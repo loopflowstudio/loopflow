@@ -512,11 +512,15 @@ def test_fixture_setup_volume_is_excluded_from_scenario_totals(tmp_path: Path) -
     builder = tmp_path / "lf-world"
     builder.write_text(
         f"#!{sys.executable}\n"
-        "import json, pathlib, sys\n"
+        "import json, pathlib, sqlite3, sys\n"
         "world = pathlib.Path(sys.argv[3])\n"
         "project = world / 'claude/projects/repo'\n"
         "project.mkdir(parents=True)\n"
         "(world / 'repo').mkdir()\n"
+        "(world / 'home').mkdir()\n"
+        "with sqlite3.connect(world / 'home/loopflow.db') as database:\n"
+        "    database.execute('CREATE TABLE agent_sessions (id TEXT)')\n"
+        "    database.execute(\"INSERT INTO agent_sessions VALUES ('retained-session')\")\n"
         "(project / 'native.jsonl').write_text('retained\\n')\n"
         "homes = {name: str(world / name) for name in ('home', 'claude', 'codex')}\n"
         "(world / 'env.json').write_text(json.dumps({'LF_HOME': homes['home'], "
@@ -535,7 +539,7 @@ def test_fixture_setup_volume_is_excluded_from_scenario_totals(tmp_path: Path) -
         "task = {'id': 'owned-task', 'identifier': 'PERF-304', 'worktree': '/checkout'}\n"
         "answers = {('desktop', 'task'): {'task': task}}\n"
         "session = {'id': 'retained-session', 'task_ids': ['owned-task']}\n"
-        "print(json.dumps(answers.get(tuple(sys.argv[1:3]), [session])))\n"
+        "print(json.dumps(answers.get(tuple(sys.argv[1:3]), {'session': session})))\n"
     )
     for executable in (builder, cli):
         executable.chmod(0o755)

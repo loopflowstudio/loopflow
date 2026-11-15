@@ -11,7 +11,6 @@
 import Darwin
 import Foundation
 import Loopflow
-import os
 
 final class DesktopServer: @unchecked Sendable {
     /// Bumped when a method or its shape changes; `lf desktop` names the fix on mismatch.
@@ -28,7 +27,6 @@ final class DesktopServer: @unchecked Sendable {
     private let inspect: @MainActor () -> DesktopInspection
     private let perform: @MainActor (DesktopActionRequest) throws -> DesktopActionReceipt
     private let readText: @MainActor (DesktopTextRequest) throws -> DesktopTextReading
-    private static let log = Logger(subsystem: "studio.loopflow", category: "desktop-server")
 
     /// The socket this Desktop serves: `LF_HOME` (else `~/.lf`), then its bundle identifier.
     static func socketPath(home: String? = ProcessInfo.processInfo.environment["LF_HOME"],
@@ -45,7 +43,7 @@ final class DesktopServer: @unchecked Sendable {
             return try DesktopServer(path: path, inspect: { router.inspect() },
                                      perform: { try router.perform($0) }, readText: { try router.readText($0) })
         } catch {
-            log.error("Desktop API unavailable at \(path, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            DesktopLog.home.error("Desktop API unavailable", ["path": path, "error": error.localizedDescription])
             return nil
         }
     }

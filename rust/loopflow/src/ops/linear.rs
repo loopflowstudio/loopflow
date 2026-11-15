@@ -28,6 +28,7 @@ use crate::store::{
 use crate::work::task::Task;
 use crate::work::wave::config::{read_wave_config, update_wave_config};
 use crate::work::wave::Wave;
+use serde::{Deserialize, Serialize};
 
 // ── Options and results ─────────────────────────────────────────────
 
@@ -40,7 +41,8 @@ pub struct LinearInitOptions {
     pub team_name: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct LinearInitResult {
     pub wave: String,
     pub initiative_id: String,
@@ -51,6 +53,8 @@ pub struct LinearInitResult {
     pub team_key: String,
     /// Whether this run created the team (vs. adopted an existing one).
     pub team_created: bool,
+    /// The binding's files (`.lf/config.yaml`, `.lf/wave/<wave>/config.yaml`) on the main checkout.
+    pub files: super::wave_lifecycle::AuthoredFiles,
 }
 
 /// How planning reads reconcile the local snapshot with Linear before reading.
@@ -85,7 +89,8 @@ pub struct LinearReteamOptions {
 
 /// One issue that moves into the repository Team. `new_identifier` is filled only
 /// after an applied move (Linear assigns the number then).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct LinearReteamMove {
     pub wave: String,
     pub project_id: String,
@@ -98,7 +103,8 @@ pub struct LinearReteamMove {
 /// One Project narrowed onto the repository Team. Projects keep their id and slug on
 /// a team move (Linear only renumbers issues), so there is no new identifier to
 /// carry — `from_teams` records where it came from for the plan output.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct LinearReteamProjectMove {
     pub wave: String,
     pub id: String,
@@ -106,8 +112,10 @@ pub struct LinearReteamProjectMove {
     pub from_teams: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct LinearReteamResult {
+    #[serde(rename = "repo")]
     pub repository: String,
     pub waves: Vec<String>,
     pub team_id: String,
@@ -124,19 +132,6 @@ pub struct LinearReteamResult {
     pub task_updates: usize,
 }
 
-#[derive(Debug, Clone)]
-pub struct LinearRenameOptions {
-    pub wave: Option<String>,
-    pub title: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LinearRenameResult {
-    pub wave: String,
-    pub initiative: String,
-    pub title: String,
-}
-
 // ── Client + Linear project resolution ──────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -151,7 +146,7 @@ pub(crate) fn resolve_wave(wave: Option<&str>) -> OpsResult<String> {
         .ok_or_else(|| OpsError::Message("cannot determine wave; pass --wave <name>".to_string()))
 }
 
-pub(super) fn read_initiative(repo: &Path, wave: &str) -> Option<String> {
+pub(crate) fn read_initiative(repo: &Path, wave: &str) -> Option<String> {
     read_wave_config(repo, wave)?
         .linear?
         .initiative
@@ -159,9 +154,14 @@ pub(super) fn read_initiative(repo: &Path, wave: &str) -> Option<String> {
 }
 
 pub(crate) fn selected_linear_team(repo: &Path) -> OpsResult<Option<String>> {
-    let transport = crate::config::load_planning_transport(repo).map_err(|error| {
-        OpsError::Message(format!("failed to read planning configuration: {error}"))
-    })?;
+    // The team is repository identity even when a personal preference selects
+    // another synchronization transport. Connecting must retain that binding.
+    let transport = crate::config::load_repo_config(repo)
+        .map_err(|error| {
+            OpsError::Message(format!("failed to read planning configuration: {error}"))
+        })?
+        .unwrap_or_default()
+        .planning_transport();
     Ok(match transport {
         crate::config::PlanningConfig::Linear { team } => {
             team.filter(|team| !team.trim().is_empty())
@@ -173,8 +173,8 @@ pub(crate) fn selected_linear_team(repo: &Path) -> OpsResult<Option<String>> {
 pub(crate) fn repository_team_id(repo: &Path) -> OpsResult<String> {
     selected_linear_team(repo)?.ok_or_else(|| {
         OpsError::Message(
-            ".lf/config.yaml has no repository `planning.team`. \
-             Run `lf wave connect <wave> --team-key <KEY>` before creating or mutating work."
+            ".lf/config.yaml has no `repo.plan.team`. \
+             Run `lf wave plan connect <wave> --team-key <KEY>` before creating or mutating work."
                 .to_string(),
         )
     })
@@ -197,10 +197,16 @@ fn repository_id(repo: &Path) -> OpsResult<RepoId> {
     RepoId::discover(repo).map_err(|error| {
         OpsError::Message(format!(
             "cannot establish repository Linear identity from Git origin: {error}. \
-             Configure an origin before running `lf wave connect`."
+             Configure an origin before running `lf wave plan connect`."
         ))
     })
 }
+
+/// Team claims this process has validated, by (Team, checkout). A claim changes
+/// only through `lf reteam`, so one `ListTeams` per process suffices; a
+/// long-lived process learns a rebinding on restart.
+static VALIDATED_TEAM_CLAIMS: std::sync::Mutex<BTreeSet<(String, std::path::PathBuf)>> =
+    std::sync::Mutex::new(BTreeSet::new());
 
 async fn resolve_repository_context(repo: &Path) -> OpsResult<LinearRepository> {
     let team_id = repository_team_id(repo)?;
@@ -208,10 +214,21 @@ async fn resolve_repository_context(repo: &Path) -> OpsResult<LinearRepository> 
     let client = build_client(Some(team_id.clone()))
         .await?
         .for_repository(repo);
-    client
-        .validate_team_claim(&team_id, repo_id.as_str())
-        .await
-        .map_err(linear_error)?;
+    let claim = (team_id.clone(), repo.to_path_buf());
+    let validated = VALIDATED_TEAM_CLAIMS
+        .lock()
+        .expect("team claim cache poisoned")
+        .contains(&claim);
+    if !validated {
+        client
+            .validate_team_claim(&team_id, repo_id.as_str())
+            .await
+            .map_err(linear_error)?;
+        VALIDATED_TEAM_CLAIMS
+            .lock()
+            .expect("team claim cache poisoned")
+            .insert(claim);
+    }
     Ok(LinearRepository {
         client,
         repo_id,
@@ -237,7 +254,7 @@ pub(crate) async fn resolve_context(
     let initiative = read_initiative(repo, wave).ok_or_else(|| {
         OpsError::Message(format!(
             ".lf/wave/{wave}/GOAL.md has no `linear.initiative`. \
-             Run `lf wave connect {wave}` to connect its Linear Initiative."
+             Run `lf wave plan connect {wave}` to connect its Linear Initiative."
         ))
     })?;
     Ok((repository, initiative))
@@ -457,6 +474,8 @@ mod oauth_tests;
 #[cfg(test)]
 mod task_comments_tests;
 
+mod adoption;
+
 // ── snapshot freshness policy ────────────────────────────────────────
 
 /// Past this age an Auto read opportunistically refreshes before serving.
@@ -488,9 +507,17 @@ pub(crate) async fn refresh_inventory(
     initiative: &str,
 ) -> OpsResult<()> {
     let store = planning_store().await?;
-    let registered = crate::work::wave::ensure_wave_row(&store, repo, wave)
-        .await
+    let locator = crate::work::wave::WaveLocator::discover(repo, wave)
         .map_err(|error| OpsError::Message(error.to_string()))?;
+    let registered = store
+        .get_wave_at(&locator)
+        .await
+        .map_err(|error| OpsError::Message(error.to_string()))?
+        .ok_or_else(|| {
+            OpsError::Message(format!(
+                "no Wave {wave} here; run `lf wave add {wave}` first"
+            ))
+        })?;
     let acquisition = lock_wave_planning(&registered).await?;
     refresh_inventory_locked(repo, &registered, ctx, initiative, &store, acquisition).await
 }
@@ -539,16 +566,33 @@ pub fn connect(
     block_on_linear(connect_async(repo, options, progress))
 }
 
+/// Link a Wave to its Linear Initiative and the repository Team. Connecting
+/// never creates a Wave itself: a name the store does not know is added first,
+/// so its files, first Project and commit land on the main checkout like any
+/// other add; the binding's own files are committed there too.
 async fn connect_async(
     repo: &Path,
     options: &LinearInitOptions,
     progress: &impl Progress,
 ) -> OpsResult<LinearInitResult> {
     let wave = resolve_wave(options.wave.as_deref())?;
+    let main = crate::repository::CanonicalRepo::discover(repo)
+        .map_err(|error| OpsError::Message(error.to_string()))?
+        .as_path()
+        .to_path_buf();
+    let repo = main.as_path();
     let store = planning_store().await?;
-    crate::work::wave::ensure_wave_row(&store, repo, &wave)
+    let locator = crate::work::wave::WaveLocator::discover(repo, &wave)
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    if store
+        .get_wave_at(&locator)
         .await
-        .map_err(|cause| OpsError::Message(cause.to_string()))?;
+        .map_err(|error| OpsError::Message(error.to_string()))?
+        .is_none()
+    {
+        progress.status(&format!("adding Wave {wave}"));
+        super::wave_lifecycle::add(repo, &wave, None).await?;
+    }
 
     let repo_id = repository_id(repo)?;
     let existing_initiative = read_initiative(repo, &wave);
@@ -616,19 +660,18 @@ async fn connect_async(
         write_initiative_to_wave(repo, &wave, &initiative_id)?;
     }
     let connection_changed = write_repository_linear_config(repo, &team.id)?;
-
-    if initiative_missing || connection_changed {
-        let _ = crate::ops::commit_workflow(
+    let files = if initiative_missing || connection_changed {
+        super::wave_lifecycle::commit_authored(
             repo,
-            &crate::ops::CommitOptions {
-                add: true,
-                message: Some(format!("lf wave connect: {wave} to Linear")),
-                ..crate::ops::CommitOptions::for_task("linear")
-            },
-            progress,
-            &|_| {},
-        )?;
-    }
+            &[
+                ".lf/config.yaml".to_string(),
+                super::wave_lifecycle::authored_path(&wave),
+            ],
+            &format!("lf wave plan connect: {wave} to Linear"),
+        )
+    } else {
+        super::wave_lifecycle::AuthoredFiles::Unchanged
+    };
 
     let (ctx, initiative) = resolve_context(repo, &wave).await?;
     refresh_inventory(repo, &wave, &ctx, &initiative).await?;
@@ -639,6 +682,7 @@ async fn connect_async(
         team_id: team.id,
         team_key: team.key,
         team_created: team.created,
+        files,
     })
 }
 
@@ -686,6 +730,11 @@ pub(crate) async fn link_pr_async(
     request: &PrLinkRequest,
     prior: &PrLinkageIds,
 ) -> PrLinkageOutcome {
+    // PR links spend the reserved Linear budget so they never fail behind sync.
+    crate::linear::urgent(link_pr(repo, request, prior)).await
+}
+
+async fn link_pr(repo: &Path, request: &PrLinkRequest, prior: &PrLinkageIds) -> PrLinkageOutcome {
     let client = match linear_client(repo).await {
         Ok(client) => client,
         Err(error) => {
@@ -695,7 +744,7 @@ pub(crate) async fn link_pr_async(
             }
         }
     };
-    if let Err(error) = acquire_task(repo, &request.issue_id, LinearRefresh::Force).await {
+    if let Err(error) = acquire_task(repo, &request.issue_id, LinearRefresh::Auto).await {
         return PrLinkageOutcome {
             ids: prior.clone(),
             error: Some(error.to_string()),
@@ -794,7 +843,8 @@ pub(crate) async fn inspect_task_planning_async(
         || refresh == LinearRefresh::Never
         || (existing.state == PlanningState::Available
             && refresh == LinearRefresh::Auto
-            && age.is_some_and(|age| age < LINEAR_SOFT_STALE_SECS))
+            && (age.is_some_and(|age| age < LINEAR_SOFT_STALE_SECS)
+                || super::linear_observe::team_current(&store, &scope).await))
     {
         return Ok(TaskPlanningInspection {
             observation: existing,
@@ -928,7 +978,7 @@ pub(crate) async fn acquire_task(
     if evidence.state != PlanningState::Available {
         return Err(OpsError::Message(read.refresh_error.unwrap_or_else(|| {
             format!(
-                "Task {issue:?} planning is {:?}; refresh planning",
+                "Task {issue:?} planning is {:?}; run `lf task sync {issue}`",
                 evidence.state
             )
         })));
@@ -966,7 +1016,7 @@ pub(crate) async fn acquire_task(
         .map_err(|error| OpsError::Message(error.to_string()))?;
     if acquisition.state != PlanningState::Available {
         return Err(OpsError::Message(format!(
-            "Task {issue} has invalid retained ownership; refresh planning"
+            "Task {issue} has invalid retained ownership; run `lf task sync {issue}`"
         )));
     }
     Ok(task)
@@ -1034,8 +1084,8 @@ fn reteam_comment_body(old_identifier: &str, team_key: &str) -> String {
 async fn resolve_reteam_context(repo: &Path) -> OpsResult<ResolvedReteamContext> {
     let team_id = selected_linear_team(repo)?.ok_or_else(|| {
         OpsError::Message(
-            ".lf/config.yaml has no repository `planning.team`. \
-             Run `lf wave connect <wave> --team-key <KEY>` to establish the migration target."
+            ".lf/config.yaml has no `repo.plan.team`. \
+             Run `lf wave plan connect <wave> --team-key <KEY>` to establish the migration target."
                 .to_string(),
         )
     })?;
@@ -1177,24 +1227,23 @@ async fn apply_or_plan_repository_reteam(
         ));
     }
 
+    if apply {
+        // A clone's authored Waves join the store before the move; a removed one stays removed.
+        store
+            .sqlite
+            .register_authored_waves(&repo.to_string_lossy())
+            .map_err(|error| OpsError::Message(error.to_string()))?;
+    }
     let mut registered = Vec::new();
     for wave in &waves {
-        if apply {
-            registered.push(
-                crate::work::wave::ensure_wave_row(store, repo, wave)
-                    .await
-                    .map_err(|error| OpsError::Message(error.to_string()))?,
-            );
-        } else {
-            let locator = crate::work::wave::WaveLocator::discover(repo, wave)
-                .map_err(|error| OpsError::Message(error.to_string()))?;
-            if let Some(wave) = store
-                .get_wave_at(&locator)
-                .await
-                .map_err(|error| OpsError::Message(error.to_string()))?
-            {
-                registered.push(wave);
-            }
+        let locator = crate::work::wave::WaveLocator::discover(repo, wave)
+            .map_err(|error| OpsError::Message(error.to_string()))?;
+        if let Some(wave) = store
+            .get_wave_at(&locator)
+            .await
+            .map_err(|error| OpsError::Message(error.to_string()))?
+        {
+            registered.push(wave);
         }
     }
     registered.sort_by(|left, right| left.id().as_str().cmp(right.id().as_str()));
@@ -1469,7 +1518,10 @@ async fn refresh_async(
     let mut blocking = Vec::new();
     let team_id = selected_linear_team(repo)?;
 
-    if let Some(store) = open_existing_store().await {
+    if let Some(store) = open_existing_store()
+        .await
+        .map_err(|error| OpsError::Message(format!("failed to open Wave registry: {error}")))?
+    {
         let origin = crate::work::wave::context::wave_origin(repo);
         for wave in store
             .list_waves(Some(&origin.display().to_string()))
@@ -1495,7 +1547,7 @@ async fn refresh_async(
     }
 
     if team_id.is_none() {
-        let message = ".lf/config.yaml has no repository `planning.team`; run `lf wave connect <wave> --team-key <KEY>`".to_string();
+        let message = ".lf/config.yaml has no `repo.plan.team`; run `lf wave plan connect <wave> --team-key <KEY>`".to_string();
         diagnostics.push(message.clone());
         blocking.push(message);
     }
@@ -1704,8 +1756,7 @@ async fn refresh_async(
                 team_id: team_id.clone(),
             };
             let store = planning_store().await?;
-            super::chapter::adopt_legacy_projects(repo, &store, wave, &ctx, &initiative, true)
-                .await?;
+            adoption::adopt_legacy_projects(repo, &store, wave, &ctx, &initiative, true).await?;
             refresh_inventory(repo, wave, &ctx, &initiative).await?;
         }
     }
@@ -1718,30 +1769,22 @@ async fn refresh_async(
 
 // ── explicit mutations ─────────────────────────────────────────────
 
-pub(crate) async fn rename(
-    repo: &Path,
-    options: &LinearRenameOptions,
-    progress: &impl Progress,
-) -> OpsResult<LinearRenameResult> {
-    let wave = resolve_wave(options.wave.as_deref())?;
-    let (ctx, initiative) = resolve_context(repo, &wave).await?;
-    progress.status(&format!(
-        "renaming Linear Initiative {} to {}",
-        initiative, options.title
-    ));
+/// Rename the captured Initiative, even after its Wave address or binding changed.
+pub(super) async fn rename_initiative(repo: &Path, initiative: &str, title: &str) -> OpsResult<()> {
+    let ctx = resolve_repository_context(repo).await?;
     ctx.client
-        .rename_wave(&initiative, &options.title)
+        .rename_wave(initiative, title)
         .await
-        .map_err(linear_error)?;
-    progress.status(&format!(
-        "refreshing local Linear observations for wave/{wave}"
-    ));
-    refresh_inventory(repo, &wave, &ctx, &initiative).await?;
-    Ok(LinearRenameResult {
-        wave,
-        initiative,
-        title: options.title.clone(),
-    })
+        .map_err(linear_error)
+}
+
+/// Archive the Initiative of a removed Wave.
+pub(super) async fn archive_initiative(repo: &Path, initiative: &str) -> OpsResult<()> {
+    let ctx = resolve_repository_context(repo).await?;
+    ctx.client
+        .archive_wave(initiative)
+        .await
+        .map_err(linear_error)
 }
 
 pub fn list_local_waves(repo: &Path) -> OpsResult<Vec<String>> {
@@ -1786,47 +1829,46 @@ fn write_initiative_to_wave(repo: &Path, wave: &str, initiative_id: &str) -> Ops
     .map_err(OpsError::Message)
 }
 
+/// Declare `repo.plan` as Linear with `team_id`, at its canonical
+/// spelling; other keys keep their text and comments.
 fn write_repository_linear_config(repo: &Path, team_id: &str) -> OpsResult<bool> {
     let path = repo.join(".lf/config.yaml");
-    let mut root = match std::fs::read_to_string(&path) {
-        Ok(content) if !content.trim().is_empty() => {
-            serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&content).map_err(|error| {
-                OpsError::Message(format!(
-                    "invalid repository config {}: {error}",
-                    path.display()
-                ))
-            })?
-        }
-        Ok(_) => serde_yaml_ng::Value::Mapping(serde_yaml_ng::Mapping::new()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            serde_yaml_ng::Value::Mapping(serde_yaml_ng::Mapping::new())
-        }
-        Err(error) => return Err(error.into()),
+    let planning = serde_yaml_ng::to_value(crate::config::PlanningConfig::Linear {
+        team: Some(team_id.to_string()),
+    })
+    .map_err(|error| OpsError::Message(error.to_string()))?;
+    let config_error =
+        |error: anyhow::Error| OpsError::Message(format!("{}: {error:#}", path.display()));
+    let original = crate::config::files::read_text(&path).map_err(config_error)?;
+    let mut document: serde_yaml_ng::Value = if original.trim().is_empty() {
+        serde_yaml_ng::Value::Mapping(serde_yaml_ng::Mapping::new())
+    } else {
+        serde_yaml_ng::from_str(&original).map_err(|error| config_error(error.into()))?
     };
-    let previous = root.clone();
-    let root_map = root.as_mapping_mut().ok_or_else(|| {
-        OpsError::Message(format!(
+    if !document.is_mapping() {
+        return Err(OpsError::Message(format!(
             "repository config {} must be a YAML mapping",
             path.display()
-        ))
-    })?;
-    root_map.insert(
-        "planning".into(),
-        serde_yaml_ng::to_value(crate::config::PlanningConfig::Linear {
-            team: Some(team_id.to_string()),
-        })
-        .map_err(|error| OpsError::Message(error.to_string()))?,
+        )));
+    }
+    let previous = document.clone();
+    let written = crate::config::keys::gather(
+        &mut document,
+        &["planning"],
+        crate::config::keys::Root::General,
     );
-    if root == previous {
+    crate::config::settings::insert(
+        &mut document,
+        &written.iter().map(String::as_str).collect::<Vec<_>>(),
+        planning,
+    );
+    if document == previous {
         return Ok(false);
     }
     std::fs::create_dir_all(path.parent().expect("config path has parent"))?;
-    std::fs::write(
-        &path,
-        serde_yaml_ng::to_string(&root).map_err(|error| {
-            OpsError::Message(format!("failed to encode {}: {error}", path.display()))
-        })?,
-    )?;
+    // The committed file takes no lock file beside it; comments and order stay.
+    let text = crate::config::files::edited_text(&original, &document).map_err(config_error)?;
+    crate::config::files::atomic_write(&path, &text).map_err(config_error)?;
     Ok(true)
 }
 
@@ -1858,7 +1900,7 @@ fn matching_initiative_id(
         [] => Ok(None),
         [initiative] => Ok(Some(initiative.id.clone())),
         many => Err(OpsError::Message(format!(
-            "multiple Linear Initiatives are named `{title}`: {}. Rename duplicates before running `lf wave connect`",
+            "multiple Linear Initiatives are named `{title}`: {}. Rename duplicates before running `lf wave plan connect`",
             many.iter()
                 .map(|initiative| initiative.id.as_str())
                 .collect::<Vec<_>>()
@@ -1884,17 +1926,6 @@ fn ensure_unique_project_slugs(projects: &[LinearProject], wave: &str) -> OpsRes
         }
     }
     Ok(())
-}
-
-#[cfg(test)]
-pub(crate) async fn checked_projects(
-    repo: &Path,
-    ctx: &LinearRepository,
-    initiative: &str,
-    wave: &str,
-) -> OpsResult<Vec<LinearProject>> {
-    let store = planning_store().await?;
-    checked_projects_with_store(repo, ctx, initiative, wave, &store).await
 }
 
 pub(super) async fn checked_projects_with_store(
@@ -1940,7 +1971,7 @@ pub(super) async fn checked_projects_with_store(
     }
 
     for adopted in
-        super::chapter::adopt_legacy_projects(repo, store, wave, ctx, initiative, false).await?
+        adoption::adopt_legacy_projects(repo, store, wave, ctx, initiative, false).await?
     {
         if let Some(project) = projects.iter_mut().find(|project| project.id == adopted.id) {
             *project = adopted;
@@ -1975,7 +2006,7 @@ fn validate_project_ownership(
     )
 }
 
-fn title_case(slug: &str) -> String {
+pub(super) fn title_case(slug: &str) -> String {
     slug.split(['-', '_', '/'])
         .filter(|part| !part.is_empty())
         .map(|word| {
@@ -2315,7 +2346,7 @@ mod tests {
     }
 
     #[test]
-    fn connect_overrides_personal_git_without_rebinding_the_repository() {
+    fn connect_preserves_personal_transport_and_repository_binding() {
         with_pm_home(|home, runtime| {
             std::fs::write(
                 home.path().join("config.yaml"),
@@ -2338,7 +2369,8 @@ mod tests {
                     json_response(StatusCode::OK, team.clone()),
                     json_response(StatusCode::OK, team.clone()),
                     projects_response(json!([])),
-                    json_response(StatusCode::OK, team.clone()),
+                    // This process already validated the claim; the second
+                    // connect skips that ListTeams.
                     json_response(StatusCode::OK, team.clone()),
                     json_response(StatusCode::OK, team),
                     projects_response(json!([])),
@@ -2360,8 +2392,9 @@ mod tests {
                         let config = crate::config::load_config(Some(&repo)).unwrap().unwrap();
                         assert_eq!(
                             config.planning_transport(),
-                            crate::config::PlanningConfig::Linear {
-                                team: Some("team-1".into())
+                            crate::config::PlanningConfig::Git {
+                                remote: "personal".into(),
+                                plan: crate::config::GitPlan::Shared("private".into()),
                             }
                         );
                         assert_eq!(
@@ -2385,38 +2418,143 @@ mod tests {
     }
 
     #[test]
-    fn connection_selects_linear_and_preserves_unrelated_authored_content() {
-        let repo = tempfile::tempdir().unwrap();
-        write_repo_config(
-            repo.path(),
-            "agent: codex\nplanning:\n  provider: git\n  shared: colleagues\n",
-        );
-        write_goal(repo.path(), "product", "agent: claude\n");
-        let goal = repo.path().join(".lf/wave/product/GOAL.md");
+    fn connect_adds_an_unregistered_wave_on_main_before_linking_it() {
+        with_pm_home(|home, runtime| {
+            std::fs::write(
+                home.path().join("config.yaml"),
+                "planning:\n  provider: linear\n",
+            )
+            .unwrap();
+            runtime.block_on(async {
+                let fixture = test_fixture::Fixture::new().await;
+                let (main, _) = fixture.planning_repo().await;
+                fixture.seed(test_fixture::now() + 3600).await;
+                let git = |args: &[&str], cwd: &Path| {
+                    let output = std::process::Command::new("git")
+                        .args(args)
+                        .current_dir(cwd)
+                        .output()
+                        .unwrap();
+                    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+                    String::from_utf8(output.stdout).unwrap()
+                };
+                git(&["config", "user.email", "fixture@example.com"], &main);
+                git(&["config", "user.name", "Fixture Person"], &main);
+                git(&["add", "-A"], &main);
+                git(&["commit", "-q", "-m", "seed"], &main);
+                let worktree = main.parent().unwrap().join("task");
+                git(
+                    &["worktree", "add", "-q", worktree.to_str().unwrap(), "-b", "task"],
+                    &main,
+                );
+                let team = json!({"data": {"teams": {"nodes": [{
+                    "id": "team-1", "name": "Fixture", "key": "FIX",
+                    "description": "<!-- loopflow-repository: loopflowstudio/fixture -->"
+                }]}}});
+                let (url, requests) = test_server::spawn(vec![
+                    json_response(StatusCode::OK, team.clone()),
+                    json_response(StatusCode::OK, team.clone()),
+                    json_response(
+                        StatusCode::OK,
+                        json!({"data": {"initiatives": {"nodes": [], "pageInfo": {"hasNextPage": false, "endCursor": null}}}}),
+                    ),
+                    json_response(
+                        StatusCode::OK,
+                        json!({"data": {"initiativeCreate": {"initiative": {"id": "6f1d2c3b-4a5e-4f60-8a71-9b2c3d4e5f60"}}}}),
+                    ),
+                    json_response(StatusCode::OK, team),
+                    projects_response(json!([])),
+                ])
+                .await;
+                LINEAR_TEST_CONTEXT
+                    .scope(fixture.context(&url), async {
+                        let result = connect_async(
+                            &worktree,
+                            &LinearInitOptions {
+                                wave: Some("ops".into()),
+                                ..Default::default()
+                            },
+                            &NullProgress,
+                        )
+                        .await;
+                        let queries: Vec<String> = requests
+                            .lock()
+                            .await
+                            .iter()
+                            .map(|request| request.body.chars().take(80).collect())
+                            .collect();
+                        let result = result.unwrap_or_else(|error| panic!("{error}\n{queries:#?}"));
+                        assert!(result.created);
+                        assert!(
+                            matches!(result.files, super::super::wave_lifecycle::AuthoredFiles::Committed { .. }),
+                            "{:?}",
+                            result.files
+                        );
+                        // The Wave lives on the main checkout, committed, never on the Task branch.
+                        assert!(!worktree.join(".lf/wave/ops").exists());
+                        assert!(git(&["ls-files", ".lf/wave/ops"], &main).contains("GOAL.md"));
+                        assert_eq!(git(&["status", "--porcelain"], &main), "");
+                        let log = git(&["log", "--format=%s", "-3"], &main);
+                        assert!(log.contains("lf wave plan connect: ops to Linear"), "{log}");
+                        assert!(log.contains("lf wave add: ops"), "{log}");
+                        assert_eq!(
+                            read_initiative(&main, "ops").as_deref(),
+                            Some("6f1d2c3b-4a5e-4f60-8a71-9b2c3d4e5f60")
+                        );
+                        let ops = fixture
+                            .store
+                            .list_waves(None)
+                            .await
+                            .unwrap()
+                            .into_iter()
+                            .find(|wave| wave.slug() == "ops")
+                            .expect("ops is registered");
+                        assert_eq!(
+                            fixture.store.sqlite.list_projects(Some(ops.id())).unwrap().len(),
+                            1,
+                            "add gives the Wave its first Project"
+                        );
+                    })
+                    .await;
+            });
+        });
+    }
 
-        write_repository_linear_config(repo.path(), "team-product").unwrap();
-        write_initiative_to_wave(repo.path(), "product", "initiative-product").unwrap();
-        let config = crate::config::load_repo_config(repo.path())
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            config.planning_transport(),
-            crate::config::PlanningConfig::Linear {
-                team: Some("team-product".into())
-            }
-        );
-        assert_eq!(config.agent.as_deref(), Some("codex"));
-        let updated = std::fs::read_to_string(goal).unwrap();
-        assert!(updated.ends_with("---\nDrive the work.\n"));
-        let wave = crate::config::load_wave_config(Some(repo.path()), Some("product"))
-            .unwrap()
-            .unwrap();
-        assert_eq!(wave.agent.as_deref(), Some("claude"));
-        let wave = read_wave_config(repo.path(), "product").unwrap();
-        assert_eq!(
-            wave.linear.unwrap().initiative.as_deref(),
-            Some("initiative-product")
-        );
+    #[test]
+    fn connection_selects_linear_and_preserves_unrelated_authored_content() {
+        with_pm_home(|_, _| {
+            let repo = tempfile::tempdir().unwrap();
+            write_repo_config(
+                repo.path(),
+                "agent: codex\nplanning:\n  provider: git\n  shared: colleagues\n",
+            );
+            write_goal(repo.path(), "product", "agent: claude\n");
+            let goal = repo.path().join(".lf/wave/product/GOAL.md");
+
+            write_repository_linear_config(repo.path(), "team-product").unwrap();
+            write_initiative_to_wave(repo.path(), "product", "initiative-product").unwrap();
+            let config = crate::config::load_repo_config(repo.path())
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                config.planning_transport(),
+                crate::config::PlanningConfig::Linear {
+                    team: Some("team-product".into())
+                }
+            );
+            assert_eq!(config.agent.as_deref(), Some("codex"));
+            let updated = std::fs::read_to_string(goal).unwrap();
+            assert!(updated.ends_with("---\nDrive the work.\n"));
+            let wave = crate::config::load_wave_config(Some(repo.path()), Some("product"))
+                .unwrap()
+                .unwrap();
+            assert_eq!(wave.agent.as_deref(), Some("claude"));
+            let wave = read_wave_config(repo.path(), "product").unwrap();
+            assert_eq!(
+                wave.linear.unwrap().initiative.as_deref(),
+                Some("initiative-product")
+            );
+        });
     }
 
     #[test]

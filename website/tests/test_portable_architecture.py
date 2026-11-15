@@ -10,6 +10,6 @@ def test_portable_architecture_matches_the_internal_surface():
         cwd=root,
         check=True,
     )
-    html = (root / "docs" / "architecture.html").read_text()
+    html = (root / "docs" / "dev" / "index.html").read_text()
     assert 'href="https://loopflow.studio/architecture/execution"' in html
     assert 'href="/static/style.css"' not in html

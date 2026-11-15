@@ -42,8 +42,6 @@ fn run_lf(home: &Path, args: &[&str]) -> Output {
 fn insert_process(store: &SqliteStore, _id: &str, ts: i64) {
     store
         .record_process(&LfProcess {
-            kind: loopflow::process::ProcessKind::Lf,
-            agent_session_id: None,
             os_started_at: None,
             id: loopflow::id::LfProcessId::new(),
             pid: None,
@@ -158,7 +156,11 @@ fn doctor_accepts_machine_commands_without_a_repository() {
         "machine-command",
         OffsetDateTime::now_utc().unix_timestamp(),
     );
-    let mut event = store.processes_since(0).unwrap().pop().unwrap();
+    let loopflow::process::ProcessEntry::Lf(mut event) =
+        store.processes_since(0).unwrap().pop().unwrap()
+    else {
+        panic!("the fixture records an lf Process")
+    };
     event.id = loopflow::id::LfProcessId::new();
     event.repo = None;
     event.command = Some("lf help".to_string());
@@ -182,7 +184,7 @@ fn doctor_accepts_machine_commands_without_a_repository() {
     assert!(identity["detail"]
         .as_str()
         .unwrap()
-        .contains("2 Process(s) without repository scope"));
+        .contains("1 Process(s) without repository scope"));
 }
 
 #[test]
@@ -203,27 +205,29 @@ fn doctor_does_not_initialize_a_missing_database() {
         .any(|check| check["name"] == "install-selection"));
 }
 
+/// A store a newer lf migrated stays readable: doctor and status reads answer
+/// from it instead of refusing the migration they don't know.
 #[test]
-fn doctor_reports_processes_despite_an_unknown_migration() {
+fn reads_answer_from_a_store_a_newer_build_migrated() {
     let home = TestRepo::new();
     let path = home.path().join("loopflow.db");
     let store = SqliteStore::new(&path).unwrap();
     insert_process(&store, "recent", OffsetDateTime::now_utc().unix_timestamp());
     let connection = rusqlite::Connection::open(&path).unwrap();
     connection.execute("INSERT INTO schema_migrations (version, applied_at) VALUES ('9.0.001_future', unixepoch() + 1)", []).unwrap();
+
     let output = run_lf(home.path(), &["self", "doctor", "--json"]);
-    assert!(!output.status.success());
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert!(report["store"]["migration_error"]
-        .as_str()
-        .unwrap()
-        .contains("9.0.001_future"));
+    assert!(report["store"]["migration_error"].is_null(), "{report}");
     assert!(report["rows"].as_u64().unwrap() >= 1);
-    assert!(report["checks"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|check| check["name"] == "attribution" && check["status"] == "ok"));
+
+    let output = run_lf(home.path(), &["wave", "list"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
     let latest: String = connection
         .query_row(
             "SELECT version FROM schema_migrations ORDER BY applied_at DESC LIMIT 1",

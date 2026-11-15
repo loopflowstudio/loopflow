@@ -69,7 +69,6 @@ async fn fresh_lookup_and_wave_list_share_planning_without_execution() {
         team_response(),
         json_response(StatusCode::OK, provider_issue.clone()),
         json_response(StatusCode::OK, provider_issue.clone()),
-        team_response(),
         json_response(StatusCode::OK, provider_issue.clone()),
         json_response(StatusCode::OK, provider_issue),
     ])
@@ -251,9 +250,18 @@ async fn rejected_project_snapshot_preserves_durable_project_facts() {
         .seed_inventory(snapshot.clone(), None)
         .await
         .unwrap();
-    let retained = fixture.store.list_projects(Some(wave.id())).await.unwrap();
-    snapshot.snapshot.projects[0].name = "Conflicting name".into();
+    // Linear can rename at the same `updatedAt`; the later read wins.
+    snapshot.snapshot.projects[0].name = "Renamed in Linear".into();
     snapshot.synced_at = 2;
+    fixture
+        .store
+        .seed_inventory(snapshot.clone(), None)
+        .await
+        .unwrap();
+    let retained = fixture.store.list_projects(Some(wave.id())).await.unwrap();
+    assert_eq!(retained[0].name, "Renamed in Linear");
+    snapshot.snapshot.projects.clear();
+    snapshot.synced_at = 3;
     assert!(fixture.store.seed_inventory(snapshot, None).await.is_err());
     assert_eq!(
         fixture.store.list_projects(Some(wave.id())).await.unwrap(),
@@ -369,12 +377,10 @@ async fn failed_refresh_preserves_the_last_observation_and_its_age() {
         team_response(),
         json_response(StatusCode::OK, issue(project())),
         json_response(StatusCode::OK, issue(project())),
-        team_response(),
         json_response(
             StatusCode::OK,
             json!({"errors":[{"message":"provider unavailable"}]}),
         ),
-        team_response(),
         json_response(
             StatusCode::OK,
             json!({"errors":[{"message":"provider unavailable"}]}),
@@ -452,7 +458,7 @@ async fn omitted_detail_fields_do_not_clear_known_planning() {
                 .unwrap()
                 .remove(field);
         }
-        responses.extend([team_response(), json_response(StatusCode::OK, incomplete)]);
+        responses.push(json_response(StatusCode::OK, incomplete));
     }
     let (url, _) = spawn(responses).await;
     LINEAR_TEST_CONTEXT
@@ -494,7 +500,6 @@ async fn missing_detail_invalidates_cached_admission_without_claiming_deletion()
         team_response(),
         json_response(StatusCode::OK, issue(project())),
         json_response(StatusCode::OK, issue(project())),
-        team_response(),
         json_response(StatusCode::OK, json!({"data":{"issue":null}})),
         json_response(StatusCode::OK, json!({"data":{"issue":null}})),
     ])
@@ -567,7 +572,6 @@ async fn automatic_refresh_reports_failure_with_retained_observation_age() {
             StatusCode::OK,
             json!({"errors":[{"message":"provider unavailable"}]}),
         ),
-        team_response(),
         json_response(
             StatusCode::OK,
             json!({"errors":[{"message":"provider unavailable"}]}),
@@ -659,13 +663,30 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
                     .title,
                 confirmed.item.name
             );
-            let mut conflicting = confirmed.clone();
-            conflicting.item.name = "Contradiction at the same revision".into();
-            assert!(fixture
+            // Linear can change a field without moving `updatedAt`: at one
+            // revision an older read is ignored and a later read wins.
+            let mut stale = confirmed.clone();
+            stale.item.name = "Older read at the same revision".into();
+            stale.observed_at -= 1;
+            fixture
                 .store
-                .seed_issue(&scope, "linear", conflicting, None, None)
+                .seed_issue(&scope, "linear", stale, None, None)
                 .await
-                .is_err());
+                .unwrap();
+            assert_eq!(
+                refresh_task_input(&repo, "FIX-1", LinearRefresh::Never)
+                    .await
+                    .unwrap(),
+                confirmed
+            );
+            confirmed.item.name = "Edited without a new revision".into();
+            confirmed.item.description = "Description Linear rewrote".into();
+            confirmed.observed_at += 1;
+            fixture
+                .store
+                .seed_issue(&scope, "linear", confirmed.clone(), None, None)
+                .await
+                .unwrap();
             assert_eq!(
                 refresh_task_input(&repo, "FIX-1", LinearRefresh::Never)
                     .await
@@ -800,7 +821,6 @@ async fn inspection_retains_invalid_removed_and_absent_facts_without_admitting_w
         team_response(),
         json_response(StatusCode::OK, issue(project())),
         json_response(StatusCode::OK, issue(project())),
-        team_response(),
         json_response(StatusCode::OK, json!({"data":{"issue":null}})),
         json_response(StatusCode::OK, json!({"data":{"issue":null}})),
     ])
@@ -887,7 +907,6 @@ async fn removal_during_absent_lookup_preserves_confirmed_evidence() {
         team_response(),
         json_response(StatusCode::OK, issue(project())),
         json_response(StatusCode::OK, issue(project())),
-        team_response(),
         absent,
         json_response(StatusCode::OK, json!({"data":{"issue":null}})),
     ])
@@ -933,7 +952,7 @@ async fn removal_during_absent_lookup_preserves_confirmed_evidence() {
 }
 
 #[tokio::test]
-async fn project_revisions_order_shared_facts_and_unordered_membership_stays_unresolved() {
+async fn project_revisions_order_shared_facts_and_an_initiative_move_stays_unresolved() {
     let _lock = crate::journal::test_env_lock();
     let _restore = PlanningEnvironment::isolate();
     let fixture = Fixture::new().await;
@@ -1003,7 +1022,7 @@ async fn project_revisions_order_shared_facts_and_unordered_membership_stays_unr
                 .await
                 .unwrap_err()
                 .to_string()
-                .contains("omitted"));
+                .contains("missing from its Initiative"));
             assert_eq!(
                 fixture
                     .store
@@ -1123,7 +1142,6 @@ async fn cold_detail_resolves_configured_wave_before_projecting() {
             team_response(),
             json_response(StatusCode::OK, issue(project())),
             json_response(StatusCode::OK, issue(project())),
-            team_response(),
             json_response(StatusCode::OK, issue(refreshed.clone())),
             json_response(StatusCode::OK, issue(refreshed)),
         ])
@@ -1349,7 +1367,6 @@ async fn delayed_absence_preserves_a_newer_accepted_task() {
         team_response(),
         json_response(StatusCode::OK, issue(project())),
         json_response(StatusCode::OK, issue(project())),
-        team_response(),
         absent,
         json_response(StatusCode::OK, json!({"data":{"issue":null}})),
     ])

@@ -11,6 +11,7 @@ it uses whatever Developer ID Application identity is in the keychain.
 Publisher preparation retains the submitted DMG and Apple submission ID outside
 the generated checkout. Retry the same `lf release run` after a wait timeout;
 it resumes that submission and staples a copy of the exact submitted image.
+Notarization failures and their fixes: `.github/CI.md`, "Notarization".
 """
 
 from __future__ import annotations
@@ -25,11 +26,17 @@ import sys
 import tempfile
 from pathlib import Path
 
-from bundle_version import read_release_version, stamp_bundle_version
+from app_bundle import executable_name, install_app_executable
+from bundle_version import (
+    read_release_version,
+    read_source_revision,
+    stamp_bundle_version,
+    stamp_release_bundle_id,
+)
+from check_desktop_launch import check_launch
 
 REPO_ROOT = Path(__file__).parent.parent
 SWIFT_DIR = REPO_ROOT / "swift"
-SWIFT_APP_PRODUCT = "LoopflowMac"
 
 
 def run(
@@ -136,6 +143,17 @@ def _write_submission(path: Path, receipt: dict[str, object]) -> None:
     temporary.replace(path)
 
 
+def _notarytool_failed(result: subprocess.CompletedProcess, what: str, advice: str) -> RuntimeError:
+    """Print notarytool's output; the error names Apple's first line, then what is safe next."""
+    stdout, stderr = result.stdout.strip(), result.stderr.strip()
+    for output in (stdout, stderr):
+        if output:
+            print(output, flush=True)
+    if message := stderr or stdout:
+        what = f"{what}: {message.splitlines()[0].strip().rstrip('.')}"
+    return RuntimeError(f"{what}; {advice}")
+
+
 def _notarize_dmg(dmg_path: Path) -> int:
     key = os.environ.get("NOTARY_KEY")
     key_id = os.environ.get("NOTARY_KEY_ID")
@@ -195,9 +213,8 @@ def _notarize_dmg(dmg_path: Path) -> int:
                 timeout=30 * 60,
             )
             if result.returncode:
-                raise RuntimeError(
-                    "Notarization upload did not return a receipt; "
-                    "inspect Apple history before retrying"
+                raise _notarytool_failed(
+                    result, "Notarization upload failed", "inspect Apple history before retrying"
                 )
             receipt["submission_id"] = json.loads(result.stdout)["id"]
             _write_submission(receipt_path, receipt)
@@ -218,8 +235,10 @@ def _notarize_dmg(dmg_path: Path) -> int:
             timeout=30 * 60,
         )
         if result.returncode:
-            raise RuntimeError(
-                f"Notarization {submission_id} wait failed; retry resumes the retained submission"
+            raise _notarytool_failed(
+                result,
+                f"Notarization {submission_id} wait failed",
+                "retry resumes the retained submission",
             )
         status = json.loads(result.stdout)["status"]
         if status != "Accepted":
@@ -241,6 +260,8 @@ def _notarize_dmg(dmg_path: Path) -> int:
 
 
 def _copy_bundled_tools(app_macos_dir: Path) -> None:
+    agents = app_macos_dir.parent / "Library/LaunchAgents"
+    shutil.copytree(SWIFT_DIR / "LaunchAgents", agents, dirs_exist_ok=True)
     release_binary = os.environ.get("LF_RELEASE_BINARY")
     if release_binary:
         bin_dir = Path(release_binary).parent
@@ -270,23 +291,6 @@ def _copy_bundled_tools(app_macos_dir: Path) -> None:
         shutil.copy(source, app_macos_dir / binary)
 
 
-def _bundle_executable(info_plist: Path) -> str:
-    with info_plist.open("rb") as file:
-        executable = plistlib.load(file).get("CFBundleExecutable")
-    if not isinstance(executable, str) or not executable:
-        raise RuntimeError(f"Missing CFBundleExecutable in {info_plist}")
-    return executable
-
-
-def _copy_app_executable(build_dir: Path, info_plist: Path, app_macos_dir: Path) -> None:
-    executable = _bundle_executable(info_plist)
-
-    source = build_dir / SWIFT_APP_PRODUCT
-    if not source.is_file():
-        raise RuntimeError(f"Missing built app executable: {source}")
-    shutil.copy(source, app_macos_dir / executable)
-
-
 # A signed app under the shipped bundle id hangs at launch while Loopflow
 # Desktop runs; the check launches a copy under its own id instead.
 RESOURCE_CHECK_BUNDLE_ID = "com.loopflow.mac.release-check"
@@ -306,7 +310,7 @@ def _resource_check_copy(
         plistlib.dump(info, file)
     if _codesign_app(check_app, identity, entitlements, timestamp=False) != 0:
         raise RuntimeError("Could not sign the packaged-app resource-check copy")
-    return check_app / "Contents" / "MacOS" / _bundle_executable(info_plist)
+    return check_app / "Contents" / "MacOS" / executable_name(info_plist)
 
 
 def _verify_app_resource_self_containment(
@@ -325,7 +329,6 @@ def _verify_app_resource_self_containment(
         dir=build_dir.parent,
     ) as temp:
         holding_dir = Path(temp)
-        snapshot = holding_dir / "snapshot.png"
         (holding_dir / "app").mkdir()
         executable = _resource_check_copy(app_path, holding_dir / "app", identity, entitlements)
         moved: list[tuple[Path, Path]] = []
@@ -335,30 +338,10 @@ def _verify_app_resource_self_containment(
                 bundle.rename(held)
                 moved.append((held, bundle))
 
-            result = run_capture(
-                [str(executable), "-ui-test-mode", "empty-workspaces"],
-                timeout=30,
-                env={
-                    **os.environ,
-                    "LOOPFLOW_UI_TEST_SNAPSHOT_PATH": str(snapshot),
-                    "LOOPFLOW_UI_TEST_DELAY": "0.2",
-                    "LOOPFLOW_UI_TEST_WIDTH": "900",
-                    "LOOPFLOW_UI_TEST_HEIGHT": "600",
-                },
-            )
+            check_launch(executable, holding_dir)
         finally:
             for held, bundle in reversed(moved):
                 held.rename(bundle)
-
-        if result.returncode != 0:
-            diagnostic = (result.stderr.strip() or result.stdout.strip())[-2000:]
-            detail = f": {diagnostic}" if diagnostic else ""
-            raise RuntimeError(
-                "Packaged app failed without SwiftPM build resources "
-                f"(exit {result.returncode}){detail}"
-            )
-        if not snapshot.is_file() or snapshot.stat().st_size == 0:
-            raise RuntimeError("Packaged app produced no resource-check snapshot")
     print(
         "Verified packaged app renders without SwiftPM build resources",
         flush=True,
@@ -393,9 +376,10 @@ def release() -> int:
 
     build_dir = SWIFT_DIR / ".build" / "release"
     info_plist = SWIFT_DIR / "LoopflowMac" / "Info.plist"
-    _copy_app_executable(build_dir, info_plist, app_dir / "MacOS")
+    install_app_executable(build_dir, info_plist, app_dir)
     shutil.copy(info_plist, app_dir)
-    stamp_bundle_version(app_dir / "Info.plist", version)
+    stamp_bundle_version(app_dir / "Info.plist", version, read_source_revision(REPO_ROOT))
+    stamp_release_bundle_id(app_dir / "Info.plist")
     shutil.copy(SWIFT_DIR / "LoopflowMac" / "AppIcon.icns", app_dir / "Resources")
     _copy_bundled_tools(app_dir / "MacOS")
     (app_dir / "PkgInfo").write_text("APPL????")
@@ -437,7 +421,12 @@ def release() -> int:
     dmg_path = dist_dir / f"{app_name}.dmg"
     dmg_staging = dist_dir / "dmg_staging"
     dmg_staging.mkdir()
-    shutil.copytree(dist_dir / f"{app_name}.app", dmg_staging / f"{app_name}.app")
+    # Framework bundles are symlink trees; copying their targets breaks the signature.
+    shutil.copytree(dist_dir / f"{app_name}.app", dmg_staging / f"{app_name}.app", symlinks=True)
+    run(
+        ["codesign", "--verify", "--deep", "--strict", str(dmg_staging / f"{app_name}.app")],
+        timeout=5 * 60,
+    )
 
     bg_image = SWIFT_DIR / "LoopflowMac" / "dmg-background.png"
     has_create_dmg = shutil.which("create-dmg") is not None
@@ -493,6 +482,9 @@ def release() -> int:
         )
 
     shutil.rmtree(dmg_staging)
+    # The DMG is the deliverable. A release-id bundle left in the checkout is one
+    # more copy Spotlight and Launch Services could open in place of the installed app.
+    shutil.rmtree(app_path)
 
     # Sign and notarize the DMG
     if identity:
@@ -507,7 +499,6 @@ def release() -> int:
 
     print()
     print("Release built:", flush=True)
-    print(f"  App: dist/{app_name}.app", flush=True)
     print(f"  DMG: {dmg_path}", flush=True)
     return 0
 

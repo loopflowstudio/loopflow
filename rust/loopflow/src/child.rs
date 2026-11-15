@@ -15,7 +15,7 @@ pub enum ChildDataError {
 
 /// Typed audit record for a body handoff. Work and Run identity are intentionally
 /// absent: they do not change during this transition.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ChildBodyHandoff {
     pub from_agent: String,
     pub to_agent: String,

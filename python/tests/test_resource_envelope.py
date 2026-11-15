@@ -142,6 +142,37 @@ def test_snapshot_measures_home_session_captures_and_names_retention(
     assert "never auto-deleted" in warning
 
 
+def test_a_cache_too_slow_to_measure_warns_and_lets_verification_start(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    cache = tmp_path / "uv-cache"
+    cache.mkdir()
+    monkeypatch.setenv("LF_HOME", str(tmp_path / "lf-home"))
+    monkeypatch.setenv("UV_CACHE_DIR", str(cache))
+    monkeypatch.setenv("CARGO_HOME", str(tmp_path / "cargo-home"))
+    monkeypatch.setattr(
+        resources,
+        "_discover_worktrees",
+        lambda _repo: ([resources.Worktree(repo, "feature")], None),
+    )
+    monkeypatch.setattr(resources, "_running_cwds", lambda: ({repo}, None))
+    measure = resources._allocated_bytes
+
+    def slow_cache(path: Path) -> int:
+        if path == cache:
+            raise OSError(f"cannot measure {path}: 15-second inventory deadline exceeded")
+        return measure(path)
+
+    monkeypatch.setattr(resources, "_allocated_bytes", slow_cache)
+
+    snapshot = resources.collect_snapshot(repo, _policy())
+
+    assert snapshot.ok
+    assert any("inventory deadline" in warning for warning in snapshot.warnings)
+
+
 @pytest.mark.parametrize("old_entry", [None, "file", "empty-directory"])
 def test_recent_gate_roots_leave_recovery_capacity_for_stale_builds(
     tmp_path: Path, old_entry: str | None, build_owner
@@ -197,6 +228,27 @@ def test_concurrent_recovery_skips_busy_cleaner_then_reports_unavailable_build_o
 
     report = resources.inspect_resources(tmp_path, policy, recover=True)
     assert report.recovery[0].status == "retained"
+    assert artifact.exists()
+
+
+@pytest.mark.parametrize("protection", ["saved-record", "nested-marker", "recent-artifact"])
+def test_manual_gate_recovery_preserves_saved_and_recent_evidence(tmp_path, protection):
+    root = tmp_path / resources.GATE_RELATIVE_PATH / "run-old"
+    artifact = root / "case/output.log"
+    artifact.parent.mkdir(parents=True)
+    artifact.write_text("verification evidence")
+    if protection == "saved-record":
+        (root / ".cleanup-evidence.json").write_text('{"saved": true}')
+    elif protection == "nested-marker":
+        (artifact.parent / ".cleanup-keep").touch()
+    old = time.time() - 8 * 86400
+    for path in [*root.rglob("*"), root]:
+        os.utime(path, (old, old))
+    if protection == "recent-artifact":
+        artifact.write_text("recent verification evidence")
+    source = _source(tmp_path, id="gate:fixture", kind="gate")
+
+    assert resources._prune_old_gate_artifacts(source, _policy(), time.time()) is None
     assert artifact.exists()
 
 

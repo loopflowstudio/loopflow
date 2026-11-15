@@ -145,25 +145,22 @@ fi
     let mut paths = vec![bin];
     paths.extend(std::env::split_paths(&path));
     std::env::set_var("PATH", std::env::join_paths(paths).unwrap());
-    // The delivery run holds in an ordinary owned execution until released.
-    let hold = home.path().join("hold.py");
-    fs::write(
-        &hold,
-        r#"import os, time
-from pathlib import Path
-home = Path(os.environ['LF_HOME'])
-(home / 'ready').touch()
-while not (home / 'release').exists():
-    time.sleep(.02)
-"#,
-    )
+    // The delivery run holds at a skill step whose provider waits until released.
+    let claude = home.path().join("bin/claude");
+    fs::write(&claude, crate::task_graph_launch_tests::HOLDING_CLAUDE).unwrap();
+    fs::set_permissions(&claude, fs::Permissions::from_mode(0o755)).unwrap();
+    crate::task_graph_launch_tests::connect_fixture_claude(home.path(), &store);
+    crate::config::files::update(&home.path().join("config.yaml"), |value| {
+        value["agent"] = "claude".into();
+        Ok(())
+    })
     .unwrap();
+    let _server =
+        loopflow_test_support::MachineServer::start(binary.to_str().unwrap(), home.path());
+    repo.create_file(".lf/skills/hold.md", "Hold.");
     repo.create_file(
         ".lf/graphs/delivery.yaml",
-        &format!(
-            "- cmd: session serve -- python3 {}\n- cmd: task complete FIX-1\n",
-            hold.display()
-        ),
+        "- step: {name: hold}\n- cmd: task complete FIX-1\n",
     );
     let provider = Arc::new(Mutex::new(Linear::default()));
     let (url, server) = runtime.block_on(async {
@@ -203,7 +200,7 @@ while not (home / 'release').exists():
         // Exercise buffered filing while the selected planning transport is offline.
         provider.lock().unwrap().unavailable = true;
         let child = crate::ops::task::task_create(repo.path(), Some(wave.slug()),
-            Some("Verify installed release".into()), Some("Run the released command; retain failures.".into())).unwrap();
+            Some("Verify installed release".into()), Some("Run the released command; retain failures.".into()), crate::ops::task::TaskAdoptionOptions::default(), None).unwrap();
         let thread = crate::ops::task::task_comment(repo.path(), "FIX-1", None,
             Some(&format!("Installed verification continues in {}.", child.identifier)), false).unwrap();
         assert!(thread.comments.iter().any(|comment| comment.body.contains(&child.identifier)));
@@ -357,7 +354,6 @@ fn fixture(
         branch: "main".into(),
         base_commit: repo.head_sha(),
         parent_pr_id: None,
-        agent: None,
         created_at: now,
         updated_at: now,
         rank: 0,

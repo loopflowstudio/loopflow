@@ -27,7 +27,8 @@
     "path": "new.txt",
     "patch": "-old\n+draft\n",
     "binary": false,
-    "truncated": false
+    "truncated": false,
+    "head_commit": null
   },
   "file": {
     "issue_identifier": "TEST-1",

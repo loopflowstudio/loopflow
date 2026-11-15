@@ -2,7 +2,7 @@
 
 import PackageDescription
 
-// SwiftPM builds the cross-platform `Loopflow` library and the macOS app.
+// Work access uses the server; GhosttyKit supplies the native renderer.
 let package = Package(
     name: "LoopflowSwift",
     platforms: [
@@ -14,7 +14,8 @@ let package = Package(
         .executable(name: "LoopflowMac", targets: ["LoopflowMac"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/nalexn/ViewInspector.git", from: "0.10.0"),
+        .package(url: "https://github.com/nalexn/ViewInspector.git", from: "0.10.5"),
+        .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.7.0"),
     ],
     targets: [
         .target(
@@ -29,14 +30,15 @@ let package = Package(
         ),
         .binaryTarget(
             name: "GhosttyKit",
-            url: "https://bin.loopflow.studio/GhosttyKit-a60e9e2-lf7-theme-readback1.xcframework.zip",
-            checksum: "19d6f6e2f93cf3d967aaaa9761c6ee1995683381ac432598d7b0496610934ce9"
+            url: "https://bin.loopflow.studio/GhosttyKit-a60e9e2-lf8.xcframework.zip",
+            checksum: "306d53ebe8604121ca0e371f01d5f7eeabf788a78e615ff21572eb25bfaaaa99"
         ),
         .executableTarget(
             name: "LoopflowMac",
             dependencies: [
                 "Loopflow",
                 .target(name: "GhosttyKit", condition: .when(platforms: [.macOS])),
+                .product(name: "Sparkle", package: "Sparkle", condition: .when(platforms: [.macOS])),
             ],
             path: "LoopflowMac",
             exclude: [

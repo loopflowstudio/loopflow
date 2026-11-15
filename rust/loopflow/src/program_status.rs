@@ -1,11 +1,12 @@
 //! Program Status revision 0.2 (OSC 7501). Reports are display evidence only.
 //! Authored from https://www.superlogical.com/rex/docs/build/program-status.
 
+use base64::Engine;
 use serde::{Deserialize, Serialize};
 
 const MAX_RECORDS: usize = 64;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum State {
@@ -17,7 +18,7 @@ pub enum State {
     Clear,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum Kind {
@@ -26,7 +27,7 @@ pub enum Kind {
     Auth,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Report {
     pub state: State,
     pub id: Option<String>,
@@ -38,6 +39,44 @@ pub struct Report {
 }
 
 impl Report {
+    pub(crate) fn encode(&self) -> Vec<u8> {
+        let state = match self.state {
+            State::Idle => "idle",
+            State::Working => "working",
+            State::Done => "done",
+            State::Blocked => "blocked",
+            State::Error => "error",
+            State::Clear => "clear",
+        };
+        let mut text = "\x1b]7501;".to_owned();
+        if let Some(id) = &self.id {
+            text.push_str(&format!("id={id}:"));
+        }
+        text.push_str(&format!("state={state}"));
+        if let Some(app) = &self.app {
+            text.push_str(&format!(":app={app}"));
+        }
+        if let Some(kind) = self.kind {
+            let kind = match kind {
+                Kind::Permission => "permission",
+                Kind::Question => "question",
+                Kind::Auth => "auth",
+            };
+            text.push_str(&format!(":kind={kind}"));
+        }
+        if let Some(progress) = self.progress {
+            text.push_str(&format!(":progress={progress}"));
+        }
+        for (key, value) in [("title", &self.title), ("msg", &self.msg)] {
+            if let Some(value) = value {
+                let encoded = base64::engine::general_purpose::STANDARD.encode(value);
+                text.push_str(&format!(":{key}={encoded}"));
+            }
+        }
+        text.push_str("\x1b\\");
+        text.into_bytes()
+    }
+
     // The observer receives decoded records, not terminal bytes. Enforce the
     // spec's field limits directly; together they fit below its sequence cap.
     fn validate(&self) -> bool {
@@ -74,13 +113,50 @@ fn valid_text(text: &str, limit: usize) -> bool {
 }
 
 /// Oldest first; replacement moves a record to the end. No heartbeat or clock.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Records {
     pub seen: bool,
     pub records: Vec<Report>,
 }
 
 impl Records {
+    /// Apply a validated terminal report, keeping the newest update last.
+    pub fn apply(&mut self, report: Report) {
+        self.seen = true;
+        if report.state == State::Clear {
+            let id = report.id.as_deref().unwrap_or("");
+            let children = format!("{id}/");
+            self.records.retain(|record| {
+                let candidate = record.id.as_deref().unwrap_or("");
+                !id.is_empty() && candidate != id && !candidate.starts_with(&children)
+            });
+        } else {
+            self.records.retain(|record| record.id != report.id);
+            self.records.push(report);
+            if self.records.len() > MAX_RECORDS {
+                self.records.remove(0);
+            }
+        }
+    }
+
+    /// A shell prompt or program exit retires live claims, preserving results.
+    pub fn clear_live(&mut self) {
+        self.records
+            .retain(|record| matches!(record.state, State::Done | State::Error));
+    }
+
+    /// Replace a viewer's status, including clearing claims from its last attachment.
+    pub(crate) fn replay(&self) -> Vec<u8> {
+        if !self.seen {
+            return Vec::new();
+        }
+        let mut bytes = b"\x1b]7501;state=clear\x1b\\".to_vec();
+        for report in &self.records {
+            bytes.extend(report.encode());
+        }
+        bytes
+    }
+
     pub fn validate(&self) -> bool {
         self.records.len() <= MAX_RECORDS
             && (self.seen || self.records.is_empty())

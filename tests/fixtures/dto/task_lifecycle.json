@@ -27,7 +27,7 @@
         "step": null
       },
       "graph_name": "delivery",
-      "graph_source": "task",
+      "graph_source": null,
       "latest_graph_process": {
         "compiled": {
           "name": "delivery",
@@ -152,6 +152,7 @@
             "label": "Jacks-MacBook-Pro-2"
           },
           "person": "Jack Heart",
+          "person_id": null,
           "person_key": "test@test.com"
         },
         "provider": "codex",
@@ -160,7 +161,7 @@
         "updated_at": "2026-10-28T02:59:03Z",
         "work_id": "task_9d1de6a17408459aa2db78181c5fb02a"
       },
-      "section": "later",
+      "section": "done",
       "ship_control": {
         "unavailable": "Task is complete"
       },
@@ -181,7 +182,7 @@
         "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
         "rank": 0,
         "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-        "repository_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
+        "repo_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
         "state": "completed",
         "sync": {
           "changes": [
@@ -272,7 +273,6 @@
           "reason": "Task is terminal",
           "recommended": "no_action"
         },
-        "agent": null,
         "base_commit": "b61ecfe45224df107655f39cb4fb48646e97659a",
         "branch": "main",
         "completion_pending": null,
@@ -391,7 +391,7 @@
         "project": "provider-destination",
         "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
         "provider": "codex",
-        "repository_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
+        "repo_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
         "status": "done",
         "task_id": "task_9d1de6a17408459aa2db78181c5fb02a",
         "updated_at": "2026-10-28T02:59:03Z",
@@ -419,7 +419,6 @@
           ],
           "processes": [
             {
-              "agent_session_id": null,
               "caller_agent_process_id": null,
               "caller_session_id": null,
               "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"task\",\"complete\",\"FIX-1\"]",
@@ -440,7 +439,6 @@
               "via_agent": false
             },
             {
-              "agent_session_id": null,
               "caller_agent_process_id": null,
               "caller_session_id": null,
               "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"session\",\"serve\",\"--\",\"python3\",\"/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py\"]",
@@ -461,7 +459,6 @@
               "via_agent": false
             },
             {
-              "agent_session_id": null,
               "caller_agent_process_id": null,
               "caller_session_id": null,
               "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"session\",\"serve\",\"--\",\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
@@ -482,7 +479,6 @@
               "via_agent": false
             },
             {
-              "agent_session_id": null,
               "caller_agent_process_id": null,
               "caller_session_id": null,
               "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
@@ -503,7 +499,6 @@
               "via_agent": false
             },
             {
-              "agent_session_id": null,
               "caller_agent_process_id": null,
               "caller_session_id": null,
               "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"--batch\",\"--task\",\"task_9d1de6a17408459aa2db78181c5fb02a\",\"graph\",\"run\"]",
@@ -524,7 +519,6 @@
               "via_agent": false
             },
             {
-              "agent_session_id": null,
               "caller_agent_process_id": null,
               "caller_session_id": null,
               "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
@@ -548,7 +542,10 @@
           "sessions": []
         },
         "workspace_slug": "delivery",
-        "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG"
+        "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
+        "started_by": null,
+        "ship_approval": null,
+        "ship_stop": null
       },
       "graph_processes": [
         {
@@ -662,8 +659,10 @@
             "machine_id": "home_56b1a8e309681768d26f79bf86b9d93c",
             "machine_label": "Jacks-MacBook-Pro-2",
             "person": "Jack Heart",
+            "person_id": null,
             "person_key": "test@test.com",
-            "task_id": "task_9d1de6a17408459aa2db78181c5fb02a"
+            "task_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+            "writer_machine_id": "home_56b1a8e309681768d26f79bf86b9d93c"
           }
         ],
         "owner": {
@@ -672,13 +671,14 @@
             "label": "Jacks-MacBook-Pro-2"
           },
           "person": "Jack Heart",
+          "person_id": null,
           "person_key": "test@test.com"
         },
         "superseded_by": null
       },
-      "planning_error": null,
-      "planning_stale": false,
-      "planning_state": "available",
+      "plan_error": null,
+      "plan_stale": false,
+      "plan_state": "available",
       "project": {
         "created_at": "2026-10-28T02:58:55Z",
         "description": "",
@@ -721,7 +721,7 @@
           "step": null
         },
         "graph_name": "delivery",
-        "graph_source": "task",
+        "graph_source": null,
         "latest_graph_process": {
           "compiled": {
             "name": "delivery",
@@ -846,6 +846,7 @@
               "label": "Jacks-MacBook-Pro-2"
             },
             "person": "Jack Heart",
+            "person_id": null,
             "person_key": "test@test.com"
           },
           "provider": "codex",
@@ -854,7 +855,7 @@
           "updated_at": "2026-10-28T02:59:03Z",
           "work_id": "task_9d1de6a17408459aa2db78181c5fb02a"
         },
-        "section": "later",
+        "section": "done",
         "ship_control": {
           "unavailable": "Task is complete"
         },
@@ -875,7 +876,7 @@
           "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
           "rank": 0,
           "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-          "repository_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
+          "repo_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
           "state": "completed",
           "sync": {
             "changes": [
@@ -985,7 +986,6 @@
         "connected": true
       },
       "task": {
-        "agent": null,
         "assignee": null,
         "base_commit": "b61ecfe45224df107655f39cb4fb48646e97659a",
         "branch": "main",
@@ -1005,7 +1005,7 @@
         },
         "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
         "rank": 0,
-        "repository_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
+        "repo_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
         "revision": 6,
         "state": "completed",
         "title": "Deliver the command",
@@ -1044,7 +1044,7 @@
         "step": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py"
       },
       "graph_name": "delivery",
-      "graph_source": "task",
+      "graph_source": null,
       "latest_graph_process": {
         "compiled": {
           "name": "delivery",
@@ -1154,6 +1154,7 @@
             "label": "Jacks-MacBook-Pro-2"
           },
           "person": "Jack Heart",
+          "person_id": null,
           "person_key": "test@test.com"
         },
         "provider": "codex",
@@ -1162,7 +1163,7 @@
         "updated_at": "2026-10-28T02:59:03Z",
         "work_id": "task_9d1de6a17408459aa2db78181c5fb02a"
       },
-      "section": "later",
+      "section": "done",
       "ship_control": {
         "unavailable": "Task is complete"
       },
@@ -1183,7 +1184,7 @@
         "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
         "rank": 0,
         "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-        "repository_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
+        "repo_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
         "state": "completed",
         "sync": {
           "changes": [
@@ -1274,7 +1275,6 @@
           "reason": "Task is terminal",
           "recommended": "no_action"
         },
-        "agent": null,
         "base_commit": "b61ecfe45224df107655f39cb4fb48646e97659a",
         "branch": "main",
         "completion_pending": null,
@@ -1393,7 +1393,7 @@
         "project": "provider-destination",
         "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
         "provider": "codex",
-        "repository_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
+        "repo_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
         "status": "done",
         "task_id": "task_9d1de6a17408459aa2db78181c5fb02a",
         "updated_at": "2026-10-28T02:59:03Z",
@@ -1403,6 +1403,7 @@
             "interactive_steps": [],
             "name": "delivery",
             "position": {
+              "at": "task complete FIX-1",
               "kind": "run",
               "lf_process_id": "1a6eca5d-1b13-4239-981d-abe5e0713e34",
               "running": true,
@@ -1423,7 +1424,6 @@
           ],
           "processes": [
             {
-              "agent_session_id": null,
               "caller_agent_process_id": null,
               "caller_session_id": null,
               "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"session\",\"serve\",\"--\",\"python3\",\"/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py\"]",
@@ -1444,7 +1444,6 @@
               "via_agent": false
             },
             {
-              "agent_session_id": null,
               "caller_agent_process_id": null,
               "caller_session_id": null,
               "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"session\",\"serve\",\"--\",\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
@@ -1465,7 +1464,6 @@
               "via_agent": false
             },
             {
-              "agent_session_id": null,
               "caller_agent_process_id": null,
               "caller_session_id": null,
               "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
@@ -1486,7 +1484,6 @@
               "via_agent": false
             },
             {
-              "agent_session_id": null,
               "caller_agent_process_id": null,
               "caller_session_id": null,
               "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"--batch\",\"--task\",\"task_9d1de6a17408459aa2db78181c5fb02a\",\"graph\",\"run\"]",
@@ -1507,7 +1504,6 @@
               "via_agent": false
             },
             {
-              "agent_session_id": null,
               "caller_agent_process_id": null,
               "caller_session_id": null,
               "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
@@ -1531,7 +1527,10 @@
           "sessions": []
         },
         "workspace_slug": "delivery",
-        "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG"
+        "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
+        "started_by": null,
+        "ship_approval": null,
+        "ship_stop": null
       },
       "graph_processes": [
         {
@@ -1603,6 +1602,7 @@
           "interactive_steps": [],
           "name": "delivery",
           "position": {
+            "at": "task complete FIX-1",
             "kind": "run",
             "lf_process_id": "1a6eca5d-1b13-4239-981d-abe5e0713e34",
             "running": true,
@@ -1632,8 +1632,10 @@
             "machine_id": "home_56b1a8e309681768d26f79bf86b9d93c",
             "machine_label": "Jacks-MacBook-Pro-2",
             "person": "Jack Heart",
+            "person_id": null,
             "person_key": "test@test.com",
-            "task_id": "task_9d1de6a17408459aa2db78181c5fb02a"
+            "task_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+            "writer_machine_id": "home_56b1a8e309681768d26f79bf86b9d93c"
           }
         ],
         "owner": {
@@ -1642,13 +1644,14 @@
             "label": "Jacks-MacBook-Pro-2"
           },
           "person": "Jack Heart",
+          "person_id": null,
           "person_key": "test@test.com"
         },
         "superseded_by": null
       },
-      "planning_error": null,
-      "planning_stale": false,
-      "planning_state": "available",
+      "plan_error": null,
+      "plan_stale": false,
+      "plan_state": "available",
       "project": {
         "created_at": "2026-10-28T02:58:55Z",
         "description": "",
@@ -1691,7 +1694,7 @@
           "step": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py"
         },
         "graph_name": "delivery",
-        "graph_source": "task",
+        "graph_source": null,
         "latest_graph_process": {
           "compiled": {
             "name": "delivery",
@@ -1801,6 +1804,7 @@
               "label": "Jacks-MacBook-Pro-2"
             },
             "person": "Jack Heart",
+            "person_id": null,
             "person_key": "test@test.com"
           },
           "provider": "codex",
@@ -1809,7 +1813,7 @@
           "updated_at": "2026-10-28T02:59:03Z",
           "work_id": "task_9d1de6a17408459aa2db78181c5fb02a"
         },
-        "section": "later",
+        "section": "done",
         "ship_control": {
           "unavailable": "Task is complete"
         },
@@ -1830,7 +1834,7 @@
           "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
           "rank": 0,
           "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-          "repository_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
+          "repo_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
           "state": "completed",
           "sync": {
             "changes": [
@@ -1940,7 +1944,6 @@
         "connected": true
       },
       "task": {
-        "agent": null,
         "assignee": null,
         "base_commit": "b61ecfe45224df107655f39cb4fb48646e97659a",
         "branch": "main",
@@ -1960,7 +1963,7 @@
         },
         "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
         "rank": 0,
-        "repository_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
+        "repo_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
         "revision": 6,
         "state": "completed",
         "title": "Deliver the command",
@@ -1999,7 +2002,7 @@
         "step": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py"
       },
       "graph_name": "delivery",
-      "graph_source": "task",
+      "graph_source": null,
       "latest_graph_process": {
         "compiled": {
           "name": "delivery",
@@ -2109,6 +2112,7 @@
             "label": "Jacks-MacBook-Pro-2"
           },
           "person": "Jack Heart",
+          "person_id": null,
           "person_key": "test@test.com"
         },
         "provider": "codex",
@@ -2117,7 +2121,7 @@
         "updated_at": "2026-10-28T02:59:00Z",
         "work_id": "task_9d1de6a17408459aa2db78181c5fb02a"
       },
-      "section": "now",
+      "section": "autonomous",
       "ship_control": {
         "unavailable": "Task is already shipping"
       },
@@ -2142,7 +2146,7 @@
         "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
         "rank": 0,
         "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-        "repository_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
+        "repo_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
         "state": "unstarted",
         "sync": {
           "changes": [
@@ -2199,7 +2203,6 @@
           "reason": "Merged; complete the Task",
           "recommended": "no_action"
         },
-        "agent": null,
         "base_commit": "b61ecfe45224df107655f39cb4fb48646e97659a",
         "branch": "main",
         "completion_pending": null,
@@ -2320,7 +2323,7 @@
         "project": "provider-destination",
         "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
         "provider": "codex",
-        "repository_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
+        "repo_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
         "status": "shipping",
         "task_id": "task_9d1de6a17408459aa2db78181c5fb02a",
         "updated_at": "2026-10-28T02:59:00Z",
@@ -2330,6 +2333,7 @@
             "interactive_steps": [],
             "name": "delivery",
             "position": {
+              "at": "task complete FIX-1",
               "kind": "run",
               "lf_process_id": "1a6eca5d-1b13-4239-981d-abe5e0713e34",
               "running": true,
@@ -2350,7 +2354,6 @@
           ],
           "processes": [
             {
-              "agent_session_id": null,
               "caller_agent_process_id": null,
               "caller_session_id": null,
               "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"session\",\"serve\",\"--\",\"python3\",\"/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py\"]",
@@ -2371,7 +2374,6 @@
               "via_agent": false
             },
             {
-              "agent_session_id": null,
               "caller_agent_process_id": null,
               "caller_session_id": null,
               "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"session\",\"serve\",\"--\",\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
@@ -2392,7 +2394,6 @@
               "via_agent": false
             },
             {
-              "agent_session_id": null,
               "caller_agent_process_id": null,
               "caller_session_id": null,
               "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
@@ -2413,7 +2414,6 @@
               "via_agent": false
             },
             {
-              "agent_session_id": null,
               "caller_agent_process_id": null,
               "caller_session_id": null,
               "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"--batch\",\"--task\",\"task_9d1de6a17408459aa2db78181c5fb02a\",\"graph\",\"run\"]",
@@ -2434,7 +2434,6 @@
               "via_agent": false
             },
             {
-              "agent_session_id": null,
               "caller_agent_process_id": null,
               "caller_session_id": null,
               "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
@@ -2458,7 +2457,10 @@
           "sessions": []
         },
         "workspace_slug": "delivery",
-        "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG"
+        "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
+        "started_by": null,
+        "ship_approval": null,
+        "ship_stop": null
       },
       "graph_processes": [
         {
@@ -2530,6 +2532,7 @@
           "interactive_steps": [],
           "name": "delivery",
           "position": {
+            "at": "task complete FIX-1",
             "kind": "run",
             "lf_process_id": "1a6eca5d-1b13-4239-981d-abe5e0713e34",
             "running": true,
@@ -2559,8 +2562,10 @@
             "machine_id": "home_56b1a8e309681768d26f79bf86b9d93c",
             "machine_label": "Jacks-MacBook-Pro-2",
             "person": "Jack Heart",
+            "person_id": null,
             "person_key": "test@test.com",
-            "task_id": "task_9d1de6a17408459aa2db78181c5fb02a"
+            "task_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+            "writer_machine_id": "home_56b1a8e309681768d26f79bf86b9d93c"
           }
         ],
         "owner": {
@@ -2569,13 +2574,14 @@
             "label": "Jacks-MacBook-Pro-2"
           },
           "person": "Jack Heart",
+          "person_id": null,
           "person_key": "test@test.com"
         },
         "superseded_by": null
       },
-      "planning_error": null,
-      "planning_stale": false,
-      "planning_state": "available",
+      "plan_error": null,
+      "plan_stale": false,
+      "plan_state": "available",
       "project": {
         "created_at": "2026-10-28T02:58:55Z",
         "description": "",
@@ -2618,7 +2624,7 @@
           "step": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py"
         },
         "graph_name": "delivery",
-        "graph_source": "task",
+        "graph_source": null,
         "latest_graph_process": {
           "compiled": {
             "name": "delivery",
@@ -2728,6 +2734,7 @@
               "label": "Jacks-MacBook-Pro-2"
             },
             "person": "Jack Heart",
+            "person_id": null,
             "person_key": "test@test.com"
           },
           "provider": "codex",
@@ -2736,7 +2743,7 @@
           "updated_at": "2026-10-28T02:59:00Z",
           "work_id": "task_9d1de6a17408459aa2db78181c5fb02a"
         },
-        "section": "now",
+        "section": "autonomous",
         "ship_control": {
           "unavailable": "Task is already shipping"
         },
@@ -2761,7 +2768,7 @@
           "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
           "rank": 0,
           "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-          "repository_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
+          "repo_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
           "state": "unstarted",
           "sync": {
             "changes": [
@@ -2823,7 +2830,6 @@
         "connected": true
       },
       "task": {
-        "agent": null,
         "assignee": null,
         "base_commit": "b61ecfe45224df107655f39cb4fb48646e97659a",
         "branch": "main",
@@ -2841,7 +2847,7 @@
         },
         "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
         "rank": 0,
-        "repository_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
+        "repo_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
         "revision": 5,
         "state": "unstarted",
         "title": "Deliver the command",

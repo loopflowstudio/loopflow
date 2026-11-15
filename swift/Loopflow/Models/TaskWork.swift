@@ -4,7 +4,7 @@ import Foundation
 public struct TaskWork: Codable, Sendable, Equatable {
     public let sessions: [TaskSession]
     public let graphProcesses: [GraphProcessInventoryEntry]
-    public let processes: [LfProcess]
+    public let processes: [ProcessEntry]
     /// The graph the Task took up; `nil` until its first `lf task run`.
     public let graph: TaskGraph?
 
@@ -12,6 +12,71 @@ public struct TaskWork: Codable, Sendable, Equatable {
         case sessions, processes, graph
         case graphProcesses = "graph_processes"
     }
+}
+
+/// `lf task status`'s recorded execution: the Task's work, who started its
+/// latest Graph, and who approved or stopped Auto-Ship.
+public struct TaskExecution: Decodable, Sendable, Equatable {
+    public let work: TaskWork
+    public let startedBy: Starter?
+    public let shipApproval: ShipMark?
+    /// Keeps a run from approving Auto-Ship and waits it at its landing step, until `lf ship`.
+    public let shipStop: ShipMark?
+
+    enum CodingKeys: String, CodingKey {
+        case work
+        case startedBy = "started_by", shipApproval = "ship_approval", shipStop = "ship_stop"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        work = try container.decode(TaskWork.self, forKey: .work)
+        startedBy = try container.decode(Starter?.self, forKey: .startedBy)
+        shipApproval = try container.decode(ShipMark?.self, forKey: .shipApproval)
+        shipStop = try container.decode(ShipMark?.self, forKey: .shipStop)
+    }
+}
+
+/// Who started a Process, derived by Rust from its ancestry: the first Session
+/// an agent ran it from, else the person at the root of its chain.
+public enum Starter: Decodable, Sendable, Hashable {
+    /// `nil` when no participant is configured or the chain is missing rows.
+    case person(name: String?)
+    case session(id: String, name: String?, requester: String?)
+
+    private enum CodingKeys: String, CodingKey { case kind, name, id, requester }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        switch try container.decode(String.self, forKey: .kind) {
+        case "person": self = .person(name: try container.decode(String?.self, forKey: .name))
+        case "session":
+            self = .session(
+                id: try container.decode(String.self, forKey: .id),
+                name: try container.decode(String?.self, forKey: .name),
+                requester: try container.decode(String?.self, forKey: .requester)
+            )
+        case let kind:
+            throw DecodingError.dataCorruptedError(
+                forKey: .kind, in: container, debugDescription: "unknown starter '\(kind)'"
+            )
+        }
+    }
+
+    /// Reads as `lf task status` prints it.
+    public var label: String {
+        switch self {
+        case .person(let name): name ?? "attribution unresolved"
+        case .session(let id, let name, let requester):
+            (name.map { "Session \"\($0)\"" } ?? "Session \(id)") + (requester.map { " for \($0)" } ?? "")
+        }
+    }
+}
+
+/// When someone approved or stopped Auto-Ship, and who.
+public struct ShipMark: Decodable, Sendable, Hashable {
+    public let at: Int64
+    public let by: Starter
 }
 
 /// Workspace facts; mechanical Process history is a separate diagnostic read.
@@ -38,14 +103,14 @@ public struct TaskGraph: Codable, Sendable, Equatable {
     }
 
     /// `at` waits at `start`, `end` or an interactive step. `run` is a
-    /// `lf task run` carrying the Task on from `step`; one no longer running
-    /// stopped, and the next `lf task run` starts it again.
+    /// `lf task run` carrying the Task on from `step`, running `at`; one no
+    /// longer running stopped, and the next `lf task run` starts it again at `at`.
     public enum Position: Codable, Sendable, Equatable {
         case at(step: String)
-        case run(step: String, lfProcessId: String, running: Bool)
+        case run(step: String, at: String, lfProcessId: String, running: Bool)
 
         enum CodingKeys: String, CodingKey {
-            case kind, step, running
+            case kind, step, at, running
             case lfProcessId = "lf_process_id"
         }
 
@@ -57,6 +122,7 @@ public struct TaskGraph: Codable, Sendable, Equatable {
             case "run":
                 self = .run(
                     step: try container.decode(String.self, forKey: .step),
+                    at: try container.decode(String.self, forKey: .at),
                     lfProcessId: try container.decode(String.self, forKey: .lfProcessId),
                     running: try container.decode(Bool.self, forKey: .running))
             case let kind:
@@ -71,9 +137,10 @@ public struct TaskGraph: Codable, Sendable, Equatable {
             case .at(let step):
                 try container.encode("at", forKey: .kind)
                 try container.encode(step, forKey: .step)
-            case .run(let step, let lfProcessId, let running):
+            case .run(let step, let at, let lfProcessId, let running):
                 try container.encode("run", forKey: .kind)
                 try container.encode(step, forKey: .step)
+                try container.encode(at, forKey: .at)
                 try container.encode(lfProcessId, forKey: .lfProcessId)
                 try container.encode(running, forKey: .running)
             }
@@ -82,7 +149,7 @@ public struct TaskGraph: Codable, Sendable, Equatable {
         /// Where the Task waits, or the step its run left.
         public var step: String {
             switch self {
-            case .at(let step), .run(let step, _, _): step
+            case .at(let step), .run(let step, _, _, _): step
             }
         }
     }

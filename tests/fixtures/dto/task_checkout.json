@@ -21,8 +21,7 @@
   },
   "worktree": "/src/loopflow.workspace",
   "workspace_slug": "workspace",
-  "agent": null,
-  "provider": "codex",
+  "provider": null,
   "latest_event": null,
   "created_at": "2026-09-30T00:00:00Z",
   "updated_at": "2026-09-30T00:00:00Z",
@@ -42,5 +41,19 @@
   "pr": null,
   "branch": "jack/workspace",
   "base_commit": "1111111111111111111111111111111111111111",
-  "repository_id": "repo_00000000000040008000000000000001"
+  "repo_id": "repo_00000000000040008000000000000001",
+  "started_by": {
+    "kind": "session",
+    "id": "session_05214bdabd2e4f66b4a8951aac87e9e7",
+    "name": "LOO-291 task",
+    "requester": "Maya"
+  },
+  "ship_approval": null,
+  "ship_stop": {
+    "at": 1793266380,
+    "by": {
+      "kind": "person",
+      "name": "Maya"
+    }
+  }
 }

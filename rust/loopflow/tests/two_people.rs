@@ -11,8 +11,21 @@ use std::process::{Command, Output, Stdio};
 use serde_json::Value;
 
 struct Pair {
+    /// Each person's Task conversations start only beside their Machine server.
+    _servers: Vec<loopflow_test_support::MachineServer>,
     root: tempfile::TempDir,
     world: PathBuf,
+}
+
+impl Drop for Pair {
+    fn drop(&mut self) {
+        for person in [Person::Maya, Person::Lee] {
+            loopflow_test_support::end_recorded_processes(
+                &self.home(person).join("home"),
+                Path::new(env!("CARGO_BIN_EXE_lf")),
+            );
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -36,7 +49,20 @@ impl Pair {
         for home in [world.clone(), world.join("lee")] {
             std::fs::write(home.join(".gitconfig"), "").unwrap();
         }
-        Self { root, world }
+        let mut pair = Self {
+            _servers: Vec::new(),
+            root,
+            world,
+        };
+        pair._servers = [Person::Maya, Person::Lee]
+            .map(|person| {
+                loopflow_test_support::MachineServer::start(
+                    env!("CARGO_BIN_EXE_lf"),
+                    pair.env(person)["LF_HOME"].as_str().unwrap().as_ref(),
+                )
+            })
+            .into();
+        pair
     }
 
     fn clean(binary: &str, home: &Path) -> Command {
@@ -111,7 +137,8 @@ impl Pair {
             &[
                 "task", "create", "--wave", "infra", "--title", title, "--json",
             ],
-        );
+        )["task"]
+            .clone();
         task["identifier"].as_str().unwrap().to_string()
     }
 
@@ -184,7 +211,7 @@ fn two_people_share_one_repository() {
     pair.ok(Lee, &["wave", "status", "infra", "--sync"]);
 
     // 1. Lee's comment, synced through Git, steers Maya's Task.
-    pair.ok(Lee, &["comment", &task, "keep CPU path"]);
+    pair.ok(Lee, &["steer", &task, "keep CPU path"]);
     pair.ok(Maya, &["wave", "status", "infra", "--sync"]);
     assert!(
         pair.steers(Maya)
@@ -238,10 +265,10 @@ fn two_people_share_one_repository() {
         .find(|line| line.contains("Nameless"))
         .unwrap_or_else(|| panic!("{show}"));
     assert!(row.contains("maya@example.com"), "{row}");
-    let refused = pair.run(Lee, &["task", "unclaim", &nameless]);
+    let refused = pair.run(Lee, &["task", "unassign", &nameless]);
     assert!(!refused.status.success());
     assert!(String::from_utf8_lossy(&refused.stderr).contains("claimed by someone else"));
-    pair.ok(Maya, &["task", "unclaim", &nameless]);
+    pair.ok(Maya, &["task", "unassign", &nameless]);
 
     // 2. Lee takes the Task over on Maya's branch, so it keeps one PR.
     pair.ok(Lee, &["task", "claim", &task]);
@@ -296,4 +323,44 @@ fn two_people_share_one_repository() {
     let fresh = pair.create_task(Lee, "Review me");
     let preview = pair.json(Lee, &["task", "run", &fresh, "--explain", "--json"]);
     assert_eq!(preview["action"]["graph"], "review", "{preview}");
+
+    let owners: Vec<u32> = [Maya, Lee]
+        .into_iter()
+        .flat_map(|person| {
+            let db =
+                rusqlite::Connection::open(pair.home(person).join("home/loopflow.db")).unwrap();
+            let mut query = db
+                .prepare(
+                    // A Task conversation is held: its process is the holder.
+                    "SELECT DISTINCT p.pid FROM processes p
+                 WHERE p.completed_at IS NULL AND p.pid IS NOT NULL
+                     AND p.command='[\"lf\",\"holder\",\"run\"]'
+                     AND EXISTS (SELECT 1 FROM agent_sessions s
+                         JOIN held_terminals t ON t.id=s.held_terminal_id
+                         WHERE t.ended_at IS NULL)",
+                )
+                .unwrap();
+            let owners = query
+                .query_map([], |row| row.get(0))
+                .unwrap()
+                .collect::<Result<Vec<u32>, _>>()
+                .unwrap();
+            assert!(!owners.is_empty(), "checkout started no conversation");
+            owners
+        })
+        .collect();
+    drop(pair);
+    for pid in owners {
+        let output = Command::new("ps")
+            .args(["-p", &pid.to_string(), "-o", "stat="])
+            .output()
+            .unwrap();
+        assert!(
+            !output.status.success()
+                || String::from_utf8_lossy(&output.stdout)
+                    .trim()
+                    .starts_with('Z'),
+            "fixture owner {pid} survived teardown"
+        );
+    }
 }

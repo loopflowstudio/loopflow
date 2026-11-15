@@ -1,6 +1,6 @@
 [project]
 name = "loopflow"
-version = "0.15.0"
+version = "0.15.3"
 description = "Run LLM coding agents from reusable prompt files"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -25,6 +25,7 @@ dependencies = ["typer>=0.9", "pyyaml>=6.0"]
 [dependency-groups]
 dev = [
     "boto3",
+    "cryptography>=47.0.0",
     "pyte>=0.8.2",
     "pytest>=8.0",
     "ruff>=0.8",
@@ -40,7 +41,7 @@ Issues = "https://github.com/loopflowstudio/loopflow/issues"
 package = false
 
 [tool.pytest.ini_options]
-pythonpath = ["."]
+pythonpath = [".", "scripts"]
 markers = ["docker: tests requiring Docker and Claude credentials"]
 
 [tool.ruff]

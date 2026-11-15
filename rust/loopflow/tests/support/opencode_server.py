@@ -14,6 +14,7 @@ from pathlib import Path
 
 HOME = Path(__file__).resolve().parent.parent
 SESSIONS = HOME / "native-sessions.json"
+LOCATIONS = HOME / "native-locations.json"
 EVENTS = queue.Queue()
 REPLIES = {}
 LOCK = threading.Lock()
@@ -231,7 +232,7 @@ class Server(BaseHTTPRequestHandler):
                         {
                             "data": sessions[session]
                             if self.path.endswith("/context")
-                            else {"id": session}
+                            else {"id": session, "location": {"directory": locations[session]}}
                         }
                     )
         else:
@@ -246,12 +247,24 @@ class Server(BaseHTTPRequestHandler):
         if self.path.endswith("/model"):
             (HOME / "native-model.json").write_text(json.dumps(body["model"]))
             self._json({})
+        elif self.path.endswith("/move"):
+            failure = HOME / "reject-move"
+            if failure.exists():
+                failure.unlink()
+                self._json({"error": "move unavailable"}, 503)
+                return
+            session = self.path.split("/")[3]
+            locations[session] = body["directory"]
+            LOCATIONS.write_text(json.dumps(locations))
+            self._json({})
         elif self.path == "/api/session":
             if "model" in body:
                 (HOME / "native-model.json").write_text(json.dumps(body["model"]))
             session = "ses_" + uuid.uuid4().hex
             with LOCK:
                 sessions[session] = []
+                locations[session] = body["location"]["directory"]
+                LOCATIONS.write_text(json.dumps(locations))
                 _save(sessions)
             self._json({"data": {"id": session}})
         elif self.path.endswith("/prompt"):
@@ -305,6 +318,7 @@ if "serve" not in sys.argv:
         sys.stdin.readline()
     raise SystemExit(0)
 sessions = json.loads(SESSIONS.read_text()) if SESSIONS.exists() else {}
+locations = json.loads(LOCATIONS.read_text()) if LOCATIONS.exists() else {}
 server = ThreadingHTTPServer(("127.0.0.1", 0), Server)
 print(json.dumps({"url": f"http://127.0.0.1:{server.server_port}"}), flush=True)
 server.serve_forever()

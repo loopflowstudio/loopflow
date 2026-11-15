@@ -4,18 +4,16 @@ use std::collections::{btree_map::Entry, BTreeMap};
 use serde::Deserialize;
 use serde_json::json;
 
-use super::{
-    CommentNode, Connection, IssueNode, LinearClient, PageInfo, ProjectNode, ISSUE_RESPONSE_FIELDS,
-};
+use super::{CommentNode, Connection, IssueNode, LinearClient, PageInfo, CHANGED_ISSUE_FIELDS};
 use super::{LinearIssue, LinearProject};
 use crate::linear::{LinearComment, LinearError, LinearIssueObservation, LinearResult};
 
 const QUERY: &str = r#"query TeamChanges($issues: IssueFilter!, $comments: CommentFilter!, $issuesAfter: String, $commentsAfter: String, $readIssues: Boolean!, $readComments: Boolean!) {
-  issues(filter: $issues, first: 100, after: $issuesAfter, orderBy: updatedAt) @include(if: $readIssues) {
+  issues(filter: $issues, first: 25, after: $issuesAfter, orderBy: updatedAt) @include(if: $readIssues) {
     nodes { ...ChangedIssue }
     pageInfo { hasNextPage endCursor }
   }
-  comments(filter: $comments, first: 100, after: $commentsAfter, orderBy: updatedAt) @include(if: $readComments) {
+  comments(filter: $comments, first: 25, after: $commentsAfter, orderBy: updatedAt) @include(if: $readComments) {
     nodes { id body createdAt updatedAt user { id displayName name } issue { ...ChangedIssue } }
     pageInfo { hasNextPage endCursor }
   }
@@ -23,7 +21,7 @@ const QUERY: &str = r#"query TeamChanges($issues: IssueFilter!, $comments: Comme
 
 #[derive(Deserialize)]
 struct Changes {
-    issues: Option<Connection<IssueNode<ProjectNode>>>,
+    issues: Option<Connection<IssueNode>>,
     comments: Option<Connection<ChangedComment>>,
 }
 
@@ -31,7 +29,7 @@ struct Changes {
 struct ChangedComment {
     #[serde(flatten)]
     comment: CommentNode,
-    issue: Option<IssueNode<ProjectNode>>,
+    issue: Option<IssueNode>,
 }
 
 impl LinearClient {
@@ -58,25 +56,23 @@ impl LinearClient {
         // An issue can occur on several comment pages or complete in this batch.
         // Keep its latest fields and all comments together until ingestion.
         let mut changes = BTreeMap::new();
-        let mut record = |node: IssueNode<ProjectNode>, mut comments: Vec<LinearComment>| {
-            let (issue, project) = node.into_ownership()?;
+        let mut record = |node: IssueNode, mut comments: Vec<LinearComment>| {
+            let issue = node.into_issue(0)?;
             match changes.entry(issue.id.clone()) {
                 Entry::Vacant(entry) => {
-                    entry.insert((issue, project, comments));
+                    entry.insert((issue, comments));
                 }
                 Entry::Occupied(mut entry) => {
-                    let (saved, saved_project, saved_comments) = entry.get_mut();
+                    let (saved, saved_comments) = entry.get_mut();
                     if issue.revision >= saved.revision {
                         *saved = issue;
-                        *saved_project = project;
                     }
                     saved_comments.append(&mut comments);
                 }
             }
             Ok::<(), LinearError>(())
         };
-        let query =
-            format!("{QUERY}\nfragment ChangedIssue on Issue {{ {ISSUE_RESPONSE_FIELDS} }}");
+        let query = format!("{QUERY}\nfragment ChangedIssue on Issue {{ {CHANGED_ISSUE_FIELDS} }}");
         while read_issues || read_comments {
             let page: Changes = self
                 .graphql(
@@ -111,9 +107,23 @@ impl LinearClient {
                 comments_after = continuation(page.page_info)?;
             }
         }
+        let mut projects = BTreeMap::new();
+        for id in changes
+            .values()
+            .filter_map(|(issue, _)| issue.project_id.clone())
+        {
+            if let Entry::Vacant(entry) = projects.entry(id) {
+                let project = self.project_node(entry.key()).await?.into_observation()?;
+                entry.insert(project);
+            }
+        }
         Ok(changes
             .into_values()
-            .map(|(issue, project, mut comments)| {
+            .map(|(issue, mut comments)| {
+                let project = issue
+                    .project_id
+                    .as_ref()
+                    .and_then(|id| projects.get(id).cloned());
                 comments.sort_by(|a, b| a.revision.cmp(&b.revision).then(a.id.cmp(&b.id)));
                 let observation = LinearIssueObservation {
                     revision: issue.revision.clone().expect("Linear issue has a revision"),

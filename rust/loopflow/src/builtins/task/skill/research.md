@@ -1,91 +1,79 @@
 ---
 requires: none
-produces: a sourced answer or research artifact for the requested decision
+produces: a sourced answer, or a research note under scratch/, for the question asked
 ---
 Map the territory. Understand what exists before deciding what to change.
 
-## Orientation
-
-Before starting, orient yourself in this branch:
-
-- Read `scratch/` — design docs and notes for the current work live here
-  (`scratch/<branch>.md` is this PR's design; `scratch/questions.md` holds open
-  questions and assumptions).
-- Read wave/PM context only when the seed names the exact wave, task, project,
-  or a concrete coordination question; never infer it or repair access as a
-  prerequisite.
-- Read the repo's agent doc (`AGENTS.md`) for conventions.
-
-Write design artifacts, notes, and open questions under `scratch/`. Don't
-re-derive what these already record.
+Read `scratch/` first: `scratch/<branch>.md` is this PR's design and
+`scratch/questions.md` holds open questions. Read Wave or Project context only
+when the seed names the exact wave, Task or Project. Don't re-derive what these
+already say.
 
 ## Scope
 
-Follow the requested question and the participant's depth of interest. A narrow
-codebase question needs a direct sourced answer, not an architecture survey.
-Investigate more broadly when the decision depends on it. In conversation,
-answer what was asked and follow new questions; headlessly, return a bounded
-answer from available evidence. Do not implement or offer unsolicited critique.
+Answer the question asked, at the depth asked. A narrow codebase question gets a
+direct sourced answer, not an architecture survey. Go broader only when the
+decision depends on it. In conversation, follow new questions as they come;
+headless, return the best answer the sources support. Don't implement, and don't
+offer critique nobody asked for.
 
-## Workflow
+## Where to look
 
 Follow the paths that matter to the question:
 
-1. **Orientation**: README, entry points, happy path. How does someone start using this?
-2. **Architecture**: Main modules, data structures, key abstractions. How is it organized?
-3. **Data flow**: How does information move through the system? Where are the boundaries?
+1. **Entry**: README, entry points, happy path. How does someone start using this?
+2. **Architecture**: Main modules, data structures, key abstractions.
+3. **Data flow**: How does information move through the system?
 4. **Dependencies**: What does this area depend on? What depends on it?
-5. **Patterns**: What conventions exist? Where are they consistent? Where do they break?
-6. **Tests**: What's tested? What's the testing strategy? Where are gaps?
+5. **Patterns**: What conventions exist, and where do they break?
+6. **Tests**: What's tested, and where are the gaps?
 
-## Evidence discipline
+## Know what you know
 
-- Separate observations, interpretations, and open hypotheses. A source, code
-  path, trace, or experiment supports an observation; resemblance does not.
-- When uncertainty would change the conclusion, keep two or more materially
-  different explanations alive and run the smallest safe check that separates
-  them.
-- Test the resulting system model against the complete relevant source set,
-  especially evidence that predates or contradicts the favored explanation.
-- Treat a contradiction as a reason to revise the representation or boundary,
-  not merely patch the local claim.
-- For parallel agent research, divide work by
-  independent approach family, keep a registry of evidence and exact gaps, and
-  require concrete findings rather than status reports. Do not broadcast the
-  favored route until the independent passes have exposed their own gaps.
+- Keep what you saw separate from what you infer. A source, code path, trace or
+  experiment backs a claim; resemblance does not.
+- When doubt would change the answer, keep two different explanations alive and
+  run the smallest safe check that tells them apart.
+- Test your model against all the sources, especially ones that predate or
+  contradict the favored explanation. A contradiction means the model is wrong,
+  not that one claim needs a patch.
+- For parallel research, split agents by independent approach and ask for
+  concrete findings and exact gaps, not status. Don't share the favored answer
+  until each pass has found its own gaps.
 
 ## Output
 
-Answer here when the reader needs an explanation. For sustained research,
-update its existing note or write a topic-named artifact under scratch/ when a
-later reader needs it. Include the system model, sources, counterexamples,
-unresolved questions and recommendations only where useful to the decision.
-Explain how the relevant pieces fit, with concrete examples of tensions,
-complexity, quality gaps or latent capabilities when they bear on the question.
-Open questions are a valid result; do not force recommendations or a report shape.
+Answer here when the reader needs an explanation. For longer research, update
+the existing note or write a topic-named note under `scratch/`. Show how the
+pieces fit, with concrete examples of tensions, gaps or unused capabilities when
+they bear on the question. Open questions are a valid result; don't force a
+recommendation.
 
-When contributing independent research to another active writer, use the exact
-assigned artifact or a distinct topic path and leave the canonical design to
-its owner. Publish a complete artifact atomically; a path alone does not deliver
-its contents to another checkout. Preserve source attribution and proof limits.
+A later agent can reread the code and rerun the commands, so don't restate
+them. Write down what can't be found again: what people said, word for word,
+what a run showed at the time, and facts from outside the repository.
+
+When feeding research to another agent writing the design, write to the path you
+were given or a distinct topic path, and leave the design to that agent. Write
+the note complete in one go; a path alone does not carry its contents to another
+checkout. Keep sources attached to claims.
 
 ## The page
 
-When a person is reviewing the answer, present it as a page, and let the
-conversation be about what they see there: the answer first, then the system
-map as a diagram, sources linked to the claims they support, counterexamples
-and open questions. Shape it to the question; a one-line answer needs no page.
-Keep any lasting record in Markdown.
+When someone is reviewing the answer, present it as a page and talk about what
+they see there: the answer first, then the system map as a diagram, sources
+linked to their claims, counterexamples and open questions. A one-line answer
+needs no page. Keep any lasting record in Markdown.
 
 - One self-contained `.html` under `scratch/`: inline CSS and script, no
   network, no build step. Escape code. Readable in light and dark and at narrow
   widths.
-- Lead with the decision you need. End with numbered questions, so "2b" is a
+- Lead with the decision needed. End with numbered questions, so "2b" is a
   complete answer.
-- Show the thing, not a description of it. Mark proposed against existing
-  behavior visibly.
+- Show the thing, not a description of it. Mark proposed behavior apart from
+  existing behavior.
 - One reading column, generous whitespace, no dashboard chrome or badges. Shape
-  the structure to the content; no fixed template.
+  the structure to the content.
 - Header: Task, step, date, and the files it is built from.
 - Say its path. Loopflow Desktop shows `scratch/` pages beside the
   conversation; in a bare terminal, open it in the browser. Regenerate the same

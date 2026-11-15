@@ -59,7 +59,7 @@ one initiating turn/Process, unchanged provider PID and attachment, and an emitt
 steer receipt across viewer replacement. The replacement exits through native
 terminal input. Demo owns rendered judgment and the selected personal account route.
 
-The broad materialized Rust gate stopped under sustained macOS host-security
+The broad Rust gate stopped under sustained macOS host-security
 pressure (syspolicyd above 1,300% CPU; load above 130). It recorded 929 passes,
 three assertion failures and four interrupted tests; 1,760 tests did not run.
 The unresolved failures were

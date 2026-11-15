@@ -344,7 +344,9 @@ mod tests {
 
     use loopflow_test_support::TestRepo;
 
-    use super::{begin_sync_operation, fence_agent_process, operation_path, GitOperationOwner};
+    use super::{
+        begin_sync_operation, fence_agent_process, held_for, operation_path, GitOperationOwner,
+    };
     use crate::ops::{
         continue_sync_for_resolution, recover_sync, sync_with_recovery, NullProgress, OpsError,
         SyncOptions,
@@ -366,6 +368,14 @@ mod tests {
     }
 
     #[test]
+    fn a_held_lock_reads_in_seconds_then_minutes_then_hours() {
+        assert_eq!(held_for(0), "0 s");
+        assert_eq!(held_for(59), "59 s");
+        assert_eq!(held_for(840), "14 min");
+        assert_eq!(held_for(7200), "2 h");
+    }
+
+    #[test]
     fn a_running_sync_fences_agents_and_a_stopped_one_admits_them() {
         let fixture = conflicting_feature();
         let repo = fixture.path();
@@ -374,7 +384,7 @@ mod tests {
         let refusal = fence_agent_process(repo).unwrap_err().to_string();
         assert!(
             refusal.contains(&format!("kill pid {}", std::process::id()))
-                && refusal.contains("for 0 s (feature onto main)"),
+                && refusal.contains("(feature onto main)"),
             "{refusal}"
         );
 
@@ -392,6 +402,11 @@ mod tests {
 
     #[test]
     fn a_resolving_sync_admits_other_agents_until_it_publishes() {
+        // The sync reads Task authority from a store; never the developer's.
+        let _lock = crate::journal::test_env_lock();
+        let home = tempfile::tempdir().unwrap();
+        let previous = std::env::var_os("LF_HOME");
+        std::env::set_var("LF_HOME", home.path());
         let fixture = conflicting_feature();
         let repo = fixture.path();
         let options = SyncOptions {
@@ -420,6 +435,10 @@ mod tests {
             "both"
         );
         assert!(!operation_path(repo).unwrap().exists());
+        match previous {
+            Some(previous) => std::env::set_var("LF_HOME", previous),
+            None => std::env::remove_var("LF_HOME"),
+        }
     }
 
     #[test]

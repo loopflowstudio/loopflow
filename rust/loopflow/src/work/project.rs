@@ -11,7 +11,7 @@ use crate::linear::{LinearBindingError, LinearProjectId};
 use crate::work::task::{TaskEventKind, TaskId};
 
 /// Shared Project status, independent of a provider’s display label.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum ProjectStatus {
     Backlog,
@@ -35,13 +35,13 @@ impl ProjectStatus {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ProjectKR {
     pub text: String,
     pub holds: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Project {
     pub id: ProjectId,
     pub summary: String,
@@ -57,8 +57,10 @@ pub struct Project {
     pub pm_snapshot_synced_at: Option<i64>,
     /// Current ownership. Wave name and checkout are resolved from this id.
     pub wave_id: WaveId,
+    #[schemars(with = "String")]
     #[serde(with = "time::serde::rfc3339")]
     pub created_at: OffsetDateTime,
+    #[schemars(with = "String")]
     #[serde(with = "time::serde::rfc3339")]
     pub updated_at: OffsetDateTime,
 }

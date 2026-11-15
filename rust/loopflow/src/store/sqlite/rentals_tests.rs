@@ -34,15 +34,42 @@ fn code(max: u32) -> OnDemand {
 }
 
 #[test]
+fn file_edits_change_admission_without_rewriting_live_rentals() {
+    let _env = loopflow_test_support::env_lock().lock().unwrap();
+    let (home, store) = store();
+    let _home =
+        crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+    store.add_ondemand(&code(1)).unwrap();
+    let admitted = store.admit_rental("code", None, None, false).unwrap();
+    crate::engine::config::set(
+        &crate::config::files::Destination::PersonalGlobal {},
+        "ondemands.code.max_machines",
+        "0",
+    )
+    .unwrap();
+    assert_eq!(store.ondemand("code").unwrap().unwrap().max_machines, 0);
+    assert!(store.admit_rental("code", None, None, false).is_err());
+    assert_eq!(
+        store.rental(&admitted.id).unwrap().cap_usd,
+        admitted.cap_usd
+    );
+}
+
+#[test]
 fn pools_and_ondemands_share_one_namespace() {
     let (_dir, store) = store();
-    store.add_pool("lab").unwrap();
+    store.add_pool("lab.west").unwrap();
     store.add_ondemand(&code(1)).unwrap();
     assert_eq!(store.ondemand("code").unwrap(), Some(code(1)));
     assert!(store.add_pool("code").is_err());
     let mut lab = code(1);
-    lab.name = "lab".into();
+    lab.name = "lab.west".into();
     assert!(store.add_ondemand(&lab).is_err());
+    store.set_pool_off("lab.west", true).unwrap();
+    assert!(store.pool("lab.west").unwrap().unwrap().off);
+    store.remove_pool("lab.west").unwrap();
+    assert!(store.pool("lab.west").unwrap().is_none());
+    assert!(store.remove_pool("lab.west").is_err());
 }
 
 #[test]
@@ -160,7 +187,6 @@ fn open_task(store: &SqliteStore) -> TaskId {
         branch: "jack/rent".into(),
         base_commit: "deadbeef".into(),
         parent_pr_id: None,
-        agent: None,
         created_at: now,
         updated_at: now,
         observation: Observation::NotRequired,
@@ -174,6 +200,8 @@ fn an_ended_rental_hands_its_open_tasks_back_here() {
     // Claiming reads the global Git identity, which isolating tests replace.
     let _env = crate::journal::test_env_lock();
     let (_dir, store) = store();
+    let _home =
+        crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", _dir.path().to_str().unwrap());
     store.add_ondemand(&code(1)).unwrap();
     let rental = store.admit_rental("code", None, None, false).unwrap();
     store
@@ -186,7 +214,7 @@ fn an_ended_rental_hands_its_open_tasks_back_here() {
     store.attach_rental(&rental.id, &code_1).unwrap();
     let task = open_task(&store);
     store.claim_task(&task).unwrap();
-    store.handoff_task(&task, &code_1).unwrap();
+    store.move_claim(&task, &code_1).unwrap();
     let person = store.task_ownership(&task).unwrap().owner.unwrap().person;
 
     let (_, returned) = store
@@ -208,25 +236,63 @@ fn an_ended_rental_hands_its_open_tasks_back_here() {
         history,
         [
             (OwnershipKind::Claim, local.clone()),
-            (OwnershipKind::Handoff, code_1),
-            (OwnershipKind::Handoff, local),
+            (OwnershipKind::Claim, code_1),
+            (OwnershipKind::Claim, local),
         ]
     );
     // This Machine writes the Task again: `lf task run` stays here.
-    store.unclaim_task(&task).unwrap();
+    store.unassign_task(&task).unwrap();
+}
+
+#[test]
+fn hand_back_writes_nothing_when_a_claim_lacks_planning_facts() {
+    let _env = crate::journal::test_env_lock();
+    let (dir, store) = store();
+    let _home =
+        crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", dir.path().to_str().unwrap());
+    let machine = MachineId::new();
+    store.add_machine(&machine, "lf@pod", "pod").unwrap();
+    let first = open_task(&store);
+    store.claim_task(&first).unwrap();
+    store.move_claim(&first, &machine).unwrap();
+    let planning =
+        super::super::task_ownership::held_planning_in(&store.conn.lock().unwrap(), &machine)
+            .unwrap();
+
+    // Another writer claims a Task after preflight but before BEGIN.
+    let second = open_task(&store);
+    store.claim_task(&second).unwrap();
+    store.move_claim(&second, &machine).unwrap();
+    {
+        let mut conn = store.conn.lock().unwrap();
+        let tx = conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .unwrap();
+        assert_eq!(
+            super::super::task_ownership::hand_back_in(&tx, &machine, &planning).unwrap(),
+            None
+        );
+        // Even committing this attempt must leave both claims untouched.
+        tx.commit().unwrap();
+    }
+    for task in [&first, &second] {
+        let ownership = store.task_ownership(task).unwrap();
+        assert_eq!(ownership.owner.unwrap().machine.id, Some(machine.clone()));
+        assert_eq!(ownership.log.len(), 2);
+    }
 }
 
 #[test]
 fn hardware_rented_before_spot_existed_reads_as_on_demand() {
-    use crate::store::migrations::{apply_before_current_draft, current_draft_sql};
+    use crate::store::migrations::{apply_before_migration, migration_section_sql};
 
     let conn = rusqlite::Connection::open_in_memory().unwrap();
-    apply_before_current_draft(&conn, "rental_spot");
+    apply_before_migration(&conn, "rental_spot");
     conn.execute_batch(include_str!(
         "../../../tests/fixtures/migrations/rental_spot_released.sql"
     ))
     .unwrap();
-    conn.execute_batch(&current_draft_sql("rental_spot"))
+    conn.execute_batch(&migration_section_sql("rental_spot"))
         .unwrap();
     for sql in [
         "SELECT template FROM ondemands",
@@ -240,15 +306,15 @@ fn hardware_rented_before_spot_existed_reads_as_on_demand() {
 
 #[test]
 fn runpod_rows_from_0_14_16_go_and_current_ones_stay() {
-    use crate::store::migrations::{apply_before_current_draft, current_draft_sql};
+    use crate::store::migrations::{apply_before_migration, migration_section_sql};
 
     let conn = rusqlite::Connection::open_in_memory().unwrap();
-    apply_before_current_draft(&conn, "scope_tasks_capacity");
+    apply_before_migration(&conn, "scope_tasks_capacity");
     conn.execute_batch(include_str!(
         "../../../tests/fixtures/migrations/scope_tasks_capacity_released.sql"
     ))
     .unwrap();
-    conn.execute_batch(&current_draft_sql("scope_tasks_capacity"))
+    conn.execute_batch(&migration_section_sql("scope_tasks_capacity"))
         .unwrap();
     let names: Vec<String> = conn
         .prepare("SELECT name FROM ondemands ORDER BY name")
@@ -266,15 +332,15 @@ fn runpod_rows_from_0_14_16_go_and_current_ones_stay() {
 
 #[test]
 fn fly_rows_from_0_14_17_go_and_the_rest_still_read() {
-    use crate::store::migrations::{apply_before_current_draft, current_draft_sql};
+    use crate::store::migrations::{apply_before_migration, migration_section_sql};
 
     let conn = rusqlite::Connection::open_in_memory().unwrap();
-    apply_before_current_draft(&conn, "forget_fly_rentals");
+    apply_before_migration(&conn, "forget_fly_rentals");
     conn.execute_batch(include_str!(
         "../../../tests/fixtures/migrations/forget_fly_rentals_released.sql"
     ))
     .unwrap();
-    conn.execute_batch(&current_draft_sql("forget_fly_rentals"))
+    conn.execute_batch(&migration_section_sql("forget_fly_rentals"))
         .unwrap();
     let providers: Vec<String> = conn
         .prepare("SELECT provider FROM ondemands UNION ALL SELECT provider FROM rentals")
@@ -291,4 +357,40 @@ fn fly_rows_from_0_14_17_go_and_the_rest_still_read() {
         })
         .unwrap();
     assert_eq!(capacity, None);
+}
+
+#[test]
+fn an_owned_machines_pool_cost_and_expiry_move_to_pool_machines() {
+    use crate::store::migrations::{apply_before_migration, migration_section_sql};
+
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    apply_before_migration(&conn, "task_machine_local");
+    conn.execute_batch(
+        "INSERT INTO pools(name,created_at) VALUES('lab',1);
+         INSERT INTO machines(id,is_local,created_at,observed_at,pool,cost_usd,expires_at)
+         VALUES('mch_owned',0,1,1,'lab','12.50',99);
+         INSERT INTO machines(id,is_local,created_at,observed_at) VALUES('mch_rented',0,1,1);",
+    )
+    .unwrap();
+    conn.execute_batch(&migration_section_sql("task_machine_local"))
+        .unwrap();
+    type Row = (String, Option<String>, Option<String>, Option<i64>);
+    let rows: Vec<Row> = conn
+        .prepare("SELECT machine_id,pool,cost_usd,expires_at FROM pool_machines")
+        .unwrap()
+        .query_map([], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(
+        rows,
+        [(
+            "mch_owned".to_string(),
+            Some("lab".to_string()),
+            Some("12.50".to_string()),
+            Some(99)
+        )]
+    );
 }

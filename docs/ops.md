@@ -1,15 +1,18 @@
-# Ops
+# PRs, checkouts, machines and accounts
 
 Your Task came back as a pull request. This page takes it the rest of the way:
 landed, with failing CI repaired for you, then released. It also covers the
-environment that work runs in: branches and worktrees, other machines, and the
-provider accounts that pay for it.
+environment that work runs in: checkouts, other machines, and the provider
+accounts that pay for it. Each section is one `lf` noun: `pr`, `repository`,
+`wt`, `machine`, `account`.
 
 Land, publish, CI repair and release are Loopflow's own verbs, so Skills and
 Graphs that use them don't care which code host is behind them. GitHub is the
 code host today; you need [`gh`](https://cli.github.com) signed in.
 
-## Land it
+## Pull requests
+
+### Land it
 
 ```bash
 lf land --wait-and-fix   # sync, mark ready, auto-merge; repair failing CI until it merges
@@ -38,15 +41,15 @@ one stays in its history. Auto-merge uses the repository's allowed merge method
 (squash, then merge, then rebase); set `merge_method` in `.lf/config.yaml` to
 prefer one. Branch protection and merge queues stay the code host's job.
 
-## Stop short of landing
+### Stop short of landing
 
 Not every PR should merge itself. Pick the endpoint:
 
 ```bash
 lf pr open                          # draft PR, opened in the browser
 lf pr publish                       # ready PR, printed as state + URL; opens nothing
-lf submit                           # sync, clear added scratch/ files, mark ready; a person merges
-lf arm                              # submit, then request auto-merge; no repair
+lf pr submit                        # sync, clear added scratch/ files, mark ready; a person merges
+lf pr arm                           # submit, then request auto-merge; no repair
 lf pr abandon                       # close the PR, remove the worktree, delete the branch
 ```
 
@@ -67,28 +70,76 @@ An approval of an older commit is not an approval of the current head; `reviews`
 shows which commit each one covered. `checks` exits 8 while checks are pending,
 which is not a failure. `--logs` pulls failed GitHub Actions logs.
 
-## When CI fails
+### Review while CI runs
 
 ```bash
-lf ship                   # a Task: the remaining steps, then land and repair until merge
-lf land --wait-and-fix    # this PR: land and repair in the foreground
-lf ci --since 7d          # how each failure was detected, repaired and landed
+lf gate                  # publish the PR so CI starts, then review the change
+```
+
+```text
+Tests that matter most
+- retry_budget::stops_at_three      the limit this change moves
+- refresh::expired_token_retries    most-edited file; a 401 used to be swallowed
+- ship_api::acceptance              the design's acceptance check
+
+4c1e9a2  superseded. CI passed 14 checks; says nothing about the fix below.
+b70d3f5  CI pending: rust-test, tests-result. Passing: rust-lint, python-test.
+         Skipped: macos (paths not reached). Local: refresh:: passed.
+         Fixed in review: refresh dropped the retry count after a 401.
+Auto-merge not requested.
+```
+
+Gate publishes first. It reads enough of the diff and your notes to commit one
+coherent candidate, syncs, and runs `lf pr publish`, creating a ready PR if the
+branch has none. Then it checks that the real suites are queued, running or
+already completed for the head it pushed. Suites that report skipped did not
+start, and gate fixes the cause or says so.
+
+The review covers what a green check can't show: security and data handling
+where the change touches them, correctness, failure handling and recovery,
+ownership, interfaces and docs. Gate fixes what it finds in scope and publishes
+the fixes together, since each push restarts CI.
+
+It names the two to five tests that cover the riskiest or most-edited behavior,
+with a line of why each. CI runs them along with everything else. Gate runs
+one locally only for fast feedback on a fix, to reproduce a CI failure, or for
+a risk no suite covers.
+
+The report is by commit. Passing, failing, pending, skipped and unavailable
+stay separate, and a pass on an earlier head doesn't carry to a later one.
+Gate doesn't wait for a pending run or request auto-merge: `lf land
+--wait-and-fix` does both, and `lf ship` runs it next.
+
+Without a remote, publishing access, `gh` or any CI, gate says which is missing
+and runs its named tests here. It reports "no CI ran" when that is known;
+unreadable CI status stays unavailable. A local pass is reported as local.
+
+If your CI only tests PRs in some state (a label, no draft, a cleared notes
+directory), name that step in your agent guide. Gate does it before publishing.
+`lf skill customize gate` copies the Skill to change the rest.
+
+### When CI fails
+
+```bash
+lf ship                        # a Task: the remaining steps, then land and repair until merge
+lf land --wait-and-fix         # this PR: land and repair in the foreground
+lf repo ci --since 7d    # how each failure was detected, repaired and landed
 ```
 
 The waiting process is the only one that repairs. It starts one `ci-fix` when
 its PR fails a required check or GitHub drops its merge request, stops when a
 person removes that request, and returns on merge or closure. A shipping Task
 whose ship process died starts again on the next read of this Machine's work
-(`lf task status`, `lf ps`, Desktop). After bare `lf land` returns, nothing
+(`lf task status`, `lf process list`, Desktop). After bare `lf land` returns, nothing
 repairs its PR.
 
-`lf ci` reads the local record, not GitHub: how much of CI repair happened without you.
+`lf repo ci` reads the local record, not GitHub: how much of CI repair happened without you.
 
-Hold repair for one Task, or cap startup retries within one repair:
+Stop repair for one Task, or cap startup retries within one repair:
 
 ```bash
-lf task defer LOO-12          # hold future runs and repair; running work continues
-lf task resume LOO-12
+lf task unassign LOO-12        # nobody owns it, so nothing repairs it; running work continues
+lf task claim LOO-12           # yours again
 ```
 
 ```yaml
@@ -101,27 +152,87 @@ backoff that grows from 1 to 30 minutes. Pending or missing checks keep waiting;
 time alone never starts a repair. For progress through a closed laptop, ship
 from an always-on Machine (below).
 
+## Updates
+
+```bash
+lf schedule hourly             # also weekly, daily, 5min; none keeps the current cadence
+tail ~/.lf/logs/refresh.log    # what each scheduled update did
+```
+
+Installing a build schedules `lf install` on your stream: daily at 09:00 local
+time, or the cadence already set. On macOS this is the LaunchAgent
+`com.loopflow.refresh`, which also runs at login and whenever it loads. On Linux
+it is a crontab line. The same schedule renews rental Claude logins every 2
+hours (`com.loopflow.rental-renewal`, the crontab line ending `# loopflow rental
+renewal`; logs in `~/.lf/logs/rental-renewal.log`); with no live rental it does
+nothing.
+
+Turn it off on macOS:
+
+```bash
+launchctl disable gui/$(id -u)/com.loopflow.refresh
+launchctl bootout gui/$(id -u)/com.loopflow.refresh
+```
+
+Both are needed: `bootout` alone lasts until the next login or install. While it
+is disabled, installs warn that updates aren't scheduled, and `lf install --dev`
+exits with an error after installing its build. Loopflow.app still updates itself
+through Sparkle.
+
+Turn it back on, which also runs `lf install` once:
+
+```bash
+launchctl enable gui/$(id -u)/com.loopflow.refresh
+lf schedule
+```
+
+On Linux, delete the crontab line ending `# loopflow install schedule`. The next
+install adds it back.
+
 ## Schedule it yourself
 
-Loopflow keeps no scheduler. Any lf command runs from your own crontab, launchd
-or systemd timer:
+The update job is the only one Loopflow registers. Any other lf command runs from
+your own crontab, launchd or systemd timer:
 
 ```bash
 # crontab -e
 */5 * * * *  cd ~/src/product && lf pr reconcile       # settle landings with Desktop closed
-0 9 * * 1    cd ~/src/product && lf release run patch  # Monday's release
 ```
+
+On macOS, a command that runs an agent or reads Keychain credentials, such as a
+release, belongs in a LaunchAgent in your login session. Cron runs outside it
+and cannot reach the Keychain:
+
+```xml
+<!-- ~/Library/LaunchAgents/com.example.product-release.plist -->
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.example.product-release</string>
+  <key>ProgramArguments</key>
+  <array><string>/bin/zsh</string><string>-lc</string>
+    <string>cd ~/src/product &amp;&amp; lf repo release run patch</string></array>
+  <key>StartCalendarInterval</key>
+  <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>9</integer></dict>
+</dict></plist>
+```
+
+```bash
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.example.product-release.plist
+```
+
+Crontab stays the answer on Linux and for jobs that need no Keychain.
 
 `lf pr reconcile` checks every recorded landing once and settles verified
 merges, then exits. It repairs nothing.
 
-## Release
+## Repository
+
+### Release
 
 ```bash
-lf release check          # has anything merged since the last tag?
-lf release run            # patch release, end to end
-lf release run minor
-lf release status         # where the release workflow stands
+lf repo release check          # has anything merged since the last tag?
+lf repo release run            # patch release, end to end
+lf repo release run minor
+lf repo release status         # where the release workflow stands
 ```
 
 `release run` bumps manifests, writes release notes, lands a release PR, builds
@@ -129,6 +240,17 @@ the exact merged commit, and tags it only after that build and your publisher
 succeed. Interrupted, it resumes the same release from where it stopped; a
 failed build is fixed with another commit under the same version, never by
 bumping. `lf skill release-run minor` hands the same command to an agent.
+
+```bash
+lf repo release regress v0.15.3 "Sessions lose their name"  # file a regression; stable stays below it
+lf repo release issues                                      # every open regression
+lf repo release promote --dry-run                           # what would move, or what holds it
+lf repo release promote                                     # move stable now, outside a run
+```
+
+A target with `completion: github-release` has a `stable` stream, GitHub's Latest
+marker. A GitHub issue labelled `regressed-in:v0.15.3` holds it below that release
+until the issue closes as completed.
 
 Your repository owns the build and publish steps. Declare them per target:
 
@@ -146,13 +268,13 @@ release:
 ```
 
 ```bash
-lf release run patch --target cli   # changes since cli/v<previous> only
+lf repo release run patch --target cli   # changes since cli/v<previous> only
 ```
 
 [Configuration](config.md#releases) has every field. The first release of a
 target needs an explicit `X.Y.Z`.
 
-## Branches and worktrees
+## Checkouts
 
 ```bash
 lf commit -m "retry budget" -p      # commit and push; paths after it commit only those
@@ -168,16 +290,55 @@ even without an ignore rule or when already staged: its staged and working
 contents survive sync without entering the checkpoint. Other ignored files stay
 ignored unless explicitly staged. Previously committed telemetry stays in history.
 
-Sync follows a stack parent through its squash merge. Stack one Task on
-another's open PR, even a draft:
+Sync follows a stack parent through its squash merge. Stack one Task on any
+other Task that has a branch, before that parent lands or even opens a PR:
 
 ```bash
 lf task run LOO-13 --stack-on LOO-12
 ```
 
+When the parent has no PR yet, stacking pushes its branch if origin lacks it or
+is behind. It never force-pushes or opens a PR for the parent. A published
+parent's missing remote branch is restored after reading its PR from GitHub:
+a merged PR stops stacking; a closed PR uses a new unpublished parent record.
+If GitHub cannot be read, stacking uses the saved PR state. If Auto was requested
+for an earlier head, stacking turns Auto off before pushing. The same clean head
+keeps its merge request.
+If the published parent's remote branch exists and is behind, or
+origin has diverged, the child bases on `origin/<branch>` and the stack line
+counts the local commits it leaves out. Run `lf commit -p` in the parent's
+checkout to include them. Stacking stops when the parent is not a Task, has no
+branch yet (`lf checkout LOO-12` places one), has already merged, or the push
+fails; a failed push shows git's message.
+
 Conflicts stay visible: resolve them, then `lf sync --continue`, or `lf sync --abort`.
 
-## Other machines
+For a stacked Task, `lf sync` follows its parent. To deliver the child's work
+independently, run `lf sync main` (or the repository's default branch). It uses
+the recorded parent tip to remove inherited changes, keeps the Task, branch and
+PR identities, and retargets the PR after integration succeeds. Resolve conflicts
+with `lf sync --manual main`, then `lf sync --continue`; `lf sync --abort` keeps
+the original placement. Parent work remains in its own branch and in Git history.
+If the recorded fork is unavailable, sync recovers it from the common ancestor
+of this checkout and the parent's remote branch. `lf sync main --plan` shows
+that fork without changing placement.
+
+## Machines
+
+### Client access and installation
+
+```bash
+lf server status   # observe the local client server
+lf install         # update Loopflow and reconcile its server registration
+```
+
+Desktop connects through the server; installation prepares it automatically.
+Use server status for connection problems and Machine commands to select where
+work runs. They have separate lifetimes: a server reconnect does not restart an
+agent or move a Task. See [Connect clients](server.md) for recovery and background
+access, and [Surfaces](surfaces.md) for app-owned Desktop automation.
+
+### Other machines
 
 ```bash
 lf machine add mini                              # save an SSH destination; offers to install lf
@@ -195,12 +356,12 @@ Group machines you own into a pool, and rent more when none is free:
 
 ```bash
 lf pool add lab && lf machine add jack@mini --pool lab
-lf account token claude jack@example.com          # once a year: Claude for rented machines
+lf machine connect code-1 claude jack@example.com # once: approve the laptop's Claude login for rentals
 lf ondemand add code --provider daytona --vcpus 4 --memory-gb 8 --max 2 --max-usd-per-hour 0.40
 lf ondemand add gpu --provider runpod --vcpus 8 --memory-gb 32 --gpu A40 --max 1 --max-usd-per-hour 1
 lf task run LOO-570 --pool lab --rent code --quote   # where it would run, the most it could cost
 lf task run LOO-570 --pool lab --rent code           # a free lab machine, else rent one
-lf --wave infrastructure set machine code            # the Wave's new Tasks rent from code
+lf --wave infrastructure set machine.capacity code            # the Wave's new Tasks rent from code
 lf machine end code-1                                # give a rented machine back now
 ```
 
@@ -215,7 +376,7 @@ us-east-1's, so AWS names the region it rents in and the region it priced. When
 the repository plans in Linear, a rented machine gets an access token this
 laptop just refreshed; the refresh grant stays here, so Linear works there for
 the token's lifetime (about a day). Its provider deletes a rented machine at
-its deadline. `lf --wave infrastructure set machine code`
+its deadline. `lf --wave infrastructure set machine.capacity code`
 (or no `--wave`, for the repository) sends a scope's unowned Tasks to `code` when they run. A machine
 goes back 15 minutes after its last Task finished; first its Sessions and
 Processes are copied home, so `lf session list` shows them "from code-1".
@@ -224,16 +385,22 @@ Unpushed work refuses the give-back unless you pass `--force`.
 ## Accounts
 
 ```bash
-lf account                                         # access and capacity for every login
-lf account connect codex work@example.com --chrome-profile Work
+lf account                                         # one row per login: weekly room, what to fix
+lf account connect codex=work@example.com --chrome-profile Work
 lf set account.codex work@,personal@               # this repository: work first
-lf account codex use work@                         # sign ~/.codex in as work@, for lf and plain codex
+lf account next                                    # which login the next launch takes, and why
+lf account use work@                               # stay on work@ until it fills up; `use auto` undoes it
+lf account pause personal@                         # out of rotation
 ```
 
 Connect registers a login you already have. It runs the provider's sign-in in
 the Chrome profile you name and refuses a login that doesn't match the email.
-Routes try accounts in order; one at 95% of a usage window drops behind the
-rest. `lf account --cached` reads saved evidence without contacting providers.
+Every launch takes the eligible account on the largest plan with the most
+weekly quota left per hour until its window resets, switching the shared login
+when another account ranks ahead; route order breaks ties. `lf account use`
+holds launches on one login until it fills up or `lf account use auto`.
+`lf account --cached` reads saved evidence without contacting providers.
+
 Unknown capacity stays unknown, never zero.
 
 For one launch, `--account codex=work@` prefers an account and keeps fallback;
@@ -245,19 +412,23 @@ For one launch, `--account codex=work@` prefers an account and keeps fallback;
 | Command | What it does |
 |---|---|
 | `lf land [--wait-and-fix]` | Request auto-merge; with the flag, wait and repair CI until merged |
-| `lf arm` | Prepare and request auto-merge; return without watching |
-| `lf submit` | Prepare for a person's merge click |
+| `lf pr arm` | Prepare and request auto-merge; return without watching |
+| `lf pr submit` | Prepare for a person's merge click |
 | `lf pr publish` / `lf pr open` | Ready PR, printed / draft PR, opened |
 | `lf pr abandon [BRANCH]` | Close the PR, remove the worktree, delete the branch |
 | `lf pr reconcile` | Check recorded landings once; recover a Task's missing PR |
-| `lf ship [ISSUE] [--stop]` | Run a Task's remaining steps to merge, repairing CI |
-| `lf ci [--since 7d]` | Report CI incidents and their repairs |
-| `lf release run\|check\|status\|notes\|bump\|tag\|publish` | Release stages, together or one at a time |
+| `lf ship [ISSUE]` / `lf task hold ISSUE` | Run a Task's remaining steps to merge, repairing CI / withdraw that approval |
+| `lf repo ci [--since 7d]` | Report CI incidents and their repairs |
+| `lf repo release run\|check\|status\|notes\|bump\|tag\|publish` | Release stages, together or one at a time |
 | `lf commit`, `lf sync`, `lf wt create\|switch\|list\|prune\|delete` | Git, with Task and stack awareness |
 | `lf machine add\|list\|status\|use\|connect\|end` | Where work runs |
 | `lf pool …`, `lf ondemand …` | Machines you own, machines you rent |
+| `lf server status` | Observe local client access and connection errors |
+| `lf install` | Update Loopflow and its server registration |
 | `lf account [connect\|route\|use\|token\|set]` | Provider logins, capacity and routing |
 
-Every flag is in the [`lf` reference](lf-reference.md#lf-ops).
+Every flag is in the [`lf` reference](lf-reference.md): [`lf pr`](lf-reference.md#lf-pr),
+[`lf repo`](lf-reference.md#lf-repo), [`lf wt`](lf-reference.md#lf-wt),
+[`lf machine`](lf-reference.md#lf-machine), [`lf account`](lf-reference.md#lf-account).
 
 Next: [Surfaces](surfaces.md): see this work in Desktop, cmux, Herdr or tmux.

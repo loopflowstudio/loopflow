@@ -29,41 +29,49 @@ struct ThemeWorkflowTests {
         #expect(appearance.selectedTheme.palette.definition == ThemeDefinition.builtins.first { $0.name == "Linen" }?.palette.definition)
     }
 
-    @Test func chooserFiltersEachPickerToItsAppearanceAndWritesTheChoice() throws {
-        let paths = ThemePaths.temporary()
-        let appearance = AppearanceStore(paths: paths, systemDark: false)
-        appearance.beginPreview()
-        let view = ThemeChooser(appearance: appearance)
-        let mode = try view.inspect().find(viewWithAccessibilityIdentifier: "appearance-mode").picker()
-        for choice in [AppearanceMode.light, .dark, .system] {
-            try mode.select(value: choice)
-            for slot in [AppearanceMode.light, .dark] {
-                let button = try view.inspect().find(viewWithAccessibilityIdentifier: "appearance-picker-\(slot.rawValue)").button()
-                #expect(button.isDisabled() == (choice != .system && choice != slot))
+    @Test func chooserFiltersEachPickerToItsAppearanceAndWritesTheChoice() async throws {
+        try await withThemeServer { location in
+            let paths = ThemePaths.temporary()
+            let appearance = await AppearanceStore.loaded(paths: paths, systemDark: false, location: location)
+            appearance.beginPreview()
+            let view = ThemeChooser(appearance: appearance)
+            let mode = try view.inspect().find(viewWithAccessibilityIdentifier: "appearance-mode").picker()
+            for choice in [AppearanceMode.light, .dark, .system] {
+                try mode.select(value: choice)
+                for slot in [AppearanceMode.light, .dark] {
+                    let button = try view.inspect().find(viewWithAccessibilityIdentifier: "appearance-picker-\(slot.rawValue)").button()
+                    #expect(button.isDisabled() == (choice != .system && choice != slot))
+                }
+                #expect(appearance.picker == (choice == .dark ? .dark : .light))
+                let showsDark = (try? view.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-Night Owl")) != nil
+                let showsLight = (try? view.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-Celadon")) != nil
+                #expect(showsDark == (choice != .light))
+                #expect(showsLight == (choice != .dark))
             }
-            #expect(appearance.picker == (choice == .dark ? .dark : .light))
-            let showsDark = (try? view.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-Night Owl")) != nil
-            let showsLight = (try? view.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-Celadon")) != nil
-            #expect(showsDark == (choice != .light))
-            #expect(showsLight == (choice != .dark))
+            #expect(appearance.entries(for: .light).builtins.count == 12)
+            #expect(appearance.entries(for: .light).builtins.allSatisfy { !$0.theme.isDark })
+            #expect(appearance.entries(for: .dark).builtins.count == 12)
+            #expect(appearance.entries(for: .dark).builtins.allSatisfy { $0.theme.isDark })
+            // System lists both sides at once; each tile assigns its own side.
+            try view.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-Celadon").button().tap()
+            try view.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-Night Owl").button().tap()
+            #expect(appearance.themeName(for: .light) == "Celadon")
+            #expect(appearance.current.mode == .system)
+            try view.inspect().find(button: "Apply").tap()
+            let deadline = ContinuousClock.now + .seconds(10)
+            while appearance.chooserOpen, ContinuousClock.now < deadline {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            #expect(!appearance.chooserOpen)
+            let savedTheme1 = try await ThemeConfig.read(paths.config, location: location)
+            #expect(savedTheme1 == "light:Celadon,dark:Night Owl")
+            #expect(appearance.effectiveTheme.name == "Celadon")
+            appearance.setSystemDark(true)
+            #expect(appearance.effectiveTheme.name == "Night Owl")
+            let restored = await AppearanceStore.loaded(paths: paths, systemDark: false, location: location)
+            #expect(restored.selection == appearance.selection)
+            #expect(restored.effectiveTheme.name == "Celadon")
         }
-        #expect(appearance.entries(for: .light).builtins.count == 12)
-        #expect(appearance.entries(for: .light).builtins.allSatisfy { !$0.theme.isDark })
-        #expect(appearance.entries(for: .dark).builtins.count == 12)
-        #expect(appearance.entries(for: .dark).builtins.allSatisfy { $0.theme.isDark })
-        // System lists both sides at once; each tile assigns its own side.
-        try view.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-Celadon").button().tap()
-        try view.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-Night Owl").button().tap()
-        #expect(appearance.themeName(for: .light) == "Celadon")
-        #expect(appearance.current.mode == .system)
-        try view.inspect().find(button: "Apply").tap()
-        #expect(ThemeConfig.read(paths.config) == "light:Celadon,dark:Night Owl")
-        #expect(appearance.effectiveTheme.name == "Celadon")
-        appearance.setSystemDark(true)
-        #expect(appearance.effectiveTheme.name == "Night Owl")
-        let restored = AppearanceStore(paths: paths, systemDark: false)
-        #expect(restored.selection == appearance.selection)
-        #expect(restored.effectiveTheme.name == "Celadon")
     }
 
     @Test func chooserExplainsAMismatchedImportAndKeepsApplyDisabled() throws {

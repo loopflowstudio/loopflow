@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use loopflow::store::{CredentialState, ProviderAccount, ProviderAccountId, RoutingState};
 use loopflow::work::task::{GithubPr, PrPublication};
-use loopflow_test_support::TestRepo;
+use loopflow_test_support::{MachineServer, TestRepo};
 use sha2::{Digest, Sha256};
 
 fn command(repo: &Path, home: &Path, args: &[&str]) -> Command {
@@ -28,16 +28,9 @@ fn command(repo: &Path, home: &Path, args: &[&str]) -> Command {
     command
 }
 
-/// The shared native Codex stand-in: an app-server that records each turn
-/// and a terminal client that attaches to it.
-const CODEX_NATIVE: &str = concat!(
-    "#!/bin/sh\nexec /usr/bin/python3 '",
-    env!("CARGO_MANIFEST_DIR"),
-    "/tests/support/native_codex.py' \"$@\"\n"
-);
-
 /// The three ways to name a Task for a Graph: the Task entry, `--task`, and its
-/// worktree. All block in the foreground and reach the same checks.
+/// worktree. All block in the foreground; only the Task entry requires
+/// admission to start Task work.
 const LAUNCHES: [&[&str]; 3] = [
     &["-b", "task", "run", "INF-123", "proof"],
     &["-b", "--task", "INF-123", "graph", "proof"],
@@ -45,322 +38,7 @@ const LAUNCHES: [&[&str]; 3] = [
 ];
 
 #[test]
-fn explicit_launch_policy_survives_task_runs_nested_graphs_and_provider_children() {
-    let repo = TestRepo::new();
-    support::bind_task_planning(&repo);
-    repo.create_branch("agent-proof");
-    let home = tempfile::tempdir().unwrap();
-    let _env = support::EnvGuard::with_home(
-        &[
-            ("open", "#!/bin/sh\nexit 0\n"),
-            ("gh", "#!/bin/sh\nexit 1\n"),
-            ("codex", CODEX_NATIVE),
-            (
-                "claude",
-                r#"#!/usr/bin/python3
-import json
-import os
-import subprocess
-import sys
-
-if '--version' in sys.argv:
-    print('fixture')
-    sys.exit(0)
-with open(os.path.join(os.environ['LF_HOME'], 'launches.jsonl'), 'a') as launches:
-    launches.write(json.dumps({'args': sys.argv[1:], 'claude_home': os.environ.get('CLAUDE_CONFIG_DIR')}) + '\n')
-message = json.loads(sys.stdin.readline())
-message['session_id'] = 'agent-fixture'
-print(json.dumps(message), flush=True)
-print(json.dumps({'type': 'system', 'subtype': 'init', 'session_id': 'agent-fixture'}), flush=True)
-if os.environ.get('LF_AGENT_CHILD') != 'yes':
-    with open(os.path.join(os.environ['LF_HOME'], 'child-output'), 'w') as output:
-        subprocess.run(
-            [os.environ['LF_BIN'], '-b', 'skill', 'child', '-a', 'codex'],
-            env={**os.environ, 'LF_AGENT_CHILD': 'yes'},
-            stdout=output, stderr=subprocess.STDOUT, check=True, timeout=30,
-        )
-print(json.dumps({'type': 'result', 'uuid': 'fixture-result', 'session_id': 'agent-fixture', 'subtype': 'success', 'is_error': False, 'result': 'done'}), flush=True)
-for line in sys.stdin:
-    pass
-"#,
-            ),
-        ],
-        Some(home.path()),
-    );
-    let registered = support::register_task_without_pr(
-        home.path(),
-        &repo.path().canonicalize().unwrap(),
-        "agent-proof",
-        &repo.head_sha(),
-    );
-    let runtime = tokio::runtime::Runtime::new().unwrap();
-    connect_fixture_claude(home.path(), &registered.store);
-    runtime
-        .block_on(
-            registered
-                .store
-                .set_task_agent(&registered.task.id, "codex"),
-        )
-        .unwrap();
-    for (path, content) in [
-        (".lf/skills/first.md", "---\nagent: codex\n---\nFirst step."),
-        (
-            ".lf/skills/second.md",
-            "---\nagent: codex\n---\nSecond step.",
-        ),
-        (
-            ".lf/skills/child.md",
-            "---\nagent: codex\n---\nProvider-issued child.",
-        ),
-        (
-            ".lf/graphs/pursue.yaml",
-            "- step: {name: first, agent: codex}\n- graph: inner\n",
-        ),
-        (
-            ".lf/graphs/inner.yaml",
-            "- step: {name: second, agent: codex}\n",
-        ),
-        (
-            ".lf/graphs/feature.yaml",
-            "- graph: pursue\n- interactive: {name: demo, id: review}\n",
-        ),
-    ] {
-        let path = repo.path().join(path);
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
-        fs::write(path, content).unwrap();
-    }
-    repo.stage_all();
-    repo.commit("Define agent selection fixtures");
-    let store =
-        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
-    support::select_wave_graph(
-        repo.path(),
-        &store,
-        registered.task.wave_id.as_ref().unwrap(),
-        "feature",
-    );
-    // Direct Task binding used to prefer the saved Task agent over -a.
-    for args in [
-        vec![
-            "-b",
-            "--yolo",
-            "--chrome",
-            "on",
-            "--isolate",
-            "--task",
-            "INF-123",
-            "skill",
-            "first",
-            "-a",
-            "claude:sonnet",
-        ],
-        vec![
-            "-b",
-            "--yolo",
-            "--chrome",
-            "on",
-            "--isolate",
-            "-a",
-            "claude:sonnet",
-            "task",
-            "run",
-            "INF-123",
-            "pursue",
-        ],
-    ] {
-        let output = command(repo.path(), home.path(), &args).output().unwrap();
-        assert!(
-            output.status.success(),
-            "{args:?}: {}\nchild: {}",
-            String::from_utf8_lossy(&output.stderr),
-            fs::read_to_string(home.path().join("child-output")).unwrap_or_default()
-        );
-    }
-    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-    let sessions = db
-        .prepare("SELECT skill, provider FROM agent_sessions ORDER BY skill")
-        .unwrap()
-        .query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })
-        .unwrap()
-        .collect::<Result<Vec<_>, _>>()
-        .unwrap();
-    assert_eq!(
-        sessions,
-        ["child", "child", "child", "first", "first", "second"]
-            .map(|skill| (skill.to_owned(), "claude".to_owned()))
-    );
-    assert_eq!(support::recorded_graphs(home.path()).len(), 1);
-    let launches = fs::read_to_string(home.path().join("launches.jsonl")).unwrap();
-    assert_eq!(launches.lines().count(), 6);
-    for launch in launches.lines() {
-        let received: serde_json::Value = serde_json::from_str(launch).unwrap();
-        let args = received["args"].as_array().unwrap();
-        assert!(args.contains(&serde_json::json!("--chrome")), "{launch}");
-        assert!(
-            !args.contains(&serde_json::json!("--no-chrome")),
-            "{launch}"
-        );
-        assert!(
-            args.contains(&serde_json::json!("--dangerously-skip-permissions")),
-            "{launch}"
-        );
-        assert!(
-            args.windows(2).any(|pair| pair == ["--model", "sonnet"]),
-            "{launch}"
-        );
-        assert_eq!(
-            Path::new(received["claude_home"].as_str().unwrap())
-                .canonicalize()
-                .unwrap(),
-            home.path()
-                .join("accounts/claude/fixture")
-                .canonicalize()
-                .unwrap()
-        );
-    }
-    let session: String = db
-        .query_row(
-            "SELECT id FROM agent_sessions WHERE skill='first' LIMIT 1",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    // Connecting with another provider continues the same Session from a log;
-    // contextual resume reaches the same open.
-    let transcript = home
-        .path()
-        .join("accounts/claude/fixture/projects/fixture/agent-fixture.jsonl");
-    fs::create_dir_all(transcript.parent().unwrap()).unwrap();
-    fs::write(
-        &transcript,
-        [
-            serde_json::json!({"type":"user","userType":"external","message":{"content":"Rename the parser module"}}),
-            serde_json::json!({"type":"assistant","message":{"content":[
-                {"type":"text","text":"Renaming it now."},
-                {"type":"tool_use","id":"read","name":"Read","input":{"file_path":"src/parser.rs"}},
-                {"type":"tool_use","id":"move","name":"Bash","input":{"command":"git mv src/parser.rs src/syntax.rs"}}]}}),
-            serde_json::json!({"type":"user","userType":"external","toolUseResult":"done","message":{"content":[
-                {"type":"tool_result","tool_use_id":"read","content":"successful parser source"},
-                {"type":"tool_result","tool_use_id":"move","is_error":true,"content":"Permission to use Bash has been denied."}]}}),
-        ]
-        .map(|row| row.to_string())
-        .join("\n"),
-    )
-    .unwrap();
-    // The first Codex app-server crashes before the conversation opens.
-    fs::write(home.path().join("fail-server"), "").unwrap();
-    let crashed = command(
-        repo.path(),
-        home.path(),
-        &["session", "connect", &session, "-a", "codex"],
-    )
-    .output()
-    .unwrap();
-    assert!(!crashed.status.success());
-    // Retrying without -a relaunches Codex with the same continuation.
-    fs::remove_file(home.path().join("fail-server")).unwrap();
-    let imported = command(repo.path(), home.path(), &["session", "connect", &session])
-        .output()
-        .unwrap();
-    assert!(
-        imported.status.success(),
-        "{}",
-        String::from_utf8_lossy(&imported.stderr)
-    );
-    assert_eq!(
-        db.query_row("SELECT count(*) FROM agent_sessions", [], |row| row
-            .get::<_, i64>(0))
-            .unwrap(),
-        6
-    );
-    assert_eq!(
-        db.query_row(
-            "SELECT provider FROM agent_sessions WHERE id=?1",
-            [&session],
-            |row| row.get::<_, String>(0)
-        )
-        .unwrap(),
-        "codex"
-    );
-    let turns: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(home.path().join("native-turns.json")).unwrap())
-            .unwrap();
-    let turn = turns[0]["items"][0]["content"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter_map(|input| input["text"].as_str())
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert!(turn.contains("began in claude"), "{turn}");
-    assert!(turn.contains("Rename the parser module"), "{turn}");
-    // The skill ran in the Claude conversation; the continuation does not re-send it.
-    assert!(!turn.contains("<lf:skill:first"), "{turn}");
-    let log_path = turn
-        .split_whitespace()
-        .find_map(|word| {
-            word.strip_suffix(";")
-                .filter(|path| path.ends_with("conversation.md"))
-        })
-        .unwrap_or_else(|| panic!("no log path in {turn}"));
-    let log = fs::read_to_string(log_path).unwrap();
-    for expected in [
-        "Rename the parser module",
-        "Renaming it now.",
-        "- tool: Bash",
-        "Permission to use Bash has been denied.",
-    ] {
-        assert!(log.contains(expected), "{expected} missing from {log}");
-    }
-    assert!(!log.contains("successful parser source"), "{log}");
-
-    // A separate invocation with no -a keeps skill and step declarations.
-    let unbound = TestRepo::new();
-    for (path, content) in [
-        (
-            ".lf/skills/default-proof.md",
-            "---\nagent: claude:haiku\n---\nUse the declared agent.",
-        ),
-        (
-            ".lf/graphs/default-proof.yaml",
-            "- step: {name: default-proof, agent: 'claude:sonnet'}\n",
-        ),
-    ] {
-        let path = unbound.path().join(path);
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
-        fs::write(path, content).unwrap();
-    }
-    unbound.stage_all();
-    unbound.commit("Define default agent fixtures");
-    for owner in ["skill", "graph"] {
-        let output = command(
-            unbound.path(),
-            home.path(),
-            &["-b", "--isolate", owner, "default-proof"],
-        )
-        .env("LF_AGENT_CHILD", "yes")
-        .output()
-        .unwrap();
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-    let models = db
-        .prepare("SELECT model FROM agent_sessions WHERE skill='default-proof' ORDER BY model")
-        .unwrap()
-        .query_map([], |row| row.get::<_, String>(0))
-        .unwrap()
-        .collect::<Result<Vec<_>, _>>()
-        .unwrap();
-    assert_eq!(models, ["haiku", "sonnet"]);
-}
-
-#[test]
-fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
+fn task_run_checks_admission_while_standalone_graphs_run_with_task_context() {
     for condition in [
         "valid",
         "invalid",
@@ -450,16 +128,32 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
                 "removed" => "deleted",
                 _ => "planning",
             };
-            for launch in LAUNCHES {
+            for (launched, launch) in LAUNCHES.iter().enumerate() {
                 let output = run(launch);
-                assert!(!output.status.success(), "{condition} admitted {launch:?}");
                 let error = String::from_utf8_lossy(&output.stderr);
-                assert!(error.contains(expected), "{condition} {launch:?}: {error}");
+                let graphs = support::recorded_graphs(home.path());
+                if launched == 0 {
+                    assert!(!output.status.success(), "{condition} admitted {launch:?}");
+                    assert!(error.contains(expected), "{condition} {launch:?}: {error}");
+                    assert!(graphs.is_empty(), "{condition} started Task work");
+                } else {
+                    // The Graph starts even when its `task sync --plan` command
+                    // cannot use the retained planning input.
+                    assert_eq!(graphs.len(), launched, "{condition} {launch:?}: {error}");
+                    let (outcome, steps) = graphs.last().unwrap();
+                    assert_eq!(steps.len(), 1, "{condition} {launch:?}: {error}");
+                    assert_eq!(steps[0]["argv"], serde_json::json!(["sync", "--plan"]));
+                    assert_eq!(
+                        outcome.as_deref(),
+                        Some(if output.status.success() {
+                            "succeeded"
+                        } else {
+                            "failed"
+                        }),
+                        "{condition} {launch:?}: {error}"
+                    );
+                }
             }
-            assert!(
-                support::recorded_graphs(home.path()).is_empty(),
-                "{condition} launched a Graph"
-            );
             continue;
         }
         // Each launch has finished when its command returns, and is its own
@@ -488,7 +182,7 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
         assert_eq!(recorded[0].1.len(), 1);
         assert_eq!(
             recorded[0].1[0]["argv"],
-            serde_json::json!(["ops", "sync", "--plan"])
+            serde_json::json!(["sync", "--plan"])
         );
         assert!(recorded.iter().all(|(_, steps)| *steps == recorded[0].1));
         // At its end the Task has nothing left to run; completion retries
@@ -542,7 +236,6 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
         // The worker's entry points are gone; nothing restarts a Graph.
         for removed in [
             vec!["--task", "INF-123", "graph", "start", "proof"],
-            vec!["task", "create", "--run", "--title", "x"],
             vec!["task", "__worker", registered.task.id.as_str()],
         ] {
             assert!(
@@ -614,29 +307,56 @@ impl Drop for HeldGraph {
     }
 }
 
-/// A held Graph step: an ordinary owned execution running this script, which
-/// optionally announces `ready` in the home and waits there for `release`.
-fn hold_script(home: &Path, announce: bool) -> PathBuf {
-    let script = home.join("hold.py");
-    let ready = if announce {
-        "(home / 'ready.tmp').write_text('ready')\n(home / 'ready.tmp').replace(home / 'ready')\n"
-    } else {
-        ""
-    };
-    fs::write(
-        &script,
-        format!(
-            "import os\nfrom pathlib import Path\nimport time\nhome = Path(os.environ['LF_HOME'])\n{ready}while not (home / 'release').exists():\n    time.sleep(.02)\n"
-        ),
-    )
+/// A Claude stand-in for a held Graph step: it announces `ready` in LF_HOME,
+/// then waits there for `release` before it answers.
+pub(crate) const HOLDING_CLAUDE: &str = r#"#!/usr/bin/python3
+import json, os, sys, time
+if '--version' in sys.argv:
+    print('fixture')
+    sys.exit(0)
+home = os.environ['LF_HOME']
+streamed = '--input-format' in sys.argv
+message = json.loads(sys.stdin.readline()) if streamed else None
+with open(os.path.join(home, 'ready'), 'w') as ready:
+    ready.write('ready')
+if streamed:
+    with open(os.path.join(home, 'stream-ready'), 'w') as ready:
+        ready.write('ready')
+while not os.path.exists(os.path.join(home, 'release')):
+    time.sleep(0.02)
+if not streamed:
+    sys.exit(0)
+message['session_id'] = 'stand-in'
+print(json.dumps(message), flush=True)
+print(json.dumps({'type': 'system', 'subtype': 'init', 'session_id': 'stand-in'}), flush=True)
+print(json.dumps({'type': 'assistant', 'message': {'content': [{'type': 'text', 'text': 'Held.'}]}}), flush=True)
+print(json.dumps({'type': 'result', 'uuid': 'stand-in-result', 'session_id': 'stand-in', 'subtype': 'success', 'is_error': False, 'result': 'Held.'}), flush=True)
+for line in sys.stdin:
+    pass
+"#;
+
+/// The skill step `holding_task`'s stand-in holds until `release`.
+const HOLD_STEP: &str = "- step: {name: hold}\n";
+const HOLD_SKILL: (&str, &str) = (".lf/skills/hold.md", "Hold.");
+
+/// The fixture with a `hold` skill whose provider holds its step open until
+/// the test writes `release` in the home.
+fn holding_task() -> GraphTask {
+    let task = GraphTask::with_tools(&[("claude", HOLDING_CLAUDE)]);
+    connect_fixture_claude(task.home.path(), &task.registered.store);
+    crate::config::files::update(&task.home.path().join("config.yaml"), |value| {
+        value["agent"] = "claude".into();
+        Ok(())
+    })
     .unwrap();
-    script
+    task.repo.create_file(HOLD_SKILL.0, HOLD_SKILL.1);
+    task
 }
 
 #[test]
 fn running_graphs_belong_to_the_target_checkout_and_retain_their_caller() {
     for launch in ["task", "direct", "checkout", "alias", "wt"] {
-        let task = GraphTask::new();
+        let task = holding_task();
         // A real sibling checkout, managed through the public placement command.
         task.ok(&["wt", "create", "caller"]);
         // Worktree discovery is read-only and does not select an ambient Home.
@@ -652,11 +372,7 @@ fn running_graphs_belong_to_the_target_checkout_and_retain_their_caller() {
         let alias = alias_root.path().join("target");
         #[cfg(unix)]
         std::os::unix::fs::symlink(task.repo.path(), &alias).unwrap();
-        let hold = hold_script(task.home.path(), true);
-        task.repo.create_file(
-            ".lf/graphs/proof.yaml",
-            &format!("- cmd: session serve -- python3 {}\n", hold.display()),
-        );
+        task.repo.create_file(".lf/graphs/proof.yaml", HOLD_STEP);
         let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
         // The checkout already claimed the Task; inspection and Graphs add no entry.
         let entries = || {
@@ -721,7 +437,20 @@ fn running_graphs_belong_to_the_target_checkout_and_retain_their_caller() {
             std::thread::sleep(Duration::from_millis(20));
         }
         assert_eq!(entries(), claimed, "{launch}");
-        let status = task.status();
+        // The Task's background conversation runs the same stand-in, so `ready`
+        // can arrive before the Graph's step; wait for the Graph itself.
+        let status = loop {
+            let status = task.status();
+            if !status["work"]["graph_processes"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+                || Instant::now() >= deadline
+            {
+                break status;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        };
         let graphs = status["work"]["graph_processes"].as_array().unwrap();
         assert_eq!(graphs.len(), 1, "{launch}: {status}");
         assert_eq!(graphs[0]["state"], "current");
@@ -794,15 +523,292 @@ fn running_graphs_belong_to_the_target_checkout_and_retain_their_caller() {
 }
 
 #[test]
-fn task_run_returns_while_its_graph_keeps_running() {
+fn task_run_open_reuses_the_primary_while_the_graph_is_running() {
+    task_run_open_while_running(false);
+}
+
+#[test]
+fn task_run_open_attachment_failure_leaves_the_graph_running() {
+    task_run_open_while_running(true);
+}
+
+fn task_run_open_while_running(fail_open: bool) {
+    let task = holding_task();
+    let lf = task.open_fixture();
+    if fail_open {
+        fs::write(task.home.path().join("open-fails"), "").unwrap();
+    }
+    task.repo.create_file(".lf/graphs/held.yaml", HOLD_STEP);
+    task.repo.create_file(
+        ".lf/graphs/held-flow.yaml",
+        "- graph: held\n- interactive: {name: demo, id: review}\n",
+    );
+    let out = task.home.path().join("open.out");
+    let log = fs::File::create(&out).unwrap();
+    let child = command(
+        task.repo.path(),
+        task.home.path(),
+        &["task", "run", "INF-123", "held-flow", "--open"],
+    )
+    .env("LF_BIN", &lf)
+    .stdin(std::process::Stdio::null())
+    .stdout(log.try_clone().unwrap())
+    .stderr(log)
+    .spawn()
+    .unwrap();
+    let mut held = HeldGraph {
+        child,
+        release: task.home.path().join("release"),
+        caller: task.home.path().join("unused-caller"),
+    };
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let status = loop {
+        if let Some(status) = held.child.try_wait().unwrap() {
+            break status;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "opening waited for the Graph: {}",
+            fs::read_to_string(&out).unwrap()
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    let text = fs::read_to_string(&out).unwrap();
+    assert_eq!(status.success(), !fail_open, "{text}");
+    let launched = text.find("running as Graph process").unwrap();
+    let opened = text
+        .find(if fail_open {
+            "Conversation exited"
+        } else {
+            ": Attached"
+        })
+        .unwrap();
+    assert!(launched < opened, "opening preceded launch: {text}");
+    assert_eq!(
+        fs::read_to_string(task.home.path().join("opened"))
+            .unwrap()
+            .trim(),
+        "opening-primary"
+    );
+    assert_eq!(
+        task.status()["work"]["graph_processes"][0]["state"],
+        "current"
+    );
+    let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
+    // Besides the conversation a selected agent starts beside a checked-out
+    // Task, opening made none.
+    let count: i64 = db
+        .query_row(
+            "SELECT count(*) FROM agent_sessions WHERE task_id=?1 AND interactive=1
+             AND skill IS NOT 'task-session'",
+            [task.registered.task.id.as_str()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, 1);
+    fs::write(&held.release, "").unwrap();
+    assert!(task
+        .ran(std::process::Output {
+            status,
+            stdout: text.into_bytes(),
+            stderr: Vec::new()
+        })
+        .success());
+}
+
+#[test]
+fn task_run_open_waits_for_foreground_runs() {
+    for mode in ["-b", "-i"] {
+        let task = holding_task();
+        let lf = task.open_fixture();
+        task.repo.create_file(
+            ".lf/graphs/foreground.yaml",
+            &format!("{HOLD_STEP}- cmd: task sync --plan\n"),
+        );
+        let out = task.home.path().join("foreground.out");
+        let log = fs::File::create(&out).unwrap();
+        let mut held = HeldGraph {
+            child: command(
+                task.repo.path(),
+                task.home.path(),
+                &[mode, "task", "run", "INF-123", "foreground", "--open"],
+            )
+            .env("LF_BIN", &lf)
+            .stdin(std::process::Stdio::null())
+            .stdout(log.try_clone().unwrap())
+            .stderr(log)
+            .spawn()
+            .unwrap(),
+            release: task.home.path().join("release"),
+            caller: task.home.path().join("unused-caller"),
+        };
+        let deadline = Instant::now() + Duration::from_secs(60);
+        while !task.home.path().join("ready").exists() {
+            assert!(
+                held.child.try_wait().unwrap().is_none() && Instant::now() < deadline,
+                "{mode}: {}",
+                fs::read_to_string(&out).unwrap()
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(held.child.try_wait().unwrap().is_none());
+        assert!(!task.home.path().join("opened").exists());
+        fs::write(&held.release, "").unwrap();
+        let status = loop {
+            if let Some(status) = held.child.try_wait().unwrap() {
+                break status;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "{mode}: {}",
+                fs::read_to_string(&out).unwrap()
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        let text = fs::read_to_string(&out).unwrap();
+        assert!(status.success(), "{mode}: {text}");
+        assert!(text.contains(": Attached"), "{mode}: {text}");
+        assert_eq!(
+            fs::read_to_string(task.home.path().join("opened"))
+                .unwrap()
+                .trim(),
+            "opening-primary"
+        );
+        let outcomes: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(task.home.path().join("opened-graphs.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(outcomes, serde_json::json!(["succeeded"]), "{mode}");
+    }
+}
+
+#[test]
+fn task_run_open_successful_quote_launches_and_opens_nothing() {
     let task = GraphTask::new();
-    let hold = hold_script(task.home.path(), false);
+    let lf = task.open_fixture();
+    task.ok(&[
+        "ondemand",
+        "add",
+        "quote",
+        "--provider",
+        "daytona",
+        "--vcpus",
+        "4",
+        "--memory-gb",
+        "8",
+        "--max",
+        "1",
+        "--max-usd-per-hour",
+        "1",
+    ]);
+    let before = task.graph();
+    let output = command(
+        task.repo.path(),
+        task.home.path(),
+        &[
+            "task", "run", "INF-123", "--rent", "quote", "--quote", "--open",
+        ],
+    )
+    .env("LF_BIN", &lf)
+    .stdin(std::process::Stdio::null())
+    .output()
+    .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        text.contains("would rent") && text.contains("runs nothing"),
+        "{text}"
+    );
+    assert!(!task.home.path().join("opened").exists());
+    assert!(support::recorded_graphs(task.home.path()).is_empty());
+    assert_eq!(task.graph(), before);
+    assert!(task
+        .registered
+        .store
+        .sqlite
+        .rentals(None)
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
+fn task_run_open_leaves_failed_launches_and_reads_alone() {
+    let task = GraphTask::new();
+    let lf = task.open_fixture();
+    let opened = task.home.path().join("opened");
+    for (args, success) in [
+        (
+            vec!["task", "run", "INF-123", "--open", "--from", "missing-step"],
+            false,
+        ),
+        // Task runs have no assembled prompt for --context to print.
+        (vec!["task", "run", "INF-123", "--open", "--context"], false),
+        (vec!["task", "run", "INF-123", "--open", "--explain"], true),
+        // A quote without --pool or --rent is refused before launch.
+        (vec!["task", "run", "INF-123", "--open", "--quote"], false),
+        // A plain waiting run leaves presentation alone too.
+        (vec!["task", "run", "INF-123", "--from", "review"], true),
+    ] {
+        let output = command(task.repo.path(), task.home.path(), &args)
+            .env("LF_BIN", &lf)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap();
+        assert_eq!(output.status.success(), success, "{args:?}: {output:?}");
+        assert!(!opened.exists(), "{args:?}: {output:?}");
+        assert!(support::recorded_graphs(task.home.path()).is_empty());
+    }
+}
+
+#[test]
+fn task_run_open_opens_the_selected_waiting_task() {
+    let task = GraphTask::new();
+    let lf = task.open_fixture();
+    let opened = task.home.path().join("opened");
+    // Omitted and root Task selectors retain the same primary, including --repo.
+    for args in [
+        vec!["task", "run", "--from", "review", "--open"],
+        vec!["task", "run", "--from", "review", "--open", "--json"],
+        vec!["task", "run", "--from", "review", "--open", "--", "INF-123"],
+        vec![
+            "--repo",
+            task.repo.path().to_str().unwrap(),
+            "task",
+            "run",
+            "--from",
+            "review",
+            "--open",
+        ],
+        vec![
+            "--task", "INF-123", "task", "run", "--from", "review", "--open",
+        ],
+    ] {
+        let waiting = command(task.repo.path(), task.home.path(), &args)
+            .env("LF_BIN", &lf)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap();
+        assert!(waiting.status.success(), "{args:?}: {waiting:?}");
+        if args.contains(&"--json") {
+            // Exactly the `task.run` value; the open receipt goes to stderr.
+            serde_json::from_slice::<serde_json::Value>(&waiting.stdout)
+                .unwrap_or_else(|error| panic!("{error}: {waiting:?}"));
+        }
+        assert_eq!(
+            fs::read_to_string(&opened).unwrap().trim(),
+            "opening-primary"
+        );
+        fs::remove_file(&opened).unwrap();
+    }
+    assert!(support::recorded_graphs(task.home.path()).is_empty());
+}
+
+#[test]
+fn task_run_returns_while_its_graph_keeps_running() {
+    let task = holding_task();
     task.repo.create_file(
         ".lf/graphs/held.yaml",
-        &format!(
-            "- cmd: session serve -- python3 {}\n- cmd: task sync --plan\n",
-            hold.display()
-        ),
+        &format!("{HOLD_STEP}- cmd: task sync --plan\n"),
     );
     task.repo.create_file(
         ".lf/graphs/held-flow.yaml",
@@ -890,7 +896,7 @@ fn task_run_returns_while_its_graph_keeps_running() {
         )
         .unwrap();
     assert!(steps >= 2, "the second step never ran: {steps}");
-    // The owner writes the arrival after its Graph exits.
+    // The carrier writes the arrival after its Graph exits.
     let deadline = Instant::now() + Duration::from_secs(30);
     while task.graph()["position"] != at("review") {
         assert!(Instant::now() < deadline, "{}", task.graph());
@@ -930,7 +936,7 @@ fn a_refused_bare_task_run_returns_its_refusal() {
 
 /// A headless Task requires an account record even when the provider is a
 /// stand-in. Its synthetic credential never leaves the network sandbox.
-fn connect_fixture_claude(home: &Path, store: &loopflow::store::Store) {
+pub(crate) fn connect_fixture_claude(home: &Path, store: &loopflow::store::Store) {
     connect_claude_account(home, store, "fixture");
 }
 
@@ -938,9 +944,10 @@ fn connect_fixture_claude(home: &Path, store: &loopflow::store::Store) {
 fn connect_claude_account(home: &Path, store: &loopflow::store::Store, name: &str) {
     let account_home = home.join("accounts/claude").join(name);
     fs::create_dir_all(&account_home).unwrap();
-    let credential =
-        r#"{"claudeAiOauth":{"accessToken":"fixture-only","expiresAt":4102444800000}}"#;
-    fs::write(account_home.join(".credentials.json"), credential).unwrap();
+    let credential = format!(
+        r#"{{"claudeAiOauth":{{"accessToken":"fixture-{name}","expiresAt":4102444800000}}}}"#
+    );
+    fs::write(account_home.join(".credentials.json"), &credential).unwrap();
     tokio::runtime::Runtime::new()
         .unwrap()
         .block_on(store.upsert_provider_account(&ProviderAccount {
@@ -971,17 +978,25 @@ fn connect_claude_account(home: &Path, store: &loopflow::store::Store, name: &st
         .unwrap();
 }
 
-/// A Claude stand-in that records each launch's arguments and account home.
+/// A Claude stand-in that records each launch's arguments, home and the login
+/// that home carries: the stand-in Keychain on macOS, else its file.
 const CLAUDE_RECORDER: &str = r#"#!/usr/bin/python3
+import glob
 import json
 import os
+import shutil
 import sys
 
 if '--version' in sys.argv:
     print('fixture')
     sys.exit(0)
+stores = glob.glob(os.path.join(os.path.dirname(shutil.which('security')), 'keychain', '*'))
+stores.append(os.path.join(os.environ['CLAUDE_CONFIG_DIR'], '.credentials.json'))
+login = next((text for text in (open(path).read() for path in stores if os.path.isfile(path)) if 'claudeAiOauth' in text), None)
 with open(os.path.join(os.environ['LF_HOME'], 'launches.jsonl'), 'a') as launches:
-    launches.write(json.dumps({'args': sys.argv[1:], 'claude_home': os.environ.get('CLAUDE_CONFIG_DIR')}) + '\n')
+    launches.write(json.dumps({'args': sys.argv[1:], 'claude_home': os.environ.get('CLAUDE_CONFIG_DIR'), 'claude_login': login}) + '\n')
+if '--input-format' not in sys.argv:
+    sys.exit(0)
 message = json.loads(sys.stdin.readline())
 message['session_id'] = 'agent-fixture'
 print(json.dumps(message), flush=True)
@@ -997,6 +1012,7 @@ fn a_task_run_takes_its_waves_agent_and_account_without_flags() {
     support::bind_task_planning(&repo);
     repo.create_branch("wave-setup");
     let home = tempfile::tempdir().unwrap();
+    let _server = MachineServer::start(loopflow_test_support::lf_binary(), home.path());
     let _env = support::EnvGuard::with_home(
         &[
             ("open", "#!/bin/sh\nexit 0\n"),
@@ -1016,13 +1032,16 @@ fn a_task_run_takes_its_waves_agent_and_account_without_flags() {
     for (path, content) in [
         (".lf/skills/probe.md", "Probe."),
         (".lf/graphs/proof.yaml", "- step: {name: probe}\n"),
-        (
-            ".lf/wave/task-pr-tests/config.yaml",
-            "linear:\n  initiative: initiative-task-pr-tests\nagent: claude:opus\n",
-        ),
     ] {
         repo.create_file(path, content);
     }
+    repo.create_file(
+        ".lf/wave/task-pr-tests/config.yaml",
+        &format!(
+            "id: {}\nlinear:\n  initiative: initiative-task-pr-tests\nagent: claude:opus\n",
+            registered.task.wave_id.as_ref().unwrap()
+        ),
+    );
     repo.stage_all();
     repo.commit("Set up the Wave once");
     for args in [
@@ -1035,38 +1054,62 @@ fn a_task_run_takes_its_waves_agent_and_account_without_flags() {
         ][..],
         &["-b", "task", "run", "INF-123", "proof"],
     ] {
-        // Isolated launches run in the routed account's own home; a shared one
-        // would sign in the native home, which is the Keychain on macOS.
-        let output = command(repo.path(), home.path(), args)
-            .env("LF_ACCOUNT_ISOLATION", "isolated")
-            .output()
-            .unwrap();
+        let output = command(repo.path(), home.path(), args).output().unwrap();
         assert!(
             output.status.success(),
             "{args:?}: {}",
             String::from_utf8_lossy(&output.stderr)
         );
     }
+    wait_for("the Task conversation and Graph launches", || {
+        fs::read_to_string(home.path().join("launches.jsonl"))
+            .is_ok_and(|launches| launches.lines().count() == 2)
+    });
     let launches = fs::read_to_string(home.path().join("launches.jsonl")).unwrap();
-    let launch: serde_json::Value = serde_json::from_str(launches.lines().next().unwrap()).unwrap();
-    let args = launch["args"].as_array().unwrap();
-    assert!(
-        args.windows(2).any(|pair| pair == ["--model", "opus"]),
-        "{launch}"
-    );
+    let launches: Vec<serde_json::Value> = launches
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .collect();
     assert_eq!(
-        Path::new(launch["claude_home"].as_str().unwrap())
-            .canonicalize()
-            .unwrap(),
-        home.path()
-            .join("accounts/claude/work")
-            .canonicalize()
-            .unwrap()
+        launches.len(),
+        2,
+        "the Task conversation and Graph both launch"
     );
+    // A Task run's steps are managed, unlike a bare `lf` in the checkout, so
+    // each gets the turn hooks steers arrive by.
+    for launch in launches {
+        let args = launch["args"].as_array().unwrap();
+        let settings = args
+            .iter()
+            .position(|arg| arg == "--settings")
+            .map(|flag| fs::read_to_string(args[flag + 1].as_str().unwrap()).unwrap())
+            .unwrap_or_else(|| panic!("{launch}"));
+        assert!(settings.contains("\"Stop\""), "{settings}");
+        assert!(
+            args.windows(2).any(|pair| pair == ["--model", "opus"]),
+            "{launch}"
+        );
+        // The shared home ran signed in as the Wave's account.
+        assert_eq!(
+            launch["claude_home"].as_str().map(Path::new),
+            std::env::var_os("CLAUDE_CONFIG_DIR")
+                .as_deref()
+                .map(Path::new)
+        );
+        assert!(
+            launch["claude_login"]
+                .as_str()
+                .unwrap()
+                .contains("fixture-work"),
+            "{launch}"
+        );
+    }
 }
 
 /// A registered Task whose repository defines the Graphs below.
 struct GraphTask {
+    /// Agent steps start only once the Task's Machine server answers.
+    _server: MachineServer,
     repo: TestRepo,
     home: tempfile::TempDir,
     registered: support::RegisteredTask,
@@ -1088,6 +1131,51 @@ impl Ran {
 }
 
 impl GraphTask {
+    /// A retained primary and a stand-in for terminal attachment, not Graph execution.
+    fn open_fixture(&self) -> PathBuf {
+        let db = rusqlite::Connection::open(self.home.path().join("loopflow.db")).unwrap();
+        db.execute(
+            "INSERT INTO agent_sessions(
+                id,title,title_source,created_at,input_published,interactive,task_id,wave_id,cwd,provider
+             ) VALUES('opening-primary','Task conversation','generated',unixepoch(),1,1,?1,?2,?3,'claude')",
+            rusqlite::params![
+                self.registered.task.id.as_str(),
+                self.registered.task.wave_id.as_ref().unwrap().as_str(),
+                self.repo.path().to_str().unwrap(),
+            ],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT OR REPLACE INTO task_primary_sessions(task_id,session_id) VALUES(?1,'opening-primary')",
+            [self.registered.task.id.as_str()],
+        )
+        .unwrap();
+        let lf = self.home.path().join("lf-open-fixture");
+        fs::write(
+            &lf,
+            format!(
+                r#"#!/usr/bin/env python3
+import json, os, sqlite3, sys
+from pathlib import Path
+if sys.argv[1:4] == ['session', 'resume', '--start-if-free']:
+    home = Path(os.environ['LF_HOME'])
+    # Capture completion at attachment, not after the caller exits.
+    with sqlite3.connect(home / 'loopflow.db') as db:
+        outcomes = [row[0] for row in db.execute('SELECT p.outcome FROM processes p JOIN graph_processes g ON g.lf_process_id=p.id')]
+    (home / 'opened-graphs.json').write_text(json.dumps(outcomes))
+    with (home / 'opened').open('a') as opened:
+        opened.write(sys.argv[4] + '\n')
+    sys.exit(9 if (home / 'open-fails').exists() else 0)
+os.execv({binary}, [{binary}, *sys.argv[1:]])
+"#,
+                binary = serde_json::to_string(&loopflow_test_support::lf_binary()).unwrap(),
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&lf, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        lf
+    }
+
     /// The fixture, its Wave selecting `feature`.
     fn new() -> Self {
         let task = Self::without_wave_graph(&[]);
@@ -1122,6 +1210,16 @@ impl GraphTask {
                 ".lf/graphs/gated.yaml",
                 "- graph: proof\n- interactive: {name: demo, id: review}\n- graph: gate\n- interactive: {name: demo, id: accepted}\n",
             ),
+            // A step that is done, then one that a limit can hold.
+            (
+                ".lf/graphs/held.yaml",
+                "- cmd: task sync --plan\n- cmd: graph show late\n",
+            ),
+            // The same, with a stop for a person: running it approves no Auto-Ship.
+            (
+                ".lf/graphs/held-review.yaml",
+                "- cmd: task sync --plan\n- cmd: graph show late\n- interactive: {name: demo, id: review}\n",
+            ),
             // The Wave's default, `feature`, as this repository defines it.
             (
                 ".lf/graphs/feature.yaml",
@@ -1153,6 +1251,7 @@ impl GraphTask {
             &repo.head_sha(),
         );
         let fixture = Self {
+            _server: MachineServer::start(loopflow_test_support::lf_binary(), home.path()),
             repo,
             home,
             registered,
@@ -1433,49 +1532,14 @@ fn checkout_leaves_graph_selection_to_the_first_run() {
 }
 
 #[test]
-fn a_task_takes_up_its_waves_graph_else_the_repositorys_else_code() {
-    let explain = |task: &GraphTask, args: &[&str]| -> serde_json::Value {
-        let preview = task.run(args);
-        assert!(
-            preview.status.success(),
-            "{}",
-            String::from_utf8_lossy(&preview.stderr)
-        );
-        serde_json::from_slice::<serde_json::Value>(&preview.stdout).unwrap()["action"].clone()
-    };
+fn a_task_takes_up_its_waves_graph_and_keeps_the_one_it_named() {
     // Nothing named, no graph yet: the Wave default, stopping at its review.
     let task = GraphTask::new();
-    let action = explain(&task, &["task", "run", "--explain", "--json"]);
-    assert_eq!(
-        (&action["kind"], &action["graph"], &action["take_up"]),
-        (&"run".into(), &"feature".into(), &true.into())
-    );
-    assert_eq!(action["stops_at"], "review");
-    // `-b` runs straight past it to the end.
-    let action = explain(&task, &["-b", "task", "run", "--explain", "--json"]);
-    assert!(action["stops_at"].is_null(), "{action}");
     task.task_run_ok(&["task", "run"]);
     let graph = task.graph();
     assert_eq!(graph["name"], "feature");
     assert_eq!(graph["position"], at("review"));
     assert_eq!(graph["interactive_steps"][0]["skill"], "demo");
-    drop(task);
-
-    // No Wave default: the repository's `graph:`, else the builtin `code`.
-    let task = GraphTask::without_wave_graph(&[]);
-    let action = explain(&task, &["task", "run", "--explain", "--json"]);
-    assert_eq!(
-        (&action["graph"], &action["take_up"]),
-        (&"code".into(), &true.into())
-    );
-    let config = task.repo.path().join(".lf/config.yaml");
-    fs::write(
-        &config,
-        format!("{}graph: findings\n", fs::read_to_string(&config).unwrap()),
-    )
-    .unwrap();
-    let action = explain(&task, &["task", "run", "--explain", "--json"]);
-    assert_eq!(action["graph"], "findings");
     drop(task);
 
     // A Task that named its own keeps it when later runs name nothing.
@@ -1488,29 +1552,96 @@ fn a_task_takes_up_its_waves_graph_else_the_repositorys_else_code() {
 }
 
 #[test]
-fn a_run_explanation_includes_interactive_steps_inside_its_first_xor() {
-    let task = GraphTask::new();
-    fs::write(
-        task.repo.path().join(".lf/graphs/conditional.yaml"),
-        "- xor:\n    paths:\n      review:\n        description: Review it\n        steps:\n          - interactive: demo\n      skip:\n        description: Nothing to review\n",
-    )
-    .unwrap();
+fn task_create_run_starts_the_graph_and_admits_the_request_as_first_turn() {
+    let task = GraphTask::without_wave_graph(&[]);
+    task.ok(&["set", "--global", "default_agent", "claude"]);
+    // New Tasks branch from the remote's main, which carries the fixture Graphs.
+    assert!(Command::new("git")
+        .args(["push", "origin", "main"])
+        .current_dir(task.repo.path())
+        .output()
+        .unwrap()
+        .status
+        .success());
+    let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
+    let tasks = || -> i64 {
+        db.query_row("SELECT count(*) FROM tasks", [], |row| row.get(0))
+            .unwrap()
+    };
+    // An unknown graph is refused before any Task exists.
+    let before = tasks();
+    let refused = task.run(&["task", "create", "never filed", "--run", "--graph", "nope"]);
+    assert!(!refused.status.success());
+    assert_eq!(tasks(), before);
+
+    let request = "fix the flaky retry test\n\nIt fails one run in ten.";
     let output = task.run(&[
-        "task",
-        "run",
-        "INF-123",
-        "conditional",
-        "--explain",
-        "--json",
+        "task", "create", request, "--run", "--graph", "feature", "--json",
+    ]);
+    let receipt: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .unwrap_or_else(|_| panic!("{}", String::from_utf8_lossy(&output.stderr)));
+    let ran = task.ran(output);
+    assert!(ran.success(), "{}", ran.text);
+    let issue = receipt["task"]["identifier"].as_str().unwrap();
+    assert_eq!(receipt["task"]["title"], "fix the flaky retry test");
+    assert_eq!(receipt["task"]["description"], request);
+    assert_eq!(receipt["graph"], "feature");
+    // Creation returns when the Graph registers, before its first step finishes.
+    wait_for("the created Task to reach review", || {
+        let status = task.run(&["desktop", "task", issue, "--json"]);
+        let status: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
+        status["execution"]["work"]["graph"]["position"] == at("review")
+    });
+    let status = task.run(&["desktop", "task", issue, "--json"]);
+    let status: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
+    let graph = &status["execution"]["work"]["graph"];
+    assert_eq!(graph["name"], "feature");
+    assert_eq!(graph["position"], at("review"));
+    // The admitted primary conversation opens with the request, word for word.
+    let session = receipt["session_id"].as_str().unwrap();
+    let first_turn: String = db
+        .query_row(
+            "SELECT request FROM agent_sessions WHERE id=?1",
+            [session],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(first_turn, request);
+    let primary: String = db
+        .query_row(
+            "SELECT session_id FROM task_primary_sessions WHERE task_id=?1",
+            [receipt["task"]["id"].as_str().unwrap()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(primary, session);
+
+    // `-b` runs to the end headless and returns no conversation to open.
+    let output = task.run(&[
+        "-b", "task", "create", "headless", "--run", "--graph", "proof", "--json",
     ]);
     assert!(
         output.status.success(),
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let preview: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(preview["action"]["stops_at"], "demo");
-    assert!(support::recorded_graphs(task.home.path()).is_empty());
+    let receipt: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(receipt["session_id"].is_null(), "{receipt}");
+    assert_eq!(receipt["graph"], "proof");
+
+    // A run that fails still reports the filed Task, so nothing files it twice.
+    let before = tasks();
+    let output = task.run(&[
+        "-b", "task", "create", "fails", "--run", "--graph", "gate", "--json",
+    ]);
+    assert!(!output.status.success());
+    let receipt: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .unwrap_or_else(|_| panic!("{}", String::from_utf8_lossy(&output.stderr)));
+    assert_eq!(receipt["task"]["title"], "fails");
+    assert_eq!(receipt["graph"], "gate", "{receipt}");
+    assert_eq!(receipt["milestone"], "started", "{receipt}");
+    assert!(receipt["session_id"].is_null(), "{receipt}");
+    assert_eq!(tasks(), before + 1);
 }
 
 #[test]
@@ -1571,6 +1702,13 @@ fn a_run_continues_after_the_step_it_stopped_at_and_from_goes_back_or_skips() {
     assert!(waits.text.contains("waits at review"), "{}", waits.text);
     assert_eq!(task.graph()["position"], at("review"));
     assert_eq!(support::recorded_graphs(task.home.path()).len(), 2);
+    // With `--json` it prints what `task.run` returns to a client.
+    let waits = task.run(&["task", "run", "INF-123", "--from", "review", "--json"]);
+    assert!(waits.status.success(), "{}", refusal(waits.clone()));
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&waits.stdout).unwrap(),
+        serde_json::json!({"state": "waiting", "issue": "INF-123", "step": "review"})
+    );
     // From a step that runs, the run starts there: proof again, to review.
     task.task_run_ok(&["task", "run", "INF-123", "--from", "proof"]);
     assert_eq!(task.graph()["position"], at("review"));
@@ -1620,7 +1758,353 @@ fn attempts(home: &Path, task_run: &str) -> Vec<String> {
 }
 
 #[test]
-fn a_stopped_run_is_started_again_from_where_it_began() {
+fn a_run_that_ended_waiting_on_a_limit_starts_again_at_that_step_without_replaying_the_done_ones() {
+    let task = GraphTask::new();
+    let failed = task.task_run(&["task", "run", "INF-123", "held"]);
+    assert!(!failed.success(), "{}", failed.text);
+    let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
+    let steps_of_latest_graph = || -> Vec<String> {
+        db.prepare(
+            "SELECT p.command FROM processes p WHERE p.parent_lf_process_id=
+                (SELECT lf_process_id FROM graph_processes ORDER BY rowid DESC LIMIT 1)
+             ORDER BY p.rowid",
+        )
+        .unwrap()
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap()
+    };
+    // The last attempt started at the failed step.
+    let steps = steps_of_latest_graph();
+    assert_eq!(steps.len(), 1, "{steps:?}");
+    // The step's Process ended waiting on a limit; the wait is over.
+    let waiting: String = db
+        .query_row(
+            "SELECT p.id FROM processes p WHERE p.parent_lf_process_id=
+                (SELECT lf_process_id FROM graph_processes ORDER BY rowid DESC LIMIT 1)
+             ORDER BY p.rowid DESC LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    db.execute(
+        "INSERT INTO agent_limit_recoveries(lf_process_id,provider,reason,retry_at,updated_at)
+         VALUES(?1,'claude','rejected: five_hour',1,1)",
+        [&waiting],
+    )
+    .unwrap();
+    // Reading the Task starts the restart by itself. Record that one in place
+    // of running it, so the run below is the only Graph that starts.
+    let bin = tempfile::tempdir().unwrap();
+    let (lf, _) = restart_recorder(bin.path());
+    let read = command(
+        task.repo.path(),
+        task.home.path(),
+        &["task", "status", "INF-123"],
+    )
+    .env("LF_BIN", &lf)
+    .output()
+    .unwrap();
+    assert!(
+        String::from_utf8_lossy(&read.stdout).contains("ended while waiting for claude capacity")
+    );
+
+    let again = task.task_run(&["task", "run", "INF-123"]);
+    assert!(!again.success(), "{}", again.text);
+    let steps = steps_of_latest_graph();
+    assert_eq!(steps.len(), 1, "{steps:?}");
+    assert!(steps[0].contains("late"), "{steps:?}");
+}
+
+/// An `lf` that records the restart a read of the Task would start, with the
+/// agent settings it saw, in place of running it. Returns it and its record.
+fn restart_recorder(bin: &Path) -> (PathBuf, PathBuf) {
+    let restarts = bin.join("restarts");
+    let lf = bin.join("lf");
+    fs::write(
+        &lf,
+        format!(
+            "#!/bin/sh\ncase \"$*\" in *'task run INF-123'|*'--task INF-123 ship')\n  echo \"$*|$LF_AGENT_OVERRIDE|$LF_SETTINGS\" >> '{}'; exit 0;;\nesac\nexec '{}' \"$@\"\n",
+            restarts.display(),
+            loopflow_test_support::lf_binary()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&lf, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    (lf, restarts)
+}
+
+/// What a read of the Task starts for a run of `graph` that ended waiting on a
+/// limit with `recorded` as its explicit agent, when that reader exported its
+/// own choice: the restart's arguments and the agent settings it saw.
+fn restart_of_a_finished_wait(graph: &str, recorded: Option<&str>) -> String {
+    let task = GraphTask::new();
+    let failed = task.task_run(&["task", "run", "INF-123", graph]);
+    assert!(!failed.success(), "{}", failed.text);
+    let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
+    let waiting: String = db
+        .query_row(
+            "SELECT p.id FROM processes p WHERE p.parent_lf_process_id=
+                (SELECT lf_process_id FROM graph_processes ORDER BY rowid DESC LIMIT 1)
+             ORDER BY p.rowid DESC LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    db.execute(
+        "INSERT INTO agent_limit_recoveries(lf_process_id,provider,reason,retry_at,agent,updated_at)
+         VALUES(?1,'claude','rejected: five_hour',1,?2,1)",
+        rusqlite::params![waiting, recorded],
+    )
+    .unwrap();
+    // Convert the ordinary failure into a capacity wait. A real wait retains
+    // the end-to-end Graph's approval; the repeated failure above withdrew it.
+    if graph == "held" {
+        db.execute("UPDATE tasks SET shipped_at=1", []).unwrap();
+    }
+    // A failed ship waits before restarting; that wait has passed too.
+    db.execute(
+        "UPDATE processes SET completed_at=1 WHERE outcome='failed'",
+        [],
+    )
+    .unwrap();
+
+    let bin = tempfile::tempdir().unwrap();
+    let (lf, restarts) = restart_recorder(bin.path());
+    let read = command(
+        task.repo.path(),
+        task.home.path(),
+        &["task", "status", "INF-123"],
+    )
+    .env("LF_BIN", &lf)
+    .env("LF_AGENT_OVERRIDE", "codex:reader")
+    .env("LF_SETTINGS", "agent: codex:reader")
+    .output()
+    .unwrap();
+    assert!(
+        read.status.success(),
+        "{}",
+        String::from_utf8_lossy(&read.stderr)
+    );
+    wait_for("the restart", || restarts.exists());
+    fs::read_to_string(restarts).unwrap().trim().to_string()
+}
+
+#[test]
+fn a_restarted_wait_keeps_its_explicit_agent() {
+    assert_eq!(
+        restart_of_a_finished_wait("held-review", Some("claude:opus")),
+        "--agent claude:opus task run INF-123||{}"
+    );
+}
+
+#[test]
+fn a_restarted_wait_with_no_explicit_agent_ignores_the_readers() {
+    assert_eq!(
+        restart_of_a_finished_wait("held-review", None),
+        "task run INF-123||{}"
+    );
+}
+
+/// With no stop for a person the run ships, so ship's own restart resumes it.
+#[test]
+fn a_shipping_tasks_restarted_wait_keeps_its_explicit_agent() {
+    assert_eq!(
+        restart_of_a_finished_wait("held", Some("claude:opus")),
+        "--agent claude:opus --task INF-123 ship||{}"
+    );
+}
+
+/// November 12: a step refused by a usage limit, with no agent to move to, was
+/// relaunched three times into the same refusal.
+#[test]
+fn a_run_stopped_by_a_usage_limit_is_not_started_again() {
+    let task = GraphTask::new();
+    // The failing step ends having recorded that a limit left it nowhere to go.
+    let reason = format!(
+        "codex_error: You've hit your usage limit{}there is no `agents` list",
+        crate::ops::task_execution::STOPPED
+    );
+    let lf = task.home.path().join("lf-limit-fixture");
+    fs::write(
+        &lf,
+        format!(
+            r#"#!/usr/bin/env python3
+import os, sqlite3, subprocess, sys
+binary = {binary}
+if sys.argv[-3:] != ['graph', 'show', 'late']:
+    os.execv(binary, [binary, *sys.argv[1:]])
+code = subprocess.call([binary, *sys.argv[1:]])
+db = sqlite3.connect(os.path.join(os.environ['LF_HOME'], 'loopflow.db'), timeout=30)
+with db:
+    db.execute(
+        "INSERT INTO agent_limit_recoveries(lf_process_id,provider,reason,updated_at) "
+        "SELECT p.id,'codex',?,1 FROM processes p WHERE p.parent_lf_process_id="
+        "(SELECT lf_process_id FROM graph_processes ORDER BY rowid DESC LIMIT 1) "
+        "ORDER BY p.rowid DESC LIMIT 1",
+        [{reason}],
+    )
+sys.exit(code)
+"#,
+            binary = serde_json::to_string(&loopflow_test_support::lf_binary()).unwrap(),
+            reason = serde_json::to_string(&reason).unwrap(),
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&lf, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    let output = command(
+        task.repo.path(),
+        task.home.path(),
+        &["-b", "task", "run", "INF-123", "held-review"],
+    )
+    .env("LF_BIN", &lf)
+    .output()
+    .unwrap();
+    let ran = task.ran(output);
+    assert!(!ran.success(), "{}", ran.text);
+    assert!(
+        ran.text.contains(
+            "stopped after a provider refusal at graph show late: codex_error: You've hit your usage limit. there is no `agents` list; `lf task run INF-123` starts the run again at it"
+        ),
+        "{}",
+        ran.text
+    );
+    assert!(!ran.text.contains("starting it again"), "{}", ran.text);
+    let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
+    assert_eq!(support::recorded_graphs(task.home.path()).len(), 1);
+    // `-b` approved Auto-Ship; a ship restart would only meet the same refusal.
+    let shipped_at: Option<i64> = db
+        .query_row("SELECT shipped_at FROM tasks", [], |row| row.get(0))
+        .unwrap();
+    assert!(shipped_at.is_none());
+    // Cross ship's retry deadline so reads would restart an approval left behind.
+    db.execute(
+        "UPDATE processes SET completed_at=1 WHERE outcome='failed'",
+        [],
+    )
+    .unwrap();
+    for _ in 0..2 {
+        let status = task.text_status();
+        assert!(!status.contains("Ship failed"), "{status}");
+        assert!(!status.contains("Auto-Ship approved"), "{status}");
+        assert!(
+            status.contains("stopped after a provider refusal"),
+            "{status}"
+        );
+        assert!(status.contains("there is no `agents` list"), "{status}");
+        assert!(
+            status.contains("`lf task run INF-123` starts the run again at it"),
+            "{status}"
+        );
+    }
+    assert_eq!(support::recorded_graphs(task.home.path()).len(), 1);
+
+    // Once capacity is available, a manual run picks up the refused step.
+    fs::write(
+        task.repo.path().join(".lf/graphs/late.yaml"),
+        "- cmd: task sync --plan\n",
+    )
+    .unwrap();
+    task.task_run_ok(&["task", "run", "INF-123"]);
+    let graphs = support::recorded_graphs(task.home.path());
+    assert_eq!(graphs.len(), 2);
+    assert_eq!(graphs[0].1.len(), 2);
+    assert_eq!(graphs[1].1.len(), 1);
+    assert_eq!(
+        graphs[1].1[0]["argv"],
+        serde_json::json!(["graph", "show", "late"])
+    );
+    assert_eq!(task.graph()["position"], at("review"));
+}
+
+#[test]
+fn a_failed_run_starts_again_at_the_step_that_failed() {
+    let task = GraphTask::new();
+    let failed = task.task_run(&["task", "run", "INF-123", "held-review"]);
+    assert!(!failed.success(), "{}", failed.text);
+    assert!(
+        failed.text.contains(
+            "The run of held-review from start failed (attempt 1 of 3); starting it again at graph show late."
+        ),
+        "{}",
+        failed.text
+    );
+    // The first attempt finished `task sync`; the retries start at the failed step.
+    let graphs = support::recorded_graphs(task.home.path());
+    assert_eq!(graphs.len(), 3);
+    assert_eq!(graphs[0].1.len(), 2);
+    for retry in &graphs[1..] {
+        assert_eq!(retry.1.len(), 1);
+        assert_eq!(
+            retry.1[0]["argv"],
+            serde_json::json!(["graph", "show", "late"])
+        );
+    }
+    let stopped = task.graph();
+    assert_eq!(stopped["position"]["step"], "start");
+    assert_eq!(stopped["position"]["at"], "graph show late");
+    assert_eq!(stopped["position"]["running"], false);
+    let status = task.text_status();
+    assert!(
+        status.contains("Graph held-review: stopped at graph show late"),
+        "{status}"
+    );
+}
+
+#[test]
+fn from_starts_a_stopped_run_where_it_names() {
+    let task = GraphTask::new();
+    let failed = task.task_run(&["task", "run", "INF-123", "held-review"]);
+    assert!(!failed.success(), "{}", failed.text);
+    fs::write(
+        task.repo.path().join(".lf/graphs/late.yaml"),
+        "- cmd: task sync --plan\n",
+    )
+    .unwrap();
+    task.task_run_ok(&["task", "run", "INF-123", "--from", "start"]);
+    let graphs = support::recorded_graphs(task.home.path());
+    let steps = &graphs.last().unwrap().1;
+    assert_eq!(steps.len(), 2);
+    assert_eq!(steps[0]["argv"], serde_json::json!(["sync", "--plan"]));
+    assert_eq!(task.graph()["position"], at("review"));
+}
+
+#[test]
+fn a_run_that_failed_after_moving_agents_starts_again_at_the_step_that_failed() {
+    let task = GraphTask::new();
+    let failed = task.task_run(&["task", "run", "INF-123", "held-review"]);
+    assert!(!failed.success(), "{}", failed.text);
+    let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
+    db.execute(
+        "INSERT INTO agent_limit_recoveries(lf_process_id,provider,reason,updated_at)
+         SELECT p.id,'codex',?1,1 FROM processes p WHERE p.parent_lf_process_id=
+             (SELECT lf_process_id FROM graph_processes ORDER BY rowid DESC LIMIT 1)
+         ORDER BY p.rowid DESC LIMIT 1",
+        [format!(
+            "codex_error: You've hit your usage limit{}claude",
+            crate::ops::task_execution::MOVED_TO
+        )],
+    )
+    .unwrap();
+    fs::write(
+        task.repo.path().join(".lf/graphs/late.yaml"),
+        "- cmd: task sync --plan\n",
+    )
+    .unwrap();
+    task.task_run_ok(&["task", "run", "INF-123"]);
+    let graphs = support::recorded_graphs(task.home.path());
+    let steps = &graphs.last().unwrap().1;
+    assert_eq!(steps.len(), 1);
+    assert_eq!(
+        steps[0]["argv"],
+        serde_json::json!(["graph", "show", "late"])
+    );
+    assert_eq!(task.graph()["position"], at("review"));
+}
+
+#[test]
+fn a_stopped_run_is_started_again_at_the_step_that_failed() {
     let task = GraphTask::new();
     task.task_run_ok(&["task", "run", "INF-123", "gated"]);
     // Every attempt fails: the Task run gives up and the run holds the Task.
@@ -1630,6 +2114,7 @@ fn a_stopped_run_is_started_again_from_where_it_began() {
     let stopped = task.graph();
     assert_eq!(stopped["position"]["kind"], "run");
     assert_eq!(stopped["position"]["step"], "review");
+    assert_eq!(stopped["position"]["at"], "graph show late");
     assert_eq!(stopped["position"]["running"], false);
     let carrier = stopped["position"]["lf_process_id"]
         .as_str()
@@ -1641,7 +2126,7 @@ fn a_stopped_run_is_started_again_from_where_it_began() {
     );
     let status = task.text_status();
     assert!(
-        status.contains("Graph gated: stopped from review"),
+        status.contains("Graph gated: stopped at graph show late"),
         "{status}"
     );
 
@@ -1667,7 +2152,7 @@ fn a_stopped_run_is_started_again_from_where_it_began() {
         .unwrap(),
     );
     assert!(ran.success(), "{}", ran.text);
-    // The bare run started the stopped run again from the gate, not after review.
+    // The bare run started the stopped run again at the gate, not after review.
     assert_eq!(task.graph()["position"], at("accepted"));
     // The carrier of the latest Graph process is the run that just ended.
     let task_run = rusqlite::Connection::open(task.home.path().join("loopflow.db"))
@@ -1772,10 +2257,22 @@ fn interrupting_an_idle_task_records_nothing_and_says_so() {
 #[test]
 fn interrupting_a_task_with_only_an_open_process_records_it_without_claiming_a_stop() {
     let task = GraphTask::new();
+    // A commit held in its pre-commit hook: an open Process that changes Work
+    // in the Task's checkout, with no Graph running.
+    let hooks = task.repo.path().join(".git/hooks");
+    fs::create_dir_all(&hooks).unwrap();
+    let hook = hooks.join("pre-commit");
+    fs::write(
+        &hook,
+        "#!/bin/sh\nwhile [ ! -e \"$LF_HOME/release\" ]; do sleep 0.05; done\n",
+    )
+    .unwrap();
+    fs::set_permissions(&hook, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    task.repo.create_file("held.txt", "held\n");
     let mut waiter = command(
         task.repo.path(),
         task.home.path(),
-        &["task", "wait", "INF-123", "--timeout", "60s"],
+        &["commit", "-m", "Held in its hook"],
     )
     .stdin(std::process::Stdio::null())
     .stdout(std::process::Stdio::null())
@@ -1788,7 +2285,7 @@ fn interrupting_a_task_with_only_an_open_process_records_it_without_claiming_a_s
             .ok()
             .and_then(|conn| {
                 conn.query_row(
-                    "SELECT COUNT(*) FROM processes WHERE completed_at IS NULL AND command LIKE '%\"wait\"%'",
+                    "SELECT COUNT(*) FROM processes WHERE completed_at IS NULL AND command LIKE '%\"commit\"%'",
                     [],
                     |row| row.get(0),
                 )
@@ -1802,7 +2299,7 @@ fn interrupting_a_task_with_only_an_open_process_records_it_without_claiming_a_s
     }
     let before = interrupt_rows(task.home.path());
     let output = task.run(&["task", "interrupt", "INF-123"]);
-    waiter.kill().unwrap();
+    fs::write(task.home.path().join("release"), "").unwrap();
     waiter.wait().unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
@@ -2099,7 +2596,7 @@ fn unmerged_completion_in_graph_is_retryable_without_replaying_it() {
 
 #[test]
 fn provider_completion_preserves_a_live_run_and_its_graph_process_records_the_arrival() {
-    let task = GraphTask::new();
+    let task = holding_task();
     let worktree = tokio::runtime::Runtime::new()
         .unwrap()
         .block_on(task.registered.store.get_task(&task.registered.task.id))
@@ -2113,13 +2610,10 @@ fn provider_completion_preserves_a_live_run_and_its_graph_process_records_the_ar
         fs::write(path, content).unwrap();
     };
     write(".lf/graphs/live-graph.yaml", "- graph: live\n");
-    let hold = hold_script(task.home.path(), true);
+    write(HOLD_SKILL.0, HOLD_SKILL.1);
     write(
         ".lf/graphs/live.yaml",
-        &format!(
-            "- cmd: session serve -- python3 {}\n- cmd: task complete INF-123\n",
-            hold.display()
-        ),
+        &format!("{HOLD_STEP}- cmd: task complete INF-123\n"),
     );
     // The run names the checkout's graph file; no Wave selection is needed.
     let log_path = task.home.path().join("live.log");
@@ -2138,7 +2632,9 @@ fn provider_completion_preserves_a_live_run_and_its_graph_process_records_the_ar
         caller: task.home.path().join("unused"),
     };
     let deadline = Instant::now() + Duration::from_secs(30);
-    while !task.home.path().join("ready").exists() {
+    // The native Task conversation also writes `ready`. Wait for the Graph's
+    // headless provider before moving the Task out of its launch Wave.
+    while !task.home.path().join("stream-ready").exists() {
         assert!(
             held.child.try_wait().unwrap().is_none() && Instant::now() < deadline,
             "{}",
@@ -2151,7 +2647,7 @@ fn provider_completion_preserves_a_live_run_and_its_graph_process_records_the_ar
     task.publish(false);
     let placement = task.status();
     assert!(placement["pr"]["id"].is_string());
-    task.ok(&["wave", "ensure", "other", "--json"]);
+    task.ok(&["wave", "add", "other", "--json"]);
     task.ok(&["task", "move", "INF-123", "--wave", "other"]);
     let moved = task.status();
     assert_eq!(moved["wave"], "other");
@@ -2242,14 +2738,11 @@ for line in sys.stdin:
 fn shipping_task() -> GraphTask {
     let task = GraphTask::with_tools(&[("claude", STAND_IN_CLAUDE)]);
     connect_fixture_claude(task.home.path(), &task.registered.store);
-    tokio::runtime::Runtime::new()
-        .unwrap()
-        .block_on(
-            task.registered
-                .store
-                .set_task_agent(&task.registered.task.id, "claude"),
-        )
-        .unwrap();
+    crate::config::files::update(&task.home.path().join("config.yaml"), |value| {
+        value["agent"] = "claude".into();
+        Ok(())
+    })
+    .unwrap();
     task
 }
 
@@ -2354,15 +2847,8 @@ fn task_ship_stands_in_at_the_step_the_task_waits_at() {
 }
 
 #[test]
-fn task_ship_holds_while_paused_and_defers_to_a_live_ship() {
+fn task_ship_defers_to_a_live_ship() {
     let task = shipping_task();
-    task.ok(&["task", "defer", "INF-123"]);
-    let deferred = task.run(&["-b", "--task", "INF-123", "ship"]);
-    assert!(deferred.status.success());
-    assert!(String::from_utf8_lossy(&deferred.stdout).contains("INF-123 is deferred"));
-    assert!(task.graph().is_null());
-    task.ok(&["task", "resume", "INF-123"]);
-
     // The first ship holds at its stand-in; a second one finds it live.
     fs::write(task.home.path().join("hold"), "").unwrap();
     let mut first = command(
@@ -2382,6 +2868,11 @@ fn task_ship_holds_while_paused_and_defers_to_a_live_ship() {
         "{}",
         String::from_utf8_lossy(&second.stdout)
     );
+    // The spelling `task.ship` runs, here and over SSH: its typed result.
+    let answered = task.run(&["--task", "INF-123", "ship", "--json"]);
+    assert!(answered.status.success(), "{answered:?}");
+    let answer: serde_json::Value = serde_json::from_slice(&answered.stdout).unwrap();
+    assert_eq!(answer["state"], "already_shipping");
     fs::remove_file(task.home.path().join("hold")).unwrap();
     assert!(first.wait().unwrap().success());
     assert_eq!(task.graph()["position"], at("end"));
@@ -2410,6 +2901,71 @@ fn task_ship_stop_withdraws_the_approval_and_ends_its_ship() {
     assert!(!first.wait().unwrap().success());
     fs::remove_file(task.home.path().join("hold")).unwrap();
     // Approval withdrawn, its run stopped where it stood.
+    assert_ne!(task.state(), "shipping");
+    let again = task.run(&["--task", "INF-123", "ship", "--stop"]);
+    let again = String::from_utf8_lossy(&again.stdout);
+    assert!(again.contains("INF-123 is not shipping"), "{again}");
+}
+
+#[test]
+fn task_ship_stop_sticks_through_a_headless_relaunch() {
+    let task = shipping_task();
+    task.repo.create_file(
+        ".lf/graphs/landing.yaml",
+        "- graph: proof\n- cmd: pr land\n",
+    );
+    // A person stops shipping; the stop stands though nothing was shipping.
+    let stopped = task.run(&["--task", "INF-123", "ship", "--stop"]);
+    assert!(stopped.status.success());
+    // A run with nothing interactive ahead would approve Auto-Ship and merge;
+    // under the stop it waits at the landing step instead.
+    let ran = task.task_run(&["task", "run", "INF-123", "landing"]);
+    assert!(ran.success(), "{}", ran.text);
+    assert!(
+        ran.text
+            .contains("Waiting at pr land: not approved to merge"),
+        "{}",
+        ran.text
+    );
+    assert_eq!(task.graph()["position"], at("pr land"));
+    assert_ne!(task.state(), "shipping");
+    // Relaunched headless from its first step, it still never ships.
+    let again = task.run(&["-b", "task", "run", "INF-123", "--from", "proof"]);
+    assert!(
+        again.status.success(),
+        "{}",
+        String::from_utf8_lossy(&again.stderr)
+    );
+    assert_eq!(task.graph()["position"], at("pr land"));
+    assert_ne!(task.state(), "shipping");
+    assert!(handoffs(&task).is_empty());
+    let status = task.status();
+    assert!(status["ship_approval"].is_null());
+    assert_eq!(status["ship_stop"]["by"]["kind"], "person");
+    assert_eq!(status["started_by"]["kind"], "person");
+    // Standing at the landing step, a plain relaunch waits there again.
+    let waiting = task.task_run(&["task", "run", "INF-123"]);
+    assert!(waiting.success(), "{}", waiting.text);
+    assert_eq!(task.graph()["position"], at("pr land"));
+    assert!(
+        task.text_status().contains("Not shipping: "),
+        "{}",
+        task.text_status()
+    );
+}
+
+#[test]
+fn task_ship_stops_shipping_when_its_run_fails_the_same_way_every_attempt() {
+    let task = shipping_task();
+    // `gate` refuses identically until the repository defines `late`.
+    let output = task.run(&["-b", "--task", "INF-123", "ship", "--graph", "gate"]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success());
+    assert!(
+        stderr.contains("failed 3 times with the same error"),
+        "{stderr}"
+    );
+    // The approval is withdrawn, so no restart repeats the refusal.
     assert_ne!(task.state(), "shipping");
     let again = task.run(&["--task", "INF-123", "ship", "--stop"]);
     let again = String::from_utf8_lossy(&again.stdout);
@@ -2497,6 +3053,40 @@ fn task_ship_restarts_on_the_next_read_after_its_process_dies() {
     assert_eq!(handoffs(&task).len(), 1);
 }
 
+#[test]
+fn task_ship_unassigned_mid_ship_waits_and_lets_its_running_step_finish() {
+    let task = shipping_task();
+    fs::write(task.home.path().join("hold"), "").unwrap();
+    let mut first = command(
+        task.repo.path(),
+        task.home.path(),
+        &["-b", "--task", "INF-123", "ship"],
+    )
+    .stdin(std::process::Stdio::null())
+    .stdout(std::process::Stdio::null())
+    .stderr(std::process::Stdio::null())
+    .spawn()
+    .unwrap();
+    wait_for("the stand-in", || !stand_ins(&task).is_empty());
+    task.ok(&["task", "unassign", "INF-123"]);
+    first.kill().unwrap();
+    first.wait().unwrap();
+    // Nobody owns it, so no read of this Machine's Tasks starts its ship again.
+    task.ok(&["task", "list"]);
+    let shown = task.run(&["wave", "show", "--json"]);
+    let shown = String::from_utf8_lossy(&shown.stdout);
+    assert!(
+        shown.contains("Unassigned; `lf task claim` and `lf ship` keep it shipping"),
+        "{shown}"
+    );
+    // Unassigning stops the ship, not the step already running.
+    fs::remove_file(task.home.path().join("hold")).unwrap();
+    wait_for("the running step to finish", || {
+        task.graph()["position"] == at("end")
+    });
+    assert_eq!(stand_ins(&task).len(), 1);
+}
+
 /// A Claude stand-in that records its first turn and fails at once, the way an
 /// expired login does.
 const FAILING_CLAUDE: &str = r#"#!/usr/bin/python3
@@ -2515,14 +3105,11 @@ sys.exit(3)
 fn task_ship_restarts_after_a_failure_wait_instead_of_on_every_read() {
     let task = GraphTask::with_tools(&[("claude", FAILING_CLAUDE)]);
     connect_fixture_claude(task.home.path(), &task.registered.store);
-    tokio::runtime::Runtime::new()
-        .unwrap()
-        .block_on(
-            task.registered
-                .store
-                .set_task_agent(&task.registered.task.id, "claude"),
-        )
-        .unwrap();
+    crate::config::files::update(&task.home.path().join("config.yaml"), |value| {
+        value["agent"] = "claude".into();
+        Ok(())
+    })
+    .unwrap();
     let output = task.run(&["-b", "--task", "INF-123", "ship"]);
     assert!(!output.status.success());
     // The ship's Task run started its failing Graph three times, then gave up.
@@ -2596,14 +3183,11 @@ for line in sys.stdin:
 fn task_ship_blocked_at_verification_waits_there_without_building_again() {
     let task = GraphTask::with_tools(&[("claude", BLOCKED_CLAUDE)]);
     connect_fixture_claude(task.home.path(), &task.registered.store);
-    tokio::runtime::Runtime::new()
-        .unwrap()
-        .block_on(
-            task.registered
-                .store
-                .set_task_agent(&task.registered.task.id, "claude"),
-        )
-        .unwrap();
+    crate::config::files::update(&task.home.path().join("config.yaml"), |value| {
+        value["agent"] = "claude".into();
+        Ok(())
+    })
+    .unwrap();
     task.repo.create_file(
         ".lf/graphs/verifying.yaml",
         "- graph: proof\n- loop: proof\n  interactive: {name: verify, id: check}\n",

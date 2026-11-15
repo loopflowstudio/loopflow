@@ -33,7 +33,7 @@ struct TaskHistoryProofTests {
             let terminal = registry.surfaces.view(for: .shell(pane, machineId: fixtureMachineId))
             terminal.frame = CGRect(x: 0, y: 0, width: 400, height: 350)
             terminal.workingDirectory = NSTemporaryDirectory()
-            terminal.command = buildWorkspaceShellCommand(id: pane, argv: ["/bin/cat"], env: [:])
+            terminal.command = buildGhosttyShellCommand(argv: ["/bin/cat"], env: [:])
             terminal.createSurface(manager: GhosttyManager.shared)
             terminals.append(terminal)
         }
@@ -96,7 +96,7 @@ struct TaskHistoryProofTests {
         await source.reply("W2-131", with: .history(["run_a1", "run_a2"]))
         try find("task-history-toggle").button().tap()
         try await waitFor { (try? find("task-history-input-run_a2:12")) != nil && !model.sessionHistory.inFlight.contains("issue-review") }
-        #expect(await source.reads == [["usage", "--days", "0", "--task", "W2-131", "--json"]])
+        #expect(await source.reads == [["session", "usage", "--days", "0", "--task", "W2-131", "--json"]])
         #expect(try label("task-history-toggle") == "Session history, expanded")
         _ = try find("task-history-input-run_a1:12")
         #expect((try? find("task-history-input-run_a2:12").find(text: "Unknown")) != nil)
@@ -210,16 +210,14 @@ private actor HistorySource {
 
     func respond(_ args: [String]) async throws -> String {
         switch (args.first, args.dropFirst().first) {
-        case ("desktop", "plan"): return roadmap
+        case ("plan", "list"): return roadmap
         case ("wave", "list"): return "[]"
-        case ("history", _): return #"{"truncated":false,"items":[]}"#
-        case ("desktop", "sessions"): return #"{"entries":\#(session),"next":null}"#
+        case ("session", "history"): return #"{"truncated":false,"items":[]}"#
+        case ("session", "list"): return #"{"entries":\#(session),"next":null}"#
         case ("graph", "list"): return "[]"
-        case ("task", "comment"):
-            return #"{"identifier":"fixture","comments":[],"pending_sync":[],"conflicts":{},"refresh_error":null}"#
-        case ("usage", "--days"):
+        case ("session", "usage"):
             reads.append(args)
-            let task = args[4]
+            let task = args[5]
             let ids: [String]
             switch replies[task] {
             case .history(let chosen): ids = chosen

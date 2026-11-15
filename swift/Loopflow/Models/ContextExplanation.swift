@@ -139,14 +139,33 @@ public struct WorkLink: Codable, Equatable, Sendable {
 
         enum CodingKeys: String, CodingKey {
             case kind, task, wave, session, diff
-            case repositoryPath = "repository_path", repositoryId = "repository_id"
+            case repositoryPath = "repo_path", repositoryId = "repo_id"
             case taskId = "task_id", executionMachine = "execution_machine"
         }
     }
 
     public struct Route: Codable, Equatable, Sendable {
-        public let hosts: [Host]
+        public let host: Host?
         public let reason: String
+
+        enum CodingKeys: String, CodingKey { case host, reason }
+
+        public init(host: Host?, reason: String) {
+            self.host = host
+            self.reason = reason
+        }
+
+        public init(from decoder: Decoder) throws {
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            host = try values.decode(Host?.self, forKey: .host)
+            reason = try values.decode(String.self, forKey: .reason)
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var values = encoder.container(keyedBy: CodingKeys.self)
+            try values.encode(host, forKey: .host)
+            try values.encode(reason, forKey: .reason)
+        }
     }
 
     public let label: String
@@ -164,29 +183,29 @@ public struct WorkLink: Codable, Equatable, Sendable {
     }
 }
 
-public enum SessionConnectIntent: String, Codable, Equatable, Sendable {
+public enum SessionResumeIntent: String, Codable, Equatable, Sendable {
     case start, resume
-    case connectOrResume = "connect_or_resume"
+    case takeOver = "take_over"
+    case newThread = "new_thread"
 }
 
-public enum SessionOpenMode: String, Codable, Equatable, Sendable {
-    case refuse, takeover, `try`
-}
-
-public struct SessionConnectAction: Codable, Equatable, Sendable {
-    public let intent: SessionConnectIntent
-    public let mode: SessionOpenMode
+public struct SessionResumeAction: Codable, Equatable, Sendable {
+    public let intent: SessionResumeIntent
+    /// The selected agent, else the conversation's recorded provider.
+    public let agent: String?
+    /// A new conversation continues from this one; its holder keeps it.
+    public let fork: Bool
     public let prepareOnly: Bool
 
     enum CodingKeys: String, CodingKey {
-        case intent, mode
+        case intent, agent, fork
         case prepareOnly = "prepare_only"
     }
 }
 
-public struct SessionConnectExplanation: Codable, Equatable, Sendable {
+public struct SessionResumeExplanation: Codable, Equatable, Sendable {
     public let resolution: ContextExplanation
-    public let action: SessionConnectAction?
+    public let action: SessionResumeAction?
     public let state: SessionState?
     public let actions: [SessionAction]
     public let impediments: [String]

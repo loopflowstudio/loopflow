@@ -68,14 +68,12 @@ impl Store {
     pub async fn ensure_primary_session(
         &self,
         scope: &crate::session::PrimaryScope,
-        replacing: Option<&str>,
         session: LfSession,
     ) -> StoreResult<LfSession> {
         let scope = scope.clone();
-        let replacing = replacing.map(str::to_string);
         let caller = crate::journal::current_lf_process_id();
         run_sqlite(&self.sqlite, move |store| {
-            store.ensure_primary_session(&scope, replacing.as_deref(), session, caller.as_ref())
+            store.ensure_primary_session(&scope, session, caller.as_ref())
         })
         .await
     }
@@ -84,24 +82,10 @@ impl Store {
         &self,
         expected_capture: Option<i64>,
         session: LfSession,
+        creation: Option<String>,
     ) -> StoreResult<LfSession> {
         run_sqlite(&self.sqlite, move |store| {
-            store.replace_session_input(expected_capture, session)
-        })
-        .await
-    }
-
-    pub async fn retarget_unpublished_capture(
-        &self,
-        artifact_key: &str,
-        provider: &str,
-        model: Option<&str>,
-    ) -> StoreResult<()> {
-        let artifact_key = artifact_key.to_owned();
-        let provider = provider.to_string();
-        let model = model.map(str::to_string);
-        run_sqlite(&self.sqlite, move |store| {
-            store.retarget_unpublished_capture(&artifact_key, &provider, model.as_deref())
+            store.replace_session_input(expected_capture, session, creation.as_deref())
         })
         .await
     }

@@ -23,7 +23,13 @@ def test_rust_only_change_runs_no_macos_job() -> None:
 
 
 @pytest.mark.parametrize(
-    "path", ["swift/LoopflowMac/WorkModel.swift", "swift/project.yml", "swift/GhosttyKitPatches/a"]
+    "path",
+    [
+        "swift/LoopflowMac/WorkModel.swift",
+        "swift/LoopflowiOS/MobileClient.swift",
+        "swift/project.yml",
+        "swift/GhosttyKitPatches/a",
+    ],
 )
 def test_swift_change_runs_every_swift_job(path: str) -> None:
     assert _jobs(path) == {SWIFT_TEST, LOOPFLOW_UI_TEST}
@@ -32,9 +38,22 @@ def test_swift_change_runs_every_swift_job(path: str) -> None:
 @pytest.mark.parametrize(
     "path",
     [
-        "tests/fixtures/dto/work_first_entry.json",
+        "scripts/loopflow-dev.py",
+        "rust/loopflow/build.rs",
+        "rust/loopflow/ghostty-vt.json",
+        "rust/loopflow/ghostty-vt-patches/0004-vt-darwin-runtime.patch",
+    ],
+)
+def test_native_build_changes_run_both_desktop_builds(path: str) -> None:
+    assert _jobs(path) == {SWIFT_TEST, LOOPFLOW_UI_TEST}
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
         "python/tests/test_desktop_performance.py",
         "scripts/swift_test_limit.py",
+        "scripts/check_desktop_launch.py",
     ],
 )
 def test_wire_fixtures_and_swift_scripts_run_swift_test(path: str) -> None:
@@ -42,10 +61,17 @@ def test_wire_fixtures_and_swift_scripts_run_swift_test(path: str) -> None:
 
 
 @pytest.mark.parametrize(
+    "path", ["tests/fixtures/dto/work_first_entry.json", "rust/loopflow/src/server/wire.rs"]
+)
+def test_shared_protocol_changes_reach_desktop_and_ios(path: str) -> None:
+    assert _jobs(path) == {SWIFT_TEST, LOOPFLOW_UI_TEST}
+
+
+@pytest.mark.parametrize(
     "path",
     [
         "rust/loopflow/src/app_process.rs",
-        "rust/loopflow/src/data_clone.rs",
+        "rust/loopflow/src/store/copy.rs",
         "rust/loopflow/src/lf/commands/install/published.rs",
     ],
 )

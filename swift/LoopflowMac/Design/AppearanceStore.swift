@@ -45,17 +45,24 @@ final class AppearanceStore {
     private(set) var systemDark: Bool
     private(set) var diagnostics: [String] = []
     var notice: String?
+    @ObservationIgnored private let location: ServerLocation
+    private(set) var saving = false
+    @ObservationIgnored private var reading = UUID()
     @ObservationIgnored private let publish: (ThemeDefinition, String) throws -> Void
     @ObservationIgnored private var observation: NSKeyValueObservation?
     @ObservationIgnored private var watcher: Timer?
     @ObservationIgnored private var fingerprint: [String] = []
 
-    init(paths: ThemePaths, systemDark: Bool? = nil, watches: Bool = false,
+    init(paths: ThemePaths, systemDark: Bool? = nil, watches: Bool = false, location: ServerLocation = .shared,
          publish: @escaping (ThemeDefinition, String) throws -> Void = { _, _ in }) {
+        self.location = location
         self.paths = paths
         self.publish = publish
         self.systemDark = systemDark ?? (NSApplication.shared.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua)
-        reload()
+        library = ThemeLibrary.load(paths)
+        notice = library.problems.isEmpty ? nil : library.problems.joined(separator: "\n")
+        effectiveTheme = resolved(selection, in: library)
+        picker = self.systemDark ? .dark : .light
         do { try publish(effectiveTheme, effectiveTheme.id) } catch { notice = error.localizedDescription }
         if systemDark == nil {
             observation = NSApplication.shared.observe(\.effectiveAppearance) { [weak self] _, _ in
@@ -65,9 +72,10 @@ final class AppearanceStore {
             }
         }
         if watches {
+            Task { await reload() }
             fingerprint = currentFingerprint()
             watcher = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-                Task { @MainActor [weak self] in self?.reloadIfChanged() }
+                Task { @MainActor [weak self] in await self?.reloadIfChanged() }
             }
         }
     }
@@ -92,7 +100,7 @@ final class AppearanceStore {
             (draft.library.yours[name]?.readabilityErrors ?? []).map { "\(name): \($0)" }
         }
     }
-    var canApply: Bool { refusal == nil && draftErrors.isEmpty }
+    var canApply: Bool { !saving && refusal == nil && draftErrors.isEmpty }
     func themeName(for picker: AppearanceMode) -> String { current.name(dark: picker == .dark) }
 
     private func theme(_ name: String, dark: Bool, in library: ThemeLibrary) -> ThemeDefinition {
@@ -104,10 +112,16 @@ final class AppearanceStore {
     }
 
     /// Read your files and `theme:` again. An unknown name keeps the last good choice.
-    func reload() {
+    func reload() async {
+        let generation = UUID()
+        reading = generation
         library = ThemeLibrary.load(paths)
         var problems = library.problems
-        switch selection(from: ThemeConfig.read(paths.config)) {
+        let raw: String?
+        do { raw = try await ThemeConfig.read(paths.config, location: location) }
+        catch { if reading == generation { notice = error.localizedDescription }; return }
+        guard reading == generation else { return }
+        switch selection(from: raw) {
         case let .success(choice): selection = choice
         case let .failure(error): problems.insert(error.message, at: 0)
         }
@@ -149,11 +163,11 @@ final class AppearanceStore {
         }
     }
 
-    private func reloadIfChanged() {
+    private func reloadIfChanged() async {
         let latest = currentFingerprint()
         guard latest != fingerprint else { return }
         fingerprint = latest
-        reload()
+        await reload()
     }
 
     // MARK: Preview
@@ -252,19 +266,26 @@ final class AppearanceStore {
     // MARK: Writing
 
     /// Menu Mode change: writes the config at once and discards any preview.
-    func applyMode(_ mode: AppearanceMode) {
+    func applyMode(_ mode: AppearanceMode) async {
+        guard !saving else { return }
+        saving = true
+        reading = UUID()
+        defer { saving = false }
         var choice = selection
         choice.mode = mode
         do {
-            try ThemeConfig.write(choice.configValue, to: paths.config)
+            try await ThemeConfig.write(choice.configValue, to: paths.config, location: location)
             selection = choice
             draft = nil
             update(resolved(selection, in: library))
         } catch { notice = error.localizedDescription }
     }
 
-    func apply() {
+    func apply() async {
         guard let draft, canApply else { return }
+        saving = true
+        reading = UUID()
+        defer { saving = false }
         do {
             for name in draft.changed.sorted() {
                 let url = paths.themes.appendingPathComponent(name)
@@ -275,14 +296,15 @@ final class AppearanceStore {
                     try FileManager.default.removeItem(at: url)
                 }
             }
-            try ThemeConfig.write(draft.selection.configValue, to: paths.config)
+            try await ThemeConfig.write(draft.selection.configValue, to: paths.config, location: location)
         } catch { notice = error.localizedDescription; return }
         selection = draft.selection
         self.draft = nil
-        reload()
+        await reload()
     }
 
     func cancel() {
+        guard !saving else { return }
         draft = nil
         update(resolved(selection, in: library))
     }

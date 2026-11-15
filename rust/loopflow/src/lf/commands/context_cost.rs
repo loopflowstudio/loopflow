@@ -395,7 +395,7 @@ fn publish(report: &ContextCostReport, now: OffsetDateTime) -> Vec<String> {
             return Ok(vec!["not in a repository; not persisted".to_string()]);
         };
         tokio::runtime::Runtime::new()?.block_on(async {
-            let Some(store) = crate::store::open_existing_store().await else {
+            let Some(store) = crate::store::open_existing_store().await? else {
                 return Ok(vec!["no local Loopflow registry; not persisted".to_string()]);
             };
             crate::ops::metrics::publish_metric_observations(

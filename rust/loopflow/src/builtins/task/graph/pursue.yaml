@@ -1,7 +1,10 @@
+- kickoff
+- write-docs
 - implement
-- compress
+- concept-review
 - graph: refresh
 - loop: implement
-- concept-review
+- compress
+- qa
 - loop: implement
 - pr-publish

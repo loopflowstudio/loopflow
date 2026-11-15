@@ -200,14 +200,13 @@ def _contract(binary: Path, claude: Path, root: Path, server: Messages, results:
             profile.mkdir(parents=True)
             (profile / ".credentials.json").write_text(_login(name))
             database.execute(
-                "INSERT INTO provider_accounts(provider,account_id,home,login_email,"
-                "credential_state,routing_state,created_at,updated_at,observed_email,"
+                "INSERT INTO provider_accounts(provider,account_id,home,"
+                "credential_state,created_at,updated_at,observed_email,"
                 "observed_subject,observed_credential_digest) "
-                "VALUES('claude',?,?,?,'connected','automatic',?,?,?,?,?)",
+                "VALUES('claude',?,?,'connected',?,?,?,?,?)",
                 (
                     name,
                     str(profile),
-                    f"{name}@example.com",
                     now,
                     now,
                     f"{name}@example.com",
@@ -215,6 +214,13 @@ def _contract(binary: Path, claude: Path, root: Path, server: Messages, results:
                     hashlib.sha256(_login(name).encode()).hexdigest(),
                 ),
             )
+    for name in ("first", "second"):
+        lf(
+            "set",
+            "--global",
+            f"accounts.claude.{name}",
+            f"{{login_email: {name}@example.com, routing_state: automatic}}",
+        )
 
     # A Claude started after a switch runs on the login Loopflow installed.
     use("first")
@@ -231,7 +237,7 @@ def _contract(binary: Path, claude: Path, root: Path, server: Messages, results:
     # A launch naming no account, or the active one, changes nothing; neither
     # hands Claude an account home or a credential.
     switched = rows("SELECT COUNT(*) FROM provider_account_switches")[0][0]
-    for flags in (("--shared",), ("--shared", "--account", "claude=first@example.com")):
+    for flags in ((), ("--account", "claude=first@example.com")):
         launch, sent = converse(*flags)
         assert launch["CLAUDE_CONFIG_DIR"] == str(native), launch
         assert launch["CLAUDE_CODE_OAUTH_TOKEN"] is None and launch["ANTHROPIC_API_KEY"] is None
@@ -240,18 +246,10 @@ def _contract(binary: Path, claude: Path, root: Path, server: Messages, results:
     results["shared_launch"] = True
 
     # Naming another account moves the home, and plain Claude with it.
-    _, sent = converse("--shared", "--account", "claude=second@example.com")
+    _, sent = converse("--account", "claude=second@example.com")
     assert sent == _bearer("second"), sent
     assert plain_claude() == _bearer("second")
     results["launch_switches_home"] = True
-
-    # An isolated launch stays in its account's own home and leaves the
-    # native login alone.
-    launch, sent = converse("--isolate", "--account", "claude=first@example.com")
-    assert launch["CLAUDE_CONFIG_DIR"] == str(profiles / "first"), launch
-    assert sent == _bearer("first"), sent
-    assert _native_login(native) == _login("second")
-    results["isolated_launch"] = True
 
 
 def main() -> None:

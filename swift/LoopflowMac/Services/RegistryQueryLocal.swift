@@ -1,6 +1,5 @@
-// The local macOS registry query: `RegistryQuery` backed by a launcher-resolved
-// `lf`. Discovery and history are `lf` subprocesses over the local store, run off the
-// main actor so a slow query never stalls the UI.
+// Native Work reads, writes and subscriptions use the local server.
+// Execution launches and remote file streams retain their CLI transports.
 
 #if os(macOS)
 import Foundation
@@ -9,7 +8,24 @@ import Loopflow
 enum RegistryQueryLocal {
     static let shared = RegistryQuery(runWithInput: { args, cwd, input in
         try await LocalWaveAgentLauncher.queryLf(args, cwd: cwd, input: input)
+    }, serve: { query in
+        try await ServerClient.read(query)
+    }, write: { change in
+        switch change {
+        case .taskCreate(_, let requestID, _, _, _, _, _, _), .sessionNew(_, let requestID, _, _):
+            let answer = try await CreationSubmissions.shared.submit(change, requestID: requestID)
+            do {
+                switch change {
+                case .taskCreate: _ = try RegistryQuery.decode(TaskCreateReceipt.self, from: answer)
+                case .sessionNew: _ = try RegistryQuery.decode(SessionRecord.self, from: answer)
+                default: break
+                }
+                return answer
+            } catch { throw SubmittedCreationError(requestID: requestID, cause: error) }
+        default: return try await ServerClient.write(change)
+        }
     }, watchFiles: { args, cwd in
+        // Only a remote Task's files: `lf --machine … task watch-files` over SSH.
         try await Task.detached(priority: .userInitiated) {
             let configuration = try ReaderLaunchConfiguration.current()
             let process = LocalWaveAgentLauncher.queryProcess([configuration.helper] + args)
@@ -21,19 +37,20 @@ enum RegistryQueryLocal {
                 decode: { try JSONDecoder().decode(TaskFilesFrame.self, from: $0) })
             return TaskFilesObservation(frames: reader.frames, cancel: reader.cancel)
         }.value
-    }, watchWork: {
+    }, subscribeRead: { args, cwd in
         try await Task.detached(priority: .userInitiated) {
             let configuration = try ReaderLaunchConfiguration.current()
-            return try LocalWorkObservation.start(
-                process: { args, cwd in
-                    let process = LocalWaveAgentLauncher.queryProcess([configuration.helper] + args)
-                    process.environment = configuration.environment
-                    if let cwd { process.currentDirectoryURL = URL(fileURLWithPath: cwd) }
-                    return process
-                },
-                configurationChanged: { try ReaderLaunchConfiguration.current() != configuration }
-            )
+            let process = LocalWaveAgentLauncher.queryProcess([configuration.helper] + args)
+            process.environment = configuration.environment
+            if let cwd { process.currentDirectoryURL = URL(fileURLWithPath: cwd) }
+            let reader = try LocalLineObservation<Data>.start(
+                name: "Task history", process: process, frameLimit: 32 * 1024 * 1024, silence: nil,
+                configurationChanged: { try ReaderLaunchConfiguration.current() != configuration },
+                decode: { $0 })
+            return LineSubscription(lines: reader.frames, send: reader.send, cancel: reader.cancel)
         }.value
+    }, subscribeWork: {
+        try WorkSubscriptions.observe { ServerClient.subscribe($0) }
     }) { args, cwd in
         try await Perf.measure(Perf.lf, args.prefix(2).joined(separator: " ")) {
             let started = ContinuousClock.now

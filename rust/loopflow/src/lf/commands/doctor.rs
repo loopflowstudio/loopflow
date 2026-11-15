@@ -6,10 +6,10 @@ use std::path::Path;
 use anyhow::{anyhow, Result};
 
 use crate::lf::output::Colors;
-use crate::process::LfProcess;
+use crate::process::ProcessEntry;
 use crate::store::contention::read_contention;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum Status {
@@ -18,7 +18,7 @@ pub enum Status {
     Fail,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
 pub struct Check {
     pub name: &'static str,
     pub status: Status,
@@ -26,14 +26,14 @@ pub struct Check {
 }
 
 impl Check {
-    fn ok(name: &'static str, detail: impl Into<String>) -> Self {
+    pub(crate) fn ok(name: &'static str, detail: impl Into<String>) -> Self {
         Self {
             name,
             status: Status::Ok,
             detail: detail.into(),
         }
     }
-    fn warn(name: &'static str, detail: impl Into<String>) -> Self {
+    pub(crate) fn warn(name: &'static str, detail: impl Into<String>) -> Self {
         Self {
             name,
             status: Status::Warn,
@@ -50,18 +50,19 @@ impl Check {
 }
 
 /// Exits non-zero when any check fails, so a caller can gate on it.
-#[derive(Debug, serde::Serialize)]
-struct DoctorReport<'a> {
+/// What `lf doctor --json` prints.
+#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
+pub struct DoctorReport {
     store: StoreReport,
     rows: usize,
-    checks: &'a [Check],
+    checks: Vec<Check>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
 struct StoreReport {
     build_provenance: crate::build_info::BuildProvenance,
     build_label: Option<String>,
-    migration_authority: String,
+    unmerged_migrations: Vec<&'static str>,
     build_source_identity: String,
     build_source_root: Option<String>,
     build_source_revision: String,
@@ -72,6 +73,24 @@ struct StoreReport {
 }
 
 pub fn run(json: bool) -> Result<()> {
+    let report = report()?;
+    if json {
+        println!("{}", serde_json::to_string(&report)?);
+    } else {
+        print_checks(&report.store, &report.checks, report.rows);
+    }
+    if report
+        .checks
+        .iter()
+        .any(|check| check.status == Status::Fail)
+    {
+        return Err(anyhow!("doctor checks failed"));
+    }
+    Ok(())
+}
+
+/// The store, Process evidence and installation checks `lf doctor` reports.
+pub fn report() -> Result<DoctorReport> {
     let database_path = crate::store::database_path_from_env()?;
     let store_report = inspect_store(&database_path);
     let mut checks = vec![match &store_report.migration_error {
@@ -111,39 +130,28 @@ pub fn run(json: bool) -> Result<()> {
         &crate::diagnostic_log::log_path(),
         time::OffsetDateTime::now_utc().unix_timestamp() - CONTENTION_WINDOW_SECONDS,
     ));
-    if json {
-        println!(
-            "{}",
-            serde_json::to_string(&DoctorReport {
-                store: store_report,
-                rows,
-                checks: &checks,
-            })?
-        );
-    } else {
-        print_checks(&store_report, &checks, rows);
-    }
-
-    if checks.iter().any(|check| check.status == Status::Fail) {
-        return Err(anyhow!("doctor checks failed"));
-    }
-    Ok(())
+    checks.push(crate::desktop_exits::check());
+    Ok(DoctorReport {
+        store: store_report,
+        rows,
+        checks,
+    })
 }
 
 const RUNNING: &str = "lf-binaries";
 
 /// Name live processes still running a binary the install has moved past.
 fn check_running_binaries() -> Check {
-    let inventory = match super::rollover::inventory() {
+    let inventory = match super::binaries::inventory() {
         Ok(inventory) => inventory,
         Err(error) => {
             return Check::warn(RUNNING, format!("cannot list live lf processes: {error:#}"))
         }
     };
-    match super::rollover::superseded_summary(&inventory) {
+    match super::binaries::superseded_summary(&inventory) {
         Some(summary) => Check::warn(
             RUNNING,
-            format!("{summary}. `lf monitor rollover` moves the resumable ones"),
+            format!("{summary}. Quit a conversation's agent and `lf resume` it to move it"),
         ),
         None => {
             let count = inventory
@@ -154,7 +162,7 @@ fn check_running_binaries() -> Check {
             let selected = inventory
                 .binaries
                 .first()
-                .map(super::rollover::RunningBinary::describe)
+                .map(super::binaries::RunningBinary::describe)
                 .unwrap_or_else(|| "the selected lf".into());
             Check::ok(
                 RUNNING,
@@ -253,7 +261,7 @@ fn check_binary_freshness() -> Check {
                 FRESHNESS,
                 format!(
                     "running lf is built from {} and is {} merged commit(s) behind cached {UPSTREAM} (not refreshed); \
-                     latest merged changes: {commits}. Run `lf install` to install the latest published release",
+                     latest merged changes: {commits}. Run `lf install` to install the stable release",
                     crate::build_info::short_revision(&revision),
                     missing.len(),
                 ),
@@ -299,21 +307,16 @@ fn inspect_store(path: &Path) -> StoreReport {
                     Ok(version) => latest_applied_migration = version,
                     Err(error) => migration_error = Some(error.to_string()),
                 }
-                let validation = if crate::store::custom_home_selected() {
-                    crate::store::migrations::validate_experimental_sqlite(
-                        &connection,
-                        crate::build_info::migration_draft_manifest(),
-                    )
-                } else {
-                    crate::store::migrations::validate_sqlite(&connection).and_then(|()| {
-                        if let Some(pending) = crate::store::migrations::pending_shared_migration(&connection)? {
-                            return Err(crate::store::StoreError::InvalidData(format!(
-                                "selected database is missing {pending}; run `lf install` to install a published release"
-                            )));
-                        }
-                        Ok(())
-                    })
-                };
+                // A private home migrates itself on its next open.
+                let custom = crate::store::custom_home_selected();
+                let validation = crate::store::migrations::validate_sqlite(&connection).and_then(|()| {
+                    match crate::store::migrations::pending_shared_migration(&connection)? {
+                        Some(pending) if !custom => Err(crate::store::StoreError::InvalidData(format!(
+                            "selected database is missing {pending}; run `lf install` to finish installing this build"
+                        ))),
+                        _ => Ok(()),
+                    }
+                });
                 if let Err(error) = validation {
                     migration_error.get_or_insert_with(|| error.to_string());
                 }
@@ -322,16 +325,12 @@ fn inspect_store(path: &Path) -> StoreReport {
         }
     }
     if !path.exists() {
-        migration_error = Some(format!("selected database {} does not exist; run `lf install` to initialize a published installation", path.display()));
+        migration_error = Some(format!("selected database {} does not exist; run `lf self install` to initialize an installation", path.display()));
     }
     StoreReport {
         build_provenance: crate::build_info::provenance(),
         build_label: crate::build_info::label().map(str::to_string),
-        migration_authority: match crate::build_info::migration_authority() {
-            crate::build_info::MigrationAuthority::Published => "published",
-            crate::build_info::MigrationAuthority::ValidationOnly => "validation-only",
-        }
-        .to_string(),
+        unmerged_migrations: crate::store::migrations::unmerged_migrations(),
         build_source_identity: crate::build_info::source_identity(),
         build_source_root: crate::build_info::source_root().map(|root| root.display().to_string()),
         build_source_revision: crate::build_info::source_revision().to_string(),
@@ -445,10 +444,10 @@ fn check_installation(database_path: &Path) -> Vec<Check> {
 }
 
 /// A process may name only one command, and its terminal row names that work.
-fn check_attribution(events: &[LfProcess]) -> Check {
+fn check_attribution(events: &[ProcessEntry]) -> Check {
     let unnamed = events
         .iter()
-        .filter(|process| process.completed_at.is_some() && process.command.is_none())
+        .filter(|process| process.completed_at().is_some() && process.command().is_none())
         .count();
     if unnamed == 0 {
         Check::ok("attribution", "every completed Process names its command")
@@ -461,12 +460,9 @@ fn check_attribution(events: &[LfProcess]) -> Check {
 }
 
 /// Processes may be machine-scoped; recorded repositories must be absolute.
-fn check_identity(events: &[LfProcess]) -> Check {
-    let repos: HashSet<&str> = events
-        .iter()
-        .filter_map(|event| event.repo.as_deref())
-        .collect();
-    let unscoped = events.iter().filter(|event| event.repo.is_none()).count();
+fn check_identity(events: &[ProcessEntry]) -> Check {
+    let repos: HashSet<&str> = events.iter().filter_map(ProcessEntry::repo).collect();
+    let unscoped = events.iter().filter(|event| event.repo().is_none()).count();
     let invalid = repos
         .iter()
         .filter(|repo| !Path::new(repo).is_absolute())
@@ -486,16 +482,16 @@ fn check_identity(events: &[LfProcess]) -> Check {
     )
 }
 
-pub(crate) fn check_lineage(events: &[LfProcess], repairable: usize) -> Check {
+pub(crate) fn check_lineage(events: &[ProcessEntry], repairable: usize) -> Check {
     let processes: HashMap<&str, &str> = events
         .iter()
-        .map(|event| (event.id.as_str(), event.trace_id.as_str()))
+        .map(|event| (event.id(), event.trace_id().as_str()))
         .collect();
     let dangling: HashSet<&str> = events
         .iter()
         .filter_map(|event| {
-            let parent = event.parent_lf_process_id.as_ref()?.as_str();
-            (processes.get(parent).copied() != Some(event.trace_id.as_str())).then_some(parent)
+            let parent = event.parent_lf_process_id()?.as_str();
+            (processes.get(parent).copied() != Some(event.trace_id().as_str())).then_some(parent)
         })
         .collect();
     if dangling.is_empty() {
@@ -519,10 +515,13 @@ fn print_checks(store: &StoreReport, checks: &[Check], rows: usize) {
         .build_label
         .clone()
         .unwrap_or_else(|| store.build_provenance.to_string());
-    println!(
-        "build: {build} ({}) · migrations {}",
-        store.build_source_identity, store.migration_authority
-    );
+    println!("build: {build} ({})", store.build_source_identity);
+    if !store.unmerged_migrations.is_empty() {
+        println!(
+            "unmerged migrations: {}",
+            store.unmerged_migrations.join(", ")
+        );
+    }
     println!("revision: {}", store.build_source_revision);
     if let Some(root) = &store.build_source_root {
         println!("source: {root}");
@@ -565,7 +564,7 @@ mod tests {
     const DAY: i64 = 86_400;
 
     #[test]
-    fn store_report_exposes_unknown_applied_migration() {
+    fn store_report_admits_a_newer_migration_tail() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("loopflow.db");
         let connection = rusqlite::Connection::open(&path).unwrap();
@@ -573,7 +572,7 @@ mod tests {
         connection
             .execute(
                 "INSERT INTO schema_migrations (version, applied_at)
-                 VALUES ('9.0.001_divergent', unixepoch() + 1)",
+                 VALUES ('9.0.001_newer', unixepoch() + 1)",
                 [],
             )
             .unwrap();
@@ -583,17 +582,13 @@ mod tests {
 
         assert_eq!(
             report.latest_applied_migration.as_deref(),
-            Some("9.0.001_divergent")
+            Some("9.0.001_newer")
         );
-        let error = report.migration_error.unwrap();
-        assert!(error.contains("9.0.001_divergent"), "{error}");
-        assert!(error.contains("latest known"), "{error}");
+        assert_eq!(report.migration_error, None);
     }
 
     fn row(ts: i64, event: &str) -> LfProcess {
         LfProcess {
-            kind: crate::process::ProcessKind::Lf,
-            agent_session_id: None,
             os_started_at: None,
             id: crate::id::LfProcessId::new(),
             pid: None,
@@ -620,6 +615,11 @@ mod tests {
     }
 
     fn status_of(rows: &[LfProcess], name: &str) -> Status {
+        let rows = &rows
+            .iter()
+            .cloned()
+            .map(crate::process::ProcessEntry::Lf)
+            .collect::<Vec<_>>();
         [
             check_attribution(rows),
             check_identity(rows),

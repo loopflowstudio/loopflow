@@ -6,6 +6,7 @@ import base64
 import hashlib
 import json
 import os
+import select
 import socket
 import struct
 import sys
@@ -40,7 +41,7 @@ def _header(stream: socket.socket) -> bytes:
     return bytes(header)
 
 
-def _client(endpoint: str, home: Path, thread: str | None) -> None:
+def _client(endpoint: str, home: Path, thread: str) -> None:
     if (home / "close-terminal").exists():
         return
     if (home / "fail-terminal").exists():
@@ -83,13 +84,8 @@ def _client(endpoint: str, home: Path, thread: str | None) -> None:
             stream,
             {
                 "id": 2,
-                "method": "thread/resume" if thread else "thread/start",
-                "params": {
-                    **({"threadId": thread} if thread else {}),
-                    "approvalPolicy": "on-request",
-                    "threadSource": "user",
-                    "config": {"native-setting": True},
-                },
+                "method": "thread/resume",
+                "params": {"threadId": thread, "approvalPolicy": "on-request"},
             },
             True,
         )
@@ -97,8 +93,9 @@ def _client(endpoint: str, home: Path, thread: str | None) -> None:
             rpc = json.loads(_message(stream))
             if rpc.get("id") == 2:
                 assert "error" not in rpc, rpc
-                thread = rpc["result"]["thread"]["id"]
-            if rpc.get("id") == 2 and rpc["result"]["thread"]["turns"]:
+                assert rpc["result"]["thread"]["id"] == thread
+            turns = rpc["result"]["thread"]["turns"] if rpc.get("id") == 2 else []
+            if turns and all(turn["status"] != "inProgress" for turn in turns):
                 _send(
                     stream,
                     {
@@ -111,9 +108,13 @@ def _client(endpoint: str, home: Path, thread: str | None) -> None:
                     },
                     True,
                 )
-            if rpc.get("method") == "turn/started" and (home / "fail-after-submit").exists():
+            # The first turn may already be running when this client joins.
+            running = rpc.get("method") == "turn/started" or any(
+                turn["status"] == "inProgress" for turn in turns
+            )
+            if running and (home / "fail-after-submit").exists():
                 raise SystemExit(25)
-            if rpc.get("method") == "turn/started" and (home / "idle-terminal").exists():
+            if running and (home / "idle-terminal").exists():
                 # Like Codex, the one idle terminal ignores losing its server until signalled.
                 (home / "idle-terminal").unlink()
                 (home / "idling").write_text(str(os.getpid()))
@@ -127,6 +128,27 @@ def _client(endpoint: str, home: Path, thread: str | None) -> None:
                         assert terminal.readline().strip() == "decline"
                 _send(stream, {"id": rpc["id"], "result": {"decision": "decline"}}, True)
             if rpc.get("method") == "turn/completed":
+                if (home / "reattach-service-tier").exists():
+                    initial = _request(stream, "thread/resume", {"threadId": thread})
+                    _request(stream, "thread/settings/update", {
+                        "threadId": thread, "serviceTier": "priority",
+                    })
+                    (home / "native-tier-before.json").write_text(json.dumps(initial))
+                    with open("/dev/tty") as terminal:
+                        deadline = time.monotonic() + 30
+                        while not select.select([terminal], [], [], .1)[0]:
+                            if (home / "release").exists():
+                                return
+                            assert time.monotonic() < deadline, "no reattached input"
+                        assert terminal.readline().strip() == "inspect tier"
+                    retained = _request(stream, "thread/resume", {"threadId": thread})
+                    (home / "native-tier-after.json").write_text(json.dumps(retained))
+                    deadline = time.monotonic() + 30
+                    while not (home / "release").exists():
+                        assert time.monotonic() < deadline, "reattached terminal not released"
+                        time.sleep(.02)
+                if (home / "check-child-tiers").exists():
+                    _check_child_tiers(stream, home)
                 if "TITLE_HOST" in os.environ:
                     (home / "args").write_text("\n".join(sys.argv[1:]))
                     (home / "ready").touch()
@@ -142,15 +164,103 @@ def _client(endpoint: str, home: Path, thread: str | None) -> None:
                 return
 
 
+def _request(stream: socket.socket, method: str, params: dict) -> dict:
+    _send(stream, {"id": "tier-check", "method": method, "params": params}, True)
+    while True:
+        reply = json.loads(_message(stream))
+        if reply.get("id") == "tier-check":
+            assert "error" not in reply, reply
+            return reply["result"]
+
+
+def _check_child_tiers(stream: socket.socket, home: Path) -> None:
+    fresh = _request(stream, "thread/start", {})
+    forked = _request(stream, "thread/fork", {"threadId": fresh["thread"]["id"]})
+    (home / "native-child-tiers.json").write_text(json.dumps({
+        "new": fresh["serviceTier"], "fork": forked["serviceTier"],
+    }))
+
+
+def _inherited(home: Path) -> dict:
+    """What a host wrapper and the user's config give every app-server."""
+    return {
+        "layers": [{"name": {"type": "sessionFlags"}, "config": {
+            "hooks": {"SessionStart": [{"matcher": "startup", "hooks": [
+                {"type": "command", "command": "host-hook"}
+            ]}], "state": {"host-trust": {"trusted_hash": "unchanged"}}}
+        }}],
+        "config": {
+            "service_tier": "priority",
+            "sandbox_workspace_write": {"writable_roots": [str(home / "configured-root")]}
+        },
+    }
+
+
+def _stdio(home: Path) -> None:
+    """A short-lived app-server on stdio, as lf reads inherited configuration."""
+    for line in sys.stdin:
+        rpc = json.loads(line)
+        if "id" not in rpc:
+            continue
+        result = _inherited(home) if rpc["method"] == "config/read" else {}
+        print(json.dumps({"id": rpc["id"], "result": result}), flush=True)
+
+
+def _inline_toml(value: str) -> object:
+    """lf's TOML inline values are JSON with `=` between a key and its value."""
+    text, quoted, escaped = [], False, False
+    for char in value:
+        if quoted:
+            quoted = escaped or char != '"'
+            escaped = not escaped and char == "\\"
+        elif char == '"':
+            quoted = True
+        elif char == "=":
+            char = ":"
+        text.append(char)
+    return json.loads("".join(text))
+
+
+def _overrides(args: list[str]) -> dict:
+    """The `-c` values before the subcommand, as Codex reads them."""
+    overrides = {}
+    for flag, pair in zip(args, args[1:]):
+        if flag == "-c":
+            key, value = pair.split("=", 1)
+            overrides[key] = _inline_toml(value)
+    return overrides
+
+
 def _server(endpoint: str, home: Path) -> None:
+    server_config = json.loads((home / "native-server-config.json").read_text())
+    tier_file = home / "native-tier.json"
+    service_tier = json.loads(tier_file.read_text()) if tier_file.exists() else None
     turns_file = home / "native-turns.json"
     turns = json.loads(turns_file.read_text()) if turns_file.exists() else []
+    # A server that stopped mid-turn loads that turn as interrupted.
+    for turn in turns:
+        if turn["status"] == "inProgress":
+            turn["status"] = "interrupted"
     thread_file = home / "native-thread"
     thread = thread_file.read_text() if thread_file.exists() else ""
-    lock = threading.Lock()
+    lock = threading.RLock()
+    # Like app-server: a thread has no rollout until it has a turn or a name,
+    # every subscriber hears every event, and a client that joins mid-turn is
+    # asked the approval still pending.
+    named = bool(thread)
+    subscribers: list[socket.socket] = []
+    pending: dict | None = None
+
+    def broadcast(value: dict) -> None:
+        with lock:
+            for subscriber in list(subscribers):
+                try:
+                    _send(subscriber, value)
+                except OSError:
+                    subscribers.remove(subscriber)
 
     def serve(stream: socket.socket) -> None:
-        nonlocal thread, turns
+        nonlocal thread, turns, named, pending, service_tier
         with stream:
             header = _header(stream)
             key = next(
@@ -177,23 +287,26 @@ def _server(endpoint: str, home: Path) -> None:
                             turn = turns[-1]
                             turn["status"] = "completed"
                             turns_file.write_text(json.dumps(turns))
-                        _send(
-                            stream,
-                            {
-                                "method": "turn/completed",
-                                "params": {"threadId": thread, "turn": turn},
-                            },
-                        )
+                            pending = None
+                            broadcast(
+                                {
+                                    "method": "turn/completed",
+                                    "params": {"threadId": thread, "turn": turn},
+                                }
+                            )
                         continue
                     if "id" not in rpc:
                         continue
                     result = {}
-                    if method in ("thread/start", "thread/resume"):
-                        if method == "thread/start":
+                    if method in ("thread/start", "thread/resume", "thread/fork"):
+                        if method in ("thread/start", "thread/fork"):
                             thread = "thread-" + uuid.uuid4().hex
                             turns = []
                             thread_file.write_text(thread)
-                        elif not turns or params.get("threadId") != thread:
+                            service_tier = server_config.get(
+                                "service_tier", _inherited(home)["config"]["service_tier"]
+                            )
+                        elif not (turns or named) or params.get("threadId") != thread:
                             _send(
                                 stream,
                                 {
@@ -202,26 +315,29 @@ def _server(endpoint: str, home: Path) -> None:
                                 },
                             )
                             continue
-                        result = {"thread": {"id": thread, "turns": turns}}
-                        if "developerInstructions" in params:
+                        service_tier = params.get("serviceTier", service_tier)
+                        tier_file.write_text(json.dumps(service_tier))
+                        result = {"thread": {"id": thread, "turns": turns}, "serviceTier": service_tier}
+                        if "cwd" in params:  # lf's own request, not a client's
                             (home / "native-config.json").write_text(json.dumps(params))
+                        with lock:
+                            subscribers.append(stream)
+                            _send(stream, {"id": rpc["id"], "result": result})
+                            if pending:
+                                _send(stream, pending)
+                        continue
+                    elif method == "thread/settings/update":
+                        service_tier = params["serviceTier"]
+                        tier_file.write_text(json.dumps(service_tier))
+                        result = {"serviceTier": service_tier}
+                    elif method == "thread/name/set":
+                        named = True
                     elif method == "thread/turns/list":
                         result = {"data": turns, "nextCursor": None}
                     elif method == "thread/loaded/list":
                         result = {"data": [thread] if thread else [], "nextCursor": None}
                     elif method == "config/read":
-                        result = {
-                            "layers": [{"name": {"type": "sessionFlags"}, "config": {
-                                "hooks": {"SessionStart": [{"matcher": "startup", "hooks": [
-                                    {"type": "command", "command": "host-hook"}
-                                ]}], "state": {"host-trust": {"trusted_hash": "unchanged"}}}
-                            }}],
-                            "config": {
-                                "sandbox_workspace_write": {
-                                    "writable_roots": [str(home / "configured-root")]
-                                }
-                            }
-                        }
+                        result = _inherited(home)
                     elif method == "turn/start":
                         with lock:
                             turn = {
@@ -240,23 +356,25 @@ def _server(endpoint: str, home: Path) -> None:
                         result = {"turn": turn}
                     _send(stream, {"id": rpc["id"], "result": result})
                     if method == "turn/start":
-                        _send(
-                            stream,
-                            {
-                                "method": "turn/started",
-                                "params": {"threadId": thread, "turn": turn},
-                            },
-                        )
-                        _send(
-                            stream,
-                            {
+                        with lock:
+                            broadcast(
+                                {
+                                    "method": "turn/started",
+                                    "params": {"threadId": thread, "turn": turn},
+                                }
+                            )
+                            pending = {
                                 "id": "approval",
                                 "method": "item/commandExecution/requestApproval",
                                 "params": {"threadId": thread, "turnId": turn["id"]},
-                            },
-                        )
+                            }
+                            broadcast(pending)
             except (EOFError, OSError):
                 pass
+            finally:
+                with lock:
+                    if stream in subscribers:
+                        subscribers.remove(stream)
 
     with socket.socket(socket.AF_UNIX) as listener:
         listener.bind(endpoint)
@@ -269,8 +387,11 @@ def _server(endpoint: str, home: Path) -> None:
 def main() -> None:
     args = sys.argv[1:]
     home = Path(os.environ["LF_HOME"])
-    # A wrapper can reject long argv without ever seeing the large payload.
-    assert all(len(arg.encode()) < 1024 for arg in args), args
+    # A wrapper can reject long argv without ever seeing the large payload: a
+    # first request never rides argv. The server's configuration, instructions
+    # included, does.
+    limit = 1024 if "--remote" in args else 64 * 1024
+    assert all(len(arg.encode()) < limit for arg in args), args
     assert "CODEX_ACCESS_TOKEN" not in os.environ
     with (home / "native-argv.jsonl").open("a") as file:
         file.write(json.dumps(args) + "\n")
@@ -281,14 +402,24 @@ def main() -> None:
         _client(
             args[args.index("--remote") + 1].removeprefix("unix://"),
             home,
-            args[-1] if "resume" in args else None,
+            args[-1],
         )
     elif "--listen" in args:
         if (home / "fail-server").exists():
             raise SystemExit(23)
         if (home / "stall-server").exists():
             threading.Event().wait(60)
+        (home / "native-server-config.json").write_text(
+            json.dumps(_overrides(args[: args.index("app-server")]))
+        )
         _server(args[args.index("--listen") + 1].removeprefix("unix://"), home)
+    elif "app-server" in args:
+        _stdio(home)
+    else:
+        # A bare launch is plain `codex` in its terminal, configured by argv.
+        print("\n".join(args), flush=True)
+        with (home / "launched").open("a") as file:
+            file.write(os.environ.get("LF_CAPTURE_KEY", "") + "\n")
 
 
 if __name__ == "__main__":

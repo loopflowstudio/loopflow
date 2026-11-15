@@ -11,13 +11,14 @@ use crate::provider_auth::Provider;
 use crate::work::wave::{Wave, WaveLocator};
 mod canonical_ids;
 pub(crate) mod changes;
-mod chapters;
 mod children;
 pub(crate) mod ci_incidents;
 pub mod contention;
-pub mod copy;
+pub(crate) mod copy;
 mod durable;
 mod metrics;
+#[cfg(test)]
+mod migration_build;
 mod migration_catalog;
 mod migration_schema;
 pub mod migrations;
@@ -25,7 +26,10 @@ mod planning_peers;
 pub mod planning_sync;
 mod pr_landings;
 mod processes;
-pub(crate) mod project_transitions;
+mod project_adoption;
+#[cfg(test)]
+pub(crate) mod query_plans;
+mod recording_gap;
 mod repositories;
 pub mod rows;
 mod sessions;
@@ -33,9 +37,12 @@ pub mod sqlite;
 mod token_crypto;
 
 pub use planning_peers::{PeerPlanningStatus, PeerProjectionConflict, PlanningJournal};
+pub use recording_gap::{GapSpan, RecordingGap};
 
 /// Availability of retained planning facts, independent of execution permission.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum PlanningState {
@@ -47,7 +54,9 @@ pub enum PlanningState {
 }
 
 /// Acquisition evidence is independent of saved Work and outbound delivery.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct TaskAcquisition {
     pub state: PlanningState,
     pub observed_at: Option<i64>,
@@ -72,7 +81,6 @@ pub(crate) struct WaveLocatorUpdate {
     pub expected_repo: String,
     pub expected_slug: String,
     pub target: WaveLocator,
-    pub retire_collision: Option<WaveId>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -89,16 +97,13 @@ pub enum StoreError {
     Serde(#[from] serde_json::Error),
     #[error("not found")]
     NotFound,
+    /// A compare-and-swap named a revision that is no longer current.
+    #[error("{0}")]
+    Stale(String),
     #[error("invalid data: {0}")]
     InvalidData(String),
-    #[error("unordered or conflicting {entity} facts for {id}; refresh planning")]
-    ProviderObservationConflict { entity: &'static str, id: String },
     #[error("competing planning {effect} receipts")]
     PlanningReceiptConflict { effect: &'static str },
-    #[error("Project {project_id} membership changed without relationship ordering evidence")]
-    ProjectMembershipConflict { project_id: String },
-    #[error("development store is incompatible: {0}")]
-    IncompatibleDevelopment(String),
     #[error("invalid control authority: {0}")]
     InvalidAuthority(String),
 }
@@ -162,10 +167,9 @@ pub(crate) fn custom_home_selected() -> bool {
     !same_database_file(&lf_home_dir(), &default_lf_home_dir()).unwrap_or(false)
 }
 
-/// The default home's database, or this build's copy of it when the build
-/// carries unreleased drafts (see [`copy`]).
+/// The selected home's database.
 pub fn default_db_path() -> PathBuf {
-    copy::selected().unwrap_or_else(|| lf_home_dir().join("loopflow.db"))
+    lf_home_dir().join("loopflow.db")
 }
 
 /// The selected Machine's database. A Machine has exactly one, at a fixed name.
@@ -193,23 +197,18 @@ pub(crate) enum FrontierAdvance {
 /// Whether this open may apply migrations to `path`.
 ///
 /// A private store (any path that is not the machine's shared `~/.lf/loopflow.db`)
-/// may initialize once; subsequent opens require its exact schema. The shared
-/// release store is exclusive to the promotion boundary: a
-/// validation-only build never writes to it, and an ordinary (`Forbidden`) open
-/// neither initializes nor advances it. Bootstrapping a missing or empty shared
-/// store to the candidate's head can strand an older installed binary exactly as
-/// advancing an existing frontier would, so both belong to `Authorized` alone.
+/// migrates itself, unmerged schema work included. The shared store is exclusive
+/// to the install switch: an ordinary (`Forbidden`) open neither initializes nor
+/// advances it. Bootstrapping a missing or empty shared store to the candidate's
+/// head can strand an older installed binary exactly as advancing an existing
+/// frontier would, so both belong to `Authorized` alone.
 fn may_apply_migrations(
     path: &Path,
-    authority: crate::build_info::MigrationAuthority,
     home: &Path,
     advance: FrontierAdvance,
 ) -> Result<bool, std::io::Error> {
     if !same_database_file(path, &home.join(".lf/loopflow.db"))? {
         return Ok(true);
-    }
-    if authority != crate::build_info::MigrationAuthority::Published {
-        return Ok(false);
     }
     Ok(advance == FrontierAdvance::Authorized)
 }
@@ -267,23 +266,18 @@ pub fn storage_config_from_env() -> Result<StorageConfig, std::io::Error> {
     Ok(StorageConfig::sqlite(database_path_from_env()?))
 }
 
-/// Planning and checkout locks retained by every queued writer using this acquisition.
+/// The Wave's planning lock, retained by every queued writer using this
+/// acquisition and released when the last one drops it.
 #[derive(Debug, Clone)]
 pub struct PlanningLocks {
-    locks: Vec<Arc<std::fs::File>>,
+    _wave: Arc<std::fs::File>,
 }
 
 impl PlanningLocks {
     pub(crate) fn new(wave: std::fs::File) -> Self {
         Self {
-            locks: vec![Arc::new(wave)],
+            _wave: Arc::new(wave),
         }
-    }
-
-    pub(crate) fn with_checkouts(&self, checkouts: &[Arc<std::fs::File>]) -> Self {
-        let mut locks = self.locks.clone();
-        locks.extend_from_slice(checkouts);
-        Self { locks }
     }
 }
 
@@ -298,7 +292,7 @@ where
     F: FnOnce(sqlite::SqliteStore) -> StoreResult<T> + Send + 'static,
 {
     let store = store.clone();
-    tokio::task::spawn_blocking(move || func(store))
+    crate::journal::request::spawn_blocking(move || func(store))
         .await
         .map_err(|err| StoreError::InvalidData(err.to_string()))?
 }
@@ -477,22 +471,6 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.relocate_waves(&updates)).await
     }
 
-    pub(crate) async fn wave_retirement_blockers(
-        &self,
-        wave_id: &WaveId,
-    ) -> StoreResult<Vec<String>> {
-        let wave_id = wave_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.wave_retirement_blockers(&wave_id)
-        })
-        .await
-    }
-
-    pub async fn delete_wave(&self, wave_id: &WaveId) -> StoreResult<()> {
-        let wave_id = wave_id.clone();
-        run_sqlite(&self.sqlite, move |store| store.delete_wave(&wave_id)).await
-    }
-
     pub(crate) async fn provider_auth_snapshot(
         &self,
         provider: Provider,
@@ -597,36 +575,6 @@ impl Store {
         .await
     }
 
-    pub async fn set_long_lived_token(
-        &self,
-        provider: &str,
-        account_id: &ProviderAccountId,
-        token: &secrecy::SecretString,
-        minted_at: i64,
-    ) -> StoreResult<bool> {
-        let provider = provider.to_string();
-        let account_id = account_id.clone();
-        let token = token.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            use secrecy::ExposeSecret;
-            store.set_long_lived_token(&provider, &account_id, token.expose_secret(), minted_at)
-        })
-        .await
-    }
-
-    pub async fn long_lived_token(
-        &self,
-        provider: &str,
-        account_id: &ProviderAccountId,
-    ) -> StoreResult<Option<LongLivedToken>> {
-        let provider = provider.to_string();
-        let account_id = account_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.long_lived_token(&provider, &account_id)
-        })
-        .await
-    }
-
     pub async fn list_provider_accounts(
         &self,
         provider: Option<&str>,
@@ -723,6 +671,48 @@ impl Store {
                 cooldown_until,
                 cooldown_reason.as_deref(),
             )
+        })
+        .await
+    }
+
+    pub(crate) async fn provider_account_capacity_revision(
+        &self,
+        provider: &str,
+        account_id: &ProviderAccountId,
+    ) -> StoreResult<i64> {
+        let provider = provider.to_owned();
+        let account_id = account_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.provider_account_capacity_revision(&provider, &account_id)
+        })
+        .await
+    }
+
+    pub(crate) async fn record_provider_account_capacity(
+        &self,
+        provider: &str,
+        account_id: &ProviderAccountId,
+        capacity: AccountCapacity,
+    ) -> StoreResult<()> {
+        let provider = provider.to_owned();
+        let account_id = account_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.record_provider_account_capacity(&provider, &account_id, &capacity)
+        })
+        .await
+    }
+
+    /// Commit a poll only while its starting capacity revision is still current.
+    pub(crate) async fn reconcile_provider_account_capacity(
+        &self,
+        account: &ProviderAccount,
+        revision: i64,
+        windows: &[AccountLimitWindow],
+    ) -> StoreResult<bool> {
+        let account = account.clone();
+        let windows = windows.to_vec();
+        run_sqlite(&self.sqlite, move |store| {
+            store.reconcile_provider_account_capacity(&account, revision, &windows)
         })
         .await
     }
@@ -838,24 +828,23 @@ impl Store {
         provider: Provider,
         agent_session: &AgentSessionId,
         account_id: &ProviderAccountId,
-        isolated: bool,
     ) -> StoreResult<()> {
         let agent_session = agent_session.clone();
         let account_id = account_id.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.pin_provider_session_route(provider, &agent_session, &account_id, isolated)
+            store.pin_provider_session_route(provider, &agent_session, &account_id)
         })
         .await
     }
 
-    pub async fn provider_session_isolated(
+    pub async fn provider_session_account(
         &self,
         provider: Provider,
         agent_session: &AgentSessionId,
-    ) -> StoreResult<Option<bool>> {
+    ) -> StoreResult<Option<ProviderAccountId>> {
         let agent_session = agent_session.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.provider_session_isolated(provider, &agent_session)
+            store.provider_session_account(provider, &agent_session)
         })
         .await
     }
@@ -884,28 +873,16 @@ impl Store {
         .await
     }
 
-    pub async fn provider_session_account(
-        &self,
-        provider: Provider,
-        agent_session: &AgentSessionId,
-    ) -> StoreResult<Option<ProviderAccountId>> {
-        let agent_session = agent_session.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.provider_session_account(provider, &agent_session)
-        })
-        .await
-    }
-
     pub async fn select_provider_account(
         &self,
         provider: Provider,
         candidates: &[ProviderAccountId],
-        agent_session: Option<&AgentSessionId>,
+        model: Option<&str>,
     ) -> StoreResult<Option<ProviderAccountSelection>> {
         let candidates = candidates.to_vec();
-        let agent_session = agent_session.cloned();
+        let model = model.map(str::to_owned);
         run_sqlite(&self.sqlite, move |store| {
-            store.select_provider_account(provider, &candidates, agent_session.as_ref())
+            store.select_provider_account(provider, &candidates, model.as_deref())
         })
         .await
     }
@@ -955,34 +932,6 @@ pub(crate) enum ProviderTokenReplacement {
     Missing,
 }
 
-/// A subscription token for machines that cannot refresh a login: Claude's
-/// `setup-token`, approved once and valid about a year.
-#[derive(Debug, Clone)]
-pub struct LongLivedToken {
-    pub token: secrecy::SecretString,
-    pub minted_at: i64,
-}
-
-impl LongLivedToken {
-    /// Anthropic honors a `setup-token` for a year. A token supplied by hand
-    /// is dated from when lf stored it, since lf cannot read its mint date.
-    const LIFETIME_SECONDS: i64 = 365 * 24 * 60 * 60;
-
-    pub fn expires_at(&self) -> i64 {
-        self.minted_at + Self::LIFETIME_SECONDS
-    }
-
-    pub fn expires_on(&self) -> time::Date {
-        time::OffsetDateTime::from_unix_timestamp(self.expires_at())
-            .expect("a year after a stored unix time is representable")
-            .date()
-    }
-
-    pub fn is_current(&self, now: i64) -> bool {
-        now < self.expires_at()
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderToken {
     pub provider: String,
@@ -996,7 +945,16 @@ pub struct ProviderToken {
 }
 
 #[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+    schemars::JsonSchema,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
 )]
 #[serde(transparent)]
 pub struct ProviderAccountId(String);
@@ -1097,7 +1055,9 @@ impl CredentialState {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    schemars::JsonSchema, Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum RoutingState {
     Automatic,
@@ -1129,18 +1089,34 @@ pub struct ProviderAccountSelection {
     pub account: ProviderAccount,
 }
 
+#[derive(Debug)]
+pub(crate) struct AccountCapacity {
+    pub utilization_percent: Option<u8>,
+    pub cooldown_until: Option<i64>,
+    pub cooldown_reason: Option<String>,
+    pub windows: Vec<AccountLimitWindow>,
+}
+
 /// One observed subscription rate-limit window: how much of the plan's
 /// `session`/`weekly`/`weekly:<model>` window an account has consumed.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct AccountLimitWindow {
     pub window: String,
     pub used_percent: u8,
     pub resets_at: Option<i64>,
     pub plan: Option<String>,
+    /// The one model this window limits; `None` limits every model.
+    pub model: Option<String>,
+    /// Set while the window holds launches it affects back.
+    pub limited_until: Option<i64>,
 }
 
 /// A stored window observation for one managed account.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct AccountLimitRow {
     pub provider: String,
     pub account_id: ProviderAccountId,
@@ -1151,6 +1127,10 @@ pub struct AccountLimitRow {
     pub observed_at: i64,
     /// 'stream' when a running harness reported it; 'poll' when asked for.
     pub source: String,
+    /// The one model this window limits; `None` limits every model.
+    pub model: Option<String>,
+    /// Set while the window holds launches it affects back.
+    pub limited_until: Option<i64>,
 }
 
 pub async fn open_store(cfg: &StorageConfig) -> StoreResult<Store> {
@@ -1201,61 +1181,16 @@ pub(crate) fn read_existing_registry() -> StoreResult<Option<Store>> {
     Ok(Some(Store { sqlite }))
 }
 
-/// Open the machine's shared registry store only if one already exists.
-/// Returns `None` if the registry is absent or incompatible; never creates it.
-pub async fn open_existing_store() -> Option<Store> {
-    let cfg = crate::store::storage_config_from_env().ok()?;
-    let StorageConfig::Sqlite { path } = &cfg;
+/// Open the machine's shared registry store only if one already exists;
+/// `None` when it is absent. A store this lf cannot open — one a newer build
+/// migrated past it, say — is an error naming the skew and its fix, never an
+/// empty registry: agents read "nothing here" as fact.
+pub async fn open_existing_store() -> StoreResult<Option<Store>> {
+    let path = default_db_path();
     if !path.exists() {
-        return None;
+        return Ok(None);
     }
-    match open_store(&cfg).await {
-        Ok(store) => Some(store),
-        Err(err) => {
-            tracing::warn!(?path, %err, "local store is incompatible; run lf doctor");
-            None
-        }
-    }
-}
-
-/// Why the shared registry could not be opened for a Task authority check.
-/// Unlike [`open_existing_store`], this preserves the *reason* so a Task PR
-/// entry point can refuse with an actionable error instead of silently
-/// degrading to generic PR behavior.
-#[derive(Debug, Clone)]
-pub enum RegistryUnavailable {
-    /// The configured registry path does not exist — no registry has been
-    /// created on this machine. For a worktree with no ambient Task id this is
-    /// the explicit "ordinary non-Task PR" case (no tasks exist); for a Task
-    /// entry point it is missing authority.
-    MissingFile { path: PathBuf },
-    /// The registry path is configured but cannot be resolved — bad env, the
-    /// development guard, or an IO failure before the file is even opened.
-    Unresolved { error: String },
-    /// The registry file exists but could not be opened: inaccessible, locked,
-    /// or schema-incompatible. Actionable via `lf doctor`.
-    Incompatible { path: PathBuf, error: String },
-}
-
-/// Open the shared registry for a Task authority check, surfacing the reason it
-/// could not be opened rather than collapsing every failure to `None`. Callers
-/// that must not degrade to generic PR behavior turn the [`RegistryUnavailable`]
-/// into an actionable authority error; callers that may treat a missing file as
-/// "no tasks on this machine" handle [`RegistryUnavailable::MissingFile`]
-/// explicitly.
-pub async fn open_registry_for_authority() -> Result<Store, RegistryUnavailable> {
-    let path = database_path_from_env().map_err(|error| RegistryUnavailable::Unresolved {
-        error: error.to_string(),
-    })?;
-    if !path.exists() {
-        return Err(RegistryUnavailable::MissingFile { path });
-    }
-    open_store(&StorageConfig::sqlite(path.clone()))
-        .await
-        .map_err(|error| RegistryUnavailable::Incompatible {
-            path,
-            error: error.to_string(),
-        })
+    open_store(&StorageConfig::sqlite(path)).await.map(Some)
 }
 
 pub type SharedStore = Arc<Store>;
@@ -1265,7 +1200,6 @@ mod tests {
         may_apply_migrations, read_nonterminal_task_worktrees, CredentialState, ProviderAccount,
         ProviderAccountId, RoutingState, StorageConfig,
     };
-    use crate::build_info::MigrationAuthority;
     use crate::child::ChildRef;
     use crate::durable::{Author, WorkRef};
     use crate::id::WaveId;
@@ -1280,7 +1214,6 @@ mod tests {
     use crate::work::wave::Wave;
     use std::env;
     use std::path::PathBuf;
-    use std::sync::Arc;
     use time::OffsetDateTime;
 
     #[test]
@@ -1347,29 +1280,50 @@ mod tests {
     }
 
     #[test]
+    fn reads_released_task_placement_without_migrating_the_machine() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("released.db");
+        let connection = rusqlite::Connection::open(&path).unwrap();
+        connection
+            .execute_batch(include_str!(
+                "../../tests/fixtures/migrations/task_placement_released.sql"
+            ))
+            .unwrap();
+        drop(connection);
+        let before = std::fs::read(&path).unwrap();
+        let mut ownership: Vec<_> = super::sqlite::read_task_worktree_ownership(&path)
+            .unwrap()
+            .into_iter()
+            .map(|owner| (owner.task, owner.completed, owner.unfinished))
+            .collect();
+        ownership.sort();
+        assert_eq!(
+            ownership,
+            vec![
+                ("local-done".into(), true, false),
+                ("remote-done".into(), false, false),
+                ("running".into(), false, true),
+                ("unknown".into(), false, true),
+            ]
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+    }
+
+    #[test]
     fn advancing_the_shared_frontier_is_exclusive_to_the_promotion_boundary() {
         use super::FrontierAdvance::{Authorized, Forbidden};
         let directory = tempfile::tempdir().unwrap();
         let home = directory.path();
         let production = home.join(".lf/loopflow.db");
-        let published = MigrationAuthority::Published;
-        let validation_only = MigrationAuthority::ValidationOnly;
 
-        // A validation-only build never writes migrations to the shared store,
-        // boundary or not.
-        assert!(!may_apply_migrations(&production, validation_only, home, Forbidden).unwrap());
-        assert!(!may_apply_migrations(&production, validation_only, home, Authorized).unwrap());
+        // An ordinary open neither initializes nor advances the shared store;
+        // only the promotion boundary owns both.
+        assert!(!may_apply_migrations(&production, home, Forbidden).unwrap());
+        assert!(may_apply_migrations(&production, home, Authorized).unwrap());
 
-        // A published build's ordinary open neither initializes nor advances the
-        // shared store; only the promotion boundary owns both.
-        assert!(!may_apply_migrations(&production, published, home, Forbidden).unwrap());
-        assert!(may_apply_migrations(&production, published, home, Authorized).unwrap());
-
-        // A private store may initialize regardless of published authority.
-        // Its schema must match exactly on subsequent opens.
+        // A private store migrates itself.
         let isolated = home.join(".lf-dev/branch/loopflow.db");
-        assert!(may_apply_migrations(&isolated, validation_only, home, Forbidden).unwrap());
-        assert!(may_apply_migrations(&isolated, published, home, Forbidden).unwrap());
+        assert!(may_apply_migrations(&isolated, home, Forbidden).unwrap());
     }
 
     fn make_wave(repo: &str) -> Wave {
@@ -1400,7 +1354,6 @@ mod tests {
             branch: format!("jack/task-{}", &id.as_str()[3..11]),
             base_commit: "deadbeef".to_string(),
             parent_pr_id: None,
-            agent: None,
             created_at: now,
             updated_at: now,
             rank: 0,
@@ -1645,6 +1598,7 @@ mod tests {
                         skill: crate::graph::Skill::named("review"),
                         id: None,
                         interactive: true,
+                        interactive_name: None,
                         returns: None,
                         sources: Vec::new(),
                     },
@@ -2035,63 +1989,6 @@ mod tests {
             assert!(store.task_owned(&task.id).await.unwrap());
             assert!(!directory.path().join("second").exists());
         }
-    }
-
-    #[tokio::test]
-    async fn cancelled_projection_retains_rotation_checkout_exclusion_through_commit() {
-        let (directory, store, wave) = planning_store().await;
-        let project = make_project(&wave);
-        store.create_project(&project).await.unwrap();
-        select_project(&store, &project);
-        let mut task = make_task(&store, &wave, &project);
-        task.worktree = Some(directory.path().join("checkout"));
-        store.seed_task(&task, &make_task_pr(&task)).await.unwrap();
-        let snapshot = task_planning_snapshot(&wave, &project, &task);
-        let checkouts = store
-            .lock_checkout_roots(vec![task.worktree.as_ref().unwrap().clone()])
-            .await
-            .unwrap();
-        let wave_lock = std::fs::File::create(directory.path().join("wave.lock")).unwrap();
-        fs2::FileExt::try_lock_exclusive(&wave_lock).unwrap();
-        let acquisition = Arc::new(super::PlanningLocks::new(wave_lock).with_checkouts(&checkouts));
-        drop(checkouts);
-        let entered = Arc::new(tokio::sync::Notify::new());
-        let (release, blocked) = std::sync::mpsc::channel();
-        let gate = (entered.clone(), Arc::new(std::sync::Mutex::new(blocked)));
-        let writer_store = super::Store::from_sqlite_for_test(store.sqlite.clone());
-        let writer = tokio::spawn(super::PLANNING_ACCEPTANCE_GATE.scope(gate, async move {
-            writer_store
-                .seed_inventory(snapshot, Some(acquisition))
-                .await
-        }));
-        tokio::time::timeout(std::time::Duration::from_secs(5), entered.notified())
-            .await
-            .unwrap();
-        writer.abort();
-        assert!(writer.await.unwrap_err().is_cancelled());
-        let excluded = store
-            .lock_checkout_roots(vec![task.worktree.as_ref().unwrap().clone()])
-            .await
-            .is_err();
-        release.send(()).unwrap();
-        let admitted = store
-            .lock_checkout_roots(vec![task.worktree.as_ref().unwrap().clone()])
-            .await
-            .unwrap();
-        assert!(
-            excluded,
-            "caller cancellation released checkout exclusion before commit"
-        );
-        assert_eq!(
-            store
-                .get_task(&task.id)
-                .await
-                .unwrap()
-                .unwrap()
-                .pm_snapshot_synced_at,
-            Some(1)
-        );
-        drop(admitted);
     }
 
     #[tokio::test]
@@ -2708,7 +2605,7 @@ mod tests {
             &[("commit -m work", Some("succeeded"))],
             None,
         );
-        assert!(store.chapter_task_evidence(&task.id).await.unwrap().begun);
+        assert!(store.task_begun(&task.id).await.unwrap());
         let graphs = store.sqlite.task_graphs(&task.id).unwrap();
         assert_eq!(graphs.len(), 1);
 
@@ -3588,13 +3485,6 @@ mod tests {
             "ordinary Wave updates cannot bypass relocation"
         );
         assert_eq!(loaded.name(), wave.name());
-
-        store.delete_wave(wave.id()).await.expect("delete wave");
-        assert!(store
-            .get_wave(wave.id())
-            .await
-            .expect("get deleted wave")
-            .is_none());
     }
 
     #[tokio::test]
@@ -3846,6 +3736,11 @@ mod tests {
 
         store.upsert_provider_account(&primary).await.unwrap();
         assert!(store.upsert_provider_account(&duplicate).await.is_err());
+        assert!(store
+            .get_provider_account("claude", &duplicate.account_id)
+            .await
+            .unwrap()
+            .is_none());
 
         duplicate.provider = "codex".to_string();
         store.upsert_provider_account(&duplicate).await.unwrap();
@@ -3895,10 +3790,6 @@ mod tests {
         {
             let conn = rusqlite::Connection::open(&db_path).expect("open sqlite db");
             super::migrations::apply_sqlite(&conn).expect("apply migrations");
-            // The open below expects this build's schema, drafts included.
-            for draft in crate::build_info::migration_draft_manifest() {
-                conn.execute_batch(draft.sql).expect("apply draft");
-            }
             conn.execute(
                 "INSERT INTO provider_tokens
                  (provider, access_token, refresh_token, expires_at, login, updated_at, credential_type, encrypted)

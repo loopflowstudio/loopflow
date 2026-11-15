@@ -29,7 +29,7 @@ def test_dense_fixture_keeps_source_and_history_but_drops_external_account_route
         """)
     before = source.read_bytes()
     home = tmp_path / "fixture"
-    receipt = prepare(source, home, False, receipts=2)
+    receipt = prepare(source, home, receipts=2)
     assert source.read_bytes() == before
     assert receipt["managed_account_routes_removed"]
     identities = [

@@ -73,10 +73,34 @@ fn names(step: &ConcreteStep) -> Vec<&str> {
         ConcreteStep::Command(command) => (&command.sources, command.item.command.as_str(), None),
         ConcreteStep::Xor(branch) => (&branch.sources, branch.router.name.as_str(), None),
     };
-    id.into_iter()
+    let interactive = match step {
+        ConcreteStep::Skill(skill) => skill.interactive_name.as_deref(),
+        _ => None,
+    };
+    interactive
+        .into_iter()
+        .chain(id)
         .chain(std::iter::once(own))
         .chain(sources.get(1).map(String::as_str))
         .collect()
+}
+
+/// The name a Task waits at before a step that merges: `lf land` or `lf pr
+/// arm` however the graph spells it, or the `pr-land` skill.
+pub(crate) fn landing_name(step: &ConcreteStep) -> Option<String> {
+    match step {
+        ConcreteStep::Command(command) => {
+            use clap::Parser;
+            crate::lf::navigation::normalize_args(command.item.argv())
+                .and_then(crate::lf::Cli::try_parse_from)
+                .is_ok_and(|cli| cli.merges())
+                .then(|| command.item.display_name())
+        }
+        ConcreteStep::Skill(skill) if skill.skill.name == "pr-land" => {
+            Some(names(step)[0].to_owned())
+        }
+        _ => None,
+    }
 }
 
 /// Visit every place in order, descending into XOR paths by name.
@@ -143,7 +167,9 @@ impl CapturedGraph {
         }
         let mut found = None;
         walk(&self.steps, &[], &mut |place, step| {
-            if found.is_none() && names(step).contains(&name) {
+            // A Graph records an operation under its display name.
+            let recorded = matches!(step, ConcreteStep::Command(command) if command.item.display_name() == name);
+            if found.is_none() && (recorded || names(step).contains(&name)) {
                 found = Some(place);
             }
         });
@@ -156,6 +182,17 @@ impl CapturedGraph {
             .into_iter()
             .find(|(_, skill)| skill.interactive_step() == Some(step))
             .map(|(place, _)| place)
+    }
+
+    /// The step that merges named `step`, where a Task someone stopped shipping waits.
+    pub fn landing_step(&self, step: &str) -> Option<Place> {
+        let mut found = None;
+        walk(&self.steps, &[], &mut |place, concrete| {
+            if found.is_none() && landing_name(concrete).as_deref() == Some(step) {
+                found = Some(place);
+            }
+        });
+        found
     }
 
     /// The place after `place` in its body, or in the body that XOR belongs
@@ -247,9 +284,18 @@ impl CapturedGraph {
         }
     }
 
-    /// What a person calls the step at `place`.
-    pub fn step_name(&self, place: &Place) -> &str {
-        names(self.step_at(place))[0]
+    /// What a person calls the step at `place`; an operation by the display
+    /// name its Graph records it under.
+    pub fn step_name(&self, place: &Place) -> String {
+        match self.step_at(place) {
+            ConcreteStep::Command(command) => command.item.display_name(),
+            step => names(step)[0].to_owned(),
+        }
+    }
+
+    /// What a person calls the step `cursor` stands at, if the graph has it.
+    pub fn step_name_of(&self, cursor: &ExecutionCursor) -> Option<String> {
+        self.place_of(cursor).map(|place| self.step_name(&place))
     }
 
     /// Steps a person would name for `--from`, for messages.
@@ -284,7 +330,7 @@ impl CapturedGraph {
 }
 
 /// A step where a person takes part.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct InteractiveStep {
     pub name: String,
     pub skill: String,
@@ -293,24 +339,26 @@ pub struct InteractiveStep {
 }
 
 /// One Task's Graph as `lf task status --json` carries it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TaskGraph {
     pub name: String,
     pub interactive_steps: Vec<InteractiveStep>,
     pub position: TaskGraphPosition,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TaskGraphPosition {
     /// The Task stands at `start`, at `end`, or at this interactive step,
     /// waiting on a person in the Task conversation.
     At { step: String },
-    /// `lf task run` (`lf_process_id`) carries the Task on from `step`.
-    /// `running` is read from that Process: a run that ended without
-    /// arriving stopped, and the next `lf task run` starts it again.
+    /// `lf task run` (`lf_process_id`) carries the Task on from `step`, and
+    /// runs `at`. `running` is read from that Process: a run that ended
+    /// without arriving stopped, and the next `lf task run` starts it again
+    /// at `at`; the steps before it stay done.
     Run {
         step: String,
+        at: String,
         lf_process_id: String,
         running: bool,
     },
@@ -339,8 +387,8 @@ impl TaskGraph {
         let name = &self.name;
         match &self.position {
             TaskGraphPosition::At { step } => format!("Graph {name}: at {step}"),
-            TaskGraphPosition::Run { step, running, .. } => format!(
-                "Graph {name}: {} from {step}",
+            TaskGraphPosition::Run { at, running, .. } => format!(
+                "Graph {name}: {} at {at}",
                 if *running { "running" } else { "stopped" }
             ),
         }
@@ -353,8 +401,8 @@ impl TaskGraph {
             (TaskGraphPosition::Run { running: true, .. }, _) => {
                 return format!("{summary}. A person takes part again when that run stops.");
             }
-            (TaskGraphPosition::Run { .. }, _) => format!(
-                "{summary}. `lf task run {issue}` starts that run again; read its log in `lf task status {issue}` first."
+            (TaskGraphPosition::Run { at, .. }, _) => format!(
+                "{summary}. `lf task run {issue}` starts that run again at {at}; read its log in `lf task status {issue}` first."
             ),
             (_, Some(step)) => format!(
                 "{summary}. The Task conversation works this step with the {} skill; when the person is done, `lf task run {issue}` continues after it.",
@@ -368,7 +416,7 @@ impl TaskGraph {
             }
         }];
         lines.push(format!(
-            "`lf task run {issue} --from <step>` starts anywhere, to go back or skip ahead; `lf -b task run {issue}` runs straight through, interactive steps headless; `lf graph <graph>` in the Task worktree runs a Graph without moving the Task."
+            "`lf task run {issue} --from <step>` starts anywhere, to go back or skip ahead; `lf -b task run {issue}` and `lf ship {issue}` run headless to `end` and approve Auto-Ship, which may merge the PR, as does `lf task run {issue}` with no interactive step left ahead, so run them only when the person asks to ship or land; `lf graph <graph>` in the Task worktree runs a Graph without moving the Task."
         ));
         lines.join("\n")
     }
@@ -397,6 +445,27 @@ mod tests {
         let path = repo.join(path);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, content).unwrap();
+    }
+
+    #[test]
+    fn a_step_that_merges_is_a_landing_step_however_it_is_spelled() {
+        let repo = tempfile::tempdir().unwrap();
+        write(
+            repo.path(),
+            ".lf/graphs/landings.yaml",
+            "- cmd: pr publish\n- cmd: land --wait-and-fix\n- cmd: task pr land\n- cmd: pr arm\n",
+        );
+        let graph = CapturedGraph::load("landings", repo.path())
+            .unwrap()
+            .unwrap();
+        assert!(graph.landing_step("pr publish").is_none());
+        for step in ["land --wait-and-fix", "pr land", "pr arm"] {
+            assert!(graph.landing_step(step).is_some(), "{step}");
+        }
+        let deliver = CapturedGraph::load("deliver", repo.path())
+            .unwrap()
+            .unwrap();
+        assert!(deliver.landing_step("land --wait-and-fix").is_some());
     }
 
     #[test]
@@ -430,6 +499,14 @@ mod tests {
         // A composed graph's name finds its first step.
         let pursue = graph.find("pursue").unwrap();
         assert_eq!(pursue.cursor().index, next.cursor().index);
+        assert_eq!(
+            graph.find("kickoff").unwrap().cursor().index,
+            next.cursor().index
+        );
+        assert_eq!(
+            graph.find("write-docs").unwrap().cursor().index,
+            next.cursor().index + 1
+        );
         assert_eq!(graph.find("start").unwrap().cursor().index, 0);
         assert!(graph.find("no-such-step").is_none());
         // After the last interactive step nothing remains.
@@ -478,6 +555,7 @@ mod tests {
         assert!(guidance.contains("--from <step>"));
         let running = at(TaskGraphPosition::Run {
             step: "explore".into(),
+            at: "implement".into(),
             lf_process_id: "process".into(),
             running: true,
         });

@@ -1,0 +1,50 @@
+--- a/src/terminal/formatter.zig
++++ b/src/terminal/formatter.zig
+@@ -365,10 +365,21 @@
+ 
+                 .vt => {
+                     for (self.terminal.colors.palette.current, 0..) |rgb, i| {
++                        if (!self.terminal.colors.palette.mask.isSet(i)) continue;
+                         try writer.print(
+                             "\x1b]4;{d};rgb:{x:0>2}/{x:0>2}/{x:0>2}\x1b\\",
+                             .{ i, rgb.r, rgb.g, rgb.b },
+                         );
++                    }
++                    // Preserve program colors without exporting the owner's
++                    // default theme, which need not match the viewer's.
++                    inline for (.{ "foreground", "background", "cursor" }, 10..) |field, code| {
++                        if (@field(self.terminal.colors, field).override) |rgb| {
++                            try writer.print(
++                                "\x1b]{d};rgb:{x:0>2}/{x:0>2}/{x:0>2}\x1b\\",
++                                .{ code, rgb.r, rgb.g, rgb.b },
++                            );
++                        }
+                     }
+                 },
+ 
+@@ -4841,6 +4852,9 @@
+     s.nextSlice("\x1b]4;0;rgb:12/34/56\x1b\\");
+     s.nextSlice("\x1b]4;1;rgb:ab/cd/ef\x1b\\");
+     s.nextSlice("\x1b]4;255;rgb:ff/00/ff\x1b\\");
++    s.nextSlice("\x1b]10;rgb:12/34/56\x1b\\\x1b]11;rgb:65/43/21\x1b\\\x1b]12;rgb:ab/cd/ef\x1b\\");
++    // An override equal to the owner's default is still explicit.
++    t.colors.palette.set(0, color.default[0]);
+     s.nextSlice("test");
+ 
+     const formatter: TerminalFormatter = .init(&t, .vt);
+@@ -4858,7 +4872,15 @@
+     var s2 = t2.vtStream();
+     defer s2.deinit();
+ 
++    // A viewer's configured theme differs from the headless owner.
++    var theme = color.default;
++    theme[2] = .{ .r = 0x23, .g = 0x45, .b = 0x67 };
++    try t2.colors.palette.changeDefault(alloc, theme);
+     s2.nextSlice(output);
++    try testing.expectEqual(theme[2], t2.colors.palette.current[2]);
++    try testing.expectEqual(t.colors.foreground.get(), t2.colors.foreground.get());
++    try testing.expectEqual(t.colors.background.get(), t2.colors.background.get());
++    try testing.expectEqual(t.colors.cursor.get(), t2.colors.cursor.get());
+ 
+     // Verify the palettes match
+     try testing.expectEqual(t.colors.palette.current[0], t2.colors.palette.current[0]);

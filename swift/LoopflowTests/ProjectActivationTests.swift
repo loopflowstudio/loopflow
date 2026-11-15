@@ -7,6 +7,8 @@ import ViewInspector
 @Suite("Project activation")
 @MainActor
 struct ProjectActivationTests {
+    private let waveAdded = String(decoding: try! loadFixtureData("wave_added.json"), as: UTF8.self)
+
     @Test("activation failure belongs to its Wave and retry preserves planning")
     func retry() async throws {
         let path = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json")
@@ -14,7 +16,7 @@ struct ProjectActivationTests {
         let result = ActivationResult()
         let model = WorkModel(query: RegistryQuery { _, _ in
             if await result.offline { throw RegistryQueryError("offline") }
-            return "{}"
+            return waveAdded  // `lf wave create --json`
         })
         model.applyFixture(roadmap: .available(roadmap), waves: .available([]),
             workActivity: .loading, repos: [])
@@ -38,7 +40,7 @@ struct ProjectActivationTests {
                 await response.wait()
                 throw RegistryQueryError("a failed")
             }
-            return "{}"
+            return waveAdded  // `lf wave create --json`
         })
         let old = model.activateProject(id: "a", name: "a", repo: "/repo")
         await response.started()
@@ -105,16 +107,6 @@ struct ProjectActivationTests {
         #expect((try? view.inspect().find(text: "Preparing Project…")) == nil)
     }
 
-    @Test("rotation report retains destinations and unresolved Task reasons")
-    func rotationPreview() async throws {
-        let query = RegistryQuery(runWithInput: { _, _, _ in
-            #"{"name":"October","waves":[{"wave":"a","successor_id":"next","predecessor":{"id":"before","name":"Summer work"},"successor":null,"tasks":[{"task":{"id":"issue","identifier":"A-1","title":"Keep work"},"disposition":"unresolved","reason":"Provider unavailable"}]}]}"#
-        }, run: { _, _ in throw RegistryQueryError("unexpected read") })
-        let result = try await query.realignProjects(name: "October", plan: "{}", preview: true, cwd: "/repo")
-        #expect(result.waves.first?.predecessor?.name == "Summer work")
-        #expect(result.waves.first?.successor_id == "next")
-        #expect(result.waves.first?.tasks.first?.reason == "Provider unavailable")
-    }
 }
 
 private actor DelayedPreparation {

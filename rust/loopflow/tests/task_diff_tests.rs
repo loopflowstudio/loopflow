@@ -1,42 +1,98 @@
 use crate::support;
 
 use std::fs;
-use std::io::Write;
-use std::path::Path;
+use std::os::fd::FromRawFd;
 use std::process::{Command, Stdio};
 
+use crate::isolated_lf::isolated_read as read;
 use loopflow_test_support::TestRepo;
 use serde_json::Value;
 use support::{register_task_with_pr, EnvGuard};
 
-fn read(repo: &Path, home: &Path, args: &[&str], input: Option<&str>) -> Value {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .env_clear()
-        .env("HOME", home)
-        .env("LF_HOME", home)
-        .env("PATH", "/usr/bin:/bin")
-        .current_dir(repo)
-        .args(args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    if let Some(input) = input {
-        child
-            .stdin
-            .take()
+#[test]
+fn diff_displays_the_task_comparison_through_git_tools_or_a_pipe() {
+    let home = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    let repo = TestRepo::new();
+    repo.create_file("edit.txt", "before\n");
+    repo.stage_all();
+    repo.commit("Comparison base");
+    let base = repo.head_sha();
+    repo.create_branch("diff-viewer");
+    register_task_with_pr(home.path(), repo.path(), "diff-viewer", &base);
+    repo.create_file("edit.txt", "committed\n");
+    repo.stage_all();
+    repo.commit("Comparison head");
+    let head = repo.head_sha();
+    repo.create_file("edit.txt", "working\n");
+    for (key, value) in [
+        ("diff.tool", "fixture"),
+        ("difftool.prompt", "false"),
+        ("difftool.fixture.cmd", "pwd -P; cat \"$LOCAL\" \"$REMOTE\""),
+        ("core.pager", "exit 99"),
+    ] {
+        assert!(Command::new("git")
+            .current_dir(repo.path())
+            .args(["config", key, value])
+            .status()
             .unwrap()
-            .write_all(input.as_bytes())
-            .unwrap();
+            .success());
     }
-    let output = child.wait_with_output().unwrap();
-    assert!(
-        output.status.success(),
-        "{args:?}: {}",
-        String::from_utf8_lossy(&output.stderr)
+    let patch = read(repo.path(), home.path(), &["diff", "INF-123"], None);
+    assert!(patch.starts_with("diff --git"), "{patch}");
+    assert!(patch.contains("-before\n+working"), "{patch}");
+    let view = |extra: &[&str]| {
+        let mut args = vec!["diff", "INF-123", "edit.txt", "--difftool"];
+        args.extend_from_slice(extra);
+        read(repo.path(), home.path(), &args, None)
+    };
+    let cwd = repo.path().canonicalize().unwrap();
+    assert_eq!(view(&[]), format!("{}\nbefore\nworking\n", cwd.display()));
+    assert_eq!(
+        view(&["--head", &head]),
+        format!("{}\nbefore\ncommitted\n", cwd.display())
     );
-    serde_json::from_slice(&output.stdout).unwrap()
+
+    assert!(Command::new("git")
+        .current_dir(repo.path())
+        .args(["config", "core.pager", "cat > .git/paged.patch"])
+        .status()
+        .unwrap()
+        .success());
+    let mut master = -1;
+    let mut slave = -1;
+    // SAFETY: valid output pointers; null selects default terminal settings.
+    assert_eq!(
+        unsafe {
+            libc::openpty(
+                &mut master,
+                &mut slave,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        },
+        0
+    );
+    // SAFETY: openpty returned two fresh, independently owned descriptors.
+    let (_master, slave) = unsafe { (fs::File::from_raw_fd(master), fs::File::from_raw_fd(slave)) };
+    let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .env_clear()
+        .env("HOME", home.path())
+        .env("LF_HOME", home.path())
+        .env("PATH", "/usr/bin:/bin")
+        .current_dir(repo.path())
+        .args(["diff", "INF-123"])
+        .stdin(Stdio::null())
+        .stdout(slave)
+        .stderr(Stdio::piped())
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{:?}", output);
+    assert_eq!(
+        fs::read_to_string(repo.path().join(".git/paged.patch")).unwrap(),
+        patch
+    );
 }
 
 #[test]
@@ -62,7 +118,9 @@ fn diff_files_preserves_comparison_identity_and_draft_editing() {
     repo.stage_all();
     repo.create_file("edit.txt", "working\n");
     repo.create_file("untracked.txt", "untracked\n");
-    let query = |args: &[&str], input| read(repo.path(), home.path(), args, input);
+    let query = |args: &[&str], input| -> Value {
+        serde_json::from_str(&read(repo.path(), home.path(), args, input)).unwrap()
+    };
 
     let files = query(&["task", "diff", "INF-123", "--files", "--json"], None);
     assert_eq!(files["task_id"], task.task.id.as_str());

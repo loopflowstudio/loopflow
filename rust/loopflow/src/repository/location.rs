@@ -83,7 +83,7 @@ pub fn reconcile(
                             return Err(anyhow!("repository {id} still locates the Git directory at {source}; a copy cannot replace its retained Work"));
                         }
                         if source_locator.is_none() && relocate.is_none() {
-                            return Err(anyhow!("the old address {source} is occupied without a Git locator; for a verified move, run `lf repository --relocate {id}` from its new location"));
+                            return Err(anyhow!("the old address {source} is occupied without a Git locator; for a verified move, run `lf config repo --relocate {id}` from its new location"));
                         }
                     }
                 }
@@ -116,7 +116,7 @@ pub fn reconcile(
             ));
         } else {
             if let Some(existing) = store.repository_id(&destination)? {
-                return Err(anyhow!("Git locator {id} conflicts with retained repository {existing}; use `lf repository --bind {existing}` only after checking this checkout"));
+                return Err(anyhow!("Git locator {id} conflicts with retained repository {existing}; use `lf config repo --bind {existing}` only after checking this checkout"));
             }
             store.bind_repository(&destination, id)?;
         }
@@ -137,11 +137,6 @@ pub fn reconcile(
 /// Ordinary reads reconnect enrolled directories and enroll retained identities
 /// witnessed by linked Task checkouts. They never invent an identity.
 pub fn reconnect_current() -> Result<()> {
-    // A disposable registry observes copied addresses without claiming the
-    // source checkout or rewriting its retained history.
-    if crate::data_clone::is_selected() {
-        return Ok(());
-    }
     // Most commands are unrelated to relocation. Inspect only the enclosing
     // Git locator before adding any Git subprocesses or database reads.
     let cwd = std::env::current_dir()?;

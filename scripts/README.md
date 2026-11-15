@@ -26,6 +26,10 @@ Escalate from a focused behavior to affected suites when crossing a component
 boundary. CI and release own the full matrix. Run `scripts/test.py --all` only
 to reproduce a matrix failure or when release guidance requires it.
 
+## Scheduled disk cleanup
+
+Reclaim disposable coding output with [opt-in hourly cleanup](disk-cleanup.md).
+
 ## Changed-aware runner
 
 ```bash
@@ -41,34 +45,28 @@ uses a prior pass only when tracked and untracked file content, the worktree,
 and the selected command plan are identical. Full and optional hosted runs never
 reuse evidence.
 
-The Rust phase prepares one exact-tree fixture CLI after draft materialization,
-then supplies it through `LOOPFLOW_TEST_LF`. It builds the CLI with test targets
-so nextest and Cargo tests reuse that dependency graph. Preparation is offline;
-Cargo updates the disposable lockfile when materialization advances the package
-version. Development provenance and validation-only migration authority are
-explicit, including when the calling shell supplied release overrides.
-
-Verification uses `target/materialized-tests/`, separate from source builds and
-app-control output. `CARGO_TARGET_DIR` or `--target-dir` selects its parent;
-relative paths resolve against the originating checkout. Serialize materialized
-runs in a checkout, since they reuse that verification target. Generic wrapper
-commands prepare no CLI unless `--prepare-cli` is supplied:
-
-```sh
-uv run python scripts/materialize_rust_tests.py --prepare-cli -- cargo nextest run -p loopflow -E 'test(local_planning::public_local_task_places_and_runs_without_a_planning_provider)' --no-tests fail
-```
+The Rust phase builds the fixture CLI once and supplies it through
+`LOOPFLOW_TEST_LF`, so test processes run no Cargo build of their own.
 
 On a pull request, CI runs nextest with the `pr` profile (`.config/nextest.toml`):
-a test that runs past 2 minutes fails on that PR and names itself. The merge
-queue and main use `default`, which only reports slow tests. Tests that were
-already slower are listed there with their own allowance; make one fast, then
-delete its entry. Reproduce locally with `cargo nextest run --profile pr`.
+a test that runs past 2 minutes fails on that PR and names itself. Everywhere
+else, local runs included, `default` kills a test at 5 minutes and stops the
+run at 20. Reproduce a PR failure locally with `cargo nextest run --profile pr`.
 
-Fixtures still create their own disposable Homes. Source and materialized schema
-frontiers stay separate; a version/schema mismatch is invalid verification
-evidence, never permission to alter an installed database.
+Fixtures still create their own disposable Homes; a test never alters an
+installed database.
 
-Runner/materializer changes also need the command-plan checks in
+`uv run python scripts/test_server_registration.py` proves installation of the macOS bundled
+client API server headlessly. Registration and replacement belong to installation,
+separate from client admission and Machine
+destination routing. It signs a temporary helper, uses the production
+SMAppService registrar through a LaunchServices-registered app, checks idempotent
+setup, replacement and legacy-label migration, then unregisters its unique job and app entry. Bundle
+replacement runs as the app itself, respecting macOS App Management. It does not open Desktop or an existing Machine database. The
+composed installed executable replacement with a held draft and live Graph is documented in
+[Rust tests](../rust/loopflow/tests/README.md#client-api-server).
+
+Runner changes also need the command-plan checks in
 `python/tests/test_release_automation.py` during focused verification.
 
 Slow suites (`loopflow`, `e2e`) stay off in changed-mode even when
@@ -126,7 +124,9 @@ Cargo can replace a held profile lock during clean; native locks do not provide
 universal exclusion. Detected activity always retains output.
 
 Recovery also prunes old disposable gate output and entries accepted by
-`uv cache prune`. Cleanup runs before verification, not on an independent timer.
+`uv cache prune`. Gate recovery retains seven days of artifact content and
+preserves saved outcome records and nested `.cleanup-keep` markers. Verification
+recovery runs before builds; the machine cleaner has its own launchd schedule.
 A busy uv cache is reported immediately
 without waiting for its reader locks, including the parent `uv run`. Other cleanup
 and above-reserve verification continue. To reclaim uv entries, run
@@ -179,7 +179,9 @@ a warning and never replaces the underlying test result. Schema-3 records also
 carry child CPU, minimum observed free disk, build bytes, and source-attributed
 growth. A product assertion remains a product failure; a stopped phase under
 sustained macOS `syspolicyd`/`trustd`/`amfid`/`taskgated` pressure is reported as
-host-security pressure with the product result explicitly unproven.
+host-security pressure with the product result explicitly unproven. Remaining
+suites stay unstarted and recorded as `not_run`; rerun after the pressure clears.
+An ordinary product failure still allows independent suites to run.
 
 Read the same gate evidence through the daily operator graph:
 
@@ -203,7 +205,7 @@ Path → suite mapping:
 | Changed | Suite | Runs |
 |---------|-------|------|
 | any changed path | architecture | `uv run python scripts/check_architecture.py` |
-| `rust/`, `Cargo.toml/lock` | rust | `cargo fmt`, `cargo clippy --all-targets`, then draft materialization in a disposable exact-tree worktree and `cargo nextest run --all` (falls back to `cargo test --all`) |
+| `rust/`, `Cargo.toml/lock` | rust | `cargo fmt`, `cargo clippy --all-targets`, then `cargo nextest run --all` (falls back to `cargo test --all`) |
 | `python/`, `scripts/*.py`, top-level `*.py`, `pyproject.toml` | python | `uv run pytest python/tests/` (scoped to changed `test_*.py` when no source moved) |
 | `website/`, `docs/` | website | `cd website && uv run python dev.py test` |
 | `swift/` | swift | `scripts/test_desktop.sh -Xswiftc -gnone`, then the multiplatform boundary check |
@@ -226,6 +228,7 @@ stderr bytes, subprocess diagnostics and resume identity without a provider inst
 
 ```bash
 uv sync
+cargo build -p loopflow --bin lf  # CLI checkout-refresh proof, before network isolation
 uv run --no-sync python scripts/test_network.py uv run --no-sync pytest python/tests/
 ```
 
@@ -297,7 +300,9 @@ uv run pytest python/tests/test_loopflow_skill_alignment.py
 
 ## Third-party inventory
 
-After changing `Cargo.lock`, including a release version bump, run
+After changing `Cargo.lock` (including a release version bump),
+`swift/Package.swift`, `swift/Package.resolved`, or the bundled resources tracked
+by `third_party.py`, run
 `uv run python scripts/third_party.py refresh` and
 `uv run pytest python/tests/test_third_party.py`. Release preparation refreshes
 the inventory after bumping versions. Gate must check the resulting release

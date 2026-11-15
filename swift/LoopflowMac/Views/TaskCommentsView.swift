@@ -3,7 +3,7 @@ import Loopflow
 import SwiftUI
 
 /// Collapsed Comments below a Task's Description. The count and thread arrive
-/// with the selected Task's `lf task status` watch; a failed reading keeps any
+/// with the selected Task's `lf task status` subscription; a failed reading keeps any
 /// earlier thread visible and says it may be out of date. Comments are never derived
 /// from the Description.
 struct TaskCommentsView: View {
@@ -121,6 +121,8 @@ struct TaskCommentsView: View {
         switch author {
         case .person(let name): name ?? "Unnamed person"
         case .integration: "Integration"
+        case .session(let id, let requester):
+            requester.map { "Session \(id) for \($0)" } ?? "Session \(id)"
         }
     }
 

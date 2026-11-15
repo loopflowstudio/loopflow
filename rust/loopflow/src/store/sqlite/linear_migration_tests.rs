@@ -1,4 +1,3 @@
-use crate::build_info::MigrationAuthority;
 use crate::id::WaveId;
 use crate::store::sqlite::SqliteStore;
 use crate::store::{FrontierAdvance, PlanningState, Store};
@@ -30,12 +29,12 @@ async fn migration_preserves_planning_identity_and_removes_snapshot_storage() {
         .unwrap();
         conn.execute("INSERT INTO pm_snapshots(wave_id,provider,initiative,synced_at,payload) VALUES(?1,'linear','initiative',42,?2)",params![wave,snapshot.to_string()]).unwrap();
     }
-    // Upgrades belong to the published installation, not an experiment.
+    // Upgrades of the shared store belong to the install switch.
     let sqlite = SqliteStore::open_with(
         &database,
-        MigrationAuthority::Published,
         directory.path(),
         FrontierAdvance::Authorized,
+        crate::store::sqlite::SQLITE_WRITE_BUSY_TIMEOUT,
     )
     .unwrap();
     sqlite.apply_migration_for_test("planning_peers").unwrap();

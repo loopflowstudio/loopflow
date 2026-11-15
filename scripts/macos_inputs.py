@@ -1,9 +1,9 @@
 """Decide which macOS CI jobs a change can reach.
 
-Rust reaches the Swift app only through the `lf --json` wire, and Linux tests
-hold Rust and `tests/fixtures/dto/` in lockstep, so a wire change edits a
-fixture. Each macOS job therefore runs only for its own inputs. CI changes,
-this classifier, an unknown diff or a failed classifier run all of them.
+Rust reaches the Swift app through the server protocol and `lf --json`, held in
+lockstep by `tests/fixtures/dto/`. Boundary changes edit the server or its shared
+Read/Write types. CI changes, this classifier, an unknown diff or a failed
+classifier run all macOS jobs.
 
     macos_inputs.py BASE_SHA [HEAD]   # writes one true|false output per job
 """
@@ -22,8 +22,32 @@ JOBS = (SWIFT_TEST, MACOS_PROCESS_TEST, LOOPFLOW_UI_TEST)
 
 _EVERY_JOB = (".github/workflows/", "scripts/macos_inputs.py")
 # The app sources, project.yml and GhosttyKit patches all live under swift/.
-_UI_INPUTS = ("swift/", "scripts/build_xcode_ci.py", "scripts/swift_cache.py")
+_DESKTOP_BUILD_INPUTS = (
+    "scripts/loopflow-dev.py",
+    "rust/loopflow/build.rs",
+    "rust/loopflow/ghostty-vt",
+)
+IOS_INPUTS = (
+    "swift/Loopflow/",
+    "swift/LoopflowiOS",
+    "swift/ios.yml",
+    "swift/project.yml",
+    "scripts/test_ios.py",
+    "tests/fixtures/dto/",
+    "rust/loopflow/src/server/",
+    "rust/loopflow/src/transport/wire.rs",
+    "rust/loopflow/src/lf/commands/read.rs",
+    "rust/loopflow/src/lf/commands/write.rs",
+)
+_UI_INPUTS = (
+    "swift/",
+    "scripts/build_xcode_ci.py",
+    "scripts/swift_cache.py",
+    *_DESKTOP_BUILD_INPUTS,
+    *IOS_INPUTS,
+)
 _SWIFT_TEST_INPUTS = (
+    *_DESKTOP_BUILD_INPUTS,
     "swift/",
     "tests/fixtures/dto/",
     "scripts/swift_",
@@ -32,16 +56,18 @@ _SWIFT_TEST_INPUTS = (
     "scripts/desktop_performance.py",
     "scripts/desktop-",
     "scripts/check_swift_multiplatform_boundaries.py",
+    "scripts/check_desktop_launch.py",
+    "rust/loopflow/src/server/",
+    "rust/loopflow/src/lf/commands/read.rs",
+    "rust/loopflow/src/lf/commands/write.rs",
     # swift-test runs this check, and pytest loads any conftest beside it.
     "python/tests/test_desktop_performance.py",
     "python/tests/conftest.py",
 )
 _PROCESS_INPUTS = (
-    "rust/loopflow/src/data_clone.rs",
     "rust/loopflow/src/store/copy.rs",
     "rust/loopflow/src/journal/os_process.rs",
     "rust/loopflow/src/lf/commands/install",
-    "rust/loopflow/tests/data_clones.rs",
 )
 _MACOS_CFG = re.compile(r'target_os\s*=\s*"macos"')
 

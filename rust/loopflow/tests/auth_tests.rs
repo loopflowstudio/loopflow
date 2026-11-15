@@ -78,8 +78,8 @@ fn account_status_preserves_local_evidence_without_provider_executables() {
         .unwrap();
     assert_eq!(
         (commands, completed),
-        (3, 3),
-        "each actual auth process remains a process"
+        (1, 1),
+        "the verifying refresh is a process; cached reads record none"
     );
     let fixture = loopflow_test_support::TestRepo::new();
     let repository = child()
@@ -142,7 +142,7 @@ fn headless_connect_without_a_saved_profile_names_recovery_without_registering()
         ))
         .unwrap();
 
-    for target in [vec!["codex", "fresh@example.com"], vec!["linear"]] {
+    for target in [vec!["codex=fresh@example.com"], vec!["linear"]] {
         let output = Command::new(env!("CARGO_BIN_EXE_lf"))
             .args(["account", "connect"])
             .args(&target)
@@ -257,12 +257,16 @@ esac
                     used_percent: 34,
                     resets_at: None,
                     plan: None,
+                    model: None,
+                    limited_until: None,
                 },
                 loopflow::store::AccountLimitWindow {
                     window: "session".into(),
                     used_percent: 100,
                     resets_at: Some(1),
                     plan: None,
+                    model: None,
+                    limited_until: None,
                 },
             ],
             "stream",
@@ -338,7 +342,7 @@ esac
     assert_eq!(revoked_row["verification"], "rejected");
     assert_eq!(
         revoked_row["recovery"],
-        "lf account connect codex revoked@example.com"
+        "lf account connect codex=revoked@example.com"
     );
     let active_row = verified_rows
         .iter()
@@ -366,7 +370,7 @@ esac
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("auth: active (verified)"));
     assert!(stdout.contains("auth: needs login (identity or credential rejected)"));
-    assert!(stdout.contains("recover: lf account connect codex revoked@example.com"));
+    assert!(stdout.contains("recover: lf account connect codex=revoked@example.com"));
     let revoked_id = ProviderAccountId::parse("revoked").expect("revoked id");
     let revoked = runtime
         .block_on(store.get_provider_account("codex", &revoked_id))
@@ -410,7 +414,7 @@ esac
     assert!(cached_text.contains("session: 12%"));
     assert!(cached_text.contains("cached"));
     assert!(
-        cached_text.contains("recover: lf account connect codex revoked@example.com"),
+        cached_text.contains("recover: lf account connect codex=revoked@example.com"),
         "cached rejection must retain its recovery command: {cached_text}"
     );
     assert_eq!(
@@ -484,7 +488,7 @@ esac
     assert!(missing_text.contains("auth: cached missing"));
     assert!(!missing_text.contains("cached connected"));
     assert!(missing_text.contains("session: 12%"));
-    assert!(missing_text.contains("recover: lf account connect codex active@example.com"));
+    assert!(missing_text.contains("recover: lf account connect codex=active@example.com"));
     assert_eq!(
         runtime
             .block_on(store.provider_account_limits(None))
@@ -544,8 +548,8 @@ esac
     assert!(unknown.status.success());
     let unknown_text = String::from_utf8_lossy(&unknown.stdout);
     assert!(unknown_text.contains("active (verified)"));
-    assert!(!unknown_text.contains("recover: lf account connect codex active@example.com"));
-    assert!(unknown_text.contains("observed plan: team"));
+    assert!(!unknown_text.contains("recover: lf account connect codex=active@example.com"));
+    assert!(unknown_text.contains("team observed"), "{unknown_text}");
     assert!(unknown_text.contains("usage response has no recognized percentage windows"));
     let window_line = unknown_text
         .lines()
@@ -564,7 +568,7 @@ esac
         .unwrap()
         .unwrap();
     let cleared = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["account", "set", "codex", "active@", "--clear-cooldown"])
+        .args(["account", "set", "codex=active@", "--clear-cooldown"])
         .output()
         .unwrap();
     assert!(
@@ -594,14 +598,7 @@ esac
         observed
     );
     for args in [
-        vec![
-            "account",
-            "set",
-            "codex",
-            "active@",
-            "--routing",
-            "automatic",
-        ],
+        vec!["account", "unpause", "codex=active@"],
         vec!["set", "account.codex", "active@", "--global"],
     ] {
         let output = Command::new(env!("CARGO_BIN_EXE_lf"))
@@ -620,7 +617,7 @@ esac
         .unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_lf"))
         .current_dir(home.path())
-        .args(["account", "route", "--default", "--json"])
+        .args(["account", "next", "--default", "--json"])
         .env("PATH", "/nonexistent")
         .output()
         .unwrap();
@@ -629,16 +626,17 @@ esac
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let routes: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    let codex = routes
+    let launches: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let codex = launches
         .as_array()
         .unwrap()
         .iter()
         .find(|r| r["provider"] == "codex")
         .unwrap();
     assert_eq!(codex["scope"], "default");
-    assert_eq!(codex["candidates"][0]["account_id"], "active");
-    assert_eq!(codex["candidates"][0]["login"], "active@example.com");
+    assert_eq!(codex["outcome"], "ready");
+    assert_eq!(codex["account_id"], "active");
+    assert_eq!(codex["login"], "active@example.com");
     assert_eq!(
         runtime
             .block_on(store.list_provider_accounts(None))
@@ -650,8 +648,12 @@ esac
         .args(["set", "account.codex", "active@"])
         .output()
         .unwrap();
-    assert!(!unscoped.status.success());
-    assert!(String::from_utf8_lossy(&unscoped.stderr).contains("--global"));
+    assert!(unscoped.status.success(), "{unscoped:?}");
+    let private: serde_yaml_ng::Value = serde_yaml_ng::from_str(
+        &std::fs::read_to_string(home.path().join("lf.config.local.yaml")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(private["account"]["codex"], "active@");
 }
 
 #[test]
@@ -661,6 +663,7 @@ fn cached_auth_leaves_no_process_or_account_state() {
     let output = Command::new(env!("CARGO_BIN_EXE_lf"))
         .current_dir(temp.path())
         .env_clear()
+        .env("HOME", temp.path())
         .env("LF_HOME", &lf_home)
         .env("PATH", "/nonexistent")
         .args(["account", "--cached", "--json"])
@@ -678,19 +681,19 @@ fn cached_auth_leaves_no_process_or_account_state() {
         .iter()
         .all(|r| r["scope"] == "local" && r["cached_credential_state"] == "uninspected"));
     let database = rusqlite::Connection::open(lf_home.join("loopflow.db")).unwrap();
-    let counts: (i64, i64, i64, i64) = database
+    let counts: (i64, i64, i64) = database
         .query_row(
             "SELECT (SELECT count(*) FROM processes),
                     (SELECT count(*) FROM provider_accounts),
-                    (SELECT count(*) FROM provider_routes),
                     (SELECT count(*) FROM agent_sessions)",
             [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .unwrap();
     // Nothing references the finished read, so its exit forgets it.
-    assert_eq!(counts, (0, 0, 0, 0));
+    assert_eq!(counts, (0, 0, 0));
     assert!(!lf_home.join("accounts").exists());
+    assert!(!lf_home.join("config.yaml").exists());
 }
 
 fn write_identity(home: &std::path::Path, email: &str, subject: &str) {
@@ -810,8 +813,7 @@ echo '{"id":3,"result":{"rateLimits":{}}}'
         .args([
             "account",
             "set",
-            "codex",
-            "engineering@",
+            "codex=engineering@",
             "--login-email",
             "wrong@example.com",
         ])
@@ -831,8 +833,7 @@ echo '{"id":3,"result":{"rateLimits":{}}}'
         .args([
             "account",
             "connect",
-            "codex",
-            "engineering@example.com",
+            "codex=engineering@example.com",
             "--import",
         ])
         .output()
@@ -856,8 +857,7 @@ echo '{"id":3,"result":{"rateLimits":{}}}'
         .args([
             "account",
             "connect",
-            "codex",
-            "engineering@example.com",
+            "codex=engineering@example.com",
             "--import",
         ])
         .output()
@@ -956,7 +956,7 @@ fn managed_connect_requires_email_before_starting_browser() {
         .block_on(store.upsert_provider_account(&unlabeled))
         .unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["account", "connect", "codex", "legacy"])
+        .args(["account", "connect", "codex=legacy"])
         .env("PATH", "/nonexistent")
         .output()
         .unwrap();
@@ -1044,8 +1044,7 @@ done
     let args = [
         "account",
         "redeem-reset",
-        "codex",
-        "active@",
+        "codex=active@",
         "--idempotency-key",
         "fixture-attempt",
         "--json",
@@ -1210,7 +1209,7 @@ impl Drop for CodexClient {
 }
 
 #[test]
-fn codex_same_login_recovery_status_launch_resume_and_reset() {
+fn codex_same_login_recovery_status_launch_and_reset() {
     let home = tempfile::tempdir().unwrap();
     let script = support::codex_socket_script(&format!(
         "#!/bin/sh\nexec python3 '{}' \"$@\"\n",
@@ -1283,8 +1282,7 @@ fn codex_same_login_recovery_status_launch_resume_and_reset() {
     run(&[
         "account",
         "redeem-reset",
-        "codex",
-        "active@",
+        "codex=active@",
         "--idempotency-key",
         "one-spend",
         "--json",
@@ -1303,9 +1301,9 @@ fn codex_same_login_recovery_status_launch_resume_and_reset() {
     run(&["set", "account.codex", "excluded@", "--global"]);
     run(&["set", "account.codex", "active@"]);
     let routes = || {
-        let output = run(&["account", "route", "--json"]);
+        let output = run(&["account", "next", "--json"]);
         let scoped: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-        let output = run(&["account", "route", "--default", "--json"]);
+        let output = run(&["account", "next", "--default", "--json"]);
         let default: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
         (scoped, default)
     };
@@ -1319,25 +1317,19 @@ fn codex_same_login_recovery_status_launch_resume_and_reset() {
             .unwrap()
             .clone()
     };
-    assert_eq!(
-        codex_route(&prior_routes.0)["candidates"][0]["account_id"],
-        "active"
-    );
-    assert_eq!(
-        codex_route(&prior_routes.1)["candidates"][0]["account_id"],
-        "excluded"
-    );
+    assert_eq!(codex_route(&prior_routes.0)["account_id"], "active");
+    assert_eq!(codex_route(&prior_routes.1)["account_id"], "excluded");
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     let stored_routes = || {
-        db.prepare(
-            "SELECT json_array(scope,scope_id,provider,position,account_id,created_at,updated_at)
-                    FROM provider_routes ORDER BY scope,scope_id,provider,position",
-        )
-        .unwrap()
-        .query_map([], |row| row.get::<_, String>(0))
-        .unwrap()
-        .collect::<Result<Vec<_>, _>>()
-        .unwrap()
+        [
+            home.path().join("config.yaml"),
+            repo.path().join("lf.config.local.yaml"),
+        ]
+        .map(|path| {
+            let config: serde_yaml_ng::Value =
+                serde_yaml_ng::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+            config["account"].clone()
+        })
     };
     let prior_stored_routes = stored_routes();
     run(&["-b", ":", "Reply with RECOVERED."]);
@@ -1366,30 +1358,6 @@ fn codex_same_login_recovery_status_launch_resume_and_reset() {
         loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
     let prior = sessions.session(&session).unwrap().unwrap();
     assert!(prior.completed_at.is_some());
-    let history = sessions.session_history(&session, 0, 0).unwrap();
-    run(&[
-        "-b",
-        "session",
-        "connect",
-        &session,
-        "--message",
-        "Reply with RECOVERED again.",
-    ]);
-    let continued: (String, String) = db
-        .query_row(
-            "SELECT id,provider_thread FROM agent_sessions WHERE id=?1",
-            [&session],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )
-        .unwrap();
-    assert_eq!(continued, (session.clone(), thread.clone()));
-    let resumed = sessions.session(&session).unwrap().unwrap();
-    assert_ne!(resumed.captured, prior.captured);
-    assert_eq!(resumed.completed_at, prior.completed_at);
-    assert!(sessions
-        .session_history(&session, 0, 0)
-        .unwrap()
-        .starts_with(&history));
     let listing = run(&["history", "list", "--json"]);
     let listing: serde_json::Value = serde_json::from_slice(&listing.stdout).unwrap();
     assert!(!listing["entries"].as_array().unwrap().is_empty());
@@ -1403,7 +1371,6 @@ fn codex_same_login_recovery_status_launch_resume_and_reset() {
         .map(|row| row["captured"].as_i64().unwrap())
         .collect();
     assert!(captures.contains(&prior.captured.unwrap()));
-    assert!(captures.contains(&resumed.captured.unwrap()));
     run(&["doctor", "--json"]);
     let routed: String = db
         .query_row(
@@ -1417,7 +1384,7 @@ fn codex_same_login_recovery_status_launch_resume_and_reset() {
         &std::fs::read(native.join(format!("turns-{thread}.json"))).unwrap(),
     )
     .unwrap();
-    assert_eq!(turns.as_array().unwrap().len(), 2);
+    assert_eq!(turns.as_array().unwrap().len(), 1);
     assert_eq!(
         std::fs::read_to_string(native.join("history.jsonl")).unwrap(),
         "unrelated native history\n"
@@ -1439,7 +1406,7 @@ fn codex_same_login_recovery_status_launch_resume_and_reset() {
         .iter()
         .filter(|event| event["method"] == "turn/start")
         .collect();
-    assert_eq!(launches.len(), 4);
+    assert_eq!(launches.len(), 3);
     for event in &launches {
         assert_eq!(event["home"], native.to_str().unwrap());
         assert_eq!(event["email"], "active@example.com");
@@ -1449,7 +1416,7 @@ fn codex_same_login_recovery_status_launch_resume_and_reset() {
             .iter()
             .filter(|event| event["thread"] == thread)
             .count(),
-        2
+        1
     );
     assert_eq!(
         launches

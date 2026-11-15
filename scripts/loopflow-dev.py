@@ -10,6 +10,7 @@ Commands:
     install         Build and install without launching
     test            Build and run tests
     ghostty-build   Build the pinned patched GhosttyKit
+    ghostty-vt-build  Build the libghostty-vt archives lf links (--publish uploads)
     run             Build and launch the app
     run-debug       Build and run with stdout visible (--world <dir> opens an lf-world)
     release         Build release .app and .dmg (delegates to release-loopflow.py)
@@ -26,6 +27,8 @@ Streaming logs (long-running commands):
 from __future__ import annotations
 
 import argparse
+import gzip
+import hashlib
 import json
 import os
 import plistlib
@@ -38,6 +41,10 @@ import time
 import urllib.request
 from pathlib import Path
 
+import boto3
+import botocore.exceptions
+from app_bundle import install_app_executable
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SWIFT_DIR = REPO_ROOT / "swift"
 DEV_APP = Path.home() / "Applications" / "Loopflow Dev.app"
@@ -48,13 +55,26 @@ DEV_BUNDLE_ID = "com.loopflow.mac.dev"
 # yields a fresh cdhash every build, so the keychain ACL that "Always Allow"
 # stays stable across builds and macOS keeps previously granted permissions.
 DEV_SIGNING_IDENTITY = "Loopflow Dev"
+# The dev app's executable gets its own name so `pgrep -x Loopflow`, Activity
+# Monitor and `ps` address the release app without touching Loopflow Dev.
+DEV_EXECUTABLE = "Loopflow Dev"
 LOGIN_KEYCHAIN = Path.home() / "Library" / "Keychains" / "login.keychain-db"
 ENV_SETUP = REPO_ROOT / "scripts" / "env-setup.sh"
 DEV_LOG_DIR = Path.home() / ".lf" / "logs" / "dev"
 LOOPFLOW_STREAM_LOG = DEV_LOG_DIR / f"{REPO_ROOT.name}.loopflow-run-debug.log"
 DEV_CONTROL_CONFIG = "LoopflowDevControl.json"
-GHOSTTY_REVISION = "a60e9e2a57f73e1eef2bd1cf2995a467f69e7fb0"
-GHOSTTY_ARTIFACT = "GhosttyKit-a60e9e2-lf7-theme-readback1.xcframework.zip"
+# One pin for the Ghostty revision Desktop's framework and lf's terminal library
+# are built from; build.rs reads the same file to fetch and link libghostty-vt.
+GHOSTTY_VT_PIN = REPO_ROOT / "rust" / "loopflow" / "ghostty-vt.json"
+GHOSTTY_REVISION = json.loads(GHOSTTY_VT_PIN.read_text())["revision"]
+GHOSTTY_ARTIFACT = "GhosttyKit-a60e9e2-lf8.xcframework.zip"
+# Rust target → Zig target for the libghostty-vt archives `lf` links.
+GHOSTTY_VT_TARGETS = {
+    "aarch64-apple-darwin": "aarch64-macos",
+    "x86_64-apple-darwin": "x86_64-macos",
+    "x86_64-unknown-linux-gnu": "x86_64-linux-gnu",
+    "aarch64-unknown-linux-gnu": "aarch64-linux-gnu",
+}
 
 
 def _app_environment(repo: Path, world: Path | None = None) -> dict[str, str]:
@@ -129,6 +149,8 @@ def run_app_bundle_with_log(
 
 def _stop_loopflow_app(app_path: Path) -> None:
     """Quit Loopflow Dev, falling back to killing the app if a modal blocks quit."""
+    # A prefix of both `Loopflow Dev` and an older install's `Loopflow`, so an
+    # upgrade stops the app it replaces; the bundled `lf` never matches.
     executable = app_path / "Contents" / "MacOS" / "Loopflow"
 
     run(["osascript", "-e", f'tell application id "{DEV_BUNDLE_ID}" to quit'], check=False)
@@ -206,36 +228,25 @@ def _normalize_ghostty_library(framework: Path) -> None:
     manifest.write_bytes(plistlib.dumps(info))
 
 
+def _strip_ghostty_debug_info(framework: Path) -> None:
+    """Ghostty strips its own Zig code in ReleaseFast; its C++ dependencies (glslang,
+    SPIRV-Cross) keep DWARF, about 80% of each slice. Apps never ship it: the linker
+    leaves DWARF out of the executable.
+    """
+    for library in plistlib.loads((framework / "Info.plist").read_bytes())["AvailableLibraries"]:
+        path = framework / library["LibraryIdentifier"] / library["LibraryPath"]
+        subprocess.run(["xcrun", "strip", "-S", str(path)], check=True)
+
+
 def cmd_ghostty_build() -> int:
     """Build the pinned GhosttyKit with Loopflow's small embedder patch."""
     build_root = SWIFT_DIR / ".build" / "ghostty-kit"
-    source = build_root / f"ghostty-{GHOSTTY_REVISION}"
-    archive = build_root / "source.tar.gz"
     local_framework = SWIFT_DIR / ".build" / "local" / "GhosttyKit.xcframework"
     artifact = SWIFT_DIR / ".build" / "artifacts" / GHOSTTY_ARTIFACT
+    source = _download_ghostty_source(build_root)
 
-    if build_root.exists():
-        shutil.rmtree(build_root)
-    build_root.mkdir(parents=True)
-
-    url = f"https://github.com/ghostty-org/ghostty/archive/{GHOSTTY_REVISION}.tar.gz"
-    print(f"Downloading Ghostty {GHOSTTY_REVISION}...")
-    with urllib.request.urlopen(url) as response, archive.open("wb") as output:
-        shutil.copyfileobj(response, output)
-    with tarfile.open(archive) as source_archive:
-        source_archive.extractall(build_root, filter="data")
-
-    for patch in sorted((SWIFT_DIR / "GhosttyKitPatches").glob("*.patch")):
-        print(f"Applying {patch.name}...")
-        with patch.open("rb") as patch_input:
-            result = subprocess.run(
-                ["patch", "--batch", "--forward", "-p1"],
-                cwd=source,
-                stdin=patch_input,
-                check=False,
-            )
-        if result.returncode != 0:
-            return result.returncode
+    if (code := _apply_patches(source, SWIFT_DIR / "GhosttyKitPatches")) != 0:
+        return code
 
     # Patch behavior, the protocol parser it consumes, and the exported action ABI.
     result = run(
@@ -254,6 +265,7 @@ def cmd_ghostty_build() -> int:
             "-Dtest-filter=terminal contrast",
             "-Dtest-filter=terminal feedback",
             "-Dtest-filter=renderer.cell",
+            "-Dtest-filter=external io",
         ],
         cwd=source,
         check=False,
@@ -269,7 +281,7 @@ def cmd_ghostty_build() -> int:
         return result.returncode
 
     result = run(
-        ["zig", "build", "-Doptimize=ReleaseFast", "-Demit-macos-app=false"],
+        ["zig", "build", "-Doptimize=ReleaseFast", "-Demit-macos-app=false", "-Di18n=false"],
         cwd=source,
         check=False,
     )
@@ -287,14 +299,15 @@ def cmd_ghostty_build() -> int:
         return result.returncode
 
     _normalize_ghostty_library(local_framework)
+    _strip_ghostty_debug_info(local_framework)
     run(
         [
             sys.executable,
             str(REPO_ROOT / "scripts/third_party.py"),
             "package",
             str(local_framework),
-            "--framework",
-            str(local_framework),
+            "--scope",
+            "GhosttyKit",
         ]
     )
 
@@ -325,6 +338,185 @@ def cmd_ghostty_build() -> int:
     print(f"Artifact: {artifact}")
     print(f"SwiftPM checksum: {checksum.stdout.strip()}")
     return 0
+
+
+def _download_ghostty_source(build_root: Path) -> Path:
+    """Extract the pinned upstream Ghostty revision under build_root."""
+    source = build_root / f"ghostty-{GHOSTTY_REVISION}"
+    archive = build_root / "source.tar.gz"
+    if build_root.exists():
+        shutil.rmtree(build_root)
+    build_root.mkdir(parents=True)
+    url = f"https://github.com/ghostty-org/ghostty/archive/{GHOSTTY_REVISION}.tar.gz"
+    print(f"Downloading Ghostty {GHOSTTY_REVISION}...")
+    with urllib.request.urlopen(url) as response, archive.open("wb") as output:
+        shutil.copyfileobj(response, output)
+    with tarfile.open(archive) as source_archive:
+        source_archive.extractall(build_root, filter="data")
+    return source
+
+
+def _apply_patches(source: Path, patches: Path) -> int:
+    for patch in sorted(patches.glob("*.patch")):
+        print(f"Applying {patch.name}...")
+        with patch.open("rb") as patch_input:
+            result = subprocess.run(
+                ["patch", "--batch", "--forward", "-p1"],
+                cwd=source,
+                stdin=patch_input,
+                check=False,
+            )
+        if result.returncode != 0:
+            return result.returncode
+    return 0
+
+
+def _zig_0_16() -> str:
+    """The Zig the pinned Ghostty revision builds with: `LOOPFLOW_ZIG` or `zig` on PATH."""
+    zig = os.environ.get("LOOPFLOW_ZIG") or shutil.which("zig")
+    if not zig:
+        raise SystemExit("zig 0.16 is required: install it and set LOOPFLOW_ZIG or PATH")
+    version = run_capture([zig, "version"]).stdout.strip()
+    if not version.startswith("0.16."):
+        raise SystemExit(f"{zig} is Zig {version}; the pinned Ghostty needs 0.16.x")
+    return zig
+
+
+def cmd_ghostty_vt_build(publish: bool = False) -> int:
+    """Cross-compile the libghostty-vt archives `lf` links, one per release target."""
+    pin = json.loads(GHOSTTY_VT_PIN.read_text())
+    zig = _zig_0_16()
+    build_root = SWIFT_DIR / ".build" / "ghostty-vt"
+    source = _download_ghostty_source(build_root)
+    if (code := _apply_patches(source, GHOSTTY_VT_PIN.parent / "ghostty-vt-patches")) != 0:
+        return code
+    # Prove each formatter patch before producing archives.
+    for test_filter in (
+        "hyperlink",
+        "TerminalFormatter vt with palette",
+        "Screen vt with kitty",
+        "Terminal vt with",
+    ):
+        result = run(
+            [
+                zig,
+                "build",
+                "test-lib-vt",
+                "-Demit-lib-vt=true",
+                "-Dsimd=false",
+                f"-Dtest-filter={test_filter}",
+            ],
+            cwd=source,
+            check=False,
+        )
+        if result.returncode != 0:
+            return result.returncode
+    artifacts = SWIFT_DIR / ".build" / "artifacts"
+    artifacts.mkdir(parents=True, exist_ok=True)
+    for rust_target, zig_target in GHOSTTY_VT_TARGETS.items():
+        prefix = build_root / "out" / rust_target
+        print(f"Building libghostty-vt for {rust_target}...")
+        result = run(
+            [
+                zig,
+                "build",
+                "-Demit-lib-vt=true",
+                "-Demit-xcframework=false",
+                "-Dsimd=false",
+                "-Dcpu=baseline",
+                "-Dstrip=true",
+                # The owner needs the terminal, its snapshot codec and the VT
+                # formatter; a selection restricts the formatter to a row range.
+                "-Dvt-features=-all,+snapshot,+formatter,+selection",
+                "-Doptimize=ReleaseFast",
+                f"-Dtarget={zig_target}",
+                "--prefix",
+                str(prefix),
+            ],
+            cwd=source,
+            check=False,
+        )
+        if result.returncode != 0:
+            return result.returncode
+        name = f"libghostty-vt-{pin['revision'][:7]}-{pin['artifact']}-{rust_target}.tar.gz"
+        archive = artifacts / name
+        _write_ghostty_vt_archive(archive, prefix, source)
+        pin["sha256"][rust_target] = hashlib.sha256(archive.read_bytes()).hexdigest()
+        print(f"Artifact: {archive}\nSHA-256: {pin['sha256'][rust_target]}")
+        if publish:
+            pin["sha256"][rust_target] = _publish_ghostty_vt_archive(
+                archive, name, pin["sha256"][rust_target], pin["base_url"]
+            )
+    GHOSTTY_VT_PIN.write_text(json.dumps(pin, indent=2) + "\n")
+    print(f"Pinned checksums in {GHOSTTY_VT_PIN}")
+    return 0
+
+
+def _write_ghostty_vt_archive(archive: Path, prefix: Path, source: Path) -> None:
+    """Normalize archive metadata; Zig output itself is not byte-reproducible."""
+
+    def _normalize(info: tarfile.TarInfo) -> tarfile.TarInfo:
+        info.mtime = 0
+        info.uid = info.gid = 0
+        info.uname = info.gname = ""
+        return info
+
+    with (
+        archive.open("wb") as raw,
+        gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as compressed,
+        tarfile.open(fileobj=compressed, mode="w") as output,
+    ):
+        output.add(prefix / "lib" / "libghostty-vt.a", arcname="libghostty-vt.a", filter=_normalize)
+        output.add(prefix / "include" / "ghostty", arcname="include/ghostty", filter=_normalize)
+        output.add(source / "LICENSE", arcname="LICENSE", filter=_normalize)
+
+
+def _publish_ghostty_vt_archive(archive: Path, name: str, sha256: str, base_url: str) -> str:
+    """Publish an immutable archive, retaining an existing name's checksum."""
+    # Check the bucket directly: the edge caches misses for four hours and
+    # published names for a year. Changed patches or flags need a new artifact.
+    bucket = boto3.client(
+        "s3",
+        endpoint_url=f"https://{os.environ['R2_ACCOUNT_ID'].strip()}.r2.cloudflarestorage.com",
+        aws_access_key_id=os.environ["R2_ACCESS_KEY_ID"].strip(),
+        aws_secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"].strip(),
+        region_name="auto",
+    )
+    try:
+        stored = bucket.head_object(Bucket="bin", Key=name)["Metadata"].get("sha256")
+    except botocore.exceptions.ClientError as error:
+        if error.response["Error"]["Code"] != "404":
+            raise
+        stored = None
+    else:
+        stored = (
+            stored
+            or hashlib.sha256(bucket.get_object(Bucket="bin", Key=name)["Body"].read()).hexdigest()
+        )
+    if stored is not None:
+        print(f"Already published {base_url}/{name}; keeping its SHA-256 {stored}")
+        return stored
+    print(f"Uploading {name} to R2...")
+    bucket.upload_file(
+        str(archive),
+        "bin",
+        name,
+        ExtraArgs={
+            "ContentType": "application/gzip",
+            "CacheControl": "public, max-age=31536000, immutable",
+            "Metadata": {"sha256": sha256},
+        },
+    )
+    # A query string keeps the read-back off the edge cache; the bucket ignores it.
+    request = urllib.request.Request(
+        f"{base_url}/{name}?sha256={sha256}", headers={"User-Agent": "loopflow-dev"}
+    )
+    with urllib.request.urlopen(request) as response:
+        published = hashlib.sha256(response.read()).hexdigest()
+    if published != sha256:
+        raise SystemExit(f"{name} read back with SHA-256 {published}, built {sha256}")
+    print(f"Published {base_url}/{name}")
+    return sha256
 
 
 def cmd_run() -> int:
@@ -396,7 +588,7 @@ def cmd_run_debug(repo: Path = REPO_ROOT, world: Path | None = None) -> int:
         return result
     if not _check_repository_opening(repo, world):
         return 1
-    print("Logs: ~/Library/Logs/Loopflow/")
+    print("Logs: ~/.lf/logs/lf.log (exits: lf doctor)")
     print(f"Stream log: {LOOPFLOW_STREAM_LOG}")
     print(f"Bundled lf: {DEV_APP}/Contents/MacOS/lf")
     print(
@@ -586,38 +778,22 @@ def _ensure_dev_signing_identity() -> str:
     return identity
 
 
-def _bundle_executable_name(info_plist: Path) -> str:
-    """The binary macOS actually launches, per CFBundleExecutable."""
-    result = run_capture(
-        ["/usr/libexec/PlistBuddy", "-c", "Print :CFBundleExecutable", str(info_plist)]
-    )
-    name = (result.stdout or "").strip()
-    if result.returncode != 0 or not name:
-        raise RuntimeError(f"Could not read CFBundleExecutable from {info_plist}")
-    return name
-
-
 def _install_dev_app() -> None:
     """Install debug build to stable location for permissions persistence."""
     app_dir = DEV_APP / "Contents"
     macos_dir = app_dir / "MacOS"
-    macos_dir.mkdir(parents=True, exist_ok=True)
+    # Every install writes the whole of Contents/MacOS, so start it empty: a
+    # binary an older install left under another name can never be launched.
+    shutil.rmtree(macos_dir, ignore_errors=True)
+    macos_dir.mkdir(parents=True)
     (app_dir / "Resources").mkdir(parents=True, exist_ok=True)
 
-    # `swift build` names the product LoopflowMac, but Info.plist declares
-    # CFBundleExecutable = Loopflow, so that is the name macOS launches. Copying
-    # the build under its own name leaves whatever `Loopflow` was already there
-    # to run forever: the app keeps starting a stale binary while the fresh one
-    # sits beside it, and codesigning bumps the stale mtime so it even looks new.
-    executable = _bundle_executable_name(SWIFT_DIR / "LoopflowMac" / "Info.plist")
-    shutil.copy(SWIFT_DIR / ".build" / "debug" / "LoopflowMac", macos_dir / executable)
-    stale = macos_dir / "LoopflowMac"
-    if stale.name != executable and stale.exists():
-        stale.unlink()
+    # The dev plist names the executable `Loopflow Dev`, so install against it.
     shutil.copy(SWIFT_DIR / "LoopflowMac" / "Info.plist", app_dir)
     _apply_dev_identity(app_dir / "Info.plist")
+    install_app_executable(SWIFT_DIR / ".build" / "debug", app_dir / "Info.plist", app_dir)
     shutil.copy(SWIFT_DIR / "LoopflowMac" / "AppIcon.icns", app_dir / "Resources")
-    _copy_bundled_tools(app_dir / "MacOS")
+    _copy_bundled_tools(macos_dir)
     (app_dir / "Resources" / DEV_CONTROL_CONFIG).unlink(missing_ok=True)
 
     run(
@@ -639,21 +815,21 @@ def _install_dev_app() -> None:
 
 
 def _apply_dev_identity(plist: Path) -> None:
-    """Rewrite the dev app's bundle id and name so it gets its own settings domain."""
+    """Give the dev app its own settings domain and process name."""
     run(["plutil", "-replace", "CFBundleIdentifier", "-string", DEV_BUNDLE_ID, str(plist)])
+    run(["plutil", "-replace", "CFBundleExecutable", "-string", DEV_EXECUTABLE, str(plist)])
     run(["plutil", "-replace", "CFBundleName", "-string", "Loopflow Dev", str(plist)])
     run(["plutil", "-replace", "CFBundleDisplayName", "-string", "Loopflow Dev", str(plist)])
 
 
 def _build_control_tools() -> Path:
     # The app is a live operator surface even when its Swift shell is a dev
-    # build. The app selects its bundled CLI for every child;
-    # it has no authority to migrate the main Machine.
+    # build. The app selects its bundled CLI for every child; an ordinary lf
+    # never migrates the main Machine.
     target_dir = REPO_ROOT / "target" / "dev-app-control"
     cargo_cmd = [
         "/usr/bin/env",
         "LOOPFLOW_BUILD_PROVENANCE=development",
-        "LOOPFLOW_MIGRATION_AUTHORITY=validation_only",
         "cargo",
         "build",
         "--locked",
@@ -670,6 +846,8 @@ def _build_control_tools() -> Path:
 
 
 def _copy_bundled_tools(app_macos_dir: Path) -> None:
+    agents = app_macos_dir.parent / "Library/LaunchAgents"
+    shutil.copytree(SWIFT_DIR / "LaunchAgents", agents, dirs_exist_ok=True)
     shutil.copy(_build_control_tools(), app_macos_dir / "lf")
 
 
@@ -680,7 +858,7 @@ def cmd_prepare_control_tools() -> int:
 
 
 def cmd_bundle_control_tools(output: Path) -> int:
-    """Build validation-only control tools into an Xcode app bundle."""
+    """Build control tools into an Xcode app bundle."""
     output.mkdir(parents=True, exist_ok=True)
     _copy_bundled_tools(output)
     return 0
@@ -705,6 +883,7 @@ COMMANDS = {
     "install": (cmd_install, "Build and install without launching"),
     "test": (cmd_test, "Build and run tests"),
     "ghostty-build": (cmd_ghostty_build, "Build the pinned patched GhosttyKit"),
+    "ghostty-vt-build": (cmd_ghostty_vt_build, "Build the libghostty-vt archives lf links"),
     "run": (cmd_run, "Build and launch the app"),
     "run-debug": (cmd_run_debug, "Build and run with stdout visible"),
     "release": (cmd_release, "Build release .app and .dmg"),
@@ -713,9 +892,9 @@ COMMANDS = {
     "logs": (cmd_logs, "Tail the app logs"),
     "bundle-control-tools": (
         cmd_bundle_control_tools,
-        "Build validation-only control tools into an app bundle",
+        "Build control tools into an app bundle",
     ),
-    "prepare-control-tools": (cmd_prepare_control_tools, "Prepare validation-only control tools"),
+    "prepare-control-tools": (cmd_prepare_control_tools, "Prepare control tools"),
     "screenshots": (cmd_screenshots, "Generate app screenshots"),
 }
 
@@ -740,6 +919,12 @@ def main() -> int:
                 "--world",
                 type=lambda p: Path(p).expanduser().resolve(),
                 help="lf-world directory: open its repo with its LF_HOME and provider homes",
+            )
+        if name == "ghostty-vt-build":
+            sub.add_argument(
+                "--publish",
+                action="store_true",
+                help="upload each archive to bin.loopflow.studio (R2 credentials from Doppler)",
             )
         if name == "setup":
             sub.add_argument(
@@ -772,6 +957,8 @@ def main() -> int:
         return func(install=args.install, dry_run=args.dry_run)
     if args.command == "bundle-control-tools":
         return func(output=args.output)
+    if args.command == "ghostty-vt-build":
+        return func(publish=args.publish)
     return func()
 
 

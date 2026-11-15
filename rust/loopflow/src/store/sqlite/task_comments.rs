@@ -15,6 +15,7 @@ pub(super) fn ingest_task_comment(
     conn: &Connection,
     task: &TaskId,
     comment: &crate::linear::LinearComment,
+    machine_names: &std::collections::HashMap<crate::durable::MachineId, String>,
 ) -> StoreResult<bool> {
     // A historical filing keeps its original local UUID. Only its Linear
     // representation changes version bits; an existing delivery proves the link.
@@ -40,7 +41,8 @@ pub(super) fn ingest_task_comment(
         conn,
         task,
         &comment.body,
-        comment.created_at.as_deref(),
+        super::task_ownership::provider_order(comment.created_at.as_deref()),
+        machine_names,
     )?;
     let existing: Option<(String, Option<String>)> = conn
         .query_row(
@@ -94,18 +96,16 @@ pub(super) fn ingest_task_comment(
     Ok(true)
 }
 
-fn read_comment(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskComment> {
+pub(super) fn read_comment(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskComment> {
     let author: String = row.get(2)?;
+    let body: String = row.get(1)?;
+    let author = serde_json::from_str::<TaskCommentAuthor>(&author).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(2, rusqlite::types::Type::Text, Box::new(error))
+    })?;
     Ok(TaskComment {
         id: row.get(0)?,
-        body: row.get(1)?,
-        author: serde_json::from_str(&author).map_err(|error| {
-            rusqlite::Error::FromSqlConversionFailure(
-                2,
-                rusqlite::types::Type::Text,
-                Box::new(error),
-            )
-        })?,
+        author: author.read(&body),
+        body,
         created_at: row.get(3)?,
     })
 }
@@ -120,7 +120,7 @@ fn write_comment(conn: &Connection, task: &TaskId, comment: &TaskComment) -> Sto
                 Edit::CommentTask(task.to_string()),
                 Edit::CommentContent(crate::work::edit::CommentContent {
                     body: comment.body.clone(),
-                    author: comment.author.clone(),
+                    author: comment.author.stored(),
                     created_at: comment.created_at.clone(),
                 }),
             ],
@@ -137,12 +137,34 @@ pub(super) fn insert_authored_comment(
     write_comment(conn, task, comment)?;
     conn.execute(
         "INSERT INTO task_comment_deliveries(comment_id,comment_json) VALUES(?1,?2)",
-        params![comment.id, serde_json::to_string(comment)?],
+        params![
+            comment.id,
+            serde_json::to_string(&TaskComment {
+                author: comment.author.stored(),
+                ..comment.clone()
+            })?
+        ],
     )?;
     Ok(())
 }
 
 impl SqliteStore {
+    /// The Task's comments that are not also steers. A direction comment
+    /// reaches Sessions once, as the steer saved with source `comment:<id>`.
+    pub(crate) fn task_undirected_comments(&self, task: &TaskId) -> StoreResult<Vec<TaskComment>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare(
+            "SELECT id,body,author,created_at FROM task_comments c
+             WHERE task_id=?1
+               AND NOT EXISTS(SELECT 1 FROM steers s WHERE s.source='comment:'||c.id)
+             ORDER BY created_at,id",
+        )?;
+        let comments = query
+            .query_map([task.as_str()], read_comment)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(comments)
+    }
+
     /// Comments and delivery badges come from one SQLite snapshot, even when
     /// another foreground connection acknowledges or resolves a delivery.
     pub fn task_comments(&self, task: &TaskId) -> StoreResult<TaskComments> {
@@ -200,7 +222,7 @@ impl SqliteStore {
                 "Task comment cannot be empty".into(),
             ));
         }
-        let author = serde_json::to_string(&comment.author)?;
+        let author = serde_json::to_string(&comment.author.stored())?;
         let previous: Option<(String, String, String, String)> = tx
             .query_row(
                 "SELECT task_id,body,author,created_at FROM task_comments WHERE id=?1",
@@ -263,18 +285,20 @@ pub(super) fn comment_steer_in(
     task: &TaskId,
     comment: &TaskComment,
 ) -> StoreResult<()> {
-    let TaskCommentAuthor::Person { name } = &comment.author else {
-        return Ok(());
+    let name = match &comment.author {
+        TaskCommentAuthor::Person { name } => name,
+        TaskCommentAuthor::Session { requester, .. } => requester,
+        TaskCommentAuthor::Integration => return Ok(()),
     };
     if !crate::ops::linear_observe::is_direction_comment(&comment.body, Some("local")) {
         return Ok(());
     }
-    let text = match name {
-        Some(name) => format!("Comment {} by {name}:\n\n{}", comment.id, comment.body),
-        None => format!(
+    let text = match &comment.author {
+        TaskCommentAuthor::Person { name: None } => format!(
             "Comment {} (attribution unresolved):\n\n{}",
             comment.id, comment.body
         ),
+        author => format!("Comment {} by {author}:\n\n{}", comment.id, comment.body),
     };
     SqliteStore::save_task_steer_in(
         tx,
@@ -297,6 +321,51 @@ mod tests {
     use crate::store::sqlite::SqliteStore;
     use crate::work::task::comment::{TaskComment, TaskCommentAuthor};
     use crate::work::wave::Wave;
+
+    #[test]
+    fn a_sessions_comment_is_stored_as_its_requesters_and_read_as_the_sessions() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let wave = Wave::new(WaveId::new(), "planning".into(), "/repo".into());
+        store.create_wave(&wave).unwrap();
+        let project = crate::durable::ProjectId::new();
+        let task = TaskId::new();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute("INSERT INTO projects(id,wave_id,created_at,updated_at,project_slug,project_name,description)
+                VALUES(?1,?2,1,1,'planning','Planning','')", rusqlite::params![project.as_str(), wave.id()]).unwrap();
+            conn.execute("INSERT INTO tasks(repository_id,id,project_id,issue_identifier,issue_title,issue_description,created_at,updated_at,workspace_slug)
+                VALUES((SELECT id FROM repository_plans WHERE selected=1),?1,?2,'FIX-2','Attribute','',1,1,'attribute')", rusqlite::params![task.as_str(), project.as_str()]).unwrap();
+        }
+        let comment = TaskComment {
+            id: uuid::Uuid::new_v4().to_string(),
+            body: "Restart after a crash\n\n<!-- loopflow-session:session-a -->".into(),
+            author: TaskCommentAuthor::Session {
+                session_id: "session-a".into(),
+                requester: Some("Jack Heart".into()),
+            },
+            created_at: Some("2026-10-29T01:00:00Z".into()),
+        };
+        store.append_task_comment(&task, &comment).unwrap();
+        // Released readers parse every stored author.
+        let stored: Vec<String> = store
+            .conn
+            .lock()
+            .unwrap()
+            .prepare("SELECT author FROM task_comments UNION ALL SELECT json_extract(comment_json,'$.author') FROM task_comment_deliveries")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(stored, vec![r#"{"kind":"person","name":"Jack Heart"}"#; 2]);
+        assert_eq!(
+            store.task_comments(&task).unwrap().comments,
+            vec![comment.clone()]
+        );
+        // Appending it again is the same comment, not another one.
+        store.append_task_comment(&task, &comment).unwrap();
+    }
 
     #[test]
     fn linear_comment_adoption_preserves_local_history_and_execution() {
@@ -337,7 +406,7 @@ mod tests {
         {
             let mut conn = store.conn.lock().unwrap();
             let tx = conn.transaction().unwrap();
-            super::ingest_task_comment(&tx, &task, &observed).unwrap();
+            super::ingest_task_comment(&tx, &task, &observed, &Default::default()).unwrap();
             tx.rollback().unwrap();
         }
         assert_eq!(
@@ -348,7 +417,13 @@ mod tests {
             store.pending_task_comments(&task).unwrap(),
             vec![original.clone()]
         );
-        super::ingest_task_comment(&store.conn.lock().unwrap(), &task, &observed).unwrap();
+        super::ingest_task_comment(
+            &store.conn.lock().unwrap(),
+            &task,
+            &observed,
+            &Default::default(),
+        )
+        .unwrap();
         drop(store);
         let store = SqliteStore::open_ephemeral(&database).unwrap();
         store.record_comment_delivery(&original.id, None).unwrap();
@@ -385,7 +460,13 @@ mod tests {
             revision: Some("2026-10-08T01:00:00Z".into()),
             ..observed.clone()
         };
-        super::ingest_task_comment(&store.conn.lock().unwrap(), &task, &stale).unwrap();
+        super::ingest_task_comment(
+            &store.conn.lock().unwrap(),
+            &task,
+            &stale,
+            &Default::default(),
+        )
+        .unwrap();
         assert_eq!(
             store.task_comments(&task).unwrap().comments,
             thread.comments
@@ -395,7 +476,13 @@ mod tests {
             revision: Some("2026-10-08T01:04:00Z".into()),
             ..observed
         };
-        super::ingest_task_comment(&store.conn.lock().unwrap(), &task, &amended).unwrap();
+        super::ingest_task_comment(
+            &store.conn.lock().unwrap(),
+            &task,
+            &amended,
+            &Default::default(),
+        )
+        .unwrap();
         assert_eq!(
             store.task_comments(&task).unwrap().comments[0].body,
             amended.body

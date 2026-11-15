@@ -1,0 +1,7 @@
+[
+  {"kind": "personal_global"},
+  {"kind": "personal_repo", "repo": "/project/task"},
+  {"kind": "shared_repo", "repo": "/project/task"},
+  {"kind": "personal_wave", "repo": "/project/task", "wave": "product"},
+  {"kind": "shared_wave", "repo": "/project/task", "wave": "product"}
+]

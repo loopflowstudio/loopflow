@@ -206,6 +206,35 @@ def test_failing_phase_reports_actionable_failure(tmp_path):
     assert outcome.failure_kind == "product"
 
 
+@pytest.mark.parametrize("security_pressure", [True, False])
+def test_security_pressure_stops_later_suites_but_product_failure_does_not(
+    tmp_path, monkeypatch, capsys, security_pressure
+):
+    evidence_root = tmp_path / "evidence"
+    marker = tmp_path / "later-suite-ran"
+    monkeypatch.setattr(gate, "_gate_evidence_root", lambda: evidence_root)
+    monkeypatch.setattr(gate, "_run_artifact_root", lambda: tmp_path / "artifacts")
+    monkeypatch.setattr(gate, "_tree_fingerprint", lambda: "tree")
+    monkeypatch.setattr(
+        gate,
+        "RESOURCE_ENVELOPE",
+        dict(gate.RESOURCE_ENVELOPE, sample_interval_seconds=0.05, host_security_samples=2),
+    )
+    monkeypatch.setattr(gate, "_host_security_pressure", lambda: ("syspolicyd", 350.0))
+    first = _plan(_cmd(["sleep", "60"] if security_pressure else ["false"], "first"))
+    later = _plan(_cmd(["touch", str(marker)], "later"))
+    later.suite.name = "later"
+
+    assert gate.run_plans([first, later]) == 1
+
+    record = json.loads(next((evidence_root / "changed").glob("*.json")).read_text())
+    assert [phase["status"] for phase in record["phases"]] == (
+        ["host_pressure", "not_run"] if security_pressure else ["failed", "passed"]
+    )
+    assert marker.exists() is not security_pressure
+    assert "later/later" in capsys.readouterr().out
+
+
 def test_passing_phase_returns_measured_outcome(tmp_path):
     outcome = gate._run_command(_cmd(["bash", "-c", "exit 0"], "ok-probe"), tmp_path, "probe")
     assert outcome.status == "passed"
@@ -621,6 +650,15 @@ def test_deleted_python_test_falls_back_to_the_full_suite():
     assert command.argv[-5:] == ["uv", "run", "--no-sync", "pytest", "python/tests/"]
 
 
+def test_mechanical_cleanup_checks_need_no_cli_build(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(gate.platform, "system", lambda: "Darwin")
+    commands = gate._python_commands(["python/tests/test_disk_cleanup.py"])
+    assert [command.label for command in commands] == ["python-dependencies", "python"]
+    refresh = gate._python_commands(["python/tests/test_checkout_refresh.py"])
+    labels = [command.label for command in refresh]
+    assert labels.index("python-cli") < labels.index("python")
+
+
 def test_python_verifier_change_runs_the_full_python_suite():
     changed = ["scripts/resource_envelope.py", "python/tests/test_resource_envelope.py"]
 
@@ -656,6 +694,21 @@ def test_changed_gate_always_runs_architecture_check():
     ]
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        "swift/LoopflowiOS/MobileClient.swift",
+        "swift/Loopflow/Services/ServerProtocol.swift",
+        "tests/fixtures/dto/server/welcome.json",
+    ],
+)
+def test_mobile_and_shared_protocol_changes_run_native_ios_tests(path):
+    plans = gate.build_plan(changed=[path], run_all=False, forced=set())
+    ios = next(plan for plan in plans if plan.suite.name == "ios")
+    assert ios.run
+    assert ios.commands[0].argv == ["uv", "run", "python", "scripts/test_ios.py"]
+
+
 def test_all_never_runs_the_optional_host_diagnostic():
     plans = gate.build_plan(changed=[], run_all=True, forced=set())
     ui = next(p for p in plans if p.suite.name == "ui-host")
@@ -673,7 +726,9 @@ def test_build_and_test_commands_share_the_four_worker_budget():
 
     assert clippy.argv[clippy.argv.index("--jobs") + 1] == jobs
     assert jobs in tests.argv
-    assert "--prepare-cli" in tests.argv
+    cli = next(command for command in rust if command.label == "rust-cli")
+    assert cli.argv[cli.argv.index("--jobs") + 1] == jobs
+    assert any(argument.startswith("LOOPFLOW_TEST_LF=") for argument in tests.argv)
     for command in (command for command in swift if command.label in {"swift-cli", "swift"}):
         assert command.argv[command.argv.index("--jobs") + 1] == jobs
     xcodebuild = next(command for command in loopflow if command.label == "xcodebuild")
@@ -695,31 +750,6 @@ def test_rust_filter_runs_only_matching_tests_then_clippy():
     assert labels.index("rust") < labels.index("clippy")
     assert "--all" not in tests
     assert any("test(prompt::)" in argument for argument in tests)
-    assert "rust-clones" not in labels
-
-
-@pytest.mark.parametrize("nextest", [True, False])
-@pytest.mark.parametrize("macos_version", ["15.7", "26.0"])
-def test_macos_clones_run_under_their_own_sandbox(monkeypatch, nextest, macos_version):
-    monkeypatch.setattr(gate.platform, "system", lambda: "Darwin")
-    monkeypatch.setattr(gate.platform, "mac_ver", lambda: (macos_version, (), ""))
-    monkeypatch.setattr(gate.shutil, "which", lambda _: "/bin/nextest" if nextest else None)
-
-    commands = gate._rust_commands([])
-    ordinary = next(command.argv for command in commands if command.label == "rust")
-    clones = next(command.argv for command in commands if command.label == "rust-clones")
-    assert ("not test(data_clones::)" if nextest else "--skip") in ordinary
-    assert "--config" not in clones
-    assert "--prepare-cli" in clones
-    selector = next(argument for argument in clones if argument.startswith("data_clones::"))
-    assert selector == (
-        "data_clones::"
-        if macos_version == "26.0"
-        else (
-            "data_clones::"
-            "clone_creation_refuses_an_incompatible_parent_sandbox_before_copying_source"
-        )
-    )
 
 
 def test_ui_host_runs_only_when_named():
@@ -852,16 +882,26 @@ def test_ui_host_suite_serializes_and_checks_machine_state():
     assert ui.postcheck is gate._ui_host_postcheck
 
 
-def test_desktop_changes_select_headless_checks_without_host_automation():
-    plans = gate.build_plan(
-        changed=["swift/LoopflowMac/Views/WorkSurfaceView.swift"], run_all=False, forced=set()
-    )
+@pytest.mark.parametrize(
+    "path",
+    [
+        "swift/LoopflowMac/Views/WorkSurfaceView.swift",
+        "scripts/loopflow-dev.py",
+        "rust/loopflow/build.rs",
+        "rust/loopflow/ghostty-vt.json",
+        "rust/loopflow/ghostty-vt-patches/0004-vt-darwin-runtime.patch",
+    ],
+)
+def test_desktop_changes_select_headless_checks_without_host_automation(path: str) -> None:
+    plans = gate.build_plan(changed=[path], run_all=False, forced=set())
     selected = {plan.suite.name: plan for plan in plans if plan.run}
     assert "swift" in selected
     assert "ui-host" not in selected
     commands = selected["swift"].commands
     assert any(command.argv[0] == "scripts/test_desktop.sh" for command in commands)
     assert not any("scripts/prove_wave_surface_states.sh" in command.argv for command in commands)
+    # The slower Xcode compile remains explicit, but must recognize these inputs.
+    assert next(s for s in gate.SUITES if s.name == "loopflow").match([path])
 
 
 def test_recovery_has_time_beyond_read_only_inventory(tmp_path, monkeypatch):
@@ -893,3 +933,25 @@ def test_resource_timeout_stops_its_cleanup_child(tmp_path, monkeypatch):
     assert "timed out" in failure
     time.sleep(1.2)
     assert not marker.exists()
+
+
+@pytest.mark.parametrize("failure", [None, "command", "postflight"])
+def test_disposable_artifacts_keep_the_gate_outcome(tmp_path, monkeypatch, failure):
+    artifacts = tmp_path / "artifacts"
+    monkeypatch.setattr(gate, "_gate_evidence_root", lambda: tmp_path / "evidence")
+    monkeypatch.setattr(gate, "_run_artifact_root", lambda: artifacts)
+    monkeypatch.setattr(gate, "_tree_fingerprint", lambda: "tree")
+
+    def resources(recover):
+        report = _resource_report()
+        if not recover and failure == "postflight":
+            report["ok"] = False
+            return report, "resource breach"
+        return report, None
+
+    monkeypatch.setattr(gate, "_run_resource_check", resources)
+    plan = _plan(_cmd(["bash", "-c", "exit 1" if failure == "command" else "true"], "probe"))
+    assert gate.run_plans([plan]) == (1 if failure else 0)
+    assert json.loads((artifacts / ".cleanup-evidence.json").read_text()) == {
+        "outcome": "failed" if failure else "passed"
+    }

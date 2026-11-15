@@ -53,9 +53,7 @@ def test_docs_sidebar_navigation(page: Page, base_url: str):
     assert "/docs/config" in page.url
 
 
-def test_docs_security_page_states_resident_login_guarantees(
-    page: Page, base_url: str
-):
+def test_docs_security_page_states_resident_login_guarantees(page: Page, base_url: str):
     page.goto(f"{base_url}/docs/security")
     content = page.locator(".docs-content")
     assert content.is_visible()
@@ -70,9 +68,7 @@ def test_docs_security_page_states_resident_login_guarantees(
     assert "--forward-agent" in text
 
 
-def test_docs_subscriptions_page_owns_account_selection(
-    page: Page, base_url: str
-):
+def test_docs_subscriptions_page_owns_account_selection(page: Page, base_url: str):
     page.goto(f"{base_url}/docs/subscriptions")
     content = page.locator(".docs-content")
     assert content.is_visible()
@@ -98,17 +94,16 @@ def test_developer_architecture_is_hidden_from_public_docs(page: Page, base_url:
     assert page.url == f"{base_url}/docs"
 
 
-def test_developer_architecture_has_its_own_reading_surface(
-    page: Page, base_url: str
-):
+def test_developer_architecture_has_its_own_reading_surface(page: Page, base_url: str):
     page.goto(f"{base_url}/architecture")
     assert page.locator('meta[name="robots"]').get_attribute("content") == "noindex,nofollow"
     assert page.locator(".docs-content h1").inner_text() == "Architecture"
     assert page.locator(".docs-nav-architecture").is_visible()
     assert page.locator(".docs-outline").is_visible()
-    assert page.locator(".docs-content").evaluate(
-        "el => getComputedStyle(el).backgroundColor"
-    ) == "rgba(0, 0, 0, 0)"
+    assert (
+        page.locator(".docs-content").evaluate("el => getComputedStyle(el).backgroundColor")
+        == "rgba(0, 0, 0, 0)"
+    )
     assert page.locator('a[href="/architecture/execution"]').count() >= 1
     assert page.locator(".docs-md-link a").get_attribute("href") == "/architecture.md"
 
@@ -122,6 +117,8 @@ def test_architecture_area_routes_render(page: Page, base_url: str):
         "planning",
         "delivery",
         "machines",
+        "server",
+        "environment",
         "data",
         "codebase",
         "reference",
@@ -134,6 +131,31 @@ def test_architecture_area_routes_render(page: Page, base_url: str):
 def test_retired_docs_redirect(page: Page, base_url: str):
     # lf, waves, conducting, planning and authoring dissolved into the
     # staged pages; no retired slug may 500
-    for retired in ("wave-authoring", "fleet", "lf", "waves", "conducting", "planning", "authoring"):
+    for retired in (
+        "wave-authoring",
+        "fleet",
+        "lf",
+        "waves",
+        "conducting",
+        "planning",
+        "authoring",
+    ):
         page.goto(f"{base_url}/docs/{retired}")
         assert page.url == f"{base_url}/docs"
+
+
+def test_server_guide_and_developer_links_have_distinct_destinations(page: Page, base_url: str):
+    page.goto(f"{base_url}/docs/server")
+    assert page.locator(".docs-content h1").inner_text() == "Connect clients"
+    assert page.locator('.docs-nav a[href="/docs/server"]').is_visible()
+    assert "lf server status" in page.locator(".docs-content").inner_text()
+    assert "lf machine add mini" in page.locator(".docs-content").inner_text()
+
+    page.goto(f"{base_url}/docs/glossary")
+    link = page.locator('.docs-content a[href="/architecture/reference-cutover#cutover-status"]')
+    link.click()
+    assert page.locator(".docs-content h1").inner_text() == "Cutover status"
+
+    response = page.request.get(f"{base_url}/docs/server.md")
+    assert response.status == 200
+    assert "# Connect clients" in response.text()

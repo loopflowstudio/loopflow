@@ -18,6 +18,9 @@ pub const WAVE_ID_ENV: &str = "LF_WAVE_ID";
 
 /// The Wave this process works in, from its launch's `LF_WAVE_ID`.
 pub fn ambient_wave_id() -> Option<WaveId> {
+    if crate::journal::request::active() {
+        return None;
+    }
     std::env::var(WAVE_ID_ENV)
         .ok()
         .and_then(|id| WaveId::parse(&id).ok())
@@ -25,6 +28,9 @@ pub fn ambient_wave_id() -> Option<WaveId> {
 
 /// Resolve this process's ambient Wave name through the durable Wave id.
 pub fn resolve_ambient_wave_name() -> Option<String> {
+    if crate::journal::request::active() {
+        return None;
+    }
     std::env::var(WAVE_ID_ENV)
         .ok()
         .filter(|id| !id.trim().is_empty())?;
@@ -270,7 +276,9 @@ pub fn resolve_managed_wave_sync(
 ) -> Result<Wave, WaveResolveError> {
     let repo = repo.map(Path::to_path_buf);
     let explicit = explicit.map(str::to_string);
-    let env_wave_id = std::env::var(WAVE_ID_ENV).ok();
+    let env_wave_id = (!crate::journal::request::active())
+        .then(|| std::env::var(WAVE_ID_ENV).ok())
+        .flatten();
     if explicit.is_none() && env_wave_id.as_deref().is_none_or(|id| id.trim().is_empty()) {
         return Err(WaveResolveError::NoContext);
     }
@@ -280,7 +288,9 @@ pub fn resolve_managed_wave_sync(
             .build()
             .expect("current-thread runtime always builds");
         runtime.block_on(async move {
-            let store = crate::store::open_existing_store().await;
+            let store = crate::store::open_existing_store()
+                .await
+                .map_err(|error| WaveResolveError::Registry(error.to_string()))?;
             resolve_managed_wave(
                 store.as_ref(),
                 repo.as_deref(),

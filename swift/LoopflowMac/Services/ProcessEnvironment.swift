@@ -31,15 +31,12 @@ enum GUIProcessEnvironment {
 
     static func enriched(_ env: [String: String]) -> [String: String] {
         var copy = env
-        // An offline clone pins helper and provider paths for every child.
-        // Ordinary launches select this app's protocol, including nested commands.
-        if env["LF_CLONE_ROOT"] == nil {
-            copy["PATH"] = enrichedPath(from: env["PATH"])
-            copy.removeValue(forKey: "LF_BIN")
-            if let helper = Bundle.main.url(forAuxiliaryExecutable: "lf") {
-                copy["LF_BIN"] = helper.path
-                copy["PATH"] = helper.deletingLastPathComponent().path + ":" + (copy["PATH"] ?? "")
-            }
+        // Launches select this app's protocol, including nested commands.
+        copy["PATH"] = enrichedPath(from: env["PATH"])
+        copy.removeValue(forKey: "LF_BIN")
+        if let helper = Bundle.main.url(forAuxiliaryExecutable: "lf") {
+            copy["LF_BIN"] = helper.path
+            copy["PATH"] = helper.deletingLastPathComponent().path + ":" + (copy["PATH"] ?? "")
         }
         // The GUI is a new human control surface, not a continuation of the
         // Work process that opened it. Preserve Machine and account authority.

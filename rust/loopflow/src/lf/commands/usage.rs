@@ -24,30 +24,17 @@ pub fn run(
     parent: Option<&str>,
 ) -> Result<()> {
     let days = if parent.is_some() { 0 } else { days };
-    let runs = crate::lf::commands::session_history::collect_history(
+    let runs = sessions(
+        days,
         WorkFilter {
             wave,
             project,
             task,
         },
         parent,
-        since_days(days),
     )?;
     if context {
-        // Oldest first: a Task's steps read in the order they ran.
-        let home = crate::store::lf_home_dir();
-        let steps = if runs.is_empty() {
-            Vec::new()
-        } else {
-            let store = crate::store::sqlite::SqliteStore::open_processes_read_only(
-                &crate::store::database_path_from_env()?,
-            )?;
-            runs.iter()
-                .rev()
-                .map(|run| crate::context_usage::step_context(&home, &store, run))
-                .collect()
-        };
-        let report = crate::context_usage::ContextReport::new(steps);
+        let report = context_report(&runs)?;
         if json {
             println!("{}", serde_json::to_string(&report)?);
         } else {
@@ -61,6 +48,33 @@ pub fn run(
     }
     print_report(&runs, days);
     Ok(())
+}
+
+/// The Session inputs `lf usage` reports over `days` (0 is all time).
+pub(crate) fn sessions(
+    days: u32,
+    filter: WorkFilter,
+    parent: Option<&str>,
+) -> Result<Vec<SessionHistory>> {
+    crate::lf::commands::session_history::collect_history(filter, parent, since_days(days))
+}
+
+/// `lf usage --context`: what each of `runs`' inputs was made of.
+pub fn context_report(runs: &[SessionHistory]) -> Result<crate::context_usage::ContextReport> {
+    // Oldest first: a Task's steps read in the order they ran.
+    let home = crate::store::lf_home_dir();
+    let steps = if runs.is_empty() {
+        Vec::new()
+    } else {
+        let store = crate::store::sqlite::SqliteStore::open_processes_read_only(
+            &crate::store::database_path_from_env()?,
+        )?;
+        runs.iter()
+            .rev()
+            .map(|run| crate::context_usage::step_context(&home, &store, run))
+            .collect()
+    };
+    Ok(crate::context_usage::ContextReport::new(steps))
 }
 
 fn since_days(days: u32) -> i64 {

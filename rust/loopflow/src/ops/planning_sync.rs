@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use crate::planning_exchange::PlanningSnapshot;
 use crate::planning_git::{PlanningGit, PlanningPublication, PlanningRevision};
-use crate::store::{open_store, sqlite::SqliteStore, SharedStore, StorageConfig, Store};
+use crate::store::{open_store, sqlite::SqliteStore, StorageConfig, Store};
 
 use super::{OpsError, OpsResult};
 
@@ -47,11 +47,25 @@ pub(crate) async fn find_task(
 /// One acquisition per destination, also used before resolving a cold Task.
 /// An unavailable remote never prevents a saved local plan from being used.
 pub(crate) async fn acquire_repository(store: &Store, repo: &str) -> OpsResult<()> {
-    exchange_repository(store, repo, false).await
+    exchange_repository(store, repo, Exchange::Acquire).await
 }
 
+/// Publishes unless another process is publishing; that one or the next
+/// connection tick sends this save out.
 pub(crate) async fn publish_repository(store: &Store, repo: &str) -> OpsResult<()> {
-    exchange_repository(store, repo, true).await
+    exchange_repository(store, repo, Exchange::Publish { wait: false }).await
+}
+
+/// Publishes after any concurrent publication, whose export may predate this
+/// Machine's latest save, so pending changes are out when it returns.
+pub(crate) async fn publish_repository_now(store: &Store, repo: &str) -> OpsResult<()> {
+    exchange_repository(store, repo, Exchange::Publish { wait: true }).await
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Exchange {
+    Acquire,
+    Publish { wait: bool },
 }
 
 /// A short command saves first, then makes one foreground exchange attempt.
@@ -81,7 +95,9 @@ pub(crate) async fn sync_after_save(store: &Store, repo: &str) {
     };
     if let Err(error) = attempt.await {
         tracing::debug!(%error, "planning synchronization pending after local save");
-        eprintln!("Saved locally; planning synchronization pending. See `lf planning status`.");
+        crate::journal::request::diagnostic(format_args!(
+            "Saved locally; planning synchronization pending. See `lf planning status`."
+        ));
     }
 }
 
@@ -110,6 +126,36 @@ pub(crate) async fn configured_destination(store: &Store, repo: &str) -> OpsResu
         .await
         .map_err(message)?;
     Ok(Some(id))
+}
+
+/// A Task moving here from another of the person's Machines brings their
+/// planning key, so a personal Git plan reads the same journal on both. A
+/// Machine that already plans under another key refuses: keys never change.
+pub(crate) async fn adopt_personal_key(store: &Store, repo: &Path, key: &str) -> OpsResult<()> {
+    use crate::config::{load_config, GitPlan, PlanningConfig};
+    let config = load_config(Some(repo))
+        .map_err(message)?
+        .unwrap_or_default();
+    if !matches!(
+        config.planning_transport(),
+        PlanningConfig::Git {
+            plan: GitPlan::Personal,
+            ..
+        }
+    ) {
+        return Ok(());
+    }
+    match store.planning_user_key().await.map_err(message)? {
+        Some(saved) if saved == key => Ok(()),
+        Some(saved) => Err(message(format!(
+            "this Machine plans under planning key {saved}, the sending Machine under {key}; \
+             a personal plan follows one key, so this Machine cannot read the Task's plan"
+        ))),
+        None => store
+            .provision_planning_user_key(key)
+            .await
+            .map_err(message),
+    }
 }
 
 /// The first personal connection creates the key; a concurrent creator's key wins.
@@ -199,7 +245,7 @@ pub(crate) fn defer_exchange(deferred: bool) {
     EXCHANGE_DEFERRED.store(deferred, Ordering::SeqCst);
 }
 
-async fn exchange_repository(store: &Store, repo: &str, publish: bool) -> OpsResult<()> {
+async fn exchange_repository(store: &Store, repo: &str, exchange: Exchange) -> OpsResult<()> {
     if EXCHANGE_DEFERRED.load(Ordering::SeqCst) {
         return Ok(());
     }
@@ -208,21 +254,34 @@ async fn exchange_repository(store: &Store, repo: &str, publish: bool) -> OpsRes
     };
     let sqlite = store.sqlite.clone();
     let repo = repo.to_owned();
-    tokio::task::spawn_blocking(move || exchange_destination(&sqlite, &repo, &destination, publish))
-        .await
-        .map_err(message)?
+    crate::journal::request::spawn_blocking(move || {
+        exchange_destination(&sqlite, &repo, &destination, exchange)
+    })
+    .await
+    .map_err(message)?
 }
 
-fn exchange_destination(store: &SqliteStore, repo: &str, id: &str, publish: bool) -> OpsResult<()> {
+fn exchange_destination(
+    store: &SqliteStore,
+    repo: &str,
+    id: &str,
+    exchange: Exchange,
+) -> OpsResult<()> {
+    let publish = matches!(exchange, Exchange::Publish { .. });
     // The blocking worker retains effect ownership through status writes, even
     // if its async waiter is canceled. Acquisition never takes this lock.
-    let _lock = if publish {
+    let _lock = if let Exchange::Publish { wait } = exchange {
         let path = store
             .home_dir()
             .map_err(message)?
             .join("locks/planning-peers")
             .join(format!("{id}.lock"));
-        let Some(lock) = super::planning_delivery::lock_delivery(&path)? else {
+        let lock = if wait {
+            wait_for_publication(&path)?
+        } else {
+            super::planning_delivery::lock_delivery(&path)?
+        };
+        let Some(lock) = lock else {
             return Ok(());
         };
         Some(lock)
@@ -255,6 +314,22 @@ fn exchange_destination(store: &SqliteStore, repo: &str, id: &str, publish: bool
         .map_err(message)?;
     result
 }
+
+/// A holder stuck past the wait leaves the save to the next publication.
+fn wait_for_publication(path: &Path) -> OpsResult<Option<std::fs::File>> {
+    let deadline = std::time::Instant::now() + PUBLICATION_WAIT;
+    loop {
+        if let Some(lock) = super::planning_delivery::lock_delivery(path)? {
+            return Ok(Some(lock));
+        }
+        if std::time::Instant::now() >= deadline {
+            return Ok(None);
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+const PUBLICATION_WAIT: Duration = Duration::from_secs(10);
 
 fn acquire_destination(
     store: &SqliteStore,
@@ -350,6 +425,15 @@ fn publish_destination(
 
 /// Provider exit is also a useful boundary for Taskless conversations.
 pub(crate) fn check_directory(directory: &Path) -> OpsResult<()> {
+    sync_directory(directory, false)
+}
+
+/// `wave status --sync`'s exchange, before it refreshes the Wave inventory.
+pub(crate) fn refresh_directory(directory: &Path) -> OpsResult<()> {
+    sync_directory(directory, true)
+}
+
+fn sync_directory(directory: &Path, refresh: bool) -> OpsResult<()> {
     let repo = crate::repository::CanonicalRepo::discover(directory)
         .map_err(message)?
         .to_string();
@@ -361,12 +445,16 @@ pub(crate) fn check_directory(directory: &Path) -> OpsResult<()> {
         .build()?
         .block_on(async {
             let store = planning_store().await?;
-            super::linear_observe::sync_repository(&store, &repo).await;
+            if refresh {
+                super::linear_observe::refresh_repository(&store, &repo).await;
+            } else {
+                super::linear_observe::sync_repository(&store, &repo).await;
+            }
             Ok(())
         })
 }
 
-/// Foreground Git exchange, or on-demand Linear checks while watching.
+/// Foreground Git exchange while a provider runs.
 /// Dropping the connection cancels requests; durable identities survive cancellation.
 #[derive(Debug)]
 pub(crate) struct PlanningSync {
@@ -376,35 +464,19 @@ pub(crate) struct PlanningSync {
 
 impl PlanningSync {
     /// Repository planning follows every foreground provider, not Task attribution.
+    /// One thread owns initialization and exchange. Callers may already be inside
+    /// an async runtime; startup errors still return before the provider launches.
     pub(crate) fn start_for_directory(directory: &Path) -> OpsResult<Self> {
         let repo = crate::repository::CanonicalRepo::discover(directory)
             .map_err(message)?
             .to_string();
-        let config = storage_config_from_env()?;
-        Self::connect(repo, false, async move {
-            open_planning_store(&config).await.map(Arc::new)
-        })
-    }
-
-    /// Watchers keep the selected transport active; providers only keep Git active.
-    pub(crate) fn start_watch(store: SharedStore, repo: String) -> OpsResult<Self> {
-        Self::connect(repo, true, async move { Ok(store) })
-    }
-
-    // One thread owns initialization and exchange. Callers may already be inside
-    // an async runtime; startup errors still return before the provider launches.
-    fn connect(
-        repo: String,
-        watching: bool,
-        open: impl Future<Output = OpsResult<SharedStore>> + Send + 'static,
-    ) -> OpsResult<Self> {
-        let remote = super::planning_client::connected(&repo);
-        if remote && !watching {
+        if super::planning_client::connected(&repo) {
             return Ok(Self {
                 stop: None,
                 thread: None,
             });
         }
+        let config = storage_config_from_env()?;
         let (ready, started) = std::sync::mpsc::sync_channel(1);
         let (stop, stopped) = tokio::sync::oneshot::channel();
         #[cfg(test)]
@@ -425,7 +497,7 @@ impl PlanningSync {
                     }
                 };
                 let drive = async {
-                    let store = match open.await {
+                    let store = match open_planning_store(&config).await.map(Arc::new) {
                         Ok(store) => store,
                         Err(error) => {
                             let _ = ready.send(Err(error));
@@ -437,13 +509,12 @@ impl PlanningSync {
                     }
                     tokio::select! {
                         _ = stopped => {},
-                        _ = super::linear_observe::watch_repository(&store, &repo), if remote => {},
                         _ = repeat_sync("Git planning acquisition", Duration::from_secs(5), || {
                             acquire_repository(&store, &repo)
-                        }), if !remote => {},
+                        }) => {},
                         _ = repeat_sync("Git planning publication", Duration::from_secs(1), || {
                             publish_repository(&store, &repo)
-                        }), if !remote => {},
+                        }) => {},
                     }
                 };
                 #[cfg(test)]
@@ -512,7 +583,7 @@ pub(super) async fn open_planning_store(config: &StorageConfig) -> OpsResult<Sto
     }
     let config = config.clone();
     // Store opening uses synchronous SQLite I/O. Keep it off the deadline's executor.
-    tokio::task::spawn_blocking(move || {
+    crate::journal::request::spawn_blocking(move || {
         tokio::runtime::Handle::current().block_on(open_store(&config))
     })
     .await

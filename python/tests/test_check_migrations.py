@@ -1,9 +1,8 @@
-"""The release gate: a migration that already shipped can never change.
+"""The merge gate: a migration on origin/main can never change, and a new one is
+additive or a dated contract."""
 
-Each test builds a throwaway repo with a release tag, so the check runs against a
-real tag rather than the one this repo happens to be on.
-"""
-
+import datetime as dt
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -12,65 +11,37 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/check_migrations.py"
-MIGRATIONS = "rust/loopflow/src/store/migrations"
-MIGRATIONS_RS = "rust/loopflow/src/store/migration_catalog.rs"
+MIGRATIONS = Path("rust/loopflow/src/store/migrations")
 
 
-def _git(repo: Path, *args: str) -> None:
-    subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
-
-
-def _registry(*entries: tuple) -> str:
-    """A MIGRATIONS registry in Rust, shaped as migration_catalog.rs writes it."""
-    rendered = []
-    for entry in entries:
-        if len(entry) == 4:
-            major, minor, ordinal, name = entry
-            patch = None
-            filename = f"{major}.{minor}.{ordinal:03d}_{name}.sql"
-        else:
-            major, minor, patch, ordinal, name = entry
-            filename = f"{major}.{minor}.{patch}.{ordinal:03d}_{name}.sql"
-        patch_value = "None" if patch is None else f"Some({patch})"
-        rendered.append(
-            f"""Migration {{
-    id: MigrationId {{
-        major: {major},
-        minor: {minor},
-        patch: {patch_value},
-        ordinal: {ordinal},
-    }},
-    name: "{name}",
-    sql: include_str!("migrations/{filename}"),
-}}, """
-        )
-    return f"const MIGRATIONS: &[Migration] = &[{''.join(rendered)}];\n"
-
-
-def _register(repo: Path, *entries: tuple) -> None:
-    (repo / MIGRATIONS_RS).write_text(_registry(*entries))
+def _git(repo: Path, *args: str, when: dt.datetime | None = None) -> None:
+    """Run git in `repo`; `when` dates a commit."""
+    env = dict(os.environ)
+    if when:
+        env |= {"GIT_AUTHOR_DATE": when.isoformat(), "GIT_COMMITTER_DATE": when.isoformat()}
+    subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", *args],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        env=env,
+    )
 
 
 @pytest.fixture
 def repo(tmp_path: Path) -> Path:
-    """A repo tagged v0.10.1 with one shipped migration, `0.10.001_initial.sql`."""
+    """origin/main carries one released batch and one merged slug."""
     (tmp_path / "scripts").mkdir()
     (tmp_path / "scripts/check_migrations.py").write_bytes(SCRIPT.read_bytes())
-    (tmp_path / "scripts/canonicalize_migrations.py").write_bytes(
-        (ROOT / "scripts/canonicalize_migrations.py").read_bytes()
-    )
     (tmp_path / MIGRATIONS).mkdir(parents=True)
-    (tmp_path / "Cargo.toml").write_text('[workspace.package]\nversion = "0.10.1"\n')
-    (tmp_path / "pyproject.toml").write_text('[project]\nversion = "0.10.1"\n')
-    (tmp_path / MIGRATIONS / "0.10.001_initial.sql").write_text("CREATE TABLE waves (id TEXT);\n")
-    _register(tmp_path, (0, 10, 1, "initial"))
-
-    _git(tmp_path, "init", "-q")
-    _git(tmp_path, "config", "user.email", "test@example.com")
-    _git(tmp_path, "config", "user.name", "test")
+    (tmp_path / MIGRATIONS / "0.10.1.001_release.sql").write_text(
+        "-- draft: initial\nCREATE TABLE waves (id TEXT);\n"
+    )
+    (tmp_path / MIGRATIONS / "task_graphs.sql").write_text("CREATE TABLE graphs (id TEXT);\n")
+    _git(tmp_path, "init", "-q", "-b", "main")
     _git(tmp_path, "add", ".")
-    _git(tmp_path, "commit", "-qm", "release")
-    _git(tmp_path, "tag", "v0.10.1")
+    _git(tmp_path, "commit", "-qm", "main")
+    _git(tmp_path, "update-ref", "refs/remotes/origin/main", "HEAD")
     return tmp_path
 
 
@@ -83,312 +54,212 @@ def check(repo: Path) -> subprocess.CompletedProcess:
     )
 
 
-def test_a_shipped_migration_left_alone_passes(repo: Path):
-    result = check(repo)
-    assert result.returncode == 0, result.stderr
-    assert "unchanged since v0.10.1" in result.stdout
-
-
-def test_a_batch_matching_the_active_package_release_passes(repo: Path):
-    (repo / MIGRATIONS / "0.10.1.001_release.sql").write_text(
-        "-- draft: add_note\nALTER TABLE waves ADD note TEXT;\n"
-    )
-    _register(repo, (0, 10, 1, "initial"), (0, 10, 1, 1, "release"))
-
-    result = check(repo)
-    assert result.returncode == 0, result.stderr
-
-
-def test_a_migration_file_nobody_registered_fails(repo: Path):
-    """An unregistered migration never runs — shipping one is shipping a no-op."""
-    (repo / MIGRATIONS / "0.10.1.001_release.sql").write_text(
-        "-- draft: add_note\nALTER TABLE waves ADD note TEXT;\n"
-    )
-
-    result = check(repo)
-    assert result.returncode == 1
-    assert "not in the MIGRATIONS registry" in result.stderr
-
-
-def test_a_registry_entry_without_its_file_fails(repo: Path):
-    _register(repo, (0, 10, 1, "initial"), (0, 10, 2, "add_note"))
-
-    result = check(repo)
-    assert result.returncode == 1
-    assert "has no file" in result.stderr
-
-
-def test_duplicate_registry_ids_fail(repo: Path):
-    _register(repo, (0, 10, 1, "initial"), (0, 10, 1, "initial"))
-
-    result = check(repo)
-    assert result.returncode == 1
-    assert "collides" in result.stderr
-
-
-def test_a_registry_entry_whose_id_disagrees_with_its_file_fails(repo: Path):
-    (repo / MIGRATIONS_RS).write_text(
-        _registry((0, 10, 2, "initial")).replace(
-            "migrations/0.10.002_initial.sql", "migrations/0.10.001_initial.sql"
-        )
-    )
-
-    result = check(repo)
-    assert result.returncode == 1
-    assert "must agree" in result.stderr
-
-
-def test_a_registry_entry_whose_name_disagrees_with_its_file_fails(repo: Path):
-    (repo / MIGRATIONS_RS).write_text(
-        _registry((0, 10, 1, "setup")).replace(
-            "migrations/0.10.001_setup.sql", "migrations/0.10.001_initial.sql"
-        )
-    )
-
-    result = check(repo)
-    assert result.returncode == 1
-    assert "must agree" in result.stderr
-
-
-def test_a_registry_out_of_id_order_fails(repo: Path):
-    (repo / MIGRATIONS / "0.10.002_add_note.sql").write_text("ALTER TABLE waves ADD note TEXT;\n")
-    _register(repo, (0, 10, 2, "add_note"), (0, 10, 1, "initial"))
-
-    result = check(repo)
-    assert result.returncode == 1
-    assert "not in id order" in result.stderr
-
-
-def test_editing_a_shipped_migration_fails(repo: Path):
-    (repo / MIGRATIONS / "0.10.001_initial.sql").write_text("CREATE TABLE waves (id INTEGER);\n")
-
-    result = check(repo)
-    assert result.returncode == 1
-    assert "has been edited" in result.stderr
-
-
-def test_renaming_a_shipped_migration_fails(repo: Path):
-    """Even a rename the registry agrees with: the id is what shipped."""
-    (repo / MIGRATIONS / "0.10.001_initial.sql").rename(repo / MIGRATIONS / "0.10.001_setup.sql")
-    _register(repo, (0, 10, 1, "setup"))
-
-    result = check(repo)
-    assert result.returncode == 1
-    assert "is now missing" in result.stderr
-
-
-def test_moving_the_migration_directory_does_not_void_the_check(repo: Path):
-    """Relocating the directory cannot quietly retire the shipped ids inside it."""
-    (repo / MIGRATIONS).rename(repo / "rust/loopflow/src/store/elsewhere")
-
-    result = check(repo)
-    assert result.returncode == 1
-    assert "missing" in result.stderr
-
-
-def test_a_migration_ahead_of_the_package_version_fails(repo: Path):
-    (repo / MIGRATIONS / "0.11.0.001_release.sql").write_text("-- draft: too_new\nSELECT 1;\n")
-
-    result = check(repo)
-    assert result.returncode == 1
-    assert "namespaced ahead" in result.stderr
-
-
-def test_a_new_canonical_migration_behind_the_active_namespace_fails(repo: Path):
-    (repo / "Cargo.toml").write_text('[workspace.package]\nversion = "0.11.0"\n')
-    (repo / "pyproject.toml").write_text('[project]\nversion = "0.11.0"\n')
-    (repo / MIGRATIONS / "0.10.1.001_release.sql").write_text("-- draft: too_old\nSELECT 1;\n")
-    _register(repo, (0, 10, 1, "initial"), (0, 10, 1, 1, "release"))
-
-    result = check(repo)
-
-    assert result.returncode == 1
-    assert "namespaced behind the active package namespace 0.11.0" in result.stderr
-    assert "ordinal-free draft" in result.stderr
-
-
-def test_a_batch_from_an_older_patch_release_fails(repo: Path):
-    (repo / "Cargo.toml").write_text('[workspace.package]\nversion = "0.10.2"\n')
-    (repo / "pyproject.toml").write_text('[project]\nversion = "0.10.2"\n')
-    (repo / MIGRATIONS / "0.10.1.001_release.sql").write_text("-- draft: too_old\nSELECT 1;\n")
-    _register(repo, (0, 10, 1, "initial"), (0, 10, 1, 1, "release"))
-
-    result = check(repo)
-
-    assert result.returncode == 1
-    assert "active package namespace 0.10.2" in result.stderr
-
-
-def test_a_new_legacy_three_part_migration_fails(repo: Path):
-    (repo / MIGRATIONS / "0.10.002_add_note.sql").write_text("SELECT 1;\n")
-    _register(repo, (0, 10, 1, "initial"), (0, 10, 2, "add_note"))
-
-    result = check(repo)
-
-    assert result.returncode == 1
-    assert "legacy three-part format" in result.stderr
-
-
-def test_corrected_release_accepts_an_additional_batch(repo: Path):
-    (repo / MIGRATIONS / "0.10.1.001_release.sql").write_text("-- draft: first_cut\nSELECT 1;\n")
-    (repo / MIGRATIONS / "0.10.1.002_release.sql").write_text("-- draft: add_note\nSELECT 1;\n")
-    _register(repo, (0, 10, 1, "initial"), (0, 10, 1, 1, "release"), (0, 10, 1, 2, "release"))
-
-    result = check(repo)
-
-    assert result.returncode == 0, result.stderr
-
-
-def test_a_release_batch_requires_draft_provenance(repo: Path):
-    (repo / MIGRATIONS / "0.10.1.001_release.sql").write_text("SELECT 1;\n")
-    _register(repo, (0, 10, 1, "initial"), (0, 10, 1, 1, "release"))
-
-    result = check(repo)
-
-    assert result.returncode == 1
-    assert "carries no `-- draft:` provenance" in result.stderr
-
-
-def test_a_malformed_migration_name_fails(repo: Path):
-    (repo / MIGRATIONS / "002_oops.sql").write_text("SELECT 1;\n")
-
-    result = check(repo)
-    assert result.returncode == 1
-    assert "is not" in result.stderr
-
-
-def test_manifests_disagreeing_on_the_version_fails(repo: Path):
-    (repo / "pyproject.toml").write_text('[project]\nversion = "0.11.0"\n')
-
-    result = check(repo)
-    assert result.returncode == 1
-    assert "disagree" in result.stderr
-
-
-def test_a_branch_cannot_reuse_an_ordinal_owned_by_current_main(repo: Path):
-    (repo / MIGRATIONS / "0.10.002_main_change.sql").write_text("SELECT 'main';\n")
-    _register(repo, (0, 10, 1, "initial"), (0, 10, 2, "main_change"))
+def merge(repo: Path, name: str, sql: str, days_ago: int) -> None:
+    """Land a migration on origin/main `days_ago` days back."""
+    (repo / MIGRATIONS / name).write_text(sql)
     _git(repo, "add", ".")
-    _git(repo, "commit", "-qm", "main migration")
+    when = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days_ago)
+    _git(repo, "commit", "-qm", name, when=when)
     _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
-    _git(repo, "checkout", "-qb", "feature", "HEAD~1")
-
-    (repo / MIGRATIONS / "0.10.002_branch_change.sql").write_text("SELECT 'branch';\n")
-    _register(repo, (0, 10, 1, "initial"), (0, 10, 2, "branch_change"))
-
-    result = check(repo)
-    assert result.returncode == 1
-    assert "collides with 0.10.002_main_change.sql on origin/main" in result.stderr
 
 
-# -- Drafts -------------------------------------------------------------------
-#
-# A draft carries a stable name and no ordinal, so two branches never contend for
-# one and a behind-main branch that adds only a draft stays green. The check only
-# proves the drafts are well-formed and orderable; the release cut assigns ids.
-
-DRAFTS = MIGRATIONS + "/drafts"
+CONTRACT = "-- expand: add_title\n-- exports: ~/.lf/exports/waves-name.json\n"
 
 
-def _draft(repo: Path, name: str, depends_on: str = "", body: str = "SELECT 1;\n") -> None:
-    (repo / DRAFTS).mkdir(parents=True, exist_ok=True)
-    (repo / DRAFTS / f"{name}.sql").write_text(f"-- depends_on: {depends_on}\n{body}")
-
-
-def test_a_well_formed_draft_passes(repo: Path):
-    _draft(repo, "add_wave_colour")
-
+def test_merged_history_left_alone_passes(repo: Path):
     result = check(repo)
     assert result.returncode == 0, result.stderr
-    assert "1 draft migration(s): add_wave_colour" in result.stdout
+    assert "no unmerged migration" in result.stdout
 
 
-def test_two_independent_drafts_pass_and_do_not_collide(repo: Path):
-    _draft(repo, "add_wave_colour")
-    _draft(repo, "add_task_priority")
+def test_package_order_records_merge_order_without_unmerged_slugs(repo: Path):
+    merge(repo, "a_later_migration.sql", "CREATE TABLE later (id TEXT);", days_ago=0)
+    command = [sys.executable, "scripts/check_migrations.py", "--write-package-order"]
+    result = subprocess.run(command, cwd=repo, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    snapshot = repo / "rust/loopflow/migration-order.txt"
+    assert snapshot.read_text() == "task_graphs\na_later_migration\n"
 
+    (repo / MIGRATIONS / "unfinished.sql").write_text("CREATE TABLE unfinished (id TEXT);")
+    result = subprocess.run(command, cwd=repo, capture_output=True, text=True)
+    assert result.returncode != 0
+    assert snapshot.read_text() == "task_graphs\na_later_migration\n"
+
+
+def test_new_slugs_pass_and_are_named(repo: Path):
+    (repo / MIGRATIONS / "add_note.sql").write_text("ALTER TABLE waves ADD note TEXT;\n")
+    (repo / MIGRATIONS / "add_colour.sql").write_text("ALTER TABLE waves ADD colour TEXT;\n")
     result = check(repo)
     assert result.returncode == 0, result.stderr
+    assert "unmerged: add_colour.sql, add_note.sql" in result.stdout
 
 
-def test_a_draft_only_advance_on_main_does_not_fail_a_behind_branch(repo: Path):
-    # In the new model, ordinary merges add drafts, not canonical migrations, so
-    # main's canonical set does not move between releases. Drafts are never
-    # compared against origin/main, so a branch behind main's drafts that adds its
-    # own draft stays green — where branch-time ordinal allocation used to collide.
-    _draft(repo, "main_draft")
-    _git(repo, "add", ".")
-    _git(repo, "commit", "-qm", "main draft")
-    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
-    _git(repo, "checkout", "-qb", "feature", "HEAD~1")  # drops main_draft
-    _draft(repo, "feature_draft")
-
-    result = check(repo)
-    assert result.returncode == 0, result.stderr
-
-
-def test_a_draft_depending_on_a_declared_draft_passes(repo: Path):
-    _draft(repo, "add_wave_colour")
-    _draft(repo, "backfill_colour", depends_on="add_wave_colour")
-
-    result = check(repo)
-    assert result.returncode == 0, result.stderr
-
-
-def test_a_draft_depending_on_no_draft_fails(repo: Path):
-    _draft(repo, "backfill_colour", depends_on="add_wave_colour")
-
+@pytest.mark.parametrize("name", ["task_graphs.sql", "0.10.1.001_release.sql"])
+def test_an_edited_merged_migration_fails(repo: Path, name: str):
+    (repo / MIGRATIONS / name).write_text("SELECT 1;\n")
     result = check(repo)
     assert result.returncode == 1
-    assert "neither a draft" in result.stderr
+    assert "differs from origin/main" in result.stderr
 
 
-def test_a_draft_dependency_cycle_fails(repo: Path):
-    _draft(repo, "a", depends_on="b")
-    _draft(repo, "b", depends_on="a")
-
+def test_a_deleted_merged_migration_fails(repo: Path):
+    (repo / MIGRATIONS / "task_graphs.sql").unlink()
     result = check(repo)
     assert result.returncode == 1
-    assert "cycle" in result.stderr
+    assert "never deleted" in result.stderr
 
 
-def test_a_draft_cannot_forge_release_provenance(repo: Path):
-    _draft(repo, "add_wave_colour", body="-- draft: invented\nSELECT 1;\n")
-
-    result = check(repo)
-
-    assert result.returncode == 1
-    assert "reserved `-- draft:`" in result.stderr
-
-
-def test_a_draft_colliding_with_a_released_name_fails(repo: Path):
-    _draft(repo, "initial")
-
+def test_a_new_released_batch_fails(repo: Path):
+    (repo / MIGRATIONS / "0.10.2.001_release.sql").write_text("SELECT 1;\n")
     result = check(repo)
     assert result.returncode == 1
-    assert "collides with a released migration" in result.stderr
+    assert "adds a released batch" in result.stderr
 
 
-def test_the_drafts_readme_is_ignored(repo: Path):
-    _draft(repo, "add_wave_colour")
-    (repo / DRAFTS / "README.md").write_text("# Draft migrations\n")
+@pytest.mark.parametrize("name", ["Add-Note.sql", "drafts"])
+def test_misplaced_files_fail(repo: Path, name: str):
+    path = repo / MIGRATIONS / name
+    if name == "drafts":
+        path.mkdir()
+    else:
+        path.write_text("SELECT 1;\n")
+    assert check(repo).returncode == 1
 
+
+def test_a_slug_reusing_a_released_name_fails(repo: Path):
+    (repo / MIGRATIONS / "initial.sql").write_text("SELECT 1;\n")
     result = check(repo)
-    assert result.returncode == 0, result.stderr
-
-
-def test_runtime_sql_names_its_columns(repo: Path) -> None:
-    source = repo / "rust/loopflow/src/store/rows.rs"
-    source.parent.mkdir(parents=True, exist_ok=True)
-    source.write_text('const ROW: &str = "INSERT INTO waves VALUES (?1)";\n')
-
-    result = check(repo)
-
     assert result.returncode == 1
-    assert "rows.rs uses positional INSERT or SELECT *" in result.stderr
+    assert "reuses the released migration name" in result.stderr
 
-    source.write_text(
-        'const ROW: &str = "INSERT INTO waves (id) VALUES (?1)";\n'
-        '#[cfg(test)]\nmod tests {\n    const FIXTURE: &str = "SELECT * FROM waves";\n}\n'
+
+def test_runtime_sql_names_its_columns(repo: Path):
+    (repo / "rust/loopflow/src/writer.rs").write_text(
+        'const SQL: &str = "INSERT INTO waves VALUES (?1)";\n'
     )
-    assert check(repo).returncode == 0
+    result = check(repo)
+    assert result.returncode == 1
+    assert "positional INSERT" in result.stderr
+
+
+def test_a_rebuild_that_keeps_every_column_is_additive(repo: Path):
+    merge(repo, "add_name.sql", "ALTER TABLE waves ADD COLUMN name TEXT;\n", 40)
+    (repo / MIGRATIONS / "rebuild_waves.sql").write_text(
+        "CREATE TABLE waves_rebuilt (name TEXT, id TEXT CHECK (id <> ''));\n"
+        "INSERT INTO waves_rebuilt(id, name) SELECT id, name FROM waves;\n"
+        "DROP TABLE waves;\nALTER TABLE waves_rebuilt RENAME TO waves;\n"
+        "CREATE INDEX waves_name ON waves(name);\n"
+    )
+    result = check(repo)
+    assert result.returncode == 0, result.stderr
+
+
+def test_a_redefined_view_that_keeps_its_columns_is_additive(repo: Path):
+    merge(repo, "wave_names.sql", "CREATE VIEW wave_names AS SELECT id FROM waves;\n", 40)
+    (repo / MIGRATIONS / "widen_view.sql").write_text(
+        "ALTER TABLE waves ADD COLUMN name TEXT;\n"
+        "DROP VIEW wave_names;\n"
+        "CREATE VIEW wave_names AS SELECT w.id, w.name FROM waves w;\n"
+    )
+    result = check(repo)
+    assert result.returncode == 0, result.stderr
+
+
+def test_a_view_losing_a_column_needs_a_contract(repo: Path):
+    merge(repo, "add_name.sql", "ALTER TABLE waves ADD COLUMN name TEXT;\n", 40)
+    merge(repo, "wave_names.sql", "CREATE VIEW wave_names AS SELECT id, name FROM waves;\n", 40)
+    merge(repo, "add_title.sql", "ALTER TABLE waves ADD COLUMN title TEXT;\n", 31)
+    narrow = repo / MIGRATIONS / "narrow_view.sql"
+    sql = "DROP VIEW wave_names;\nCREATE VIEW wave_names AS SELECT id FROM waves;\n"
+
+    narrow.write_text(sql)
+    result = check(repo)
+    assert result.returncode == 1
+    assert "drops column wave_names.name without naming its expand step" in result.stderr
+
+    narrow.write_text(CONTRACT + sql)
+    result = check(repo)
+    assert result.returncode == 0, result.stderr
+
+
+def test_a_dropped_column_needs_a_dated_contract_that_exports(repo: Path):
+    merge(repo, "add_name.sql", "ALTER TABLE waves ADD COLUMN name TEXT;\n", 40)
+    merge(repo, "add_title.sql", "ALTER TABLE waves ADD COLUMN title TEXT;\n", 31)
+    contract = repo / MIGRATIONS / "drop_name.sql"
+
+    contract.write_text("ALTER TABLE waves DROP COLUMN name;\n")
+    result = check(repo)
+    assert result.returncode == 1
+    assert "drops column waves.name without naming its expand step" in result.stderr
+
+    contract.write_text("-- expand: add_title\nALTER TABLE waves DROP COLUMN name;\n")
+    result = check(repo)
+    assert result.returncode == 1
+    assert "-- exports:" in result.stderr
+
+    contract.write_text(CONTRACT + "ALTER TABLE waves DROP COLUMN name;\n")
+    result = check(repo)
+    assert result.returncode == 0, result.stderr
+    assert "drop_name.sql: contract of add_title (31 days)" in result.stdout
+
+
+def test_a_contract_waits_for_its_expand_step_to_age(repo: Path):
+    merge(repo, "add_name.sql", "ALTER TABLE waves ADD COLUMN name TEXT;\n", 40)
+    merge(repo, "add_title.sql", "ALTER TABLE waves ADD COLUMN title TEXT;\n", 3)
+    (repo / MIGRATIONS / "drop_name.sql").write_text(
+        CONTRACT + "ALTER TABLE waves DROP COLUMN name;\n"
+    )
+    result = check(repo)
+    assert result.returncode == 1
+    assert "merged 3 days ago; its contract clears on" in result.stderr
+
+
+def test_a_contract_drops_only_what_its_expand_step_left_behind(repo: Path):
+    merge(repo, "add_title.sql", "ALTER TABLE waves ADD COLUMN title TEXT;\n", 31)
+    (repo / MIGRATIONS / "drop_title.sql").write_text(
+        CONTRACT + "ALTER TABLE waves DROP COLUMN title;\n"
+    )
+    result = check(repo)
+    assert result.returncode == 1
+    assert "did not leave behind" in result.stderr
+
+    (repo / MIGRATIONS / "drop_title.sql").write_text(
+        "-- expand: never_merged\n-- exports: x\nALTER TABLE waves DROP COLUMN title;\n"
+    )
+    result = check(repo)
+    assert result.returncode == 1
+    assert "not on origin/main" in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("sql", "reason"),
+    [
+        ("ALTER TABLE waves ADD COLUMN rank INTEGER NOT NULL;", "required without a default"),
+        (
+            "CREATE TABLE waves_rebuilt (id INTEGER);\n"
+            "INSERT INTO waves_rebuilt SELECT id FROM waves;\n"
+            "DROP TABLE waves;\nALTER TABLE waves_rebuilt RENAME TO waves;\n",
+            "changed its type",
+        ),
+        ("CREATE UNIQUE INDEX waves_id ON waves(id);", "unique index"),
+        (
+            "ALTER TABLE waves ADD COLUMN is_local INTEGER NOT NULL DEFAULT 0;\n"
+            "CREATE UNIQUE INDEX waves_local ON waves(is_local);",
+            "unique index",
+        ),
+    ],
+)
+def test_changes_that_break_older_sql_are_not_additive(repo: Path, sql: str, reason: str):
+    (repo / MIGRATIONS / "reshape.sql").write_text(sql + "\n")
+    result = check(repo)
+    assert result.returncode == 1
+    assert "is not additive" in result.stderr and reason in result.stderr
+
+
+def test_a_unique_index_older_rows_never_enter_is_additive(repo: Path):
+    (repo / MIGRATIONS / "local_machine.sql").write_text(
+        "ALTER TABLE waves ADD COLUMN is_local INTEGER NOT NULL DEFAULT 0;\n"
+        "CREATE UNIQUE INDEX waves_local ON waves(is_local) WHERE is_local=1;\n"
+    )
+    result = check(repo)
+    assert result.returncode == 0, result.stderr

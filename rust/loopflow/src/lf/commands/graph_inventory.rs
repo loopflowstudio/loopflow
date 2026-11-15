@@ -1,9 +1,10 @@
 use std::num::NonZeroU32;
+use std::path::Path;
 
 use anyhow::{Context, Result};
 use clap::Args;
 
-use crate::durable::GraphProcessFilter;
+use crate::durable::{GraphProcessDetail, GraphProcessFilter, GraphProcessPage};
 use crate::repository::CanonicalRepo;
 use crate::session::GraphProcessSummaryState;
 use crate::store::{open_store, storage_config_from_env};
@@ -52,12 +53,32 @@ impl GraphProcessInventoryArgs {
 }
 
 pub fn list(args: &GraphProcessInventoryArgs, json: bool) -> Result<()> {
+    let page = page(&std::env::current_dir()?, args)?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&page)?);
+    } else {
+        for entry in page.entries {
+            println!(
+                "{}  {:?}  {}",
+                entry.summary.id, entry.summary.state, entry.summary.name,
+            );
+        }
+        if let Some(next) = page.next {
+            println!("Continue with --after '{}' and the same filters", next);
+        }
+    }
+    Ok(())
+}
+
+/// `lf graph list --processes`' page, scoped to the repository containing
+/// `directory` unless `--all`.
+pub fn page(directory: &Path, args: &GraphProcessInventoryArgs) -> Result<GraphProcessPage> {
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_store(&storage_config_from_env()?).await?;
         let repo = if args.all {
             None
         } else {
-            CanonicalRepo::current()?.map(|repo| repo.to_string())
+            CanonicalRepo::containing(directory)?.map(|repo| repo.to_string())
         };
         let filter = GraphProcessFilter {
             task_id: args
@@ -91,52 +112,43 @@ pub fn list(args: &GraphProcessInventoryArgs, json: bool) -> Result<()> {
             taskless: args.taskless,
             search: args.search.clone(),
         };
-        let page = store
+        Ok(store
             .graph_inventory(
                 &filter,
                 args.after.as_deref(),
                 args.limit
                     .unwrap_or(NonZeroU32::new(100).expect("100 is nonzero")),
             )
-            .await?;
-        if json {
-            println!("{}", serde_json::to_string_pretty(&page)?);
-        } else {
-            for entry in page.entries {
-                println!(
-                    "{}  {:?}  {}",
-                    entry.summary.id, entry.summary.state, entry.summary.name,
-                );
-            }
-            if let Some(next) = page.next {
-                println!("Continue with --after '{}' and the same filters", next);
-            }
-        }
-        Ok(())
+            .await?)
     })
 }
 
 pub fn inspect(selector: &str, json: bool) -> Result<()> {
+    let detail = detail(selector)?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&detail)?);
+        return Ok(());
+    }
+    let summary = &detail.entry.summary;
+    println!("{}  {:?}  {}", summary.id, summary.state, summary.name);
+    for step in &detail.steps {
+        println!(
+            "  {}  {}  {}",
+            step.lf_process_id,
+            step.position(),
+            step.outcome.as_deref().unwrap_or("no recorded exit"),
+        );
+    }
+    Ok(())
+}
+
+/// `lf graph show <selector> --processes`: one Graph that ran, with its steps.
+pub fn detail(selector: &str) -> Result<GraphProcessDetail> {
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_store(&storage_config_from_env()?).await?;
-        let detail = store
+        store
             .graph_detail(selector)
             .await?
-            .context("no Graph has that Graph process")?;
-        if json {
-            println!("{}", serde_json::to_string_pretty(&detail)?);
-            return Ok(());
-        }
-        let summary = &detail.entry.summary;
-        println!("{}  {:?}  {}", summary.id, summary.state, summary.name);
-        for step in &detail.steps {
-            println!(
-                "  {}  {}  {}",
-                step.lf_process_id,
-                step.position(),
-                step.outcome.as_deref().unwrap_or("no recorded exit"),
-            );
-        }
-        Ok(())
+            .context("no Graph has that Graph process")
     })
 }

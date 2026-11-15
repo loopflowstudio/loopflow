@@ -1,15 +1,11 @@
-"""Back up a dense SQLite store read-only; apply source drafts only to the copy."""
+"""Back up a dense SQLite store read-only into a private benchmark Home."""
 
 import argparse
 import json
 import os
 import sqlite3
-import sys
 import uuid
 from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from canonicalize_migrations import _order, _read_drafts
 
 
 def require_fixture(home: Path) -> None:
@@ -22,20 +18,16 @@ def read_session_ids(home: Path) -> set[str]:
         return {row[0] for row in db.execute("SELECT id FROM agent_sessions")}
 
 
-def prepare(source: Path, home: Path, apply_drafts: bool, receipts: int = 0) -> dict:
+def prepare(source: Path, home: Path, receipts: int = 0) -> dict:
     home.mkdir(mode=0o700, parents=True, exist_ok=False)
     destination = home / "loopflow.db"
     with sqlite3.connect(f"file:{source.resolve()}?mode=ro", uri=True) as original:
         with sqlite3.connect(destination) as copy:
             original.backup(copy)
     destination.chmod(0o600)
-    drafts = _order(_read_drafts()) if apply_drafts else []
+    # The selected CLI migrates this private Home when it first opens it.
     with sqlite3.connect(destination) as copy:
-        # A fresh copy gets the draft set once. An incompatible released
-        # frontier fails validation when the selected CLI opens this fixture.
-        copy.executescript(
-            "PRAGMA foreign_keys=OFF; BEGIN;\n" + "\n".join(draft.sql for draft in drafts)
-        )
+        copy.executescript("PRAGMA foreign_keys=OFF; BEGIN;")
         # Copied account rows contain absolute provider-home paths. Remove the
         # routes before any launch so this fixture uses only native provider
         # selection and cannot refresh an installed managed account.
@@ -71,7 +63,6 @@ def prepare(source: Path, home: Path, apply_drafts: bool, receipts: int = 0) -> 
         )
     receipt = {
         "counts": counts,
-        "drafts": [draft.name for draft in drafts],
         "credential_files_copied": False,
         "managed_account_routes_removed": True,
         "synthetic_process_receipts": receipts,
@@ -84,11 +75,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--home", type=Path, required=True)
-    parser.add_argument("--apply-drafts", action="store_true")
     parser.add_argument("--receipts", type=int, default=0)
     args = parser.parse_args()
     os.umask(0o077)
-    print(json.dumps(prepare(args.source, args.home, args.apply_drafts, args.receipts)))
+    print(json.dumps(prepare(args.source, args.home, args.receipts)))
 
 
 if __name__ == "__main__":

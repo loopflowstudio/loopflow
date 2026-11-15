@@ -27,6 +27,7 @@ def test_report_separates_saved_from_fresh_launches_and_counts_failures(tmp_path
             {**launch, "event": "first_frame", "ms": 300 + index},
             {**launch, "event": "usable", "ms": 500 + index, "source": "saved"},
             {**launch, "event": "fresh", "ms": 14000},
+            {**launch, "event": "exit", "at": "2026-10-29T16:00:00Z", "reason": "quit"},
         ]
     launches += [
         {"launch": "first", "app": "1.2.3", "event": "launch", "ms": 45},
@@ -47,6 +48,8 @@ def test_report_separates_saved_from_fresh_launches_and_counts_failures(tmp_path
             {"event": "read", "verb": "wave show", "ms": 14000, "ok": True, "app": "1.2.3"},
             {"event": "read", "verb": "wave show", "ms": 90000, "ok": False, "app": "1.2.3"},
             {"event": "refresh", "part": "sessions", "ms": 12000, "ok": True, "app": "1.2.3"},
+            {"event": "frame_wait", "part": "planning", "ms": 7000, "ok": True, "app": "1.2.3"},
+            {"event": "frame_apply", "part": "planning", "ms": 300, "ok": True, "app": "1.2.3"},
         ],
     )
 
@@ -74,6 +77,8 @@ def test_report_separates_saved_from_fresh_launches_and_counts_failures(tmp_path
         "failed": 1,
     }
     assert version["refreshes"]["sessions"]["samples"] == 1
+    assert version["frame_waits"]["planning"]["median_ms"] == 7000
+    assert version["frame_applies"]["planning"]["median_ms"] == 300
     assert report["versions"]["1.2.4"]["launches"] == 1
     assert "usable_saved" in timings.render(report)
 

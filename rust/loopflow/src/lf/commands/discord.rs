@@ -56,7 +56,7 @@ pub fn serve(repo: &Path, wave: &str) -> Result<()> {
     runtime.block_on(async {
         let store = Arc::new(
             crate::store::open_existing_store()
-                .await
+                .await?
                 .ok_or_else(|| anyhow!("Discord bridge needs an initialized local store"))?,
         );
         let binding =

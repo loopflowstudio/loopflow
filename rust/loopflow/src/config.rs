@@ -1,13 +1,10 @@
 //! Configuration loading for loopflow.
 //!
 //! Loads config from `~/.lf/config.yaml` (global), `.lf/config.yaml` (repo) and,
-//! for work in a Wave, `.lf/wave/<name>/config.yaml`. Each nearer layer overrides
-//! the one before; additive keys (docs, context, exclude, summaries) combine and
-//! keyed maps (context_budgets, skill_agents) merge per key.
+//! for work in a Wave, `.lf/wave/<name>/config.yaml`. Settings resolve by source,
+//! then scope and target; see `settings` for precedence and provenance.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::fs;
-use std::io::Write;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -16,30 +13,59 @@ use serde::{Deserialize, Serialize};
 #[cfg(not(test))]
 use crate::agent::check_cli_available;
 use crate::error::LoadError;
-use crate::prompt::context_budget::BudgetKey;
+
+pub mod catalog;
+mod definitions;
+pub mod files;
+pub mod keys;
+pub mod migrate;
+pub(crate) mod placement;
+pub(crate) mod reader;
+pub mod remote;
+pub mod settings;
 
 /// Request participant carried across foreground launches, including SSH.
 /// Only a non-empty value overrides personal configuration and Git.
 pub const USER_NAME_ENV: &str = "LF_USER_NAME";
 
-#[derive(Debug, Deserialize)]
-struct UserConfig {
-    name: Option<String>,
+#[derive(schemars::JsonSchema, Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct UserConfig {
+    pub name: Option<String>,
 }
 
-/// Resolve a display name from personal Loopflow configuration or Git's user.name.
-fn load_user_name() -> Result<Option<String>, LoadError> {
-    if let Some(config) = load_yaml_file(&global_config_path())? {
-        if let Some(user) = config.get("user").filter(|value| !value.is_null()) {
-            let user: UserConfig = serde_yaml_ng::from_value(user.clone()).map_err(|error| {
-                LoadError::InvalidGraph(format!("Invalid personal user config: {error}"))
-            })?;
-            if let Some(name) = user.name.as_deref().and_then(normalize_user_name) {
-                return Ok(Some(name));
-            }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum CodexServiceTier {
+    #[serde(alias = "standard")]
+    Default,
+    #[serde(alias = "fast")]
+    Priority,
+}
+
+impl CodexServiceTier {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::Priority => "priority",
         }
     }
+}
+
+/// Resolve a display name from personal Loopflow configuration or Git's
+/// user.name in `directory`.
+fn load_user_name(directory: &Path) -> Result<Option<String>, LoadError> {
+    if let Some(name) = load_global_config()?
+        .and_then(|config| config.user.name)
+        .as_deref()
+        .and_then(normalize_user_name)
+    {
+        return Ok(Some(name));
+    }
     let Some(output) = Command::new("git")
+        .arg("-C")
+        .arg(directory)
         .args(["config", "--get", "user.name"])
         .output()
         .ok()
@@ -52,18 +78,31 @@ fn load_user_name() -> Result<Option<String>, LoadError> {
         .and_then(normalize_user_name))
 }
 
+/// A boolean this Machine sets for itself in `config.yaml` under `home`, such
+/// as `logs.linear_requests`; never read from a repository. Absent, unreadable
+/// or not a boolean is off.
+pub(crate) fn machine_flag(home: &Path, path: &[&str]) -> bool {
+    let Ok(Some(mut value)) = load_yaml_file(&home.join("config.yaml")) else {
+        return false;
+    };
+    for key in path {
+        match value.get(*key) {
+            Some(child) => value = child.clone(),
+            None => return false,
+        }
+    }
+    value.as_bool().unwrap_or(false)
+}
+
 /// Resolve a direct invocation's participant before execution moves Machines.
 pub fn participant_name() -> Result<Option<String>, LoadError> {
-    match std::env::var(USER_NAME_ENV) {
-        Ok(name) => match normalize_user_name(&name) {
-            Some(name) => Ok(Some(name)),
-            None => load_user_name(),
-        },
-        Err(std::env::VarError::NotPresent) => load_user_name(),
-        Err(error) => Err(LoadError::InvalidGraph(format!(
-            "Invalid {USER_NAME_ENV}: {error}"
-        ))),
-    }
+    participant_name_in(Path::new("."))
+}
+
+/// The participant as `lf` would name them running in `directory`: an app
+/// resolves a repository's Git name from that repository, not where it stands.
+pub fn participant_name_in(directory: &Path) -> Result<Option<String>, LoadError> {
+    load_user_name(directory)
 }
 
 /// Your stable person key: Git's `user.email` in `repo` (your global one when
@@ -88,23 +127,28 @@ pub(crate) fn normalize_user_name(name: &str) -> Option<String> {
     (!name.is_empty()).then(|| name.to_string())
 }
 
-/// Agents Loopflow can drive, in the order it prefers them.
+/// Agents Loopflow can drive; listing order grants no preference.
 const KNOWN_AGENTS: [&str; 4] = ["codex", "claude", "opencode", "pi"];
+
+/// Claude model families a launch can name with `claude:<family>` and a
+/// scoped Claude limit can name in its `rate_limit_type` suffix.
+pub const CLAUDE_MODEL_FAMILIES: [&str; 4] = ["fable", "opus", "sonnet", "haiku"];
+
+/// The family Claude Code runs when a launch names no model.
+pub const CLAUDE_DEFAULT_MODEL_FAMILY: &str = "fable";
+
+/// The models a bare `claude` step falls through to when the one it runs
+/// hits a scoped limit, best first.
+pub const CLAUDE_MODEL_RUNGS: [&str; 3] = ["opus", "sonnet", "haiku"];
 
 /// An explicit invocation-wide choice; definitions and defaults never set it.
 pub const YOLO_OVERRIDE_ENV: &str = "LF_YOLO_OVERRIDE";
 pub const CHROME_OVERRIDE_ENV: &str = "LF_CHROME_OVERRIDE";
 
-pub fn yolo_override() -> bool {
-    std::env::var(YOLO_OVERRIDE_ENV).is_ok_and(|value| value == "1")
-}
-
 pub const AGENT_OVERRIDE_ENV: &str = "LF_AGENT_OVERRIDE";
 
 pub fn agent_override() -> Option<String> {
-    std::env::var(AGENT_OVERRIDE_ENV)
-        .ok()
-        .filter(|value| !value.is_empty())
+    settings::explicit_agent().ok().flatten()
 }
 
 /// How a recorded conversation continues under the invocation's agent choice.
@@ -128,113 +172,75 @@ pub(crate) fn resume_choice(provider: &str, model: Option<&str>, selected: Optio
     }
 }
 
-/// Agent used when neither the caller, config, nor skill chooses one: the
-/// first known agent installed on this machine.
-pub fn default_agent() -> &'static str {
+/// Select automatically only when exactly one supported harness is installed.
+pub fn default_agent() -> Option<&'static str> {
     #[cfg(test)]
     let is_installed = |agent: &str| agent == KNOWN_AGENTS[0];
     #[cfg(not(test))]
     let is_installed = check_cli_available;
-    installed_agent(is_installed).unwrap_or(KNOWN_AGENTS[0])
+    installed_agent(is_installed)
 }
 
 fn installed_agent(is_installed: impl Fn(&str) -> bool) -> Option<&'static str> {
-    KNOWN_AGENTS.into_iter().find(|agent| is_installed(agent))
+    let mut installed = KNOWN_AGENTS.into_iter().filter(|agent| is_installed(agent));
+    let only = installed.next()?;
+    installed.next().is_none().then_some(only)
 }
 
-/// Keys that combine lists from global + repo config.
-const ADDITIVE_KEYS: &[&str] = &[
-    "docs",
-    "context",
-    "exclude",
-    "summaries",
-    "supported_harnesses",
-];
+pub(crate) fn select_agent(agent: Option<&str>) -> Result<&str, LoadError> {
+    match agent {
+        Some(agent) => Ok(agent),
+        None => default_agent().ok_or(LoadError::AgentSelection),
+    }
+}
 
-/// Keys whose maps merge entry by entry, the nearer layer winning per entry.
-const MAPPED_KEYS: &[&str] = &["context_budgets", "skill_agents"];
-
-/// Keys only a repository or your personal config may set; a Wave file
-/// naming one is an error.
-const REPO_ONLY_KEYS: &[&str] = &[
-    "planning",
-    "release",
-    "exclude",
-    "merge_method",
-    "land",
-    "pr",
-];
-
-/// The config layer a value came from, farthest first. `Personal` is your
-/// own `lf set` value for the repository or Wave; yours for every repository
-/// sits with `~/.lf/config.yaml` as `Global`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ConfigLayer {
-    Global,
-    Repo,
-    Wave,
+/// Authority is independent of the declaration's scope and target.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum ConfigSource {
+    Builtin,
+    Repository,
     Personal,
+    Environment,
+    CommandLine,
+}
+
+impl ConfigSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Builtin => "builtin",
+            Self::Repository => "repository",
+            Self::Personal => "personal",
+            Self::Environment => "environment",
+            Self::CommandLine => "command_line",
+        }
+    }
 }
 
 /// Summary configuration for a specific path.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(schemars::JsonSchema, Debug, Clone, Serialize, Deserialize)]
 pub struct SummaryConfig {
     pub path: String,
     #[serde(default)]
     pub tokens: Option<usize>,
-    #[serde(default = "default_summary_agent")]
-    pub agent: String,
-}
-
-fn default_summary_agent() -> String {
-    default_agent().to_string()
+    #[serde(default)]
+    pub agent: Option<String>,
 }
 
 /// Interactive session launch configuration.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(schemars::JsonSchema, Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct SessionConfig {
     /// Machine-local terminal application used to present detached sessions.
     #[serde(default)]
     pub terminal: Option<String>,
-    /// How long a Session keeps its agent running after its last viewer leaves.
-    #[serde(default)]
-    pub end_detached_after: DetachedLimit,
-}
-
-/// When an unviewed Session's agent ends: `24h`, `90m`, `2d`, or `off`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(try_from = "String", into = "String")]
-pub enum DetachedLimit {
-    Off,
-    After(std::time::Duration),
-}
-
-impl Default for DetachedLimit {
-    fn default() -> Self {
-        Self::After(std::time::Duration::from_secs(24 * 60 * 60))
-    }
-}
-
-impl TryFrom<String> for DetachedLimit {
-    type Error = String;
-
-    fn try_from(value: String) -> Result<Self, String> {
-        if value.trim() == "off" {
-            return Ok(Self::Off);
-        }
-        parse_duration(&value)
-            .map(Self::After)
-            .map_err(|error| format!("end_detached_after: {error}; or use off"))
-    }
-}
-
-impl From<DetachedLimit> for String {
-    fn from(limit: DetachedLimit) -> Self {
-        match limit {
-            DetachedLimit::Off => "off".into(),
-            DetachedLimit::After(duration) => format!("{}s", duration.as_secs()),
-        }
-    }
+    // Remove in task_c118380f31f14d07ba28669499efa395 after LOO-823 ships:
+    // released lf still reads this shared config key. It no longer has an effect.
+    #[serde(default, rename = "end_detached_after", skip_serializing)]
+    #[schemars(skip)]
+    _end_detached_after: Option<String>,
 }
 
 /// Parse `30`, `10s`, `5m`, `1h` or `2d`; a bare number is seconds.
@@ -256,13 +262,15 @@ pub fn parse_duration(value: &str) -> anyhow::Result<std::time::Duration> {
 }
 
 /// Release configuration.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(schemars::JsonSchema, Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct ReleaseConfig {
     #[serde(default)]
     pub targets: HashMap<String, ReleaseTargetConfig>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(schemars::JsonSchema, Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct ReleaseTargetConfig {
     #[serde(default)]
     pub area: Vec<String>,
@@ -286,7 +294,7 @@ pub struct ReleaseTargetConfig {
     pub publisher: Vec<String>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(schemars::JsonSchema, Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum ReleaseCompletion {
     Tag,
@@ -295,7 +303,7 @@ pub enum ReleaseCompletion {
 }
 
 /// Repository merge policy; GitHub's allowed methods remain authoritative.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(schemars::JsonSchema, Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum MergeMethod {
     Merge,
@@ -306,14 +314,14 @@ pub enum MergeMethod {
 /// One synchronization destination for the repository's local planning.
 /// Repository configuration overrides the personal default as one value.
 /// Every remote provider names the team that owns the repository's Tasks.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(schemars::JsonSchema, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(try_from = "RawPlanningConfig", into = "RawPlanningConfig")]
 pub enum PlanningConfig {
     Git {
         remote: String,
         plan: GitPlan,
     },
-    /// The Linear Team's ID; `lf wave connect` finds or creates it.
+    /// The Linear Team's ID; `lf wave plan connect` finds or creates it.
     Linear {
         team: Option<String>,
     },
@@ -353,7 +361,7 @@ impl GitPlan {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(schemars::JsonSchema, Clone, Serialize, Deserialize)]
 #[serde(tag = "provider", rename_all = "snake_case", deny_unknown_fields)]
 enum RawPlanningConfig {
     Git {
@@ -364,7 +372,7 @@ enum RawPlanningConfig {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         personal: bool,
     },
-    /// The Linear Team's ID; `lf wave connect` finds or creates it.
+    /// The Linear Team's ID; `lf wave plan connect` finds or creates it.
     Linear {
         #[serde(default, deserialize_with = "crate::id::deserialize_uuid_option")]
         team: Option<String>,
@@ -456,112 +464,10 @@ impl Config {
     }
 }
 
-/// Main configuration struct.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Config {
-    /// The graph Tasks take up without their own or their Wave's selection;
-    /// `code` when unset. The released lf reads `workflow:`; LOO-637 removes
-    /// that alias once the release that reads `graph:` is installed.
-    #[serde(alias = "workflow")]
-    pub graph: Option<String>,
-    #[serde(default)]
-    pub planning: Option<PlanningConfig>,
-    #[serde(default)]
-    pub automation: AutomationConfig,
-    #[serde(default)]
-    pub context_budgets: BTreeMap<BudgetKey, usize>,
-    #[serde(skip)]
-    pub context_budget_sources: BTreeMap<BudgetKey, String>,
-    /// Agent in format harness:model (e.g., claude:opus, codex)
-    #[serde(default)]
-    pub agent: Option<String>,
+pub use catalog::{Config, ContextConfig};
 
-    /// Agent for one skill by name, ahead of the skill's own choice and `agent`.
-    #[serde(default)]
-    pub skill_agents: BTreeMap<String, String>,
-
-    /// Supported harnesses for model selection UI.
-    #[serde(default)]
-    pub supported_harnesses: Vec<String>,
-
-    /// Skip permissions; Codex also disables sandboxing
-    #[serde(default)]
-    pub yolo: bool,
-
-    /// Enable Chrome integration for Claude Code
-    #[serde(default)]
-    pub chrome: bool,
-
-    /// Create PR after push
-    #[serde(default)]
-    pub pr: bool,
-
-    /// Land strategy: "gh" or "local"
-    #[serde(default = "default_land")]
-    pub land: String,
-
-    /// Repository-only merge preference; absent chooses an allowed method.
-    #[serde(default)]
-    pub merge_method: Option<MergeMethod>,
-
-    /// Additional context files to include
-    #[serde(default)]
-    pub context: Vec<String>,
-
-    /// Glob patterns to exclude
-    #[serde(default)]
-    pub exclude: Vec<String>,
-
-    /// Interactive session launch configuration
-    #[serde(default)]
-    pub session: SessionConfig,
-
-    /// Docs paths, globs, or directories to include by default.
-    #[serde(default)]
-    pub docs: Vec<String>,
-
-    /// Include raw branch diff
-    #[serde(default)]
-    pub diff: bool,
-
-    /// Include full content of explicitly requested files.
-    #[serde(default)]
-    pub diff_files: bool,
-
-    /// Include clipboard content by default
-    #[serde(default)]
-    pub paste: bool,
-
-    /// Summaries to include
-    #[serde(default)]
-    pub summaries: Vec<SummaryConfig>,
-
-    /// Default token budget for summaries
-    #[serde(default = "default_summary_tokens")]
-    pub summary_tokens: usize,
-
-    /// Autoprune configuration
-
-    /// Release targets and scoping rules.
-    #[serde(default)]
-    pub release: ReleaseConfig,
-
-    /// Run provider conversations in the selected account's own home rather
-    /// than the provider's native one. `--shared` overrides it per launch.
-    #[serde(default)]
-    pub isolate: bool,
-}
-
-fn default_land() -> String {
-    "gh".to_string()
-}
-
-fn default_summary_tokens() -> usize {
-    5000
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
+#[derive(schemars::JsonSchema, Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
 pub struct AutomationConfig {
     pub retries: u32,
 }
@@ -572,45 +478,60 @@ impl Default for AutomationConfig {
     }
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            graph: None,
-            planning: None,
-            context_budgets: Default::default(),
-            context_budget_sources: Default::default(),
-            agent: None,
-            skill_agents: BTreeMap::new(),
-            supported_harnesses: Vec::new(),
-            yolo: false,
-            chrome: false,
-            pr: false,
-            land: default_land(),
-            merge_method: None,
-            context: Vec::new(),
-            exclude: Vec::new(),
-            session: SessionConfig::default(),
-            automation: AutomationConfig::default(),
-            docs: Vec::new(),
-            diff: false,
-            diff_files: false,
-            paste: false,
-            summaries: Vec::new(),
-            summary_tokens: default_summary_tokens(),
-            release: ReleaseConfig::default(),
-            isolate: false,
-        }
-    }
+#[derive(schemars::JsonSchema, Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LogConfig {
+    #[serde(default)]
+    pub linear_requests: bool,
 }
 
 impl Config {
-    /// Return the configured agent or Loopflow's compiled default.
-    pub fn agent(&self) -> &str {
-        match self.agent.as_deref() {
-            Some(agent) => agent,
-            None => default_agent(),
-        }
+    /// Resolve authored preferences, or the sole installed harness: an `agent`
+    /// choice, else the first of [`Config::agent_order`].
+    ///
+    /// # Errors
+    /// Returns `AgentSelection` when no preference resolves and installation is ambiguous or absent.
+    pub fn agent(&self) -> Result<&str, LoadError> {
+        select_agent(
+            self.agent
+                .as_deref()
+                .or(self.default_agent.as_deref())
+                .or_else(|| self.agents.first().map(String::as_str)),
+        )
     }
+
+    /// What Loopflow tries, in order: an `agent` choice alone, else
+    /// `default_agent` followed by the rest of `agents`. A `default_agent`
+    /// the list lacks is added in front for this context only. Entries are
+    /// `harness[:model]` as written; a bare harness is its own entry.
+    pub fn agent_order(&self) -> Vec<String> {
+        if let Some(agent) = &self.agent {
+            return vec![agent.clone()];
+        }
+        self.default_agent
+            .iter()
+            .chain(
+                self.agents
+                    .iter()
+                    .filter(|entry| Some(*entry) != self.default_agent.as_ref()),
+            )
+            .cloned()
+            .collect()
+    }
+
+    /// The agents a headless step may move to when a usage limit refuses its
+    /// own: the rest of [`Config::agent_order`]. An `agent` choice has none.
+    pub fn fallback_agents(&self) -> Vec<String> {
+        self.agent_order().into_iter().skip(1).collect()
+    }
+}
+
+/// The entries of a comma-separated agent list, such as `claude,codex`.
+pub(crate) fn agent_list(value: &str) -> impl Iterator<Item = &str> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|agent| !agent.is_empty())
 }
 
 /// Parse agent string like 'claude:opus' into (harness, model).
@@ -624,83 +545,74 @@ pub fn parse_agent(agent: &str) -> (String, Option<String>) {
 
 /// Load YAML file, returning None if not present or empty.
 fn load_yaml_file(path: &Path) -> Result<Option<serde_yaml_ng::Value>, LoadError> {
-    if !path.exists() {
-        return Ok(None);
-    }
-    let content = fs::read_to_string(path)?;
+    let content = match crate::observe::read_to_string(path) {
+        Ok(content) => content,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
     if content.trim().is_empty() {
         return Ok(None);
     }
-    let mut value: serde_yaml_ng::Value = serde_yaml_ng::from_str(&content).map_err(|e| {
-        LoadError::InvalidGraph(format!("YAML parse error in {}: {}", path.display(), e))
-    })?;
-    fold_linear_team(&mut value);
+    let mut value = serde_yaml_ng::Value::Mapping(reader::parse(&content, path));
+    keys::fold(&mut value);
+    normalize_context(&mut value);
     Ok(Some(value))
 }
 
-/// Released lf reads the Linear Team from `linear.team`, so a repository
-/// keeps that block while either build may run in it. Read it as Linear
-/// planning's team; an explicit `planning.team` wins. LOO-560 removes this
-/// once a release with `planning.team` is installed.
-fn fold_linear_team(value: &mut serde_yaml_ng::Value) {
-    let Some(mapping) = value.as_mapping_mut() else {
+/// Temporary reader for preferences shared with the released flat format.
+/// Task 807ef7 removes this after installed readers migrate.
+pub(crate) fn normalize_context(value: &mut serde_yaml_ng::Value) {
+    use serde_yaml_ng::{Mapping, Value};
+    let Some(map) = value.as_mapping_mut() else {
         return;
     };
-    let Some(linear) = mapping.remove("linear") else {
-        return;
+    let mut context = match map.remove("context") {
+        Some(Value::Mapping(context)) => context,
+        Some(Value::Sequence(paths)) => {
+            let mut docs = map
+                .remove("docs")
+                .unwrap_or_else(|| Value::Sequence(vec![]));
+            if let Some(docs) = docs.as_sequence_mut() {
+                docs.extend(paths);
+            }
+            Mapping::from_iter([("docs".into(), docs)])
+        }
+        Some(other) => {
+            map.insert("context".into(), other);
+            return;
+        }
+        None => Mapping::new(),
     };
-    let Some(team) = linear.get("team").cloned() else {
-        return;
-    };
-    if let Some(planning) = mapping.get_mut("planning").and_then(|p| p.as_mapping_mut()) {
-        if planning.get("provider").and_then(|p| p.as_str()) == Some("linear")
-            && !planning.contains_key("team")
-        {
-            planning.insert("team".into(), team);
+    for (old, new) in [
+        ("docs", "docs"),
+        ("exclude", "exclude"),
+        ("diff", "diff"),
+        ("diff_files", "diff_files"),
+        ("paste", "paste"),
+        ("context_budgets", "budgets"),
+    ] {
+        if let Some(value) = map.remove(old) {
+            context.entry(new.into()).or_insert(value);
         }
     }
-}
-
-/// Merge global and repo config. Repo wins for scalars, additive keys combine.
-fn merge_config_values(
-    global: Option<serde_yaml_ng::Value>,
-    repo: Option<serde_yaml_ng::Value>,
-) -> serde_yaml_ng::Value {
-    match (global, repo) {
-        (None, None) => serde_yaml_ng::Value::Mapping(serde_yaml_ng::Mapping::new()),
-        (Some(g), None) => g,
-        (None, Some(r)) => r,
-        (
-            Some(serde_yaml_ng::Value::Mapping(mut global_map)),
-            Some(serde_yaml_ng::Value::Mapping(repo_map)),
-        ) => {
-            for (key, value) in repo_map {
-                let key_str = key.as_str().unwrap_or("");
-                if ADDITIVE_KEYS.contains(&key_str) {
-                    // Combine lists
-                    if let Some(serde_yaml_ng::Value::Sequence(mut global_seq)) =
-                        global_map.remove(&key)
-                    {
-                        if let serde_yaml_ng::Value::Sequence(repo_seq) = value {
-                            global_seq.extend(repo_seq);
-                            global_map.insert(key, serde_yaml_ng::Value::Sequence(global_seq));
-                        } else {
-                            global_map.insert(key, value);
-                        }
-                    } else {
-                        global_map.insert(key, value);
-                    }
-                } else if MAPPED_KEYS.contains(&key_str) {
-                    let previous = global_map.remove(&key);
-                    global_map.insert(key, merge_config_values(previous, Some(value)));
-                } else {
-                    // Repo overrides
-                    global_map.insert(key, value);
+    if !context.is_empty() {
+        map.insert("context".into(), context.into());
+    }
+    for name in ["skills", "waves", "repos"] {
+        if let Some(targets) = map.get_mut(name).and_then(Value::as_mapping_mut) {
+            for value in targets.values_mut() {
+                normalize_context(value);
+            }
+        }
+    }
+    if let Some(graphs) = map.get_mut("graphs").and_then(Value::as_mapping_mut) {
+        for graph in graphs.values_mut() {
+            if let Some(steps) = graph.get_mut("steps").and_then(Value::as_mapping_mut) {
+                for value in steps.values_mut() {
+                    normalize_context(value);
                 }
             }
-            serde_yaml_ng::Value::Mapping(global_map)
         }
-        (_, Some(r)) => r,
     }
 }
 
@@ -726,226 +638,177 @@ pub fn load_wave_config_with(
     personal: &PersonalSettings,
 ) -> Result<Option<Config>, LoadError> {
     let layers = config_layers_with(repo_root, wave, personal)?;
-    if layers.is_empty() {
-        return Ok(None);
-    }
-    let mut sources = BTreeMap::new();
-    let mut merged = None;
-    for layer in layers {
-        if let Some(budgets) = layer.value.get("context_budgets") {
-            let budgets: BTreeMap<BudgetKey, usize> = serde_yaml_ng::from_value(budgets.clone())
-                .map_err(|e| {
-                    LoadError::InvalidGraph(format!(
-                        "Invalid context_budgets in {}: {e}",
-                        layer.path.display()
-                    ))
-                })?;
-            sources.extend(
-                budgets
-                    .keys()
-                    .map(|key| (*key, layer.path.display().to_string())),
-            );
-        }
-        merged = Some(merge_config_values(merged, Some(layer.value)));
-    }
-    let merged = merged.expect("at least one layer");
-
-    let mut config: Config = serde_yaml_ng::from_value(merged)
-        .map_err(|e| LoadError::InvalidGraph(format!("Config validation error: {}", e)))?;
-
-    config.context_budget_sources = sources;
-    Ok(Some(config))
+    settings::resolve_layers(&layers, None).map(|resolved| Some(resolved.config))
 }
 
-/// The planning transport from the global and repository config files.
-/// `lf set` holds no planning values, so this opens no store: planning checks
-/// resolve it once per Wave and Task inside a bounded hook.
+/// The effective planning transport, resolved once per bounded planning hook.
 pub fn load_planning_transport(repo_root: &Path) -> Result<PlanningConfig, LoadError> {
-    let global = load_yaml_file(&global_config_path())?;
-    let repo = load_yaml_file(&repo_root.join(".lf").join("config.yaml"))?;
-    let config: Config = serde_yaml_ng::from_value(merge_config_values(global, repo))
-        .map_err(|e| LoadError::InvalidGraph(format!("Config validation error: {e}")))?;
-    Ok(config.planning_transport())
+    Ok(load_config(Some(repo_root))?
+        .unwrap_or_default()
+        .planning_transport())
 }
 
 /// One present config file's values.
-#[derive(Debug, Clone)]
-pub struct ConfigLayerValues {
-    pub layer: ConfigLayer,
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConfigDeclarations {
+    pub source: ConfigSource,
+    pub scope: settings::SettingScope,
     pub path: PathBuf,
     pub value: serde_yaml_ng::Value,
 }
 
-/// The present config layers for work in a Wave, farthest first: global
-/// files, the repository's and Wave's committed config, then your `lf set`
-/// values for the repository and the Wave.
+/// Collect authored repository, Wave and personal-file declarations. The resolver orders them by source, scope and target.
 pub fn config_layers(
     repo_root: Option<&Path>,
     wave: Option<&str>,
-) -> Result<Vec<ConfigLayerValues>, LoadError> {
+) -> Result<Vec<ConfigDeclarations>, LoadError> {
     config_layers_with(repo_root, wave, &PersonalSettings::read(repo_root, wave))
 }
 
-fn config_layers_with(
+pub(crate) fn config_layers_with(
     repo_root: Option<&Path>,
     wave: Option<&str>,
     personal_values: &PersonalSettings,
-) -> Result<Vec<ConfigLayerValues>, LoadError> {
-    let mut layers = Vec::new();
-    let global_path = global_config_path();
-    if let Some(value) = load_yaml_file(&global_path)? {
-        layers.push(ConfigLayerValues {
-            layer: ConfigLayer::Global,
-            path: global_path,
-            value,
-        });
-    }
-    // Your values for every repository rank with the global file; yours for
-    // the repository and then the Wave rank above every committed layer.
-    let mut personal = Vec::new();
-    if let Some((path, settings)) = &personal_values.0 {
-        let layer = |layer, values: &BTreeMap<String, String>| {
-            (!values.is_empty()).then(|| ConfigLayerValues {
-                layer,
-                path: path.clone(),
-                value: settings_value(values),
-            })
-        };
-        layers.extend(layer(ConfigLayer::Global, &settings.global));
-        personal.extend(layer(ConfigLayer::Personal, &settings.repository));
-        personal.extend(layer(ConfigLayer::Personal, &settings.wave));
-    }
-    let Some(repo_root) = repo_root else {
-        return Ok(layers);
+) -> Result<Vec<ConfigDeclarations>, LoadError> {
+    let wave = match (repo_root, wave) {
+        (Some(repo), Some(wave)) => Some(
+            files::wave_name(repo, wave)
+                .map_err(|error| LoadError::InvalidGraph(error.to_string()))?,
+        ),
+        (_, wave) => wave.map(str::to_owned),
     };
-    let repo_path = repo_root.join(".lf").join("config.yaml");
-    if let Some(value) = load_yaml_file(&repo_path)? {
-        layers.push(ConfigLayerValues {
-            layer: ConfigLayer::Repo,
-            path: repo_path,
-            value,
-        });
+    let wave = wave.as_deref();
+    let mut layers = Vec::new();
+    if let Some(repo_root) = repo_root {
+        let repo_path = repo_root.join(".lf/config.yaml");
+        if let Some(value) = load_yaml_file(&repo_path)? {
+            layers.push(ConfigDeclarations {
+                source: ConfigSource::Repository,
+                scope: settings::SettingScope::Repository,
+                path: repo_path,
+                value,
+            });
+        }
+        if let Some(wave) = wave {
+            if let Some((path, value)) = crate::work::wave::config::read_wave_layer(repo_root, wave)
+                .map_err(|error| LoadError::InvalidGraph(error.to_string()))?
+            {
+                layers.push(ConfigDeclarations {
+                    source: ConfigSource::Repository,
+                    scope: settings::SettingScope::Wave,
+                    path,
+                    value,
+                });
+            }
+        }
     }
-    if let Some(wave) = wave {
-        if let Some((path, value)) = crate::work::wave::config::read_wave_layer(repo_root, wave)
+    layers.extend(
+        personal_values
+            .0
+            .as_ref()
+            .map_err(|message| LoadError::InvalidGraph(message.clone()))?
+            .clone(),
+    );
+    Ok(layers)
+}
+
+/// Personal file declarations cached for one bounded Work reading.
+#[derive(Debug, Clone)]
+pub struct PersonalSettings(Result<Vec<ConfigDeclarations>, String>);
+
+impl PersonalSettings {
+    pub fn read(repo_root: Option<&Path>, wave: Option<&str>) -> Self {
+        Self(personal_file_layers(repo_root, wave).map_err(|error| error.to_string()))
+    }
+}
+
+pub(crate) fn private_wave_layers(
+    repo: &Path,
+    name: Option<&str>,
+    path: &Path,
+    document: &serde_yaml_ng::Value,
+) -> Result<Vec<ConfigDeclarations>, LoadError> {
+    let Some(name) = name.filter(|_| document.get("waves").is_some()) else {
+        return Ok(vec![]);
+    };
+    let mut layers = Vec::new();
+    let parts: Vec<_> = name.split('/').collect();
+    for end in 1..=parts.len() {
+        let selected = parts[..end].join("/");
+        let Some(id) = files::wave_key(repo, &selected)
             .map_err(|error| LoadError::InvalidGraph(error.to_string()))?
+        else {
+            continue;
+        };
+        if let Some(mut value) = document
+            .get("waves")
+            .and_then(|waves| waves.get(&id))
+            .cloned()
         {
-            validate_wave_keys(&path, &value)?;
-            layers.push(ConfigLayerValues {
-                layer: ConfigLayer::Wave,
-                path,
+            if end < parts.len() {
+                if let Some(map) = value.as_mapping_mut() {
+                    map.retain(|key, _| {
+                        key.as_str()
+                            .is_some_and(|key| ["machine", "account"].contains(&key))
+                    });
+                }
+            }
+            layers.push(ConfigDeclarations {
+                source: ConfigSource::Personal,
+                scope: settings::SettingScope::Wave,
+                path: format!("{}#waves.{id}", path.display()).into(),
                 value,
             });
         }
     }
-    layers.extend(personal);
     Ok(layers)
 }
 
-/// Your `lf set` values in effect for one repository and Wave, with the store
-/// they came from.
-#[derive(Debug, Clone)]
-pub struct PersonalSettings(Option<(PathBuf, crate::store::sqlite::ScopeSettings)>);
-
-impl PersonalSettings {
-    /// The local store is optional here: absent, or older than this build, it
-    /// holds none.
-    pub fn read(repo_root: Option<&Path>, wave: Option<&str>) -> Self {
-        Self(personal_settings(repo_root, wave))
-    }
-}
-
-fn personal_settings(
+fn personal_file_layers(
     repo_root: Option<&Path>,
     wave: Option<&str>,
-) -> Option<(PathBuf, crate::store::sqlite::ScopeSettings)> {
-    let read = || -> anyhow::Result<Option<(PathBuf, crate::store::sqlite::ScopeSettings)>> {
-        let path = crate::store::database_path_from_env()?;
-        if !path.try_exists()? {
-            return Ok(None);
-        }
-        // Reuse the receipt ledger when present, without retaining a new connection.
-        let store = match crate::journal::retained_ledger(&path) {
-            Some(store) => store,
-            None => crate::store::sqlite::SqliteStore::open_read_only(&path)?,
-        };
-        if !store.has_scope_settings()? {
-            return Ok(None);
-        }
-        let repo = repo_root
-            .and_then(|root| crate::repository::CanonicalRepo::discover(root).ok())
-            .map(|repo| repo.to_string());
-        let settings = store.scope_settings(repo.as_deref(), wave)?;
-        Ok(Some((path, settings)))
+) -> Result<Vec<ConfigDeclarations>, LoadError> {
+    let wave = match (repo_root, wave) {
+        (Some(repo), Some(wave)) => Some(
+            files::wave_name(repo, wave)
+                .map_err(|error| LoadError::InvalidGraph(error.to_string()))?,
+        ),
+        (_, wave) => wave.map(str::to_owned),
     };
-    read().unwrap_or_else(|error| {
-        tracing::warn!(%error, "your lf set values are unavailable");
-        None
-    })
-}
-
-fn settings_value(values: &BTreeMap<String, String>) -> serde_yaml_ng::Value {
-    let mut mapping = serde_yaml_ng::Mapping::new();
-    for (key, value) in values {
-        match key.split_once('.') {
-            Some((parent, child)) => {
-                let entry = mapping
-                    .entry(parent.into())
-                    .or_insert_with(|| serde_yaml_ng::Mapping::new().into());
-                if let Some(entry) = entry.as_mapping_mut() {
-                    entry.insert(child.into(), value.as_str().into());
-                }
+    let wave = wave.as_deref();
+    if let Some(layers) = remote::layers(repo_root, wave)
+        .map_err(|error| LoadError::InvalidGraph(error.to_string()))?
+    {
+        return Ok(layers);
+    }
+    let mut layers = Vec::new();
+    let path = global_config_path();
+    if let Some(value) = load_yaml_file(&path)? {
+        layers.push(ConfigDeclarations {
+            source: ConfigSource::Personal,
+            scope: settings::SettingScope::Global,
+            path,
+            value,
+        });
+    }
+    if let Some(repo) = repo_root {
+        let path = files::private_path(repo)
+            .map_err(|error| LoadError::InvalidGraph(error.to_string()))?;
+        if let Some(mut value) = load_yaml_file(&path)? {
+            let waves = private_wave_layers(repo, wave, &path, &value)?;
+            if let Some(map) = value.as_mapping_mut() {
+                map.remove("waves");
             }
-            None => {
-                mapping.insert(key.as_str().into(), value.as_str().into());
-            }
+            layers.push(ConfigDeclarations {
+                source: ConfigSource::Personal,
+                scope: settings::SettingScope::Repository,
+                path: path.clone(),
+                value,
+            });
+            layers.extend(waves);
         }
     }
-    serde_yaml_ng::Value::Mapping(mapping)
-}
-
-/// The nearest layer setting the value at `path`, such as
-/// `["skill_agents", "implement"]`, with that value.
-pub fn layer_setting<'a>(
-    layers: &'a [ConfigLayerValues],
-    path: &[&str],
-) -> Option<(ConfigLayer, &'a serde_yaml_ng::Value)> {
-    layers.iter().rev().find_map(|layer| {
-        let mut value = &layer.value;
-        for key in path {
-            value = value.get(*key)?;
-        }
-        (!value.is_null()).then_some((layer.layer, value))
-    })
-}
-
-/// The graph a Task in these layers takes up and the layer selecting it; no
-/// layer means the builtin `code`. A global value (`~/.lf/config.yaml`) never
-/// selects one for a repository's Tasks, and it is the farthest layer, so it is
-/// simply ignored. Each layer may still say `workflow:`, the released name;
-/// LOO-637 removes that alias.
-pub fn graph_setting(
-    layers: &[ConfigLayerValues],
-) -> Result<(String, Option<ConfigLayer>), LoadError> {
-    let Some((layer, value)) = layers
-        .iter()
-        .rev()
-        .filter(|layer| layer.layer != ConfigLayer::Global)
-        .find_map(|layer| {
-            ["graph", GRAPH_ALIAS]
-                .iter()
-                .find_map(|key| layer.value.get(*key).filter(|value| !value.is_null()))
-                .map(|value| (layer.layer, value))
-        })
-    else {
-        return Ok((crate::ops::task::DEFAULT_TASK_GRAPH.to_owned(), None));
-    };
-    let name = value
-        .as_str()
-        .ok_or_else(|| LoadError::InvalidGraph("graph must be a graph name".to_owned()))?;
-    crate::task_graph::validate_graph_name(name)
-        .map_err(|error| LoadError::InvalidGraph(format!("graph {name}: {error}")))?;
-    Ok((name.to_owned(), Some(layer)))
+    Ok(layers)
 }
 
 /// The released name of `graph:`; LOO-637 removes it.
@@ -954,76 +817,28 @@ const GRAPH_ALIAS: &str = "workflow";
 /// Keys a Wave's `config.yaml` may set: every `Config` key a repository may
 /// share with its Waves.
 pub fn wave_config_keys() -> BTreeSet<String> {
-    let Ok(serde_yaml_ng::Value::Mapping(defaults)) = serde_yaml_ng::to_value(Config::default())
-    else {
-        unreachable!("Config serializes as a mapping");
-    };
-    defaults
-        .keys()
-        .filter_map(|key| key.as_str())
-        .filter(|key| !REPO_ONLY_KEYS.contains(key))
-        .map(str::to_owned)
+    catalog::DEFINITIONS
+        .iter()
+        .filter(|definition| {
+            definition.applies(
+                ConfigSource::Repository,
+                settings::SettingScope::Wave,
+                false,
+            )
+        })
+        .map(|definition| definition.key.to_owned())
+        .chain(["skills".into(), "graphs".into()])
         .collect()
-}
-
-fn validate_wave_keys(path: &Path, value: &serde_yaml_ng::Value) -> Result<(), LoadError> {
-    let Some(mapping) = value.as_mapping() else {
-        return Err(LoadError::InvalidGraph(format!(
-            "{} must be a mapping",
-            path.display()
-        )));
-    };
-    let allowed = wave_config_keys();
-    for key in mapping.keys().filter_map(|key| key.as_str()) {
-        if REPO_ONLY_KEYS.contains(&key) {
-            return Err(LoadError::InvalidGraph(format!(
-                "{}: `{key}` belongs to the repository's .lf/config.yaml, not a Wave",
-                path.display()
-            )));
-        }
-        if !allowed.contains(key) && key != GRAPH_ALIAS {
-            return Err(LoadError::InvalidGraph(format!(
-                "{}: unknown key `{key}`",
-                path.display()
-            )));
-        }
-    }
-    Ok(())
 }
 
 /// Load only Machine-local user configuration.
 pub fn load_global_config() -> Result<Option<Config>, LoadError> {
-    let Some(value) = load_yaml_file(&global_config_path())? else {
-        return Ok(None);
-    };
-    serde_yaml_ng::from_value(value)
-        .map(Some)
-        .map_err(|error| LoadError::InvalidGraph(format!("Config validation error: {error}")))
+    load_wave_config(None, None)
 }
 
 /// Repository lookup belongs to the selected Machine, never repository config.
 pub fn repository_root() -> Result<Option<PathBuf>, LoadError> {
-    let path = global_config_path();
-    let Some(value) = load_yaml_file(&path)?.and_then(|config| config.get("repo_root").cloned())
-    else {
-        return Ok(None);
-    };
-    serde_yaml_ng::from_value(value).map_err(|error| {
-        LoadError::InvalidGraph(format!("Invalid repo_root in {}: {error}", path.display()))
-    })
-}
-
-/// Persist a Machine-local configuration mapping without exposing partial YAML.
-pub(crate) fn write_global_config_at(
-    path: &Path,
-    value: &serde_yaml_ng::Value,
-) -> anyhow::Result<()> {
-    let parent = path.parent().expect("config path has a parent");
-    let mut file = tempfile::NamedTempFile::new_in(parent)?;
-    file.write_all(serde_yaml_ng::to_string(value)?.as_bytes())?;
-    file.as_file().sync_all()?;
-    file.persist(path)?;
-    Ok(())
+    Ok(load_global_config()?.and_then(|config| config.repo_root))
 }
 
 fn global_config_path() -> PathBuf {
@@ -1035,9 +850,16 @@ fn global_config_path() -> PathBuf {
 /// Linear Team bindings use this path; personal transport defaults do not assign
 /// a repository to a Team.
 pub fn load_repo_config(repo_root: &Path) -> Result<Option<Config>, LoadError> {
-    let Some(value) = load_yaml_file(&repo_root.join(".lf/config.yaml"))? else {
+    let path = repo_root.join(".lf/config.yaml");
+    let Some(mut value) = load_yaml_file(&path)? else {
         return Ok(None);
     };
+    settings::filter_file_preferences(
+        &mut value,
+        &path,
+        ConfigSource::Repository,
+        settings::SettingScope::Repository,
+    );
     serde_yaml_ng::from_value(value)
         .map(Some)
         .map_err(|error| LoadError::InvalidGraph(format!("Config validation error: {error}")))
@@ -1050,6 +872,28 @@ pub fn load_config_or_default(repo_root: Option<&Path>) -> Config {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn private_wave_reads_skip_malformed_entries_but_validate_authored_identity() {
+        let repo = tempfile::tempdir().unwrap();
+        let path = repo.path().join("lf.config.local.yaml");
+        let document = serde_yaml_ng::from_str("waves: {}\n").unwrap();
+        assert!(
+            super::private_wave_layers(repo.path(), Some("missing"), &path, &document)
+                .unwrap()
+                .is_empty()
+        );
+        let wave = repo.path().join(".lf/wave/broken");
+        std::fs::create_dir_all(&wave).unwrap();
+        std::fs::write(wave.join("config.yaml"), "id: [invalid\n").unwrap();
+        assert!(
+            super::private_wave_layers(repo.path(), Some("broken"), &path, &document)
+                .unwrap()
+                .is_empty()
+        );
+        std::fs::write(wave.join("config.yaml"), "id: invalid\n").unwrap();
+        assert!(super::private_wave_layers(repo.path(), Some("broken"), &path, &document).is_err());
+    }
+
     #[test]
     fn resume_stays_native_until_the_provider_changes() {
         use super::Resume;
@@ -1074,7 +918,7 @@ mod tests {
     #[test]
     fn default_agent_is_the_one_installed() {
         assert_eq!(installed_agent(|agent| agent == "claude"), Some("claude"));
-        assert_eq!(installed_agent(|_| true), Some("codex"));
+        assert_eq!(installed_agent(|_| true), None);
         assert_eq!(installed_agent(|_| false), None);
     }
 
@@ -1163,17 +1007,16 @@ mod tests {
     fn default_config_values() {
         let config = Config::default();
         assert!(config.agent.is_none());
-        assert_eq!(config.agent(), "codex");
+        assert_eq!(config.agent().unwrap(), "codex");
         assert!(config.supported_harnesses.is_empty());
         assert!(!config.yolo);
-        assert!(config.docs.is_empty());
-        assert!(!config.diff_files);
-        assert!(!config.diff);
-        assert!(!config.chrome);
+        assert!(config.context.docs.is_empty());
+        assert!(!config.context.diff_files);
+        assert!(!config.context.diff);
+        assert_eq!(config.chrome, None);
         assert!(!config.pr);
         assert_eq!(config.land, "gh");
-        assert!(config.context.is_empty());
-        assert!(config.exclude.is_empty());
+        assert!(config.context.exclude.is_empty());
         assert!(config.release.targets.is_empty());
     }
 
@@ -1196,9 +1039,39 @@ chrome: true
 "#;
         let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
         assert_eq!(config.agent.as_deref(), Some("codex:o3"));
-        assert_eq!(config.agent(), "codex:o3");
+        assert_eq!(config.agent().unwrap(), "codex:o3");
         assert!(config.yolo);
-        assert!(config.chrome);
+        assert_eq!(config.chrome, Some(true));
+    }
+
+    #[test]
+    fn default_agent_leads_the_agents_order_and_a_choice_pins_one() {
+        let order = |yaml: &str| {
+            let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
+            (config.agent().unwrap().to_owned(), config.agent_order())
+        };
+        assert_eq!(
+            order("agents: [claude:opus, codex, claude:fable]"),
+            (
+                "claude:opus".into(),
+                vec!["claude:opus".into(), "codex".into(), "claude:fable".into()]
+            )
+        );
+        // An entry the list has moves up; one it lacks is added in front.
+        assert_eq!(
+            order("agents: [claude:opus, codex, claude:fable]\ndefault_agent: claude:fable").1,
+            ["claude:fable", "claude:opus", "codex"]
+        );
+        assert_eq!(
+            order("agents: [claude, codex]\ndefault_agent: codex:sol").1,
+            ["codex:sol", "claude", "codex"]
+        );
+        assert_eq!(order("default_agent: claude").1, ["claude"]);
+        let pinned: Config =
+            serde_yaml_ng::from_str("agents: [claude, codex]\ndefault_agent: codex\nagent: pi")
+                .unwrap();
+        assert_eq!(pinned.agent_order(), ["pi"]);
+        assert!(pinned.fallback_agents().is_empty());
     }
 
     #[test]
@@ -1216,34 +1089,40 @@ supported_harnesses:
     fn config_from_yaml_context_as_list() {
         let yaml = r#"
 context:
-  - src/
-  - tests/
+  docs:
+    - src/
+    - tests/
 "#;
         let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
-        assert_eq!(config.context, vec!["src/", "tests/"]);
+        assert_eq!(config.context.docs, vec!["src/", "tests/"]);
     }
 
     #[test]
     fn config_from_yaml_docs_as_list() {
         let yaml = r#"
-docs:
-  - README.md
-  - docs/
+context:
+  docs:
+    - README.md
+    - docs/
 "#;
         let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
-        assert_eq!(config.docs, vec!["README.md", "docs/"]);
+        assert_eq!(config.context.docs, vec!["README.md", "docs/"]);
     }
 
     #[test]
     fn config_from_yaml_exclude_as_list() {
         let yaml = r#"
-exclude:
-  - "*.log"
-  - build/
-  - node_modules/
+context:
+  exclude:
+    - "*.log"
+    - build/
+    - node_modules/
 "#;
         let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
-        assert_eq!(config.exclude, vec!["*.log", "build/", "node_modules/"]);
+        assert_eq!(
+            config.context.exclude,
+            vec!["*.log", "build/", "node_modules/"]
+        );
     }
 
     #[test]
@@ -1257,33 +1136,17 @@ session:
     }
 
     #[test]
-    fn detached_sessions_end_after_a_day_unless_configured() {
-        use super::DetachedLimit;
-        use std::time::Duration;
-        let parse = |yaml: &str| serde_yaml_ng::from_str::<Config>(yaml).map(|c| c.session);
-        assert_eq!(
-            parse("agent: claude").unwrap().end_detached_after,
-            DetachedLimit::After(Duration::from_secs(86_400))
-        );
-        assert_eq!(
-            parse("session: {end_detached_after: 90m}")
+    fn obsolete_detached_limit_is_readable_but_not_written() {
+        for value in ["2m", "off"] {
+            let config: super::SessionConfig = serde_yaml_ng::from_str(&format!(
+                "terminal: Ghostty\nend_detached_after: {value}\n"
+            ))
+            .unwrap();
+            assert_eq!(config.terminal.as_deref(), Some("Ghostty"));
+            assert!(!serde_yaml_ng::to_string(&config)
                 .unwrap()
-                .end_detached_after,
-            DetachedLimit::After(Duration::from_secs(5_400))
-        );
-        assert_eq!(
-            parse("session: {end_detached_after: 2d}")
-                .unwrap()
-                .end_detached_after,
-            DetachedLimit::After(Duration::from_secs(172_800))
-        );
-        assert_eq!(
-            parse("session: {end_detached_after: off}")
-                .unwrap()
-                .end_detached_after,
-            DetachedLimit::Off
-        );
-        assert!(parse("session: {end_detached_after: soon}").is_err());
+                .contains("end_detached_after"));
+        }
     }
 
     #[test]
@@ -1299,9 +1162,9 @@ summaries:
         assert_eq!(config.summaries.len(), 2);
         assert_eq!(config.summaries[0].path, "src/");
         assert_eq!(config.summaries[0].tokens, Some(5000));
-        assert_eq!(config.summaries[0].agent, "claude");
+        assert_eq!(config.summaries[0].agent.as_deref(), Some("claude"));
         assert_eq!(config.summaries[1].path, "tests/");
-        assert_eq!(config.summaries[1].agent, default_agent());
+        assert_eq!(config.summaries[1].agent, None);
     }
 
     #[test]
@@ -1369,153 +1232,70 @@ release:
     // ==========================================================================
 
     #[test]
-    fn merge_config_values_repo_overrides_scalar() {
-        let global: serde_yaml_ng::Value = serde_yaml_ng::from_str(
-            r#"
-agent: claude:opus
-yolo: false
-"#,
-        )
-        .unwrap();
-
-        let repo: serde_yaml_ng::Value = serde_yaml_ng::from_str(
-            r#"
-agent: codex
-"#,
-        )
-        .unwrap();
-
-        let merged = merge_config_values(Some(global), Some(repo));
-        let config: Config = serde_yaml_ng::from_value(merged).unwrap();
-
-        assert_eq!(config.agent.as_deref(), Some("codex"));
-        assert!(!config.yolo); // preserved from global
-    }
-
-    #[test]
-    fn merge_config_values_additive_keys_combine() {
-        let global: serde_yaml_ng::Value = serde_yaml_ng::from_str(
-            r#"
-context:
-  - global.md
-docs:
-  - README.md
-exclude:
-  - "*.log"
-"#,
-        )
-        .unwrap();
-
-        let repo: serde_yaml_ng::Value = serde_yaml_ng::from_str(
-            r#"
-context:
-  - local.md
-docs:
-  - docs/
-exclude:
-  - build/
-"#,
-        )
-        .unwrap();
-
-        let merged = merge_config_values(Some(global), Some(repo));
-        let config: Config = serde_yaml_ng::from_value(merged).unwrap();
-
-        assert_eq!(config.context, vec!["global.md", "local.md"]);
-        assert_eq!(config.docs, vec!["README.md", "docs/"]);
-        assert_eq!(config.exclude, vec!["*.log", "build/"]);
-    }
-
-    #[test]
-    fn merge_config_values_supported_harnesses_combine() {
-        let global: serde_yaml_ng::Value = serde_yaml_ng::from_str(
-            r#"
-supported_harnesses:
-  - claude
-"#,
-        )
-        .unwrap();
-
-        let repo: serde_yaml_ng::Value = serde_yaml_ng::from_str(
-            r#"
-supported_harnesses:
-  - codex
-"#,
-        )
-        .unwrap();
-
-        let merged = merge_config_values(Some(global), Some(repo));
-        let config: Config = serde_yaml_ng::from_value(merged).unwrap();
-        assert_eq!(config.supported_harnesses, vec!["claude", "codex"]);
-    }
-
-    #[test]
-    fn skill_agents_merge_per_skill_and_a_wave_layer_rejects_repository_keys() {
+    fn skill_settings_merge_per_skill_and_a_wave_layer_ignores_repository_keys() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let _home =
+            crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
         let repo = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(repo.path().join(".lf/wave/infra")).unwrap();
         std::fs::write(
             repo.path().join(".lf/config.yaml"),
-            "agent: codex\nskill_agents:\n  implement: codex:o3\n  design: claude\n",
+            "agent: codex\nskills:\n  implement: {agent: codex:o3}\n  design: {agent: claude}\n",
         )
         .unwrap();
         let wave = repo.path().join(".lf/wave/infra/config.yaml");
-        std::fs::write(&wave, "skill_agents:\n  implement: claude:opus\n").unwrap();
-        let layers = config_layers(Some(repo.path()), Some("infra")).unwrap();
+        std::fs::write(&wave, "skills:\n  implement: {agent: claude:opus}\n").unwrap();
         let config = load_wave_config(Some(repo.path()), Some("infra"))
             .unwrap()
             .unwrap();
         assert_eq!(config.agent.as_deref(), Some("codex"));
-        assert_eq!(config.skill_agents["implement"], "claude:opus");
-        assert_eq!(config.skill_agents["design"], "claude");
         assert_eq!(
-            layer_setting(&layers, &["skill_agents", "implement"]).map(|(layer, _)| layer),
-            Some(ConfigLayer::Wave)
+            super::settings::resolve(&config, Some(&crate::graph::Skill::named("implement")))
+                .unwrap()
+                .config
+                .agent()
+                .unwrap(),
+            "claude:opus"
         );
         assert_eq!(
-            layer_setting(&layers, &["agent"]).map(|(layer, _)| layer),
-            Some(ConfigLayer::Repo)
+            super::settings::resolve(&config, Some(&crate::graph::Skill::named("design")))
+                .unwrap()
+                .config
+                .agent()
+                .unwrap(),
+            "claude"
         );
-
-        std::fs::write(&wave, "planning:\n  provider: git\n").unwrap();
-        assert!(load_wave_config(Some(repo.path()), Some("infra")).is_err());
+        std::fs::write(&wave, "workflow: review\n").unwrap();
+        assert_eq!(
+            load_wave_config(Some(repo.path()), Some("infra"))
+                .unwrap()
+                .unwrap()
+                .graph
+                .as_deref(),
+            Some("review")
+        );
+        std::fs::write(&wave, "planning: {provider: git}\n").unwrap();
+        assert!(load_wave_config(Some(repo.path()), Some("infra")).is_ok());
         std::fs::write(&wave, "agnet: claude\n").unwrap();
-        assert!(load_wave_config(Some(repo.path()), Some("infra")).is_err());
+        assert_eq!(
+            load_wave_config(Some(repo.path()), Some("infra"))
+                .unwrap()
+                .unwrap()
+                .agent()
+                .unwrap(),
+            "codex"
+        );
         assert!(load_config(Some(repo.path())).is_ok());
+        let repo_config = repo.path().join(".lf/config.yaml");
+        std::fs::write(&repo_config, "session: {terminal: ghostty}\n").unwrap();
+        assert!(load_config(Some(repo.path()))
+            .unwrap()
+            .unwrap()
+            .session
+            .terminal
+            .is_none());
     }
-
-    #[test]
-    fn merge_config_values_global_only() {
-        let global: serde_yaml_ng::Value = serde_yaml_ng::from_str("agent: claude:opus\n").unwrap();
-
-        let merged = merge_config_values(Some(global), None);
-        let config: Config = serde_yaml_ng::from_value(merged).unwrap();
-
-        assert_eq!(config.agent.as_deref(), Some("claude:opus"));
-    }
-
-    #[test]
-    fn merge_config_values_repo_only() {
-        let repo: serde_yaml_ng::Value = serde_yaml_ng::from_str("agent: codex\n").unwrap();
-
-        let merged = merge_config_values(None, Some(repo));
-        let config: Config = serde_yaml_ng::from_value(merged).unwrap();
-
-        assert_eq!(config.agent.as_deref(), Some("codex"));
-    }
-
-    #[test]
-    fn merge_config_values_both_none() {
-        let merged = merge_config_values(None, None);
-        let config: Config = serde_yaml_ng::from_value(merged).unwrap();
-
-        // Should get defaults
-        assert!(config.agent.is_none());
-    }
-
-    // ==========================================================================
-    // File-based config loading tests
-    // Note: These tests may be affected by the user's global ~/.lf/config.yaml
-    // ==========================================================================
 
     #[test]
     fn load_yaml_file_empty_returns_none() {
@@ -1563,6 +1343,7 @@ supported_harnesses:
 
     #[test]
     fn load_config_basic() {
+        let _home = crate::journal::TestLedgerGuard::new();
         let temp = tempfile::tempdir().expect("create temp dir");
         let config_dir = temp.path().join(".lf");
         std::fs::create_dir_all(&config_dir).expect("create .lf dir");
@@ -1578,6 +1359,7 @@ supported_harnesses:
 
     #[test]
     fn load_config_or_default_exists() {
+        let _home = crate::journal::TestLedgerGuard::new();
         let temp = tempfile::tempdir().expect("create temp dir");
         let config_dir = temp.path().join(".lf");
         std::fs::create_dir_all(&config_dir).expect("create .lf dir");
@@ -1590,19 +1372,12 @@ supported_harnesses:
 
 #[cfg(test)]
 mod planning_config_tests {
-    use super::{merge_config_values, Config, GitPlan, PlanningConfig};
+    use super::{Config, GitPlan, PlanningConfig};
 
     #[test]
-    fn repository_transport_replaces_personal_provider_fields() {
-        let personal = serde_yaml_ng::from_str(
-            "planning:\n  provider: git\n  remote: private\n  shared: solo\n",
-        )
-        .unwrap();
-        let repository =
-            serde_yaml_ng::from_str("planning:\n  provider: linear\n  team: team\n").unwrap();
+    fn planning_variants_keep_their_typed_defaults() {
         let config: Config =
-            serde_yaml_ng::from_value(merge_config_values(Some(personal), Some(repository)))
-                .unwrap();
+            serde_yaml_ng::from_str("planning: {provider: linear, team: team}").unwrap();
         assert_eq!(
             config.planning_transport(),
             PlanningConfig::Linear {

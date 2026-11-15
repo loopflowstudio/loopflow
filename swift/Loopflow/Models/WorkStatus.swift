@@ -46,7 +46,6 @@ public enum WorkStatus: Codable, Sendable, Hashable {
 /// A Task's state, derived in Rust from its checkout, stage, a running Graph
 /// and the Auto-Ship approval. A Session's available/busy is a separate axis.
 public enum TaskState: String, Codable, Sendable, Hashable {
-    case deferred
     /// No checkout yet.
     case unstarted
     /// A checkout, no Graph running, not at a stage.
@@ -62,6 +61,7 @@ public enum TaskState: String, Codable, Sendable, Hashable {
 
     public var label: String { rawValue.replacingOccurrences(of: "_", with: " ") }
     public var isTerminal: Bool { self == .done || self == .abandoned }
+    public var isWorking: Bool { self == .idle || self == .active || self == .moving }
 }
 
 public struct WorkReference: Codable, Sendable, Hashable {

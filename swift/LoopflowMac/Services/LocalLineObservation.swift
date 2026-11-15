@@ -3,15 +3,17 @@ import Darwin
 import Foundation
 import Loopflow
 
-/// One owned `lf` reader speaking newline-delimited JSON over its pipes.
-/// All mutable state and pipe I/O belong to queue. No callback touches AppKit.
+/// One owned `lf` reader speaking newline-delimited JSON over its pipes: a
+/// remote Task's file subscription, which runs on another Machine. Local reads run in
+/// the server through `ServerClient`. All mutable state and pipe I/O belong to
+/// queue. No callback touches AppKit.
 final class LocalLineObservation<Frame: Sendable>: @unchecked Sendable {
     private let queue: DispatchQueue
     private let name: String
     private let process: Process
-    private let input = Pipe()
-    private let output = Pipe()
-    private let diagnostics = Pipe()
+    private let input = Pipe.uninherited()
+    private let output = Pipe.uninherited()
+    private let diagnostics = Pipe.uninherited()
     private let continuation: AsyncThrowingStream<Frame, any Error>.Continuation
     private let configurationChanged: @Sendable () throws -> Bool
     /// Runs on `queue`; a throw ends the observation.
@@ -209,7 +211,7 @@ final class LocalLineObservation<Frame: Sendable>: @unchecked Sendable {
             if now - lastConfigurationCheck >= 2 {
                 lastConfigurationCheck = now
                 if try configurationChanged() {
-                    fail(WorkObservationError.configurationChanged)
+                    fail(RegistryQueryError("\(name) reader ended: the installed lf or its Machine selection changed"))
                     return
                 }
             }
@@ -223,6 +225,9 @@ final class LocalLineObservation<Frame: Sendable>: @unchecked Sendable {
 
     private func fail(_ error: any Error) {
         guard stoppingAt == nil else { return }
+        let detail = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
+        DesktopLog.home.warn("lf subscription ended", ["subscribe": name,
+                                               "error": String((detail.split(separator: "\n").first ?? "").prefix(200))])
         continuation.finish(throwing: error)
         stop()
     }
@@ -262,30 +267,4 @@ final class LocalLineObservation<Frame: Sendable>: @unchecked Sendable {
     }
 }
 
-enum LocalWorkObservation {
-    /// One `lf` watch per part. Watches send a frame only when their read changes,
-    /// so silence is not a stall; process exit and configuration changes still end them.
-    static func start(
-        process: @escaping @Sendable ([String], String?) throws -> Process,
-        configurationChanged: @escaping @Sendable () throws -> Bool
-    ) throws -> WorkObservation {
-        // Which store this build reads: `lf --version` names a preview copy.
-        let version = try process(["--version"], nil)
-        let output = Pipe()
-        version.standardInput = FileHandle.nullDevice
-        version.standardOutput = output
-        version.standardError = FileHandle.nullDevice
-        try version.run()
-        let printed = output.fileHandleForReading.readDataToEndOfFile()
-        version.waitUntilExit()
-        let copy = WorkObservation.copy(fromVersion: String(decoding: printed, as: UTF8.self))
-        return try WorkWatches.observe(copy: copy) { args, cwd in
-            let reader = try LocalLineObservation<Data>.start(
-                name: args.prefix(2).joined(separator: " "), process: try process(args, cwd),
-                frameLimit: 64 * 1024 * 1024, silence: nil,
-                configurationChanged: configurationChanged, decode: { $0 })
-            return LineWatch(lines: reader.frames, send: reader.send, cancel: reader.cancel)
-        }
-    }
-}
 #endif

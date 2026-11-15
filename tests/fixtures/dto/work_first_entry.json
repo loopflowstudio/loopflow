@@ -15,54 +15,11 @@
         "kind": "open",
         "label": "Open here",
         "unavailable_reason": null
-      }
-    ],
-    "agent_process_id": null,
-    "availability": null,
-    "cwd": "/private/tmp/.tmpRKKNhK.repo",
-    "detail": "opencode:opencode/test-model",
-    "graph_membership": {
-      "kind": "unknown",
-      "reason": "Graph membership was not recorded"
-    },
-    "id": "cc797f6de1e54aa4a1888591b7da9743",
-    "interactive": true,
-    "open_argv": [
-      "/usr/bin/env",
-      "LF_BIN=/Users/jack/src/loopflow.make-loopflow-a-work-first/target/debug/lf",
-      "LF_HOME=/private/tmp/.tmp346qSS",
-      "/Users/jack/src/loopflow.make-loopflow-a-work-first/target/debug/lf",
-      "session",
-      "connect",
-      "cc797f6de1e54aa4a1888591b7da9743"
-    ],
-    "primary_scope": "repository",
-    "program_status": null,
-    "provider": "opencode",
-    "ready_summary": null,
-    "state": "unknown",
-    "task_ids": [],
-    "task_primary": false,
-    "terminal_ids": [],
-    "title": ".tmpRKKNhK",
-    "title_source": "generated",
-    "wave_id": null,
-    "work": null,
-    "work_path": null,
-    "workspace": {
-      "machine_id": "home_3e605971a0c316fdfeafc7e91579940f",
-      "task_id": null,
-      "unavailable": null,
-      "worktree": "/private/tmp/.tmpRKKNhK.repo"
-    },
-    "preview": null
-  },
-  "reopened": {
-    "actions": [
+      },
       {
-        "help": "Open this Session in a terminal",
-        "kind": "open",
-        "label": "Open here",
+        "kind": "reveal",
+        "label": "Show conversation",
+        "help": "Continue existing history without taking another terminal's input",
         "unavailable_reason": null
       }
     ],
@@ -82,12 +39,14 @@
       "LF_HOME=/private/tmp/.tmp346qSS",
       "/Users/jack/src/loopflow.make-loopflow-a-work-first/target/debug/lf",
       "session",
-      "connect",
+      "resume",
       "cc797f6de1e54aa4a1888591b7da9743"
     ],
     "primary_scope": "repository",
     "program_status": null,
     "provider": "opencode",
+    "model": null,
+    "blocked": false,
     "ready_summary": null,
     "state": "unknown",
     "task_ids": [],
@@ -104,7 +63,70 @@
       "unavailable": null,
       "worktree": "/private/tmp/.tmpRKKNhK.repo"
     },
-    "preview": null
+    "preview": null,
+    "transition": null,
+    "turn": null,
+    "raw": false
+  },
+  "reopened": {
+    "actions": [
+      {
+        "help": "Open this Session in a terminal",
+        "kind": "open",
+        "label": "Open here",
+        "unavailable_reason": null
+      },
+      {
+        "kind": "reveal",
+        "label": "Show conversation",
+        "help": "Continue existing history without taking another terminal's input",
+        "unavailable_reason": null
+      }
+    ],
+    "agent_process_id": null,
+    "availability": null,
+    "cwd": "/private/tmp/.tmpRKKNhK.repo",
+    "detail": "opencode:opencode/test-model",
+    "graph_membership": {
+      "kind": "unknown",
+      "reason": "Graph membership was not recorded"
+    },
+    "id": "cc797f6de1e54aa4a1888591b7da9743",
+    "interactive": true,
+    "open_argv": [
+      "/usr/bin/env",
+      "LF_BIN=/Users/jack/src/loopflow.make-loopflow-a-work-first/target/debug/lf",
+      "LF_HOME=/private/tmp/.tmp346qSS",
+      "/Users/jack/src/loopflow.make-loopflow-a-work-first/target/debug/lf",
+      "session",
+      "resume",
+      "cc797f6de1e54aa4a1888591b7da9743"
+    ],
+    "primary_scope": "repository",
+    "program_status": null,
+    "provider": "opencode",
+    "model": null,
+    "blocked": false,
+    "ready_summary": null,
+    "state": "unknown",
+    "task_ids": [],
+    "task_primary": false,
+    "terminal_ids": [],
+    "title": ".tmpRKKNhK",
+    "title_source": "generated",
+    "wave_id": null,
+    "work": null,
+    "work_path": null,
+    "workspace": {
+      "machine_id": "home_3e605971a0c316fdfeafc7e91579940f",
+      "task_id": null,
+      "unavailable": null,
+      "worktree": "/private/tmp/.tmpRKKNhK.repo"
+    },
+    "preview": null,
+    "transition": null,
+    "turn": null,
+    "raw": false
   },
   "roadmap": {
     "generated_at": "2026-10-11T22:28:09.267041Z",
@@ -226,6 +248,7 @@
             "reason": "No Task Graph has run; independent Sessions may still be active",
             "owner": {
               "person": "Jack Heart",
+              "person_id": null,
               "person_key": "jack@loopflow.studio",
               "machine": {
                 "id": "home_7a3f0c2e9b1d4e5f8a6b0c1d2e3f4a5b",
@@ -236,7 +259,7 @@
             "updated_at": "2026-10-11T22:28:08Z",
             "work_id": "task_ab8d3359dc7053bda4afd24ff7e7a7d7"
           },
-          "section": "waiting",
+          "section": "backlog",
           "task": {
             "acquisition": {
               "observed_at": 1791757688,
@@ -257,13 +280,13 @@
               "changes": [],
               "connected": false
             },
-            "repository_id": "repo_00000000000040008000000000000001",
+            "repo_id": "repo_00000000000040008000000000000001",
             "repo": "/private/tmp/.tmpRKKNhK",
             "project_id": "proj_afa19d1ddecc466d956f0bc47eccaad9",
             "wave_id": "d1b09180-31e8-4cee-b058-413a3fd52616"
           },
           "graph_name": "feature",
-          "graph_source": "task"
+          "graph_source": null
         }
       ],
       "truncated": false
@@ -276,6 +299,12 @@
           "help": "Open this Session in a terminal",
           "kind": "open",
           "label": "Open here",
+          "unavailable_reason": null
+        },
+        {
+          "kind": "reveal",
+          "label": "Show conversation",
+          "help": "Continue existing history without taking another terminal's input",
           "unavailable_reason": null
         }
       ],
@@ -295,12 +324,14 @@
         "LF_HOME=/private/tmp/.tmp346qSS",
         "/Users/jack/src/loopflow.make-loopflow-a-work-first/target/debug/lf",
         "session",
-        "connect",
+        "resume",
         "cc797f6de1e54aa4a1888591b7da9743"
       ],
       "primary_scope": "repository",
       "program_status": null,
       "provider": "opencode",
+      "model": null,
+      "blocked": false,
       "ready_summary": null,
       "state": "unknown",
       "task_ids": [],
@@ -317,7 +348,10 @@
         "unavailable": null,
         "worktree": "/private/tmp/.tmpRKKNhK.repo"
       },
-      "preview": null
+      "preview": null,
+      "transition": null,
+      "turn": null,
+      "raw": false
     },
     {
       "actions": [
@@ -325,6 +359,12 @@
           "help": "Open this Session in a terminal",
           "kind": "open",
           "label": "Open here",
+          "unavailable_reason": null
+        },
+        {
+          "kind": "reveal",
+          "label": "Show conversation",
+          "help": "Continue existing history without taking another terminal's input",
           "unavailable_reason": null
         }
       ],
@@ -344,12 +384,14 @@
         "LF_HOME=/private/tmp/.tmp346qSS",
         "/Users/jack/src/loopflow.make-loopflow-a-work-first/target/debug/lf",
         "session",
-        "connect",
+        "resume",
         "480d8ca67cdb41ffa963f79fdb34637c"
       ],
       "primary_scope": null,
       "program_status": null,
       "provider": "opencode",
+      "model": null,
+      "blocked": false,
       "ready_summary": null,
       "state": "unknown",
       "task_ids": [
@@ -371,7 +413,10 @@
         "unavailable": null,
         "worktree": "/private/tmp/.tmpRKKNhK"
       },
-      "preview": null
+      "preview": null,
+      "transition": null,
+      "turn": null,
+      "raw": false
     },
     {
       "actions": [
@@ -379,6 +424,12 @@
           "help": "Open this Session in a terminal",
           "kind": "open",
           "label": "Open here",
+          "unavailable_reason": null
+        },
+        {
+          "kind": "reveal",
+          "label": "Show conversation",
+          "help": "Continue existing history without taking another terminal's input",
           "unavailable_reason": null
         }
       ],
@@ -397,12 +448,14 @@
         "LF_HOME=/private/tmp/.tmp346qSS",
         "/Users/jack/src/loopflow.make-loopflow-a-work-first/target/debug/lf",
         "session",
-        "connect",
+        "resume",
         "session_bf12c20b53be450998e36bf24a58b56f"
       ],
       "primary_scope": null,
       "program_status": null,
       "provider": "opencode",
+      "model": null,
+      "blocked": false,
       "ready_summary": null,
       "state": "closed",
       "task_ids": [],
@@ -419,7 +472,10 @@
         "unavailable": null,
         "worktree": "/private/tmp/.tmpRKKNhK.unscoped"
       },
-      "preview": null
+      "preview": null,
+      "transition": null,
+      "turn": null,
+      "raw": false
     }
   ],
   "task_primary": {
@@ -428,6 +484,12 @@
         "help": "Open this Session in a terminal",
         "kind": "open",
         "label": "Open here",
+        "unavailable_reason": null
+      },
+      {
+        "kind": "reveal",
+        "label": "Show conversation",
+        "help": "Continue existing history without taking another terminal's input",
         "unavailable_reason": null
       }
     ],
@@ -447,12 +509,14 @@
       "LF_HOME=/private/tmp/.tmp346qSS",
       "/Users/jack/src/loopflow.make-loopflow-a-work-first/target/debug/lf",
       "session",
-      "connect",
+      "resume",
       "480d8ca67cdb41ffa963f79fdb34637c"
     ],
     "primary_scope": null,
     "program_status": null,
     "provider": "opencode",
+    "model": null,
+    "blocked": false,
     "ready_summary": null,
     "state": "unknown",
     "task_ids": [
@@ -474,6 +538,9 @@
       "unavailable": null,
       "worktree": "/private/tmp/.tmpRKKNhK"
     },
-    "preview": null
+    "preview": null,
+    "transition": null,
+    "turn": null,
+    "raw": false
   }
 }

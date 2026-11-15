@@ -45,18 +45,28 @@ public struct TaskComment: Decodable, Sendable, Hashable, Identifiable {
     }
 }
 
-/// A person has a provider user; an integration has none.
+/// A person has a provider user; an integration has none. An agent's
+/// direction is its Session's, written for its requester.
 public enum TaskCommentAuthor: Decodable, Sendable, Hashable {
     case person(name: String?)
     case integration
+    case session(id: String, requester: String?)
 
-    private enum CodingKeys: String, CodingKey { case kind, name }
+    private enum CodingKeys: String, CodingKey {
+        case kind, name, requester
+        case sessionId = "session_id"
+    }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         switch try container.decode(String.self, forKey: .kind) {
         case "person": self = .person(name: try container.decode(String?.self, forKey: .name))
         case "integration": self = .integration
+        case "session":
+            self = .session(
+                id: try container.decode(String.self, forKey: .sessionId),
+                requester: try container.decode(String?.self, forKey: .requester)
+            )
         case let kind:
             throw DecodingError.dataCorruptedError(
                 forKey: .kind, in: container, debugDescription: "unknown comment author '\(kind)'"

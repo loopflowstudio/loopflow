@@ -3,6 +3,20 @@ use rusqlite::{params, OptionalExtension, TransactionBehavior};
 use super::SqliteStore;
 use crate::store::StoreResult;
 
+/// The team's last attempt and the watermark its last finished read reached.
+fn saved_check(
+    conn: &rusqlite::Connection,
+    team: &str,
+) -> StoreResult<Option<(i64, Option<String>)>> {
+    Ok(conn
+        .query_row(
+            "SELECT attempted_at,synced_through FROM linear_team_checks WHERE team_id=?1",
+            [team],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?)
+}
+
 impl SqliteStore {
     // The acquisition file lock spans network/ingestion; this transaction only
     // claims freshness. A crash leaves a bounded delay and the old watermark.
@@ -10,17 +24,19 @@ impl SqliteStore {
         &self,
         team: &str,
         now: i64,
+        fresh_for: i64,
     ) -> StoreResult<Option<Option<String>>> {
+        let fresh = |saved: &Option<(i64, Option<String>)>| {
+            saved.as_ref().is_some_and(|(at, _)| now - at < fresh_for)
+        };
         let mut conn = self.conn.lock().expect("store mutex poisoned");
+        // Nearly every check finds the team fresh; that answer takes no write lock.
+        if fresh(&saved_check(&conn, team)?) {
+            return Ok(None);
+        }
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let saved: Option<(i64, Option<String>)> = tx
-            .query_row(
-                "SELECT attempted_at,synced_through FROM linear_team_checks WHERE team_id=?1",
-                [team],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .optional()?;
-        if saved.as_ref().is_some_and(|(last, _)| now - last < 10) {
+        let saved = saved_check(&tx, team)?;
+        if fresh(&saved) {
             return Ok(None);
         }
         tx.execute(
@@ -30,6 +46,34 @@ impl SqliteStore {
         )?;
         tx.commit()?;
         Ok(Some(saved.and_then(|(_, through)| through)))
+    }
+
+    /// Whether the team's last finished delta read Linear within `fresh_for`
+    /// seconds of `now`, so its local state answers reads in place of Linear.
+    pub(crate) fn linear_team_current(
+        &self,
+        team: &str,
+        now: i64,
+        fresh_for: i64,
+    ) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let through: Option<String> = conn
+            .query_row(
+                "SELECT synced_through FROM linear_team_checks WHERE team_id=?1",
+                [team],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten();
+        Ok(through
+            .and_then(|through| {
+                time::OffsetDateTime::parse(
+                    &through,
+                    &time::format_description::well_known::Rfc3339,
+                )
+                .ok()
+            })
+            .is_some_and(|through| now - through.unix_timestamp() < fresh_for))
     }
 
     pub(crate) fn finish_linear_team_check(&self, team: &str, through: &str) -> StoreResult<()> {
@@ -44,16 +88,45 @@ impl SqliteStore {
 
 #[cfg(test)]
 mod tests {
+    use crate::store::sqlite::SqliteStore;
+
+    #[test]
+    fn finished_team_delta_answers_reads_inside_its_window() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        // 2026-10-29T00:00:00Z
+        let start = 1_793_232_000;
+        assert_eq!(
+            store.begin_linear_team_check("team", start, 10).unwrap(),
+            Some(None)
+        );
+        // Begun but unfinished: nothing local answers yet.
+        assert!(!store.linear_team_current("team", start, 10).unwrap());
+        store
+            .finish_linear_team_check("team", "2026-10-29T00:00:00Z")
+            .unwrap();
+        assert!(store.linear_team_current("team", start + 9, 10).unwrap());
+        assert!(!store.linear_team_current("team", start + 10, 10).unwrap());
+        // A tighter budget stretches the window over the same delta.
+        assert!(store.linear_team_current("team", start + 90, 100).unwrap());
+        assert_eq!(
+            store
+                .begin_linear_team_check("team", start + 90, 100)
+                .unwrap(),
+            None
+        );
+    }
+
     #[test]
     fn linear_on_demand_migration_retains_released_work() {
-        use crate::store::migrations::{apply_before_current_draft, current_draft_sql};
+        use crate::store::migrations::{apply_before_migration, migration_section_sql};
         let conn = rusqlite::Connection::open_in_memory().unwrap();
-        apply_before_current_draft(&conn, "linear_team_checks");
+        apply_before_migration(&conn, "linear_team_checks");
         conn.execute_batch(include_str!(
             "../../../tests/fixtures/migrations/linear_team_checks_released.sql"
         ))
         .unwrap();
-        conn.execute_batch(&current_draft_sql("linear_team_checks"))
+        conn.execute_batch(&migration_section_sql("linear_team_checks"))
             .unwrap();
         let work: (String, String) = conn
             .query_row(

@@ -25,7 +25,7 @@ def _write(root: Path, path: str, text: str) -> None:
 def repo(tmp_path: Path) -> Path:
     _write(
         tmp_path,
-        "docs/architecture-reference.md",
+        "docs/dev/reference.md",
         (
             """# Architecture
 
@@ -34,7 +34,7 @@ def repo(tmp_path: Path) -> Path:
             "| Concept | Truth and authority | Data structure | Persistence | "
             "Process owner | Public surface | External edge |\n"
             "| --- | --- | --- | --- | --- | --- | --- |\n"
-            "| **Wave** | Goal | [`Wave`](../rust/loopflow/src/wave/types.rs) | "
+            "| **Wave** | Goal | [`Wave`](../../rust/loopflow/src/wave/types.rs) | "
             "`schema_migrations`, `waves` | `lf` | `lf wave` | "
             "`provider:linear`, `process:git` |\n"
             """<!-- architecture-map:end -->
@@ -92,16 +92,6 @@ impl Provider {
     )
     _write(
         tmp_path,
-        "rust/loopflow/src/store/migration_catalog.rs",
-        """const MIGRATIONS: &[Migration] = &[
-    Migration {
-        sql: include_str!("migrations/0.1.001_initial.sql"),
-    },
-];
-""",
-    )
-    _write(
-        tmp_path,
         "rust/loopflow/src/store/migrations/0.1.001_initial.sql",
         "CREATE TABLE waves (id TEXT PRIMARY KEY);\n",
     )
@@ -121,9 +111,8 @@ def test_clean_fixture_has_no_unexplained_architecture(repo: Path) -> None:
 def test_new_durable_table_must_join_the_map(repo: Path) -> None:
     _write(
         repo,
-        "rust/loopflow/src/store/migrations/drafts/add_mirror.sql",
-        """-- depends_on: none
-CREATE TABLE mirrors (id TEXT);
+        "rust/loopflow/src/store/migrations/add_mirror.sql",
+        """CREATE TABLE mirrors (id TEXT);
 """,
     )
 
@@ -142,8 +131,7 @@ def test_hidden_graph_command_is_internal_not_public(repo: Path) -> None:
     commands.write_text(
         commands.read_text().replace(
             "    Wave,",
-            '    Wave,\n    #[command(name = "__context-block", hide = true)]\n'
-            "    ContextBlock,",
+            '    Wave,\n    #[command(name = "__context-block", hide = true)]\n    ContextBlock,',
         )
     )
 
@@ -185,7 +173,7 @@ def test_new_provider_must_join_an_external_edge(repo: Path) -> None:
 
 
 def test_one_owner_cannot_be_mapped_twice(repo: Path) -> None:
-    architecture_doc = repo / "docs/architecture-reference.md"
+    architecture_doc = repo / "docs/dev/reference.md"
     architecture_doc.write_text(
         architecture_doc.read_text().replace(
             "<!-- architecture-map:end -->",
@@ -197,7 +185,7 @@ def test_one_owner_cannot_be_mapped_twice(repo: Path) -> None:
 
 
 def test_one_concept_name_cannot_describe_two_rows(repo: Path) -> None:
-    architecture_doc = repo / "docs/architecture-reference.md"
+    architecture_doc = repo / "docs/dev/reference.md"
     architecture_doc.write_text(
         architecture_doc.read_text().replace(
             "<!-- architecture-map:end -->",
@@ -222,7 +210,7 @@ def test_retired_runtime_language_fails_in_website_source(repo: Path) -> None:
 
 
 def test_generated_website_docs_do_not_duplicate_the_authoritative_scan(repo: Path) -> None:
-    _write(repo, "website/docs/architecture.md", "Project Session\n")
+    _write(repo, "website/docs/dev/index.md", "Project Session\n")
 
     assert architecture.check_repository(repo).ok
 
@@ -247,7 +235,7 @@ def test_historical_evidence_does_not_define_current_architecture(
 
 
 def test_named_historical_sql_scope_accepts_retired_language(repo: Path) -> None:
-    architecture_doc = repo / "docs/architecture-reference.md"
+    architecture_doc = repo / "docs/dev/reference.md"
     architecture_doc.write_text(
         architecture_doc.read_text().replace(
             "| `Project Session` | — | Project Work |",
@@ -261,7 +249,7 @@ def test_named_historical_sql_scope_accepts_retired_language(repo: Path) -> None
 
 
 def test_unused_historical_scope_fails(repo: Path) -> None:
-    architecture_doc = repo / "docs/architecture-reference.md"
+    architecture_doc = repo / "docs/dev/reference.md"
     architecture_doc.write_text(
         architecture_doc.read_text().replace(
             "| `Project Session` | — | Project Work |",
@@ -279,7 +267,7 @@ def test_new_compatibility_marker_must_join_the_seam_inventory(repo: Path) -> No
 
 
 def test_declared_compatibility_seam_needs_a_source_marker(repo: Path) -> None:
-    architecture_doc = repo / "docs/architecture-reference.md"
+    architecture_doc = repo / "docs/dev/reference.md"
     architecture_doc.write_text(
         architecture_doc.read_text().replace(
             "<!-- architecture-shims:end -->",
@@ -298,7 +286,7 @@ def test_new_dto_projection_must_join_the_projection_inventory(repo: Path) -> No
 
 
 def test_dead_authoritative_link_fails(repo: Path) -> None:
-    architecture_doc = repo / "docs/architecture-reference.md"
+    architecture_doc = repo / "docs/dev/reference.md"
     architecture_doc.write_text(
         architecture_doc.read_text().replace("wave/types.rs", "wave/missing.rs")
     )

@@ -88,11 +88,12 @@ struct ThemeChooser: View {
                     Text(appearance.paths.config.path).font(.caption).textSelection(.enabled)
                 }
                 Spacer()
-                Button("Cancel") { appearance.cancel() }.keyboardShortcut(.cancelAction)
-                Button("Apply") { appearance.apply() }.keyboardShortcut(.defaultAction)
+                Button("Cancel") { appearance.cancel() }.disabled(appearance.saving).keyboardShortcut(.cancelAction)
+                Button("Apply") { Task { await appearance.apply() } }.keyboardShortcut(.defaultAction)
                     .disabled(!appearance.canApply)
             }.buttonStyle(WorkOutlineButtonStyle())
         }
+        .disabled(appearance.saving)
         .padding(20).frame(minWidth: 620, minHeight: 560)
         .foregroundStyle(palette.text).background(palette.background)
         .onAppear { appearance.beginPreview() }

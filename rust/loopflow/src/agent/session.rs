@@ -23,37 +23,38 @@ pub(crate) enum ProviderInvocation<'a> {
 #[derive(Debug, Clone)]
 pub(crate) struct SessionCommand {
     pub(crate) launch: Option<AgentConfig>,
+    /// Who holds the provider (`AgentConfig::holder`).
+    pub(crate) holder: crate::session::Holder,
     pub(crate) input: Option<String>,
     pub(crate) program: String,
     pub(crate) args: Vec<String>,
     pub(crate) cwd: PathBuf,
     pub(crate) context: Option<crate::context_block::ContextDelivery>,
-    pub(crate) remote: Option<NativeConnection>,
+    pub(crate) remote: Option<PathBuf>,
     pub(crate) attachment: Option<(String, crate::process::SessionAttachment)>,
 }
 
-/// The local relay is the client transport; only upstream identifies the AgentProcess.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct NativeConnection {
-    pub(crate) relay: PathBuf,
-    pub(crate) upstream: PathBuf,
-}
-
+/// The native client joins this running conversation at the provider's own
+/// endpoint, possibly mid-turn: lf sends the first turn before it starts, and
+/// Codex replays pending approvals to a client that joins.
 pub(crate) fn native_connection_command(
     cwd: PathBuf,
-    session_id: Option<&AgentSessionId>,
-    remote: NativeConnection,
+    session_id: &AgentSessionId,
+    remote: PathBuf,
     attachment: Option<(String, crate::process::SessionAttachment)>,
 ) -> SessionCommand {
-    let mut args = vec![
+    let args = vec![
         "--remote".into(),
-        format!("unix://{}", remote.relay.display()),
+        format!("unix://{}", remote.display()),
+        "resume".into(),
+        "--".into(),
+        session_id.to_string(),
     ];
-    if let Some(id) = session_id {
-        args.extend(["resume".into(), "--".into(), id.to_string()]);
-    }
+    // The client holds nothing: the app-server it joins passed its own
+    // launch's server check.
     SessionCommand {
         launch: None,
+        holder: crate::session::Holder::Caller,
         input: None,
         program: "codex".into(),
         args,
@@ -69,7 +70,7 @@ pub(crate) fn build_session_command(
     invocation: ProviderInvocation<'_>,
     context_file: Option<&Path>,
 ) -> Result<SessionCommand> {
-    let (harness, model) = crate::config::parse_agent(config.agent());
+    let (harness, model) = crate::config::parse_agent(&config.resolved_agent()?);
     let cwd = config
         .cwd
         .clone()
@@ -77,7 +78,7 @@ pub(crate) fn build_session_command(
         .unwrap_or_else(std::env::current_dir)?;
     let stream = matches!(invocation, ProviderInvocation::ClaudeStream { .. });
     if !stream && (config.max_turns.is_some() || config.output_schema.is_some()) {
-        bail!("turn limits and response schemas require a headless Session (-b)");
+        bail!("turn limits and response schemas require a headless Run (-b)");
     }
     if stream && harness != "claude" {
         bail!("stream-json command syntax belongs to Claude");
@@ -132,6 +133,17 @@ pub(crate) fn build_session_command(
                 input = prompt;
             }
         }
+        // A bare Codex runs as plain `codex`, its first turn in argv; the
+        // app-server and its observer belong to held Sessions.
+        "codex" if config.holder == crate::session::Holder::Caller => {
+            args.extend(super::codex_terminal_options(config)?);
+            if let ProviderInvocation::Resume { session_id } = invocation {
+                args.extend(["resume".into(), "--".into(), session_id.to_string()]);
+            } else {
+                args.push("--".into());
+            }
+            args.extend(prompt.filter(|prompt| !prompt.is_empty()));
+        }
         "codex" | "opencode" => {
             let mut launch = config.clone();
             launch.task_prompt = prompt.unwrap_or_default();
@@ -147,9 +159,14 @@ pub(crate) fn build_session_command(
         }
         "pi" => {
             args.extend(crate::harness::pi::options(config, context_file)?);
-            if let ProviderInvocation::Resume { session_id } = invocation {
-                crate::harness::pi::validate_resume(session_id)?;
-                args.extend(["--session".into(), session_id.to_string()]);
+            match invocation {
+                ProviderInvocation::Resume { session_id } => {
+                    args.extend(crate::harness::pi::resume_args(session_id)?);
+                }
+                ProviderInvocation::Terminal {
+                    session_id: Some(id),
+                } => args.extend(["--session-id".into(), id.to_string()]),
+                _ => {}
             }
             if let Some(prompt) = prompt.filter(|p| !p.is_empty()) {
                 super::validate_terminal_turn(&prompt)?;
@@ -160,6 +177,7 @@ pub(crate) fn build_session_command(
     }
     Ok(SessionCommand {
         launch: native,
+        holder: config.holder,
         input,
         program: harness,
         args,
@@ -176,7 +194,7 @@ pub(crate) fn session_environment(
     context_file: Option<&Path>,
 ) -> Result<BTreeMap<String, String>> {
     let mut environment = config.env.clone();
-    if crate::config::parse_agent(config.agent()).0 == "opencode" {
+    if crate::config::parse_agent(config.agent()?).0 == "opencode" {
         let mut settings: serde_json::Value = environment
             .get("OPENCODE_CONFIG_CONTENT")
             .cloned()
@@ -218,6 +236,7 @@ pub(crate) fn session_environment(
                 &mut settings,
                 context,
                 &super::system_prompt_with_structured_replies(config),
+                config.holder,
             )?;
         }
         environment.insert("OPENCODE_CONFIG_CONTENT".into(), settings.to_string());
@@ -230,16 +249,62 @@ pub(crate) fn resolve_session_config(
     session: &crate::session::LfSession,
     cli: &crate::lf::Cli,
 ) -> Result<AgentConfig> {
-    let current = crate::config::load_config(Some(&session.cwd))?.unwrap_or_default();
+    let _selection = crate::config::settings::select_invocation(cli.setting_values()?);
+    let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
+    let wave = session
+        .wave_id
+        .as_ref()
+        .map(|id| store.get_wave(id))
+        .transpose()?
+        .flatten();
+    let current =
+        crate::config::load_wave_config(Some(&session.cwd), wave.as_ref().map(|wave| wave.slug()))?
+            .unwrap_or_default();
+    let saved = if let Some(key) = session.artifact_key.as_deref() {
+        match crate::session_record::resolve_manifest(&crate::store::lf_home_dir(), key) {
+            Ok((_, saved)) => Some(saved),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => return Err(error.into()),
+        }
+    } else {
+        None
+    };
+    let input_harness = saved.as_ref().map(|saved| saved.harness.clone());
+    let request = saved.and_then(|saved| saved.process);
+    let skill = request
+        .as_ref()
+        .and_then(|request| request.skill_invocation.as_ref())
+        .map(|invocation| invocation.skill.clone())
+        .or_else(|| {
+            session
+                .skill
+                .as_deref()
+                .and_then(|name| crate::graph::load_skill(name, &session.cwd).ok())
+        });
     let provider = session
         .provider
         .as_deref()
         .ok_or_else(|| anyhow::anyhow!("Session has no provider"))?;
-    let selected = cli.agent.clone().or_else(crate::config::agent_override);
-    let model = if let Some(agent) = current.agent.as_deref() {
+    let resolved = crate::config::settings::resolve(&current, skill.as_ref())?;
+    let current = &resolved.config;
+    let candidate = resolved.settings["agent"].selected();
+    let selected = candidate
+        .filter(|candidate| {
+            candidate.key == "agent"
+                && matches!(
+                    candidate.source,
+                    crate::config::ConfigSource::CommandLine
+                        | crate::config::ConfigSource::Environment
+                )
+        })
+        .map(|candidate| candidate.value.as_str().expect("agent is a string"));
+    let configured_agent = candidate
+        .filter(|candidate| candidate.source != crate::config::ConfigSource::Builtin)
+        .and_then(|_| resolved.settings["agent"].value.as_str());
+    let model = if let Some(agent) = configured_agent {
         let (harness, model) = crate::config::parse_agent(agent);
         if harness == provider {
-            model
+            model.or_else(|| session.model.clone())
         } else {
             session.model.clone()
         }
@@ -247,7 +312,7 @@ pub(crate) fn resolve_session_config(
         session.model.clone()
     };
     let (agent, importing) =
-        match crate::config::resume_choice(provider, model.as_deref(), selected.as_deref()) {
+        match crate::config::resume_choice(provider, model.as_deref(), selected) {
             crate::config::Resume::Native(model) => (
                 model.map_or_else(
                     || provider.to_string(),
@@ -257,29 +322,34 @@ pub(crate) fn resolve_session_config(
             ),
             crate::config::Resume::Import { agent } => (agent, true),
         };
+    // The latest input's thread and account belong to the provider it ran on.
+    let resumes_native = !importing
+        && input_harness
+            .as_deref()
+            .is_none_or(|harness| harness == provider);
     let mut config = AgentConfig {
         agent: Some(agent),
         cwd: Some(session.cwd.clone()),
-        skip_permissions: cli.yolo || crate::config::yolo_override() || current.yolo,
-        chrome: cli.chrome_setting().unwrap_or(current.chrome),
+        skip_permissions: current.yolo,
+        chrome: current.chrome,
+        codex_service_tier: current.codex.service_tier,
+        claude_model: if importing
+            || selected
+                .is_some_and(|agent| crate::config::parse_agent(agent) == ("claude".into(), None))
+        {
+            current.claude.model.clone()
+        } else {
+            None
+        },
         output_schema: cli.output_schema.clone(),
         ..Default::default()
-    };
-    let request = if let Some(key) = session.artifact_key.as_deref() {
-        match crate::session_record::resolve_manifest(&crate::store::lf_home_dir(), key) {
-            Ok((_, saved)) => saved.process,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-            Err(error) => return Err(error.into()),
-        }
-    } else {
-        None
     };
     let mut needs_execution_boundary = false;
     if let Some(request) = request {
         if !importing && provider == "codex" {
             config.task_prompt = request.codex_initial_input();
         }
-        if !importing {
+        if resumes_native {
             config.provider_account_id = request.account_id;
         }
         config.system_prompt = request.system_prompt;
@@ -287,7 +357,6 @@ pub(crate) fn resolve_session_config(
         config.write_scope = request.write_scope;
         needs_execution_boundary = request.execution_boundary.is_some();
     }
-    let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
     if cli.batch {
         if let Some(task) = session
             .task_id
@@ -305,10 +374,10 @@ pub(crate) fn resolve_session_config(
     if needs_execution_boundary {
         config.execution_boundary = Some(super::checkout_execution_boundary(
             &session.cwd,
-            config.agent(),
+            config.agent()?,
         )?);
     }
-    if !importing {
+    if resumes_native {
         if let Some(native) = session
             .artifact_key
             .as_deref()
@@ -402,13 +471,18 @@ mod tests {
                         .any(|arg| arg.contains("failIfUnavailable")));
                 }
                 if provider == "codex" {
-                    let params = build_codex_thread_start_params(command.launch.as_ref().unwrap());
-                    assert_eq!(params["sandbox"], "workspace-write");
-                    assert_eq!(params["approvalPolicy"], "never");
+                    assert!(command
+                        .args
+                        .windows(2)
+                        .any(|pair| pair == ["--sandbox", "workspace-write"]));
+                    assert!(command
+                        .args
+                        .windows(2)
+                        .any(|pair| pair == ["--ask-for-approval", "never"]));
                 }
             }
             if provider == "codex" {
-                let params = build_codex_thread_start_params(&config);
+                let params = build_codex_thread_start_params(&config, true);
                 assert_eq!(params["sandbox"], "workspace-write");
                 assert_eq!(params["approvalPolicy"], "never");
             } else if provider == "claude" {
@@ -443,7 +517,7 @@ mod tests {
         let config = AgentConfig {
             agent: Some("claude:sonnet".into()),
             cwd: Some(cwd.path().into()),
-            chrome: true,
+            chrome: Some(true),
             max_turns: Some(7),
             output_schema: Some(serde_json::json!({"type":"object"})),
             ..Default::default()
@@ -469,6 +543,175 @@ mod tests {
     }
 
     #[test]
+    fn unset_chrome_sends_no_flag_and_explicit_choices_send_theirs() {
+        let cwd = tempfile::tempdir().unwrap();
+        for (chrome, expected) in [
+            (None, None),
+            (Some(true), Some("--chrome")),
+            (Some(false), Some("--no-chrome")),
+        ] {
+            let config = AgentConfig {
+                agent: Some("claude".into()),
+                cwd: Some(cwd.path().into()),
+                chrome,
+                ..Default::default()
+            };
+            for invocation in [
+                ProviderInvocation::Terminal { session_id: None },
+                ProviderInvocation::ClaudeStream { session_id: None },
+            ] {
+                let command = build_session_command(&config, invocation, None).unwrap();
+                let sent: Vec<_> = command
+                    .args
+                    .iter()
+                    .filter(|arg| *arg == "--chrome" || *arg == "--no-chrome")
+                    .map(String::as_str)
+                    .collect();
+                assert_eq!(sent, Vec::from_iter(expected));
+            }
+        }
+    }
+
+    /// Codex, OpenCode and Pi have no Chrome equivalent; the whole launch
+    /// (args, environment, Codex thread params) stays free of the setting.
+    #[test]
+    fn chrome_choice_reaches_no_harness_but_claude() {
+        let cwd = tempfile::tempdir().unwrap();
+        for harness in ["codex", "opencode", "pi"] {
+            let config = AgentConfig {
+                agent: Some(harness.into()),
+                cwd: Some(cwd.path().into()),
+                chrome: Some(true),
+                ..Default::default()
+            };
+            let command = build_session_command(
+                &config,
+                ProviderInvocation::Terminal { session_id: None },
+                None,
+            )
+            .unwrap();
+            let launch = format!(
+                "{:?} {:?} {:?}",
+                command.args,
+                session_environment(&config, None).unwrap(),
+                build_codex_thread_start_params(&config, false)
+            );
+            assert!(
+                !launch.to_lowercase().contains("chrome"),
+                "{harness}: {launch}"
+            );
+        }
+    }
+
+    /// Pi has no permission bypass; `yolo` reaches it as nothing.
+    #[test]
+    fn yolo_sends_pi_nothing() {
+        let cwd = tempfile::tempdir().unwrap();
+        let launch = |skip_permissions| {
+            let config = AgentConfig {
+                agent: Some("pi".into()),
+                cwd: Some(cwd.path().into()),
+                skip_permissions,
+                ..Default::default()
+            };
+            build_session_command(
+                &config,
+                ProviderInvocation::Terminal { session_id: None },
+                None,
+            )
+            .unwrap()
+            .args
+        };
+        assert_eq!(launch(true), launch(false));
+    }
+
+    #[test]
+    fn bare_harness_sends_no_model_and_a_pinned_one_sends_it() {
+        let cwd = tempfile::tempdir().unwrap();
+        for (agent, expected) in [
+            ("claude", None),
+            ("claude:opus", Some("opus")),
+            ("pi", None),
+            ("pi:openai/gpt-5", Some("openai/gpt-5")),
+            ("codex", None),
+            ("codex:o3", Some("o3")),
+        ] {
+            let config = AgentConfig {
+                agent: Some(agent.into()),
+                cwd: Some(cwd.path().into()),
+                ..Default::default()
+            };
+            let command = build_session_command(
+                &config,
+                ProviderInvocation::Terminal { session_id: None },
+                None,
+            )
+            .unwrap();
+            let model = command
+                .args
+                .iter()
+                .position(|arg| arg == "--model")
+                .map(|index| command.args[index + 1].as_str());
+            assert_eq!(model, expected, "{agent}");
+        }
+    }
+
+    /// A bare Codex is plain `codex` with its first turn in argv: no lf
+    /// app-server, no `--remote` client and no observer. A held one keeps them.
+    #[test]
+    fn bare_codex_runs_plain_codex_and_a_held_one_keeps_its_app_server() {
+        let cwd = tempfile::tempdir().unwrap();
+        let config = |holder| AgentConfig {
+            agent: Some("codex".into()),
+            cwd: Some(cwd.path().into()),
+            task_prompt: "fix the bug".into(),
+            system_prompt: "be brief".into(),
+            holder,
+            ..Default::default()
+        };
+        let bare = config(crate::session::Holder::Caller);
+        let start = build_session_command(
+            &bare,
+            ProviderInvocation::Terminal { session_id: None },
+            None,
+        )
+        .unwrap();
+        assert_eq!(start.program, "codex");
+        assert!(start.launch.is_none() && start.remote.is_none());
+        assert!(start.args.ends_with(&["--".into(), "fix the bug".into()]));
+        assert!(start
+            .args
+            .iter()
+            .any(|arg| arg.starts_with("developer_instructions=")));
+        assert!(!start
+            .args
+            .iter()
+            .any(|arg| arg == "app-server" || arg == "--remote"));
+        let resume = build_session_command(
+            &bare,
+            ProviderInvocation::Resume {
+                session_id: &"thread-1".into(),
+            },
+            None,
+        )
+        .unwrap();
+        assert!(resume.args.ends_with(&[
+            "resume".into(),
+            "--".into(),
+            "thread-1".into(),
+            "fix the bug".into()
+        ]));
+
+        let held = build_session_command(
+            &config(crate::session::Holder::Server),
+            ProviderInvocation::Terminal { session_id: None },
+            None,
+        )
+        .unwrap();
+        assert!(held.launch.is_some());
+    }
+
+    #[test]
     fn terminal_launch_and_resume_reject_turn_limits_and_schemas_independently() {
         for provider in ["claude", "codex", "opencode"] {
             for (max_turns, output_schema) in [
@@ -488,7 +731,7 @@ mod tests {
                     },
                 ] {
                     let error = build_session_command(&config, invocation, None).unwrap_err();
-                    assert!(error.to_string().contains("require a headless Session"));
+                    assert!(error.to_string().contains("require a headless Run"));
                 }
             }
         }

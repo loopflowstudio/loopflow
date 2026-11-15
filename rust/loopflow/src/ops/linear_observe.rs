@@ -6,6 +6,8 @@
 //! Exactly-once, the baseline, and the monotonic-revision guard all live in the
 //! store; acquisition supplies observations without proposing a second write.
 
+use std::collections::HashMap;
+use std::path::Path;
 use std::time::Duration;
 
 use sha2::{Digest, Sha256};
@@ -49,7 +51,13 @@ pub(crate) async fn refresh_task_comments(store: &SharedStore, task: &Task) -> O
         return Ok(());
     };
     let repository = super::task::repository_for_task(store, &task)?;
-    if !super::planning_client::connected(&repository.to_string_lossy()) {
+    let planning_connected = super::planning_client::connected(&repository.to_string_lossy());
+    if !planning_connected {
+        return Ok(());
+    }
+    // The Team delta carries this issue's new comments; a current one needs no
+    // per-issue read.
+    if team_current(store, &repository.to_string_lossy()).await {
         return Ok(());
     }
     let client = super::planning_client::PlanningClient::for_items(&repository).await?;
@@ -91,7 +99,12 @@ pub(crate) async fn refresh_task_comments(store: &SharedStore, task: &Task) -> O
         }
     }
     store
-        .apply_linear_observation(&task.id, observation, OffsetDateTime::now_utc())
+        .apply_linear_observation(
+            &task.id,
+            observation,
+            OffsetDateTime::now_utc(),
+            planning_connected,
+        )
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?;
     Ok(())
@@ -146,11 +159,23 @@ pub(crate) async fn check_before_write(repo: &std::path::Path) -> OpsResult<()> 
 /// update Tasks. Freshness belongs to the scope, even when several repositories
 /// or processes share it.
 pub(crate) async fn check_repository(store: &Store, repository: &str) -> OpsResult<bool> {
-    if !super::planning_client::connected(repository) {
+    check_scope(store, repository, fresh_for(repository)).await
+}
+
+/// `check_repository` unless a check started within `fresh_for` seconds.
+async fn check_scope(store: &Store, repository: &str, fresh_for: i64) -> OpsResult<bool> {
+    let planning_connected = super::planning_client::connected(repository);
+    if !planning_connected {
         return Ok(false);
     }
-    let repo = std::path::Path::new(repository);
+    let repo = Path::new(repository);
     let team = super::planning_client::repository_scope(repo)?;
+    let mut scope_matches = HashMap::from([(repo.to_path_buf(), true)]);
+    let mut same_scope = |repo: &Path| {
+        *scope_matches.entry(repo.to_path_buf()).or_insert_with(|| {
+            super::planning_client::repository_scope(repo).is_ok_and(|scope| scope == team)
+        })
+    };
     let mut live = Vec::new();
     let mut finished = Vec::new();
     let waves: Vec<_> = store
@@ -158,20 +183,11 @@ pub(crate) async fn check_repository(store: &Store, repository: &str) -> OpsResu
         .await
         .map_err(message)?
         .into_iter()
-        .filter(|wave| {
-            super::planning_client::repository_scope(std::path::Path::new(wave.repo()))
-                .ok()
-                .as_ref()
-                == Some(&team)
-        })
+        .filter(|wave| same_scope(Path::new(wave.repo())))
         .collect();
     for task in store.list_tasks(None).await.map_err(message)? {
         let task_repo = super::task::repository_for_task(store, &task)?;
-        if super::planning_client::repository_scope(&task_repo)
-            .ok()
-            .as_ref()
-            != Some(&team)
-        {
+        if !same_scope(&task_repo) {
             continue;
         }
         let Some(issue) = task.linear_id else {
@@ -201,7 +217,7 @@ pub(crate) async fn check_repository(store: &Store, repository: &str) -> OpsResu
     let now = OffsetDateTime::now_utc();
     let Some(since) = store
         .sqlite
-        .begin_linear_team_check(&team, now.unix_timestamp())
+        .begin_linear_team_check(&team, now.unix_timestamp(), fresh_for)
         .map_err(message)?
     else {
         return Ok(false);
@@ -264,7 +280,7 @@ pub(crate) async fn check_repository(store: &Store, repository: &str) -> OpsResu
             let mut observation = observation;
             claim_local_comments(store, &task, &client, &mut observation)?;
             store
-                .apply_linear_observation(&task.id, observation, now)
+                .apply_linear_observation(&task.id, observation, now, planning_connected)
                 .await
                 .map_err(message)?;
         }
@@ -276,17 +292,70 @@ pub(crate) async fn check_repository(store: &Store, repository: &str) -> OpsResu
     Ok(changed)
 }
 
-/// Bound on-demand work and retain local planning when Linear is unavailable.
-pub(crate) async fn sync_repository(store: &Store, repository: &str) -> bool {
-    let check =
-        tokio::time::timeout(Duration::from_secs(5), check_repository(store, repository)).await;
-    let changed = match check {
+/// Seconds a finished scope delta answers reads. Linear's stretches as its
+/// shared budget falls; Asana and Notion keep the healthy window.
+fn fresh_for(repository: &str) -> i64 {
+    if super::planning_client::is_linear(repository) {
+        crate::linear::delta_fresh_secs()
+    } else {
+        crate::linear::HEALTHY_FRESH_SECS
+    }
+}
+
+/// The one freshness check for Linear reads: bring the repository's Team
+/// delta up to date (a no-op inside its window), then report whether local
+/// state is current enough to answer in place of a per-item read.
+pub(crate) async fn team_current(store: &Store, repository: &str) -> bool {
+    if !super::planning_client::is_linear(repository) {
+        return false;
+    }
+    check_repository_bounded(store, repository, fresh_for(repository)).await;
+    let Ok(team) = super::planning_client::repository_scope(std::path::Path::new(repository))
+    else {
+        return false;
+    };
+    store
+        .sqlite
+        .linear_team_current(
+            &team,
+            OffsetDateTime::now_utc().unix_timestamp(),
+            crate::linear::delta_fresh_secs(),
+        )
+        .unwrap_or(false)
+}
+
+/// Bring the repository's scope delta up to date within five seconds; whether
+/// it changed local state. Unavailable or slow providers leave state as it is.
+async fn check_repository_bounded(store: &Store, repository: &str, fresh_for: i64) -> bool {
+    let check = tokio::time::timeout(
+        Duration::from_secs(5),
+        check_scope(store, repository, fresh_for),
+    )
+    .await;
+    match check {
         Ok(Ok(changed)) => changed,
         result => {
             tracing::debug!(?result, "Linear team check pending");
             false
         }
-    };
+    }
+}
+
+/// Bound on-demand work and retain local planning when Linear is unavailable.
+pub(crate) async fn sync_repository(store: &Store, repository: &str) -> bool {
+    sync_scope(store, repository, fresh_for(repository)).await
+}
+
+/// An explicit planning refresh: the scope delta, however recently a check
+/// started, then pending deliveries. It runs before the Wave inventory, which
+/// would otherwise learn a remote completion first and leave the delta skipping
+/// that finished Task's other changes, such as a comment made alongside it.
+pub(crate) async fn refresh_repository(store: &Store, repository: &str) -> bool {
+    sync_scope(store, repository, 0).await
+}
+
+async fn sync_scope(store: &Store, repository: &str, fresh_for: i64) -> bool {
+    let changed = check_repository_bounded(store, repository, fresh_for).await;
     // Each delivery has its own deadline. A shared deadline repeatedly canceled
     // the first slow export and starved every later saved Task.
     if let Err(error) = sync_repository_deliveries(store, repository).await {
@@ -299,17 +368,6 @@ pub(crate) async fn sync_repository(store: &Store, repository: &str) -> bool {
         tracing::debug!(%error, "planning field delivery pending");
     }
     changed
-}
-
-/// Only an attached watcher owns a Linear clock. Idle agents own no Linear timer.
-pub(super) async fn watch_repository(store: &Store, repo: &str) {
-    let mut delay = 30;
-    loop {
-        let changed = sync_repository(store, repo).await;
-        delay = if changed { 30 } else { (delay * 2).min(240) };
-        tracing::debug!(target: "loopflow::linear_watch", delay, "Linear watcher waiting");
-        tokio::time::sleep(Duration::from_secs(delay)).await;
-    }
 }
 
 pub(super) async fn sync_repository_deliveries(store: &Store, repository: &str) -> OpsResult<()> {
@@ -601,146 +659,6 @@ pub(crate) fn render_comment(
 #[cfg(test)]
 mod tests {
     use super::{is_direction_comment, render_comment};
-
-    #[test]
-    fn linear_on_demand_watch_connection_acquires_and_closes() {
-        use crate::ops::linear::task_planning_tests::{mark_issue_updated, with_planning_task};
-
-        with_planning_task(|runtime, fixture, repo, task, state| {
-            runtime.block_on(async {
-                let mut provider = state.lock().await;
-                provider.issues[0]["title"] = serde_json::json!("Acquired by watcher");
-                mark_issue_updated(&mut provider.issues[0]);
-            });
-            let watch = crate::ops::planning_sync::PlanningSync::start_watch(
-                fixture.store.clone(),
-                repo.to_string_lossy().into_owned(),
-            )
-            .unwrap();
-            runtime.block_on(async {
-                tokio::time::timeout(std::time::Duration::from_secs(5), async {
-                    while fixture
-                        .store
-                        .get_task(&task.id)
-                        .await
-                        .unwrap()
-                        .unwrap()
-                        .title
-                        != "Acquired by watcher"
-                    {
-                        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-                    }
-                })
-                .await
-                .unwrap();
-            });
-            let closing = std::time::Instant::now();
-            drop(watch);
-            assert!(closing.elapsed() < std::time::Duration::from_secs(5));
-        });
-    }
-
-    #[test]
-    fn linear_on_demand_watcher_backs_off_and_resets_on_change() {
-        use crate::ops::linear::task_planning_tests::{mark_issue_updated, with_planning_task};
-        use tracing_subscriber::layer::SubscriberExt;
-
-        struct Sleeps(std::sync::mpsc::Sender<u64>);
-        impl tracing::field::Visit for Sleeps {
-            fn record_debug(&mut self, _: &tracing::field::Field, _: &dyn std::fmt::Debug) {}
-            fn record_u64(&mut self, field: &tracing::field::Field, value: u64) {
-                if field.name() == "delay" {
-                    self.0.send(value).unwrap();
-                }
-            }
-        }
-        impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for Sleeps {
-            fn on_event(
-                &self,
-                event: &tracing::Event<'_>,
-                _: tracing_subscriber::layer::Context<'_, S>,
-            ) {
-                if event.metadata().target() == "loopflow::linear_watch" {
-                    event.record(&mut Sleeps(self.0.clone()));
-                }
-            }
-        }
-
-        with_planning_task(|runtime, fixture, repo, task, state| {
-            let clock = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .unwrap();
-            let conn = rusqlite::Connection::open(&fixture.database).unwrap();
-            conn.execute("DELETE FROM linear_team_checks", []).unwrap();
-            runtime.block_on(async { state.lock().await.requests = 0 });
-            let (sender, sleeps) = std::sync::mpsc::channel();
-            let subscriber = tracing_subscriber::registry().with(Sleeps(sender));
-            let _trace = tracing::subscriber::set_default(subscriber);
-            clock.block_on(async {
-                tokio::time::pause();
-                let mut watch = Box::pin(super::watch_repository(
-                    &fixture.store,
-                    repo.to_str().unwrap(),
-                ));
-                let exercise = async {
-                    let mut previous = 0;
-                    for (index, expected) in [30, 60, 120, 240, 240, 30, 60].into_iter().enumerate()
-                    {
-                        if previous != 0 {
-                            tokio::time::advance(std::time::Duration::from_secs(previous - 1))
-                                .await;
-                            tokio::task::yield_now().await;
-                            assert_eq!(state.lock().await.requests, index);
-                            // SQLite freshness uses wall time; advance its attempt too.
-                            conn.execute("UPDATE linear_team_checks SET attempted_at=0", [])
-                                .unwrap();
-                            if index == 5 {
-                                let mut provider = state.lock().await;
-                                provider.issues[0]["title"] =
-                                    serde_json::json!("Watcher acquired change");
-                                mark_issue_updated(&mut provider.issues[0]);
-                            }
-                            // Tokio rounds sleep deadlines to millisecond ticks.
-                            tokio::time::advance(std::time::Duration::from_millis(1001)).await;
-                        }
-                        let deadline =
-                            std::time::Instant::now() + std::time::Duration::from_secs(5);
-                        let delay = loop {
-                            if let Ok(delay) = sleeps.try_recv() {
-                                break delay;
-                            }
-                            assert!(
-                                std::time::Instant::now() < deadline,
-                                "watcher did not finish check {index}"
-                            );
-                            tokio::task::yield_now().await;
-                        };
-                        assert_eq!(delay, expected);
-                        assert_eq!(state.lock().await.requests, index + 1);
-                        previous = delay;
-                    }
-                    assert_eq!(
-                        fixture
-                            .store
-                            .get_task(&task.id)
-                            .await
-                            .unwrap()
-                            .unwrap()
-                            .title,
-                        "Watcher acquired change"
-                    );
-                };
-                tokio::select! {
-                    _ = &mut watch => panic!("watcher unexpectedly stopped"),
-                    _ = exercise => {},
-                }
-                drop(watch);
-                tokio::time::advance(std::time::Duration::from_secs(600)).await;
-                assert_eq!(state.lock().await.requests, 7);
-            });
-        });
-    }
 
     #[test]
     fn agent_progress_never_reenters_direction_even_with_a_quoted_steer() {

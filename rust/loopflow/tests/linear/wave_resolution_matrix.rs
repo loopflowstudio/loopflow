@@ -30,7 +30,7 @@ enum WaveForm {
 
 struct Cmd {
     id: &'static str,
-    /// Subcommand path for the completeness guard (e.g. `["wave", "connect"]`).
+    /// Subcommand path for the completeness guard (e.g. `["wave", "plan", "connect"]`).
     path: &'static [&'static str],
     /// Full args after `lf` (subcommand path + extra flags/values).
     base_args: &'static [&'static str],
@@ -48,7 +48,7 @@ const AMBIENT_ONLY: &[&[&str]] = &[];
 
 /// Task identity selects its owning Wave; an optional Wave only checks that
 /// ownership. Ambient Wave selection must not redirect an explicit Task.
-const ISSUE_OWNED: &[&[&str]] = &[&["task", "edit"], &["task", "comment"]];
+const ISSUE_OWNED: &[&[&str]] = &[&["task", "update"], &["task", "report"]];
 
 /// Authored inputs do not select an ambient execution Wave: context reads
 /// directories.
@@ -56,7 +56,12 @@ const AUTHORED_CONTEXT: &[&[&str]] = &[&["context"]];
 
 /// Session entry uses an explicit Work target or checkout discovery, never an
 /// ambient Wave. `session_launch_contract` covers both forms and their effects.
-const SESSION_TARGETS: &[&[&str]] = &[&["session", "connect"]];
+const SESSION_TARGETS: &[&[&str]] = &[
+    &["session", "resume"],
+    &["session", "new"],
+    &["open"],
+    &["workspace"],
+];
 
 /// Membership changes name an explicit destination and preserve execution context.
 /// `lf set` and `lf unset` take only the typed root `--wave`, else apply to the
@@ -68,17 +73,18 @@ const MEMBERSHIP_TARGETS: &[&[&str]] = &[&["task", "move"]];
 /// selecting ambient Wave context. These must not inherit `LF_WAVE_ID`.
 /// Typed historical filters may resolve an explicit name to its stored ID.
 const FILTER_ONLY: &[&[&str]] = &[
+    &["session", "list"],
     &["task", "list"],
-    &["desktop", "done"],
-    &["history"],
-    &["ops", "ci"],
-    &["history", "list"],
-    &["history", "search"],
-    &["history", "usage"],
+    &["session", "history"],
+    &["repo", "ci"],
+    &["session", "history", "list"],
+    &["session", "history", "search"],
+    &["session", "usage"],
 ];
 
-/// Rotation names its Wave or takes `--all`; it never resolves ambient context.
-const EXPLICIT_OR_ALL: &[&[&str]] = &[&["wave", "new-chapter"]];
+/// Exchanges planning first, then reads its Wave as `wave status` does, so a
+/// repository with no planning remote stops before any Wave resolves.
+const EXCHANGE_FIRST: &[&[&str]] = &[&["wave", "sync"]];
 
 /// Commands that require a Wave on the command line and therefore never
 /// resolve ambient context.
@@ -101,16 +107,23 @@ const COMMANDS: &[Cmd] = &[
         global_default: true,
     },
     Cmd {
-        id: "desktop wave",
-        path: &["desktop", "wave"],
-        base_args: &["desktop", "wave", "--json"],
+        id: "wave planning",
+        path: &["wave", "plan"],
+        base_args: &["wave", "plan", "--json"],
         wave_form: WaveForm::Positional,
         global_default: false,
     },
     Cmd {
-        id: "desktop plan",
-        path: &["desktop", "plan"],
-        base_args: &["desktop", "plan", "--json"],
+        id: "planning list",
+        path: &["plan", "list"],
+        base_args: &["plan", "list", "--json"],
+        wave_form: WaveForm::Positional,
+        global_default: true,
+    },
+    Cmd {
+        id: "planning board",
+        path: &["plan", "board"],
+        base_args: &["plan", "board", "--json"],
         wave_form: WaveForm::Positional,
         global_default: true,
     },
@@ -130,9 +143,9 @@ const COMMANDS: &[Cmd] = &[
     },
     // ── Mutations ────────────────────────────────────────────────────────
     Cmd {
-        id: "wave connect",
-        path: &["wave", "connect"],
-        base_args: &["wave", "connect"],
+        id: "wave planning connect",
+        path: &["wave", "plan", "connect"],
+        base_args: &["wave", "plan", "connect"],
         wave_form: WaveForm::Positional,
         global_default: false,
     },
@@ -231,7 +244,7 @@ fn expected_outcome(cmd: &Cmd, env: &Env) -> Outcome {
         return Outcome::Resolved;
     }
     // Connection may register the selected Wave.
-    if env.id == "explicit-unknown" && cmd.id == "wave connect" {
+    if env.id == "explicit-unknown" && cmd.id == "wave planning connect" {
         return Outcome::Resolved;
     }
 
@@ -530,7 +543,7 @@ fn registry_is_complete() {
         .chain(AUTHORED_CONTEXT)
         .chain(SESSION_TARGETS)
         .chain(MEMBERSHIP_TARGETS)
-        .chain(EXPLICIT_OR_ALL)
+        .chain(EXCHANGE_FIRST)
         .map(|path| path.iter().map(|s| s.to_string()).collect())
         .collect();
 
@@ -553,7 +566,7 @@ fn registry_is_complete() {
         .chain(AUTHORED_CONTEXT)
         .chain(SESSION_TARGETS)
         .chain(MEMBERSHIP_TARGETS)
-        .chain(EXPLICIT_OR_ALL)
+        .chain(EXCHANGE_FIRST)
     {
         assert!(
             find_clap_command(&root, path).is_some(),

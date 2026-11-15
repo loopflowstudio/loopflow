@@ -4,7 +4,7 @@ use loopflow_test_support::env_lock;
 use std::env;
 use std::ffi::OsString;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use base64::prelude::*;
 use loopflow::id::WaveId;
@@ -18,17 +18,121 @@ use tempfile::TempDir;
 use time::OffsetDateTime;
 
 pub mod ambient;
+#[cfg(unix)]
+pub mod rex;
+
+// Shared with the library's cfg(test) store setup; production never embeds it.
+#[path = "../../src/store/test_database.rs"]
+pub(crate) mod test_database;
+
+#[allow(dead_code)] // Shared helper compiled into each integration test binary.
+pub fn seed_store(home: &Path) {
+    test_database::copy(&home.join("loopflow.db")).expect("copy fixture store");
+}
 
 /// Agent shells such as Codex export the developer's real provider home
 /// (`CODEX_HOME=~/.codex`). An `lf` fixture child that inherits it would swap
 /// fixture logins into that home, so every test binary drops both variables
 /// before `main`, while no other thread can read the environment. Fixtures
 /// that need a provider home set one explicitly.
+///
+/// `~/.codex` and `~/.claude` are reachable through `HOME` the same way, so
+/// the binary also moves `HOME` into a temp directory, keeping Cargo's and
+/// rustup's own homes for fixtures that build `lf`. A fixture that clears the
+/// environment sets its own `HOME`: with none, `lf` asks the OS for the
+/// account's real one.
+///
+/// A fixture `lf` that signs a Claude home in on macOS runs `security`, so
+/// the Keychain stand-in also goes first on PATH for the whole binary: a
+/// fixture that forgets its own would otherwise leave a real Keychain item
+/// per run. Fixtures that replace PATH outright find no `security` at all.
 #[ctor::ctor(unsafe)]
-fn scrub_inherited_provider_homes() {
+fn isolate_from_the_developers_machine() {
     env::remove_var("CODEX_HOME");
     env::remove_var("CLAUDE_CONFIG_DIR");
+    let root = env::temp_dir().join(format!("lf-test-{}", std::process::id()));
+    let home = root.join("home");
+    fs::create_dir_all(&home).expect("create the test binary's home");
+    // Store fixtures also name repositories that are absent on this Machine.
+    // Give those claims an identity without borrowing the developer's Git config.
+    fs::write(
+        home.join(".gitconfig"),
+        "[user]\n\tname = Loopflow Test\n\temail = test@loopflow.invalid\n",
+    )
+    .expect("write the test binary's Git identity");
+    if let Some(developer) = env::var_os("HOME").map(std::path::PathBuf::from) {
+        for (name, directory) in [("CARGO_HOME", ".cargo"), ("RUSTUP_HOME", ".rustup")] {
+            if env::var_os(name).is_none() {
+                env::set_var(name, developer.join(directory));
+            }
+        }
+    }
+    env::set_var("HOME", home);
+    let bin = root.join("bin");
+    fs::create_dir_all(&bin).expect("create the Keychain stand-in directory");
+    write_executable(&bin, "security", FAKE_SECURITY);
+    let path = env::var_os("PATH").unwrap_or_default();
+    let joined = env::join_paths(std::iter::once(bin).chain(env::split_paths(&path)))
+        .expect("temp dir is a valid PATH entry");
+    env::set_var("PATH", joined);
 }
+
+/// A macOS `security` stand-in that keeps generic passwords in a `keychain`
+/// directory beside itself. Signing a fixture's shared Claude home in goes
+/// through the Keychain on macOS; with this first on PATH it never reaches
+/// the real one. Each item's password is the file named by its service in hex.
+#[allow(dead_code)] // Shared Keychain fixture compiled into multiple test crates.
+pub const FAKE_SECURITY: &str = r#"#!/usr/bin/python3
+import os, shlex, sys
+store = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'keychain')
+os.makedirs(store, exist_ok=True)
+
+def item(service):
+    return os.path.join(store, service.encode().hex())
+
+def options(rest, valued):
+    found, flags, args = {}, set(), iter(rest)
+    for arg in args:
+        if arg in valued:
+            found[arg] = next(args)
+        else:
+            flags.add(arg)
+    return found, flags
+
+def missing():
+    sys.stderr.write('security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.\n')
+    sys.exit(44)
+
+def run(command, rest):
+    if command == 'add-generic-password':
+        found, _ = options(rest, {'-a', '-s', '-X', '-w', '-l', '-T', '-D', '-j'})
+        password = bytes.fromhex(found['-X']).decode() if '-X' in found else found.get('-w', '')
+        open(item(found['-s']), 'w').write(password)
+        open(item(found['-s']) + '.acct', 'w').write(found.get('-a', ''))
+        return
+    found, flags = options(rest, {'-a', '-s'})
+    path = item(found.get('-s', ''))
+    if not os.path.exists(path):
+        missing()
+    if command == 'find-generic-password':
+        if '-w' in flags:
+            print(open(path).read())
+        else:
+            print('attributes:\n    "acct"<blob>="%s"' % open(path + '.acct').read())
+    elif command == 'delete-generic-password':
+        os.remove(path)
+        os.remove(path + '.acct')
+    else:
+        sys.exit(1)
+
+if sys.argv[1:2] == ['-i']:
+    for line in sys.stdin:
+        if line.strip():
+            words = shlex.split(line)
+            run(words[0], words[1:])
+else:
+    run(sys.argv[1], sys.argv[2:])
+"#;
 
 #[cfg(unix)]
 #[allow(dead_code)] // Shared native provider fixture compiled into multiple test crates.
@@ -191,6 +295,7 @@ pub fn register_codex_login(home: &Path, name: &str) {
         .to_string(),
     )
     .unwrap();
+    seed_store(home);
     let store = loopflow::store::sqlite::SqliteStore::new(&home.join("loopflow.db")).unwrap();
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
     store
@@ -202,6 +307,70 @@ pub fn register_codex_login(home: &Path, name: &str) {
             observed_email: None,
             observed_subject: None,
             observed_credential_digest: None,
+            observed_plan: None,
+            credential_state: loopflow::store::CredentialState::Connected,
+            routing_state: loopflow::store::RoutingState::Automatic,
+            plan: None,
+            paid_through: None,
+            utilization_percent: None,
+            cooldown_until: None,
+            cooldown_reason: None,
+            last_selected_at: None,
+            created_at: now,
+            updated_at: now,
+        })
+        .unwrap();
+}
+
+/// A launch routes by the process directory: the checkout it runs in, never
+/// the developer's, whose private route belongs to their Machine.
+#[allow(dead_code)] // Shared helper compiled into multiple test crates.
+pub struct InDirectory(PathBuf);
+
+#[allow(dead_code)] // Shared helper compiled into multiple test crates.
+impl InDirectory {
+    pub fn enter(path: &Path) -> Self {
+        let previous = env::current_dir().unwrap();
+        env::set_current_dir(path).unwrap();
+        Self(previous)
+    }
+}
+
+impl Drop for InDirectory {
+    fn drop(&mut self) {
+        env::set_current_dir(&self.0).unwrap();
+    }
+}
+
+/// A connected synthetic Claude login `<name>@example.com`, account id `<name>`.
+/// Its token is `<name>-token`, so a stand-in Keychain shows who is signed in.
+/// Signing in on macOS needs `FAKE_SECURITY` first on PATH and `USER` set.
+#[allow(dead_code)]
+pub fn register_claude_login(home: &Path, name: &str) {
+    let account_home = home.join("accounts/claude").join(name);
+    fs::create_dir_all(&account_home).unwrap();
+    let credential = serde_json::json!({"claudeAiOauth": {
+        "accessToken": format!("{name}-token"),
+        "expiresAt": 4102444800000i64
+    }})
+    .to_string();
+    fs::write(account_home.join(".credentials.json"), &credential).unwrap();
+    let email = format!("{name}@example.com");
+    seed_store(home);
+    let store = loopflow::store::sqlite::SqliteStore::new(&home.join("loopflow.db")).unwrap();
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    store
+        .upsert_provider_account(&loopflow::store::ProviderAccount {
+            provider: "claude".into(),
+            account_id: loopflow::store::ProviderAccountId::parse(name).unwrap(),
+            home: Some(account_home),
+            login_email: Some(loopflow::profile::EmailAddress::parse(&email).unwrap()),
+            observed_email: Some(email),
+            observed_subject: Some(name.into()),
+            observed_credential_digest: Some({
+                use sha2::Digest;
+                format!("{:x}", sha2::Sha256::digest(credential.as_bytes()))
+            }),
             observed_plan: None,
             credential_state: loopflow::store::CredentialState::Connected,
             routing_state: loopflow::store::RoutingState::Automatic,
@@ -252,12 +421,17 @@ impl EnvGuard {
         let lock = env_lock().lock().unwrap_or_else(|err| err.into_inner());
         let cli = loopflow_test_support::lf_binary();
         let bin = TempDir::new().expect("temp bin dir");
+        write_executable(bin.path(), "security", FAKE_SECURITY);
         for (name, content) in entries {
             write_executable(bin.path(), name, content);
         }
         let previous_path = env::var("PATH").ok();
         let new_path = match (&previous_path, include_existing_path) {
-            (Some(prev), true) => format!("{}:{}", bin.path().display(), prev),
+            (Some(prev), true) => format!(
+                "{}:{}",
+                bin.path().display(),
+                loopflow_test_support::path_without_installed_harnesses(prev)
+            ),
             _ => bin.path().display().to_string(),
         };
         env::set_var("PATH", new_path);
@@ -401,6 +575,7 @@ fn register_task_fixture(
     branch: &str,
     base_commit: &str,
 ) -> RegisteredTask {
+    seed_store(home);
     let runtime = tokio::runtime::Runtime::new().expect("task test runtime");
     let store = runtime
         .block_on(loopflow::store::open_ephemeral_store(
@@ -454,7 +629,6 @@ fn register_task_fixture(
         branch: branch.to_string(),
         base_commit: base_commit.to_string(),
         parent_pr_id: None,
-        agent: None,
         created_at: now,
         updated_at: now,
         rank: 0,
@@ -651,16 +825,23 @@ pub fn record_graph(home: &Path, cwd: &Path, graph: &str, label: &str, outcome: 
             skill: Skill::named(label),
             id: None,
             interactive: false,
+            interactive_name: None,
             returns: None,
             sources: Vec::new(),
         })],
     );
+    // A Graph launched in a Task's checkout records that Task, the deepest
+    // checkout holding `cwd`.
     db.execute(
-        "INSERT INTO graph_processes(lf_process_id,graph,compiled) VALUES(?1,?2,?3)",
+        "INSERT INTO graph_processes(lf_process_id,graph,compiled,task_id) VALUES(?1,?2,?3,
+            (SELECT task_id FROM task_checkouts
+             WHERE ?4=rtrim(worktree,'/') OR instr(?4,rtrim(worktree,'/')||'/')=1
+             ORDER BY length(worktree) DESC LIMIT 1))",
         rusqlite::params![
             graph_process.as_str(),
             graph,
-            serde_json::to_string(&compiled).expect("compiled serializes")
+            serde_json::to_string(&compiled).expect("compiled serializes"),
+            cwd.to_string_lossy()
         ],
     )
     .expect("record GraphProcess");
@@ -748,6 +929,7 @@ pub fn managed_codex_account(home: &Path) {
             .to_string(),
     )
     .unwrap();
+    seed_store(home);
     let store = loopflow::store::sqlite::SqliteStore::new(&home.join("loopflow.db")).unwrap();
     let account_id = loopflow::store::ProviderAccountId::parse("fixture").unwrap();
     store

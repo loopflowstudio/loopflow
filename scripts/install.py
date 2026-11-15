@@ -14,6 +14,7 @@ import os
 import platform
 import shutil
 import subprocess
+import sys
 import threading
 import time
 from collections.abc import Callable
@@ -22,15 +23,13 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
-from bundle_version import read_release_version, stamp_bundle_version
+from app_bundle import executable_name, install_app_executable
+from bundle_version import read_release_version, read_source_revision, stamp_bundle_version
 
 ROOT = Path(__file__).parent.parent
 DEFAULT_INSTALL_DIR = Path.home() / ".local" / "bin"
 LOCAL_BIN = ROOT / "local-bin"
 APP_NAME = "Loopflow"
-# SwiftPM executable product; the library owns the bare `Loopflow` name, so the
-# app binary is built as `LoopflowMac` and renamed to APP_NAME inside the bundle.
-SWIFT_APP_PRODUCT = "LoopflowMac"
 BUILD_STAGES = ("cargo", "swift")
 
 
@@ -42,9 +41,11 @@ class BundleSpec:
     """Paths that define the Loopflow.app bundle."""
 
     app_path: Path
-    executables: tuple[Path, ...]
+    swift_build_dir: Path
+    tools: tuple[Path, ...]
     info_plist: Path
     resources: tuple[Path, ...]
+    launch_agents: Path
 
     @property
     def contents_dir(self) -> Path:
@@ -59,32 +60,23 @@ class BundleSpec:
         return self.contents_dir / "Resources"
 
     def macos_binaries(self) -> tuple[Path, ...]:
-        return tuple(
-            self.macos_dir / _bundle_binary_name(executable) for executable in self.executables
-        )
-
-
-def _bundle_binary_name(executable: Path) -> str:
-    """Name an executable takes inside the bundle: the app binary ships as
-    APP_NAME (matching CFBundleExecutable); auxiliary tools keep their names."""
-    if executable.name == SWIFT_APP_PRODUCT:
-        return APP_NAME
-    return executable.name
+        names = (executable_name(self.info_plist), *(tool.name for tool in self.tools))
+        return tuple(self.macos_dir / name for name in names)
 
 
 def default_bundle_spec(root: Path = ROOT) -> BundleSpec:
     swift = root / "swift"
+    swift_release = swift / ".build" / "release"
     cargo_release = root / "target" / "release"
+    # Spotlight skips `.noindex` directories, so Cmd+Space "loopflow" reaches
+    # only the installed app, never this worktree's build.
     return BundleSpec(
-        app_path=root / "local-bin" / f"{APP_NAME}.app",
-        executables=(
-            swift / ".build" / "release" / "LoopflowMac",
-            cargo_release / "lf",
-        ),
+        app_path=root / "local-bin" / "app.noindex" / f"{APP_NAME}.app",
+        swift_build_dir=swift_release,
+        tools=(cargo_release / "lf",),
         info_plist=swift / "LoopflowMac" / "Info.plist",
-        resources=(
-            swift / "LoopflowMac" / "AppIcon.icns",
-        ),
+        resources=(swift / "LoopflowMac" / "AppIcon.icns",),
+        launch_agents=swift / "LaunchAgents",
     )
 
 
@@ -134,7 +126,6 @@ def _development_build_env() -> dict[str, str]:
     return {
         **os.environ,
         "LOOPFLOW_BUILD_PROVENANCE": "development",
-        "LOOPFLOW_MIGRATION_AUTHORITY": "validation_only",
     }
 
 
@@ -269,14 +260,25 @@ def _install_loopflow(spec: BundleSpec, version: str) -> None:
     spec.macos_dir.mkdir(parents=True)
     spec.resources_dir.mkdir(parents=True)
 
-    for executable in spec.executables:
-        _atomic_install(executable, spec.macos_dir / _bundle_binary_name(executable))
+    for tool in spec.tools:
+        _atomic_install(tool, spec.macos_dir / tool.name)
+    try:
+        install_app_executable(spec.swift_build_dir, spec.info_plist, spec.contents_dir)
+    except RuntimeError as exc:
+        raise StageError(str(exc)) from exc
 
     installed_plist = spec.contents_dir / spec.info_plist.name
     shutil.copy(spec.info_plist, installed_plist)
-    stamp_bundle_version(installed_plist, version)
+    stamp_bundle_version(installed_plist, version, read_source_revision(ROOT))
     for resource in spec.resources:
         shutil.copy(resource, spec.resources_dir / resource.name)
+    for bundle in spec.swift_build_dir.glob("*.bundle"):
+        shutil.copytree(bundle, spec.resources_dir / bundle.name)
+    shutil.copytree(spec.launch_agents, spec.contents_dir / "Library/LaunchAgents")
+    _run_or_raise(
+        [sys.executable, str(ROOT / "scripts/third_party.py"), "package", str(spec.resources_dir)],
+        "notices",
+    )
     (spec.contents_dir / "PkgInfo").write_text("APPL????")
 
     _verify_bundle_layout(spec)
@@ -355,9 +357,14 @@ def _verify_bundle_layout(spec: BundleSpec) -> None:
         if current_arch not in archs:
             problems.append(f"{path} built for {', '.join(archs)}, not {current_arch}")
 
-    for path in [spec.contents_dir / spec.info_plist.name] + [
-        spec.resources_dir / r.name for r in spec.resources
-    ]:
+    for path in (
+        [spec.contents_dir / spec.info_plist.name]
+        + [spec.resources_dir / r.name for r in spec.resources]
+        + [
+            spec.contents_dir / "Library/LaunchAgents" / agent.name
+            for agent in spec.launch_agents.glob("*.plist")
+        ]
+    ):
         if not path.exists():
             problems.append(f"missing resource: {path}")
 
@@ -429,7 +436,7 @@ def local(
         [], "--skip", help=f"Skip a build stage ({'|'.join(BUILD_STAGES)}); repeatable"
     ),
 ) -> None:
-    """Build this worktree into local-bin/ with validation-only authority."""
+    """Build this worktree into local-bin/."""
     skip_set = set(skip)
     unknown = skip_set - set(BUILD_STAGES)
     if unknown:
@@ -445,12 +452,13 @@ def local(
         planned = [s for s in BUILD_STAGES if s not in skip_set] or ["(nothing)"]
         typer.echo(f"Would build in parallel: {', '.join(planned)}")
         if builds_app:
-            typer.echo(f"Would stage lf + {spec.app_path.name} (v{version}) into {LOCAL_BIN}")
-            executable_names = ", ".join(path.name for path in spec.executables)
+            typer.echo(f"Would stage lf into {LOCAL_BIN}")
+            typer.echo(f"Would stage {spec.app_path.name} (v{version}) into {spec.app_path.parent}")
+            executable_names = ", ".join(path.name for path in spec.macos_binaries())
             typer.echo(f"  Contents/MacOS/: {executable_names}")
         else:
             typer.echo(f"Would stage lf into {LOCAL_BIN}")
-        typer.echo("Would keep the validation-only build under local-bin/")
+        typer.echo("Would keep the build under local-bin/")
         return
 
     total_start = time.monotonic()
@@ -459,7 +467,9 @@ def local(
 
         _stage_binaries(LOCAL_BIN)
         if builds_app:
-            typer.echo(f"Staging lf + {APP_NAME}.app (v{version}) into {LOCAL_BIN}...")
+            # Earlier builds staged the app beside lf, where Spotlight indexed it.
+            shutil.rmtree(LOCAL_BIN / f"{APP_NAME}.app", ignore_errors=True)
+            typer.echo(f"Staging {APP_NAME}.app (v{version}) into {spec.app_path.parent}...")
             _install_loopflow(spec, version)
             typer.echo(f"Built {spec.app_path}")
         else:

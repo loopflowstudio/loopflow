@@ -7,32 +7,182 @@ import Testing
 
 @Suite("RegistryQuery")
 struct RegistryQueryTests {
+    @Test("Session adoption returns the served Task and preserves uncertain failure")
+    func servedSessionAdoption() async throws {
+        actor Adoption {
+            var attempts = 0
+            func submit(title: String) throws -> String {
+                attempts += 1
+                if title == "Uncertain" { throw RegistryQueryError("Outcome unknown") }
+                return #"{"task":{"id":"task-retained","identifier":"FIX-1","title":"Keep the conversation"},"graph":null,"session_id":null,"milestone":"filed"}"#
+            }
+        }
+        let adoption = Adoption()
+        let query = RegistryQuery(write: { change in
+            guard case .taskCreate(_, _, let title?, _, _, _, _, _) = change else {
+                throw RegistryQueryError("Unexpected write")
+            }
+            return try await adoption.submit(title: title)
+        }) { _, _ in throw RegistryQueryError("Unexpected execution launch") }
+        let task = try await query.createTaskFromSession(id: "session-retained", title: "Keep the conversation", cwd: "/repo")
+        #expect(task.id == "task-retained")
+        #expect(task.title == "Keep the conversation")
+        do {
+            _ = try await query.createTaskFromSession(id: "session-retained", title: "Uncertain", cwd: "/repo")
+            Issue.record("An uncertain adoption succeeded")
+        } catch {
+            #expect(error.localizedDescription == "Outcome unknown")
+        }
+        #expect(await adoption.attempts == 2)
+    }
+
+    @Test("Settings inspection retains skill and authored occurrence selectors")
+    func settingsInspection() throws {
+        let read = ServedRead.configSettings(directory: "/r", wave: nil, skill: nil, graph: "release", step: "write-code")
+        #expect(read.argv == ["config", "settings", "--json", "--graph", "release", "--step", "write-code"])
+        let data = try JSONEncoder().encode(read)
+        let value = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(value["kind"] as? String == "config.settings")
+        #expect(value["graph"] as? String == "release")
+        #expect(value["step"] as? String == "write-code")
+    }
+
     @Test("Graph logs read captured execution from the content Machine, never a peer path locally")
     func contentRoutedGraphLog() async throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let detail = try String(contentsOf: root.appendingPathComponent("tests/fixtures/dto/graph_detail.json"), encoding: .utf8)
         let expected = try JSONDecoder().decode(GraphProcessDetail.self, from: Data(detail.utf8))
-        let entry = String(decoding: try JSONEncoder().encode(expected.entry), as: UTF8.self)
+        let overview = "{\"sessions\":[],\"graph_processes\":[],\"graph\":{\"name\":\"feature\",\"interactive_steps\":[],\"position\":{\"kind\":\"at\",\"step\":\"demo\"}}}"
+        let query = RegistryQuery(subscribeRead: { args, cwd in
+            guard args == ["--machine", "peer", "--repo-id", "plan", "task", "show", "task", "--json", "--subscribe"], cwd == nil else {
+                throw RegistryQueryError("A peer run page must never use local execution")
+            }
+            let body = "{\"overview\":\(overview),\"graph_processes\":[\(detail)],\"comments\":{\"identifier\":\"task\",\"comments\":[],\"pending_sync\":[],\"conflicts\":{},\"refresh_error\":null},\"execution\":null,\"row\":null}"
+            let lines = AsyncThrowingStream<Data, any Error> { continuation in
+                continuation.yield(Data("{\"answers\":null,\"unavailable\":null,\"body\":\(body)}".utf8))
+                continuation.finish()
+            }
+            return LineSubscription(lines: lines, send: { _ in }, cancel: {})
+        }) { _, _ in throw RegistryQueryError("Unexpected one-shot read") }
+        let subscription = try await query.onMachine("peer", repository: "plan").subscribeTask(task: "task")
+        var iterator = subscription.lines.makeAsyncIterator()
+        let line = try #require(await iterator.next())
+        let frame = try WorkFrame.decode(part: .task,
+            scope: WorkScope(repo: nil, headless: false, task: "task", activity: nil, taskListWave: nil), sequence: 0, line: line)
+        guard case .task(let reading?) = frame.content else { Issue.record("Missing Task reading"); return }
+        #expect(reading.graphProcesses == [expected])
+        #expect(reading.work.graph?.position == .at(step: "demo"))
+    }
+
+    @Test("Step history uses the exact process on the content Machine")
+    func contentRoutedStepHistory() async throws {
         let query = RegistryQuery { args, cwd in
-            guard args.starts(with: ["--machine", "peer", "--repository", "plan"]), cwd == nil else {
-                throw RegistryQueryError("A peer Graph log must never use local execution")
+            guard args == ["--machine", "peer", "--repo-id", "plan", "session", "history", "show", "process-step"], cwd == nil else {
+                throw RegistryQueryError("Wrong process history owner")
             }
-            let command = Array(args.dropFirst(4))
-            if command.starts(with: ["graph", "list"]) {
-                return "{\"entries\":[\(entry)],\"next\":null}"
-            }
-            if command == ["graph", "show", expected.entry.id, "--processes", "--json"] { return detail }
-            throw RegistryQueryError("Unexpected execution")
+            return "gate failed: exit 1"
         }
-        let graphs = try await query.onMachine("peer", repository: "plan").taskGraphProcesses(task: "task")
-        #expect(graphs == [expected])
+        #expect(try await query.onMachine("peer", repository: "plan").processHistory(id: "process-step") == "gate failed: exit 1")
+    }
+
+    /// The JSON `read::tests::desktop_encodings_name_their_reads` decodes in Rust.
+    @Test("Served reads encode as Rust's Read")
+    func servedReadEncodings() throws {
+        func object(_ value: some Encodable) throws -> NSDictionary {
+            try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(value)) as? NSDictionary)
+        }
+        func object(_ json: String) throws -> NSDictionary {
+            try #require(JSONSerialization.jsonObject(with: Data(json.utf8)) as? NSDictionary)
+        }
+        #expect(try object(ServedRead.sessionHistory(since: "7d", limit: 50, wave: nil, project: "p", task: nil))
+            == object(#"{"kind":"session.history","since":"7d","limit":50,"wave":null,"project":"p","task":null}"#))
+        let sessions = ServedRead.sessionList(directory: "/r", headless: true, after: nil, limit: nil, task: nil)
+        #expect(try object(sessions) == object(#"{"kind":"session.list","directory":"/r","headless":true,"after":null,"limit":null,"task":null}"#))
+        #expect(sessions.argv == ["session", "list", "--headless", "--json", "--limit", "0"])
+        let page = ServedRead.sessionList(directory: "/r", headless: true, after: "cursor", limit: 100, task: nil)
+        #expect(try object(page) == object(#"{"kind":"session.list","directory":"/r","headless":true,"after":"cursor","limit":100,"task":null}"#))
+        #expect(page.argv == ["session", "list", "--json", "--page", "--headless", "--limit", "100", "--after", "cursor"])
+        #expect(try object(ServedRead.taskDiff(issue: "FIX-1", path: nil, base: "parent", head: nil, draft: nil))
+            == object(#"{"kind":"task.diff","issue":"FIX-1","path":null,"base":"parent","head":null,"draft":null}"#))
+        let view = ServedRead.desktopViewGet(directory: "/r", expression: "state:backlog")
+        #expect(try object(view) == object(#"{"kind":"desktop.view.get","directory":"/r","expression":"state:backlog"}"#))
+        #expect(view.cwd == "/r")
+        #expect(ServedRead.waveList.cwd == nil)
+    }
+
+    /// The JSON `write::tests::desktop_encodings_name_their_writes` decodes in Rust.
+    @Test("Served writes encode as Rust's Write")
+    func servedWriteEncodings() throws {
+        func object(_ value: some Encodable) throws -> NSDictionary {
+            try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(value)) as? NSDictionary)
+        }
+        func object(_ json: String) throws -> NSDictionary {
+            try #require(JSONSerialization.jsonObject(with: Data(json.utf8)) as? NSDictionary)
+        }
+        let move = ServedWrite.taskMove(directory: "/r", issue: "FIX-1", wave: nil, machine: nil)
+        #expect(try object(move) == object(#"{"kind":"task.move","directory":"/r","issue":"FIX-1","wave":null,"machine":null}"#))
+        #expect(move.argv == ["task", "move", "FIX-1", "--no-wave", "--json"])
+        #expect(move.cwd == "/r")
+        let stop = ServedWrite.taskHold(directory: "/r", issue: "FIX-1")
+        #expect(try object(stop) == object(#"{"kind":"task.hold","directory":"/r","issue":"FIX-1"}"#))
+        #expect(stop.argv == ["task", "hold", "FIX-1", "--json"])
+        let save = ServedWrite.taskSave(directory: "/", issue: "FIX-1", path: "a.txt", revision: "r", content: "text")
+        #expect(try object(save) == object(
+            #"{"kind":"task.save","directory":"/","issue":"FIX-1","path":"a.txt","revision":"r","content":"text"}"#))
+        #expect(save.input == "text")
+        let query = ServedWrite.desktopDashboardQuery(directory: "/r", id: "picked", expression: "-state:done", revision: nil)
+        #expect(try object(query) == object(
+            #"{"kind":"desktop.dashboard.query","directory":"/r","id":"picked","expression":"-state:done","revision":null}"#))
+        #expect(query.argv == ["desktop", "dashboard", "query", "--", "picked", "-state:done"])
+        let portfolio = ServedWrite.desktopPortfolioSet(change: ["remove", "/r"])
+        #expect(try object(portfolio) == object(#"{"kind":"desktop.portfolio.set","change":{"action":"remove","path":"/r"}}"#))
+        #expect(portfolio.argv == ["desktop", "portfolio", "remove", "/r", "--json"])
+        #expect(portfolio.cwd == "/")
+        let primary = ServedWrite.sessionResume(directory: "/r", id: nil, task: nil, wave: nil, agent: nil, intent: .resume)
+        #expect(try object(primary) == object(
+            #"{"kind":"session.resume","directory":"/r","id":null,"task":null,"wave":null,"agent":null,"intent":"resume"}"#))
+        #expect(primary.argv == ["--repo", "/r", "session", "resume", "--prepare", "--json"])
+        let start = ServedWrite.sessionResume(directory: "/r", id: nil, task: "FIX-1", wave: nil, agent: nil, intent: .start)
+        #expect(try object(start) == object(
+            #"{"kind":"session.resume","directory":"/r","id":null,"task":"FIX-1","wave":null,"agent":null,"intent":"start"}"#))
+        #expect(start.argv == ["session", "resume", "--start-if-free", "--task", "FIX-1", "--prepare", "--json"])
+        let restart = ServedWrite.sessionNew(directory: "/r", requestID: "fixture-thread", id: "session_1", agent: "codex")
+        #expect(try object(restart) == object(
+            #"{"kind":"session.new","directory":"/r","request_id":"fixture-thread","id":"session_1","agent":"codex"}"#))
+        #expect(restart.argv == ["--agent", "codex", "session", "new", "session_1", "--request-id", "fixture-thread", "--prepare", "--json"])
+    }
+
+    @Test("Paired task and dashboard actions keep distinct wire kinds")
+    func pairedWriteEncodings() throws {
+        let writes: [(ServedWrite, String, [String], String)] = [
+            (.taskClaim(directory: "/r", issue: "FIX-1"), "task.claim",
+             ["task", "claim", "FIX-1", "--json"], #"{"directory":"/r","issue":"FIX-1"}"#),
+            (.taskUnassign(directory: "/r", issue: "FIX-1"), "task.unassign",
+             ["task", "unassign", "FIX-1", "--json"], #"{"directory":"/r","issue":"FIX-1"}"#),
+            (.desktopDashboardPin(directory: "/r", id: "picked", revision: 3), "desktop.dashboard.pin",
+             ["desktop", "dashboard", "pin", "--revision=3", "--", "picked"], #"{"directory":"/r","id":"picked","revision":3}"#),
+            (.desktopDashboardUnpin(directory: "/r", id: "picked", revision: 3), "desktop.dashboard.unpin",
+             ["desktop", "dashboard", "unpin", "--revision=3", "--", "picked"], #"{"directory":"/r","id":"picked","revision":3}"#),
+            (.desktopDashboardHide(directory: "/r", id: "picked", member: "task:FIX-1"), "desktop.dashboard.hide",
+             ["desktop", "dashboard", "hide", "query:picked/task:FIX-1"], #"{"directory":"/r","id":"picked","member":"task:FIX-1"}"#),
+            (.desktopDashboardShow(directory: "/r", id: "picked", member: "task:FIX-1"), "desktop.dashboard.show",
+             ["desktop", "dashboard", "show", "query:picked/task:FIX-1"], #"{"directory":"/r","id":"picked","member":"task:FIX-1"}"#),
+        ]
+        for (write, kind, argv, fields) in writes {
+            var expected = try #require(JSONSerialization.jsonObject(with: Data(fields.utf8)) as? [String: Any])
+            expected["kind"] = kind
+            let encoded = try JSONSerialization.jsonObject(with: JSONEncoder().encode(write)) as? NSDictionary
+            #expect(encoded == expected as NSDictionary)
+            #expect(write.argv == argv)
+            #expect(write.cwd == "/r")
+        }
     }
 
     @Test("Recording a remote reading preserves its Machine and transport", arguments: [false, true])
     func recordingRemoteQuery(recordFirst: Bool) async throws {
         let json = #"{"id":"peer"}"#
         let local = RegistryQuery { args, cwd in
-            guard args.starts(with: ["--machine", "peer", "--repository", "plan"]), cwd == nil else {
+            guard args.starts(with: ["--machine", "peer", "--repo-id", "plan"]), cwd == nil else {
                 throw RegistryQueryError("The reading lost its remote selectors")
             }
             return json
@@ -112,7 +262,7 @@ struct RegistryQueryTests {
         let counter = CallCounter()
         let query = RegistryQuery { args, _ in
             await counter.increment()
-            #expect(args == ["wave", "list", "--all", "--current", "--json"])
+            #expect(args == ["wave", "list", "--all", "--json"])
             return json
         }
 
@@ -214,7 +364,7 @@ struct RegistryQueryTests {
     "items": [
       {
         "task": {
-          "repository_id": "repo_00000000000040008000000000000001",
+          "repo_id": "repo_00000000000040008000000000000001",
           "repo": "/tmp/repo-a",
           "project_id": "project-1",
           "wave_id": "goals",
@@ -240,9 +390,9 @@ struct RegistryQueryTests {
           "reason": "ready",
           "updated_at": "2026-07-06T00:00:00Z",
           "provider": "codex",
-          "owner": {"person": "Jack Heart", "machine": {"id": null, "label": null}}
+          "owner": {"person": "Jack Heart", "person_id": null, "machine": {"id": null, "label": null}}
         },
-        "graph_name":"feature","graph_source":"wave","latest_graph_process":null,"execution":null,"run_control":{"unavailable":null},"ship_control":{"unavailable":null},"shipping":null,
+        "graph_name":"feature","graph_source":"repository","latest_graph_process":null,"execution":null,"run_control":{"unavailable":null},"ship_control":{"unavailable":null},"shipping":null,
         "next_move": {
           "owner": "task",
           "reason": "ready"
@@ -263,11 +413,11 @@ struct RegistryQueryTests {
           "unresolved_execution": true
         },
         "actions": {
-          "recommended": "resume",
+          "recommended": "run",
           "reason": "resume the parked Task"
         },
         "pr": null,
-        "section": "now"
+        "section": "working"
       }
     ],
     "truncated": false
@@ -276,7 +426,7 @@ struct RegistryQueryTests {
 }
 """
         let query = RegistryQuery { args, _ in
-            #expect(args == ["desktop", "wave", "goals", "--json"])
+            #expect(args == ["wave", "plan", "goals", "--json"])
             return json
         }
 
@@ -294,14 +444,14 @@ struct RegistryQueryTests {
         #expect(result.history.items[0].skill == "task/pursue")
         #expect(result.history.items[0].usage.inputTokens == 1000)
         #expect(result.workMap.tasks.items[0].condition.state == .clear)
-        #expect(result.workMap.tasks.items[0].actions.recommended == .resume)
+        #expect(result.workMap.tasks.items[0].actions.recommended == .run)
     }
 
     @Test("lf wave show is one optionally scoped machine query")
     func roadmapUsesOneMachineQuery() async throws {
         let query = RegistryQuery { args, cwd in
-            #expect(args == ["desktop", "plan", "product", "--json"])
-            #expect(cwd == nil)
+            #expect(args == ["plan", "list", "product", "--json"])
+            #expect(cwd == "/")
             return #"{"generated_at":"2026-07-15T00:00:00Z","waves":[],"tasks":{"state":"ok","items":[],"truncated":false}}"#
         }
 
@@ -313,8 +463,8 @@ struct RegistryQueryTests {
     @Test("lf wave show requests every repository when no Wave narrows it")
     func roadmapRequestsAllRepositories() async throws {
         let query = RegistryQuery { args, cwd in
-            #expect(args == ["desktop", "plan", "--all", "--json"])
-            #expect(cwd == nil)
+            #expect(args == ["plan", "list", "--all", "--json"])
+            #expect(cwd == "/")
             return #"{"generated_at":"2026-07-15T00:00:00Z","waves":[],"tasks":{"state":"ok","items":[],"truncated":false}}"#
         }
 
@@ -327,7 +477,7 @@ struct RegistryQueryTests {
         let json = try String(contentsOf: workActivityFixtureURL(), encoding: .utf8)
         let query = RegistryQuery { args, cwd in
             #expect(args == [
-                "history", "--since", "7d", "--limit", "50",
+                "session", "history", "--since", "7d", "--limit", "50",
                 "--wave", "product", "--project", "mac-surface-ux",
                 "--task", "W2-144", "--json",
             ])
@@ -398,7 +548,7 @@ struct RegistryQueryTests {
         let query = RegistryQuery { args, cwd in
             #expect(cwd == nil)
             switch args {
-            case ["task", "diff", "INF-123", "--files", "--base", "parent", "--json"]:
+            case ["task", "changes", "INF-123", "--base", "parent", "--json"]:
                 return #"{"issue_identifier":"INF-123","task_id":"ts_1","base_commit":"abc","head_commit":"def","files":[{"path":"src/parser.rs","old_path":null,"committed":true,"staged":false,"unstaged":true,"untracked":false}],"scratch":[],"scratch_truncated":false}"#
             case ["task", "diff", "INF-123", "src/parser.rs", "--base", "parent", "--json"]:
                 return #"{"issue_identifier":"INF-123","task_id":"ts_1","path":"src/parser.rs","base_commit":"abc","patch":"@@ -1 +1 @@","binary":false,"truncated":false}"#
@@ -448,10 +598,10 @@ struct RegistryQueryTests {
         let query = RegistryQuery { args, cwd in
             #expect(cwd == "/tmp/repo")
             switch args {
-            case ["desktop", "sessions", "--json", "--page", "--limit", "100"]:
+            case ["session", "list", "--json", "--page", "--limit", "100"]:
                 return #"{"entries":\#(sessionsJSON),"next":null}"#
-            case ["session", "connect", session.id, "--prepare", "--json", "--try"],
-                 ["session", "connect", "--task", "INF-123", "--prepare", "--json", "--try"]:
+            case ["session", "resume", "--start-if-free", session.id, "--prepare", "--json"],
+                 ["session", "resume", "--start-if-free", "--task", "INF-123", "--prepare", "--json"]:
                 return sessionJSON
             default:
                 throw RegistryQueryError("unexpected argv: \(args)")
@@ -517,8 +667,8 @@ struct RegistryQueryTests {
 """
         let query = RegistryQuery { args, _ in
             #expect(args == [
-                "usage", "--days", "7", "--json",
-                "--wave", "product", "--project", "sessions", "--task", "LOO-265",
+                "session", "usage", "--days", "7",
+                "--wave", "product", "--project", "sessions", "--task", "LOO-265", "--json",
             ])
             return json
         }
@@ -550,7 +700,7 @@ struct RegistryQueryTests {
         }
         """
         let query = RegistryQuery { args, _ in
-            #expect(args == ["doctor", "--json"])
+            #expect(args == ["machine", "doctor", "--json"])
             return json
         }
 

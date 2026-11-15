@@ -1,50 +1,46 @@
 ---
 requires: a reviewable change
-produces: recorded PR delivery with auto-merge requested, or verified merge when waiting
+produces: PR with auto-merge requested, or merged when waiting
 ---
-Land the current change through Loopflow's delivery operation.
+Land the current change with `lf land`.
 
-Inspect the intended outcome, diff, proof and repository delivery requirements.
-Fix readiness gaps and preserve useful design conclusions before any configured
-scratch cleanup. Cleanup removes committed additions while preserving existing scratch files.
-Keep unrelated active contributions out of this change. Preserve accepted later
-checks and their exact unverified outcomes in durable PR copy before cleanup;
-They must remain readable after merge without scratch.
+Check the intended outcome, the diff, the runs and checks behind it, and the
+repository's delivery requirements. Fix readiness gaps first. Landing clears
+files added under `scratch/`, so first move into the PR copy what the code
+and git history can't tell a later reader: exact quoted direction, what a run
+showed, and checks that can only run after merge with what they still need to show. Leave other people's unrelated work out of
+this change.
 
 ```bash
 lf land                 # prepare, request exact-head auto-merge, return
 lf land --wait-and-fix  # wait for merge and repair failing CI
 ```
 
-The operation checkpoints the change, clears added scratch files, syncs, publishes,
-and requests exact-head auto-merge. Existing scratch files and edits remain.
-It consumes valid prepared copy or generates it through pr-message; use explicit
-title/body only for an intentional override. Check the resulting PR's scope,
-claims and evidence limits. Do not duplicate its Git/GitHub mutations or launch
-another landing watcher.
+`lf land` commits, clears added scratch files (existing ones and their edits
+stay), syncs, publishes, and requests exact-head auto-merge. It uses prepared
+PR copy or writes it through pr-message; pass a title or body only to override
+on purpose. Read the resulting PR for scope and claims. Don't repeat its Git or
+GitHub steps or start a second landing watcher.
 
-Bare land and `lf arm` return after recording intent. `lf pr reconcile` checks
-recorded landings once and repairs nothing. `--wait-and-fix` observes and
-repairs its own PR every 15 seconds until verified merge, closure, a concrete
-blocker or interruption, including with Desktop closed. An unchanged incident
-receives one repair. Each check
-releases the landing lock. Elapsed time never stops waiting or triggers a rerun.
-Interruption retains intent and returns stopped; a concrete blocker returns held.
-Neither reports merge.
-A successful handoff proves neither merge nor Task completion.
+Bare `lf land` and `lf arm` return once the landing is recorded. `lf pr
+reconcile` checks recorded landings once and repairs nothing.
+`--wait-and-fix` checks its own PR every 15 seconds and repairs it until it
+merges, closes, hits a concrete blocker, or is interrupted, with Desktop open
+or not. An unchanged failure gets one repair. Each check releases the landing
+lock. Elapsed time never stops the wait or triggers a rerun. Interrupted, it
+keeps the landing and returns stopped; on a blocker it returns held. Neither
+means merged, and a successful handoff means neither merge nor Task completion.
 
-For an associated Task, verified merge leaves an open Task available for optional follow-up work. Register
-new work through ordinary Task creation when useful, then `lf task complete` when
-the outcome is satisfied. No follow-up disposition is required. `ship` runs gate
-and waited landing; the Task graph's `end` requests completion. Recommend follow-up
-Tasks for distinct outcomes. Continued work in the same Task can publish another
-PR; earlier PRs remain history. No transition command is required.
-Taskless delivery needs no synthetic Task.
+After merge, a Task stays open for follow-up. Create new Tasks for distinct
+outcomes, and run `lf task complete` when the outcome is done; the Task graph's
+`end` requests completion, and `ship` runs gate and a waited landing. More work
+in the same Task can publish another PR; earlier PRs stay in its history.
+Taskless delivery needs no Task.
 
-If sync or CI fails, use the named recovery path in this checkout and retry.
-Rerunning land retries a retained blocker without inventing an empty commit.
-For an already-merged Task PR it succeeds immediately and reports whether Task
-completion remains, preserving any finishing notes and edits.
-Preserve uncertainty about external effects. Reviewer-owned merge uses
-`lf submit`; report merge only from authoritative evidence, and completion only
-from Task status.
+If sync or CI fails, follow the named recovery in this checkout and retry.
+Rerunning `lf land` retries a held blocker without an empty commit. On an
+already-merged Task PR it succeeds at once and says whether Task completion is
+still pending, keeping any finishing notes and edits. When unsure whether an
+external effect happened, say so. For a reviewer's merge click, use `lf
+submit`. Report merge only from GitHub, and completion only from `lf task
+status`.

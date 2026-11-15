@@ -13,7 +13,9 @@ const FUTURE_SOURCE_ALLOWANCE: Duration = Duration::minutes(5);
 const MAX_METRIC_DURATION_SECONDS: i64 = 10 * 365 * 24 * 60 * 60;
 
 /// Canonical Work association; metric names remain case sensitive.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(from = "MetricObservationIdentity")]
 pub struct MetricIdentity {
     wave_id: String,
@@ -34,7 +36,7 @@ impl MetricIdentity {
 }
 
 /// Original hash input. Its Wave spelling is evidence, never a lookup key.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct MetricObservationIdentity {
     pub wave_id: String,
     pub metric_id: String,
@@ -55,20 +57,20 @@ impl From<MetricIdentity> for MetricObservationIdentity {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum MetricStage {
     Installed,
     Graduated,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct MetricTarget {
     pub metric_id: String,
     pub target: Threshold,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Threshold {
     AtLeast { value: f64 },
@@ -728,13 +730,13 @@ impl MetricObservationEvidence {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct MetricPortfolioDto {
     pub metrics: Vec<MetricReadingDto>,
     pub contract_issues: Vec<MetricContractIssueDto>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct MetricReadingDto {
     pub target: Option<Threshold>,
     pub identity: MetricIdentity,
@@ -752,45 +754,55 @@ pub struct MetricReadingDto {
     pub evidence: MetricEvidenceDto,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum MetricFreshnessDto {
     Never,
     Fresh {
+        #[schemars(with = "String")]
         #[serde(with = "time::serde::rfc3339")]
         source_time: OffsetDateTime,
+        #[schemars(with = "String")]
         #[serde(with = "time::serde::rfc3339")]
         expires_at: OffsetDateTime,
     },
     Stale {
+        #[schemars(with = "String")]
         #[serde(with = "time::serde::rfc3339")]
         source_time: OffsetDateTime,
+        #[schemars(with = "String")]
         #[serde(with = "time::serde::rfc3339")]
         expires_at: OffsetDateTime,
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum MetricEvidenceDto {
     Untargeted {
         value: f64,
+        #[schemars(with = "String")]
         #[serde(with = "time::serde::rfc3339")]
         source_window_start: OffsetDateTime,
+        #[schemars(with = "String")]
         #[serde(with = "time::serde::rfc3339")]
         source_window_end: OffsetDateTime,
     },
     Met {
         value: f64,
+        #[schemars(with = "String")]
         #[serde(with = "time::serde::rfc3339")]
         source_window_start: OffsetDateTime,
+        #[schemars(with = "String")]
         #[serde(with = "time::serde::rfc3339")]
         source_window_end: OffsetDateTime,
     },
     Missed {
         value: f64,
+        #[schemars(with = "String")]
         #[serde(with = "time::serde::rfc3339")]
         source_window_start: OffsetDateTime,
+        #[schemars(with = "String")]
         #[serde(with = "time::serde::rfc3339")]
         source_window_end: OffsetDateTime,
     },
@@ -799,57 +811,68 @@ pub enum MetricEvidenceDto {
     },
     Unavailable {
         reason: String,
+        #[schemars(with = "String")]
         #[serde(with = "time::serde::rfc3339")]
         source_as_of: OffsetDateTime,
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum MetricUnknownCauseDto {
     Never,
     TargetUnavailable {
         value: f64,
+        #[schemars(with = "String")]
         #[serde(with = "time::serde::rfc3339")]
         source_window_start: OffsetDateTime,
+        #[schemars(with = "String")]
         #[serde(with = "time::serde::rfc3339")]
         source_window_end: OffsetDateTime,
     },
     RevisionMismatch {
         expected_contract_revision: String,
         observed_contract_revision: String,
+        #[schemars(with = "String")]
         #[serde(with = "time::serde::rfc3339")]
         source_time: OffsetDateTime,
     },
     Incomplete {
         value: f64,
+        #[schemars(with = "String")]
         #[serde(with = "time::serde::rfc3339")]
         source_window_start: OffsetDateTime,
+        #[schemars(with = "String")]
         #[serde(with = "time::serde::rfc3339")]
         source_window_end: OffsetDateTime,
     },
     WindowMismatch {
         value: f64,
+        #[schemars(with = "String")]
         #[serde(with = "time::serde::rfc3339")]
         source_window_start: OffsetDateTime,
+        #[schemars(with = "String")]
         #[serde(with = "time::serde::rfc3339")]
         source_window_end: OffsetDateTime,
     },
     StaleObservation {
         value: f64,
+        #[schemars(with = "String")]
         #[serde(with = "time::serde::rfc3339")]
         source_window_start: OffsetDateTime,
+        #[schemars(with = "String")]
         #[serde(with = "time::serde::rfc3339")]
         source_window_end: OffsetDateTime,
     },
     StaleUnavailable {
         reason: String,
+        #[schemars(with = "String")]
         #[serde(with = "time::serde::rfc3339")]
         source_as_of: OffsetDateTime,
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum MetricContractIssueDto {
     ChapterUnavailable {

@@ -121,6 +121,7 @@ mod tests {
             skill: Skill::named(id),
             id: Some(id.to_owned()),
             interactive: false,
+            interactive_name: None,
             returns,
             sources: vec![],
         })

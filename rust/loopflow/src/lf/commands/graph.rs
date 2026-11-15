@@ -43,13 +43,8 @@ pub fn run(
     };
     let binding = binding.or(checkout.as_ref());
     let items = compile_graph(graph, repo)?;
-    if let Some(WorkRef::Task(task)) = binding.map(|binding| &binding.work) {
-        block_on(async {
-            let store = open_graph_store().await?;
-            store.sqlite.require_task_launch(task)?;
-            Ok(())
-        })?;
-    }
+    // A named Graph runs here with the checkout's context; only `task run`
+    // advances the Task's Graph and requires admission to start Task work.
     print_pipeline_header(&graph.name, &items);
     let bound_message = binding
         .filter(|binding| !matches!(binding.work, WorkRef::Task(_)))
@@ -68,8 +63,9 @@ pub fn run(
 }
 
 /// `lf --task ISSUE graph run`: carry the Task's Graph from the cursor its
-/// `lf task run`, this process's parent, set out from. The Graph writes where
-/// it left the Task: before the interactive step it stopped at, or at `end`.
+/// `lf task run`, this process's parent, recorded: where the run began, then
+/// the step after each one finished. The Graph writes where it left the Task:
+/// before the interactive step it stopped at, or at `end`.
 pub fn run_task_graph(cli: &Cli, repo: &Path, binding: Option<&WorkBinding>) -> Result<()> {
     let Some(WorkRef::Task(task)) = binding.map(|binding| &binding.work) else {
         anyhow::bail!("`lf graph run` carries a Task's Graph; `lf task run` starts it");
@@ -82,7 +78,7 @@ pub fn run_task_graph(cli: &Cli, repo: &Path, binding: Option<&WorkBinding>) -> 
         anyhow::bail!("the Task is not on a run; `lf task run` starts one");
     };
     let parent = journal::current_lf_process_id()
-        .and_then(|id| store.sqlite.process(&id).ok().flatten())
+        .and_then(|id| store.sqlite.lf_process(&id).ok().flatten())
         .and_then(|process| process.parent_lf_process_id);
     anyhow::ensure!(
         parent.as_ref() == Some(&carrier.id),
@@ -103,6 +99,21 @@ pub fn run_task_graph(cli: &Cli, repo: &Path, binding: Option<&WorkBinding>) -> 
         stop_at_interactive,
         Some(&carrier.id),
     )
+}
+
+/// What `lf graph customize` wrote.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
+pub struct Customized {
+    /// The repository file that defines the Graph.
+    pub path: std::path::PathBuf,
+}
+
+/// `lf graph customize <name>` in `directory`'s repository.
+pub fn customize(name: &str, directory: &Path) -> Result<Customized> {
+    let repo = crate::repo::working_directory_in(directory)?;
+    Ok(Customized {
+        path: crate::graph::customize(name, &repo)?,
+    })
 }
 
 pub fn show(name: &str, repo: &Path) -> Result<()> {
@@ -133,17 +144,56 @@ pub fn list(repo: &Path, json: bool) -> Result<()> {
 /// How many times one `lf task run` starts its Graph before giving up.
 const TASK_RUN_ATTEMPTS: u32 = 3;
 
+/// A Task run that must stop rather than retry, including when shipping.
+#[derive(Debug, thiserror::Error)]
+enum TaskRunStopped {
+    #[error("the run of {run} failed {TASK_RUN_ATTEMPTS} times with the same error; this Task run stops here: {cause}")]
+    Repeated { run: String, cause: String },
+    #[error(
+        "the run of {run} stopped after a provider refusal at {step}: {cause}; `lf task run {issue}` starts the run again at it"
+    )]
+    Limit {
+        issue: String,
+        run: String,
+        step: String,
+        cause: String,
+    },
+}
+
+impl TaskRunStopped {
+    fn stop(self, task: &Task, status: std::process::ExitStatus) -> Result<()> {
+        // Render before the detached run's log closes when its process exits.
+        eprintln!("{self}");
+        let cause = match &self {
+            Self::Repeated { cause, .. } | Self::Limit { cause, .. } => cause,
+        };
+        // Both `task run` and `ship` end the approval at a terminal stop.
+        // With no approval, ship_halt does nothing and records no person's stop.
+        crate::ops::task::ship::ship_halt(&task.identifier, cause)?;
+        Err(anyhow::Error::new(exit_of(status)).context(self))
+    }
+}
+
 /// Carry one Task run: start the Task's Graph as a child Graph process, and
-/// start it again while a Graph process fails. Each attempt records its own
-/// GraphProcess beneath this process. A Graph held for a person or a watcher, an
-/// interrupted one, and a launch refused before any Graph started are returned
-/// as they ended. Once someone interrupts the Task, nothing is started again.
+/// retry failed Graphs unless a provider refusal stopped them. Each attempt records
+/// its own GraphProcess beneath this process and sets out at the step the last
+/// one failed at. A Graph held for a person or a
+/// watcher, an interrupted one, and a launch refused before any Graph started
+/// are returned as they ended. Once someone interrupts the Task, nothing is
+/// started again.
 /// `run` names the graph and where the run set out, for messages.
 ///
 /// With `release`, a bare run inside its execution owner lets its launcher go
 /// once the first attempt has registered, and carries on with its output in
-/// that attempt's log.
-pub fn run_task_graph_for(cli: &Cli, task: &Task, run: &str, release: bool) -> Result<()> {
+/// that attempt's log. `announce` hears the first registered Graph process
+/// and that log, before the launcher goes.
+pub fn run_task_graph_for(
+    cli: &Cli,
+    task: &Task,
+    run: &str,
+    release: bool,
+    announce: &mut dyn FnMut(&LfProcessId, Option<&Path>) -> Result<()>,
+) -> Result<()> {
     let checkout = task.worktree()?;
     let args = task_run_args(cli, task.id.as_str(), &["graph", "run"]);
     let store = block_on(open_graph_store())?;
@@ -152,10 +202,11 @@ pub fn run_task_graph_for(cli: &Cli, task: &Task, run: &str, release: bool) -> R
         journal::current_lf_process_id().context("a Task run requires a registered Process")?;
     let work = WorkRef::Task(task.id.clone());
     let cursor = store.latest_interrupt_id(&work)?;
-    let letting_go =
-        release && !cli.batch && !cli.interactive && crate::transport::current().is_some();
+    let letting_go = release && lets_launcher_go(cli);
     let mut released = false;
     let mut attempt = 1;
+    // The error every failed attempt so far shared, if they all shared one.
+    let mut repeated: Option<String> = None;
     loop {
         let mark = store.process_mark(&process)?;
         let mut log = letting_go
@@ -163,24 +214,22 @@ pub fn run_task_graph_for(cli: &Cli, task: &Task, run: &str, release: bool) -> R
             .transpose()?;
         let sink = log.as_ref().map(|log| log.file.try_clone()).transpose()?;
         let status = spawn_task_child(&args, checkout, sink, Some(cursor), |child| {
-            let Some(mut log) = log.take() else {
-                return Ok(());
-            };
-            match registration(store, &process, mark, child)? {
-                Some(registered) => {
+            let registered = registration(store, &process, mark, child)?;
+            match (registered, log.take()) {
+                (Some(registered), Some(mut log)) => {
                     log.settle(&registered)?;
                     if !released {
-                        println!(
-                            "{} · {run} running as Graph process {registered}\n  follow: lf task status {}\n  log:    {}",
-                            task.identifier,
-                            task.identifier,
-                            log.path.display()
-                        );
+                        announce(&registered, Some(&log.path))?;
                         release_launcher(&log.file)?;
                         released = true;
                     }
                 }
-                None => log.replay(),
+                (Some(registered), None) if !released => {
+                    announce(&registered, None)?;
+                    released = true;
+                }
+                (None, Some(log)) => log.replay(),
+                _ => {}
             }
             Ok(())
         })?;
@@ -192,26 +241,120 @@ pub fn run_task_graph_for(cli: &Cli, task: &Task, run: &str, release: bool) -> R
             return Err(crate::process::CommandExit(130).into());
         }
         // Only a Graph process that failed is started again.
-        let failed = status.code() == Some(1) && attempt_graph(store, &process, mark)?.is_some();
-        if failed {
+        let graph = match status.code() {
+            Some(1) => store.graph_child_after(&process, mark)?,
+            _ => None,
+        };
+        let failed = graph.is_some();
+        if let Some(graph) = &graph {
             if let Some(stash) = crate::ops::checkout::retained_edits(checkout)? {
                 eprintln!(
                     "The run of {run} failed with the checkout's edits retained in stash {stash}; this Task run stops here. Restore them with `git stash apply --index {stash}`."
                 );
                 return Err(crate::process::CommandExit(1).into());
             }
+            let cause = store.failure_cause(graph)?.map(|(_, cause)| cause);
+            repeated = cause.filter(|cause| attempt == 1 || repeated.as_ref() == Some(cause));
+            if let Some((step, recovery)) =
+                crate::ops::task::limit_recovery::ended_step_recovery(store, &task.id)?
+            {
+                // The recovery sweep restarts a wait at its reset, not now.
+                if let Some(retry_at) = recovery
+                    .retry_at
+                    .filter(|at| *at > crate::store::rows::now_unix())
+                {
+                    eprintln!(
+                        "The run of {run} is waiting on a limit until {}; it starts again at {step} then.",
+                        crate::lf::output::format_time(retry_at),
+                    );
+                    return Err(exit_of(status).into());
+                }
+                if let Some(cause) = crate::ops::task_execution::limit_stop(&recovery) {
+                    let stop = TaskRunStopped::Limit {
+                        issue: task.identifier.clone(),
+                        run: run.to_string(),
+                        step,
+                        cause,
+                    };
+                    return stop.stop(task, status);
+                }
+            }
         }
         if !failed || attempt == TASK_RUN_ATTEMPTS {
             if failed {
+                if let Some(cause) = repeated {
+                    let repeated = TaskRunStopped::Repeated {
+                        run: run.to_string(),
+                        cause,
+                    };
+                    return repeated.stop(task, status);
+                }
                 eprintln!("The run of {run} failed {attempt} times; this Task run stops here.");
             }
             return Err(exit_of(status).into());
         }
+        // The failed Graph checkpointed after each step it finished.
+        let again = store
+            .task_graph_row(&task.id)?
+            .and_then(|row| row.graph.step_name_of(&row.run?.0))
+            .map_or_else(String::new, |step| format!(" at {step}"));
         eprintln!(
-            "The run of {run} failed (attempt {attempt} of {TASK_RUN_ATTEMPTS}); starting it again."
+            "The run of {run} failed (attempt {attempt} of {TASK_RUN_ATTEMPTS}); starting it again{again}."
         );
         attempt += 1;
     }
+}
+
+/// `lf task run`: place the Task and carry its run in this process. What the
+/// run set out to do is announced once, as `task.run` returns it: printed,
+/// and reported to the launcher that started this process detached.
+pub fn carry_task_run(
+    cli: &Cli,
+    repo: &Path,
+    issue: &str,
+    options: crate::ops::task::TaskProcessOptions,
+    json: bool,
+) -> Result<()> {
+    use crate::engine::task::TaskRun;
+    use crate::ops::task::{TaskRunMode, TaskRunStart};
+    let mode = if cli.interactive {
+        TaskRunMode::InPlace
+    } else if cli.batch {
+        TaskRunMode::Headless
+    } else {
+        TaskRunMode::Stop
+    };
+    let (task, start) = crate::ops::task::task_place(repo, issue, options, mode)?;
+    if !cli.interactive {
+        crate::ops::task::start_conversation_beside(&task);
+    }
+    let issue = task.identifier.clone();
+    let announce = |run: &TaskRun| -> Result<()> {
+        crate::engine::launch::report(Ok(run));
+        if json {
+            println!("{}", serde_json::to_string(run)?);
+        } else if let Some(text) = run.render() {
+            println!("{text}");
+        }
+        Ok(())
+    };
+    let (step, ships) = match start {
+        TaskRunStart::Run { step, ships } => (step, ships),
+        TaskRunStart::Waiting(step) => return announce(&TaskRun::Waiting { issue, step }),
+        TaskRunStart::Ended => return announce(&TaskRun::Ended { issue }),
+    };
+    // This process carries the run; its Graph process writes where the
+    // Task stopped. A run that never arrives leaves the Task to start it again.
+    run_task_graph_for(cli, &task, &step, true, &mut |graph, log| {
+        announce(&TaskRun::Running {
+            issue: issue.clone(),
+            run: step.clone(),
+            ships,
+            graph_process: graph.clone(),
+            log: log.map(Path::to_path_buf),
+        })
+    })?;
+    Ok(crate::ops::task::task_run_finished(&task)?)
 }
 
 fn exit_of(status: std::process::ExitStatus) -> crate::process::CommandExit {
@@ -314,17 +457,6 @@ impl PendingLog {
     }
 }
 
-/// The attempt's child once it has recorded a GraphProcess.
-fn attempt_graph(
-    store: &SqliteStore,
-    process: &LfProcessId,
-    mark: i64,
-) -> Result<Option<LfProcessId>> {
-    Ok(store
-        .child_process_after(process, mark)?
-        .filter(|child| matches!(store.graph_process(child.as_str()), Ok(Some(_)))))
-}
-
 /// Wait until the attempt records its GraphProcess or ends first. No deadline:
 /// the child's own exit bounds it.
 fn registration(
@@ -334,7 +466,7 @@ fn registration(
     child: &mut std::process::Child,
 ) -> Result<Option<LfProcessId>> {
     loop {
-        let registered = attempt_graph(store, process, mark)?;
+        let registered = store.graph_child_after(process, mark)?;
         if registered.is_some() {
             return Ok(registered);
         }
@@ -345,15 +477,26 @@ fn registration(
     }
 }
 
-/// Hand the launcher its last lines, end its view, and keep this run's own
-/// output in the log from here on.
+/// Whether this run lets whoever started it go once it is under way: it runs
+/// in a held terminal or detached, and is neither `-b` nor interactive.
+pub(crate) fn lets_launcher_go(cli: &Cli) -> bool {
+    !cli.batch
+        && !cli.interactive
+        && (crate::transport::current().is_some() || crate::os_process::detached::launched())
+}
+
+/// Hand the launcher its last lines, keep this run's own output in the log
+/// from here on, and let the launcher go.
 pub(crate) fn release_launcher(log: &std::fs::File) -> Result<()> {
     use std::io::Write;
     std::io::stdout().flush()?;
     std::io::stderr().flush()?;
-    crate::transport::detach_viewers()?;
+    if crate::transport::current().is_some() {
+        crate::transport::detach_viewers()?;
+    }
     crate::terminal_output::redirect(log, 1)?;
     crate::terminal_output::redirect(log, 2)?;
+    crate::os_process::detached::release();
     Ok(())
 }
 
@@ -406,6 +549,7 @@ fn execute(
             launcher: cli,
             position: Mutex::new(start.clone()),
             task,
+            task_run: task_run.cloned(),
             interrupt,
         };
         // A chapter rotation moving this checkout's Task excludes new work in it.
@@ -420,6 +564,7 @@ fn execute(
             .record_graph_process(
                 &running.process,
                 &crate::graph::compiled::CompiledGraph::new(graph_name, items),
+                running.task.as_ref(),
             )
             .context("could not record the Graph; no steps launched")?;
         drop(admission);
@@ -454,7 +599,7 @@ fn execute(
                 .get_task(task)
                 .await?
                 .context("Graph Task disappeared")?;
-            crate::ops::task::cleanup_completed_task(&running.store, &task).await?;
+            crate::ops::task::retirement::schedule(&running.store, &task).await?;
         }
         Ok(outcome)
     })?)
@@ -493,9 +638,7 @@ fn report_outcome(outcome: GraphOutcome) -> Result<()> {
     match outcome {
         GraphOutcome::Completed => Ok(()),
         GraphOutcome::StoppedAt(step) => {
-            eprintln!(
-                "Stopped at {step}, an interactive step; the Task conversation takes it from here."
-            );
+            eprintln!("Stopped at {step}; the Task waits there for its conversation.");
             Ok(())
         }
         GraphOutcome::Interrupted => Err(crate::process::CommandExit(130).into()),
@@ -668,6 +811,9 @@ struct RunningGraph<'a> {
     /// Where the runner stands, as of its last checkpoint.
     position: Mutex<ExecutionCursor>,
     task: Option<crate::durable::TaskId>,
+    /// The `lf task run` this Graph carries its Task for: a stop keeps it from
+    /// merging, and each checkpoint is where that run's next attempt sets out.
+    task_run: Option<LfProcessId>,
     /// The Task's latest interrupt when its run began; a later one stops the Graph.
     interrupt: Option<i64>,
 }
@@ -717,6 +863,30 @@ impl RunningGraph<'_> {
         Ok(Some(step))
     }
 
+    /// Where a Task run waits instead of merging: the step about to run merges
+    /// and someone stopped shipping the Task. Read when the step is reached,
+    /// so a stop made mid-run counts; an unreadable stop fails the step.
+    fn stopped_landing(&self) -> Result<Option<String>> {
+        let Some(task) = self.task.as_ref().filter(|_| self.task_run.is_some()) else {
+            return Ok(None);
+        };
+        let Some(step) = self
+            .current()
+            .as_ref()
+            .and_then(crate::task_graph::landing_name)
+        else {
+            return Ok(None);
+        };
+        let Some(stop) = self.store.sqlite.task_ship_stop(task)? else {
+            return Ok(None);
+        };
+        let by = crate::ops::task::ship::stopper(&self.store.sqlite, self.cwd, &stop)?;
+        eprintln!(
+            "Waiting at {step}: not approved to merge ({by} stopped shipping). `lf ship` lands it."
+        );
+        Ok(Some(step))
+    }
+
     /// Whether someone interrupted this Graph's Task after its run began.
     fn interrupted(&self) -> bool {
         let (Some(task), Some(cursor)) = (&self.task, self.interrupt) else {
@@ -750,6 +920,7 @@ impl RunningGraph<'_> {
         let mut command = tokio::process::Command::new(crate::os_process::resolve_lf_binary()?);
         command.current_dir(self.cwd);
         command.env(graph_process::GRAPH_ID_ENV, self.process.as_str());
+        command.env(crate::journal::GRAPH_STEP_ENV, "1");
         command.env_remove(graph_process::TASK_INTERRUPT_CURSOR_ENV);
         if self.launcher.verbose {
             command.arg("--verbose");
@@ -804,6 +975,10 @@ impl RunningGraph<'_> {
         // An interrupt during an operation takes effect once it has finished.
         if signalled || self.interrupted() {
             eprintln!("Graph {} interrupted at {label}.", self.graph);
+            // Someone stopped it: a wait it was in no longer starts it again.
+            if let Some(step) = &step {
+                self.store.sqlite.end_agent_limit_wait(step)?;
+            }
             return Ok((StepExit::Interrupted, step));
         }
         match status.code() {
@@ -896,6 +1071,17 @@ fn answer_value(text: &str) -> Result<serde_json::Value, String> {
 impl SkillExecutor for &RunningGraph<'_> {
     async fn checkpoint(&self, cursor: &ExecutionCursor) -> Result<()> {
         *self.position.lock().expect("Graph position mutex poisoned") = cursor.clone();
+        // A Task run that fails starts again here, not where it began. A stale
+        // cursor reruns finished steps; that beats failing a finished step.
+        if let (Some(task), Some(carrier)) = (&self.task, &self.task_run) {
+            if let Err(error) = self
+                .store
+                .sqlite
+                .advance_task_graph_run(task, carrier, cursor)
+            {
+                tracing::warn!(%task, %error, "could not record where the Task run goes on");
+            }
+        }
         Ok(())
     }
 
@@ -904,6 +1090,9 @@ impl SkillExecutor for &RunningGraph<'_> {
         skill: &ConcreteSkill,
         ctx: ExecutionContext,
     ) -> Result<SkillOutcome> {
+        if let Some(step) = self.stopped_landing()? {
+            return Ok(SkillOutcome::Unapproved(step));
+        }
         crate::ops::linear_observe::sync_repository(&self.store, &self.cwd.to_string_lossy()).await;
         let name = &skill.skill.name;
         print_step_progress(ctx.progress, name);
@@ -942,8 +1131,6 @@ impl SkillExecutor for &RunningGraph<'_> {
         step_cli.output_schema = output.as_ref().map(GraphOutput::schema);
         step_cli.account.clear();
         step_cli.only_account.clear();
-        step_cli.isolate = false;
-        step_cli.shared = false;
         // `-i` and `-b` choose for every step. Otherwise a step runs headless,
         // and an interactive step launches the way `lf skill` would: with the
         // person at a terminal, else headless.
@@ -961,6 +1148,11 @@ impl SkillExecutor for &RunningGraph<'_> {
         )?;
         step_cli.skill_input = Some(input.path().to_path_buf());
         let mut args = step_cli.step_args();
+        // A Task run's step is the Task's own conversation, not a bare `lf`
+        // in its checkout, so it names the Task.
+        if let Some(task) = self.task.as_ref().filter(|_| self.task_run.is_some()) {
+            args.extend(["--task".to_owned(), task.to_string()]);
+        }
         args.extend(["skill".to_owned(), name.clone()]);
         if !message.trim().is_empty() {
             args.push(message);
@@ -993,7 +1185,7 @@ impl SkillExecutor for &RunningGraph<'_> {
                 "--output-schema".to_owned(),
                 output.schema().to_string(),
                 "session".to_owned(),
-                "connect".to_owned(),
+                "resume".to_owned(),
                 conversation,
                 "--message".to_owned(),
                 format!("The previous final output was invalid: {error}. Return a corrected value using the declared schema; preserve the preceding work.{}", output.instructions()),
@@ -1008,6 +1200,9 @@ impl SkillExecutor for &RunningGraph<'_> {
         ops: &crate::graph::ConcreteCommand,
         _ctx: ExecutionContext,
     ) -> Result<SkillOutcome> {
+        if let Some(step) = self.stopped_landing()? {
+            return Ok(SkillOutcome::Unapproved(step));
+        }
         crate::ops::linear_observe::sync_repository(&self.store, &self.cwd.to_string_lossy()).await;
         let label = ops.item.display_name();
         eprintln!("op: {label}");
@@ -1016,17 +1211,14 @@ impl SkillExecutor for &RunningGraph<'_> {
             .and_then(Cli::try_parse_from)
             .ok();
         let handoff_checkout = match parsed.and_then(|cli| cli.command) {
-            Some(Commands::Ops {
+            Some(Commands::Pr {
                 cmd:
-                    crate::lf::OpsCommand::Pr {
-                        cmd:
-                            Some(PrCommand::Land {
-                                local: false,
-                                wait_and_fix: false,
-                                worktree,
-                                ..
-                            }),
-                    },
+                    Some(PrCommand::Land {
+                        local: false,
+                        wait_and_fix: false,
+                        worktree,
+                        ..
+                    }),
             }) => Some(crate::ops::land::resolve_repos(self.cwd, worktree.as_deref())?.0),
             _ => None,
         };
@@ -1102,6 +1294,7 @@ mod tests {
                 skill: Skill::named("probe"),
                 id: None,
                 interactive: false,
+                interactive_name: None,
                 returns: None,
                 sources: Vec::new(),
             };
@@ -1126,6 +1319,7 @@ mod tests {
                 launcher: &cli,
                 position: Mutex::new(ExecutionCursor::default()),
                 task: None,
+                task_run: None,
                 interrupt: None,
             };
             runtime.block_on(async {
@@ -1155,7 +1349,8 @@ mod tests {
                     }
                     .unwrap();
                     assert_eq!(outcome, SkillOutcome::Completed);
-                    assert_eq!(state.lock().await.requests, 1);
+                    // One delta, then the Project its changed issue names.
+                    assert_eq!(state.lock().await.requests, 2);
                 }
             });
         });
@@ -1190,6 +1385,7 @@ mod tests {
                 skill: Skill::named("probe"),
                 id: None,
                 interactive: false,
+                interactive_name: None,
                 returns: None,
                 sources: Vec::new(),
             });
@@ -1205,6 +1401,7 @@ mod tests {
                 launcher: &cli,
                 position: Mutex::new(ExecutionCursor::default()),
                 task: Some(task.id.clone()),
+                task_run: None,
                 interrupt: Some(
                     runtime
                         .block_on(fixture.store.latest_interrupt_id(&work))

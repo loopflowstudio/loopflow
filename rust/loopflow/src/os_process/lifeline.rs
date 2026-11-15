@@ -13,8 +13,9 @@ static HELD_LIFELINES: Mutex<Vec<(Option<u32>, File)>> = Mutex::new(Vec::new());
 
 // stdout acknowledges watchdog startup, not provider output. Ignoring TERM
 // lets the watchdog and its sleep survive the group signal to deliver KILL.
-// dash needs `kill -s TERM -- -pgid`, not `kill -TERM -- -pgid`.
-const WATCHDOG: &std::ffi::CStr = cr#"printf .; exec 1>&-
+// dash needs `kill -s TERM -- -pgid`, not `kill -TERM -- -pgid`. Pi's bash
+// guard (`harness::context`) runs the same text in each detached tool group.
+pub(crate) const WATCHDOG: &std::ffi::CStr = cr#"printf .; exec 1>&-
 while read -r _; do :; done
 trap '' TERM
 kill -s TERM -- "-$1" 2>/dev/null
@@ -202,13 +203,30 @@ fn retain_lifeline(group: Option<u32>, writer: File) {
         .push((group, writer));
 }
 
+/// Keep this process's lifeline writers across exec, so the program it becomes
+/// holds its provider alive and no lf process has to.
+pub(crate) fn inherit_lifelines() -> std::io::Result<()> {
+    for (_, writer) in HELD_LIFELINES
+        .lock()
+        .expect("lifeline list poisoned")
+        .iter()
+    {
+        // SAFETY: the descriptor is open for as long as the list owns it, and
+        // F_SETFD changes only its close-on-exec flag.
+        if unsafe { libc::fcntl(writer.as_raw_fd(), libc::F_SETFD, 0) } != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+    }
+    Ok(())
+}
+
 /// Release only this process's retained spawn writer. The already-owned watchdog
 /// performs shutdown; no signal authority is inferred from a dead leader.
-pub(crate) fn release_agent_lifeline(group: u32) -> bool {
-    let mut held = HELD_LIFELINES.lock().expect("lifeline list poisoned");
-    let before = held.len();
-    held.retain(|(owner, _)| *owner != Some(group));
-    held.len() != before
+pub(crate) fn release_agent_lifeline(group: u32) {
+    HELD_LIFELINES
+        .lock()
+        .expect("lifeline list poisoned")
+        .retain(|(owner, _)| *owner != Some(group));
 }
 
 // Command installs native stdio before pre_exec. An invocation with a closed
@@ -284,30 +302,6 @@ fn start_watchdog(reader: libc::c_int, null: libc::c_int) -> std::io::Result<()>
         drop(ready_writer);
         await_ready(ready_reader.as_raw_fd())
     }
-}
-
-/// Join an already-owned tool group to a writer held by its provider. The
-/// watchdog acknowledges readiness before the shell can execute user commands.
-pub(crate) fn watch_tool_lifeline(path: &Path) -> std::io::Result<()> {
-    use std::os::unix::fs::FileTypeExt;
-
-    // A provider that died before admission cannot leave this open blocked.
-    let reader = above_stdio(
-        File::options()
-            .read(true)
-            .custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW)
-            .open(path)?,
-    )?;
-    if !reader.metadata()?.file_type().is_fifo() {
-        return Err(std::io::Error::other("tool lifeline is not a FIFO"));
-    }
-    // SAFETY: reader is owned here. The watchdog waits for EOF, including when
-    // the provider already closed its writer before the watchdog starts.
-    if unsafe { libc::fcntl(reader.as_raw_fd(), libc::F_SETFL, 0) } != 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    let null = above_stdio(File::options().write(true).open("/dev/null")?)?;
-    start_watchdog(reader.as_raw_fd(), null.as_raw_fd())
 }
 
 fn await_ready(fd: libc::c_int) -> std::io::Result<()> {
@@ -608,8 +602,7 @@ mod tests {
         let group = child.id().unwrap();
         assert_eq!(child.wait().await.unwrap().code(), Some(7));
         assert!(group_alive(group), "watchdog and helper survive the leader");
-        assert!(super::release_agent_lifeline(group));
-        assert!(!super::release_agent_lifeline(group));
+        super::release_agent_lifeline(group);
         let died = wait_until(|| !group_alive(group));
         kill_process_group(group);
         assert!(died, "the owned watchdog must settle its entire group");

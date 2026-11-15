@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use fs2::FileExt;
 use rusqlite::{params, Connection};
 
-use super::{_migration_transaction, apply_build_drafts, apply_sqlite};
+use super::{_migration_transaction, apply_pending_migrations, apply_sqlite};
 use crate::id::LfProcessId;
 use crate::journal::{ProcessIdentityEvidence, ProcessReceipt, PROCESS_RECEIPT_ROOT};
 use crate::store::canonical_ids::{preflight, session_fence_file};
@@ -200,7 +200,7 @@ fn canonical_ids_retained_receipt_and_trace_locator_survive_identity_change() {
     .unwrap();
     let store = SqliteStore::open_processes_read_only(&home.path().join("loopflow.db")).unwrap();
     let id = LfProcessId::parse(&PROCESS.to_ascii_lowercase()).unwrap();
-    let record = store.process(&id).unwrap().unwrap();
+    let record = store.lf_process(&id).unwrap().unwrap();
     let retained_path = store.process_receipt_path(&id).unwrap().unwrap();
     assert_eq!(retained_path.file_name(), path.file_name());
     assert_eq!(
@@ -211,7 +211,7 @@ fn canonical_ids_retained_receipt_and_trace_locator_survive_identity_change() {
         .unwrap()
         .unwrap();
     assert_eq!(
-        crate::journal::recorded_process_evidence(&record, &Ok(Some(retained)), |pid, start| {
+        crate::journal::lf_process_evidence(&record, &Ok(Some(retained)), |pid, start| {
             assert_eq!((pid, start), (std::process::id(), 1));
             ProcessIdentityEvidence::Dead
         }),
@@ -231,7 +231,7 @@ fn canonical_ids_retained_receipt_and_trace_locator_survive_identity_change() {
     )
     .unwrap();
     assert_eq!(
-        crate::journal::process_evidence(&store, &id),
+        crate::journal::lf_evidence(&store, &id),
         ProcessIdentityEvidence::Dead
     );
     assert!(conn
@@ -540,7 +540,7 @@ fn canonical_ids_metric_upgrade_retains_evidence_and_reimport() {
         )
         .unwrap();
     apply_sqlite(&conn).unwrap();
-    apply_build_drafts(&conn);
+    apply_pending_migrations(&conn);
     assert_eq!(retained(), before);
     assert_eq!(
         conn.query_row(
@@ -794,7 +794,7 @@ fn canonical_ids_released_work_upgrades_without_replacing_history() {
             .collect::<Result<_, _>>()
             .unwrap();
     apply_sqlite(&conn).unwrap();
-    apply_build_drafts(&conn);
+    apply_pending_migrations(&conn);
     assert_eq!(
         conn.query_row(
             "SELECT session_id,payload FROM session_events WHERE receipt_key='Case-Receipt'",
@@ -893,7 +893,7 @@ fn canonical_ids_released_work_upgrades_without_replacing_history() {
         "session_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     );
     assert_eq!(
-        store.resolve_process(PROCESS).unwrap().unwrap().id.as_str(),
+        store.resolve_process(PROCESS).unwrap().unwrap().id(),
         PROCESS.to_ascii_lowercase()
     );
     assert!(conn
@@ -992,7 +992,7 @@ fn canonical_ids_commands_read_the_upgraded_work_and_native_history() {
     conn.execute("UPDATE agent_sessions SET repo=?1,cwd=?1", [repo_path])
         .unwrap();
     apply_sqlite(&conn).unwrap();
-    apply_build_drafts(&conn);
+    apply_pending_migrations(&conn);
     let binary = loopflow_test_support::lf_binary();
     let lf = |args: &[&str]| {
         let mut command = std::process::Command::new(binary);

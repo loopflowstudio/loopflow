@@ -1,4 +1,4 @@
-"""Watcher and Graph-boundary recovery against a disposable Linear HTTPS peer."""
+"""Planning refresh and Graph-boundary recovery against a disposable Linear HTTPS peer."""
 
 import copy
 import hashlib
@@ -197,13 +197,13 @@ def _await(check, message: str, seconds: int = 45) -> None:
     raise AssertionError(message)
 
 
-class Watch:
-    """One `lf <args> --json --watch`. `planning status` keeps the
-    repository's planning exchanged while it runs, as an open Desktop window does."""
+class Subscription:
+    """One `lf <args> --json --subscribe`, a reader as an open Desktop window is.
+    Readers show stored planning; they exchange nothing."""
 
     def __init__(self, fixture: dict, env: dict, *args: str):
         self.process = subprocess.Popen(
-            [fixture["lf"], *args, "--json", "--watch"],
+            [fixture["lf"], *args, "--json", "--subscribe"],
             cwd=fixture["repo"],
             env=env,
             stdin=subprocess.PIPE,
@@ -248,6 +248,16 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
         assert result.returncode == 0, result.stderr
         return result.stdout
 
+    def refresh_until(check, message: str) -> None:
+        """Desktop's planning clock: `lf wave status --sync` until `check` holds."""
+        deadline = time.monotonic() + 90
+        while time.monotonic() < deadline:
+            run("wave", "status", fixture["wave"], "--sync")
+            if check():
+                return
+            time.sleep(1)
+        raise AssertionError(message)
+
     # Acquire a real baseline before the outage, not an invented provider revision.
     run("wave", "status", fixture["wave"], "--sync")
     remote_id = db.execute(
@@ -261,9 +271,7 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
     try:
         with server.lock:
             server.state["offline"] = True
-        if mode == "watch":
-            watch = Watch(fixture, env, "planning", "status")
-        else:
+        if mode == "graph":
             # Graph admission requires a managed login, even with a contained provider.
             profile = root / "accounts/claude/reconnect"
             profile.mkdir(parents=True)
@@ -273,14 +281,13 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
             (profile / ".credentials.json").write_text(credential)
             now = int(time.time())
             db.execute(
-                "INSERT INTO provider_accounts(provider,account_id,home,login_email,"
-                "credential_state,routing_state,created_at,updated_at,observed_email,"
+                "INSERT INTO provider_accounts(provider,account_id,home,"
+                "credential_state,created_at,updated_at,observed_email,"
                 "observed_subject,observed_credential_digest) "
-                "VALUES('claude',?,?,?,'connected','automatic',?,?,?,?,?)",
+                "VALUES('claude',?,?,'connected',?,?,?,?,?)",
                 (
                     "reconnect",
                     str(profile),
-                    "reconnect@example.com",
                     now,
                     now,
                     "reconnect@example.com",
@@ -289,6 +296,12 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
                 ),
             )
             db.commit()
+            run(
+                "set",
+                "--global",
+                "accounts.claude.reconnect",
+                "{login_email: reconnect@example.com, routing_state: automatic}",
+            )
             (repo / ".lf/graphs").mkdir(exist_ok=True)
             (repo / ".lf/skills").mkdir(exist_ok=True)
             (repo / ".lf/graphs/reconnect.yaml").write_text("- reconnect-proof\n- cmd: context\n")
@@ -376,9 +389,8 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
             assert graph.wait(timeout=30) == 0, (root / "graph.log").read_text()
             assert caught_up(), "Graph boundaries did not acquire and settle pending planning"
         else:
-            # The watcher's idle cadence can reach 240 seconds; acquisition and
-            # uncertain-write settlement may need separate checks.
-            _await(caught_up, "watcher did not catch up after reconnect", seconds=300)
+            # Acquisition and uncertain-write settlement may need separate refreshes.
+            refresh_until(caught_up, "planning refresh did not catch up after reconnect")
         assert db.execute("SELECT * FROM task_graphs ORDER BY task_id").fetchall() == task_graphs
         assert db.execute("SELECT id,task_id,branch,base_commit FROM task_prs").fetchall() == prs
         assert db.execute("SELECT worktree FROM tasks WHERE id=?", (remote_id,)).fetchone() == (
@@ -393,76 +405,34 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
             assert server.state["state_writes"] == 1
             assert len([c for c in server.state["comments"] if c["id"] == comment_id]) == 1
             assert not server.state["unexpected"], server.state["unexpected"]
-        if watch:
-            planning = Watch(fixture, env, "wave", "show", "--all")
+        if not graph:
+            planning = Subscription(fixture, env, "wave", "show", "--all")
             planning.frame(lambda f: "INF-126" in json.dumps(f["body"]))
             planning.close()
-            # Reading a Task is its own watch. Closing it must not stop sync.
-            task = Watch(fixture, env, "task", "status", "INF-125")
+            task = Subscription(fixture, env, "task", "status", "INF-125")
             task.frame(lambda f: incoming["id"] in json.dumps(f["body"]))
             task.close()
-            later = _comment("After leaving Task", added["id"])
-            with server.lock:
-                state["comments"].append(later)
-            _await(
-                lambda: (
-                    db.execute(
-                        "SELECT count(*) FROM task_comments WHERE id=?", (later["id"],)
-                    ).fetchone()
-                    == (1,)
-                ),
-                "leaving Task stopped acquisition",
-                seconds=300,
-            )
-            watch.close()
-            watch = None
             # A short command attempts delivery itself. An outage leaves the save
-            # pending; reopening the repository delivers it after connectivity returns.
+            # pending; an open reader never delivers it, and the next refresh does.
             with server.lock:
                 state["offline"] = True
-            gap = json.loads(
-                run("task", "comment", "INF-124", "Saved with Desktop closed", "--json")
-            )["pending_sync"][0]
+            gap = json.loads(run("task", "comment", "INF-124", "Saved during an outage", "--json"))[
+                "pending_sync"
+            ][0]
             with server.lock:
                 assert not any(c["id"] == gap for c in state["comments"])
                 state["offline"] = False
-            watch = Watch(fixture, env, "planning", "status")
-            _await(
-                lambda: (
-                    db.execute(
-                        "SELECT acknowledged FROM task_comment_deliveries WHERE comment_id=?",
-                        (gap,),
-                    ).fetchone()
-                    == (1,)
-                ),
-                "reopened Wave view did not deliver",
-                seconds=300,
-            )
-            watch.close()  # No window shows the repository.
-            watch = None
-            with server.lock:
-                state["offline"] = True
-            detached = json.loads(
-                run("task", "comment", "INF-124", "No repository selected", "--json")
-            )["pending_sync"][0]
-            with server.lock:
-                state["offline"] = False
+
+            def delivered() -> bool:
+                return db.execute(
+                    "SELECT acknowledged FROM task_comment_deliveries WHERE comment_id=?", (gap,)
+                ).fetchone() == (1,)
+
+            watch = Subscription(fixture, env, "planning", "status")
+            watch.frame(lambda f: True)
             time.sleep(2)
-            assert db.execute(
-                "SELECT acknowledged FROM task_comment_deliveries WHERE comment_id=?", (detached,)
-            ).fetchone() == (0,)
-            watch = Watch(fixture, env, "planning", "status")
-            _await(
-                lambda: (
-                    db.execute(
-                        "SELECT acknowledged FROM task_comment_deliveries WHERE comment_id=?",
-                        (detached,),
-                    ).fetchone()
-                    == (1,)
-                ),
-                "repository reselection did not deliver",
-                seconds=300,
-            )
+            assert not delivered(), "a planning reader delivered a pending save"
+            refresh_until(delivered, "planning refresh did not deliver a pending save")
         else:
             assert db.execute("SELECT count(*) FROM graph_process_steps").fetchone()[0] == 2
     finally:

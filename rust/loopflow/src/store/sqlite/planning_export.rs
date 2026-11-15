@@ -21,6 +21,16 @@ pub(crate) struct PlanningExport {
     pub link_id: String,
 }
 
+/// What a receipt records about its provider effects: whether the creation
+/// (and, for a Project, its Initiative link) was sent, and when a pass last
+/// looked for an uncertain creation.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ExportAttempts {
+    pub creation: bool,
+    pub link: bool,
+    pub observed_at: Option<i64>,
+}
+
 impl PlanningChanges<'_> {
     fn receipt(self) -> (&'static str, &'static str) {
         match self {
@@ -31,6 +41,7 @@ impl PlanningChanges<'_> {
 }
 
 impl SqliteStore {
+    /// Unmapped Projects, then Tasks, whose export a pass may advance.
     pub(crate) fn planning_export_owners(&self, repo: &str) -> StoreResult<Vec<WorkRef>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(
@@ -56,7 +67,7 @@ impl SqliteStore {
     pub(crate) fn planning_export_attempts(
         &self,
         owner: PlanningChanges<'_>,
-    ) -> StoreResult<(bool, bool)> {
+    ) -> StoreResult<ExportAttempts> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let (table, key) = owner.receipt();
         let link = if matches!(owner, PlanningChanges::Project(_)) {
@@ -65,9 +76,25 @@ impl SqliteStore {
             "0"
         };
         conn.query_row(
-            &format!("SELECT export_attempted,{link} FROM {table} WHERE {key}=?1 AND export_json IS NOT NULL"),
-            [owner.owner().1], |row| Ok((row.get(0)?,row.get(1)?)),
+            &format!("SELECT export_attempted,{link},export_observed_at FROM {table} WHERE {key}=?1 AND export_json IS NOT NULL"),
+            [owner.owner().1],
+            |row| Ok(ExportAttempts { creation: row.get(0)?, link: row.get(1)?, observed_at: row.get(2)? }),
         ).optional()?.ok_or_else(|| StoreError::InvalidData("creation receipt is missing".into()))
+    }
+
+    /// Record a look (a pass or `lf task sync`) for this uncertain creation.
+    pub(crate) fn observe_planning_export(
+        &self,
+        owner: PlanningChanges<'_>,
+        now: i64,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let (table, key) = owner.receipt();
+        conn.execute(
+            &format!("UPDATE {table} SET export_observed_at=?2 WHERE {key}=?1 AND export_json IS NOT NULL"),
+            params![owner.owner().1, now],
+        )?;
+        Ok(())
     }
 
     // Capture before provider discovery; a concurrent local save cannot alter this effect.
@@ -154,7 +181,6 @@ impl SqliteStore {
         owner: PlanningChanges<'_>,
         input: &Value,
         link: bool,
-        retry_creation: bool,
     ) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let (table, key) = owner.receipt();
@@ -168,8 +194,10 @@ impl SqliteStore {
         } else {
             ""
         };
+        // The caller holds the object's delivery lock and has read the receipt;
+        // whether this is a first send or a re-send is its decision.
         Ok(conn.execute(&format!("UPDATE {table} SET {column}=1,export_error=NULL,export_json=CASE WHEN ?3 THEN export_json ELSE json_set(export_json,'$.input',json(?2)) END
-            WHERE {key}=?1 AND ({column}=0 OR ?4) AND export_json IS NOT NULL {deleted}"), params![owner.owner().1,input.to_string(),link,retry_creation && !link])? == 1)
+            WHERE {key}=?1 AND export_json IS NOT NULL {deleted}"), params![owner.owner().1,input.to_string(),link])? == 1)
     }
 
     pub(crate) fn reject_planning_export(
@@ -404,7 +432,7 @@ mod tests {
     use super::{attach_in, retain_filing_export_in, PlanningExport};
     use crate::durable::{ProjectId, TaskId};
     use crate::store::migrations::{
-        apply_before_current_draft, convert_released_data, current_draft_sql,
+        apply_before_migration, convert_released_data, migration_section_sql,
     };
     use crate::store::sqlite::planning_changes::PlanningChanges;
     use crate::store::sqlite::task_history::RetainedFiling;
@@ -413,12 +441,12 @@ mod tests {
     #[test]
     fn historical_creation_keeps_intent_values_after_local_edits() {
         let conn = Connection::open_in_memory().unwrap();
-        apply_before_current_draft(&conn, "planning_peers");
+        apply_before_migration(&conn, "planning_peers");
         conn.execute_batch(include_str!(
             "../../../tests/fixtures/migrations/creation_baselines.sql"
         ))
         .unwrap();
-        let sql = current_draft_sql("planning_peers");
+        let sql = migration_section_sql("planning_peers");
         conn.execute_batch(&sql).unwrap();
         convert_released_data(&conn, &sql).unwrap();
         conn.execute("UPDATE task_creation_intents SET export_json=NULL", [])
@@ -477,7 +505,7 @@ mod tests {
     #[test]
     fn malformed_creation_baseline_keeps_released_receipts_and_schema() {
         let mut conn = Connection::open_in_memory().unwrap();
-        apply_before_current_draft(&conn, "planning_peers");
+        apply_before_migration(&conn, "planning_peers");
         conn.execute_batch(include_str!(
             "../../../tests/fixtures/migrations/creation_baselines.sql"
         ))
@@ -491,7 +519,7 @@ mod tests {
         };
         let before = receipt(&conn);
         let tx = conn.transaction().unwrap();
-        let sql = current_draft_sql("planning_peers");
+        let sql = migration_section_sql("planning_peers");
         tx.execute_batch(&sql).unwrap();
         assert!(convert_released_data(&tx, &sql).is_err());
         tx.rollback().unwrap();
@@ -507,7 +535,7 @@ mod tests {
         for project in [false, true] {
             for changed_readback in [false, true] {
                 let conn = Connection::open_in_memory().unwrap();
-                apply_before_current_draft(&conn, "planning_peers");
+                apply_before_migration(&conn, "planning_peers");
                 conn.execute_batch(include_str!(
                     "../../../tests/fixtures/migrations/creation_baselines.sql"
                 ))
@@ -541,7 +569,7 @@ mod tests {
                     .unwrap()
                 };
                 let before: Value = serde_json::from_str(&receipt()).unwrap();
-                let sql = current_draft_sql("planning_peers");
+                let sql = migration_section_sql("planning_peers");
                 conn.execute_batch(&sql).unwrap();
                 convert_released_data(&conn, &sql).unwrap();
                 let after: Value = serde_json::from_str(&receipt()).unwrap();

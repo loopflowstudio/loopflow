@@ -106,9 +106,8 @@ impl Drop for AmbientVarGuard {
     }
 }
 
-/// Make a registry file inaccessible so `open_store` cannot open it — the
-/// `RegistryUnavailable::Incompatible` branch (which also covers
-/// schema-incompatible and locked stores). Simulating a real registry that
+/// Make a registry file inaccessible so `open_existing_store` fails — the same
+/// error a schema-incompatible or locked store produces. Simulating a real registry that
 /// became unreadable is more faithful than a garbage file, which SQLite may
 /// recreate or recover from via WAL.
 #[cfg(unix)]
@@ -131,9 +130,8 @@ fn missing_registry_and_ambient_input_leave_checkout_unmanaged() {
 /// A Task worktree whose registry exists but cannot be opened (inaccessible)
 /// must refuse before any push or `gh pr`. No ambient id is set — this is the
 /// interactive Task-worktree shape — and the unreadable registry cannot be
-/// inspected to prove otherwise, so publication refuses. The
-/// `RegistryUnavailable::Incompatible` branch also covers schema-incompatible
-/// and locked stores.
+/// inspected to prove otherwise, so publication refuses. The same error covers
+/// schema-incompatible and locked stores.
 #[cfg(unix)]
 #[test]
 fn publish_refuses_when_registry_inaccessible_before_any_push() {
@@ -181,8 +179,8 @@ fn publish_refuses_when_registry_inaccessible_before_any_push() {
         "expected an authority refusal, got: {message}"
     );
     assert!(
-        message.contains("incompatible"),
-        "refusal must name the inaccessible/incompatible registry, got: {message}"
+        message.contains("unable to open database file"),
+        "refusal must carry the store's own error, got: {message}"
     );
 
     assert!(
@@ -280,8 +278,8 @@ fn task_stack_refuses_when_registry_inaccessible() {
 /// A registry file that is present but not a valid database (schema-incompatible
 /// / corrupt) must refuse before any push or `gh pr`. The WAL sidecars are
 /// removed first so SQLite cannot recover the prior valid state from them and
-/// `open_store` hits "file is not a database" — the same
-/// `RegistryUnavailable::Incompatible` branch as an inaccessible store.
+/// `open_existing_store` hits "file is not a database" — the same error as an
+/// inaccessible store.
 #[test]
 fn publish_refuses_when_registry_schema_incompatible_before_any_push() {
     let home = tempfile::TempDir::new().expect("temp home");
@@ -328,8 +326,8 @@ fn publish_refuses_when_registry_schema_incompatible_before_any_push() {
         "expected an authority refusal, got: {message}"
     );
     assert!(
-        message.contains("incompatible"),
-        "refusal must name the incompatible registry, got: {message}"
+        message.contains("not a database"),
+        "refusal must carry the store's own error, got: {message}"
     );
 
     assert!(

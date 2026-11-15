@@ -3,6 +3,8 @@
 //! Release receipts live outside the data directory. Ordinary commands share
 //! the main Machine; explicit experiments never change installed artifact selection.
 
+pub mod server;
+
 use std::collections::HashSet;
 #[cfg(unix)]
 use std::ffi::{CStr, OsString};
@@ -18,7 +20,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -112,7 +114,7 @@ pub struct ArtifactSet {
     pub source: InstallSource,
     pub source_revision: String,
     pub source_identity: String,
-    /// An unreleased build's provenance, e.g. `hotfix e9b2c2eac on v0.14.16`.
+    /// An unreleased build's provenance, e.g. `build e9b2c2eac on v0.14.16`.
     pub build_label: Option<String>,
     pub content_sha256: String,
     pub artifacts: Vec<ArtifactIdentity>,
@@ -772,6 +774,17 @@ pub(crate) fn desktop_helper() -> Option<PathBuf> {
     is_app_helper(&current).then_some(current)
 }
 
+/// The installed Loopflow.app: the bundle the account's public `lf` resolves
+/// into. Promotion links `~/.local/bin/lf` to the app's own `lf`, so this names
+/// the promoted copy and never another build that shares its bundle id.
+pub(crate) fn installed_app() -> Option<PathBuf> {
+    let public = fs::canonicalize(account_home().ok()?.join(".local/bin/lf")).ok()?;
+    if !is_app_helper(&public) {
+        return None;
+    }
+    public.ancestors().nth(3).map(Path::to_path_buf)
+}
+
 /// `<App>.app/Contents/MacOS/lf`.
 pub(crate) fn is_app_helper(path: &Path) -> bool {
     let tail: Vec<_> = path
@@ -783,56 +796,14 @@ pub(crate) fn is_app_helper(path: &Path) -> bool {
     matches!(tail[..], [Some("lf"), Some("MacOS"), Some("Contents"), Some(bundle)] if bundle.ends_with(".app"))
 }
 
-/// Use the installed CLI for the main Machine. A Desktop helper keeps itself,
-/// private Homes keep their caller, and so does a draft build, which works on
-/// its own copy of the store.
-pub fn dispatch_default_cli() -> Result<()> {
-    if crate::store::copy::selected().is_some() {
-        return Ok(());
-    }
+/// A build runs its own code on whichever home it selects. A private home
+/// reaches children as its canonical path.
+pub fn canonicalize_selected_home() -> Result<()> {
     if crate::store::custom_home_selected() {
         let home = crate::store::canonicalize_with_missing_tail(&crate::store::lf_home_dir())?;
         std::env::set_var("LF_HOME", home);
-        return Ok(());
     }
-    // A build with drafts works on its own copy of the shared store; the
-    // installed lf cannot read that copy.
-    if crate::store::copy::selected().is_some() {
-        return Ok(());
-    }
-    let current = fs::canonicalize(std::env::current_exe()?)?;
-    if is_app_helper(&current) {
-        return Ok(());
-    }
-    std::env::remove_var("LF_BIN");
-    let destination = if let Some(cli) = installed_cli(&root()?)? {
-        cli.verify()?;
-        cli.path
-    } else {
-        let installed = account_home()?.join(".local/bin/lf");
-        match fs::canonicalize(&installed) {
-            Ok(path) => path,
-            Err(error) if error.kind() == ErrorKind::NotFound && crate::build_info::provenance().is_release() => return Ok(()),
-            Err(error) if error.kind() == ErrorKind::NotFound => return Err(anyhow!(
-                "no installed lf; install a published release or select an explicit disposable LF_HOME for this build"
-            )),
-            Err(error) => return Err(error.into()),
-        }
-    };
-    if current == destination {
-        return Ok(());
-    }
-    let main_home = account_home()?.join(".lf");
-    let mut command = reexec(&destination);
-    command.env("LF_HOME", &main_home);
-    #[cfg(unix)]
-    {
-        Err(command.exec()).context("run installed lf")
-    }
-    #[cfg(not(unix))]
-    {
-        std::process::exit(command.status()?.code().unwrap_or(1));
-    }
+    Ok(())
 }
 
 pub fn dispatch_entry_gate(role: &ArtifactRole) -> Result<()> {
@@ -853,39 +824,9 @@ pub fn dispatch_entry_gate(role: &ArtifactRole) -> Result<()> {
         return Ok(());
     }
 
-    let switch_capability = _switch_capability(role);
-    let selection = match read_state(&root)? {
-        InstallationState::Legacy => {
-            return Err(anyhow!(
-                "installation entry gate {} has no settled install receipt",
-                gate.display()
-            ))
-        }
-        InstallationState::Switching(receipt)
-            if switch_capability.as_deref() == Some(receipt.id.as_str())
-                && receipt.phase.order() >= SwitchPhase::Activated.order()
-                && receipt.target_store_advanced =>
-        {
-            receipt.target
-        }
-        // A switch this process is not driving (typically one that failed or was
-        // abandoned mid-flight) must not brick ordinary startup: dispatch through
-        // the last good install instead of refusing.
-        InstallationState::Switching(receipt) => startup_selection_during_switch(&receipt)?,
-        InstallationState::Settled(active) => active.selection,
-    };
-    let artifact = selection
-        .artifact_set
-        .artifacts
-        .iter()
-        .find(|artifact| artifact_matches_runtime_role(&artifact.role, role))
-        .ok_or_else(|| {
-            anyhow!(
-                "active installation {} has no {:?} artifact",
-                selection.installation_id,
-                role
-            )
-        })?;
+    let selection = gate_selection(&root, _switch_capability(role).as_deref())
+        .with_context(|| format!("installation entry gate {}", gate.display()))?;
+    let artifact = gate_artifact(&selection, role)?;
     artifact.verify()?;
     if artifact.path == gate {
         return Err(anyhow!(
@@ -918,6 +859,91 @@ pub fn dispatch_entry_gate(role: &ArtifactRole) -> Result<()> {
     }
 }
 
+/// The install the gate dispatches to: the switch this process drives once it
+/// is activated, else the last good install.
+fn gate_selection(root: &Path, switch_capability: Option<&str>) -> Result<InstallSelection> {
+    Ok(match read_state(root)? {
+        InstallationState::Legacy => bail!("no settled install receipt"),
+        InstallationState::Switching(receipt)
+            if switch_capability == Some(receipt.id.as_str())
+                && receipt.phase.order() >= SwitchPhase::Activated.order()
+                && receipt.target_store_advanced =>
+        {
+            receipt.target
+        }
+        // A switch this process is not driving (typically one that failed or was
+        // abandoned mid-flight) must not brick ordinary startup: dispatch through
+        // the last good install instead of refusing.
+        InstallationState::Switching(receipt) => startup_selection_during_switch(&receipt)?,
+        InstallationState::Settled(active) => active.selection,
+    })
+}
+
+fn gate_artifact<'a>(
+    selection: &'a InstallSelection,
+    role: &ArtifactRole,
+) -> Result<&'a ArtifactIdentity> {
+    selection
+        .artifact_set
+        .artifacts
+        .iter()
+        .find(|artifact| artifact_matches_runtime_role(&artifact.role, role))
+        .ok_or_else(|| {
+            anyhow!(
+                "active installation {} has no {:?} artifact",
+                selection.installation_id,
+                role
+            )
+        })
+}
+
+/// Whether the selected entry launches a different build from `executable`.
+/// An unreadable entry or executable is not superseded; the next check retries.
+pub(crate) fn superseded(executable: &Path) -> bool {
+    launch_target().is_ok_and(|target| !same_build(executable, &target))
+}
+
+/// The executable a launch through the entry runs now: the gate's selected CLI
+/// artifact, else the file the entry names after following symlinks.
+pub(crate) fn launch_target() -> Result<PathBuf> {
+    resolve_entry_target(&crate::os_process::resolve_lf_binary()?)
+}
+
+/// The account's promoted CLI, independent of a development app's helper.
+pub(crate) fn installed_cli() -> Result<PathBuf> {
+    resolve_entry_target(&account_home()?.join(".local/bin/lf"))
+}
+
+fn resolve_entry_target(entry: &Path) -> Result<PathBuf> {
+    let canonical =
+        fs::canonicalize(entry).with_context(|| format!("resolve lf entry {}", entry.display()))?;
+    let root = root()?;
+    let gate = entry_gate_path(&root, &ArtifactRole::Cli)?;
+    if !fs::canonicalize(&gate).is_ok_and(|gate| gate == canonical) {
+        return Ok(canonical);
+    }
+    let selection = gate_selection(&root, None)?;
+    let artifact = gate_artifact(&selection, &ArtifactRole::Cli)?;
+    fs::canonicalize(&artifact.path)
+        .with_context(|| format!("resolve selected lf {}", artifact.path.display()))
+}
+
+/// Whether two executables are one build: the same file, or the same bytes at
+/// different paths, as Desktop's bundled lf and the installed CLI artifact are.
+fn same_build(a: &Path, b: &Path) -> bool {
+    let (Ok(a), Ok(b)) = (fs::canonicalize(a), fs::canonicalize(b)) else {
+        return false;
+    };
+    if a == b {
+        return true;
+    }
+    let same_len = match (fs::metadata(&a), fs::metadata(&b)) {
+        (Ok(a), Ok(b)) => a.len() == b.len(),
+        _ => false,
+    };
+    same_len && matches!((file_sha256(&a), file_sha256(&b)), (Ok(a), Ok(b)) if a == b)
+}
+
 pub fn read_state(root: &Path) -> Result<InstallationState> {
     let switch_path = root.join(SWITCH_FILE);
     if path_exists(&switch_path)? {
@@ -932,31 +958,6 @@ pub fn read_state(root: &Path) -> Result<InstallationState> {
         return Ok(InstallationState::Settled(Box::new(active)));
     }
     Ok(InstallationState::Legacy)
-}
-
-/// Ordinary launches use published artifacts even if an old development
-/// installation is still selected. Its store never participates in routing.
-pub(crate) fn installed_artifacts(root: &Path) -> Result<Option<ArtifactSet>> {
-    let active = match read_state(root)? {
-        InstallationState::Legacy => return Ok(None),
-        InstallationState::Settled(active) => *active,
-        InstallationState::Switching(receipt) => startup_active_during_switch(&receipt)?,
-    };
-    Ok(Some(match active.selection.source {
-        InstallSource::Published => active.selection.artifact_set,
-        InstallSource::Development => active.published_fallback,
-    }))
-}
-
-pub(crate) fn installed_cli(root: &Path) -> Result<Option<ArtifactIdentity>> {
-    let Some(artifacts) = installed_artifacts(root)? else {
-        return Ok(None);
-    };
-    artifacts
-        .artifact(&ArtifactRole::Cli)
-        .cloned()
-        .map(Some)
-        .context("installed CLI is missing")
 }
 
 /// The install selection ordinary startup should use while a switch receipt is
@@ -1660,31 +1661,6 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("digest mismatch"));
-    }
-
-    #[test]
-    fn ordinary_cli_uses_published_artifacts_through_legacy_development_selection() {
-        let directory = tempfile::tempdir().unwrap();
-        let root = directory.path().join("authority");
-        assert!(super::installed_cli(&root).unwrap().is_none());
-        let published = selection(directory.path(), "published", InstallSource::Published);
-        let development = selection(directory.path(), "development", InstallSource::Development);
-        let expected = published.artifact_set.artifact(&ArtifactRole::Cli).unwrap();
-        for selected in [published.clone(), development.clone()] {
-            let active = active(selected, published.artifact_set.clone());
-            write_atomic_json(&root, &root.join(ACTIVE_FILE), &active).unwrap();
-            assert_eq!(
-                super::installed_cli(&root).unwrap().as_ref(),
-                Some(expected)
-            );
-        }
-        let next = selection(directory.path(), "next", InstallSource::Published);
-        let receipt = switch(development, next, published.artifact_set.clone());
-        write_switch(&root, &receipt).unwrap();
-        assert_eq!(
-            super::installed_cli(&root).unwrap().as_ref(),
-            Some(expected)
-        );
     }
 
     #[test]

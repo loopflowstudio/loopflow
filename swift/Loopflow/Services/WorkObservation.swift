@@ -1,37 +1,23 @@
 import Foundation
 
-/// What a window shows, kept current by one `lf … --json --watch` process per
-/// part: the same reads any client runs, each internally consistent.
+/// What a window shows, kept current by one served subscription per part: the reads
+/// `lf … --json --subscribe` prints, each internally consistent.
 public struct WorkObservation: Sendable {
     public let frames: AsyncThrowingStream<WorkFrame, any Error>
     /// Requests are delivered in the order they are made.
     public let request: @Sendable (WorkRequest) -> Void
-    /// Returns only after every owned watch has exited.
+    /// Returns only after every owned subscription has exited.
     public let cancel: @Sendable () async -> Void
-    /// The preview copy directory a draft-carrying build reads; nil on the shared store.
-    public let copy: String?
 
     public init(
         frames: AsyncThrowingStream<WorkFrame, any Error>,
         request: @escaping @Sendable (WorkRequest) -> Void,
-        cancel: @escaping @Sendable () async -> Void,
-        copy: String?
+        cancel: @escaping @Sendable () async -> Void
     ) {
         self.frames = frames
         self.request = request
         self.cancel = cancel
-        self.copy = copy
     }
-
-    /// The copy `lf --version` names on its `copy:` line.
-    public static func copy(fromVersion output: String) -> String? {
-        output.split(separator: "\n").first { $0.hasPrefix("copy: ") }.map { String($0.dropFirst(6)) }
-    }
-}
-
-public enum WorkObservationError: Error, Sendable {
-    /// Replace the reader only after draining its previous launch authority.
-    case configurationChanged
 }
 
 /// The Work whose activity is shown: `lf history`'s filters.
@@ -47,19 +33,22 @@ public struct WorkActivityScope: Equatable, Sendable {
     }
 }
 
-/// What a window shows; it selects which watches run and with what arguments.
+/// What a window shows; it selects which subscriptions run and with what arguments.
 public struct WorkScope: Equatable, Sendable {
     public let repo: String?
     public let headless: Bool
     /// Task identifier whose work is shown.
     public let task: String?
     public let activity: WorkActivityScope?
+    /// The Wave whose started Tasks the sidebar lists; nil lists the repository's.
+    public let taskListWave: String?
 
-    public init(repo: String?, headless: Bool, task: String?, activity: WorkActivityScope?) {
+    public init(repo: String?, headless: Bool, task: String?, activity: WorkActivityScope?, taskListWave: String?) {
         self.repo = repo
         self.headless = headless
         self.task = task
         self.activity = activity
+        self.taskListWave = taskListWave
     }
 }
 
@@ -68,8 +57,8 @@ public struct WorkScope: Equatable, Sendable {
 public enum WorkRequest: Equatable, Sendable {
     case scope(id: Int, WorkScope)
     case refresh(id: Int)
-    /// Confirm delivery after a command's commit: each named part's watch, or
-    /// every running watch when `replay` is empty, answers before the
+    /// Confirm delivery after a command's commit: each named part's subscription, or
+    /// every running subscription when `replay` is empty, answers before the
     /// checkpoint frame follows.
     case checkpoint(id: Int, replay: [String])
 
@@ -80,38 +69,35 @@ public enum WorkRequest: Equatable, Sendable {
     }
 }
 
-/// One watch a window runs, and the `lf` read behind it.
+/// One subscription a window runs, and the read behind it.
 public enum WorkPart: String, CaseIterable, Sendable {
     case task, sessions, planning, selections, activity
+    case taskList = "task_list"
     case peerPlanning = "peer_planning"
     case workActivity = "work_activity"
 
-    /// The read this part watches for `scope`, and the directory it runs in;
-    /// nil when the scope shows no such part.
-    public func command(for scope: WorkScope) -> (args: [String], cwd: String?)? {
+    /// The read this part subscriptions for `scope`; nil when the scope shows no such part.
+    public func read(for scope: WorkScope) -> ServedRead? {
         switch self {
-        case .planning: return (["desktop", "plan", "--all"], nil)
-        case .activity: return (["monitor", "ps"], nil)
-        case .selections:
-            return scope.repo.map { (["desktop", "plans"], $0) }
-        case .peerPlanning:
-            return scope.repo.map { (["planning", "status"], $0) }
-        case .sessions:
-            return scope.repo.map { (["desktop", "sessions"] + (scope.headless ? ["--interactive", "all"] : []), $0) }
+        case .planning: return .allPlans
+        case .activity: return .processList
+        case .selections: return scope.repo.map { .desktopViewList(directory: $0) }
+        case .taskList:
+            return scope.repo.map { .desktopViewGet(directory: $0, expression: TaskList.started.expression(wave: scope.taskListWave)) }
+        case .peerPlanning: return scope.repo.map { .repoPlan(directory: $0) }
+        case .sessions: return scope.repo.map { .sessionList(directory: $0, headless: scope.headless, after: nil, limit: nil, task: nil) }
         case .task:
-            return scope.task.map { (["desktop", "task", $0], scope.repo) }
+            // Without a repository the Task resolves Machine-wide, from no checkout.
+            return scope.task.map { .taskGet(directory: scope.repo ?? "/", issue: $0) }
         case .workActivity:
-            guard let activity = scope.activity else { return nil }
-            var args = ["history", "--since", "7d", "--limit", "50"]
-            if let wave = activity.wave { args += ["--wave", wave] }
-            if let project = activity.project { args += ["--project", project] }
-            if let task = activity.task { args += ["--task", task] }
-            return (args, nil)
+            return scope.activity.map {
+                .sessionHistory(since: "7d", limit: 50, wave: $0.wave, project: $0.project, task: $0.task)
+            }
         }
     }
 }
 
-/// One part's reading as a window applies it, decoded from its watch's frame.
+/// One part's reading as a window applies it, decoded from its subscription's frame.
 public struct WorkFrame: Sendable {
     /// `lf wave show --all`; Waves are the plan's own.
     public struct Planning: Sendable {
@@ -139,7 +125,7 @@ public struct WorkFrame: Sendable {
         public let work: TaskOverview
         public let graphProcesses: [GraphProcessDetail]
         public let comments: TaskComments
-        public let diagnostics: TaskWork?
+        public let execution: TaskExecution?
     }
 
     public struct WorkActivityPart: Sendable {
@@ -151,6 +137,8 @@ public struct WorkFrame: Sendable {
     public enum Content: Sendable {
         case planning(Planning?)
         case selections([WorkViewPlan]?)
+        /// The sidebar's started Tasks, as the phone lists them.
+        case taskList(WorkViewPlan?)
         case peerPlanning(PeerPlanning?)
         case sessions(Sessions?)
         case task(TaskPart?)
@@ -162,6 +150,7 @@ public struct WorkFrame: Sendable {
             switch self {
             case .planning: WorkPart.planning.rawValue
             case .selections: WorkPart.selections.rawValue
+            case .taskList: WorkPart.taskList.rawValue
             case .peerPlanning: WorkPart.peerPlanning.rawValue
             case .sessions: WorkPart.sessions.rawValue
             case .task: WorkPart.task.rawValue
@@ -180,6 +169,8 @@ public struct WorkFrame: Sendable {
     /// Wire text of the parts a saved workspace keeps, exactly as a one-shot
     /// read would have printed them.
     public let wire: Wire?
+    /// When the observation handed this frame to its window.
+    public let received = ContinuousClock.now
 
     public struct Wire: Sendable {
         public let roadmap: String?
@@ -216,13 +207,12 @@ public struct WorkFrame: Sendable {
         }
     }
 
-    private struct TaskStatusReading: Decodable {
-        struct Execution: Decodable { let work: TaskWork }
-        let overview: TaskOverview?
-        let graphProcesses: [GraphProcessDetail]
-        let comments: TaskComments?
-        let execution: Execution?
-        let row: RoadmapTask?
+    public struct TaskStatusReading: Decodable {
+        public let overview: TaskOverview?
+        public let graphProcesses: [GraphProcessDetail]
+        public let comments: TaskComments?
+        public let execution: TaskExecution?
+        public let row: RoadmapTask?
 
         enum CodingKeys: String, CodingKey {
             case overview, comments, execution, row
@@ -234,7 +224,7 @@ public struct WorkFrame: Sendable {
         let destinations: [PeerPlanningStatus]
     }
 
-    /// Decode one line of `part`'s watch, read for `scope`.
+    /// Decode one line of `part`'s subscription, read for `scope`.
     public static func decode(part: WorkPart, scope: WorkScope, sequence: Int, line: Data) throws -> WorkFrame {
         func envelope<Body: Decodable>(_: Body.Type) throws -> Envelope<Body> {
             try JSONDecoder().decode(Envelope<Body>.self, from: line)
@@ -266,6 +256,9 @@ public struct WorkFrame: Sendable {
         case .selections:
             let read = try envelope([WorkViewPlan].self)
             return frame(read, .selections(read.body))
+        case .taskList:
+            let read = try envelope(WorkViewPlan.self)
+            return frame(read, .taskList(read.body))
         case .peerPlanning:
             let read = try envelope(PeerPlanningReading.self)
             return frame(read, .peerPlanning(read.body.map {
@@ -286,7 +279,7 @@ public struct WorkFrame: Sendable {
             }
             return frame(read, .task(TaskPart(task: task, row: status.row, work: work,
                                               graphProcesses: status.graphProcesses,
-                                              comments: comments, diagnostics: status.execution?.work)))
+                                              comments: comments, execution: status.execution)))
         case .workActivity:
             let read = try envelope(WorkActivitySnapshot.self)
             return frame(read, .workActivity(zip(scope.activity, read.body).map {
@@ -304,12 +297,12 @@ private func zip<A, B>(_ a: A?, _ b: B?) -> (A, B)? {
     return (a, b)
 }
 
-/// One owned `lf … --json --watch` process speaking newline-delimited JSON.
-public struct LineWatch: Sendable {
+/// One served subscription speaking `lf <read> --json --subscribe`'s newline-delimited JSON.
+public struct LineSubscription: Sendable {
     public let lines: AsyncThrowingStream<Data, any Error>
     /// Queue one newline-terminated request line.
     public let send: @Sendable (Data) -> Void
-    /// Returns only after the process has exited.
+    /// Returns only after the subscription has ended.
     public let cancel: @Sendable () async -> Void
 
     public init(lines: AsyncThrowingStream<Data, any Error>, send: @escaping @Sendable (Data) -> Void,
@@ -320,18 +313,17 @@ public struct LineWatch: Sendable {
     }
 }
 
-/// Runs the watches a window's scope selects and merges their frames into one
-/// observation. A scope change restarts only the watches whose read changed;
+/// Runs the subscriptions a window's scope selects and merges their frames into one
+/// observation. A scope change restarts only the subscriptions whose read changed;
 /// the others answer it from their last frame without reading again.
-public final class WorkWatches: @unchecked Sendable {
-    /// Starts `lf <args> --json --watch` in `cwd`.
-    public typealias Launch = @Sendable (_ args: [String], _ cwd: String?) throws -> LineWatch
+public final class WorkSubscriptions: @unchecked Sendable {
+    /// Serves `read` as `lf <read> --subscribe` prints it.
+    public typealias Launch = @Sendable (_ read: ServedRead) throws -> LineSubscription
 
     private struct Running {
         let generation: Int
-        let args: [String]
-        let cwd: String?
-        let watch: LineWatch
+        let read: ServedRead
+        let subscription: LineSubscription
         let reader: Task<Void, Never>
         /// The request it was started after: every reading it makes is newer.
         let launched: Int
@@ -344,19 +336,18 @@ public final class WorkWatches: @unchecked Sendable {
     private let lock = NSLock()
     private let continuation: AsyncThrowingStream<WorkFrame, any Error>.Continuation
     private var running: [WorkPart: Running] = [:]
-    private var scope = WorkScope(repo: nil, headless: false, task: nil, activity: nil)
+    private var scope = WorkScope(repo: nil, headless: false, task: nil, activity: nil, taskListWave: nil)
     private var sequence = 0
     private var generation = 0
     /// Checkpoints waiting on these parts' answers.
     private var checkpoints: [(id: Int, waiting: Set<WorkPart>, failed: [String])] = []
     private var finished = false
 
-    public static func observe(copy: String?, launch: @escaping Launch) throws -> WorkObservation {
+    public static func observe(launch: @escaping Launch) throws -> WorkObservation {
         let (frames, continuation) = AsyncThrowingStream<WorkFrame, any Error>.makeStream()
-        let watches = WorkWatches(launch: launch, continuation: continuation)
-        try watches.lock.withLock { try watches.select(id: 0) }
-        return WorkObservation(frames: frames, request: { watches.handle($0) }, cancel: { await watches.stop() },
-                               copy: copy)
+        let subscriptions = WorkSubscriptions(launch: launch, continuation: continuation)
+        try subscriptions.lock.withLock { try subscriptions.select(id: 0) }
+        return WorkObservation(frames: frames, request: { subscriptions.handle($0) }, cancel: { await subscriptions.stop() })
     }
 
     private init(launch: @escaping Launch, continuation: AsyncThrowingStream<WorkFrame, any Error>.Continuation) {
@@ -373,11 +364,11 @@ public final class WorkWatches: @unchecked Sendable {
                     scope = next
                     try select(id: id)
                 case .refresh(let id):
-                    for watch in running.values { watch.watch.send(Self.confirm(id)) }
+                    for running in running.values { running.subscription.send(Self.confirm(id)) }
                 case .checkpoint(let id, let replay):
                     let parts = replay.isEmpty ? Set(running.keys)
                         : Set(replay.compactMap(WorkPart.init(rawValue:))).intersection(running.keys)
-                    for part in parts { running[part]?.watch.send(Self.confirm(id)) }
+                    for part in parts { running[part]?.subscription.send(Self.confirm(id)) }
                     checkpoints.append((id, parts, []))
                     settleCheckpoints()
                 }
@@ -385,36 +376,36 @@ public final class WorkWatches: @unchecked Sendable {
         }
     }
 
-    /// Start, stop or keep each part's watch for the current scope. A kept
-    /// watch answers `id` with its last reading.
+    /// Start, stop or keep each part's subscription for the current scope. A kept
+    /// subscription answers `id` with its last reading.
     private func select(id: Int) throws {
         var stopped: [Running] = []
         for part in WorkPart.allCases {
-            let command = part.command(for: scope)
-            if var current = running[part], let command, current.args == command.args, current.cwd == command.cwd {
+            let read = part.read(for: scope)
+            if var current = running[part], current.read == read {
                 current.floor = id
                 running[part] = current
                 if let last = current.last { yield(part, last) }
                 continue
             }
             if let current = running.removeValue(forKey: part) { stopped.append(current) }
-            guard let command else { continue }
-            let watch = try launch(command.args + ["--json", "--watch"], command.cwd)
+            guard let read else { continue }
+            let subscription = try launch(read)
             generation += 1
             let generation = generation
             let reader = Task { [weak self] in
                 do {
-                    for try await line in watch.lines { self?.receive(part, generation, line: line) }
+                    for try await line in subscription.lines { self?.receive(part, generation, line: line) }
                     self?.ended(part, generation, error: nil)
                 } catch {
                     self?.ended(part, generation, error: error)
                 }
             }
-            running[part] = Running(generation: generation, args: command.args, cwd: command.cwd, watch: watch,
+            running[part] = Running(generation: generation, read: read, subscription: subscription,
                                     reader: reader, launched: id, floor: id)
         }
         if !stopped.isEmpty {
-            Task { for watch in stopped { watch.reader.cancel(); await watch.watch.cancel() } }
+            Task { for running in stopped { running.reader.cancel(); await running.subscription.cancel() } }
         }
         // A part that stopped no longer holds a checkpoint back.
         settleCheckpoints()
@@ -438,16 +429,16 @@ public final class WorkWatches: @unchecked Sendable {
                 }
                 settleCheckpoints()
             } catch {
-                fail(RegistryQueryError("Invalid \(part.rawValue) watch frame: \(error)"))
+                fail(RegistryQueryError("Invalid \(part.rawValue) subscription frame: \(error)"))
             }
         }
     }
 
     private func ended(_ part: WorkPart, _ generation: Int, error: (any Error)?) {
         lock.withLock {
-            // A watch that ends on its own ends the observation; the window reopens it.
+            // A subscription that ends on its own ends the observation; the window reopens it.
             guard !finished, running[part]?.generation == generation else { return }
-            fail(error ?? RegistryQueryError("The \(part.rawValue) watch ended"))
+            fail(error ?? RegistryQueryError("The \(part.rawValue) subscription ended"))
         }
     }
 
@@ -456,8 +447,8 @@ public final class WorkWatches: @unchecked Sendable {
         continuation.yield(last.answering(max(last.answers ?? 0, running[part]?.floor ?? 0), sequence: sequence))
     }
 
-    /// A checkpoint follows once every watch it waits on has answered; a
-    /// watch that stopped no longer shows anything to confirm.
+    /// A checkpoint follows once every subscription it waits on has answered; a
+    /// subscription that stopped no longer shows anything to confirm.
     private func settleCheckpoints() {
         for index in checkpoints.indices {
             checkpoints[index].waiting = checkpoints[index].waiting.filter { running[$0] != nil }
@@ -479,15 +470,15 @@ public final class WorkWatches: @unchecked Sendable {
     }
 
     private func stop() async {
-        let watches: [Running] = lock.withLock {
+        let subscriptions: [Running] = lock.withLock {
             finished = true
             continuation.finish()
             defer { running = [:] }
             return Array(running.values)
         }
-        for watch in watches {
-            watch.reader.cancel()
-            await watch.watch.cancel()
+        for running in subscriptions {
+            running.reader.cancel()
+            await running.subscription.cancel()
         }
     }
 

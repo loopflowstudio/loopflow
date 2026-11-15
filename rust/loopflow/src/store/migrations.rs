@@ -1,14 +1,13 @@
-//! Release-scoped schema migrations. See `MIGRATIONS.md` next to this file for
-//! the convention; the one rule is that a shipped migration is never edited.
+//! Schema migrations. See `MIGRATIONS.md` next to this file for the
+//! convention; the one rule is that a merged migration is never edited.
 
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use super::migration_catalog::MIGRATIONS;
 pub use super::migration_catalog::{Migration, MigrationId};
-use super::migration_schema::{product_schema, ForeignKeyDefinition, ProductSchemaObject};
+use super::migration_schema::{product_schema, ProductSchemaObject};
 use crate::store::sqlite::SQLITE_WRITE_BUSY_TIMEOUT;
 use crate::store::{StoreError, StoreResult};
 use fs2::FileExt;
@@ -16,20 +15,32 @@ use rusqlite::OptionalExtension;
 use serde::de::DeserializeOwned;
 use sha2::{Digest, Sha256};
 
+// The catalog `build.rs` generates: released batches, then later migrations in
+// the order origin/main added them, then this checkout's unmerged ones.
+include!(concat!(env!("OUT_DIR"), "/migrations.rs"));
+
+/// The SQL of a migration named by its slug, or of the released batch whose
+/// `-- draft: <name>` section carries it.
 #[doc(hidden)]
 pub fn migration_sql_for_test(name: &str) -> String {
     let marker = format!("-- draft: {name}");
-    if let Some(migration) = MIGRATIONS
+    MIGRATIONS
         .iter()
-        .find(|migration| migration.sql.lines().any(|line| line == marker))
-    {
-        return migration.sql.to_string();
-    }
+        .find(|migration| {
+            migration.version == name || migration.sql.lines().any(|line| line == marker)
+        })
+        .expect("migration is in the catalog")
+        .sql
+        .to_string()
+}
 
-    let drafts =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/store/migrations/drafts");
-    std::fs::read_to_string(drafts.join(format!("{name}.sql")))
-        .expect("migration is canonical or present as a draft")
+/// The slug migrations this build carries that origin/main has not added.
+pub fn unmerged_migrations() -> Vec<&'static str> {
+    MIGRATIONS
+        .iter()
+        .filter(|migration| !migration.merged)
+        .map(|migration| migration.version)
+        .collect()
 }
 
 #[cfg(test)]
@@ -38,10 +49,9 @@ pub(crate) fn migration_is_applied_for_test(
     name: &str,
 ) -> StoreResult<bool> {
     let marker = format!("-- draft: {name}");
-    let Some(migration) = MIGRATIONS
-        .iter()
-        .find(|migration| migration.sql.lines().any(|line| line == marker))
-    else {
+    let Some(migration) = MIGRATIONS.iter().find(|migration| {
+        migration.version == name || migration.sql.lines().any(|line| line == marker)
+    }) else {
         return Ok(false);
     };
     Ok(applied_versions(conn)?
@@ -53,14 +63,17 @@ pub(crate) fn migration_is_applied_for_test(
 pub(crate) fn apply_released_planning_fixture(conn: &rusqlite::Connection) {
     let count = MIGRATIONS
         .iter()
-        .take_while(|m| (m.id.major, m.id.minor, m.id.patch.unwrap_or(0)) <= (0, 12, 29))
+        .take_while(|m| {
+            MigrationId::parse_version(m.version)
+                .is_some_and(|id| (id.major, id.minor, id.patch.unwrap_or(0)) <= (0, 12, 29))
+        })
         .count();
     apply_set(conn, &MIGRATIONS[..count], &mut Vec::new()).unwrap();
 }
 
 #[cfg(test)]
 pub(crate) use tests::{
-    apply_before_current_draft, apply_build_drafts, current_draft_sql, upgrade_from_draft,
+    apply_before_migration, apply_pending_migrations, migration_section_sql, upgrade_from_migration,
 };
 
 /// The exact branch-local history that reached one production ledger before
@@ -69,48 +82,24 @@ pub(crate) use tests::{
 /// known history without treating arbitrary unknown migrations as ours.
 const DIVERGENT_MIGRATIONS: &[Migration] = &[
     Migration {
-        id: MigrationId {
-            major: 0,
-            minor: 11,
-            patch: None,
-            ordinal: 8,
-        },
-        name: "context_pressure",
+        version: "0.11.008_context_pressure",
         sql: include_str!("migrations/0.11.009_context_pressure.sql"),
-        reader_floor: None,
+        merged: true,
     },
     Migration {
-        id: MigrationId {
-            major: 0,
-            minor: 11,
-            patch: None,
-            ordinal: 9,
-        },
-        name: "context_input_normalization",
+        version: "0.11.009_context_input_normalization",
         sql: include_str!("migrations/0.11.010_context_input_normalization.sql"),
-        reader_floor: None,
+        merged: true,
     },
     Migration {
-        id: MigrationId {
-            major: 0,
-            minor: 11,
-            patch: None,
-            ordinal: 10,
-        },
-        name: "profiles",
+        version: "0.11.010_profiles",
         sql: include_str!("migrations/0.11.011_profiles.sql"),
-        reader_floor: None,
+        merged: true,
     },
     Migration {
-        id: MigrationId {
-            major: 0,
-            minor: 11,
-            patch: None,
-            ordinal: 11,
-        },
-        name: "provider_account_lifecycle",
+        version: "0.11.011_provider_account_lifecycle",
         sql: include_str!("migrations/0.11.012_provider_account_lifecycle.sql"),
-        reader_floor: None,
+        merged: true,
     },
 ];
 
@@ -127,165 +116,22 @@ const CONVERGED_VERSIONS: &[&str] = &[
 /// bookkeeping rename, not a schema change.
 const LEGACY_BASELINE_VERSION: &str = "001_initial";
 
-const RECREATE_MESSAGE: &str =
-    "incompatible Loopflow database; delete loopflow.db and rerun the command";
-
-/// The package version a migration release cut belongs to, from the single
-/// source of truth (the workspace `Cargo.toml`, via Cargo).
-///
-/// # Panics
-///
-/// Panics if the package version is not `major.minor.patch`, which Cargo rejects
-/// long before this runs.
-pub fn active_namespace() -> (u32, u32, u32) {
-    let version = env!("CARGO_PKG_VERSION");
-    let mut parts = version.split('.');
-    let major = parts.next().and_then(|part| part.parse().ok());
-    let minor = parts.next().and_then(|part| part.parse().ok());
-    let patch = parts.next().and_then(|part| part.parse().ok());
-    match (major, minor, patch, parts.next()) {
-        (Some(major), Some(minor), Some(patch), None) => (major, minor, patch),
-        _ => panic!("package version {version} is not major.minor.patch"),
-    }
-}
-
 // -- Applying -----------------------------------------------------------------
 
 pub fn apply_sqlite(conn: &rusqlite::Connection) -> StoreResult<()> {
-    apply_sqlite_transaction(conn, |_| Ok(()))
+    apply_sqlite_transaction(conn, MigrationPurpose::Upgrade, |_| Ok(()))
 }
 
-/// Only the clone creator calls this, on its newly backed-up private destination.
-/// Drafts change the experiment schema, never the published migration ledger.
-pub(crate) fn prepare_clone_sqlite(conn: &rusqlite::Connection) -> StoreResult<()> {
-    let drafts = crate::build_info::migration_draft_manifest();
-    if validate_experimental_schema(conn, drafts).is_ok() {
-        return Ok(());
-    }
-    _migration_transaction(conn, |conn, guards| {
-        apply_set(conn, MIGRATIONS, guards)?;
-        validate_schema(conn, MIGRATIONS)?;
-        for draft in drafts {
-            if draft.name == "canonical_structured_ids" {
-                super::canonical_ids::preflight(conn, guards)?;
-            }
-            conn.execute_batch(draft.sql)?;
-            convert_released_data(conn, draft.sql)?;
-        }
-        validate_foreign_keys(conn)?;
-        validate_persisted_json(conn)?;
-        _validate_development_schema(conn, drafts)
-    })
+/// Advance a validation snapshot without changing preferences in the real
+/// checkouts its rows reference. Promotion owns the actual settings cutover.
+pub(crate) fn apply_sqlite_preview(conn: &rusqlite::Connection) -> StoreResult<()> {
+    apply_sqlite_transaction(conn, MigrationPurpose::Preview, |_| Ok(()))
 }
 
-/// Initialize an empty experiment with this build's exact schema.
-/// Concurrent initializers recheck under the writer lock; existing schemas are
-/// validated without appending drafts, adopting releases or creating backups.
-pub(crate) fn initialize_experimental_sqlite(
-    conn: &rusqlite::Connection,
-    drafts: &[crate::build_info::MigrationDraft],
-) -> StoreResult<()> {
-    if _read_snapshot(conn, |conn| {
-        if user_table_count(conn)? == 0 {
-            return Ok(false);
-        }
-        validate_experimental_schema(conn, drafts)?;
-        Ok(true)
-    })? {
-        return Ok(());
-    }
-    _migration_transaction(conn, |conn, guards| {
-        _initialize_experiment_in(conn, drafts, guards)
-    })
-}
-
-fn _initialize_experiment_in(
-    conn: &rusqlite::Connection,
-    drafts: &[crate::build_info::MigrationDraft],
-    guards: &mut Vec<File>,
-) -> StoreResult<()> {
-    if user_table_count(conn)? > 0 {
-        return validate_experimental_schema(conn, drafts);
-    }
-    apply_set(conn, MIGRATIONS, guards)?;
-    for draft in drafts {
-        conn.execute_batch(draft.sql)?;
-        convert_released_data(conn, draft.sql)?;
-    }
-    validate_foreign_keys(conn)?;
-    validate_persisted_json(conn)?;
-    _validate_development_schema(conn, drafts)
-}
-
-/// Validate an experiment's history and schema, as every open does.
-pub(crate) fn validate_experimental_schema(
-    conn: &rusqlite::Connection,
-    drafts: &[crate::build_info::MigrationDraft],
-) -> StoreResult<()> {
-    _read_snapshot(conn, |conn| {
-        _validate_canonical_history_for_development(conn)?;
-        _validate_development_schema(conn, drafts)
-    })
-}
-
-/// Diagnose an experiment in full: its schema and every stored foreign key.
-pub(crate) fn validate_experimental_sqlite(
-    conn: &rusqlite::Connection,
-    drafts: &[crate::build_info::MigrationDraft],
-) -> StoreResult<()> {
-    _read_snapshot(conn, |conn| {
-        validate_experimental_schema(conn, drafts)?;
-        validate_foreign_keys(conn)
-    })
-}
-
-fn _validate_canonical_history_for_development(conn: &rusqlite::Connection) -> StoreResult<()> {
-    validate_set(MIGRATIONS).map_err(StoreError::InvalidData)?;
-    if !has_ledger(conn)? {
-        return Err(StoreError::IncompatibleDevelopment(
-            "canonical migration ledger is missing".to_string(),
-        ));
-    }
-    let applied = applied_versions(conn)?;
-    let pending = pending_migrations(&applied, MIGRATIONS)?;
-    if let Some(next) = pending.first() {
-        return Err(StoreError::IncompatibleDevelopment(format!(
-            "canonical frontier changed before {}",
-            next.version()
-        )));
-    }
-    validate_applied_checksums(conn, MIGRATIONS)
-}
-
-fn _validate_development_schema(
-    conn: &rusqlite::Connection,
-    drafts: &[crate::build_info::MigrationDraft],
-) -> StoreResult<()> {
-    let expected = expected_schema(
-        MIGRATIONS
-            .iter()
-            .map(|migration| migration.sql)
-            .chain(drafts.iter().map(|draft| draft.sql)),
-    )?;
-    if *product_schema(conn)? != *expected {
-        return Err(StoreError::IncompatibleDevelopment(
-            "schema does not match this experiment".to_string(),
-        ));
-    }
-    Ok(())
-}
-
-pub(crate) fn experimental_store_diagnostic(
-    conn: &rusqlite::Connection,
-    error: StoreError,
-) -> StoreError {
-    let StoreError::IncompatibleDevelopment(reason) = error else {
-        return error;
-    };
-    StoreError::IncompatibleDevelopment(format!(
-        "{reason}\nDatabase: {}\nCustom Machines are disposable. Start a new experiment with a fresh LF_HOME; this Machine will not be upgraded or repaired.",
-        conn.path().unwrap_or(":memory:")
-    ))
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MigrationPurpose {
+    Upgrade,
+    Preview,
 }
 
 /// Stage a fresh connection one migration behind the binary's known head. The
@@ -301,39 +147,22 @@ pub(crate) fn prior_known_version() -> String {
     MIGRATIONS[MIGRATIONS.len() - 2].version()
 }
 
-/// Stand in for a newer release: apply one more migration after this binary's
-/// head, as the build that knows it would, and return that release. This binary
-/// is then the older reader. An additive release keeps the current floor.
+/// Stand in for a newer build: apply one more migration after this binary's
+/// head, as the build that knows it would, and return its version. This binary
+/// is then the older reader.
 #[cfg(test)]
-pub(crate) fn apply_newer_release(
+pub(crate) fn apply_newer_migration(
     conn: &rusqlite::Connection,
     sql: &'static str,
-    additive: bool,
 ) -> StoreResult<String> {
-    if !ledger_has_reader_floor(conn)? {
-        conn.execute_batch(&tests::current_draft_sql("reader_floor"))?;
-    }
-    let head = MIGRATIONS.last().expect("the shipped set is not empty");
-    // Newer than both the shipped head and this binary: a minor release cut
-    // bumps the package version before its first migration exists.
-    let (major, minor) = (head.id.major, head.id.minor).max({
-        let (major, minor, _) = active_namespace();
-        (major, minor)
-    });
     let newer = Migration {
-        id: MigrationId {
-            major,
-            minor: minor + 1,
-            patch: Some(0),
-            ordinal: 1,
-        },
-        name: "release",
+        version: "newer_migration",
         sql,
-        reader_floor: additive.then(|| &*Box::leak(reader_floor(head).into_boxed_str())),
+        merged: true,
     };
     let set: Vec<Migration> = MIGRATIONS.iter().copied().chain([newer]).collect();
     apply_set(conn, &set, &mut Vec::new())?;
-    Ok(newer.id.release())
+    Ok(newer.version())
 }
 
 /// Whether the old reader — a binary whose head is the prior migration — still
@@ -342,33 +171,28 @@ pub(crate) fn apply_newer_release(
 /// shared-frontier regression sabotage-sensitive.
 #[cfg(test)]
 pub(crate) fn old_reader_recognizes(conn: &rusqlite::Connection) -> bool {
-    let prior = &MIGRATIONS[..MIGRATIONS.len() - 1];
-    applied_versions(conn)
-        .and_then(|applied| pending_migrations(&applied, prior).map(<[_]>::is_empty))
-        .unwrap_or(false)
+    let prior = MIGRATIONS[..MIGRATIONS.len() - 1]
+        .iter()
+        .map(Migration::version);
+    applied_versions(conn).is_ok_and(|applied| applied.into_iter().eq(prior))
 }
 
 /// Validate the schema this binary already understands without advancing it.
-/// Branch builds use this against the release-owned database: they can reuse
-/// compatible state, but an unpublished migration never becomes durable there.
-/// Every ordinary open of the release database runs this.
+/// Every ordinary open of the Machine's shared store runs this: any build may
+/// reuse a store it can read, but only the install switch advances it.
 pub(crate) fn validate_sqlite_schema(conn: &rusqlite::Connection) -> StoreResult<()> {
     _read_snapshot(conn, |conn| {
         validate_set(MIGRATIONS).map_err(StoreError::InvalidData)?;
         if !has_ledger(conn)? {
             return Err(StoreError::InvalidData(
-                "a validation-only lf cannot initialize the release database; install a published lf"
+                "an ordinary lf cannot initialize the shared store; install lf with `lf self install`"
                     .to_string(),
             ));
         }
         let applied = applied_versions(conn)?;
-        let newer = admitted_newer_floor(conn, &applied, MIGRATIONS, active_namespace())?;
+        pending_migrations(conn, &applied, MIGRATIONS)?;
         validate_applied_checksums(conn, MIGRATIONS)?;
-        if newer.is_some() {
-            validate_schema_within(conn, MIGRATIONS)
-        } else {
-            validate_schema(conn, &MIGRATIONS[..applied.len()])
-        }
+        validate_applied_schema(conn, MIGRATIONS, &applied)
     })
 }
 
@@ -382,11 +206,12 @@ pub(crate) fn validate_sqlite(conn: &rusqlite::Connection) -> StoreResult<()> {
 
 fn apply_sqlite_transaction(
     conn: &rusqlite::Connection,
+    purpose: MigrationPurpose,
     before_migration: impl FnOnce(&rusqlite::Connection) -> StoreResult<()>,
 ) -> StoreResult<()> {
     _migration_transaction(conn, |conn, guards| {
         before_migration(conn)?;
-        apply_set(conn, MIGRATIONS, guards)?;
+        apply_set_with_purpose(conn, MIGRATIONS, guards, purpose)?;
         validate_foreign_keys(conn)?;
         validate_persisted_json(conn)
     })
@@ -596,7 +421,7 @@ pub(crate) fn apply_sqlite_with_backup(
     let result = match requires_migration_sqlite(conn) {
         Ok(false) => Ok(()),
         Ok(true) => {
-            let migrated = apply_sqlite_transaction(conn, |conn| {
+            let migrated = apply_sqlite_transaction(conn, MigrationPurpose::Upgrade, |conn| {
                 backup_before_migration(conn, path).map(|_| ())
             });
             if migrated.is_ok() {
@@ -683,20 +508,18 @@ fn backup_before_migration(
     Ok(Some(backup_path))
 }
 
-/// Each release that migrates clones the store first. Once a migration commits
-/// only the generation it made stays, and once its install settles none does
-/// (`kept` 0). Names this writer did not produce are left alone, and a failed
-/// removal is retried by the next migration or settlement.
-pub(crate) fn prune_migration_backups(path: &Path, kept: usize) {
+/// The clones this writer made beside `path`, oldest first:
+/// `loopflow.db.backup-<version>-<16 hex>`. Names it did not produce are not listed.
+pub(crate) fn migration_backups(path: &Path) -> Vec<PathBuf> {
     let (Some(parent), Some(file_name)) = (
         path.parent(),
         path.file_name().and_then(|name| name.to_str()),
     ) else {
-        return;
+        return Vec::new();
     };
     let prefix = format!("{file_name}.backup-");
     let Ok(entries) = std::fs::read_dir(parent) else {
-        return;
+        return Vec::new();
     };
     let mut backups: Vec<(std::time::SystemTime, PathBuf)> = entries
         .filter_map(Result::ok)
@@ -715,8 +538,17 @@ pub(crate) fn prune_migration_backups(path: &Path, kept: usize) {
         .filter_map(|entry| Some((entry.metadata().ok()?.modified().ok()?, entry.path())))
         .collect();
     backups.sort();
+    backups.into_iter().map(|(_, path)| path).collect()
+}
+
+/// Each release that migrates clones the store first. Once a migration commits
+/// only the generation it made stays (`kept` 1); once its install settles with no
+/// process left on an older build, none does (`kept` 0). A failed removal is
+/// retried by the next migration or settlement.
+pub(crate) fn prune_migration_backups(path: &Path, kept: usize) {
+    let backups = migration_backups(path);
     let superseded = backups.len().saturating_sub(kept);
-    for (_, backup) in backups.into_iter().take(superseded) {
+    for backup in backups.into_iter().take(superseded) {
         if let Err(error) = std::fs::remove_file(&backup) {
             tracing::warn!(%error, backup = %backup.display(), "superseded migration backup was not removed");
             continue;
@@ -791,17 +623,27 @@ fn validate_foreign_keys(conn: &rusqlite::Connection) -> StoreResult<()> {
 /// Apply every migration in `set` the database has not seen, in id order, exactly
 /// once. Taking the set as an argument is what lets the fixtures below drive
 /// synthetic release histories without a test-only seam in the store.
+#[cfg(test)]
 fn apply_set(
     conn: &rusqlite::Connection,
     set: &[Migration],
     guards: &mut Vec<File>,
+) -> StoreResult<()> {
+    apply_set_with_purpose(conn, set, guards, MigrationPurpose::Upgrade)
+}
+
+fn apply_set_with_purpose(
+    conn: &rusqlite::Connection,
+    set: &[Migration],
+    guards: &mut Vec<File>,
+    purpose: MigrationPurpose,
 ) -> StoreResult<()> {
     validate_set(set).map_err(StoreError::InvalidData)?;
 
     if !has_ledger(conn)? {
         // Product tables with no ledger were never written by us.
         if user_table_count(conn)? > 0 {
-            return Err(incompatible());
+            return Err(incompatible(conn));
         }
         conn.execute_batch(
             "CREATE TABLE schema_migrations (
@@ -816,9 +658,9 @@ fn apply_set(
     adopt_permuted_history(conn, set)?;
 
     let applied = applied_versions(conn)?;
-    for (offset, migration) in pending_migrations(&applied, set)?.iter().enumerate() {
+    for (offset, migration) in pending_migrations(conn, &applied, set)?.iter().enumerate() {
         let parent_history = migration_prefix_fingerprint(&set[..applied.len() + offset]);
-        migration_preflight(conn, migration, guards)?;
+        migration_preflight(conn, migration, guards, purpose)?;
         conn.execute_batch(migration.sql)?;
         convert_released_data(conn, migration.sql)?;
         backfill_known_checksums(conn, set)?;
@@ -826,7 +668,7 @@ fn apply_set(
     }
 
     validate_applied_checksums(conn, set)?;
-    validate_schema(conn, set)
+    validate_applied_schema(conn, set, &applied_versions(conn)?)
 }
 
 /// Convert stored rows whose shape a migration's SQL changes. Released
@@ -902,7 +744,12 @@ fn migration_preflight(
     conn: &rusqlite::Connection,
     migration: &Migration,
     guards: &mut Vec<File>,
+    purpose: MigrationPurpose,
 ) -> StoreResult<()> {
+    if purpose == MigrationPurpose::Upgrade && migration_contains(migration, "settings_authority") {
+        crate::config::migrate::preflight(conn, guards)
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+    }
     if migration_contains(migration, "canonical_structured_ids") {
         super::canonical_ids::preflight(conn, guards)?;
     }
@@ -976,7 +823,7 @@ fn migration_preflight(
 
 fn migration_contains(migration: &Migration, name: &str) -> bool {
     let marker = format!("-- draft: {name}");
-    migration.name == name || migration.sql.lines().any(|line| line == marker)
+    migration.version == name || migration.sql.lines().any(|line| line == marker)
 }
 
 fn migration_checksum(migration: &Migration) -> String {
@@ -1057,13 +904,33 @@ fn insert_applied_migration(
             [migration.version()],
         )?;
     }
+    carry_reader_floor(conn, migration)
+}
+
+/// Builds released before the floor's deletion read `reader_floor` on every row past
+/// their own head, and a row with none names itself, so one NULL there refuses them.
+/// This build reads it for nothing: the new row repeats the ledger's newest floor so
+/// those builds stay admitted past additive migrations. Task f5981e removes this 30
+/// days after that release.
+fn carry_reader_floor(conn: &rusqlite::Connection, migration: &Migration) -> StoreResult<()> {
     if ledger_has_reader_floor(conn)? {
         conn.execute(
-            "UPDATE schema_migrations SET reader_floor=?1 WHERE version=?2",
-            (reader_floor(migration), migration.version()),
+            "UPDATE schema_migrations SET reader_floor = (
+                SELECT reader_floor FROM schema_migrations
+                WHERE reader_floor IS NOT NULL ORDER BY applied_at DESC, rowid DESC LIMIT 1
+             ) WHERE version = ?1",
+            [migration.version()],
         )?;
     }
     Ok(())
+}
+
+fn ledger_has_reader_floor(conn: &rusqlite::Connection) -> StoreResult<bool> {
+    Ok(conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('schema_migrations') WHERE name='reader_floor')",
+        [],
+        |row| row.get(0),
+    )?)
 }
 
 fn validate_applied_checksums(conn: &rusqlite::Connection, set: &[Migration]) -> StoreResult<()> {
@@ -1080,12 +947,17 @@ fn validate_applied_checksums(conn: &rusqlite::Connection, set: &[Migration]) ->
     for row in rows {
         let (version, checksum) = row?;
         let Some(migration) = set.iter().find(|migration| migration.version() == version) else {
-            // Callers check history first; only an admitted newer tail reaches here.
+            // Callers check history first; only a newer build's tail reaches here.
             continue;
         };
         if checksum != migration_checksum(migration) {
+            let fix = if migration.merged {
+                ""
+            } else {
+                "; it is unmerged schema work, so start a fresh LF_HOME"
+            };
             return Err(StoreError::InvalidData(format!(
-                "database migration {version} checksum does not match this lf build"
+                "database migration {version} checksum does not match this lf build{fix}"
             )));
         }
     }
@@ -1104,7 +976,7 @@ fn adopt_permuted_history(conn: &rusqlite::Connection, set: &[Migration]) -> Sto
 
     let expected = expected_schema(set[..prefix_len].iter().map(|migration| migration.sql))?;
     if *product_schema(conn)? != *expected {
-        return Err(incompatible());
+        return Err(incompatible(conn));
     }
 
     let mut applied_at = conn
@@ -1144,7 +1016,12 @@ fn permuted_history(applied: &[String], set: &[Migration]) -> Option<usize> {
         .collect::<Option<Vec<_>>>()?;
     let mut canonical_names = set[..applied.len()]
         .iter()
-        .map(|migration| migration.name)
+        .map(|migration| {
+            migration
+                .version
+                .split_once('_')
+                .map_or(migration.version, |(_, name)| name)
+        })
         .collect::<Vec<_>>();
     applied_names.sort_unstable();
     canonical_names.sort_unstable();
@@ -1158,7 +1035,7 @@ fn adopt_legacy_baseline(conn: &rusqlite::Connection, set: &[Migration]) -> Stor
         return Ok(());
     }
     let Some(baseline) = set.first() else {
-        return Err(incompatible());
+        return Err(incompatible(conn));
     };
     conn.execute(
         "UPDATE schema_migrations SET version = ?1 WHERE version = ?2",
@@ -1254,187 +1131,66 @@ fn validate_divergent_schema(
             .map(|migration| migration.sql),
     )?;
     if *product_schema(conn)? != *expected {
-        return Err(incompatible());
+        return Err(incompatible(conn));
     }
     Ok(())
 }
 
 /// The migrations still to run, given what the database has already applied.
 ///
-/// The applied versions must be exactly the leading run of `set`: a database that
-/// skipped a migration, or that carries one this binary does not know, cannot be
-/// brought forward by running the tail.
+/// A history that starts with all of `set` owes nothing, however long its tail:
+/// a newer lf extended it. Otherwise the applied versions must be exactly the
+/// leading run of `set`: a database that skipped a migration, or that carries one
+/// this binary does not know, cannot be brought forward by running the tail.
 ///
-/// An unknown id that *is* release-scoped came from a newer Loopflow. An unknown
-/// id that is not — the flat ledger of the pre-loop store, abandoned when the
-/// runtime collapsed to waves, projects, and tasks — is simply not our database.
+/// An unknown released id or slug came from a newer lf. Anything else — the flat
+/// ledger of the pre-loop store, abandoned when the runtime collapsed to waves,
+/// projects, and tasks — is simply not our database.
 fn pending_migrations<'a>(
+    conn: &rusqlite::Connection,
     applied: &[String],
     set: &'a [Migration],
 ) -> StoreResult<&'a [Migration]> {
     let known: Vec<String> = set.iter().map(Migration::version).collect();
-    for version in applied {
-        if known.contains(version) {
-            continue;
-        }
-        return match MigrationId::parse_version(version) {
-            Some(_) => Err(StoreError::InvalidData(format!(
-                "database migration {version} is unknown to lf {} (latest known {}); this database needs a newer release or the matching divergent local build; run lf doctor with that binary",
-                env!("CARGO_PKG_VERSION"),
+    if applied.starts_with(&known) {
+        return Ok(&[]);
+    }
+    if let Some(version) = applied.iter().find(|version| !known.contains(version)) {
+        return if MigrationId::parse_version(version).is_some()
+            || super::migration_catalog::is_slug(version)
+        {
+            Err(StoreError::InvalidData(format!(
+                "database migration {version} is unknown to lf {} (latest known {}); a newer lf migrated this store; run `lf install`",
+                crate::build_info::BUILD_VERSION,
                 set.last()
                     .map(Migration::version)
                     .unwrap_or_else(|| "none".to_string())
-            ))),
-            None => Err(incompatible()),
+            )))
+        } else {
+            Err(incompatible(conn))
         };
     }
-    if applied.len() > known.len() || *applied != known[..applied.len()] {
-        return Err(incompatible());
+    if !known.starts_with(applied) {
+        return Err(incompatible(conn));
     }
     Ok(&set[applied.len()..])
 }
 
-// -- Reader floor -------------------------------------------------------------
-
-fn ledger_has_reader_floor(conn: &rusqlite::Connection) -> StoreResult<bool> {
-    Ok(conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('schema_migrations') WHERE name='reader_floor')",
-        [],
-        |row| row.get(0),
-    )?)
-}
-
-/// The oldest lf that can open a store once `migration` is applied. A release
-/// cut before reader floors existed counts as breaking: its floor is its release.
-fn reader_floor(migration: &Migration) -> String {
-    migration
-        .reader_floor
-        .map(str::to_string)
-        .unwrap_or_else(|| migration.id.release())
-}
-
-fn parse_release(version: &str) -> Option<(u32, u32, u32)> {
-    let mut parts = version.split('.').map(str::parse);
-    match (parts.next(), parts.next(), parts.next(), parts.next()) {
-        (Some(Ok(major)), Some(Ok(minor)), Some(Ok(patch)), None) => Some((major, minor, patch)),
-        _ => None,
+/// Pending migrations origin/main has not added. The shared store never
+/// applies them; they belong in a private `LF_HOME`.
+pub(crate) fn pending_unmerged(conn: &rusqlite::Connection) -> StoreResult<Vec<String>> {
+    if !has_ledger(conn)? {
+        return Ok(unmerged_migrations()
+            .into_iter()
+            .map(str::to_string)
+            .collect());
     }
-}
-
-fn highest_floor(floors: impl IntoIterator<Item = String>) -> Option<String> {
-    floors.into_iter().max_by_key(|floor| parse_release(floor))
-}
-
-/// The highest reader floor of migrations newer than `set` when this reader may
-/// still open the store, or `None` when the store holds no newer migration. The
-/// known part must be exactly `set`, as for every open; the newer tail is
-/// admitted only when no row raised the floor above `reader`.
-fn admitted_newer_floor(
-    conn: &rusqlite::Connection,
-    applied: &[String],
-    set: &[Migration],
-    reader: (u32, u32, u32),
-) -> StoreResult<Option<String>> {
-    let known: Vec<String> = set.iter().map(Migration::version).collect();
-    if applied.len() <= set.len() || applied[..set.len()] != known[..] {
-        pending_migrations(applied, set)?;
-        return Ok(None);
-    }
-    let recorded = ledger_has_reader_floor(conn)?;
-    let mut previous = set.last().map(|migration| migration.id);
-    let mut floors = Vec::new();
-    for version in &applied[set.len()..] {
-        let id = MigrationId::parse_version(version).ok_or_else(incompatible)?;
-        if previous.is_some_and(|previous| id <= previous) {
-            return Err(incompatible());
-        }
-        previous = Some(id);
-        let floor = applied_floor(conn, recorded, version, id)?;
-        if parse_release(&floor).is_none() {
-            return Err(StoreError::InvalidData(format!(
-                "database migration {version} records unreadable reader floor {floor:?}"
-            )));
-        }
-        floors.push(floor);
-    }
-    let floor = highest_floor(floors).expect("a newer tail has at least one floor");
-    if parse_release(&floor).is_some_and(|floor| floor > reader) {
-        return Err(StoreError::InvalidData(format!(
-            "this store needs lf {floor} or newer (it has {}; latest known {}); install it with lf install",
-            applied.last().expect("a newer tail is not empty"),
-            known.last().map(String::as_str).unwrap_or("none"),
-        )));
-    }
-    Ok(Some(floor))
-}
-
-/// The reader floor of a store a newer release migrated, when it still admits
-/// this binary; `None` when the store is at or behind this binary's history.
-pub(crate) fn newer_store_floor(conn: &rusqlite::Connection) -> StoreResult<Option<String>> {
-    admitted_newer_floor(
-        conn,
-        &applied_versions(conn)?,
-        MIGRATIONS,
-        active_namespace(),
-    )
-}
-
-/// The oldest lf release that can open this store, from every applied row,
-/// including rows a newer release wrote; `None` for an empty store.
-pub(crate) fn store_reader_floor(conn: &rusqlite::Connection) -> StoreResult<Option<String>> {
-    let recorded = ledger_has_reader_floor(conn)?;
-    let mut floors = Vec::new();
-    for version in applied_versions(conn)? {
-        let id = MigrationId::parse_version(&version).ok_or_else(incompatible)?;
-        floors.push(applied_floor(conn, recorded, &version, id)?);
-    }
-    Ok(highest_floor(floors))
-}
-
-/// An applied row's recorded floor; a row written before floors were recorded
-/// counts as breaking, so its floor is its release.
-fn applied_floor(
-    conn: &rusqlite::Connection,
-    recorded: bool,
-    version: &str,
-    id: MigrationId,
-) -> StoreResult<String> {
-    let floor: Option<String> = if recorded {
-        conn.query_row(
-            "SELECT reader_floor FROM schema_migrations WHERE version=?1",
-            [version],
-            |row| row.get(0),
-        )?
-    } else {
-        None
-    };
-    Ok(floor.unwrap_or_else(|| id.release()))
-}
-
-/// Whether lf `version` (`0.14.16`, `0.14.16+e9b2c2eac`) is at or above
-/// `floor`; `None` when either is not a release.
-pub(crate) fn release_meets_floor(version: &str, floor: &str) -> Option<bool> {
-    let core = version.split(['+', '-']).next().unwrap_or(version);
-    Some(parse_release(core)? >= parse_release(floor)?)
-}
-
-/// The floor this binary's pending migrations raise the store to, or `None`
-/// when every lf that opens the store now still can after promotion.
-pub(crate) fn raised_reader_floor(conn: &rusqlite::Connection) -> StoreResult<Option<String>> {
-    raised_floor_over(conn, MIGRATIONS)
-}
-
-fn raised_floor_over(
-    conn: &rusqlite::Connection,
-    set: &[Migration],
-) -> StoreResult<Option<String>> {
     let applied = applied_versions(conn)?;
-    let pending = pending_migrations(&applied, set)?;
-    let Some(current) = highest_floor(set[..applied.len()].iter().map(reader_floor)) else {
-        return Ok(None);
-    };
-    Ok(highest_floor(pending.iter().map(reader_floor))
-        .filter(|next| parse_release(next) > parse_release(&current)))
+    Ok(pending_migrations(conn, &applied, MIGRATIONS)?
+        .iter()
+        .filter(|migration| !migration.merged)
+        .map(Migration::version)
+        .collect())
 }
 
 /// One row, however many tables: every open asks this, so it never lists them.
@@ -1470,22 +1226,16 @@ fn applied_versions(conn: &rusqlite::Connection) -> StoreResult<Vec<String>> {
 
 // -- Validation ---------------------------------------------------------------
 
-/// Ids strictly increase, so a duplicate and an out-of-order id are the same
-/// error. A malformed set is a programmer error, caught by the tests and by
-/// `scripts/check_migrations.py` — never a condition a user can create.
+/// Every version appears once. `build.rs` orders the catalog; a malformed set is
+/// a programmer error caught by the tests, never a condition a user can create.
 pub fn validate_set(set: &[Migration]) -> Result<(), String> {
-    let mut previous: Option<&Migration> = None;
-    for migration in set {
-        if let Some(previous) = previous {
-            if migration.id <= previous.id {
-                return Err(format!(
-                    "migration {} does not come after {}",
-                    migration.version(),
-                    previous.version()
-                ));
-            }
+    for (index, migration) in set.iter().enumerate() {
+        if set[..index]
+            .iter()
+            .any(|earlier| earlier.version == migration.version)
+        {
+            return Err(format!("migration {} appears twice", migration.version));
         }
-        previous = Some(migration);
     }
     Ok(())
 }
@@ -1496,112 +1246,23 @@ pub fn validate_set(set: &[Migration]) -> Result<(), String> {
 fn validate_schema(conn: &rusqlite::Connection, set: &[Migration]) -> StoreResult<()> {
     let expected = expected_schema(set.iter().map(|migration| migration.sql))?;
     if *product_schema(conn)? != *expected {
-        return Err(incompatible());
+        return Err(incompatible(conn));
     }
     Ok(())
 }
 
-/// A store a newer release migrated additively still holds every object `set`
-/// builds unchanged; its tables may have gained columns.
-fn validate_schema_within(conn: &rusqlite::Connection, set: &[Migration]) -> StoreResult<()> {
-    let expected = expected_schema(set.iter().map(|migration| migration.sql))?;
-    let actual = product_schema(conn)?;
-    if let Some(missing) = expected
-        .iter()
-        .find(|old| !actual.iter().any(|new| schema_object_within(old, new)))
-    {
-        return Err(StoreError::InvalidData(format!(
-            "a newer lf changed {} {}, which lf {} reads; install the newer release with lf install",
-            missing.object_type,
-            missing.name,
-            env!("CARGO_PKG_VERSION")
-        )));
+/// Validate what this build's catalog says the applied history built. A store a
+/// newer build extended has no schema this catalog can name: SQLite reports
+/// anything this build reads that is gone, at the statement that reads it.
+fn validate_applied_schema(
+    conn: &rusqlite::Connection,
+    set: &[Migration],
+    applied: &[String],
+) -> StoreResult<()> {
+    match set.get(..applied.len()) {
+        Some(known) => validate_schema(conn, known),
+        None => Ok(()),
     }
-    Ok(())
-}
-
-fn schema_object_within(old: &ProductSchemaObject, new: &ProductSchemaObject) -> bool {
-    if old == new {
-        return true;
-    }
-    old.object_type == "table"
-        && new.object_type == "table"
-        && old.name == new.name
-        && old.foreign_keys.iter().all(|key| {
-            new.foreign_keys.iter().any(|other| {
-                ForeignKeyDefinition {
-                    id: key.id,
-                    ..other.clone()
-                } == *key
-            })
-        })
-        && table_within(&old.sql, &new.sql)
-}
-
-/// SQLite splices `ADD COLUMN` definitions in before table constraints, so the
-/// old definitions must all survive verbatim and only column definitions are new.
-fn table_within(old: &str, new: &str) -> bool {
-    let (Some((old_head, old_parts, old_tail)), Some((new_head, new_parts, new_tail))) =
-        (table_parts(old), table_parts(new))
-    else {
-        return false;
-    };
-    const CONSTRAINTS: [&str; 5] = ["CONSTRAINT", "PRIMARY", "UNIQUE", "CHECK", "FOREIGN"];
-    old_head == new_head
-        && old_tail == new_tail
-        && old_parts.iter().all(|part| new_parts.contains(part))
-        && new_parts
-            .iter()
-            .filter(|part| !old_parts.contains(part))
-            .all(|part| {
-                let keyword = part.split_whitespace().next().unwrap_or("");
-                !CONSTRAINTS
-                    .iter()
-                    .any(|constraint| keyword.eq_ignore_ascii_case(constraint))
-            })
-}
-
-/// A `CREATE TABLE` statement as its head, top-level definitions and suffix.
-fn table_parts(sql: &str) -> Option<(&str, Vec<&str>, &str)> {
-    let open = sql.find('(')?;
-    let mut parts = Vec::new();
-    let mut start = open + 1;
-    let mut depth = 0;
-    let mut quote = None;
-    let mut characters = sql[open..]
-        .char_indices()
-        .map(|(index, c)| (open + index, c))
-        .peekable();
-    while let Some((index, character)) = characters.next() {
-        if let Some(end) = quote {
-            if character == end {
-                if end != ']' && characters.peek().is_some_and(|(_, next)| *next == end) {
-                    characters.next();
-                } else {
-                    quote = None;
-                }
-            }
-            continue;
-        }
-        match character {
-            '\'' | '"' | '`' => quote = Some(character),
-            '[' => quote = Some(']'),
-            '(' => depth += 1,
-            ')' => {
-                depth -= 1;
-                if depth == 0 {
-                    parts.push(sql[start..index].trim());
-                    return Some((sql[..open].trim(), parts, sql[index + 1..].trim()));
-                }
-            }
-            ',' if depth == 1 => {
-                parts.push(sql[start..index].trim());
-                start = index + 1;
-            }
-            _ => {}
-        }
-    }
-    None
 }
 
 /// Cache the immutable reference derived from this build's ordered SQL. Every
@@ -1620,30 +1281,10 @@ fn expected_schema(
                 "/canonical_schema.json"
             )))
             .expect("build-generated canonical schema is valid");
-            let mut references: References = HashMap::from([(
+            Mutex::new(HashMap::from([(
                 MIGRATIONS.iter().map(|migration| migration.sql).collect(),
                 canonical.into(),
-            )]);
-            // A draft-bearing build validates every store it opens against
-            // its drafts; without this each process replays all migrations.
-            let draft: Option<Vec<ProductSchemaObject>> =
-                serde_json::from_str(include_str!(concat!(env!("OUT_DIR"), "/draft_schema.json")))
-                    .expect("build-generated draft schema is valid");
-            if let Some(draft) = draft {
-                references.insert(
-                    MIGRATIONS
-                        .iter()
-                        .map(|migration| migration.sql)
-                        .chain(
-                            crate::build_info::migration_draft_manifest()
-                                .iter()
-                                .map(|draft| draft.sql),
-                        )
-                        .collect(),
-                    draft.into(),
-                );
-            }
-            Mutex::new(references)
+            )]))
         })
         .lock()
         .expect("schema reference cache poisoned");
@@ -1669,11 +1310,11 @@ fn expected_schema(
 /// string such as `0.10.001_initial`.
 pub fn latest_version_sqlite(conn: &rusqlite::Connection) -> StoreResult<String> {
     let applied = applied_versions(conn)?;
-    if !pending_migrations(&applied, MIGRATIONS)?.is_empty() {
-        return Err(incompatible());
+    if !pending_migrations(conn, &applied, MIGRATIONS)?.is_empty() {
+        return Err(incompatible(conn));
     }
-    validate_schema(conn, MIGRATIONS)?;
-    applied.last().cloned().ok_or_else(incompatible)
+    validate_applied_schema(conn, MIGRATIONS, &applied)?;
+    applied.last().cloned().ok_or_else(|| incompatible(conn))
 }
 
 pub fn latest_known_version() -> String {
@@ -1684,7 +1325,7 @@ pub fn latest_known_version() -> String {
 }
 
 /// The next migration this binary knows that the store has not applied, or
-/// `None` when the store is exactly at this binary's frontier.
+/// `None` when the store has reached this binary's frontier.
 ///
 /// Call only after [`validate_sqlite_schema`] has confirmed the applied history is a
 /// clean recognized prefix; then `pending_migrations` cannot error and this is a
@@ -1693,10 +1334,7 @@ pub fn latest_known_version() -> String {
 /// pending migration adds, so reusing the older schema would only fail later.
 pub(crate) fn pending_shared_migration(conn: &rusqlite::Connection) -> StoreResult<Option<String>> {
     let applied = applied_versions(conn)?;
-    if admitted_newer_floor(conn, &applied, MIGRATIONS, active_namespace())?.is_some() {
-        return Ok(None);
-    }
-    Ok(pending_migrations(&applied, MIGRATIONS)?
+    Ok(pending_migrations(conn, &applied, MIGRATIONS)?
         .first()
         .map(Migration::version))
 }
@@ -1719,7 +1357,7 @@ pub(crate) fn requires_migration_sqlite(conn: &rusqlite::Connection) -> StoreRes
             return if user_table_count(conn)? == 0 {
                 Ok(true)
             } else {
-                Err(incompatible())
+                Err(incompatible(conn))
             };
         }
         let applied = applied_versions(conn)?;
@@ -1735,133 +1373,367 @@ pub(crate) fn requires_migration_sqlite(conn: &rusqlite::Connection) -> StoreRes
         if permuted_history(&applied, MIGRATIONS).is_some() {
             return Ok(true);
         }
-        Ok(!pending_migrations(&applied, MIGRATIONS)?.is_empty())
+        Ok(!pending_migrations(conn, &applied, MIGRATIONS)?.is_empty())
     })
 }
 
-fn incompatible() -> StoreError {
-    StoreError::InvalidData(RECREATE_MESSAGE.to_string())
+/// A history or schema no build of this catalog produced. The data is still
+/// someone's: name the builds that can open it and never suggest deletion.
+fn incompatible(conn: &rusqlite::Connection) -> StoreError {
+    let keep = match last_migrated_by(conn) {
+        Some(build) => {
+            format!("keep loopflow.db: it was last migrated by lf {build}. Open it with that build")
+        }
+        None => "keep loopflow.db and open it with the lf that last migrated it".to_string(),
+    };
+    StoreError::InvalidData(format!(
+        "this Loopflow database's migration history or schema differs from lf {} (latest known {}); \
+         {keep}, or run `lf install`",
+        crate::build_info::BUILD_VERSION,
+        latest_known_version(),
+    ))
+}
+
+/// The build that wrote the ledger's newest row, when it recorded itself. A
+/// ledger without provenance columns fails the query and names no build.
+fn last_migrated_by(conn: &rusqlite::Connection) -> Option<String> {
+    let (version, revision): (Option<String>, Option<String>) = conn
+        .query_row(
+            "SELECT package_version, source_revision FROM schema_migrations
+             ORDER BY applied_at DESC, rowid DESC LIMIT 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .ok()?;
+    let version = version?;
+    Some(match revision.filter(|revision| revision != "unknown") {
+        Some(revision) => format!(
+            "{version} ({})",
+            crate::build_info::short_revision(&revision)
+        ),
+        None => version,
+    })
 }
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
-    use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
+    use std::sync::mpsc::sync_channel;
     use std::time::Duration;
 
-    use super::{_initialize_experiment_in, _read_snapshot, has_table, user_table_count};
+    use super::has_table;
     use rusqlite::OptionalExtension;
 
-    use super::apply_newer_release;
+    use super::apply_newer_migration;
     use super::{
-        active_namespace, applied_versions, apply_set, apply_sqlite, apply_sqlite_transaction,
-        apply_sqlite_with_backup, backup_before_migration, initialize_experimental_sqlite,
-        latest_applied_version_sqlite, latest_known_version, latest_version_sqlite,
-        migration_checksum, migration_sql_for_test, pending_migrations, product_schema,
-        prune_migration_backups, validate_experimental_sqlite, validate_foreign_keys,
+        applied_versions, apply_set, apply_sqlite, apply_sqlite_transaction,
+        apply_sqlite_with_backup, backup_before_migration, latest_applied_version_sqlite,
+        latest_known_version, latest_version_sqlite, migration_checksum, pending_migrations,
+        product_schema, prune_migration_backups, requires_migration_sqlite, validate_foreign_keys,
         validate_persisted_json, validate_schema, validate_set, validate_sqlite,
         validate_sqlite_schema, Migration, MigrationId, DIVERGENT_MIGRATIONS, MIGRATIONS,
     };
 
     const GATE_PROPOSAL_REPAIR_NAME: &str = "repair_legacy_task_gate_proposals";
     const LEGACY_TASK_FLOW_REPAIR_NAME: &str = "repair_legacy_task_flow";
-    const COMPLETED_TASK_WORK_REPAIR_NAME: &str = "restore_completed_task_work";
     const TURN_USAGE_SAMPLES_NAME: &str = "add_turn_usage_samples";
     const REPOSITORY_OWNED_WAVES_NAME: &str = "repository_owned_waves";
     const REMOVE_TASK_LIFECYCLE_OUTCOME_NAME: &str = "remove_task_lifecycle_outcome";
     const RUN_IDENTITY_NAME: &str = "run_identity";
 
-    fn _draft_is_canonical(name: &str) -> bool {
-        let marker = format!("-- draft: {name}");
-        MIGRATIONS
-            .iter()
-            .any(|migration| migration.sql.lines().any(|line| line == marker.as_str()))
-    }
-
-    /// Stand-ins for the releases that have not happened yet: one more migration
-    /// in the baseline's minor, and the first of the next minor.
+    /// Stand-ins for migrations that have not merged yet.
     const SECOND_IN_SAME_MINOR: Migration = Migration {
-        id: MigrationId {
-            major: 0,
-            minor: 10,
-            patch: None,
-            ordinal: 2,
-        },
-        name: "add_note",
+        version: "add_note",
         sql: "ALTER TABLE waves ADD COLUMN note TEXT;",
-        reader_floor: None,
+        merged: true,
     };
     const FIRST_IN_NEXT_MINOR: Migration = Migration {
-        id: MigrationId {
-            major: 0,
-            minor: 11,
-            patch: None,
-            ordinal: 1,
-        },
-        name: "add_colour",
+        version: "add_colour",
         sql: "ALTER TABLE waves ADD COLUMN colour TEXT;",
-        reader_floor: None,
+        merged: true,
     };
+
+    /// A migration's name: a slug, or a released batch's name after its id.
+    fn name_of(migration: &Migration) -> &'static str {
+        migration
+            .version
+            .split_once('_')
+            .filter(|_| MigrationId::parse_version(migration.version).is_some())
+            .map_or(migration.version, |(_, name)| name)
+    }
 
     fn open() -> rusqlite::Connection {
         rusqlite::Connection::open_in_memory().unwrap()
     }
 
     #[test]
-    fn a_newer_tail_must_leave_this_builds_schema_intact() {
+    fn finished_headless_sessions_upgrade_to_history_without_closing_live_runs() {
         let conn = open();
-        apply_set(&conn, MIGRATIONS, &mut Vec::new()).unwrap();
-        apply_newer_release(&conn, "DROP INDEX idx_tasks_project;", true).unwrap();
+        apply_before_migration(&conn, "complete_finished_headless_sessions");
+        for (session, interactive, completed) in [
+            ("finished", false, None),
+            ("no-process", false, None),
+            ("live", false, None),
+            ("older-live", false, None),
+            ("interactive", true, None),
+            ("already-completed", false, Some(15)),
+        ] {
+            conn.execute(
+                "INSERT INTO agent_sessions(id,title,title_source,created_at,cwd,input_published,
+                    interactive,completed_at) VALUES(?1,?1,'generated',10,'/repo',0,?2,?3)",
+                rusqlite::params![session, interactive, completed],
+            )
+            .unwrap();
+        }
+        for (session, completed) in [
+            ("finished", Some(20)),
+            ("live", None),
+            ("older-live", Some(20)),
+            ("interactive", Some(20)),
+            ("already-completed", Some(20)),
+        ] {
+            let process = crate::id::AgentProcessId::new();
+            conn.execute(
+                "INSERT INTO processes(id,trace_id,started_at,kind,agent_session_id,completed_at)
+                 VALUES(?1,?1,10,'agent',?2,?3)",
+                rusqlite::params![process, session, completed],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE agent_sessions SET agent_process_id=?2 WHERE id=?1",
+                rusqlite::params![session, process],
+            )
+            .unwrap();
+        }
+        // Any unfinished agent keeps its Session open, even when it is no longer
+        // current. Unassociated processes must not poison the NOT IN query.
+        for session in [Some("older-live"), None] {
+            let process = crate::id::AgentProcessId::new();
+            conn.execute(
+                "INSERT INTO processes(id,trace_id,started_at,kind,agent_session_id)
+                 VALUES(?1,?1,10,'agent',?2)",
+                rusqlite::params![process, session],
+            )
+            .unwrap();
+        }
 
-        let error = validate_sqlite_schema(&conn).unwrap_err().to_string();
+        upgrade_from_migration(&conn, "complete_finished_headless_sessions");
 
-        assert!(
-            error.contains("a newer lf changed index idx_tasks_project"),
-            "{error}"
+        let sessions = conn
+            .prepare("SELECT id,completed_at FROM agent_sessions ORDER BY id")
+            .unwrap()
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, Option<i64>>(1)?))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(
+            sessions,
+            [
+                ("already-completed".into(), Some(15)),
+                ("finished".into(), Some(20)),
+                ("interactive".into(), None),
+                ("live".into(), None),
+                ("no-process".into(), Some(10)),
+                ("older-live".into(), None),
+            ]
         );
     }
 
     #[test]
-    fn promotion_names_the_floor_its_pending_migrations_raise() {
+    fn sessions_upgrade_to_the_provider_that_recorded_their_thread() {
+        let conn = open();
+        apply_before_migration(&conn, "resume_on_latest_input_provider");
+        conn.execute_batch(
+            "INSERT INTO provider_accounts(provider,account_id,credential_state,created_at,updated_at)
+             VALUES('codex','account','connected',10,10),('opencode','account','connected',10,10)",
+        )
+        .unwrap();
+        for (session, provider, thread) in [
+            ("switched", "claude", "codex-thread"),
+            ("same", "codex", "own-thread"),
+            ("ambiguous", "claude", "shared-thread"),
+            ("unrecorded", "claude", "unknown-thread"),
+            ("unaccounted", "claude", "manifest-thread"),
+        ] {
+            conn.execute(
+                "INSERT INTO agent_sessions(id,title,title_source,created_at,cwd,input_published,
+                    interactive,provider,model,provider_thread)
+                 VALUES(?1,?1,'generated',10,'/repo',1,1,?2,'opus',?3)",
+                rusqlite::params![session, provider, thread],
+            )
+            .unwrap();
+        }
+        for (provider, thread) in [
+            ("codex", "codex-thread"),
+            ("codex", "own-thread"),
+            ("codex", "shared-thread"),
+            ("opencode", "shared-thread"),
+        ] {
+            conn.execute(
+                "INSERT INTO provider_session_accounts(provider,provider_session_id,account_id,created_at)
+                 VALUES(?1,?2,'account',10)",
+                rusqlite::params![provider, thread],
+            )
+            .unwrap();
+        }
+
+        // Without an account record, the current input's manifest names its harness.
+        conn.execute_batch(
+            r#"INSERT INTO session_events(seq,session_id,kind,receipt_key,observed_at,payload)
+             VALUES(100,'unaccounted','captured','input',10,'{}'),
+                (101,'unaccounted','observed','input:manifest.json',10,
+                 '{"evidence":{"harness":"codex","model":"gpt-5"}}');
+             UPDATE agent_sessions SET current_capture=100 WHERE id='unaccounted';"#,
+        )
+        .unwrap();
+
+        upgrade_from_migration(&conn, "resume_on_latest_input_provider");
+
+        let sessions = conn
+            .prepare("SELECT id,provider,model FROM agent_sessions ORDER BY id")
+            .unwrap()
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        let opus = Some("opus".to_string());
+        assert_eq!(
+            sessions,
+            [
+                ("ambiguous".into(), "claude".into(), opus.clone()),
+                ("same".into(), "codex".into(), opus.clone()),
+                ("switched".into(), "codex".into(), None),
+                ("unaccounted".into(), "codex".into(), Some("gpt-5".into())),
+                ("unrecorded".into(), "claude".into(), opus),
+            ]
+        );
+    }
+
+    #[test]
+    fn task_update_revision_upgrade_preserves_existing_counters() {
+        let conn = open();
+        apply_before_migration(&conn, "task_update_revision");
+        conn.execute("UPDATE store_revisions SET revision=41", [])
+            .unwrap();
+        let counters = || {
+            conn.prepare("SELECT domain,revision FROM store_revisions WHERE domain!='task_updates' ORDER BY domain")
+                .unwrap().query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))
+                .unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap()
+        };
+        let before = counters();
+        apply_pending_migrations(&conn);
+        assert_eq!(counters(), before);
+        assert_eq!(
+            conn.query_row(
+                "SELECT revision FROM store_revisions WHERE domain='task_updates'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
+        validate_foreign_keys(&conn).unwrap();
+    }
+
+    #[test]
+    fn task_session_promotion_releases_shared_scope_but_preserves_permanent_binds() {
+        let conn = open();
+        apply_before_migration(&conn, "task_session_promotion");
+        conn.execute_batch(include_str!(
+            "../../tests/fixtures/migrations/task_session_promotion.sql"
+        ))
+        .unwrap();
+        apply_pending_migrations(&conn);
+
+        conn.execute(
+            "UPDATE agent_sessions SET primary_scope=NULL,wave_id=NULL WHERE id='primary'",
+            [],
+        )
+        .unwrap();
+        conn.execute("UPDATE agent_sessions SET task_id='task_promotion',bound_at=2,work_source='bound' WHERE id='primary'", []).unwrap();
+        let history: (String, String) = conn.query_row(
+            "SELECT s.cwd,e.wave_id FROM agent_sessions s JOIN session_events e ON e.session_id=s.id WHERE s.id='primary' AND e.kind='captured'",
+            [], |row| Ok((row.get(0)?, row.get(1)?)),
+        ).unwrap();
+        assert_eq!(history, ("/repo/wave".into(), "wave-promotion".into()));
+        for sql in [
+            "UPDATE agent_sessions SET task_id='task_other' WHERE id='primary'",
+            "UPDATE agent_sessions SET task_id=NULL WHERE id='primary'",
+            "UPDATE agent_sessions SET wave_id=NULL WHERE id='ordinary'",
+            "UPDATE agent_sessions SET wave_id='wave-promotion' WHERE id='primary'",
+        ] {
+            assert!(conn.execute(sql, []).is_err(), "{sql}");
+        }
+    }
+
+    #[test]
+    fn graph_process_task_backfills_the_read_time_pairing() {
+        let conn = open();
+        apply_before_migration(&conn, "graph_process_task");
+        conn.execute_batch(include_str!(
+            "../../tests/fixtures/migrations/graph_process_task_released.sql"
+        ))
+        .unwrap();
+        apply_pending_migrations(&conn);
+
+        let tasks: Vec<(String, Option<String>)> = conn
+            .prepare("SELECT lf_process_id,task_id FROM graph_processes ORDER BY lf_process_id")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        let expected = [
+            ("graph-deep", Some("task_inner")),
+            ("graph-moved", Some("task_bound")),
+            ("graph-outside", None),
+            ("graph-session", Some("task_bound")),
+            ("graph-sibling", Some("task_sibling")),
+        ]
+        .map(|(graph, task)| (graph.to_string(), task.map(str::to_string)));
+        assert_eq!(tasks, expected);
+        assert!(conn
+            .execute("UPDATE graph_processes SET task_id=NULL", [])
+            .is_err());
+        validate_foreign_keys(&conn).unwrap();
+    }
+
+    #[test]
+    fn a_newer_tail_changes_nothing_this_build_validates() {
+        for sql in [
+            "CREATE TABLE newer_table (id TEXT);",
+            "DROP INDEX idx_tasks_project;",
+            "ALTER TABLE waves DROP COLUMN promoted_at;",
+        ] {
+            let conn = open();
+            apply_set(&conn, MIGRATIONS, &mut Vec::new()).unwrap();
+            let newer = apply_newer_migration(&conn, sql).unwrap();
+
+            validate_sqlite_schema(&conn).unwrap();
+            assert_eq!(latest_version_sqlite(&conn).unwrap(), newer, "{sql}");
+            assert!(!requires_migration_sqlite(&conn).unwrap(), "{sql}");
+        }
+    }
+
+    #[test]
+    fn this_builds_own_frontier_stays_exact() {
         let conn = open();
         apply_set(&conn, MIGRATIONS, &mut Vec::new()).unwrap();
-        let head = MIGRATIONS.last().unwrap();
-        let candidate = |sql: &'static str, reader_floor: Option<&'static str>| {
-            let mut set = MIGRATIONS.to_vec();
-            set.push(Migration {
-                id: MigrationId {
-                    major: head.id.major,
-                    minor: head.id.minor + 1,
-                    patch: Some(0),
-                    ordinal: 1,
-                },
-                name: "release",
-                sql,
-                reader_floor,
-            });
-            set
-        };
-        let kept = super::reader_floor(head);
-        let kept: &'static str = Box::leak(kept.into_boxed_str());
+        conn.execute_batch("DROP INDEX idx_tasks_project;").unwrap();
 
-        assert_eq!(
-            super::raised_floor_over(&conn, &candidate("SELECT 1;", Some(kept))).unwrap(),
-            None
-        );
-        let raised = candidate("SELECT 1;", None);
-        assert_eq!(
-            super::raised_floor_over(&conn, &raised).unwrap(),
-            Some(raised.last().unwrap().id.release())
-        );
+        assert!(validate_sqlite_schema(&conn).is_err());
     }
 
     fn apply_project_content_cut(conn: &rusqlite::Connection) -> crate::store::StoreResult<()> {
         super::_migration_transaction(conn, |conn, guards| {
             apply_set(conn, MIGRATIONS, guards)?;
-            for draft in crate::build_info::migration_draft_manifest() {
-                conn.execute_batch(draft.sql)?;
-                super::convert_released_data(conn, draft.sql)?;
-            }
             super::validate_persisted_json(conn)
         })
     }
@@ -1869,7 +1741,7 @@ mod tests {
     #[test]
     fn structured_project_conversion_refuses_unreadable_criteria_without_losing_original() {
         let conn = open();
-        apply_before_current_draft(&conn, "planning_peers");
+        apply_before_migration(&conn, "planning_peers");
         conn.execute_batch(include_str!(
             "../../tests/fixtures/migrations/project_content.sql"
         ))
@@ -1907,15 +1779,7 @@ mod tests {
     #[test]
     fn project_prose_receipt_migration_preserves_uncertain_effects() {
         let conn = open();
-        apply_before_current_draft(&conn, "planning_peers");
-        if !_draft_is_canonical("planning_peers") {
-            for draft in crate::build_info::migration_draft_manifest() {
-                if draft.name == "planning_peers" {
-                    break;
-                }
-                conn.execute_batch(draft.sql).unwrap();
-            }
-        }
+        apply_before_migration(&conn, "planning_peers");
         conn.execute_batch("INSERT INTO waves(id,name,repo,created_at) VALUES('wave-proof','proof','/repo',1);
             INSERT INTO projects(id,wave_id,created_at) VALUES('project-proof','wave-proof',1);
             INSERT INTO project_changes(seq,id,project_id,field,value_json,base_json,conflict_json,attempted,error,acknowledged_revision,acknowledged,order_effects_json)
@@ -1930,7 +1794,7 @@ mod tests {
             serde_json::json!({"field":"project_summary","value":"Saved"}).to_string()
         );
         expected[5]=serde_json::json!(serde_json::json!({"revision":"r1","value":{"field":"project_summary","value":"Before"}}).to_string());
-        conn.execute_batch(&current_draft_sql("planning_peers"))
+        conn.execute_batch(&migration_section_sql("planning_peers"))
             .unwrap();
         let mut actual: serde_json::Value = serde_json::from_str(&rows(&conn)).unwrap();
         // Compare retained JSON values, independently of object-key ordering.
@@ -1955,7 +1819,7 @@ mod tests {
     #[test]
     fn provider_columns_preserve_released_observations_and_local_execution() {
         let conn = open();
-        apply_before_current_draft(&conn, "planning_peers");
+        apply_before_migration(&conn, "planning_peers");
         conn.execute_batch(include_str!(
             "../../tests/fixtures/migrations/planning_relationships.sql"
         ))
@@ -2010,7 +1874,7 @@ mod tests {
                 .unwrap()
         };
         let before: Vec<_> = tables.iter().map(|table| rows(table)).collect();
-        let sql = current_draft_sql("planning_peers");
+        let sql = migration_section_sql("planning_peers");
         super::_migration_transaction(&conn, |conn, _guards| {
             conn.execute_batch(&sql)?;
             super::convert_released_data(conn, &sql)
@@ -2070,10 +1934,10 @@ mod tests {
             r#"{"completed":1}"#,
         ] {
             let conn = open();
-            apply_before_current_draft(&conn, "planning_peers");
+            apply_before_migration(&conn, "planning_peers");
             conn.execute("INSERT INTO pm_items(repo,provider,id,identifier,observed_at,body) VALUES('/repo','linear','unreadable','OTHER-1',17,?1)",[body]).unwrap();
             let error = super::_migration_transaction(&conn, |conn, _guards| {
-                conn.execute_batch(&current_draft_sql("planning_peers"))?;
+                conn.execute_batch(&migration_section_sql("planning_peers"))?;
                 Ok(())
             })
             .unwrap_err();
@@ -2098,7 +1962,7 @@ mod tests {
     #[test]
     fn typed_journal_seeding_preserves_released_relationships_authors_and_receipts() {
         let conn = open();
-        apply_before_current_draft(&conn, "planning_peers");
+        apply_before_migration(&conn, "planning_peers");
         conn.execute_batch(include_str!(
             "../../tests/fixtures/migrations/planning_relationships.sql"
         ))
@@ -2111,7 +1975,7 @@ mod tests {
             ).unwrap()
         };
         let before = receipt(&conn);
-        let sql = current_draft_sql("planning_peers");
+        let sql = migration_section_sql("planning_peers");
         conn.execute_batch(&sql).unwrap();
         super::convert_released_data(&conn, &sql).unwrap();
         for (id, field, expected) in [
@@ -2161,7 +2025,7 @@ mod tests {
     #[test]
     fn structured_project_content_preserves_released_work_and_pending_delivery() {
         let conn = open();
-        apply_before_current_draft(&conn, "planning_peers");
+        apply_before_migration(&conn, "planning_peers");
         conn.execute_batch(include_str!(
             "../../tests/fixtures/migrations/project_content.sql"
         ))
@@ -2246,15 +2110,7 @@ mod tests {
     #[test]
     fn task_checkout_machine_migration_preserves_locations_and_history() {
         let conn = open();
-        apply_before_current_draft(&conn, "task_checkout_machine");
-        if !_draft_is_canonical("task_checkout_machine") {
-            for draft in crate::build_info::migration_draft_manifest()
-                .iter()
-                .take_while(|draft| draft.name != "task_checkout_machine")
-            {
-                conn.execute_batch(draft.sql).unwrap();
-            }
-        }
+        apply_before_migration(&conn, "task_checkout_machine");
         conn.execute_batch(r#"
             INSERT INTO waves(id,name,repo,created_at) VALUES('w','proof','/repo',1);
             INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES('p','w','external-p',1);
@@ -2298,9 +2154,10 @@ mod tests {
                 r.get(0)
             })
             .unwrap();
-        conn.execute_batch(&current_draft_sql("task_checkout_machine"))
+        conn.execute_batch(&migration_section_sql("task_checkout_machine"))
             .unwrap();
-        super::convert_released_data(&conn, &current_draft_sql("task_checkout_machine")).unwrap();
+        super::convert_released_data(&conn, &migration_section_sql("task_checkout_machine"))
+            .unwrap();
         conn.execute(
             "UPDATE work_placements SET machine_id='machine-b' WHERE task_id='t'",
             [],
@@ -2360,12 +2217,12 @@ mod tests {
     #[test]
     fn task_pr_continuation_preserves_released_delivery_and_one_current_pr() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
-        apply_before_current_draft(&conn, "task_pr_continuation");
+        apply_before_migration(&conn, "task_pr_continuation");
         conn.execute_batch(include_str!(
             "../../tests/fixtures/migrations/task_pr_continuation.sql"
         ))
         .unwrap();
-        conn.execute_batch(&current_draft_sql("task_pr_continuation"))
+        conn.execute_batch(&migration_section_sql("task_pr_continuation"))
             .unwrap();
         conn.execute("UPDATE tasks SET base_commit='next-base' WHERE id='t'", [])
             .unwrap();
@@ -2406,7 +2263,7 @@ mod tests {
     #[test]
     fn optional_task_pr_preserves_placement_and_freezes_prior_delivery() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
-        apply_before_current_draft(&conn, "local_planning");
+        apply_before_migration(&conn, "local_planning");
         conn.execute_batch(r#"
             INSERT INTO waves(id,name,repo,created_at) VALUES('w','product','/repo',1);
             INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES('p','w','linear-p',1);
@@ -2444,7 +2301,7 @@ mod tests {
         ))
         .unwrap();
         apply_sqlite(&conn).unwrap();
-        apply_build_drafts(&conn);
+        apply_pending_migrations(&conn);
         assert_eq!(
             conn.query_row(
                 "SELECT planning_completed FROM tasks WHERE id='research'",
@@ -2557,7 +2414,7 @@ mod tests {
     #[test]
     fn process_names_preserves_released_history_and_constraints() {
         let conn = open();
-        apply_before_current_draft(&conn, "process_names");
+        apply_before_migration(&conn, "process_names");
         conn.execute_batch(include_str!(
             "../../tests/fixtures/migrations/process_names_released.sql"
         ))
@@ -2590,7 +2447,7 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        conn.execute_batch(&current_draft_sql("process_names"))
+        conn.execute_batch(&migration_section_sql("process_names"))
             .unwrap();
         for ((_, current), mut expected) in tables.iter().zip(before) {
             if *current == "processes" {
@@ -2635,12 +2492,12 @@ mod tests {
     #[test]
     fn store_revisions_upgrade_starts_counting_without_touching_released_rows() {
         let conn = open();
-        apply_before_current_draft(&conn, "store_revisions");
+        apply_before_migration(&conn, "store_revisions");
         conn.execute_batch(
             "INSERT INTO waves(id,name,repo,created_at) VALUES('wave-released','proof','/repo',1);",
         )
         .unwrap();
-        conn.execute_batch(&current_draft_sql("store_revisions"))
+        conn.execute_batch(&migration_section_sql("store_revisions"))
             .unwrap();
         let revision = |domain: &str| -> i64 {
             conn.query_row(
@@ -2673,11 +2530,7 @@ mod tests {
     #[test]
     fn remove_ask_preserves_conversations_and_history() {
         let conn = open();
-        apply_before_current_draft(&conn, "remove_ask");
-        if !_draft_is_canonical("remove_ask") {
-            conn.execute_batch(&current_draft_sql("primary_session_scope"))
-                .unwrap();
-        }
+        apply_before_migration(&conn, "remove_ask");
         conn.execute_batch("INSERT INTO waves(id,name,repo,created_at) VALUES('wave-preserved','proof','/repo',1);
             INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES('project-preserved','wave-preserved','external-project',1);
             INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at) VALUES('task-preserved','project-preserved','external-issue','PROOF-1','/repo',1);").unwrap();
@@ -2705,7 +2558,7 @@ mod tests {
             .unwrap()
             .collect::<Result<_, _>>()
             .unwrap();
-        conn.execute_batch(&current_draft_sql("remove_ask"))
+        conn.execute_batch(&migration_section_sql("remove_ask"))
             .unwrap();
         for (id, completed, native, published) in [
             ("completed", Some(30), Some("native-completed"), true),
@@ -2741,62 +2594,6 @@ mod tests {
         assert_eq!(conn.query_row("SELECT COUNT(*) FROM agent_sessions WHERE task_id='task-preserved' AND wave_id='wave-preserved' AND work_source='inherited'", [], |row| row.get::<_, i64>(0)).unwrap(), 3);
     }
 
-    fn development_draft(
-        name: &'static str,
-        sql: &'static str,
-    ) -> crate::build_info::MigrationDraft {
-        crate::build_info::MigrationDraft { name, sql }
-    }
-
-    #[test]
-    fn current_private_store_opens_while_another_writer_holds_the_wal() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("loopflow.db");
-        let writer = rusqlite::Connection::open(&path).unwrap();
-        writer.execute_batch("PRAGMA journal_mode = WAL;").unwrap();
-        initialize_experimental_sqlite(&writer, &[]).unwrap();
-        writer.execute_batch("BEGIN IMMEDIATE;").unwrap();
-
-        let reader = rusqlite::Connection::open(&path).unwrap();
-        reader.busy_timeout(Duration::ZERO).unwrap();
-        initialize_experimental_sqlite(&reader, &[]).unwrap();
-        assert_eq!(
-            latest_version_sqlite(&reader).unwrap(),
-            latest_known_version()
-        );
-        writer.execute_batch("ROLLBACK;").unwrap();
-    }
-
-    #[test]
-    fn experiment_schema_changes_require_a_fresh_store() {
-        let conn = open();
-        let first = development_draft(
-            "local_feature",
-            "CREATE TABLE local_feature (note TEXT); INSERT INTO local_feature VALUES ('retained');",
-        );
-        initialize_experimental_sqlite(&conn, std::slice::from_ref(&first)).unwrap();
-        let second = development_draft(
-            "extend_local_feature",
-            "ALTER TABLE local_feature ADD COLUMN extra TEXT;",
-        );
-        let schema = product_schema(&conn).unwrap();
-        for drafts in [vec![], vec![first.clone(), second]] {
-            assert!(initialize_experimental_sqlite(&conn, &drafts).is_err());
-            assert_eq!(product_schema(&conn).unwrap(), schema);
-            assert_eq!(
-                conn.query_row("SELECT note FROM local_feature", [], |row| row
-                    .get::<_, String>(0))
-                    .unwrap(),
-                "retained"
-            );
-        }
-        let older = open();
-        apply_set(&older, &MIGRATIONS[..1], &mut Vec::new()).unwrap();
-        let history = applied_versions(&older).unwrap();
-        assert!(initialize_experimental_sqlite(&older, &[]).is_err());
-        assert_eq!(applied_versions(&older).unwrap(), history);
-    }
-
     #[test]
     fn expected_schema_reuse_keeps_prefixes_and_changed_sql_distinct() {
         let conn = open();
@@ -2820,179 +2617,6 @@ mod tests {
         validate_schema(&conn, &first).unwrap();
     }
 
-    #[test]
-    fn expected_schema_reuse_does_not_accept_schema_ledger_or_data_drift() {
-        let draft = development_draft(
-            "schema_reuse_probe",
-            "CREATE TABLE schema_parent (id TEXT PRIMARY KEY);
-             CREATE TABLE schema_child (
-                 id TEXT PRIMARY KEY, parent_id TEXT REFERENCES schema_parent(id)
-             );
-             CREATE INDEX schema_child_parent ON schema_child(parent_id);
-             CREATE TRIGGER schema_child_required BEFORE INSERT ON schema_child
-             WHEN NEW.parent_id IS NULL BEGIN SELECT RAISE(ABORT, 'parent required'); END;",
-        );
-        let drafts = std::slice::from_ref(&draft);
-        let valid = open();
-        initialize_experimental_sqlite(&valid, drafts).unwrap();
-        validate_experimental_sqlite(&valid, drafts).unwrap();
-
-        let conn = open();
-        initialize_experimental_sqlite(&conn, drafts).unwrap();
-        conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
-        for (mutation, reason) in [
-            (
-                "ALTER TABLE schema_child ADD COLUMN unexpected TEXT;",
-                "schema does not match",
-            ),
-            ("DROP INDEX schema_child_parent;", "schema does not match"),
-            (
-                "DROP TRIGGER schema_child_required;",
-                "schema does not match",
-            ),
-            (
-                "UPDATE schema_migrations SET checksum = 'changed';",
-                "checksum does not match",
-            ),
-            (
-                "DELETE FROM schema_migrations WHERE version = '0.10.001_initial';",
-                "incompatible",
-            ),
-            (
-                "INSERT INTO schema_child VALUES ('child', 'absent-parent');",
-                "invalid foreign keys",
-            ),
-        ] {
-            conn.execute_batch("SAVEPOINT drift").unwrap();
-            conn.execute_batch(mutation).unwrap();
-            let error = validate_experimental_sqlite(&conn, drafts).unwrap_err();
-            assert!(error.to_string().contains(reason), "{mutation}: {error}");
-            conn.execute_batch("ROLLBACK TO drift; RELEASE drift")
-                .unwrap();
-            validate_experimental_sqlite(&conn, drafts).unwrap();
-        }
-        validate_experimental_sqlite(&valid, drafts).unwrap();
-
-        // Opening reads the schema only; the row scan belongs to diagnosis.
-        conn.execute_batch("INSERT INTO schema_child VALUES ('child', 'absent-parent');")
-            .unwrap();
-        initialize_experimental_sqlite(&conn, drafts).unwrap();
-        validate_experimental_sqlite(&conn, drafts).unwrap_err();
-    }
-
-    struct WaitingMigration {
-        reached: SyncSender<()>,
-        resume: Receiver<()>,
-    }
-
-    thread_local! {
-        static WAITING_MIGRATION: RefCell<Option<WaitingMigration>> = const { RefCell::new(None) };
-    }
-
-    fn _wait_for_migration_writer(_attempt: i32) -> bool {
-        WAITING_MIGRATION.with(|waiting| {
-            waiting.borrow_mut().take().is_some_and(|waiting| {
-                waiting.reached.send(()).is_ok()
-                    && waiting.resume.recv_timeout(Duration::from_secs(30)).is_ok()
-            })
-        })
-    }
-
-    #[test]
-    fn experimental_initializers_recheck_after_another_writer_commits() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("loopflow.db");
-        let winner = rusqlite::Connection::open(&path).unwrap();
-        winner.pragma_update(None, "journal_mode", "WAL").unwrap();
-        let first = development_draft(
-            "race_note",
-            "CREATE TABLE race_note (note TEXT); INSERT INTO race_note VALUES ('original');",
-        );
-        let second = development_draft(
-            "race_append",
-            "UPDATE race_note SET note = note || ' appended';",
-        );
-        let drafts = vec![first, second];
-        winner.execute_batch("BEGIN EXCLUSIVE").unwrap();
-        _initialize_experiment_in(&winner, &drafts, &mut Vec::new()).unwrap();
-        let (reached_tx, reached_rx) = sync_channel(1);
-        let (resume_tx, resume_rx) = sync_channel(1);
-        let contender = std::thread::spawn(move || {
-            let conn = rusqlite::Connection::open(path).unwrap();
-            WAITING_MIGRATION.with(|waiting| {
-                *waiting.borrow_mut() = Some(WaitingMigration {
-                    reached: reached_tx,
-                    resume: resume_rx,
-                });
-            });
-            conn.busy_handler(Some(_wait_for_migration_writer)).unwrap();
-            initialize_experimental_sqlite(&conn, &drafts)?;
-            validate_experimental_sqlite(&conn, &drafts)
-        });
-        // The contender is waiting for BEGIN EXCLUSIVE. Commit the first
-        // initialization precisely at that boundary.
-        reached_rx.recv_timeout(Duration::from_secs(30)).unwrap();
-        winner.execute_batch("COMMIT").unwrap();
-        resume_tx.send(()).unwrap();
-        contender.join().unwrap().unwrap();
-        assert_eq!(
-            winner
-                .query_row("SELECT note FROM race_note", [], |row| row
-                    .get::<_, String>(0))
-                .unwrap(),
-            "original appended",
-            "draft SQL replayed",
-        );
-        assert_eq!(applied_versions(&winner).unwrap().len(), MIGRATIONS.len());
-    }
-
-    #[test]
-    fn experiment_validation_does_not_block_a_writer() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("loopflow.db");
-        let reader = rusqlite::Connection::open(&path).unwrap();
-        reader.pragma_update(None, "journal_mode", "WAL").unwrap();
-        initialize_experimental_sqlite(&reader, &[]).unwrap();
-        let writer = rusqlite::Connection::open(&path).unwrap();
-        writer.busy_timeout(Duration::ZERO).unwrap();
-        _read_snapshot(&reader, |reader| {
-            validate_experimental_sqlite(reader, &[])?;
-            writer.execute(
-                "INSERT INTO blob_tokens(sha,lines,bytes,tokens) VALUES('concurrent',1,2,3)",
-                [],
-            )?;
-            validate_experimental_sqlite(reader, &[])
-        })
-        .unwrap();
-        assert_eq!(
-            reader
-                .query_row(
-                    "SELECT tokens FROM blob_tokens WHERE sha='concurrent'",
-                    [],
-                    |row| row.get::<_, i64>(0)
-                )
-                .unwrap(),
-            3
-        );
-    }
-
-    #[test]
-    fn failed_first_draft_rolls_back_canonical_initialization() {
-        let conn = open();
-        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
-        let drafts = [development_draft(
-            "broken_first_draft",
-            "CREATE TABLE unfinished (id TEXT); INSERT INTO missing_table VALUES (1);",
-        )];
-        assert!(initialize_experimental_sqlite(&conn, &drafts).is_err());
-        assert_eq!(user_table_count(&conn).unwrap(), 0);
-        assert!(conn.is_autocommit());
-        assert!(conn
-            .pragma_query_value(None, "foreign_keys", |row| row.get::<_, bool>(0))
-            .unwrap());
-        initialize_experimental_sqlite(&conn, &[]).unwrap();
-    }
-
     fn baseline() -> Migration {
         MIGRATIONS[0]
     }
@@ -3000,7 +2624,7 @@ mod tests {
     fn apply_divergent_history(conn: &rusqlite::Connection, count: usize) {
         let canonical_start = MIGRATIONS
             .iter()
-            .position(|migration| migration.name == "interactive_handoffs")
+            .position(|migration| name_of(migration) == "interactive_handoffs")
             .unwrap();
         apply_set(conn, &MIGRATIONS[..canonical_start], &mut Vec::new()).unwrap();
         for migration in &DIVERGENT_MIGRATIONS[..count] {
@@ -3016,7 +2640,7 @@ mod tests {
     fn apply_permuted_history(conn: &rusqlite::Connection) {
         let context_start = MIGRATIONS
             .iter()
-            .position(|migration| migration.name == "context_pressure")
+            .position(|migration| name_of(migration) == "context_pressure")
             .unwrap();
         apply_set(conn, &MIGRATIONS[..context_start], &mut Vec::new()).unwrap();
         conn.execute("UPDATE schema_migrations SET applied_at = rowid", [])
@@ -3041,7 +2665,7 @@ mod tests {
         for (offset, (version, name)) in permutation.into_iter().enumerate() {
             let migration = MIGRATIONS
                 .iter()
-                .find(|migration| migration.name == name)
+                .find(|migration| name_of(migration) == name)
                 .unwrap();
             conn.execute_batch(migration.sql).unwrap();
             conn.execute(
@@ -3113,50 +2737,19 @@ mod tests {
             .unwrap_or_else(|| panic!("no backup starts with {prefix:?}"))
     }
 
+    /// Released batches stay in numeric id order and every later migration
+    /// follows them.
     #[test]
-    fn the_shipped_set_is_ordered_and_within_the_active_namespace() {
-        validate_set(MIGRATIONS).unwrap();
-
-        let active = active_namespace();
-        for migration in MIGRATIONS {
-            let namespace = (
-                migration.id.major,
-                migration.id.minor,
-                migration.id.patch.unwrap_or(0),
-            );
-            assert!(
-                namespace <= active,
-                "{} is namespaced ahead of the package version",
-                migration.version()
-            );
-        }
-    }
-
-    /// The directory and the registered set are two hands that must stay in sync:
-    /// a file added without registering it would never run.
-    #[test]
-    fn every_migration_file_is_registered_under_its_own_name() {
-        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/store/migrations");
-        let mut on_disk: Vec<String> = std::fs::read_dir(dir)
-            .unwrap()
-            .filter_map(|entry| {
-                let entry = entry.unwrap();
-                entry.file_type().unwrap().is_file().then(|| {
-                    entry
-                        .path()
-                        .file_stem()
-                        .unwrap()
-                        .to_string_lossy()
-                        .into_owned()
-                })
-            })
+    fn released_history_precedes_later_migrations_in_id_order() {
+        let released: Vec<MigrationId> = MIGRATIONS
+            .iter()
+            .map_while(|migration| MigrationId::parse_version(migration.version))
             .collect();
-        on_disk.sort();
-
-        let mut registered: Vec<String> = MIGRATIONS.iter().map(Migration::version).collect();
-        registered.sort();
-
-        assert_eq!(on_disk, registered);
+        assert!(released.windows(2).all(|pair| pair[0] < pair[1]));
+        assert!(MIGRATIONS[released.len()..]
+            .iter()
+            .all(|migration| super::super::migration_catalog::is_slug(migration.version)));
+        validate_set(MIGRATIONS).unwrap();
     }
 
     #[test]
@@ -3233,7 +2826,7 @@ mod tests {
     fn prefix_before(name: &str) -> &'static [Migration] {
         let index = MIGRATIONS
             .iter()
-            .position(|migration| migration.name == name)
+            .position(|migration| name_of(migration) == name)
             .expect("named migration is registered");
         &MIGRATIONS[..index]
     }
@@ -3241,48 +2834,69 @@ mod tests {
     fn apply_through(conn: &rusqlite::Connection, name: &str) {
         let index = MIGRATIONS
             .iter()
-            .position(|migration| migration.name == name)
+            .position(|migration| name_of(migration) == name)
             .expect("named migration is registered");
         apply_set(conn, &MIGRATIONS[..=index], &mut Vec::new()).unwrap();
     }
 
-    fn draft_location(name: &str) -> (usize, &'static str, usize) {
+    /// A migration's section of the catalog: a slug migration's whole file, or
+    /// the `-- draft: <name>` section of the released batch that carries it.
+    struct Section {
+        index: usize,
+        sql: &'static str,
+        start: usize,
+        body: std::ops::Range<usize>,
+    }
+
+    fn section(name: &str) -> Section {
         let marker = format!("-- draft: {name}");
         MIGRATIONS
             .iter()
             .enumerate()
             .find_map(|(index, migration)| {
-                migration
-                    .sql
-                    .find(&marker)
-                    .map(|offset| (index, migration.sql, offset))
+                if migration.version == name {
+                    return Some(Section {
+                        index,
+                        sql: migration.sql,
+                        start: 0,
+                        body: 0..migration.sql.len(),
+                    });
+                }
+                let start = migration.sql.find(&marker)?;
+                let sql = migration.sql;
+                let body_start = sql[start..]
+                    .find('\n')
+                    .map(|offset| start + offset + 1)
+                    .unwrap_or(sql.len());
+                let body_end = sql[body_start..]
+                    .find("\n-- draft: ")
+                    .map(|offset| body_start + offset)
+                    .unwrap_or(sql.len());
+                Some(Section {
+                    index,
+                    sql,
+                    start,
+                    body: body_start..body_end,
+                })
             })
-            .unwrap_or_else(|| panic!("draft {name} is materialized in a release migration"))
+            .unwrap_or_else(|| panic!("migration {name} is in the catalog"))
     }
 
     fn apply_before_draft(conn: &rusqlite::Connection, name: &str) {
-        let (migration_index, sql, draft_offset) = draft_location(name);
-        apply_set(conn, &MIGRATIONS[..migration_index], &mut Vec::new()).unwrap();
-        conn.execute_batch(&sql[..draft_offset]).unwrap();
+        let section = section(name);
+        apply_set(conn, &MIGRATIONS[..section.index], &mut Vec::new()).unwrap();
+        conn.execute_batch(&section.sql[..section.start]).unwrap();
     }
 
     fn apply_draft(conn: &rusqlite::Connection, name: &str) {
-        let (_, sql, draft_offset) = draft_location(name);
-        let body_start = sql[draft_offset..]
-            .find('\n')
-            .map(|offset| draft_offset + offset + 1)
-            .unwrap_or(sql.len());
-        let body_end = sql[body_start..]
-            .find("\n-- draft: ")
-            .map(|offset| body_start + offset)
-            .unwrap_or(sql.len());
-        conn.execute_batch(&sql[body_start..body_end]).unwrap();
+        let section = section(name);
+        conn.execute_batch(&section.sql[section.body]).unwrap();
     }
 
     #[test]
     fn conversation_admission_preserves_started_history_and_starts_only_on_input() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
-        apply_before_current_draft(&conn, "session_admission");
+        apply_before_migration(&conn, "session_admission");
         conn.execute_batch(include_str!(
             "../../tests/fixtures/migrations/conversation_admission_released.sql"
         ))
@@ -3296,7 +2910,7 @@ mod tests {
             .unwrap()
         };
         let first = started();
-        conn.execute_batch(&current_draft_sql("session_admission"))
+        conn.execute_batch(&migration_section_sql("session_admission"))
             .unwrap();
         assert_eq!(started(), first);
         let retained: (String, String) = conn.query_row("SELECT t.primary_session_id,c.receipt_key FROM tasks t JOIN agent_sessions s ON s.id=t.primary_session_id JOIN session_events c ON c.seq=s.current_capture WHERE t.id='started'", [], |row| Ok((row.get(0)?,row.get(1)?))).unwrap();
@@ -3333,12 +2947,12 @@ mod tests {
     #[test]
     fn repository_relocation_upgrade_retains_released_work() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
-        apply_before_current_draft(&conn, "repository_relocation");
+        apply_before_migration(&conn, "repository_relocation");
         conn.execute_batch(include_str!(
             "../../tests/fixtures/migrations/repository_relocation_released.sql"
         ))
         .unwrap();
-        conn.execute_batch(&current_draft_sql("repository_relocation"))
+        conn.execute_batch(&migration_section_sql("repository_relocation"))
             .unwrap();
         conn.execute(
             "INSERT INTO relocated_task_processes(task_id,process_id) VALUES('task','process')",
@@ -3354,12 +2968,12 @@ mod tests {
     #[test]
     fn designated_panes_resets_released_free_trees() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
-        apply_before_current_draft(&conn, "designated_panes");
+        apply_before_migration(&conn, "designated_panes");
         conn.execute_batch(include_str!(
             "../../tests/fixtures/migrations/pane_layouts_released.sql"
         ))
         .unwrap();
-        let sql = current_draft_sql("designated_panes");
+        let sql = migration_section_sql("designated_panes");
         conn.execute_batch(&sql).unwrap();
         super::convert_released_data(&conn, &sql).unwrap();
         super::validate_persisted_json(&conn).unwrap();
@@ -3372,14 +2986,34 @@ mod tests {
     }
 
     #[test]
+    fn native_terminal_input_upgrade_preserves_owners_without_inventing_drafts() {
+        let conn = open();
+        let migration = section("native_terminal_input");
+        apply_set(&conn, &MIGRATIONS[..migration.index], &mut Vec::new()).unwrap();
+        conn.execute_batch(include_str!(
+            "../../tests/fixtures/migrations/native_terminal_input_released.sql"
+        ))
+        .unwrap();
+        apply_set(&conn, MIGRATIONS, &mut Vec::new()).unwrap();
+        let owner: (i64, bool, Option<String>) = conn
+            .query_row(
+                "SELECT started_at,viewed,native_input FROM processes WHERE id='retained-owner'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(owner, (100, true, None));
+    }
+
+    #[test]
     fn session_preview_upgrades_released_activity_without_inventing_output() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
-        apply_before_current_draft(&conn, "session_preview");
+        apply_before_migration(&conn, "session_preview");
         conn.execute_batch(include_str!(
             "../../tests/fixtures/migrations/session_preview_released.sql"
         ))
         .unwrap();
-        conn.execute_batch(&current_draft_sql("session_preview"))
+        conn.execute_batch(&migration_section_sql("session_preview"))
             .unwrap();
         let activity: (i64, i64, Option<String>) = conn.query_row(
             "SELECT observed_at,pending_input,preview FROM session_activity WHERE session_id='retained'", [],
@@ -3390,12 +3024,12 @@ mod tests {
     #[test]
     fn session_facts_only_folds_stream_usage_into_native_turns_and_keeps_facts() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
-        apply_before_current_draft(&conn, "session_facts_only");
+        apply_before_migration(&conn, "session_facts_only");
         conn.execute_batch(include_str!(
             "../../tests/fixtures/migrations/session_facts_only_released.sql"
         ))
         .unwrap();
-        conn.execute_batch(&current_draft_sql("session_facts_only"))
+        conn.execute_batch(&migration_section_sql("session_facts_only"))
             .unwrap();
         let usage = |thread: &str, turn: &str| -> (serde_json::Value, Option<i64>) {
             conn.query_row(
@@ -3524,73 +3158,200 @@ mod tests {
         assert_eq!(revision("usage"), usage_revision + 1);
     }
 
-    pub(crate) fn apply_before_current_draft(conn: &rusqlite::Connection, name: &str) {
-        if _draft_is_canonical(name) {
-            apply_before_draft(conn, name);
-        } else {
-            apply_set(conn, MIGRATIONS, &mut Vec::new()).unwrap();
-        }
+    /// Apply the catalog up to the named migration, as a fixture released
+    /// before it would have it.
+    pub(crate) fn apply_before_migration(conn: &rusqlite::Connection, name: &str) {
+        apply_before_draft(conn, name);
     }
 
     /// Finish a historical fixture's partial migration before using current readers.
-    pub(crate) fn upgrade_from_draft(conn: &rusqlite::Connection, name: &str) {
+    pub(crate) fn upgrade_from_migration(conn: &rusqlite::Connection, name: &str) {
         super::_migration_transaction(conn, |conn, guards| {
-            if _draft_is_canonical(name) {
-                let (index, sql, offset) = draft_location(name);
-                conn.execute_batch(&sql[offset..])?;
-                super::convert_released_data(conn, sql)?;
-                super::insert_applied_migration(
-                    conn,
-                    &MIGRATIONS[index],
-                    &super::migration_prefix_fingerprint(&MIGRATIONS[..index]),
-                )?;
-                apply_set(conn, MIGRATIONS, guards)?;
-            }
-            _apply_build_drafts_in(conn)?;
+            let section = section(name);
+            conn.execute_batch(&section.sql[section.start..])?;
+            super::convert_released_data(conn, section.sql)?;
+            super::insert_applied_migration(
+                conn,
+                &MIGRATIONS[section.index],
+                &super::migration_prefix_fingerprint(&MIGRATIONS[..section.index]),
+            )?;
+            apply_set(conn, MIGRATIONS, guards)?;
             super::validate_foreign_keys(conn)
         })
         .unwrap();
     }
 
-    /// Bring a released fixture to this build's experiment schema.
-    pub(crate) fn apply_build_drafts(conn: &rusqlite::Connection) {
-        super::_migration_transaction(conn, |conn, _| _apply_build_drafts_in(conn)).unwrap();
+    /// Bring a fixture seeded at a released frontier to this build's schema.
+    pub(crate) fn apply_pending_migrations(conn: &rusqlite::Connection) {
+        super::_migration_transaction(conn, |conn, guards| apply_set(conn, MIGRATIONS, guards))
+            .unwrap();
     }
 
-    fn _apply_build_drafts_in(conn: &rusqlite::Connection) -> crate::store::StoreResult<()> {
-        for draft in crate::build_info::migration_draft_manifest() {
-            conn.execute_batch(draft.sql)?;
-            super::convert_released_data(conn, draft.sql)?;
-        }
-        Ok(())
+    /// One migration's own SQL: a slug file, or a released batch's section.
+    pub(crate) fn migration_section_sql(name: &str) -> String {
+        let section = section(name);
+        section.sql[section.body].to_string()
     }
 
-    pub(crate) fn current_draft_sql(name: &str) -> String {
-        if !_draft_is_canonical(name) {
-            return migration_sql_for_test(name);
-        }
-        let (_, sql, draft_offset) = draft_location(name);
-        let body_start = sql[draft_offset..]
-            .find('\n')
-            .map(|offset| draft_offset + offset + 1)
-            .unwrap_or(sql.len());
-        let body_end = sql[body_start..]
-            .find("\n-- draft: ")
-            .map(|offset| body_start + offset)
-            .unwrap_or(sql.len());
-        sql[body_start..body_end].to_string()
+    fn reader_floors(conn: &rusqlite::Connection) -> Vec<Option<String>> {
+        conn.prepare("SELECT reader_floor FROM schema_migrations ORDER BY applied_at, rowid")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    }
+
+    /// Released builds check every row past their own head, and a row with no floor
+    /// names itself, so one NULL in that tail refuses them.
+    #[test]
+    fn every_new_migration_repeats_the_ledgers_newest_reader_floor() {
+        let conn = open();
+        apply_pending_migrations(&conn);
+        conn.execute_batch(
+            "UPDATE schema_migrations SET reader_floor='older_floor' WHERE rowid=1;
+             UPDATE schema_migrations SET reader_floor='recorded_floor' WHERE rowid=2;",
+        )
+        .unwrap();
+        let colour = Migration {
+            version: "add_colour",
+            sql: "ALTER TABLE waves ADD COLUMN colour TEXT;",
+            merged: true,
+        };
+        let shade = Migration {
+            version: "add_shade",
+            sql: "ALTER TABLE waves ADD COLUMN shade TEXT;",
+            merged: true,
+        };
+        let set: Vec<Migration> = MIGRATIONS.iter().copied().chain([colour, shade]).collect();
+
+        apply_set(&conn, &set, &mut Vec::new()).unwrap();
+
+        let recorded = Some("recorded_floor".to_string());
+        assert_eq!(
+            reader_floors(&conn)[MIGRATIONS.len()..],
+            [recorded.clone(), recorded]
+        );
+    }
+
+    #[test]
+    fn a_ledger_with_no_recorded_floor_stays_without_one() {
+        let conn = open();
+        apply_pending_migrations(&conn);
+
+        apply_newer_migration(&conn, "ALTER TABLE waves ADD COLUMN colour TEXT;").unwrap();
+
+        assert!(reader_floors(&conn).iter().all(Option::is_none));
+    }
+
+    #[test]
+    fn server_request_stops_preserve_unknown_historical_attribution() {
+        let conn = open();
+        apply_before_migration(&conn, "server_request_stops");
+        conn.execute_batch(include_str!(
+            "../../tests/fixtures/migrations/request_stops_released.sql"
+        ))
+        .unwrap();
+        apply_pending_migrations(&conn);
+        let stop: (i64, Option<String>, Option<String>) = conn.query_row(
+            "SELECT ship_stopped_at,ship_stopped_lf_process_id,ship_stopped_person FROM tasks WHERE issue_identifier='STOP-1'",
+            [], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
+        ).unwrap();
+        assert_eq!(stop, (25, None, None));
+    }
+
+    #[test]
+    fn task_workspace_teardown_upgrade_keeps_explicit_closes_and_rejudges_automatic_closes() {
+        let conn = open();
+        apply_before_migration(&conn, "task_workspace_teardown");
+        conn.execute_batch(include_str!(
+            "../../tests/fixtures/migrations/task_workspace_teardown_released.sql"
+        ))
+        .unwrap();
+        apply_pending_migrations(&conn);
+        let mut query = conn
+            .prepare(
+                "SELECT id,close_requested FROM desktop_shells WHERE owner IS NOT NULL ORDER BY id",
+            )
+            .unwrap();
+        let requests = query
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(
+            requests,
+            vec![("automatic".into(), 0), ("explicit".into(), 1)]
+        );
+        let closed: bool = conn
+            .query_row(
+                "SELECT jobs_settled FROM desktop_shells WHERE id='unstarted'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(closed);
+        validate_foreign_keys(&conn).unwrap();
+    }
+
+    #[test]
+    fn task_workspace_upgrade_preserves_checkout_and_adds_retry_queue() {
+        let conn = open();
+        apply_before_migration(&conn, "task_workspace_lifetimes");
+        conn.execute_batch(include_str!(
+            "../../tests/fixtures/migrations/task_workspace_released.sql"
+        ))
+        .unwrap();
+        apply_pending_migrations(&conn);
+        apply_pending_migrations(&conn);
+        let checkout: String = conn
+            .query_row(
+                "SELECT worktree FROM tasks WHERE id='task_workspace'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(checkout, "/repo.task");
+        conn.execute("INSERT INTO desktop_shells(id,task_id,checkout,created_at) VALUES('shell','task_workspace','/repo.task',100)", []).unwrap();
+        let shell: (String, Option<String>, bool) = conn
+            .query_row(
+                "SELECT checkout,owner,jobs_settled FROM desktop_shells WHERE id='shell'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(shell, ("/repo.task".into(), None, false));
+        assert!(!conn.table_exists(None, "task_shells").unwrap());
+
+        conn.execute("INSERT INTO task_retirements(task_id,completion,checkout,branch,due_at,phase) SELECT id,planning_completed_at,worktree,branch,900,'waiting' FROM tasks WHERE id='task_workspace'", []).unwrap();
+        let retry: (Option<i64>, i64) = conn
+            .query_row("SELECT retry_at,failures FROM task_retirements", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        assert_eq!(retry, (None, 0));
+        conn.execute(
+            "UPDATE tasks SET planning_completed=0 WHERE id='task_workspace'",
+            [],
+        )
+        .unwrap();
+        let remaining: i64 = conn
+            .query_row("SELECT count(*) FROM task_retirements", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(remaining, 0);
+        validate_foreign_keys(&conn).unwrap();
     }
 
     #[test]
     fn ownership_log_records_released_evidence_without_inventing_owners() {
         let conn = open();
-        apply_before_current_draft(&conn, "task_ownership");
+        apply_before_migration(&conn, "task_ownership");
         conn.execute_batch(include_str!(
             "../../tests/fixtures/migrations/ownership_log_released.sql"
         ))
         .unwrap();
         super::_migration_transaction(&conn, |conn, _| {
-            conn.execute_batch(&current_draft_sql("task_ownership"))?;
+            conn.execute_batch(&migration_section_sql("task_ownership"))?;
             validate_foreign_keys(conn)
         })
         .unwrap();
@@ -3669,13 +3430,13 @@ mod tests {
     #[test]
     fn optional_task_ancestry_preserves_released_work_and_current_defaults() {
         let conn = open();
-        apply_before_current_draft(&conn, "optional_task_ancestry");
+        apply_before_migration(&conn, "optional_task_ancestry");
         conn.execute_batch(include_str!(
             "../../tests/fixtures/migrations/optional_task_ancestry.sql"
         ))
         .unwrap();
         super::_migration_transaction(&conn, |conn, _| {
-            conn.execute_batch(&current_draft_sql("optional_task_ancestry"))?;
+            conn.execute_batch(&migration_section_sql("optional_task_ancestry"))?;
             validate_foreign_keys(conn)
         })
         .unwrap();
@@ -3747,11 +3508,11 @@ mod tests {
     #[test]
     fn paused_migration_keeps_existing_tasks_unpaused_and_retains_work() {
         let conn = open();
-        apply_before_current_draft(&conn, "task_paused");
+        apply_before_migration(&conn, "task_paused");
         conn.execute_batch("INSERT INTO waves(id,name,repo,created_at) VALUES('w','product','/repo',1);
             INSERT INTO projects(id,wave_id,created_at) VALUES('p','w',1);
             INSERT INTO tasks(id,project_id,issue_identifier,issue_title,worktree,created_at) VALUES('t','p','PROOF-1','Retained','/repo/task',1);").unwrap();
-        conn.execute_batch(&current_draft_sql("task_paused"))
+        conn.execute_batch(&migration_section_sql("task_paused"))
             .unwrap();
         let task: (bool, String, String) = conn
             .query_row(
@@ -3766,7 +3527,7 @@ mod tests {
     #[test]
     fn task_flow_observations_removes_scheduling_and_worker_control_and_preserves_history() {
         let conn = open();
-        apply_before_current_draft(&conn, "task_flow_observations");
+        apply_before_migration(&conn, "task_flow_observations");
         conn.execute_batch(r#"
             INSERT INTO execs(id,trace_id,started_at,outcome) VALUES('old-exec','trace',1,'interrupted');
             INSERT INTO waves(id,name,repo,created_at) VALUES('w','product','/repo',1);
@@ -3795,7 +3556,7 @@ mod tests {
             VALUES('finished','p','linear-d','LOO-3',1,30,'/repo/finished','done',25),
                   ('dropped','p','linear-a','LOO-4',1,30,'/repo/dropped','abandoned',26);
         "#).unwrap();
-        conn.execute_batch(&current_draft_sql("task_flow_observations"))
+        conn.execute_batch(&migration_section_sql("task_flow_observations"))
             .unwrap();
         // A Task's state is now its Workflow position. A done Task stands at
         // the end of a workflow with nothing between, placed by a move no
@@ -3963,41 +3724,33 @@ mod tests {
     }
 
     #[test]
-    fn task_agent_migration_preserves_existing_tasks() {
-        let conn = open();
-        apply_before_current_draft(&conn, "task_agent");
-        conn.execute_batch("INSERT INTO waves (id, name, repo, created_at)
-            VALUES ('wave_agent', 'agent', '/repo', 1);
-            INSERT INTO projects (id, wave_id, external_project_id, created_at, updated_at)
-            VALUES ('project_agent', 'wave_agent', 'linear-project', 1, 1);
-            INSERT INTO tasks (id, project_id, external_issue_id, issue_identifier, worktree, workspace_slug, created_at, updated_at)
-            VALUES ('task_agent', 'project_agent', 'linear-issue', 'TEST-1', '/repo.task', 'task-agent', 1, 1);").unwrap();
-        conn.execute_batch(&current_draft_sql("task_agent"))
-            .unwrap();
-        let retained = conn
-            .query_row(
-                "SELECT issue_identifier, worktree, agent FROM tasks WHERE id='task_agent'",
-                [],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, Option<String>>(2)?,
-                    ))
-                },
-            )
-            .unwrap();
-        assert_eq!(retained, ("TEST-1".into(), "/repo.task".into(), None));
+    fn settings_authority_preserves_task_history_and_migrates_preferences() {
+        let home = tempfile::tempdir().unwrap();
+        let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+        apply_before_migration(&conn, "settings_authority");
+        conn.execute_batch(include_str!(
+            "../../tests/fixtures/migrations/settings_authority_released.sql"
+        ))
+        .unwrap();
+        let mut guards = Vec::new();
+        crate::config::migrate::preflight(&conn, &mut guards).unwrap();
+        drop(guards);
+        upgrade_from_migration(&conn, "settings_authority");
+        let retained: (String, String) = conn.query_row("SELECT t.worktree,s.provider FROM tasks t JOIN agent_sessions s ON s.task_id=t.id WHERE t.id='retained'", [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
+        assert_eq!(retained, ("/repo.task".into(), "claude".into()));
+        let values: serde_yaml_ng::Value = serde_yaml_ng::from_str(
+            &std::fs::read_to_string(home.path().join("config.yaml")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(values["skills"]["design"]["agent"], "codex:o3");
+        assert_eq!(values["skills"]["implement"]["agent"], "codex");
+        assert_eq!(conn.query_row("SELECT count(*) FROM sqlite_master WHERE name IN ('scope_settings','scope_defaults','provider_routes')", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
     }
 
     #[test]
     fn task_issue_identities_migration_preserves_confirmation_and_planning() {
         let conn = open();
-        apply_before_current_draft(&conn, "task_issue_identities");
-        if !_draft_is_canonical("task_issue_identities") && !_draft_is_canonical("task_deletions") {
-            conn.execute_batch(&current_draft_sql("task_deletions"))
-                .unwrap();
-        }
+        apply_before_migration(&conn, "task_issue_identities");
         conn.execute_batch(
             r#"INSERT INTO waves(id,name,repo,created_at) VALUES('wave_history','history','/repo',100);
              INSERT INTO task_deletions(wave_id,issue_id,identifier,confirmed_at)
@@ -4007,7 +3760,7 @@ mod tests {
              INSERT INTO wave_chapters(wave_id,chapter_id,project_id,current,receipt)
                VALUES('wave_history','old','linear-project',1,'{"tasks":[{"applied":true}]}');"#,
         ).unwrap();
-        conn.execute_batch(&current_draft_sql("task_issue_identities"))
+        conn.execute_batch(&migration_section_sql("task_issue_identities"))
             .unwrap();
         assert_eq!(
             conn.query_row("SELECT COUNT(*) FROM task_issue_identities", [], |row| {
@@ -4046,7 +3799,7 @@ mod tests {
     #[test]
     fn task_deletions_migration_preserves_terminal_history_without_inventing_confirmation() {
         let conn = open();
-        apply_before_current_draft(&conn, "task_deletions");
+        apply_before_migration(&conn, "task_deletions");
         conn.execute_batch(
             r#"INSERT INTO waves(id,name,repo,created_at) VALUES('wave_history','history','/repo',100);
              INSERT INTO projects(id,wave_id,external_project_id,created_at,updated_at)
@@ -4059,7 +3812,7 @@ mod tests {
              INSERT INTO wave_chapters(wave_id,chapter_id,project_id,current,receipt)
                VALUES('wave_history','old','linear-project',1,'{"tasks":[{"applied":true}]}');"#
         ).unwrap();
-        conn.execute_batch(&current_draft_sql("task_deletions"))
+        conn.execute_batch(&migration_section_sql("task_deletions"))
             .unwrap();
         let rows = conn
             .prepare("SELECT id,work_state,work_terminal_at,updated_at FROM tasks ORDER BY id")
@@ -4105,15 +3858,15 @@ mod tests {
     #[test]
     fn machine_connections_preserve_released_records() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
-        apply_before_current_draft(&conn, "rename_home_to_machine");
+        apply_before_migration(&conn, "rename_home_to_machine");
         conn.execute_batch("INSERT INTO homes (id, route, created_at, observed_at)
             VALUES ('home_11111111111111111111111111111111', 'ssh://jack@mini', 9, 10);
             INSERT INTO waves (id, name, repo, created_at) VALUES ('machine-wave', 'machine', '/repo', 7);
             INSERT INTO work_placements (wave_id, home_id, placed_at)
             VALUES ('machine-wave', 'home_11111111111111111111111111111111', 8);").unwrap();
-        conn.execute_batch(&current_draft_sql("rename_home_to_machine"))
+        conn.execute_batch(&migration_section_sql("rename_home_to_machine"))
             .unwrap();
-        conn.execute_batch(&current_draft_sql("machine_connections"))
+        conn.execute_batch(&migration_section_sql("machine_connections"))
             .unwrap();
         let row: (String, i64, i64, Option<String>, Option<String>, i64) = conn.query_row(
             "SELECT m.route, m.created_at, m.observed_at, m.label, m.repo, p.placed_at
@@ -4126,7 +3879,7 @@ mod tests {
     #[test]
     fn machine_rename_preserves_released_identity_and_placement() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
-        apply_before_current_draft(&conn, "rename_home_to_machine");
+        apply_before_migration(&conn, "rename_home_to_machine");
         let id: String = conn
             .query_row("SELECT id FROM homes WHERE route='local'", [], |row| {
                 row.get(0)
@@ -4141,7 +3894,7 @@ mod tests {
             VALUES ('home_00000000000000000000000000000001', 'ssh://jack@mini', 9, 10);",
         )
         .unwrap();
-        conn.execute_batch(&current_draft_sql("rename_home_to_machine"))
+        conn.execute_batch(&migration_section_sql("rename_home_to_machine"))
             .unwrap();
         let retained: (String, i64) = conn
             .query_row(
@@ -4166,12 +3919,12 @@ mod tests {
     #[test]
     fn landing_timeout_removal_preserves_intent_and_recovers_synthetic_blocks() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
-        apply_before_current_draft(&conn, "remove_landing_timeouts");
+        apply_before_migration(&conn, "remove_landing_timeouts");
         conn.execute_batch(include_str!(
             "../../tests/fixtures/migrations/landing_timeouts.sql"
         ))
         .unwrap();
-        conn.execute_batch(&current_draft_sql("remove_landing_timeouts"))
+        conn.execute_batch(&migration_section_sql("remove_landing_timeouts"))
             .unwrap();
         let state: (String, String, String, Option<String>) = conn.query_row(
             "SELECT state,requested_head_sha,observed_head_sha,blocked_reason FROM pr_landings WHERE id='slow'",
@@ -4219,7 +3972,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("registry.db");
         let conn = rusqlite::Connection::open(&path).unwrap();
-        apply_before_current_draft(&conn, "retire_home_landing_supervisors");
+        apply_before_migration(&conn, "retire_home_landing_supervisors");
         conn.execute_batch(
             "INSERT INTO homes (id, route, created_at, observed_at)
              VALUES ('retired_home', 'remote', 1, 2);
@@ -4272,9 +4025,6 @@ mod tests {
         .unwrap();
         super::_migration_transaction(&conn, |conn, guards| {
             apply_set(conn, MIGRATIONS, guards)?;
-            for draft in crate::build_info::migration_draft_manifest() {
-                conn.execute_batch(draft.sql)?;
-            }
             validate_foreign_keys(conn)
         })
         .unwrap();
@@ -4399,7 +4149,7 @@ mod tests {
     fn landing_repair_counter_removal_preserves_supervision() {
         let conn = open();
         let name = "remove_landing_repair_counter";
-        apply_before_current_draft(&conn, name);
+        apply_before_migration(&conn, name);
         conn.execute_batch(
             "INSERT INTO pr_landings (
                 id, repo, pr_number, worktree, branch, requested_head_sha,
@@ -4431,7 +4181,7 @@ mod tests {
         };
         let before = read_landing();
 
-        conn.execute_batch(&current_draft_sql(name)).unwrap();
+        conn.execute_batch(&migration_section_sql(name)).unwrap();
 
         assert_eq!(read_landing(), before);
         assert!(!columns(&conn, "pr_landings").contains(&"repair_count".to_string()));
@@ -4442,9 +4192,9 @@ mod tests {
     fn stable_work_draft_keeps_definitions_and_clears_execution_state() {
         let conn = open();
         conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
-        apply_before_current_draft(&conn, "stable_work_state");
+        apply_before_migration(&conn, "stable_work_state");
         if !columns(&conn, "tasks").contains(&"work_state".to_string()) {
-            conn.execute_batch(&current_draft_sql("opaque_steer_run_provenance"))
+            conn.execute_batch(&migration_section_sql("opaque_steer_run_provenance"))
                 .unwrap();
         }
         conn.execute(
@@ -4454,7 +4204,7 @@ mod tests {
         )
         .unwrap();
 
-        conn.execute_batch(&current_draft_sql("stable_work_state"))
+        conn.execute_batch(&migration_section_sql("stable_work_state"))
             .unwrap();
 
         let state: (String, Option<i64>) = conn
@@ -4496,10 +4246,10 @@ mod tests {
     fn obsolete_sql_lifecycle_draft_preserves_only_the_outer_exec_ledger() {
         let conn = open();
         conn.execute_batch("PRAGMA foreign_keys = OFF").unwrap();
-        apply_before_current_draft(&conn, "obsolete_sql_lifecycle");
+        apply_before_migration(&conn, "obsolete_sql_lifecycle");
         if !columns(&conn, "tasks").contains(&"work_state".to_string()) {
             for draft in ["opaque_steer_run_provenance", "stable_work_state"] {
-                conn.execute_batch(&current_draft_sql(draft)).unwrap();
+                conn.execute_batch(&migration_section_sql(draft)).unwrap();
             }
         }
         conn.execute(
@@ -4509,7 +4259,7 @@ mod tests {
         )
         .unwrap();
         conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
-        conn.execute_batch(&current_draft_sql("obsolete_sql_lifecycle"))
+        conn.execute_batch(&migration_section_sql("obsolete_sql_lifecycle"))
             .unwrap();
 
         validate_foreign_keys(&conn).unwrap();
@@ -4553,12 +4303,12 @@ mod tests {
     #[test]
     fn task_lifecycle_outcome_is_removed_from_the_persisted_model() {
         let conn = open();
-        apply_before_current_draft(&conn, REMOVE_TASK_LIFECYCLE_OUTCOME_NAME);
+        apply_before_migration(&conn, REMOVE_TASK_LIFECYCLE_OUTCOME_NAME);
         assert!(columns(&conn, "tasks")
             .iter()
             .any(|column| column == "lifecycle_outcome"));
 
-        conn.execute_batch(&current_draft_sql(REMOVE_TASK_LIFECYCLE_OUTCOME_NAME))
+        conn.execute_batch(&migration_section_sql(REMOVE_TASK_LIFECYCLE_OUTCOME_NAME))
             .unwrap();
 
         assert!(!columns(&conn, "tasks")
@@ -4572,9 +4322,9 @@ mod tests {
     #[test]
     fn run_identity_removes_secret_columns_and_preserves_run_invariants() {
         let conn = open();
-        apply_before_current_draft(&conn, RUN_IDENTITY_NAME);
+        apply_before_migration(&conn, RUN_IDENTITY_NAME);
         conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
-        conn.execute_batch(&current_draft_sql(RUN_IDENTITY_NAME))
+        conn.execute_batch(&migration_section_sql(RUN_IDENTITY_NAME))
             .unwrap();
         validate_foreign_keys(&conn).unwrap();
         conn.pragma_update(None, "foreign_keys", "ON").unwrap();
@@ -4611,7 +4361,7 @@ mod tests {
     #[test]
     fn turn_usage_samples_move_provider_receipts_out_of_turn_lifecycle() {
         let conn = open();
-        apply_before_current_draft(&conn, TURN_USAGE_SAMPLES_NAME);
+        apply_before_migration(&conn, TURN_USAGE_SAMPLES_NAME);
         conn.execute_batch(
             "INSERT INTO agent_invocations (
                 id, run_id, process_id, started_at, ended_at, repo, worktree,
@@ -4657,7 +4407,7 @@ mod tests {
         .unwrap();
 
         conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
-        conn.execute_batch(&current_draft_sql(TURN_USAGE_SAMPLES_NAME))
+        conn.execute_batch(&migration_section_sql(TURN_USAGE_SAMPLES_NAME))
             .unwrap();
         validate_foreign_keys(&conn).unwrap();
         conn.pragma_update(None, "foreign_keys", "ON").unwrap();
@@ -4754,7 +4504,7 @@ mod tests {
     #[test]
     fn repository_owned_waves_preserve_uuid_projection_and_allow_duplicate_slugs() {
         let conn = open();
-        apply_before_current_draft(&conn, REPOSITORY_OWNED_WAVES_NAME);
+        apply_before_migration(&conn, REPOSITORY_OWNED_WAVES_NAME);
         conn.execute(
             "INSERT INTO waves (id, name, repo, created_at) VALUES ('wave-a', 'infrastructure', '/repo/a', 1)",
             [],
@@ -4787,7 +4537,7 @@ mod tests {
         .unwrap();
 
         conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
-        conn.execute_batch(&current_draft_sql(REPOSITORY_OWNED_WAVES_NAME))
+        conn.execute_batch(&migration_section_sql(REPOSITORY_OWNED_WAVES_NAME))
             .unwrap();
         validate_foreign_keys(&conn).unwrap();
         conn.pragma_update(None, "foreign_keys", "ON").unwrap();
@@ -4844,7 +4594,7 @@ mod tests {
     #[test]
     fn repository_owned_waves_abort_on_an_unmatched_pm_projection() {
         let mut conn = open();
-        apply_before_current_draft(&conn, REPOSITORY_OWNED_WAVES_NAME);
+        apply_before_migration(&conn, REPOSITORY_OWNED_WAVES_NAME);
         conn.execute(
             "INSERT INTO waves (id, name, repo, created_at) VALUES ('wave-a', 'infrastructure', '/repo/a', 1)",
             [],
@@ -4859,7 +4609,7 @@ mod tests {
 
         let transaction = conn.transaction().unwrap();
         let error = transaction
-            .execute_batch(&current_draft_sql(REPOSITORY_OWNED_WAVES_NAME))
+            .execute_batch(&migration_section_sql(REPOSITORY_OWNED_WAVES_NAME))
             .unwrap_err();
         assert!(error.to_string().contains("NOT NULL"));
         transaction.rollback().unwrap();
@@ -4873,7 +4623,7 @@ mod tests {
     }
 
     #[test]
-    fn validation_only_open_does_not_apply_an_unpublished_tail() {
+    fn validation_does_not_apply_a_pending_tail() {
         let conn = open();
         let published = prefix_before("durable_input_spine");
         apply_set(&conn, published, &mut Vec::new()).unwrap();
@@ -4883,14 +4633,14 @@ mod tests {
         assert_eq!(
             latest_applied_version_sqlite(&conn).unwrap(),
             published.last().map(Migration::version),
-            "a validation-only open advances nothing"
+            "validation advances nothing"
         );
         assert!(capture_status_accepts(&conn, "pruned"));
         // Bait for the withheld tail: the durable input migration creates the
         // stable Work tables. Their absence proves validation stayed read-only.
         assert!(
             conn.prepare("SELECT id FROM projects LIMIT 0").is_err(),
-            "a validation-only open must not run the tail's schema change"
+            "validation must not run the tail's schema change"
         );
     }
 
@@ -4934,7 +4684,7 @@ mod tests {
         // The installed binary — whose set ends at the store's frontier — still
         // opens the store: it is exactly the recognized prefix, nothing pending.
         assert!(
-            pending_migrations(&applied_versions(&conn).unwrap(), installed)
+            pending_migrations(&conn, &applied_versions(&conn).unwrap(), installed)
                 .unwrap()
                 .is_empty(),
             "the installed binary must keep reading the store the candidate left alone"
@@ -5535,10 +5285,10 @@ mod tests {
     #[test]
     fn provider_account_identity_preserves_existing_labels_and_health() {
         let conn = open();
-        apply_before_current_draft(&conn, "provider_account_identity");
+        apply_before_migration(&conn, "provider_account_identity");
         conn.execute_batch("INSERT INTO provider_accounts (provider, account_id, home, login_email, credential_state, routing_state, plan, cooldown_until, created_at, updated_at)
             VALUES ('codex', 'engineering', '/fixture/account', 'eng@example.com', 'connected', 'automatic', 'pro', 123, 1, 2);").unwrap();
-        conn.execute_batch(&current_draft_sql("provider_account_identity"))
+        conn.execute_batch(&migration_section_sql("provider_account_identity"))
             .unwrap();
         let row = conn.query_row("SELECT login_email, cooldown_until, observed_email, observed_subject, observed_plan FROM provider_accounts WHERE account_id = 'engineering'", [], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?, row.get::<_, Option<String>>(2)?, row.get::<_, Option<String>>(3)?, row.get::<_, Option<String>>(4)?))).unwrap();
         assert_eq!(row, ("eng@example.com".into(), 123, None, None, None));
@@ -5547,15 +5297,13 @@ mod tests {
     #[test]
     fn provider_account_credential_identity_retains_unbound_historical_observations() {
         let conn = open();
-        apply_before_current_draft(&conn, "provider_account_credential_identity");
-        if !_draft_is_canonical("provider_account_identity") {
-            conn.execute_batch(&current_draft_sql("provider_account_identity"))
-                .unwrap();
-        }
+        apply_before_migration(&conn, "provider_account_credential_identity");
         conn.execute_batch("INSERT INTO provider_accounts (provider, account_id, home, login_email, credential_state, routing_state, observed_email, observed_subject, cooldown_until, created_at, updated_at)
             VALUES ('claude', 'engineering', '/fixture/account', 'eng@example.com', 'connected', 'explicit_only', 'eng@example.com', 'user-one', 123, 1, 2);").unwrap();
-        conn.execute_batch(&current_draft_sql("provider_account_credential_identity"))
-            .unwrap();
+        conn.execute_batch(&migration_section_sql(
+            "provider_account_credential_identity",
+        ))
+        .unwrap();
         let row = conn.query_row("SELECT observed_email, observed_subject, observed_credential_digest, cooldown_until, routing_state FROM provider_accounts WHERE account_id = 'engineering'", [], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, Option<String>>(2)?, row.get::<_, i64>(3)?, row.get::<_, String>(4)?))).unwrap();
         assert_eq!(
             row,
@@ -5572,14 +5320,14 @@ mod tests {
     #[test]
     fn auth_browser_bindings_preserve_populated_profiles_accounts_and_routes() {
         let conn = open();
-        apply_before_current_draft(&conn, "auth_browser_bindings");
+        apply_before_migration(&conn, "auth_browser_bindings");
         conn.execute_batch("INSERT INTO provider_accounts (provider, account_id, home, login_email, credential_state, routing_state, created_at, updated_at)
             VALUES ('codex', 'primary', '/account', 'person@example.com', 'connected', 'explicit_only', 1, 2);
             INSERT INTO access_profiles VALUES ('Work', 'Profile 3', 'person@example.com', 1, 2), ('Personal', 'Default', 'other@example.com', 3, 4);
             INSERT INTO account_access_profiles VALUES ('codex', 'primary', 0, 'Work'), ('codex', 'primary', 1, 'Personal');
             INSERT INTO provider_routes VALUES ('default', '', 'codex', 0, 'primary', 1, 2);").unwrap();
         conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
-        conn.execute_batch(&current_draft_sql("auth_browser_bindings"))
+        conn.execute_batch(&migration_section_sql("auth_browser_bindings"))
             .unwrap();
         conn.pragma_update(None, "foreign_keys", "ON").unwrap();
         validate_foreign_keys(&conn).unwrap();
@@ -5861,11 +5609,7 @@ mod tests {
 
         assert_eq!(
             applied_versions(&conn).unwrap(),
-            vec![
-                "0.10.001_initial",
-                "0.10.002_add_note",
-                "0.11.001_add_colour"
-            ]
+            vec!["0.10.001_initial", "add_note", "add_colour"]
         );
         let name: String = conn
             .query_row("SELECT name FROM waves WHERE id = 'w1'", [], |row| {
@@ -5934,16 +5678,8 @@ mod tests {
         .unwrap();
 
         apply_sqlite(&conn).unwrap();
-        if !_draft_is_canonical(COMPLETED_TASK_WORK_REPAIR_NAME) {
-            conn.execute_batch(&migration_sql_for_test(COMPLETED_TASK_WORK_REPAIR_NAME))
-                .unwrap();
-        }
-        if !_draft_is_canonical("task_flow_observations") {
-            conn.execute_batch(&current_draft_sql("task_flow_observations"))
-                .unwrap();
-        }
 
-        apply_build_drafts(&conn);
+        apply_pending_migrations(&conn);
 
         let task: (String, String, String, String) = conn
             .query_row(
@@ -6013,15 +5749,7 @@ mod tests {
     fn planning_cutover_preserves_provider_fields_and_editable_project_content() {
         let conn = open();
         conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
-        apply_before_current_draft(&conn, "local_planning");
-        if !_draft_is_canonical("local_planning") {
-            for draft in crate::build_info::migration_draft_manifest() {
-                if draft.name == "local_planning" {
-                    break;
-                }
-                conn.execute_batch(draft.sql).unwrap();
-            }
-        }
+        apply_before_migration(&conn, "local_planning");
         let mut snapshot: crate::test_linear_input::Inventory = serde_json::from_str(include_str!(
             "../../../../tests/fixtures/dto/task_history_planning.json"
         ))
@@ -6049,7 +5777,7 @@ mod tests {
         conn.execute("INSERT INTO pm_wave_projects(wave_id,project_id,position) VALUES('wave_fields','current',11)", []).unwrap();
         conn.execute("INSERT INTO pm_items(repo,provider,id,identifier,project_id,observed_at,body) VALUES('/repo','linear','LOO-318','LOO-318','current',17,?1)", [serde_json::to_string(item).unwrap()]).unwrap();
         conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
-        conn.execute_batch(&current_draft_sql("local_planning"))
+        conn.execute_batch(&migration_section_sql("local_planning"))
             .unwrap();
         validate_foreign_keys(&conn).unwrap();
         assert_eq!(
@@ -6129,15 +5857,7 @@ mod tests {
     fn local_planning_preserves_pending_decisions_without_workflow_history() {
         let conn = open();
         conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
-        apply_before_current_draft(&conn, "local_planning");
-        if !_draft_is_canonical("local_planning") {
-            for draft in crate::build_info::migration_draft_manifest() {
-                if draft.name == "local_planning" {
-                    break;
-                }
-                conn.execute_batch(draft.sql).unwrap();
-            }
-        }
+        apply_before_migration(&conn, "local_planning");
         conn.execute_batch(
             "INSERT INTO waves(id,name,repo,created_at) VALUES('wave_delivery','delivery','/repo',1);
              INSERT INTO projects(id,wave_id,external_project_id,created_at)
@@ -6149,7 +5869,7 @@ mod tests {
                     '{\"state\":\"pending\",\"operation\":\"reopen_task\",\"error\":\"lost reopening reply\"}');",
         ).unwrap();
         conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
-        conn.execute_batch(&current_draft_sql("local_planning"))
+        conn.execute_batch(&migration_section_sql("local_planning"))
             .unwrap();
         validate_foreign_keys(&conn).unwrap();
         validate_persisted_json(&conn).unwrap();
@@ -6317,7 +6037,7 @@ mod tests {
         .unwrap();
 
         // Prove the historical JSON repair before later releases retire its storage.
-        let (repair_index, _, _) = draft_location(GATE_PROPOSAL_REPAIR_NAME);
+        let repair_index = section(GATE_PROPOSAL_REPAIR_NAME).index;
         apply_set(&conn, &MIGRATIONS[..=repair_index], &mut Vec::new()).unwrap();
         let current_gate: String = conn
             .query_row(
@@ -6366,14 +6086,6 @@ mod tests {
         conn.execute_batch("COMMIT").unwrap();
         validate_foreign_keys(&conn).unwrap();
         validate_persisted_json(&conn).unwrap();
-
-        // The store below opens with this build's schema, drafts included.
-        conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
-        for draft in crate::build_info::migration_draft_manifest() {
-            conn.execute_batch(draft.sql).unwrap();
-        }
-        validate_foreign_keys(&conn).unwrap();
-        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
         drop(conn);
 
         let store = crate::store::sqlite::SqliteStore::new(&path).unwrap();
@@ -6491,7 +6203,7 @@ mod tests {
 
         assert_eq!(
             applied_versions(&conn).unwrap(),
-            vec!["0.10.001_initial", "0.10.002_add_note"]
+            vec!["0.10.001_initial", "add_note"]
         );
         assert!(columns(&conn, "waves").contains(&"note".to_string()));
     }
@@ -6509,11 +6221,7 @@ mod tests {
 
         assert_eq!(
             applied_versions(&conn).unwrap(),
-            vec![
-                "0.10.001_initial",
-                "0.10.002_add_note",
-                "0.11.001_add_colour"
-            ]
+            vec!["0.10.001_initial", "add_note", "add_colour"]
         );
         assert_eq!(
             columns(&conn, "waves")
@@ -6530,22 +6238,41 @@ mod tests {
         let conn = open();
         apply_set(&conn, &[baseline(), FIRST_IN_NEXT_MINOR], &mut Vec::new()).unwrap();
 
-        let error = apply_set(&conn, &[baseline()], &mut Vec::new()).unwrap_err();
+        let branch = Migration {
+            version: "branch_only",
+            sql: "SELECT 1;",
+            merged: false,
+        };
+        let error = apply_set(&conn, &[baseline(), branch], &mut Vec::new()).unwrap_err();
         let message = error.to_string();
-        assert!(message.contains("0.11.001_add_colour"), "{message}");
-        assert!(
-            message.contains("latest known 0.10.001_initial"),
-            "{message}"
-        );
-        assert!(message.contains("run lf doctor"), "{message}");
+        assert!(message.contains("add_colour"), "{message}");
+        assert!(message.contains("latest known branch_only"), "{message}");
+        assert!(message.contains("run `lf install`"), "{message}");
+    }
+
+    #[test]
+    fn applying_an_older_catalog_leaves_a_newer_history_alone() {
+        let conn = open();
+        let newer = [baseline(), FIRST_IN_NEXT_MINOR];
+        apply_set(&conn, &newer, &mut Vec::new()).unwrap();
+
+        apply_set(&conn, &[baseline()], &mut Vec::new()).unwrap();
+
+        assert_eq!(applied_versions(&conn).unwrap().len(), 2);
+    }
+
+    fn assert_keeps_the_store(error: &crate::store::StoreError) {
+        let message = error.to_string();
+        assert!(!message.contains("delete"), "{message}");
+        assert!(message.contains("keep loopflow.db"), "{message}");
+        assert!(message.contains("run `lf install`"), "{message}");
     }
 
     /// The pre-loop store's flat ledger (`001_initial`, `002_...`, …) was abandoned
-    /// when the runtime collapsed to waves, projects, and tasks. Its databases are
-    /// not ours to upgrade, and telling their owners to upgrade `lf` would send
-    /// them in a circle.
+    /// when the runtime collapsed to waves, projects, and tasks. No build upgrades
+    /// it, but its data is still the owner's: the build that wrote it opens it.
     #[test]
-    fn a_database_from_the_abandoned_flat_ledger_tells_the_user_to_recreate() {
+    fn a_database_from_the_abandoned_flat_ledger_keeps_the_store_and_names_the_newest_build() {
         let conn = open();
         conn.execute_batch(
             "CREATE TABLE schema_migrations (
@@ -6559,25 +6286,48 @@ mod tests {
         .unwrap();
 
         let error = apply_sqlite(&conn).unwrap_err();
-        assert!(error.to_string().contains("delete loopflow.db"));
+        assert_keeps_the_store(&error);
     }
 
     #[test]
-    fn a_stale_edit_of_a_shipped_migration_tells_the_user_to_recreate() {
+    fn a_stale_edit_of_a_shipped_migration_keeps_the_store_and_names_the_newest_build() {
         let conn = open();
         apply_sqlite(&conn).unwrap();
         conn.execute_batch("DROP INDEX idx_tasks_project").unwrap();
 
         let error = apply_sqlite(&conn).unwrap_err();
-        assert!(error.to_string().contains("delete loopflow.db"));
+        assert_keeps_the_store(&error);
     }
 
     #[test]
-    fn a_skipped_migration_tells_the_user_to_recreate() {
+    fn a_drifted_store_names_the_build_that_last_migrated_it() {
+        let conn = open();
+        apply_sqlite(&conn).unwrap();
+        conn.execute_batch(
+            "UPDATE schema_migrations
+             SET package_version = '0.14.2',
+                 source_revision = '0123456789abcdef0123456789abcdef01234567'
+             WHERE rowid = (SELECT rowid FROM schema_migrations
+                            ORDER BY applied_at DESC, rowid DESC LIMIT 1);
+             DROP INDEX idx_tasks_project;",
+        )
+        .unwrap();
+
+        let error = apply_sqlite(&conn).unwrap_err();
+        assert_keeps_the_store(&error);
+        let message = error.to_string();
+        assert!(
+            message.contains("last migrated by lf 0.14.2 (012345678)"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn a_skipped_migration_keeps_the_store_and_names_the_newest_build() {
         let conn = open();
         apply_set(&conn, &[baseline()], &mut Vec::new()).unwrap();
         conn.execute(
-            "INSERT INTO schema_migrations (version, applied_at) VALUES ('0.11.001_add_colour', 2)",
+            "INSERT INTO schema_migrations (version, applied_at) VALUES ('add_colour', 2)",
             [],
         )
         .unwrap();
@@ -6588,7 +6338,7 @@ mod tests {
             &mut Vec::new(),
         )
         .unwrap_err();
-        assert!(error.to_string().contains("delete loopflow.db"));
+        assert_keeps_the_store(&error);
     }
 
     #[test]
@@ -6661,9 +6411,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        let expected_parent =
-            (!_draft_is_canonical("wave_directory_parents")).then(|| "wave-root".to_string());
-        assert_eq!(child_parent, expected_parent);
+        assert_eq!(child_parent, None);
         let tokens: i64 = conn
             .query_row("SELECT count(*) FROM provider_tokens", [], |row| row.get(0))
             .unwrap();
@@ -6671,6 +6419,37 @@ mod tests {
             tokens, 1,
             "seeded provider token did not survive the upgrade"
         );
+    }
+
+    #[test]
+    fn claude_usage_reconciliation_upgrade_keeps_capacity_and_adds_revision() {
+        let conn = open();
+        apply_before_migration(&conn, "account_capacity_revision");
+        conn.execute_batch("INSERT INTO provider_accounts
+            (provider,account_id,credential_state,cooldown_until,cooldown_reason,created_at,updated_at)
+            VALUES ('claude','primary','connected',1900000005,'rejected: seven_day',1,1);
+            INSERT INTO provider_account_limits
+            (provider,account_id,window,used_percent,resets_at,observed_at,source,model,limited_until)
+            VALUES ('claude','primary','seven_day_overage_included',100,1900000000,1,'stream','fable',1900000005);").unwrap();
+        apply_pending_migrations(&conn);
+        let capacity: (i64, i64, String) = conn
+            .query_row(
+                "SELECT capacity_revision,cooldown_until,cooldown_reason FROM provider_accounts
+             WHERE provider='claude' AND account_id='primary'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(capacity, (0, 1900000005, "rejected: seven_day".into()));
+        let used: i64 = conn
+            .query_row(
+                "SELECT used_percent FROM provider_account_limits",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(used, 100);
+        validate_foreign_keys(&conn).unwrap();
     }
 
     /// Fresh initialization over the full real registry — a brand-new database
@@ -6818,7 +6597,7 @@ mod tests {
                 .unwrap();
         });
 
-        apply_sqlite_transaction(&conn, |conn| {
+        apply_sqlite_transaction(&conn, super::MigrationPurpose::Upgrade, |conn| {
             backup_before_migration(conn, &path)?;
             start_writer.send(()).unwrap();
             assert!(
@@ -6894,7 +6673,7 @@ mod tests {
         // on the first read of a table it never created.
         assert!(store.processes_since(0).unwrap().is_empty());
         let conn = rusqlite::Connection::open(&path).unwrap();
-        validate_experimental_sqlite(&conn, crate::build_info::migration_draft_manifest()).unwrap();
+        validate_sqlite_schema(&conn).unwrap();
         assert_eq!(
             applied_versions(&conn).unwrap().last(),
             Some(&latest_known_version())
@@ -6908,82 +6687,13 @@ mod tests {
             .unwrap();
 
         let error = apply_sqlite(&conn).unwrap_err();
-        assert!(error.to_string().contains("delete loopflow.db"));
+        assert_keeps_the_store(&error);
     }
 
     #[test]
     fn a_repeated_id_is_rejected_before_anything_runs() {
         let error = validate_set(&[baseline(), baseline()]).unwrap_err();
-        assert!(error.contains("does not come after"));
-    }
-
-    #[test]
-    fn ids_order_numerically_rather_than_lexically() {
-        let id = |major, minor, ordinal| MigrationId {
-            major,
-            minor,
-            patch: None,
-            ordinal,
-        };
-        assert!(id(0, 9, 1) < id(0, 10, 1));
-        assert!(id(0, 10, 2) < id(0, 11, 1));
-        assert_eq!(id(0, 10, 1).to_string(), "0.10.001");
-
-        let release = MigrationId {
-            major: 0,
-            minor: 12,
-            patch: Some(2),
-            ordinal: 1,
-        };
-        assert!(id(0, 12, 37) < release);
-        assert_eq!(release.to_string(), "0.12.2.001");
-    }
-
-    #[test]
-    fn a_skipped_patch_is_part_of_the_pending_release_suffix() {
-        let releases = [
-            Migration {
-                id: MigrationId {
-                    major: 1,
-                    minor: 1,
-                    patch: Some(0),
-                    ordinal: 1,
-                },
-                name: "release",
-                sql: "SELECT 1;",
-                reader_floor: None,
-            },
-            Migration {
-                id: MigrationId {
-                    major: 1,
-                    minor: 1,
-                    patch: Some(1),
-                    ordinal: 1,
-                },
-                name: "release",
-                sql: "SELECT 2;",
-                reader_floor: None,
-            },
-            Migration {
-                id: MigrationId {
-                    major: 1,
-                    minor: 2,
-                    patch: Some(0),
-                    ordinal: 1,
-                },
-                name: "release",
-                sql: "SELECT 3;",
-                reader_floor: None,
-            },
-        ];
-        let applied = [releases[0].version()];
-
-        let pending = pending_migrations(&applied, &releases).unwrap();
-
-        assert_eq!(
-            pending.iter().map(Migration::version).collect::<Vec<_>>(),
-            ["1.1.1.001_release", "1.2.0.001_release"]
-        );
+        assert!(error.contains("appears twice"));
     }
 
     #[test]
@@ -7065,13 +6775,7 @@ mod tests {
     #[test]
     fn ownership_cutover_keeps_current_task_review_without_importing_history() {
         let conn = open();
-        apply_before_current_draft(&conn, "session_ownership");
-        if !_draft_is_canonical("session_ownership") {
-            conn.execute_batch(&current_draft_sql("record_execs"))
-                .unwrap();
-            conn.execute_batch(&current_draft_sql("project_status_chapters"))
-                .unwrap();
-        }
+        apply_before_migration(&conn, "session_ownership");
         conn.execute_batch(r#"
             INSERT INTO waves(id,name,repo,created_at) VALUES('w','infra','/repo',1);
             INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES('p','w','linear-p',1);
@@ -7085,7 +6789,7 @@ mod tests {
               'custom','review','review',1,'run_11111111111111111111111111111111','Keep this feedback',
               0,2,7,3,NULL,20,'{"index":0,"iteration":2}');
         "#).unwrap();
-        conn.execute_batch(&current_draft_sql("session_ownership"))
+        conn.execute_batch(&migration_section_sql("session_ownership"))
             .unwrap();
         let (plan, feedback, started, worktree, selected): (String, String, i64, String, String) =
             conn.query_row(
@@ -7128,7 +6832,7 @@ mod tests {
     #[test]
     fn project_status_adoption_preserves_current_identity_and_custom_flow() {
         let conn = open();
-        apply_before_current_draft(&conn, "project_status_chapters");
+        apply_before_migration(&conn, "project_status_chapters");
         conn.execute_batch(
             r#"INSERT INTO waves(id,name,repo,created_at) VALUES('w','infra','/repo',1);
             INSERT INTO projects(id,wave_id,external_project_id,created_at,updated_at,
@@ -7145,7 +6849,7 @@ mod tests {
                  "flows":{"recommended":"future-custom"},"krs":[],"initiative_ids":["initiative"],"team_ids":["team"]}
             ],"items":[]}');"#,
         ).unwrap();
-        conn.execute_batch(&current_draft_sql("project_status_chapters"))
+        conn.execute_batch(&migration_section_sql("project_status_chapters"))
             .unwrap();
         let preserved: (String, String, i64, i64, i64, String, i64) = conn.query_row(
             "SELECT id,project_prompt_context,created_at,updated_at,iteration,flow,legacy_current FROM projects WHERE external_project_id='old'",
@@ -7191,11 +6895,7 @@ mod tests {
     #[test]
     fn dropping_project_fingerprint_preserves_planning_and_progress() {
         let conn = open();
-        apply_before_current_draft(&conn, "drop_project_fingerprint");
-        if !_draft_is_canonical("drop_project_fingerprint") {
-            conn.execute_batch(&current_draft_sql("work_domain_state"))
-                .unwrap();
-        }
+        apply_before_migration(&conn, "drop_project_fingerprint");
         conn.execute_batch(
             "INSERT INTO waves (id, name, repo, created_at)
              VALUES ('wave_project', 'project', '/repo', 100);
@@ -7209,7 +6909,7 @@ mod tests {
         )
         .unwrap();
 
-        conn.execute_batch(&current_draft_sql("drop_project_fingerprint"))
+        conn.execute_batch(&migration_section_sql("drop_project_fingerprint"))
             .unwrap();
 
         assert!(!columns(&conn, "projects").contains(&"last_state_fingerprint".to_string()));
@@ -7244,7 +6944,7 @@ mod tests {
     #[test]
     fn task_loop_review_preserves_existing_human_and_claimed_positions() {
         let conn = open();
-        apply_before_current_draft(&conn, "task_loop_review");
+        apply_before_migration(&conn, "task_loop_review");
         conn.execute_batch(
             "INSERT INTO task_flow_positions (
                 task_id, invocation_json, flow, step, node_id, human, session_run_id,
@@ -7268,7 +6968,7 @@ mod tests {
             .unwrap()
             .collect::<Result<_, _>>()
             .unwrap();
-        conn.execute_batch(&current_draft_sql("task_loop_review"))
+        conn.execute_batch(&migration_section_sql("task_loop_review"))
             .unwrap();
         let after: Vec<String> = conn
             .prepare(
@@ -7500,11 +7200,7 @@ mod tests {
     #[test]
     fn legacy_task_flow_repair_restores_existing_tasks_without_moving_their_work() {
         let conn = open();
-        if _draft_is_canonical(LEGACY_TASK_FLOW_REPAIR_NAME) {
-            apply_before_draft(&conn, LEGACY_TASK_FLOW_REPAIR_NAME);
-        } else {
-            apply_set(&conn, MIGRATIONS, &mut Vec::new()).unwrap();
-        }
+        apply_before_draft(&conn, LEGACY_TASK_FLOW_REPAIR_NAME);
         conn.execute_batch(
             "INSERT INTO waves (id, name, repo, created_at)
                  VALUES ('wave_restore', 'restore', '/repo', 100);
@@ -7545,12 +7241,7 @@ mod tests {
         )
         .unwrap();
 
-        if _draft_is_canonical(LEGACY_TASK_FLOW_REPAIR_NAME) {
-            apply_draft(&conn, LEGACY_TASK_FLOW_REPAIR_NAME);
-        } else {
-            conn.execute_batch(&migration_sql_for_test(LEGACY_TASK_FLOW_REPAIR_NAME))
-                .unwrap();
-        }
+        apply_draft(&conn, LEGACY_TASK_FLOW_REPAIR_NAME);
 
         let tasks = conn
             .prepare(
@@ -7726,7 +7417,7 @@ mod tests {
     #[test]
     fn wave_directory_migration_preserves_ids_and_derives_parent_addresses() {
         let conn = open();
-        apply_before_current_draft(&conn, "wave_directory_parents");
+        apply_before_migration(&conn, "wave_directory_parents");
         conn.execute_batch(
             "INSERT INTO waves(id,name,repo,created_at) VALUES
             ('parent','infrastructure','/repo',1),
@@ -7736,7 +7427,7 @@ mod tests {
             VALUES ('release-plan','child','linear-release',1,1);",
         )
         .unwrap();
-        conn.execute_batch(&current_draft_sql("wave_directory_parents"))
+        conn.execute_batch(&migration_section_sql("wave_directory_parents"))
             .unwrap();
         let child: (String, String, String, i64) = conn
             .query_row(
@@ -7802,7 +7493,7 @@ mod tests {
     #[test]
     fn wave_directory_migration_preserves_paths_across_retired_ancestors() {
         let conn = open();
-        apply_before_current_draft(&conn, "wave_directory_parents");
+        apply_before_migration(&conn, "wave_directory_parents");
         conn.execute_batch(
             "INSERT INTO waves(id,name,repo,created_at,retired_at,superseded_by_wave_id,retirement_reason) VALUES
             ('retired-parent','infra','/repo',1,2,'root','relocated'),
@@ -7811,7 +7502,7 @@ mod tests {
             ('retired-child','archive/retired','/repo',1,2,'root','relocated');",
         )
         .unwrap();
-        conn.execute_batch(&current_draft_sql("wave_directory_parents"))
+        conn.execute_batch(&migration_section_sql("wave_directory_parents"))
             .unwrap();
         let (slug, parent_retired): (String, Option<i64>) = conn
             .query_row(
@@ -7888,7 +7579,7 @@ mod tests {
     #[test]
     fn status_surfaces_migration_attributes_only_uniquely_contained_project_failures() {
         let conn = open();
-        apply_before_current_draft(&conn, "status_truth");
+        apply_before_migration(&conn, "status_truth");
         conn.execute_batch(
             "PRAGMA foreign_keys=OFF;
              INSERT INTO waves (id, name, repo, created_at)
@@ -7966,7 +7657,7 @@ mod tests {
         )
         .unwrap();
 
-        conn.execute_batch(&current_draft_sql("status_truth"))
+        conn.execute_batch(&migration_section_sql("status_truth"))
             .unwrap();
 
         let rows = conn

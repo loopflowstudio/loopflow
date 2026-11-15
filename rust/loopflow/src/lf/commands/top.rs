@@ -1,4 +1,4 @@
-//! Loopflow activity snapshots: `lf monitor ps` once or `--watch`ed, `lf monitor top` continuously on a TTY.
+//! Loopflow activity snapshots: `lf monitor ps` once or `--subscribe`ed, `lf monitor top` continuously on a TTY.
 
 use std::collections::{HashMap, HashSet};
 use std::io::{IsTerminal, Write};
@@ -10,6 +10,7 @@ use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
+use crate::id::LfProcessId;
 use crate::journal::{
     prune_process_receipts_at, read_process_receipts_at, recorded_process_evidence,
     recorded_process_receipt, OsProcess, ProcessIdentityEvidence, ProcessReceipt,
@@ -22,7 +23,7 @@ const SCHEMA_VERSION: u32 = 1;
 const COMMAND_WIDTH: usize = 82;
 const REFRESH_INTERVAL: Duration = Duration::from_secs(2);
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ActivityNodeKind {
@@ -30,7 +31,7 @@ pub enum ActivityNodeKind {
     AgentProcess,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ActivityState {
@@ -51,7 +52,7 @@ impl ActivityState {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 pub struct ActivityNode {
     pub id: String,
     pub parent_id: Option<String>,
@@ -61,12 +62,13 @@ pub struct ActivityNode {
     pub worktree: Option<String>,
     pub wave: Option<String>,
     pub pid: Option<u32>,
+    #[schemars(with = "String")]
     #[serde(with = "time::serde::rfc3339")]
     pub started_at: OffsetDateTime,
     pub state: ActivityState,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 pub struct ActivitySnapshot {
     pub nodes: Vec<ActivityNode>,
 }
@@ -89,7 +91,7 @@ pub struct ProcessPruneReport {
 /// Missing identity and failed sampling remain visible without granting control.
 /// Only affirmative death removes a recorded process from the activity view.
 fn activity_state(
-    record: &crate::process::LfProcess,
+    record: &crate::process::ProcessEntry,
     receipt: &std::io::Result<Option<ProcessReceipt>>,
     processes: Option<&[OsProcess]>,
 ) -> Option<ActivityState> {
@@ -114,8 +116,8 @@ pub fn run_ps(json: bool) -> Result<()> {
     let snapshot = load_snapshot()?;
     print_snapshot(&snapshot, json)?;
     if !json {
-        match super::rollover::inventory() {
-            Ok(inventory) => print!("{}", super::rollover::render_binaries(&inventory)),
+        match super::binaries::inventory() {
+            Ok(inventory) => print!("{}", super::binaries::render_binaries(&inventory)),
             Err(error) => tracing::warn!(%error, "lf binary inventory unavailable"),
         }
     }
@@ -137,13 +139,20 @@ pub fn run_top() -> Result<()> {
     }
 }
 
-/// Stream the call trees: Process rows change with the store, liveness and
-/// activity state only on the clock.
-pub fn watch_ps() -> Result<()> {
-    super::watch::run(
+/// Stream the call trees as stored Process rows or observed OS states change.
+pub fn subscribe_ps(
+    transport: super::subscribe::Transport,
+) -> Result<Option<super::subscribe::Subscription>> {
+    super::subscribe::start(
         (),
-        super::watch::Watched::every(super::watch::ACTIVITY_CLOCK),
-        |_, ()| async { load_snapshot() },
+        {
+            let mut reader = ActivityReader::default();
+            move |_, ()| {
+                let snapshot = reader.read();
+                async { snapshot }
+            }
+        },
+        transport,
     )
 }
 
@@ -225,54 +234,117 @@ fn stale_process_receipt_pids(processes: &[OsProcess], receipts: &[ProcessReceip
 }
 
 pub(crate) fn load_snapshot() -> Result<ActivitySnapshot> {
-    let now = OffsetDateTime::now_utc().unix_timestamp();
-    let path = crate::store::database_path_from_env()?;
-    if !path.exists() {
-        return Ok(ActivitySnapshot { nodes: Vec::new() });
+    ActivityReader::default().read()
+}
+
+/// Reads activity again and again, each time reading only the unfinished rows
+/// not yet proven dead. Death is permanent, so a row that never recorded its
+/// exit costs one reading of its receipt and PID, not one every tick.
+#[derive(Debug, Default)]
+pub(crate) struct ActivityReader {
+    store: Option<SqliteStore>,
+    dead: HashSet<String>,
+    /// The rows not yet proven dead, read at this `processes` revision.
+    rows: Option<(i64, Vec<crate::process::ProcessEntry>)>,
+}
+
+impl ActivityReader {
+    pub(crate) fn read(&mut self) -> Result<ActivitySnapshot> {
+        let store = match &self.store {
+            Some(store) => store,
+            None => {
+                let path = crate::store::database_path_from_env()?;
+                if !path.exists() {
+                    return Ok(ActivitySnapshot { nodes: Vec::new() });
+                }
+                self.store
+                    .insert(SqliteStore::open_processes_read_only(&path)?)
+            }
+        };
+        // Rows change only with the revision, read before them; liveness is
+        // read every time.
+        let revision = store.revisions()?.processes;
+        let records = match self.rows.take() {
+            Some((read_at, rows)) if read_at == revision => rows,
+            _ => store.unfinished_processes_except(&mut self.dead)?,
+        };
+        let snapshot = read_activity(store, records.clone())?;
+        let shown: HashSet<&str> = snapshot.nodes.iter().map(|node| node.id.as_str()).collect();
+        let current = crate::journal::current_lf_process_id();
+        let (dead, alive) = records.into_iter().partition::<Vec<_>, _>(|row| {
+            !shown.contains(row.id()) && current.as_ref().map(LfProcessId::as_str) != Some(row.id())
+        });
+        self.dead
+            .extend(dead.into_iter().map(|row| row.id().to_owned()));
+        self.rows = Some((revision, alive));
+        Ok(snapshot)
     }
-    let store = SqliteStore::open_processes_read_only(&path)?;
-    let records = store.unfinished_processes()?;
-    let processes = OsProcess::sample(now);
+}
+
+fn read_activity(
+    store: &SqliteStore,
+    records: Vec<crate::process::ProcessEntry>,
+) -> Result<ActivitySnapshot> {
+    let now = OffsetDateTime::now_utc().unix_timestamp();
+    // Each unfinished row reads its own receipt and its own OS processes, so
+    // cost follows live work, not history or the rest of the Machine.
+    let mut receipts: HashMap<_, _> = records
+        .iter()
+        .filter_map(crate::process::ProcessEntry::as_lf)
+        .map(|record| (record.id.clone(), recorded_process_receipt(store, record)))
+        .collect();
+    let mut pids: Vec<u32> = records
+        .iter()
+        .filter_map(crate::process::ProcessEntry::pid)
+        .collect();
+    pids.extend(
+        receipts
+            .values()
+            .filter_map(|receipt| receipt.as_ref().ok()?.as_ref().map(|receipt| receipt.pid)),
+    );
+    pids.sort_unstable();
+    pids.dedup();
+    let processes = OsProcess::read_each(&pids, now);
     if let Err(error) = &processes {
         tracing::warn!(%error, "activity OS observation unavailable");
     }
-    // Each unfinished row reads its own receipt, so cost follows live work, not history.
     collect_activity(records, processes.as_deref().ok(), |record| {
-        recorded_process_receipt(&store, record)
+        receipts.remove(&record.id).unwrap_or(Ok(None))
     })
 }
 
 fn collect_activity(
-    records: Vec<crate::process::LfProcess>,
+    records: Vec<crate::process::ProcessEntry>,
     processes: Option<&[OsProcess]>,
     mut receipt: impl FnMut(&crate::process::LfProcess) -> std::io::Result<Option<ProcessReceipt>>,
 ) -> Result<ActivitySnapshot> {
+    use crate::process::ProcessEntry;
+    let current = crate::journal::current_lf_process_id();
     let mut nodes = Vec::new();
     for record in records {
-        let agent = record.kind == crate::process::ProcessKind::Agent;
-        if Some(&record.id) == crate::journal::current_lf_process_id().as_ref() {
+        if current.as_ref().map(LfProcessId::as_str) == Some(record.id()) {
             continue;
         }
-        let Some(state) = activity_state(&record, &receipt(&record), processes) else {
+        let receipt = match &record {
+            ProcessEntry::Lf(process) => receipt(process),
+            ProcessEntry::Agent(_) => Ok(None),
+        };
+        let Some(state) = activity_state(&record, &receipt, processes) else {
             continue;
         };
         nodes.push(ActivityNode {
-            id: record.id.to_string(),
-            parent_id: record
-                .parent_lf_process_id
-                .as_ref()
-                .map(ToString::to_string),
-            kind: if agent {
-                ActivityNodeKind::AgentProcess
-            } else {
-                ActivityNodeKind::Process
+            id: record.id().to_owned(),
+            parent_id: record.parent_lf_process_id().map(ToString::to_string),
+            kind: match record {
+                ProcessEntry::Lf(_) => ActivityNodeKind::Process,
+                ProcessEntry::Agent(_) => ActivityNodeKind::AgentProcess,
             },
-            label: command_label(record.command.as_deref(), record.kind),
-            repo: record.repo,
-            worktree: record.cwd,
+            label: command_label(&record),
+            repo: record.repo().map(ToOwned::to_owned),
+            worktree: record.cwd().map(ToOwned::to_owned),
             wave: None,
-            pid: record.pid,
-            started_at: unix_to_datetime(record.started_at),
+            pid: record.pid(),
+            started_at: unix_to_datetime(record.started_at()),
             state,
         });
     }
@@ -281,26 +353,37 @@ fn collect_activity(
     Ok(ActivitySnapshot { nodes })
 }
 
-pub(crate) fn command_label(command: Option<&str>, kind: crate::process::ProcessKind) -> String {
-    if kind == crate::process::ProcessKind::Agent {
-        let argv = command.and_then(|value| serde_json::from_str::<Vec<String>>(value).ok());
-        let program = argv
-            .as_ref()
-            .and_then(|argv| argv.first().map(String::as_str))
-            .or(command)
-            .and_then(|value| Path::new(value).file_name())
-            .and_then(|value| value.to_str())
-            .filter(|value| safe_command_word(value))
-            .unwrap_or("AgentProcess");
-        let subcommand = argv
-            .as_ref()
-            .and_then(|argv| argv.get(1))
-            .filter(|value| safe_command_word(value));
-        return match subcommand {
-            Some(subcommand) => format!("{program} {subcommand}"),
-            None => program.to_owned(),
-        };
+pub(crate) fn command_label(record: &crate::process::ProcessEntry) -> String {
+    match record {
+        crate::process::ProcessEntry::Lf(process) => lf_command_label(process.command.as_deref()),
+        crate::process::ProcessEntry::Agent(process) => {
+            agent_command_label(process.command.as_deref())
+        }
     }
+}
+
+/// The provider program and its subcommand, never its prompt or other arguments.
+fn agent_command_label(command: Option<&str>) -> String {
+    let argv = command.and_then(|value| serde_json::from_str::<Vec<String>>(value).ok());
+    let program = argv
+        .as_ref()
+        .and_then(|argv| argv.first().map(String::as_str))
+        .or(command)
+        .and_then(|value| Path::new(value).file_name())
+        .and_then(|value| value.to_str())
+        .filter(|value| safe_command_word(value))
+        .unwrap_or("AgentProcess");
+    let subcommand = argv
+        .as_ref()
+        .and_then(|argv| argv.get(1))
+        .filter(|value| safe_command_word(value));
+    match subcommand {
+        Some(subcommand) => format!("{program} {subcommand}"),
+        None => program.to_owned(),
+    }
+}
+
+pub(crate) fn lf_command_label(command: Option<&str>) -> String {
     let Some(command) = command else {
         return "lf".to_string();
     };
@@ -311,7 +394,16 @@ pub(crate) fn command_label(command: Option<&str>, kind: crate::process::Process
         return "lf".to_string();
     };
     let grouped = [
-        "machine", "ops", "repo", "pm", "pr", "project", "radio", "task", "wave", "work",
+        "machine",
+        "repository",
+        "repo",
+        "pm",
+        "pr",
+        "project",
+        "radio",
+        "task",
+        "wave",
+        "work",
     ];
     let operation = grouped
         .contains(&command.as_str())
@@ -418,7 +510,10 @@ fn fold_process_state(base: ActivityState, children: &[ActivityState]) -> Activi
 
 fn print_snapshot(snapshot: &ActivitySnapshot, json: bool) -> Result<()> {
     if json {
-        println!("{}", serde_json::to_string_pretty(snapshot)?);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&super::subscribe::selected_answer(snapshot)?)?
+        );
     } else {
         print!("{}", render_snapshot(snapshot));
     }
@@ -581,8 +676,8 @@ fn format_duration(seconds: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::{collect_activity, ActivityNodeKind, OsProcess};
-    use crate::id::{LfProcessId, TraceId};
-    use crate::process::{LfProcess, ProcessKind};
+    use crate::id::{AgentProcessId, LfProcessId, TraceId};
+    use crate::process::{AgentProcess, ProcessEntry};
 
     #[test]
     fn activity_fold_keeps_unknown_parents_and_rejects_cycles() {
@@ -652,7 +747,7 @@ mod tests {
         let sql = rusqlite::Connection::open(path).unwrap();
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
         let parent = LfProcessId::new();
-        let agent = LfProcessId::new();
+        let agent = AgentProcessId::new();
         sql.execute(
             "INSERT INTO processes(id,trace_id,started_at,pid) VALUES(?1,?1,?2,?3)",
             rusqlite::params![parent, now, std::process::id()],
@@ -680,14 +775,13 @@ mod tests {
         .unwrap();
         sql.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
         sql.execute(
-            "INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,worktree,created_at) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'issue','PROOF-1','/repo/task',1)",
+            "INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,created_at) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'issue','PROOF-1',1)",
             rusqlite::params![task.as_str(), project.as_str()],
         )
         .unwrap();
-        let machine = store.local_machine().unwrap().id;
         sql.execute(
-            "UPDATE tasks SET checkout_machine_id=?1",
-            [machine.as_str()],
+            "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,'/repo/task')",
+            [task.as_str()],
         )
         .unwrap();
         sql.execute("UPDATE processes SET cwd='/repo/task'", [])
@@ -709,9 +803,10 @@ mod tests {
             assert!(super::render_snapshot(&snapshot).contains(id));
         }
 
-        let mut record = store.process(&agent).unwrap().unwrap();
+        let mut record = store.agent_process(&agent).unwrap().unwrap();
         record.pid = Some(4242);
         record.os_started_at = Some(now);
+        let record = ProcessEntry::Agent(record);
         for (sample, expected) in [
             (None, Some(ActivityState::Unknown)),
             (Some(vec![]), None),
@@ -752,11 +847,11 @@ mod tests {
             let actual = activity_state(&record, &Ok(None), sample.as_deref());
             assert_eq!(actual, expected);
         }
-        let lf = store.process(&parent).unwrap().unwrap();
+        let lf = ProcessEntry::Lf(store.lf_process(&parent).unwrap().unwrap());
         let receipt = crate::journal::ProcessReceipt {
             schema_version: 1,
             lf_process_id: parent.to_string(),
-            trace_id: lf.trace_id.to_string(),
+            trace_id: lf.trace_id().to_string(),
             pid: 4242,
             started_at: now,
         };
@@ -843,21 +938,76 @@ mod tests {
         assert_eq!(after.unwrap(), before);
     }
 
+    /// A subscription shows new rows and exits as they commit, and reads a row proven
+    /// dead only once: its receipt and PID are never read again.
+    #[test]
+    #[cfg(unix)]
+    fn a_watch_reads_each_dead_row_once() {
+        use super::ActivityReader;
+        use crate::store::sqlite::SqliteStore;
+
+        let _lock = crate::journal::test_env_lock();
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        let _home = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("LF_HOME", home.path());
+        let path = home.path().join("loopflow.db");
+        SqliteStore::open_ephemeral(&path).unwrap();
+        let sql = rusqlite::Connection::open(path).unwrap();
+        let pid = std::process::id();
+        let started = crate::journal::process_started_at(pid).unwrap().unwrap();
+        let insert = |start: i64| {
+            let id = LfProcessId::new();
+            sql.execute(
+                "INSERT INTO processes(id,trace_id,started_at,pid,os_started_at) VALUES(?1,?1,?2,?3,?4)",
+                rusqlite::params![id, started, pid, start],
+            )
+            .unwrap();
+            id
+        };
+        let mut reader = ActivityReader::default();
+        let mut shown = || {
+            let mut ids: Vec<_> = reader
+                .read()
+                .unwrap()
+                .nodes
+                .into_iter()
+                .map(|node| node.id)
+                .collect();
+            ids.sort();
+            ids
+        };
+        let first = insert(started);
+        let dead = insert(started + 3600);
+        assert_eq!(shown(), [first.to_string()]);
+
+        let second = insert(started);
+        let mut both = vec![first.to_string(), second.to_string()];
+        both.sort();
+        assert_eq!(shown(), both);
+
+        sql.execute("UPDATE processes SET completed_at=1 WHERE id=?1", [&first])
+            .unwrap();
+        // A row read dead stays dead even if its identity were to match again.
+        sql.execute(
+            "UPDATE processes SET os_started_at=?2 WHERE id=?1",
+            rusqlite::params![dead, started],
+        )
+        .unwrap();
+        assert_eq!(shown(), [second.to_string()]);
+    }
+
     #[test]
     fn detached_agent_is_a_recorded_node_without_its_parent_or_a_client_receipt() {
-        let id = LfProcessId::new();
+        let id = AgentProcessId::new();
         let parent = LfProcessId::new();
-        let record = LfProcess {
+        let record = ProcessEntry::Agent(AgentProcess {
             id: id.clone(),
-            kind: ProcessKind::Agent,
             agent_session_id: Some("conversation".into()),
             pid: Some(4242),
             os_started_at: Some(100),
             trace_id: TraceId::new(),
             parent_lf_process_id: Some(parent.clone()),
-            via_agent: None,
-            caller_session_id: None,
-            caller_agent_process_id: None,
             command: Some(r#"["codex","app-server"]"#.into()),
             repo: Some("/repo".into()),
             cwd: Some("/repo/task".into()),
@@ -867,7 +1017,7 @@ mod tests {
             exit_code: None,
             signal: None,
             error: None,
-        };
+        });
         let os = |start| {
             vec![OsProcess {
                 pid: 4242,

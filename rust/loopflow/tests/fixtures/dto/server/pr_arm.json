@@ -1,0 +1,1 @@
+{"type":"request","id":"arm-1","operation":{"kind":"pr.arm","directory":"/repo","strict":true,"local":false,"worktree":null,"message":null,"title":null,"body":null,"agent":null},"select":null}

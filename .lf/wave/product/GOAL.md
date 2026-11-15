@@ -30,8 +30,7 @@ chapters remain readable.
 The common local planning writer owns records and APIs; optional Linear sync
 adopts observed Linear conflicts. Portable Git planning exchange excludes execution.
 
-Chapter changes use the deterministic `lf wave new-chapter` operation after the
-concrete plan is accepted. Started unfinished Tasks keep their identity, checkout,
+Chapter changes follow the accepted concrete plan. Started unfinished Tasks keep their identity, checkout,
 PR, and execution. Unreviewed backlog stays in its Project until explicit
 disposition; uncertain evidence cannot authorize closure. Code integration alone
 never authorizes a live migration.

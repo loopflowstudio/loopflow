@@ -75,6 +75,8 @@ macro_rules! work_values {
 work_values! {
     (WaveName, "wave_name", String),
     (WaveParent, "wave_parent", Option<String>),
+    // Captured only once a Wave is removed, so live Waves exchange as before.
+    (WaveRetired, "wave_retired", Option<i64>),
     (WaveProject, "wave_project", Option<String>),
     (ProjectWave, "project_wave", String),
     (ProjectLinearId, "project_linear_id", Option<String>),
@@ -93,14 +95,17 @@ work_values! {
     (TaskDescription, "task_description", Option<String>),
     (TaskRank, "task_rank", u32),
     (TaskAssignee, "task_assignee", Option<String>),
-    // Released peers and stored edits name it `task_paused`.
-    (TaskDeferred, "task_paused", bool),
+    // Released peers recorded a Task hold here; nothing reads it.
+    (HistoricalTaskPaused, "task_paused", bool),
     (TaskShippedAt, "task_shipped_at", Option<i64>),
     (TaskDueDate, "task_due_date", Option<String>),
     (TaskDeletedAt, "task_deleted_at", Option<i64>),
     (TaskUrl, "task_url", Option<String>),
     (TaskBranch, "task_branch", Option<String>),
     (TaskTeam, "task_team", Option<String>),
+    // Regressions are GitHub issues. Stored journal rows and released peers still carry
+    // this field, so it round-trips unread until LOO-730 deletes the rows and column.
+    (HistoricalTaskRegressedIn, "task_regressed_in", Option<String>),
     (CommentTask, "comment_task", String),
     (HistoricalProjectWorkflow, "workflow", String),
     // Released peers recorded the Wave default here; it lives in the Wave config.yaml.

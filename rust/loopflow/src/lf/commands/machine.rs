@@ -21,6 +21,58 @@ pub fn run(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
     tokio::runtime::Runtime::new()?.block_on(run_async(cmd, batch))
 }
 
+async fn existing_store() -> anyhow::Result<Store> {
+    crate::store::open_existing_store()
+        .await?
+        .ok_or_else(|| anyhow!("machine commands need an initialized local store"))
+}
+
+/// `lf machine id`: this Machine's durable identity.
+pub async fn local_machine() -> anyhow::Result<Machine> {
+    Ok(existing_store().await?.local_machine().await?)
+}
+
+/// `lf machine list`: your registered Machines with the defaults naming them.
+pub async fn machines() -> anyhow::Result<Vec<MachineListing>> {
+    listings(&existing_store().await?, None).await
+}
+
+async fn listings(store: &Store, label: Option<&str>) -> anyhow::Result<Vec<MachineListing>> {
+    let mut machines = match label {
+        Some(label) => vec![find_machine(store, label).await?],
+        None => store.machines().await?,
+    };
+    let defaults = store.sqlite.machine_defaults()?;
+    // This Machine is listed only when one of your defaults names it.
+    let local = store.local_machine().await?;
+    if label.is_none() && defaults.iter().any(|d| d.machine_id == local.id) {
+        machines.insert(0, local);
+    }
+    let mut listed = Vec::new();
+    for machine in machines {
+        let mut tasks = Vec::new();
+        for (task, since) in store.sqlite.tasks_held_by(&machine.id)? {
+            if let Some(saved) = store.sqlite.task(&task)? {
+                tasks.push(HeldTask {
+                    id: task,
+                    identifier: saved.identifier,
+                    since,
+                });
+            }
+        }
+        listed.push(MachineListing {
+            defaults: defaults
+                .iter()
+                .filter(|d| d.machine_id == machine.id)
+                .cloned()
+                .collect(),
+            tasks,
+            machine,
+        });
+    }
+    Ok(listed)
+}
+
 async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
     match cmd {
         MachineCommand::Connect {
@@ -28,6 +80,7 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             provider,
             email,
             chrome_profile,
+            owned,
         } => {
             let machine = super::ssh::resolve_target(target, false).await?;
             return super::machine_credentials::connect(
@@ -35,6 +88,7 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
                 *provider,
                 email.as_deref(),
                 chrome_profile.as_deref(),
+                *owned,
                 batch,
             )
             .await;
@@ -42,11 +96,18 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
         MachineCommand::Credentials { cmd } => {
             return super::machine_credentials::receive(cmd).await
         }
+        MachineCommand::Self_ { json } => {
+            let machine = local_machine().await?;
+            if *json {
+                println!("{}", serde_json::to_string(&machine)?);
+            } else {
+                println!("{}", machine.id);
+            }
+            return Ok(());
+        }
         _ => {}
     }
-    let store = crate::store::open_existing_store()
-        .await
-        .ok_or_else(|| anyhow!("machine commands need an initialized local store"))?;
+    let store = existing_store().await?;
     match cmd {
         MachineCommand::Public { name } => {
             let name = (name != "off").then_some(name.as_str());
@@ -54,14 +115,6 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             match name {
                 Some(name) => println!("This Machine is public as {name}"),
                 None => println!("This Machine is private"),
-            }
-        }
-        MachineCommand::Id { json } => {
-            let machine = store.local_machine().await?;
-            if *json {
-                println!("{}", serde_json::to_string(&machine)?);
-            } else {
-                println!("{}", machine.id);
             }
         }
         MachineCommand::Add {
@@ -128,27 +181,7 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             print_machine(&machine, *json)?;
         }
         MachineCommand::List { label, json } => {
-            let mut machines = match label {
-                Some(label) => vec![find_machine(&store, label).await?],
-                None => store.machines().await?,
-            };
-            let defaults = store.sqlite.machine_defaults()?;
-            // This Machine is listed only when one of your defaults names it.
-            let local = store.local_machine().await?;
-            if label.is_none() && defaults.iter().any(|d| d.machine_id == local.id) {
-                machines.insert(0, local);
-            }
-            let listings = machines
-                .into_iter()
-                .map(|machine| MachineListing {
-                    defaults: defaults
-                        .iter()
-                        .filter(|d| d.machine_id == machine.id)
-                        .cloned()
-                        .collect(),
-                    machine,
-                })
-                .collect::<Vec<_>>();
+            let listings = listings(&store, label.as_deref()).await?;
             if *json {
                 println!("{}", serde_json::to_string(&listings)?);
             } else {
@@ -164,6 +197,14 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
                             MachineSetting::Session => "Session",
                         };
                         println!("  {scope} {} {part}", default.name);
+                    }
+                    for task in &listing.tasks {
+                        // A move that has not arrived reads as that, as in `lf task status`.
+                        let place = crate::ops::task_ownership::move_line(&store.sqlite, &task.id)?
+                            .unwrap_or_else(|| {
+                                format!("since {}", crate::lf::output::format_time(task.since))
+                            });
+                        println!("  {} {place}", task.identifier);
                     }
                 }
             }
@@ -233,8 +274,13 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             store.remove_machine(label).await?;
             println!("Removed {label}");
         }
-        MachineCommand::Connect { .. } | MachineCommand::Credentials { .. } => {
-            unreachable!("credential commands dispatch before opening the store")
+        MachineCommand::Connect { .. }
+        | MachineCommand::Credentials { .. }
+        | MachineCommand::Self_ { .. }
+        | MachineCommand::Doctor { .. } => {
+            unreachable!(
+                "credential, identity and doctor commands dispatch before opening the store"
+            )
         }
         MachineCommand::End { .. }
         | MachineCommand::Pool { .. }
@@ -276,11 +322,21 @@ pub(super) async fn find_machine(store: &Store, selector: &str) -> anyhow::Resul
 }
 
 /// A Machine with your Wave and repository defaults that name it.
-#[derive(Debug, Serialize)]
-struct MachineListing {
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct MachineListing {
     #[serde(flatten)]
     machine: Machine,
     defaults: Vec<MachineDefault>,
+    /// Unfinished Tasks it owns, as this Machine reads their ownership.
+    tasks: Vec<HeldTask>,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct HeldTask {
+    id: crate::durable::TaskId,
+    identifier: String,
+    /// Unix seconds when the Task's claim reached the Machine.
+    since: i64,
 }
 
 #[derive(Debug, Serialize)]
@@ -404,7 +460,12 @@ pub(super) async fn probe(target: &str, forward_agent: bool) -> anyhow::Result<P
     }
     let text = String::from_utf8(output.stdout)?;
     let mut lines = text.lines();
-    let version = lines.next().and_then(|line| line.strip_prefix("lf "));
+    // `lf --version` prints the build version, then a label such as
+    // `(build 3f3153d95 on v0.15.3)`; only the version compares.
+    let version = lines
+        .next()
+        .and_then(|line| line.strip_prefix("lf "))
+        .and_then(|line| line.split_whitespace().next());
     if text.trim() == "lf-not-installed" && output.status.code() == Some(127) {
         return Err(connection_failure(
             target,

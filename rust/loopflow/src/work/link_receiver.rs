@@ -16,6 +16,7 @@ const SCHEME_TYPE: &str = "x-scheme-handler/loopflow";
 const DESKTOP_ENTRY: &str = "loopflow-links.desktop";
 const APPLET: &str = "Loopflow Links.app";
 const APPLET_BUNDLE: &str = "com.loopflow.links";
+pub(crate) const LSREGISTER: &str = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
 
 /// Who receives `loopflow:` links after installation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -217,8 +218,7 @@ fn install_macos(home: &Path, lf: &Path, placed_desktop: bool) -> Result<Receive
     let applet = home
         .join("Library/Application Support/Loopflow")
         .join(APPLET);
-    if placed_desktop || application_for_bundle(crate::lf::commands::open::DESKTOP_BUNDLE).is_some()
-    {
+    if placed_desktop || crate::installation::installed_app().is_some() {
         // Desktop owns the scheme and resolves through `lf open --link` itself.
         if applet.exists() {
             fs::remove_dir_all(&applet).with_context(|| format!("remove {}", applet.display()))?;
@@ -229,13 +229,11 @@ fn install_macos(home: &Path, lf: &Path, placed_desktop: bool) -> Result<Receive
         return Ok(Receiver::Other(handler.display().to_string()));
     }
     write_applet(&applet, lf)?;
-    let status = Command::new(
-        "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister",
-    )
-    .arg("-f")
-    .arg(&applet)
-    .status()
-    .context("register the link receiver with Launch Services")?;
+    let status = Command::new(LSREGISTER)
+        .arg("-f")
+        .arg(&applet)
+        .status()
+        .context("register the link receiver with Launch Services")?;
     anyhow::ensure!(
         status.success(),
         "Launch Services registration exited with {status}"
@@ -314,12 +312,6 @@ fn launch_services(expression: &str) -> Option<PathBuf> {
     let path = String::from_utf8(output.stdout).ok()?;
     let path = path.trim();
     (output.status.success() && !path.is_empty()).then(|| PathBuf::from(path))
-}
-
-pub(crate) fn application_for_bundle(bundle: &str) -> Option<PathBuf> {
-    launch_services(&format!(
-        "$.NSWorkspace.sharedWorkspace.URLForApplicationWithBundleIdentifier('{bundle}')"
-    ))
 }
 
 fn scheme_handler() -> Option<PathBuf> {

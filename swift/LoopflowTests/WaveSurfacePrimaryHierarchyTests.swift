@@ -4,8 +4,8 @@ import Testing
 /// The W2-178 contract says the primary Wave hierarchy must not surface
 /// registered-wave vocabulary or raw sync-timestamp prominence. That vocabulary
 /// shipped once (RoadmapView's "Every registered Wave · as of 10:32"), so this
-/// guards the removal at the source: the user-facing panes may reference the
-/// `isRegistered` model property, but never the retired user-facing phrases.
+/// guards the removal at the source: the user-facing panes never show the
+/// retired phrases.
 @Suite("Wave surface primary hierarchy vocabulary")
 struct WaveSurfacePrimaryHierarchyTests {
     /// The default center pane (no selection), the list rows, and the selected

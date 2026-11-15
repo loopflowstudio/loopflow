@@ -37,6 +37,9 @@ from functools import partial
 from pathlib import Path
 from typing import IO, Callable, Optional
 
+from cleanup_evidence import record_outcome
+from macos_inputs import IOS_INPUTS
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 XCODE_LOCAL_SIGNING = [
     "CODE_SIGNING_ALLOWED=YES",
@@ -89,11 +92,12 @@ PHASE_BUDGETS: dict[str, int] = {
     "architecture": 120,
     "rustfmt": 120,
     "clippy": 900,
-    "rust": 1200,
+    "rust": 1800,
     "python": 600,
     "website": 900,
     "swift": 1200,
     "swift-boundaries": 120,
+    "ios": 1200,
     "xcodegen": 180,
     "xcodebuild": 1200,
     "e2e-smoke": 600,
@@ -226,21 +230,21 @@ def _architecture_commands(_changed: list[str]) -> list[Command]:
     ]
 
 
+def _test_cli() -> Path:
+    target = Path(os.environ.get("CARGO_TARGET_DIR", "target"))
+    return (target if target.is_absolute() else REPO_ROOT / target) / "debug/lf"
+
+
 def _rust_commands(_changed: list[str], tests: Optional[str] = None) -> list[Command]:
     """Rust checks; `tests` narrows the test run to one nextest filter expression."""
-    macos = platform.system() == "Darwin"
     if tests is not None or shutil.which("cargo-nextest"):
         filters = [] if tests is None else [f"({tests})"]
-        if macos:
-            # Clone fixtures need their own sandbox; the full macOS run covers them.
-            filters.append("not test(data_clones::)")
         scope = ["--all"] if tests is None else ["-p", "loopflow", "--no-tests", "fail"]
         test_argv = [
             "cargo",
             "nextest",
             "run",
             *scope,
-            "--no-fail-fast",
             "--build-jobs",
             str(MAX_PARALLEL_JOBS),
             "--test-threads",
@@ -260,8 +264,6 @@ def _rust_commands(_changed: list[str], tests: Optional[str] = None) -> list[Com
             "--test-threads",
             str(MAX_PARALLEL_JOBS),
         ]
-        if macos:
-            test_argv.extend(["--skip", "data_clones::"])
     runner = ["uv", "run", "--no-sync", "python", str(REPO_ROOT / "scripts/test_network.py")]
     test_argv[1:1] = ["--config", 'target."cfg(all())".runner = ' + json.dumps(runner)]
     commands = [
@@ -271,54 +273,14 @@ def _rust_commands(_changed: list[str], tests: Optional[str] = None) -> list[Com
             "rust-test-inventory",
         ),
         Command(["cargo", "fmt", "--all", "--", "--check"], REPO_ROOT, "rustfmt"),
+        # Fixtures run one prepared CLI instead of a Cargo build per test process.
         Command(
-            [
-                "uv",
-                "run",
-                "python",
-                "scripts/materialize_rust_tests.py",
-                "--prepare-cli",
-                "--",
-                *test_argv,
-            ],
+            ["cargo", "build", "-p", "loopflow", "--bin", "lf", "--jobs", str(MAX_PARALLEL_JOBS)],
             REPO_ROOT,
-            "rust",
+            "rust-cli",
         ),
+        Command(["env", f"LOOPFLOW_TEST_LF={_test_cli()}", *test_argv], REPO_ROOT, "rust"),
     ]
-    if macos and tests is None:
-        # Clone fixtures install their own sandbox, which cannot nest with the
-        # network runner's unsandboxed ps exception. Match macOS CI's boundary.
-        selector = "data_clones::"
-        if int(platform.mac_ver()[0].split(".")[0]) < 26:
-            selector += (
-                "clone_creation_refuses_an_incompatible_parent_sandbox_before_copying_source"
-            )
-        commands.append(
-            Command(
-                [
-                    "uv",
-                    "run",
-                    "python",
-                    "scripts/materialize_rust_tests.py",
-                    "--prepare-cli",
-                    "--",
-                    "cargo",
-                    "test",
-                    "-p",
-                    "loopflow",
-                    "--test",
-                    "integration",
-                    "--jobs",
-                    str(MAX_PARALLEL_JOBS),
-                    selector,
-                    "--",
-                    "--test-threads",
-                    str(MAX_PARALLEL_JOBS),
-                ],
-                REPO_ROOT,
-                "rust-clones",
-            )
-        )
     # Clippy runs last: a test failure means another edit, and Cargo serializes
     # every build in this target directory anyway.
     commands.append(
@@ -367,6 +329,28 @@ def _python_commands(changed: list[str]) -> list[Command]:
             "python",
         ),
     ]
+    if platform.system() == "Darwin" and (
+        not test_files or touches_source or "python/tests/test_checkout_refresh.py" in test_files
+    ):
+        # The checkout refresh proofs use lf under network isolation. Fetch native
+        # archives and Cargo dependencies before entering that boundary.
+        commands.insert(
+            1,
+            Command(
+                [
+                    "cargo",
+                    "build",
+                    "-p",
+                    "loopflow",
+                    "--bin",
+                    "lf",
+                    "--jobs",
+                    str(MAX_PARALLEL_JOBS),
+                ],
+                REPO_ROOT,
+                "python-cli",
+            ),
+        )
     # macOS refuses nested Seatbelt profiles. This fixture installs its own
     # network-denying, read-only policy around the observed subprocesses.
     if platform.system() == "Darwin" and (
@@ -431,6 +415,10 @@ def _swift_commands(_changed: list[str]) -> list[Command]:
             "swift-boundaries",
         ),
     ]
+
+
+def _ios_commands(_changed: list[str]) -> list[Command]:
+    return [Command(["uv", "run", "python", "scripts/test_ios.py"], REPO_ROOT, "ios")]
 
 
 def _loopflow_commands(_changed: list[str]) -> list[Command]:
@@ -696,23 +684,34 @@ SUITES: list[Suite] = [
     Suite(
         name="swift",
         slow=False,
-        trigger_desc="swift/ (headless app build and view tests)",
+        trigger_desc="swift/ or Desktop native build inputs (headless app build and view tests)",
         match=lambda c: (
             _touches(
                 c,
                 "swift/",
                 "rust/loopflow/src/store/sqlite/sessions.rs",
                 "rust/loopflow/src/naming.rs",
+                "rust/loopflow/ghostty-vt",
             )
             or _touches_exact(
                 c,
                 "scripts/test_desktop.sh",
                 "scripts/swift_test_limit.py",
                 "scripts/desktop-headless.sb",
+                "scripts/loopflow-dev.py",
+                "rust/loopflow/build.rs",
             )
         ),
         build=_swift_commands,
         proves="app builds; model and view/interaction tests run without a display session.",
+    ),
+    Suite(
+        name="ios",
+        slow=False,
+        trigger_desc="iOS client, shared models or server protocol",
+        match=lambda c: _touches(c, *IOS_INPUTS),
+        build=_ios_commands,
+        proves="iOS app, model and UI tests run on a disposable Simulator.",
     ),
     Suite(
         name="e2e",
@@ -729,10 +728,12 @@ SUITES: list[Suite] = [
     Suite(
         name="loopflow",
         slow=True,
-        trigger_desc="Loopflow app/UI (swift/Loopflow, project.yml)",
+        trigger_desc="Loopflow app/UI or Desktop native build inputs",
         match=lambda c: (
-            _touches(c, "swift/LoopflowMac/", "swift/LoopflowUITests/")
-            or _touches_exact(c, "swift/project.yml")
+            _touches(c, "swift/LoopflowMac/", "swift/LoopflowUITests/", "rust/loopflow/ghostty-vt")
+            or _touches_exact(
+                c, "swift/project.yml", "scripts/loopflow-dev.py", "rust/loopflow/build.rs"
+            )
         ),
         build=_loopflow_commands,
         proves=(
@@ -1717,14 +1718,32 @@ def run_plans(
         recorder.checkpoint()
 
     outcomes: dict[str, SuiteOutcome] = {}
+    stopped_for_security = False
     for plan in plans:
-        if plan.run:
-            outcomes[plan.suite.name] = _run_suite(plan, artifact_root, _checkpoint_phase)
+        if not plan.run:
+            continue
+        if stopped_for_security:
+            outcomes[plan.suite.name] = SuiteOutcome(
+                False,
+                0.0,
+                [_not_run_phase(plan.suite.name, cmd) for cmd in plan.commands],
+                "Not run after host-security pressure; product result: unproven.",
+            )
+            continue
+        outcome = _run_suite(plan, artifact_root, _checkpoint_phase)
+        outcomes[plan.suite.name] = outcome
+        stopped_for_security = any(
+            phase.failure_kind == "host_security_pressure" for phase in outcome.phases
+        )
 
     failed = [(name, outcome) for name, outcome in outcomes.items() if not outcome.ok]
     phases = [phase for outcome in outcomes.values() for phase in outcome.phases]
     postflight, postflight_failure = _run_resource_check(False)
     resource_breach = postflight_failure if postflight is not None else None
+    try:
+        record_outcome(artifact_root, passed=not (failed or resource_breach))
+    except OSError as exc:
+        print(f"MEASUREMENT WARNING: artifact outcome remains unknown: {exc}", file=sys.stderr)
     if postflight is not None:
         print(_resource_summary(postflight, "postflight"))
     elif postflight is None and postflight_failure is not None:

@@ -10,62 +10,172 @@ Waves.
 ```bash
 pbpaste | lf task create                     # first line is the title, the rest its notes
 lf task run LOO-12                           # returns once its Graph is running
-lf task run LOO-13 --stack-on LOO-12         # builds on LOO-12's open PR before it merges
+lf task run LOO-12 --open                    # continue its Graph and open its conversation
+lf task run LOO-13 --stack-on LOO-12         # builds on LOO-12's branch before it lands
 lf capture-tasks                             # talk it through; the Session files the Tasks
 ```
 
-Each Task gets its own worktree beside your repository, its own branch and at
-most one pull request. A stacked Task forks from its parent's PR; `lf sync`
+A Task adopts existing work or gets its own worktree beside your repository, its own branch and at
+most one pull request. A stacked Task forks from its parent's branch on origin,
+pushing it when absent or when an unpublished parent is ahead; `lf sync`
 carries the child through the parent's updates and squash merge.
 
+`lf task run`, `lf ship`, and an explicit `lf task checkout` start the Task's
+conversation in the background when an agent is configured and installed.
+An in-place `lf -i task run` uses its current terminal instead.
+`lf resume` in its worktree reattaches to it. Previously opened conversations
+stay as they are. Every newly checked-out Task can start its conversation;
+there is no background conversation cap.
+A running Graph keeps its conversation alive; abandoning the Task stops its
+unviewed conversation. A conversation you are viewing stays open.
+Preparing a conversation, including Desktop's preload, does not launch an agent.
+
+Add `--open` to open the Task's primary conversation when launch returns,
+including when the Task is waiting at an interactive step. It reuses the Task's
+primary Session, including one already started in the background. A bare run
+opens at Graph registration; `-b` and `-i` still wait for their foreground run
+before opening.
+
+Opening follows [`lf open`'s host selection](workspaces.md#choose-where-it-appears):
+a direct CLI invocation attaches in the current terminal; an agent tool call
+opens a sibling tab. When the Graph runs on another Machine, the conversation
+opens locally where you invoked the command. `--explain` and `--quote` open
+nothing. Task runs reject `--context`; use `--explain` to inspect their selection.
+With `--json`, stdout holds only the `task.run` value; the open receipt goes to
+stderr.
+
+A failed launch opens nothing. An opening failure does not stop the Graph.
+Fix the reported host or attachment problem, then use
+`lf open --task LOO-12` to open the conversation without advancing the Graph.
+
 Every agent that works on a Task starts from the same place: the Task's notes
-and comments, its checkout and `scratch/`, and, in a Wave, the Wave's goal,
+and thread, its checkout and `scratch/`, and, in a Wave, the Wave's goal,
 memory and KRs.
+
+Run `lf incident` in a Task checkout to investigate a failure, including after
+the Task is done. A named Graph keeps the checkout's Task context and records
+its own run; it leaves the Task's Graph position and completion unchanged.
+
+### Recover a creation whose reply was lost
+
+```bash
+lf task create --request-id terminal-recovery-42 --no-wave --title "Keep the terminal intact after sleep" --json
+```
+
+Save a unique request ID before sending a creation you may need to recover.
+Inspect `lf server receipt terminal-recovery-42 --json` after a lost reply.
+This read needs no running server and starts no work. A missing receipt is `null`;
+an unavailable lookup is an error, not absence. Repeating the exact creation on
+the same Machine and repository with that ID returns the original creation or
+continues its safe unfinished work rather than filing a second Task.
+Changing the payload while reusing the ID returns `conflict`. A new creation
+needs a new ID. Without `--request-id`, the CLI generates one for that invocation;
+rerunning the command without it is a new submission.
+
+The JSON creation result contains `task`, `graph`, `session_id` and `milestone`,
+including without `--run`. Scripts read the identifier at `.task.identifier`.
+For `--run`, an interrupted launch can return `outcome_unknown` with the created
+Task and `run_requested` milestone. Inspect `lf task status <ID>` before starting
+anything: recovery never launches a second Graph when the first launch is
+unconfirmed. A receipt for a removed Task does not recreate it.
+
+Desktop saves and recovers these submissions automatically, including after it
+quits. Showing the resulting Task clears its saved submission; promotion from a
+conversation follows the same path. See [Recover a submitted creation](server.md#recover-a-submitted-creation).
+
+## Keep work already in progress
+
+```bash
+lf task create --worktree . --title "Finish the prototype"
+lf session list --json                         # find the Loopflow Session ID
+lf task create --session SESSION --title "Finish the prototype"
+lf session bind SESSION --task LOO-12           # select this Task’s conversation
+```
+
+Promotion preserves the branch, dirty and untracked files, and the Session's
+provider history and live attachment. The selected Session becomes the Task's
+primary conversation; `lf open --task LOO-12` and `lf resume --task LOO-12` find it.
+Pass `--session` explicitly to keep a conversation. An agent reads its own
+Session ID from its lf context block.
+A Graph belongs to the Task it was started for. Graphs that ran in an adopted
+checkout before the Task adopted it stay unattached; `lf task status` lists the
+Graphs launched for the Task from then on. While an earlier Graph still runs
+in that checkout, status shows the Task moving and reports its execution;
+`lf task run` starts no other Graph until it finishes.
+Without `--run`, `lf task create --worktree` adopts only the checkout; it selects
+no conversation. `--run` then uses ordinary Task conversation admission.
+Opening a conversation more recently never selects it. Explicit-source retries
+keep the same Task; conflicting Task ownership fails without moving either
+person's work.
+
+Plain `lf task create` files new work, including from an owned checkout or
+Session. `--run` starts the created Task; it does not opt into adoption.
+Explicit sources work with or without `--run`. Creation alone starts no Graph
+and approves no Auto-Ship. Binding also requires an explicit Session ID.
+
+Main and Wave checkouts remain shared. A selected Session there can become a
+Task conversation without moving its cwd; an explicit later `lf task checkout`
+gives the Task a separate home. Selecting a repository or Wave primary Session
+transfers that conversation to the Task; its former scope can open a new one.
+A remote command uses the selected Machine's existing paths and Sessions; it does not transfer local live work.
+
+Desktop offers **Create Task from this conversation** in the Session’s binding
+action. **Bind to Task** makes it the selected Task’s primary conversation.
+Already-assigned Sessions offer **Make primary Task conversation** in the palette
+and Task menu. The current terminal and composer stay in place.
+
+When an existing Task already has a worktree, `lf session bind <id> --task <task>`
+keeps that worktree and immediately sets the Session's working directory there.
+Already-running clients may keep their original directory; subsequent connections
+use the selected one. Files remain in their original checkout. If an open Task has no checkout, binding adopts the Session’s unowned
+linked checkout. Done Tasks can still select an unfinished conversation without
+reopening work. With no Task checkout, the conversation stays in place and no
+checkout is adopted. Closed or headless Sessions cannot become primary.
 
 ## Steer it while it runs
 
 ```bash
-lf comment LOO-12 "keep the retry budget at 3"   # reaches its agents at their next step or turn
-lf comment LOO-12                                 # read the thread: yours, teammates', the agents'
-lf interrupt LOO-12                               # stop its running Graph
-lf task defer LOO-12                              # hold future runs and CI repair; live processes finish
+lf steer LOO-12 "keep the retry budget at 3"   # reaches its agents at their next step or turn
+lf task status LOO-12 --json                        # the thread: your steers, teammates', the agents' reports
+lf task interrupt LOO-12                          # stop its running Graph
+lf task unassign LOO-12                           # nobody owns it: ship and CI repair stop; live processes finish
 ```
 
-A comment saves locally first, then reaches every Session working on the Task at
-its next supported boundary: before a Graph step or after an agent turn. Idle
-Sessions stay idle; nothing is replayed into them. Comments from teammates, in
-Loopflow or in your tracker, arrive the same way.
+A steer saves locally first, then reaches every Session working on the Task at
+its next supported boundary: before a Graph step or after an agent turn. An
+idle Task conversation is woken with it. Direction from teammates, in Loopflow
+or as comments in your tracker, arrives the same way.
 
-`lf task resume LOO-12` clears a deferral without starting anything. To reopen a
-conversation, use `lf resume` ([Sessions](sessions.md)).
+`lf task claim LOO-12` takes it back without starting anything; `lf task run`
+claims and runs. To reopen a conversation, use `lf resume` ([Sessions](sessions.md)).
 
 ## See where it stands
 
 ```bash
 lf wave show                       # each Wave's plan and Tasks, sorted by what they need
 lf task status LOO-12              # state, graph step, PR, and every Session and Graph on it
-lf task diff LOO-12 --files        # what it changed so far
-lf task wait LOO-13                # block until its run ends, with no agent polling
+lf task changes LOO-12        # what it changed so far
+lf task wait LOO-13                # wait until the Task is done or abandoned
 ```
 
 ```bash
 lf task list                                  # open Tasks in this repository
 lf task list loo-60                           # identifier or title contains "loo-60"
 lf task list --wave infra --state idle
-lf task list --done --wave infra --since 7d   # closed in the last week
-lf task list --watch                          # a JSON line each time the list changes
+lf task list --closed --wave infra --since 7d   # closed in the last week
+lf task list --subscribe                          # a JSON line each time the list changes
 ```
 
 `lf task list` is the flat inventory. Every view reads this machine's store, so
 it answers instantly and offline.
 
-`--watch` also works on `lf task status <id>`, `lf wave show`, `lf wave status`,
-`lf session list`, `lf history`, `lf planning status`, `lf ps` and the
+`--subscribe` also works on `lf task status <id>`, `lf wave show`, `lf wave status`,
+`lf session list`, `lf session history`, `lf repo plan`, `lf process list` and the
 `lf desktop` reads, always with `--json`. Each line is
 `{"answers", "unavailable", "body"}`, where `body` is
 what `--json` prints. Write `{"id": 1, "args": {"query": "parser"}}` to stdin to
 change what it reads, or `{"id": 2}` to ask for a fresh reading; the next line
-answers that id. It stops when stdin closes. `lf planning status --watch` also
+answers that id. It stops when stdin closes. `lf repo plan --subscribe` also
 keeps the repository's planning exchanged while it runs.
 
 A Graph that stopped or crashed stays as history; nothing resumes it. Read
@@ -81,17 +191,18 @@ lf task complete LOO-12                 # then mark the Task done
 
 A Task whose graph reaches `end` requests completion itself; with a PR,
 completion waits for the merge. Landing outside its graph leaves the Task open
-until you complete it. Publishing, landing and CI repair are covered in [Ops](ops.md).
+until you complete it. Publishing, landing and CI repair are covered in
+[Pull requests](ops.md#pull-requests).
 
 ## Share the plan
 
 ```bash
-lf planning status                 # which plan this repository reads, and what's pending
+lf repo plan                 # which plan this repository reads, and what's pending
 lf task claim LOO-12               # take it; the earlier owner's Sessions are told
-lf task unclaim LOO-12             # hand it back, history intact
+lf task unassign LOO-12            # nobody owns it; Linear shows no assignee; history intact
 ```
 
-Tasks, comments and status sync through your Git remote by default, as a ref
+Tasks, their threads and status sync through your Git remote by default, as a ref
 (`refs/loopflow/planning/shared/main` on `origin`), never a branch. Everyone who
 clones the repository reads and writes the same plan, with no account to
 connect. Every command saves locally first and syncs after, so nothing waits on
@@ -107,18 +218,18 @@ A different ref, or a plan only you see:
 planning:
   provider: git
   shared: team        # refs/loopflow/planning/shared/team
-  # personal: true    # refs/loopflow/planning/users/<key>; see `lf planning key`
+  # personal: true    # refs/loopflow/planning/users/<key>; see `lf repo plan key`
 ```
 
 Ref names are not access control; pick a remote whose readers should see the
 plan. When two people edit the same field, the later edit wins and the other
-value stays in `lf planning journal`, ready to copy back.
+value stays in `lf repo plan journal`, ready to copy back.
 
 ### Linear, Asana or Notion
 
 ```bash
 lf account connect linear                  # or asana, or notion
-lf wave connect --all --team-key LOO       # Linear: one Team per repository; Tasks become LOO-12
+lf wave plan connect --all --team-key LOO       # Linear: one Team per repository; Tasks become LOO-12
 ```
 
 ```yaml
@@ -139,28 +250,40 @@ Each Task is one item in the tracker, and the tracker is where coworkers work:
 
 | You, in Loopflow… | Coworkers see… |
 |---|---|
-| create, edit, comment, complete | the same change |
+| create, update, steer, complete | the same change |
 | start work on the Task | it moves to in progress |
 | open, land or abandon its PR | a link to the PR and its state |
 
-In Linear, a Wave is an Initiative and its plan is a Linear Project. Offline,
+In Linear, a Wave is an Initiative and its planning is a Linear Project. Offline,
 commands save locally and deliver on the next connected command;
 `lf task sync LOO-12` retries one Task.
+
+A Wave not yet connected to an Initiative has nothing to exchange. Its Tasks
+stay local and `lf wave sync` shows them without asking Linear, until
+`lf wave plan connect billing` connects one:
+
+```text
+$ lf wave sync billing
+billing: no Linear Initiative; showing local planning (lf wave plan connect billing)
+```
 
 ## Waves
 
 A Wave keeps a longer objective moving across many Tasks: a goal, the memory
-agents curate as they work, and a plan of Projects and KRs. Every Task in it
+agents curate as they work, and its planning: Tasks and KRs. Every Task in it
 starts with that context.
 
 ### Give it a goal and memory
 
 ```bash
-mkdir -p .lf/wave/billing
+lf wave create billing                    # register it, commit .lf/wave/billing/ on main
 $EDITOR .lf/wave/billing/GOAL.md       # who benefits, and what improves
-lf wave ensure billing                 # register it and prepare its Project
 lf task create --wave billing --title "Meter usage events"
 ```
+
+A clone's committed `.lf/wave/` directories register when the repository joins
+the Desktop portfolio, and on `lf wave create` or `lf wave plan connect --all`; Desktop
+and `lf wave list` read the same rows. A removed Wave's directory stays removed.
 
 ```markdown
 <!-- .lf/wave/billing/GOAL.md -->
@@ -182,6 +305,24 @@ pull requests merge.
 
 `lf context --wave billing` shows each file's share of the context budget.
 
+### Rename or remove it
+
+```bash
+lf wave rename billing payments          # same Wave, Tasks and planning; files move on main
+lf wave remove payments --preview        # what happens to its Tasks and Sessions
+lf wave remove payments                  # open Tasks move to the parent Wave or the repository
+lf wave remove payments --delete-backlog # delete unstarted Tasks instead; started ones always move
+```
+
+Removal retires the Wave and its child Waves: completed Tasks and
+conversations stay readable with `lf wave show payments` until a new Wave takes
+the name. A child's `MEMORY.md` folds into its parent's. Running it again
+finishes an interrupted removal; adding the name again starts a fresh Wave.
+Repeat a failed rename with the same old and new names to finish its pending
+files and Initiative title. Retries keep later edits uncommitted. An unfinished
+request retains the original Wave even if its name has been reused; address the
+replacement by its ID for a new removal or rename.
+
 ### Run a pass, or keep a conversation
 
 ```bash
@@ -191,18 +332,24 @@ lf wave status billing                            # plan, Tasks, metrics and exe
 ```
 
 `wave-operate` gives every started Task you own a disposition: moving, acted on,
-waiting on a named person, deferred, or unknown. It leaves running Graphs alone,
+waiting on a named person, unassigned, or unknown. It leaves running Graphs alone,
 reruns what remains of a stopped one, and lists unstarted backlog for you to
 pick. It never edits the plan or files Tasks. Teammates' Tasks are listed and
 left alone.
 
 The Wave's conversation carries the same pass each time you return. Between
-turns, running Graphs keep going on their own. For a schedule, put an ordinary
-command in your own crontab:
+turns, running Graphs keep going on their own. For a schedule, run an ordinary
+command from your own scheduler:
 
 ```bash
 # 0 9 * * *  cd ~/src/product && lf -b --wave billing wave-operate
 ```
+
+On macOS, a scheduled command that runs an agent or reads Keychain credentials
+belongs in a LaunchAgent in your login session (`StartCalendarInterval` in
+`~/Library/LaunchAgents`), because cron runs outside the login session and
+cannot reach the Keychain. Crontab works on Linux and for jobs that need no
+Keychain.
 
 ### Set it up once
 
@@ -210,10 +357,12 @@ command in your own crontab:
 # .lf/wave/billing/config.yaml: committed, inherited by the Wave's Tasks
 graph: code
 agent: claude
-skill_agents:
-  implement: claude:opus
-context_budgets:
-  memory_tokens: 20000
+skills:
+  implement:
+    agent: claude:opus
+context:
+  budgets:
+    memory_tokens: 20000
 ```
 
 ```bash
@@ -225,27 +374,31 @@ lf wave status billing                                    # each setting and its
 ```
 
 `config.yaml` has the shape of `.lf/config.yaml` and holds only what the Wave
-changes; launches in the Wave layer it over the repository's and your
-`~/.lf/config.yaml`. Repository settings (`planning`, `release`, `exclude`,
+changes; Wave values override repository values, and personal config overrides
+both. Repository settings (`planning`, `release`,
 `merge_method`, `land`, `pr`) are an error there. It also carries the Wave's
 `id`, `linear.initiative` and `chat`. A Task with no Wave uses the repository's
 settings.
 
-`lf set` never edits committed config. It stores your own value on this
-Machine for the repository, a Wave (`lf --wave <wave> set`) or every repository
-(`--global`); without `--wave` it sets the repository, even in a Wave's Task
-worktree. Your `graph`, `agent` or `skill_agents.<skill>` wins over the
-committed value for you only, and `lf wave status` reports it as `personal`.
-Machines (`machine`, `machine.tasks`, `machine.session`) and account routes
-(`account.<provider>`) exist only this way; a launch uses the nearest of Wave,
-repository and global. `lf unset <key>` hands the choice back.
+`lf set` edits your private `lf.config.local.yaml`, shared across this clone's
+Task worktrees. `--wave` selects a Wave within that file; `--global` edits
+`~/.lf/config.yaml`. Independent clones have independent private preferences.
+The same values can be edited by hand or through Desktop. `lf unset <key>` removes
+your declaration and reveals the next applicable value.
+
+Machine choices and ordered accounts are personal file settings too. Credentials,
+observed availability and existing work placement remain runtime state. Agent choices
+beat all `default_agent` fallbacks; within each class, personal settings beat shared
+settings. [Configuration](config.md) owns the complete source/scope/target rules and
+remote preference behavior. `lf wave status` explains each value's source.
 
 A Wave without `config.yaml` reads these keys from `GOAL.md` frontmatter, which
 released lf still reads (LOO-640 removes that).
 
-### Plan a chapter: Projects and KRs
+### Plan it: KRs and targets
 
 ```bash
+lf wave plan billing --json                     # its Tasks, KRs and metric targets
 lf wave update-plan --wave billing --plan plan.json
 ```
 
@@ -254,11 +407,9 @@ lf wave update-plan --wave billing --plan plan.json
 ```
 
 The goal names who benefits; KRs prove it, observably, across a window. A
-Wave's current Project holds its Tasks, KRs and metric targets. Projects
-created together share a chapter name, such as `2026-10`; completed Projects
-keep their history. `lf wave new-chapter` rotates to the next one, moving
-started Tasks with their worktree and PR and leaving unreviewed backlog where
-it was.
+Wave's planning holds its Tasks, KRs and metric targets. `lf wave update-plan`
+replaces the plan in place, and started Tasks keep their worktree and PR
+wherever they are.
 
 ### Nested Waves
 
@@ -309,9 +460,24 @@ and keeps the Session, checkout, PR and graph.
 position; retry it alone if it fails. `lf task reopen` keeps the same PR.
 `lf task abandon` cancels it, closes its PRs and deletes its branches.
 
-**Sync.** `lf task sync LOO-12 --retry-creation` retries an uncertain tracker
-creation with its saved ID; `--retry-updates` retries saved field changes after
-reading the tracker again. `lf wave status --sync` refreshes from Linear first.
+**Sync.** `lf task sync LOO-12` looks for its tracker creation now and re-sends
+it with its saved ID when absent; between syncs, every `lf` command looks for an
+uncertain creation once per window. `--retry-updates` retries saved field
+changes after reading the tracker again. `lf wave sync` refreshes from Linear
+first; a Wave with no Initiative skips the refresh and still succeeds.
+
+```bash
+lf task sync LOO-403 --retry-updates
+```
+
+Linear can change an issue or a Project without moving its `updatedAt` (it
+re-renders branch names, for one). When its copy disagrees with lf's saved copy
+at the same `updatedAt`, the sync keeps what it just read and carries on, for
+Tasks and Projects alike; your saved local edits stay queued. A Project's
+Teams follow Linear the same way. Moving a Project to another Initiative is
+held instead, because the Initiative decides which Wave plans it: move it back
+in Linear, then run `lf wave sync`. When an error has a fix, it names the
+command: `lf task sync <issue>` for a Task, `lf wave sync` for a Project.
 
 Every flag: [`lf task`](lf-reference.md#lf-task), [`lf wave`](lf-reference.md#lf-wave).
 

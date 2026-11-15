@@ -2,47 +2,51 @@
 //! `lf -b task run` runs it: every step headless, an interactive step standing
 //! in for the person who would be there. A bare ship inside its execution owner
 //! returns once it is shipping and carries on in its log; `-b` stays until the
-//! end. It is started again if it dies while the Task is shipping.
+//! end. It is started again if it dies while shipping, unless a provider refusal or
+//! repeated identical failure stopped its run: then it stops shipping with it.
 
 use std::path::Path;
 
 use anyhow::Result;
 
+use crate::engine::task::TaskShip;
 use crate::lf::Cli;
 use crate::ops::task::ship::{
     ship_begin, ship_next, ship_progressed, ship_settle_merge, ShipMerge, ShipStart, ShipStep,
 };
 use crate::ops::task::{TaskProcessOptions, TaskRunStart};
 
+/// `lf ship`: approve Auto-Ship and ship the Task here, reporting what it set
+/// going once, as `task.ship` returns it.
 pub fn run(
     cli: &Cli,
     repo: &Path,
     issue: &str,
     graph: Option<&str>,
     reason: Option<&str>,
+    json: bool,
 ) -> Result<()> {
     let task = match ship_begin(issue, graph, reason)? {
         ShipStart::Begun(task) => task,
         ShipStart::AlreadyShipping { issue, process } => {
-            println!("{issue} is already shipping (process {process})");
-            return Ok(());
+            return announce(&TaskShip::AlreadyShipping { issue, process }, json)
         }
-        ShipStart::Deferred { issue } => {
-            println!("{issue} is deferred; `lf task resume {issue}` before shipping it");
-            return Ok(());
-        }
-        ShipStart::AtEnd { issue } => {
-            println!("{issue} is already at its end");
-            return Ok(());
-        }
+        ShipStart::AtEnd { issue } => return announce(&TaskShip::AtEnd { issue }, json),
     };
     let issue = task.identifier.clone();
-    if !cli.batch && !cli.interactive && crate::transport::current().is_some() {
-        let log = super::graph::PendingLog::open(&format!("ship-{issue}"))?;
-        println!(
-            "{issue} shipping\n  follow: lf task status {issue}\n  log:    {}",
-            log.path.display()
-        );
+    let process = crate::journal::current_lf_process_id()
+        .expect("a ship that began has a registered Process");
+    let letting_go = super::graph::lets_launcher_go(cli);
+    let log = letting_go
+        .then(|| super::graph::PendingLog::open(&format!("ship-{issue}")))
+        .transpose()?;
+    let shipping = TaskShip::Shipping {
+        issue: issue.clone(),
+        process,
+        log: log.as_ref().map(|log| log.path.clone()),
+    };
+    announce(&shipping, json)?;
+    if let Some(log) = &log {
         super::graph::release_launcher(&log.file)?;
     }
     // Every run is `lf -b task run`: straight through, interactive steps headless.
@@ -65,16 +69,17 @@ pub fn run(
             &issue,
             TaskProcessOptions {
                 wave: cli.wave.clone(),
-                agent: cli.agent.clone(),
                 from,
                 reason: None,
                 ..TaskProcessOptions::default()
             },
             crate::ops::task::TaskRunMode::Headless,
         )?;
-        if let TaskRunStart::Run(step) = start {
+        // A Task that already has a conversation keeps it; this starts one only once.
+        crate::ops::task::start_conversation_beside(&task);
+        if let TaskRunStart::Run { step, .. } = start {
             // This ship has already let its launcher go, or keeps it to the end.
-            super::graph::run_task_graph_for(&headless, &task, &step, false)?;
+            super::graph::run_task_graph_for(&headless, &task, &step, false, &mut |_, _| Ok(()))?;
             crate::ops::task::task_run_finished(&task)?;
             ship_progressed(&task.id)?;
         }
@@ -101,16 +106,27 @@ fn merged(issue: &str) -> ShipMerge {
     }
 }
 
-/// Say why shipping ends here: deferred, stopped or finished.
+/// Say why shipping ends here: unassigned, stopped or finished.
 fn halt(issue: &str, step: &ShipStep) -> Result<()> {
     match step {
-        ShipStep::Deferred => {
+        ShipStep::Unassigned => {
             println!(
-                "{issue} is deferred; `lf task resume {issue}` and `lf ship` continue shipping"
+                "{issue} is unassigned; `lf task claim {issue}` and `lf ship` continue shipping"
             )
         }
         ShipStep::Stopped => println!("{issue} stopped shipping"),
         _ => println!("{issue} reached its end"),
+    }
+    Ok(())
+}
+
+/// Report what this ship set going to its launcher and print it.
+fn announce(shipping: &TaskShip, json: bool) -> Result<()> {
+    crate::engine::launch::report(Ok(shipping));
+    if json {
+        println!("{}", serde_json::to_string(shipping)?);
+    } else if let Some(text) = shipping.render() {
+        println!("{text}");
     }
     Ok(())
 }

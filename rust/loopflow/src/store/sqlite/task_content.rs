@@ -302,6 +302,7 @@ mod tests {
                     artifact_key: Some(new_artifact_key()),
                     ..bound
                 },
+                None,
             )
             .unwrap();
         let before = store.session_history(&session.id, 0, 0).unwrap();
@@ -326,6 +327,7 @@ mod tests {
                     artifact_key: Some(new_artifact_key()),
                     ..captured
                 },
+                None,
             )
             .unwrap();
         assert_eq!(next.wave_id, Some(product.wave_id.clone()));
@@ -344,6 +346,7 @@ mod tests {
                     artifact_key: Some(new_artifact_key()),
                     ..next
                 },
+                None,
             )
             .unwrap();
         assert!(final_input.wave_id.is_none());

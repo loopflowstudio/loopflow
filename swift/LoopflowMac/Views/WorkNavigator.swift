@@ -16,8 +16,9 @@ struct WorkNavigator: View {
     @State private var wavesHeight: CGFloat = 130
     /// The Wave row just clicked, shown before its selection moves it.
     @State private var pressedScope: WorkNavigation.SidebarScope?
-    /// Pointing at the Waves section reveals New Wave; only that row reads it.
-    @State private var wavesHover = HoverFlag()
+    @State private var removingWave: WaveSnapshot?
+    @State private var renamingWave: WaveSnapshot?
+    @State private var taskDrag = TaskOrderDrag.State()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var listTitle: String {
@@ -40,7 +41,8 @@ struct WorkNavigator: View {
     }
 
     private var rowOrder: [WorkReference] {
-        model.sidebarTaskIDs.map { .task(id: $0) } + model.visibleRoadmaps.map { .wave(id: $0.wave.id) }
+        (model.sidebarTaskIDs + model.sidebarAutonomousTaskIDs).map { .task(id: $0) }
+            + model.visibleRoadmaps.map { .wave(id: $0.wave.id) }
     }
 
     private func moveFocus(_ direction: MoveCommandDirection) {
@@ -70,6 +72,7 @@ struct WorkNavigator: View {
                 let taskIDs = model.sidebarTaskIDs
                 let scope = model.navigation.sidebarScope
                 VStack(alignment: .leading, spacing: 5) {
+                    NewTaskRow(model: model)
                     if case .dashboard = scope {
                         HStack {
                             Text(listTitle.uppercased()).lineLimit(1)
@@ -87,8 +90,9 @@ struct WorkNavigator: View {
                             .font(Typography.body(12))
                             .foregroundStyle(palette.textSecondary).padding(10)
                     }
+                    autonomousSection
                     if let selection = model.selection, selection.kind == .task,
-                       !taskIDs.contains(where: { model.isSelected(.task(id: $0)) }) {
+                       !(taskIDs + model.sidebarAutonomousTaskIDs).contains(where: { model.isSelected(.task(id: $0)) }) {
                         VStack(alignment: .leading, spacing: 5) {
                             Text("Open Task is outside this list")
                             Button("Show working tasks") {
@@ -97,7 +101,7 @@ struct WorkNavigator: View {
                             }
                         }.font(Typography.body(11)).padding(10)
                     }
-                }.padding(8)
+                }.padding(8).coordinateSpace(.named(TaskOrderDrag.space))
             }
             WaveSectionDivider(navigation: model.navigation)
             waveSection
@@ -122,6 +126,15 @@ struct WorkNavigator: View {
             actionTaskID = focusedWork.id
             return .handled
         }
+        .onChange(of: rowOrder.isEmpty, initial: true) { _, empty in
+            guard !empty else { return }
+            Perf.endAfterCommit(Perf.coldStart, id: "launch")
+            let source = model.showsSavedWork ? "saved" : "fresh"
+            DispatchQueue.main.async { LaunchJournal.home.mark(.usable, ["source": source]) }
+        }
+        .onChange(of: model.navigation.sidebarFilter) { _, _ in
+            Perf.endAfterCommit(Perf.hierarchyInteraction, id: "outline")
+        }
         .onChange(of: model.navigation.sidebarFocusRequested, initial: true) { _, requested in
             guard requested else { return }
             focusMemory.window = NSApp.keyWindow
@@ -142,28 +155,33 @@ struct WorkNavigator: View {
     /// Pinned below the Task list so any Wave is a click away however far the
     /// list scrolls; it starts about three rows tall and its divider drags.
     private var waveSection: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 5) {
-                ForEach(model.visibleRoadmaps.filter { $0.wave.id != model.sidebarWave?.wave.id }, id: \.wave.id) { waveRow($0) }
-                NewWaveRow(model: model, hover: wavesHover)
-            }.padding(8)
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 5) {
+                    ForEach(model.visibleRoadmaps.filter { $0.wave.id != model.sidebarWave?.wave.id }, id: \.wave.id) { waveRow($0) }
+                }.padding(8)
+            }
+            .onScrollGeometryChange(for: CGFloat.self) { $0.contentSize.height } action: { _, height in
+                wavesHeight = height
+            }
+            .frame(height: min(wavesHeight, model.navigation.sidebarWavesHeight))
+            NewWaveRow(model: model).padding(.horizontal, 8).padding(.bottom, 8)
         }
-        .onScrollGeometryChange(for: CGFloat.self) { $0.contentSize.height } action: { _, height in
-            wavesHeight = height
-        }
-        .frame(height: min(wavesHeight, model.navigation.sidebarWavesHeight))
-        .hoverSource(wavesHover)
+        .waveLifecycleSheets(model: model, removing: $removingWave, renaming: $renamingWave)
     }
 
     /// The repository is the default Wave; it lists Working Tasks and can't be edited.
     private var repositoryRow: some View {
         waveRow(scope: .repository, name: model.repoPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Repository",
-                icon: nil, count: model.workingTaskMembers.count, unavailableReason: nil)
+                icon: nil, count: model.startedTaskCount(.repository), unavailableReason: nil)
     }
 
     private func waveRow(_ wave: WaveRoadmap) -> some View {
         waveRow(scope: .wave(wave.wave.id), name: wave.wave.displayName, icon: "water.waves",
-                count: wave.tasks.items.count, unavailableReason: wave.tasks.unavailableReason)
+                count: model.startedTaskCount(.wave(wave.wave.id)), unavailableReason: wave.tasks.unavailableReason)
+            .contextMenu {
+                WaveLifecycleMenu(onRename: { renamingWave = wave.wave }, onRemove: { removingWave = wave.wave })
+            }
     }
 
     private func waveRow(scope: WorkNavigation.SidebarScope, name: String, icon: String?,
@@ -188,7 +206,7 @@ struct WorkNavigator: View {
                 if let unavailableReason {
                     Image(systemName: "exclamationmark.triangle").help(unavailableReason)
                 } else {
-                    Text("\(count)").font(Typography.code(10)).help("\(count) Tasks")
+                    Text("\(count)").font(Typography.code(10)).help("\(count) working or autonomous Tasks")
                 }
             }.font(Typography.body(13)).padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -198,15 +216,35 @@ struct WorkNavigator: View {
                 .contentShape(RoundedRectangle(cornerRadius: 6))
         }.buttonStyle(.plain)
             .modifier(FocusedWork(focus: $focusedWork, reference: reference))
-            .accessibilityLabel("\(name), \(count) Tasks")
+            .accessibilityLabel("\(name), \(count) working or autonomous Tasks")
             .accessibilityIdentifier("work-wave-\(reference?.id ?? "repository")")
             .matchedGeometryEffect(id: scope, in: scopeTitle)
     }
 
-    private func taskRow(_ id: String, slotHint: String?) -> some View {
+    /// Shipping Tasks run to merge without anyone; they sit below, quieter, under a heading.
+    @ViewBuilder private var autonomousSection: some View {
+        let ids = model.sidebarAutonomousTaskIDs
+        if !ids.isEmpty {
+            HStack {
+                Text("Autonomous")
+                Spacer()
+                Text("\(ids.count)").font(Typography.code(10))
+            }
+            .font(Typography.strong(12)).foregroundStyle(palette.textSecondary)
+            .padding(.horizontal, 10).padding(.top, 14).padding(.bottom, 2)
+            .help("Shipping: running to merge with nothing left for a person to do")
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("work-autonomous-heading")
+            ForEach(ids, id: \.self) { id in
+                taskRow(id, slotHint: nil, quiet: true)
+            }
+        }
+    }
+
+    private func taskRow(_ id: String, slotHint: String?, quiet: Bool = false) -> some View {
         let found = model.task(id: id)
         let selected = model.isSelected(.task(id: id))
-        let otherWave = model.selection?.kind == .wave && found?.wave?.wave.id != model.selection?.id
+        let muted = quiet || model.selection?.kind == .wave && found?.wave?.wave.id != model.selection?.id
         let sessions = model.taskSessions(id)
         let status = SessionProgramStatus(sessions: sessions, unavailable: model.sessions.errorMessage)
         let title = found?.task.task.name ?? "Task unavailable · \(id)"
@@ -228,7 +266,7 @@ struct WorkNavigator: View {
             }
         }
         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
-        .foregroundStyle(selected ? palette.workSelectedText : otherWave ? palette.textSecondary : palette.text)
+        .foregroundStyle(selected ? palette.workSelectedText : muted ? palette.textSecondary : palette.text)
         .background {
             Button { model.select(.task(id: id)) } label: {
                 SidebarSelectionShape(state: selected ? .shown : .none)
@@ -245,7 +283,8 @@ struct WorkNavigator: View {
         }
         .renderFlash()
         }
-        .modifier(TaskOrderDragging(model: model, workID: model.navigation.sidebarScope == .repository ? model.workingTaskWorkID(row: id) : nil))
+        .modifier(TaskOrderDragging(model: model, workID: model.navigation.sidebarScope == .repository ? model.workingTaskWorkID(row: id) : nil,
+                                    drag: taskDrag))
         .contextMenu {
             actions(for: id)
         }
@@ -297,6 +336,8 @@ extension WorkNavigator: Equatable {
 struct WorkBreadcrumbs: View {
     @Bindable var model: WorkModel
     @Environment(\.palette) private var palette
+    @State private var removingWave: WaveSnapshot?
+    @State private var renamingWave: WaveSnapshot?
 
     var body: some View {
         HStack(spacing: 8) {
@@ -304,17 +345,12 @@ struct WorkBreadcrumbs: View {
                 trail(showWave: true).fixedSize(horizontal: true, vertical: false)
                 trail(showWave: false)
             }
-            if let copy = model.previewCopy {
-                WorkChip(text: "Preview", tone: .warning)
-                    .fixedSize()
-                    .help("Preview copy: \((copy as NSString).abbreviatingWithTildeInPath) — work here is not in the shared store")
-                    .accessibilityIdentifier("preview-copy")
-            }
         }
         .buttonStyle(.plain)
         .font(Typography.strong(13))
         .foregroundStyle(palette.titlebarText, palette.titlebarSecondaryText)
         .accessibilityIdentifier("work-breadcrumbs")
+        .waveLifecycleSheets(model: model, removing: $removingWave, renaming: $renamingWave)
     }
 
     private func trail(showWave: Bool) -> some View {
@@ -379,6 +415,11 @@ struct WorkBreadcrumbs: View {
                 model.select(.wave(id: id))
                 model.navigation.content = .terminals
             }.lineLimit(1).fixedSize()
+            .contextMenu {
+                if let wave = model.wave(id: id)?.wave {
+                    WaveLifecycleMenu(onRename: { renamingWave = wave }, onRemove: { removingWave = wave })
+                }
+            }
             WorkJumpSeparator(model: model, scope: .wave(id), label: "Tasks in \(name)")
         }
     }
@@ -432,7 +473,7 @@ struct WorkMachineControl: View {
     private func load() async {
         error = nil
         // A newer load or a navigation cancels this one; that is not a failure to show.
-        do { machines = try await model.machines(for: target) }
+        do { machines = try await model.machines() }
         catch is CancellationError {}
         catch { self.error = error.localizedDescription }
     }
@@ -519,50 +560,108 @@ extension WorkJumpScope {
     }
 }
 
-/// The last row of the Waves list while the pointer is over it; names and authors a Wave.
+/// Always first in the Task list: the main way to start work. It opens the
+/// New Task sheet, as ⌘N does.
+private struct NewTaskRow: View {
+    let model: WorkModel
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        Button { model.navigation.palette = .newTask } label: {
+            HStack {
+                Image(systemName: "plus")
+                Text("New Task").lineLimit(1)
+                Spacer()
+                Text("⌘N").font(Typography.code(10))
+            }.font(Typography.body(13)).foregroundStyle(palette.textSecondary).padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(RoundedRectangle(cornerRadius: 6))
+        }.buttonStyle(.plain)
+            .disabled(model.repoPath == nil)
+            .accessibilityIdentifier("work-new-task")
+    }
+}
+
+/// Pinned below the scrolling Waves list; names and authors a Wave.
+/// An add with leftovers (its files uncommitted on main) keeps the popover open
+/// showing the receipt's lines; a clean add closes it.
 private struct NewWaveRow: View {
     let model: WorkModel
-    let hover: HoverFlag
     @Environment(\.palette) private var palette
     @State private var naming = false
     @State private var name = ""
+    @State private var objective = ""
     @State private var error: String?
+    @State private var leftovers: WaveAdded?
 
     var body: some View {
-        HoverRevealed(flag: hover) {
-            Button { naming = true } label: {
-                HStack {
-                    Image(systemName: "plus")
-                    Text("New Wave").lineLimit(1)
-                    Spacer()
-                }.font(Typography.body(13)).foregroundStyle(palette.textSecondary).padding(10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(RoundedRectangle(cornerRadius: 6))
-            }.buttonStyle(.plain)
-                .accessibilityIdentifier("work-new-wave")
-                .popover(isPresented: $naming, arrowEdge: .trailing) { form }
-        }
+        Button { naming = true } label: {
+            HStack {
+                Image(systemName: "plus")
+                Text("New Wave").lineLimit(1)
+                Spacer()
+            }.font(Typography.body(13)).foregroundStyle(palette.textSecondary).padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(RoundedRectangle(cornerRadius: 6))
+        }.buttonStyle(.plain)
+            .accessibilityIdentifier("work-new-wave")
+            .popover(isPresented: $naming, arrowEdge: .trailing) { form }
     }
 
+    @ViewBuilder
     private var form: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            TextField("Wave name", text: $name).onSubmit(create).frame(width: 200)
-            if let error { Text(error).font(Typography.body(11)).foregroundStyle(palette.warning) }
-            HStack { Spacer(); Button("Create", action: create).keyboardShortcut(.defaultAction) }
-        }.padding(12)
+        if let leftovers {
+            WaveAddedLeftovers(added: leftovers) {
+                self.leftovers = nil
+                naming = false
+            }.padding(12)
+        } else {
+            VStack(alignment: .leading, spacing: 8) {
+                TextField("Wave name", text: $name).onSubmit(create).frame(width: 200)
+                TextField("Objective (optional)", text: $objective).onSubmit(create).frame(width: 200)
+                if let error { Text(error).font(Typography.body(11)).foregroundStyle(palette.warning) }
+                HStack { Spacer(); Button("Create", action: create).keyboardShortcut(.defaultAction) }
+            }.padding(12)
+        }
     }
 
     private func create() {
         guard let repoPath = model.repoPath else { return }
         Task {
             do {
-                try await PortfolioRepoState.createWave(name: name, repoPath: repoPath)
-                naming = false
+                let added = try await model.addWave(name: name, objective: objective, repo: repoPath)
                 name = ""
+                objective = ""
                 error = nil
-                await model.refreshPlanning()
+                if added.summary.isEmpty { naming = false } else { leftovers = added }
+                model.select(.wave(id: added.id))
             } catch let failure {
                 error = failure.localizedDescription
+            }
+        }
+    }
+}
+
+/// An add receipt with lines a person still has to act on, and a Done button.
+struct WaveAddedLeftovers: View {
+    let added: WaveAdded
+    let onDone: () -> Void
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            Text(added.created ? "Added \(added.name)" : "\(added.name) already exists")
+                .font(Typography.body(13)).foregroundStyle(palette.text)
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                ForEach(Array(added.summary.enumerated()), id: \.offset) { _, line in
+                    Text(line).font(Typography.body(11)).foregroundStyle(palette.textSecondary)
+                }
+            }.accessibilityIdentifier("new-wave-summary")
+            HStack {
+                Spacer()
+                Button("Done", action: onDone)
+                    .keyboardShortcut(.defaultAction)
+                    .accessibilityIdentifier("new-wave-done")
             }
         }
     }
@@ -697,21 +796,77 @@ private struct RowHover<Content: View>: View {
 }
 
 /// Working Tasks rows reorder the repository's one Task order by drag; Wave lists don't.
+/// The row itself follows the pointer, a line marks where it lands, and release
+/// places it at once. A system drag would hold its image for the drop animation.
 private struct TaskOrderDragging: ViewModifier {
     let model: WorkModel
     let workID: String?
+    let drag: TaskOrderDrag.State
+    @Environment(\.palette) private var palette
 
     func body(content: Content) -> some View {
         if let workID {
+            let dragging = drag.source == workID
             content
-                .draggable(TaskOrderDrag.token(workID))
-                .dropDestination(for: String.self) { values, _ in
-                    guard let task = values.first.flatMap(TaskOrderDrag.taskID), task != workID else { return false }
-                    Task { await model.reorderWorkingTask(task, to: workID) }
-                    return true
+                .background(dragging ? palette.surfaceMuted : .clear)
+                .shadow(color: .black.opacity(dragging ? 0.18 : 0), radius: 6, y: 2)
+                .offset(y: dragging ? drag.offset : 0)
+                .zIndex(dragging ? 1 : 0)
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(TaskOrderDrag.space)) } action: {
+                    drag.frames[workID] = $0
+                }
+                .highPriorityGesture(DragGesture(minimumDistance: 4, coordinateSpace: .named(TaskOrderDrag.space))
+                    .onChanged { drag.move(workID, by: $0.translation.height, at: $0.location.y,
+                                           order: model.workingTaskMembers.map(\.work.id)) }
+                    .onEnded { _ in
+                        guard let (source, target) = drag.end() else { return }
+                        model.reorderWorkingTask(source, to: target)
+                    })
+                .overlay(alignment: drag.landing(on: workID) ?? .top) {
+                    if drag.landing(on: workID) != nil {
+                        Rectangle().fill(palette.accent).frame(height: 2)
+                            .allowsHitTesting(false).accessibilityIdentifier("task-order-insertion")
+                    }
                 }
         } else {
             content
+        }
+    }
+}
+
+extension TaskOrderDrag {
+    static let space = "task-order"
+
+    /// The sidebar row being dragged and the row it would take the place of.
+    @MainActor @Observable final class State {
+        var source: String?
+        var target: String?
+        /// The dragged row lands after the target when it comes from above.
+        var below = false
+        var offset: CGFloat = 0
+        /// Each row's frame in the list, read only while a drag picks its target.
+        @ObservationIgnored var frames: [String: CGRect] = [:]
+
+        func landing(on row: String) -> Alignment? {
+            target == row ? (below ? .bottom : .top) : nil
+        }
+
+        func move(_ row: String, by translation: CGFloat, at y: CGFloat, order: [String]) {
+            source = row
+            offset = translation
+            let under = { (id: String) in self.frames[id].map { $0.minY <= y && y < $0.maxY } == true }
+            // Another row under the pointer is the target; back over its own row, none.
+            if let over = order.first(where: { $0 != row && under($0) }) { target = over } else if under(row) { target = nil }
+            if let target {
+                below = (order.firstIndex(of: row) ?? 0) < (order.firstIndex(of: target) ?? 0)
+            }
+        }
+
+        /// Clears the drag in the same frame the caller moves the row.
+        func end() -> (String, String)? {
+            defer { source = nil; target = nil; offset = 0 }
+            guard let source, let target else { return nil }
+            return (source, target)
         }
     }
 }

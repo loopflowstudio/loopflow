@@ -164,7 +164,9 @@ struct SessionBindingDraft: Equatable {
     let id = UUID()
     let sessionId: String
     let title: String
+    var assignedTaskId: String?
     var selector = ""
+    var taskTitle = ""
     var preview: SessionBindingPreview?
     var submitting = false
     var error: String?
@@ -194,6 +196,10 @@ struct TaskRunDraft: Equatable {
 /// A Wave view's named parts, as `lf desktop -p` names them.
 enum WaveViewPart: String, CaseIterable, Hashable {
     case board, session, tiles
+
+    /// The Tasks strip distracts more than it helps for now (Jack Heart, LOO-673);
+    /// Show… or `lf desktop show -p tiles` brings it back.
+    static let hiddenByDefault: Set<Self> = [.tiles]
 
     /// How the view's `Show…` menu names it.
     var title: String {
@@ -241,8 +247,8 @@ final class WorkNavigation {
         if case .saved(let id) = trailBoard { return .dashboard(id) }
         return sidebarWaveID.map(SidebarScope.wave) ?? .repository
     }
-    /// Each Wave view's footer page; it outlives entering a tile and coming back.
-    var wavePages: [Board: Int] = [:]
+    /// Each board's page; it outlives entering a tile and coming back. Nil is the unsaved view.
+    var boardPages: [Board?: Int] = [:]
     /// Each Wave view's hidden board and strip; its conversation hides as its session pane.
     var hiddenViewParts: [Board: Set<WaveViewPart>] = [:]
     /// Each Wave view's zoomed board or strip; its conversation zooms as its session pane.
@@ -250,7 +256,11 @@ final class WorkNavigation {
     var waveRatios: [Board: WaveViewRatios] = [:]
     var boardSections: [Board: WaveBoardSection] = [:]
     var showsSlotHints = false
-    var sidebarFilter: SidebarFilter = .working
+    var sidebarFilter: SidebarFilter = .working {
+        willSet {
+            if newValue != sidebarFilter { Perf.begin(Perf.hierarchyInteraction, "filter", id: "outline") }
+        }
+    }
     var sidebarFocusRequested = false
     enum Content { case overview, details, terminals }
     enum Palette: Equatable {
@@ -258,6 +268,7 @@ final class WorkNavigation {
         case sidebarSearch
         case graph(String)
         case workflow(String)
+        case newTask
     }
     @MainActor @Observable
     final class WorkspacePresentation {
@@ -271,9 +282,12 @@ final class WorkNavigation {
     }
     var palette: Palette? {
         didSet {
+            if oldValue != palette { paletteGeneration &+= 1 }
             if oldValue == nil, palette != nil { restorePaletteFocus = true }
         }
     }
+    /// A dismissed and reopened sheet is a different presentation, even at the same Work.
+    @ObservationIgnored private(set) var paletteGeneration = 0
     var restorePaletteFocus = true
     var recentDestinations: [WorkPaletteRow] = []
     /// Source revisions isolate disclosure from changed definitions and repositories.

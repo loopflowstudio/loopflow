@@ -24,23 +24,7 @@ try:
     spec.loader.exec_module(release_loopflow)
 finally:
     sys.path.pop(0)
-
-
-def test_release_bundle_renames_swift_product_to_bundle_executable(tmp_path: Path) -> None:
-    build_dir = tmp_path / "build"
-    build_dir.mkdir()
-    (build_dir / "LoopflowMac").write_bytes(b"swift-product")
-
-    info_plist = tmp_path / "Info.plist"
-    with info_plist.open("wb") as file:
-        plistlib.dump({"CFBundleExecutable": "Loopflow"}, file)
-
-    app_macos_dir = tmp_path / "Loopflow.app" / "Contents" / "MacOS"
-    app_macos_dir.mkdir(parents=True)
-    release_loopflow._copy_app_executable(build_dir, info_plist, app_macos_dir)
-
-    assert (app_macos_dir / "Loopflow").read_bytes() == b"swift-product"
-    assert not (app_macos_dir / "LoopflowMac").exists()
+check_desktop_launch = sys.modules["check_desktop_launch"]
 
 
 def test_release_bundle_carries_the_cli(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -56,6 +40,16 @@ def test_release_bundle_carries_the_cli(monkeypatch: pytest.MonkeyPatch, tmp_pat
 
     assert (app_macos_dir / "lf").read_bytes() == b"release-lf"
     assert not (app_macos_dir / "lfd").exists()
+    agent = plistlib.loads(
+        (app_macos_dir.parent / "Library/LaunchAgents/com.loopflow.server.plist").read_bytes()
+    )
+    assert agent["BundleProgram"] == "Contents/MacOS/lf"
+    assert agent["ProgramArguments"] == ["lf", "server", "run"]
+    legacy = plistlib.loads(
+        (app_macos_dir.parent / "Library/LaunchAgents/com.loopflow.machine.plist").read_bytes()
+    )
+    assert legacy["Label"] == "com.loopflow.machine"
+    assert legacy["ProgramArguments"] == ["lf", "machine", "service", "run"]
 
 
 def _write_test_app(app_path: Path, script: str) -> None:
@@ -131,7 +125,7 @@ def test_resource_check_rejects_a_build_dependent_app(tmp_path: Path, unsigned_c
         f'test -e {quoted_bundle}\nprintf snapshot > "$LOOPFLOW_UI_TEST_SNAPSHOT_PATH"\n',
     )
 
-    with pytest.raises(RuntimeError, match="failed without SwiftPM build resources"):
+    with pytest.raises(RuntimeError, match="App exited 1 from -ui-test-mode"):
         _check(app_path, build_dir)
 
     assert build_bundle.is_dir()
@@ -144,10 +138,26 @@ def test_resource_check_requires_a_rendered_snapshot(tmp_path: Path, unsigned_ch
     app_path = tmp_path / "Loopflow.app"
     _write_test_app(app_path, "exit 0\n")
 
-    with pytest.raises(RuntimeError, match="produced no resource-check snapshot"):
+    with pytest.raises(RuntimeError, match="without writing its -ui-test-mode snapshot"):
         _check(app_path, build_dir)
 
     assert build_bundle.is_dir()
+
+
+def test_resource_check_reports_a_hung_app(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, unsigned_check: None
+) -> None:
+    build_dir = tmp_path / "build"
+    (build_dir / "LoopflowSwift_Loopflow.bundle").mkdir(parents=True)
+    app_path = tmp_path / "Loopflow.app"
+    _write_test_app(app_path, "echo window opened\nsleep 60 &\nwait\n")
+    monkeypatch.setattr(check_desktop_launch, "LAUNCH_TIMEOUT", 1)
+
+    with pytest.raises(RuntimeError, match="did not exit within 1s") as failure:
+        _check(app_path, build_dir)
+
+    assert "window opened" in str(failure.value)
+    assert (build_dir / "LoopflowSwift_Loopflow.bundle").is_dir()
 
 
 def test_release_command_reports_timeout(
@@ -228,6 +238,68 @@ def test_notarization_retry_reuses_submission_after_checkout_cleanup(
     assert (retained / "Loopflow.dmg").read_bytes() == b"signed candidate"
 
 
+AGREEMENT_403 = (
+    "Error: HTTP status code: 403. A required agreement is missing or has expired. "
+    "This request requires an in-effect agreement that has not been signed or has expired."
+)
+UNAUTHENTICATED_401 = (
+    "Error: HTTP status code: 401. Unauthenticated. "
+    "Ensure that all authentication arguments are correct."
+)
+
+
+@pytest.mark.parametrize(
+    ("step", "stderr", "message"),
+    [
+        (
+            "submit",
+            f"\n{AGREEMENT_403}\n",
+            f"Notarization upload failed: {AGREEMENT_403[:-1]}; "
+            "inspect Apple history before retrying",
+        ),
+        (
+            "wait",
+            UNAUTHENTICATED_401,
+            f"Notarization submission-1 wait failed: {UNAUTHENTICATED_401[:-1]}; "
+            "retry resumes the retained submission",
+        ),
+        (
+            "submit",
+            "",
+            "Notarization upload failed; inspect Apple history before retrying",
+        ),
+    ],
+)
+def test_notarytool_failure_names_apples_message(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    step: str,
+    stderr: str,
+    message: str,
+) -> None:
+    dmg = tmp_path / "Loopflow.dmg"
+    dmg.write_bytes(b"signed candidate")
+    monkeypatch.setenv("LF_RELEASE_NOTARIZATION_DIR", str(tmp_path / "retained"))
+    for name in ("NOTARY_KEY", "NOTARY_KEY_ID", "NOTARY_ISSUER"):
+        monkeypatch.setenv(name, "fixture")
+
+    def capture(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if cmd[0] == "git":
+            return subprocess.CompletedProcess(cmd, 0, "source-commit\n", "")
+        if cmd[2] == step:
+            return subprocess.CompletedProcess(cmd, 1, "", stderr)
+        return subprocess.CompletedProcess(cmd, 0, '{"id":"submission-1"}', "")
+
+    monkeypatch.setattr(release_loopflow, "run_capture", capture)
+    with pytest.raises(RuntimeError) as failure:
+        release_loopflow._notarize_dmg(dmg)
+
+    assert str(failure.value) == message
+    if stderr:
+        assert stderr.strip() in capsys.readouterr().out
+
+
 @pytest.mark.parametrize("changed", ["artifact", "source", "unknown"])
 def test_notarization_does_not_resubmit_uncertain_or_changed_artifacts(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, changed: str
@@ -257,3 +329,20 @@ def test_notarization_does_not_resubmit_uncertain_or_changed_artifacts(
     monkeypatch.setattr(release_loopflow, "run_capture", capture)
     with pytest.raises(RuntimeError, match="changed|different source|outcome unknown"):
         release_loopflow._notarize_dmg(tmp_path / "checkout/Loopflow.dmg")
+
+
+def test_only_release_packaging_carries_the_installed_bundle_id(tmp_path: Path) -> None:
+    swift = SCRIPTS_DIR.parent / "swift"
+    source = swift / "LoopflowMac/Info.plist"
+    xcode_ids = [
+        line.split(":", 1)[1].strip()
+        for line in (swift / "project.yml").read_text().splitlines()
+        if line.strip().startswith("PRODUCT_BUNDLE_IDENTIFIER: com.loopflow.mac")
+    ]
+    assert xcode_ids == ["com.loopflow.mac.dev"]
+    assert plistlib.loads(source.read_bytes())["CFBundleIdentifier"] == "com.loopflow.mac.dev"
+
+    packaged = tmp_path / "Info.plist"
+    shutil.copy(source, packaged)
+    release_loopflow.stamp_release_bundle_id(packaged)
+    assert plistlib.loads(packaged.read_bytes())["CFBundleIdentifier"] == "com.loopflow.mac"

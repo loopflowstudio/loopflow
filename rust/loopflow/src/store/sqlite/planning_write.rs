@@ -21,6 +21,7 @@ pub(crate) fn table(value: &WorkValue) -> &'static str {
     match value {
         WorkValue::WaveName(_)
         | WorkValue::WaveParent(_)
+        | WorkValue::WaveRetired(_)
         | WorkValue::WaveProject(_)
         | WorkValue::HistoricalWaveWorkflow(_) => "waves",
         WorkValue::ProjectWave(_)
@@ -43,13 +44,14 @@ pub(crate) fn table(value: &WorkValue) -> &'static str {
         | WorkValue::TaskDescription(_)
         | WorkValue::TaskRank(_)
         | WorkValue::TaskAssignee(_)
-        | WorkValue::TaskDeferred(_)
+        | WorkValue::HistoricalTaskPaused(_)
         | WorkValue::TaskShippedAt(_)
         | WorkValue::TaskDueDate(_)
         | WorkValue::TaskDeletedAt(_)
         | WorkValue::TaskUrl(_)
         | WorkValue::TaskBranch(_)
         | WorkValue::TaskTeam(_)
+        | WorkValue::HistoricalTaskRegressedIn(_)
         | WorkValue::Disposition(_) => "tasks",
         WorkValue::CommentTask(_) | WorkValue::CommentContent(_) => "task_comments",
     }
@@ -59,6 +61,7 @@ fn column(value: &WorkValue) -> &'static str {
     match value {
         WorkValue::WaveName(_) => "name",
         WorkValue::WaveParent(_) => "parent_wave_id",
+        WorkValue::WaveRetired(_) => "retired_at",
         WorkValue::WaveProject(_) => "current_project_id",
         WorkValue::HistoricalWaveWorkflow(_) => "workflow",
         WorkValue::ProjectWave(_) => "wave_id",
@@ -78,14 +81,14 @@ fn column(value: &WorkValue) -> &'static str {
         WorkValue::TaskDescription(_) => "issue_description",
         WorkValue::TaskRank(_) => "planning_rank",
         WorkValue::TaskAssignee(_) => "planning_assignee",
-        // The released column keeps its name.
-        WorkValue::TaskDeferred(_) => "paused",
+        WorkValue::HistoricalTaskPaused(_) => "paused",
         WorkValue::TaskShippedAt(_) => "shipped_at",
         WorkValue::TaskDueDate(_) => "planning_due_date",
         WorkValue::TaskDeletedAt(_) => "planning_deleted_at",
         WorkValue::TaskUrl(_) => "planning_url",
         WorkValue::TaskBranch(_) => "planning_branch_name",
         WorkValue::TaskTeam(_) => "planning_team_id",
+        WorkValue::HistoricalTaskRegressedIn(_) => "regressed_in",
         WorkValue::CommentTask(_) => "task_id",
         WorkValue::HistoricalProjectWorkflow(_) => "workflow",
         WorkValue::Krs(_) => "krs",
@@ -97,12 +100,19 @@ fn column(value: &WorkValue) -> &'static str {
 
 pub(crate) fn read(conn: &Connection, table: &str, id: &str) -> StoreResult<Vec<WorkValue>> {
     let mut values = match table {
-        "waves" => read_record(conn, "SELECT name,parent_wave_id,current_project_id FROM waves WHERE id=?1", id, |row| {
-                    Ok(vec![
+        "waves" => read_record(conn, "SELECT name,parent_wave_id,current_project_id,retired_at FROM waves WHERE id=?1", id, |row| {
+                    let retired: Option<i64> = row.get(3)?;
+                    let project: Option<String> = row.get(2)?;
+                    Ok([
                         WorkValue::WaveName(row.get(0)?),
                         WorkValue::WaveParent(row.get(1)?),
-                        WorkValue::WaveProject(row.get(2)?),
-                    ])
+                    ]
+                    .into_iter()
+                    // A clone registers authored Waves before it acquires their
+                    // planning. Missing selection is not an edit clearing a peer's.
+                    .chain(project.map(|id| WorkValue::WaveProject(Some(id))))
+                    .chain(retired.map(|at| WorkValue::WaveRetired(Some(at))))
+                    .collect())
         }),
         "projects" => read_record(conn, "SELECT wave_id,external_project_id,project_slug,project_name,project_summary,description,status,planning_rank,planning_initiatives,planning_teams,krs,metric_targets FROM projects WHERE id=?1", id, |row| {
                     Ok(vec![
@@ -157,37 +167,43 @@ pub(crate) fn read(conn: &Connection, table: &str, id: &str) -> StoreResult<Vec<
         }),
         _ => Err(StoreError::InvalidData("unknown Work table".into())),
     }?;
-    // Historical migrations seed their journal before the `paused` column exists.
-    if table == "tasks"
-        && conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('tasks') WHERE name='paused')",
-            [],
-            |row| row.get::<_, bool>(0),
-        )?
-    {
-        values.push(WorkValue::TaskDeferred(conn.query_row(
-            "SELECT paused FROM tasks WHERE id=?1",
-            [id],
-            |row| row.get(0),
-        )?));
-    }
-    if table == "tasks"
-        && conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('tasks') WHERE name='shipped_at')",
-            [],
-            |row| row.get::<_, bool>(0),
-        )?
-    {
-        values.push(WorkValue::TaskShippedAt(conn.query_row(
-            "SELECT shipped_at FROM tasks WHERE id=?1",
-            [id],
-            |row| row.get(0),
-        )?));
+    // Historical migrations seed their journal before later Task columns exist.
+    if table == "tasks" {
+        if let Some(paused) = optional_task_column(conn, id, "paused")? {
+            values.push(WorkValue::HistoricalTaskPaused(paused));
+        }
+        if let Some(shipped_at) = optional_task_column(conn, id, "shipped_at")? {
+            values.push(WorkValue::TaskShippedAt(shipped_at));
+        }
+        if let Some(regressed_in) = optional_task_column(conn, id, "regressed_in")? {
+            values.push(WorkValue::HistoricalTaskRegressedIn(regressed_in));
+        }
     }
     for value in &values {
         value.validate()?;
     }
     Ok(values)
+}
+
+/// A `tasks` column's value, or `None` before the migration that adds it.
+fn optional_task_column<T: rusqlite::types::FromSql>(
+    conn: &Connection,
+    id: &str,
+    column: &str,
+) -> StoreResult<Option<T>> {
+    let exists: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('tasks') WHERE name=?1)",
+        [column],
+        |row| row.get(0),
+    )?;
+    if !exists {
+        return Ok(None);
+    }
+    Ok(Some(conn.query_row(
+        &format!("SELECT {column} FROM tasks WHERE id=?1"),
+        [id],
+        |row| row.get(0),
+    )?))
 }
 
 fn read_record(
@@ -327,12 +343,11 @@ pub(crate) fn capture(conn: &Connection, table: &str, target: &str) -> StoreResu
 }
 
 pub(crate) fn retain(conn: &Connection, id: &str, change: &PlanningMutation) -> StoreResult<()> {
+    // An import retains thousands of changes under the write lock; preparing
+    // an insert compiles the table's triggers, so prepare each statement once.
     let existing: Option<String> = conn
-        .query_row(
-            "SELECT mutation FROM planning_peer_changes WHERE id=?1",
-            [id],
-            |row| row.get(0),
-        )
+        .prepare_cached("SELECT mutation FROM planning_peer_changes WHERE id=?1")?
+        .query_row([id], |row| row.get(0))
         .optional()?;
     if let Some(existing) = existing {
         if serde_json::from_str::<PlanningMutation>(&existing)? != *change {
@@ -342,14 +357,14 @@ pub(crate) fn retain(conn: &Connection, id: &str, change: &PlanningMutation) -> 
         }
         return Ok(());
     }
-    conn.execute(
+    conn.prepare_cached(
         "INSERT INTO planning_peer_changes(id,record_table,mutation) VALUES(?1,?2,?3)",
-        params![
-            id,
-            table(&change.edit.change),
-            serde_json::to_string(change)?
-        ],
-    )?;
+    )?
+    .execute(params![
+        id,
+        table(&change.edit.change),
+        serde_json::to_string(change)?
+    ])?;
     Ok(())
 }
 
@@ -358,18 +373,29 @@ pub(crate) fn observe<'a>(
     edit: &WorkEdit,
     ids: impl IntoIterator<Item = &'a str>,
 ) -> StoreResult<()> {
-    conn.execute(
+    conn.prepare_cached(
         "DELETE FROM planning_peer_observed WHERE id IN
          (SELECT id FROM planning_peer_changes WHERE object_id=?1 AND field=?2)",
-        params![edit.target, edit.change.field()],
-    )?;
+    )?
+    .execute(params![edit.target, edit.change.field()])?;
+    let mut insert =
+        conn.prepare_cached("INSERT OR IGNORE INTO planning_peer_observed(id) VALUES(?1)")?;
     for id in ids {
-        conn.execute(
-            "INSERT OR IGNORE INTO planning_peer_observed(id) VALUES(?1)",
-            [id],
-        )?;
+        insert.execute([id])?;
     }
     Ok(())
+}
+
+/// The repository's planning identity. Registering one reads its Git
+/// locator, so only an unregistered repository pays that under the lock.
+fn registered_repository_in(
+    conn: &Connection,
+    repo: &str,
+) -> StoreResult<crate::durable::RepositoryId> {
+    match super::repositories::repository_id_in(conn, repo)? {
+        Some(id) => Ok(id),
+        None => super::repositories::ensure_repository_in(conn, repo),
+    }
 }
 
 pub(crate) fn ensure_record(
@@ -379,9 +405,6 @@ pub(crate) fn ensure_record(
     id: &str,
     edits: &[WorkEdit],
 ) -> StoreResult<bool> {
-    if table == "waves" {
-        super::repositories::ensure_repository_in(conn, repo)?;
-    }
     let exists = conn.query_row(
         &format!("SELECT EXISTS(SELECT 1 FROM {} WHERE id=?1)", table),
         [id],
@@ -394,6 +417,7 @@ pub(crate) fn ensure_record(
     match table {
         "waves" => {
             crate::id::WaveId::parse(id).map_err(|e| StoreError::InvalidData(e.to_string()))?;
+            registered_repository_in(conn, repo)?;
             let name = edits
                 .iter()
                 .rev()
@@ -443,7 +467,7 @@ pub(crate) fn ensure_record(
                     _ => None,
                 })
                 .ok_or_else(missing)?;
-            let repository = super::repositories::ensure_repository_in(conn, repo)?;
+            let repository = registered_repository_in(conn, repo)?;
             conn.execute("INSERT INTO tasks(id,project_id,issue_identifier,created_at,updated_at,workspace_slug,repository_id) VALUES(?1,?2,?3,unixepoch(),unixepoch(),'',?4)",params![id,project,identifier,repository.as_str()])?;
         }
         "task_comments" => {
@@ -594,6 +618,87 @@ mod tests {
     }
 
     #[test]
+    fn a_released_regression_mark_round_trips_the_plan_ref_unread() {
+        let left = tempfile::tempdir().unwrap();
+        let right = tempfile::tempdir().unwrap();
+        let a = SqliteStore::open_ephemeral(&left.path().join("db")).unwrap();
+        let b = SqliteStore::open_ephemeral(&right.path().join("db")).unwrap();
+        let route =
+            PlanningDestination::new("/synthetic.git", "refs/loopflow/planning/shared/test")
+                .unwrap();
+        a.bind_peer_planning("/repo", &route).unwrap();
+        b.bind_peer_planning("/repo", &route).unwrap();
+        let task = plan(&a);
+        let exchanged = |store: &SqliteStore| {
+            store
+                .export_peer_planning("/repo", &route.id())
+                .unwrap()
+                .changes
+                .into_values()
+                .filter(|change| change.edit.target == task.as_str())
+                .filter(|change| change.edit.change.field() == "task_regressed_in")
+                .map(|change| change.edit.change)
+                .collect::<Vec<_>>()
+        };
+        // Released peers refuse a Task that arrives without the field.
+        assert_eq!(exchanged(&a), [Edit::HistoricalTaskRegressedIn(None)]);
+
+        let released = Edit::HistoricalTaskRegressedIn(Some("v0.15.3".into()));
+        {
+            let mut conn = a.conn.lock().unwrap();
+            let tx = conn.transaction().unwrap();
+            local(
+                &tx,
+                &WorkEdit::for_target(task.as_str(), std::slice::from_ref(&released)),
+            )
+            .unwrap();
+            tx.commit().unwrap();
+        }
+        let journal = a.export_peer_planning("/repo", &route.id()).unwrap();
+        b.import_peer_planning("/repo", &route.id(), "first", &journal)
+            .unwrap();
+
+        assert_eq!(b.task(&task).unwrap().unwrap().title, "Original");
+        assert!(exchanged(&b).contains(&released));
+    }
+
+    #[test]
+    fn a_stored_released_regression_row_leaves_peer_planning_readable() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
+        let task = plan(&store);
+        // The bytes every lf since v0.15.1 stores for a new Task.
+        let stored = format!(
+            r#"{{"edit":{{"target":"{task}","change":{{"field":"task_regressed_in","value":null}}}},"clock":1793827427857,"parents":[]}}"#
+        );
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE planning_peer_changes SET mutation=?1 WHERE field='task_regressed_in'",
+                [&stored],
+            )
+            .unwrap();
+        let route =
+            PlanningDestination::new("/synthetic.git", "refs/loopflow/planning/shared/test")
+                .unwrap();
+        store.bind_peer_planning("/repo", &route).unwrap();
+
+        let exported = store.export_peer_planning("/repo", &route.id()).unwrap();
+
+        assert!(exported
+            .changes
+            .values()
+            .any(|change| change.clock == 1793827427857
+                && change.edit.change == Edit::HistoricalTaskRegressedIn(None)));
+        let status = store
+            .peer_planning_status("/repo", Some(&route.id()))
+            .unwrap();
+        assert_eq!(status.len(), 1);
+    }
+
+    #[test]
     fn standalone_task_exchange_preserves_membership_comments_and_ownership() {
         let left = tempfile::tempdir().unwrap();
         let right = tempfile::tempdir().unwrap();
@@ -672,38 +777,6 @@ mod tests {
             )
             .unwrap();
         assert_eq!(body, "Retain direction");
-    }
-
-    #[test]
-    fn paused_planning_exchanges_without_starting_or_moving_work() {
-        let left = tempfile::tempdir().unwrap();
-        let right = tempfile::tempdir().unwrap();
-        let a = SqliteStore::open_ephemeral(&left.path().join("db")).unwrap();
-        let b = SqliteStore::open_ephemeral(&right.path().join("db")).unwrap();
-        let task = plan(&a);
-        let route =
-            PlanningDestination::new("/synthetic.git", "refs/loopflow/planning/shared/test")
-                .unwrap();
-        for store in [&a, &b] {
-            store.bind_peer_planning("/repo", &route).unwrap();
-        }
-        for deferred in [true, false] {
-            a.set_task_deferred(&task, deferred).unwrap();
-            let exported = a.export_peer_planning("/repo", &route.id()).unwrap();
-            b.import_peer_planning(
-                "/repo",
-                &route.id(),
-                if deferred { "deferred" } else { "resumed" },
-                &exported,
-            )
-            .unwrap();
-            assert_eq!(
-                b.task_state(&task).unwrap() == crate::durable::TaskState::Deferred,
-                deferred
-            );
-            assert!(b.task_graph(&task).unwrap().is_none());
-            assert!(b.task(&task).unwrap().unwrap().worktree.is_none());
-        }
     }
 
     #[test]
@@ -817,7 +890,7 @@ mod tests {
         {
             let conn = b.conn.lock().unwrap();
             conn.execute(
-                "UPDATE tasks SET worktree='/retained',branch='local-branch' WHERE id=?1",
+                "INSERT INTO task_checkouts(task_id,worktree,branch) VALUES(?1,'/retained','local-branch') ON CONFLICT(task_id) DO UPDATE SET worktree=excluded.worktree,branch=excluded.branch",
                 [task.as_str()],
             )
             .unwrap();

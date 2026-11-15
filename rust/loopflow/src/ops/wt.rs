@@ -2,7 +2,9 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::git::worktrees::{list_porcelain, main_repo_root, sibling_worktree_name};
+use crate::git::worktrees::{
+    github_repo_nwo, list_porcelain, main_repo_root, sibling_worktree_name,
+};
 use crate::git::{
     acquire_worktree_lease, delete_local_branch, get_default_branch, is_clean, ref_exists,
     rev_parse, worktree_remove_owned,
@@ -19,11 +21,38 @@ pub(crate) struct BranchDeletion {
     force: bool,
 }
 
+impl BranchDeletion {
+    fn require_merged_head(&self, merged_head: &str) -> OpsResult<()> {
+        if [&self.local_head, &self.remote_head]
+            .into_iter()
+            .flatten()
+            .any(|head| head != merged_head)
+        {
+            return Err(OpsError::Message(format!(
+                "{} has work beyond its merged head; retained checkout and branches",
+                self.branch
+            )));
+        }
+        Ok(())
+    }
+}
+
 fn git(repo: &Path, args: &[&str]) -> OpsResult<String> {
-    let output = Command::new("git").args(args).current_dir(repo).output()?;
+    run("git", repo, args)
+}
+
+fn gh(repo: &Path, args: &[&str]) -> OpsResult<String> {
+    run("gh", repo, args)
+}
+
+fn run(program: &str, repo: &Path, args: &[&str]) -> OpsResult<String> {
+    let output = Command::new(program)
+        .args(args)
+        .current_dir(repo)
+        .output()?;
     if !output.status.success() {
         return Err(OpsError::Message(format!(
-            "git {}: {}",
+            "{program} {}: {}",
             args.join(" "),
             String::from_utf8_lossy(&output.stderr).trim()
         )));
@@ -127,14 +156,36 @@ pub(crate) fn prepare_landed_delete(
     merged_head: &str,
 ) -> OpsResult<BranchDeletion> {
     let deletion = prepare_delete(repo, branch, false)?;
-    if [&deletion.local_head, &deletion.remote_head]
-        .into_iter()
-        .flatten()
-        .any(|head| head != merged_head)
-    {
-        return Err(OpsError::Message(format!(
-            "{branch} has work beyond its merged head; retained checkout and branches"
-        )));
+    deletion.require_merged_head(merged_head)?;
+    Ok(deletion)
+}
+
+/// Completed Task retirement may discard files, while retaining the landed
+/// head checks and exact checkout identity of the ordinary deletion path.
+pub(crate) fn prepare_task_retirement(
+    repo: &Path,
+    branch: &str,
+    merged_head: &str,
+    checkout: &Path,
+) -> OpsResult<BranchDeletion> {
+    let deletion = prepare_delete(repo, branch, true)?;
+    deletion.require_merged_head(merged_head)?;
+    let resolved = checkout
+        .exists()
+        .then(|| checkout.canonicalize())
+        .transpose()?;
+    let checkout = resolved.as_deref().unwrap_or(checkout);
+    if checkout.exists() && crate::git::worktrees::is_persistent_worktree(checkout)? {
+        return Err(OpsError::Message("Retained persistent checkout".into()));
+    }
+    let changed_checkout = match deletion.worktree.as_deref() {
+        Some(path) => path != checkout,
+        None => checkout.exists(),
+    };
+    if changed_checkout {
+        return Err(OpsError::Message(
+            "Task checkout changed; retained resources".into(),
+        ));
     }
     Ok(deletion)
 }
@@ -168,6 +219,7 @@ pub(crate) fn apply_delete(deletion: BranchDeletion, progress: &impl Progress) -
         }
     }
     if let Some(head) = remote_head {
+        retarget_dependents(&repo, &branch, progress)?;
         progress.status("Deleting remote branch...");
         // A changed remote is new work, not permission to delete it on this retry.
         git(
@@ -197,6 +249,34 @@ pub(crate) fn apply_delete(deletion: BranchDeletion, progress: &impl Progress) -
     Ok(())
 }
 
+/// Point open PRs based on `branch` at the default branch. GitHub closes a PR
+/// whose base branch is deleted, so a stacked PR must move before its base goes.
+fn retarget_dependents(repo: &Path, branch: &str, progress: &impl Progress) -> OpsResult<()> {
+    if github_repo_nwo(repo).is_none() {
+        return Ok(());
+    }
+    let listed = gh(
+        repo,
+        &[
+            "pr", "list", "--state", "open", "--base", branch, "--limit", "1000", "--json",
+            "number",
+        ],
+    )?;
+    let dependents: Vec<serde_json::Value> = serde_json::from_str(&listed)
+        .map_err(|error| OpsError::Message(format!("gh pr list --base {branch}: {error}")))?;
+    let default_branch = get_default_branch(repo)?;
+    for number in dependents.iter().filter_map(|pull| pull["number"].as_u64()) {
+        progress.status(&format!(
+            "Retargeting PR #{number} onto {default_branch}..."
+        ));
+        gh(
+            repo,
+            &["pr", "edit", &number.to_string(), "--base", &default_branch],
+        )?;
+    }
+    Ok(())
+}
+
 pub fn delete_worktree(
     repo: &Path,
     selector: &str,
@@ -216,6 +296,67 @@ mod tests {
     use super::{apply_delete, git, prepare_delete};
     use crate::ops::NullProgress;
     use loopflow_test_support::TestRepo;
+
+    #[test]
+    fn completed_task_retirement_discards_files_but_preserves_new_commits_and_primary() {
+        let fixture = TestRepo::new();
+        let directory = tempfile::tempdir().unwrap();
+        let checkout = directory.path().join("task");
+        git(
+            fixture.path(),
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "completed",
+                checkout.to_str().unwrap(),
+            ],
+        )
+        .unwrap();
+        let merged = git(&checkout, &["rev-parse", "HEAD"]).unwrap();
+        std::fs::write(checkout.join("untracked"), "discard at completion").unwrap();
+        assert!(prepare_delete(fixture.path(), "completed", false).is_err());
+        let deletion =
+            super::prepare_task_retirement(fixture.path(), "completed", &merged, &checkout)
+                .unwrap();
+        git(&checkout, &["add", "untracked"]).unwrap();
+        git(&checkout, &["commit", "-m", "new committed work"]).unwrap();
+        assert!(apply_delete(deletion, &NullProgress).is_err());
+        assert!(
+            super::prepare_task_retirement(fixture.path(), "completed", &merged, &checkout)
+                .is_err()
+        );
+        assert!(checkout.exists());
+        git(&checkout, &["reset", "--hard", &merged]).unwrap();
+        std::fs::write(checkout.join("untracked"), "discard at completion").unwrap();
+        git(
+            &checkout,
+            &["config", "branch.completed.loopflow-persistent", "true"],
+        )
+        .unwrap();
+        assert!(
+            super::prepare_task_retirement(fixture.path(), "completed", &merged, &checkout)
+                .is_err()
+        );
+        git(
+            &checkout,
+            &["config", "--unset", "branch.completed.loopflow-persistent"],
+        )
+        .unwrap();
+        apply_delete(
+            super::prepare_task_retirement(fixture.path(), "completed", &merged, &checkout)
+                .unwrap(),
+            &NullProgress,
+        )
+        .unwrap();
+        assert!(!checkout.exists());
+        assert!(fixture.path().exists());
+        let primary = git(fixture.path(), &["branch", "--show-current"]).unwrap();
+        assert!(
+            super::prepare_task_retirement(fixture.path(), &primary, &merged, fixture.path())
+                .is_err()
+        );
+    }
 
     #[test]
     fn deletion_removes_checkout_and_both_branches_and_retries_without_a_checkout() {

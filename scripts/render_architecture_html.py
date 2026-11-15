@@ -10,7 +10,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 WEBSITE = ROOT / "website"
-OUTPUT = ROOT / "docs" / "architecture.html"
+OUTPUT = ROOT / "docs" / "dev" / "index.html"
 
 sys.path.insert(0, str(WEBSITE))
 
@@ -20,7 +20,7 @@ from fasthtml.common import to_xml  # noqa: E402
 
 def render_html() -> str:
     fragments = site._docs_page(
-        "architecture",
+        "dev/index",
         "Architecture — Loopflow Developer Architecture",
         architecture=True,
     )
@@ -33,7 +33,7 @@ def render_html() -> str:
     css = "\n".join(
         (
             (WEBSITE / "static" / "style.css").read_text(),
-            (ROOT / "docs" / "architecture.css").read_text(),
+            (ROOT / "docs" / "dev" / "architecture.css").read_text(),
         )
     )
     return f"""<!doctype html>
@@ -62,14 +62,14 @@ def main() -> None:
     parser.add_argument(
         "--check",
         action="store_true",
-        help="fail when docs/architecture.html is not current",
+        help="fail when docs/dev/index.html is not current",
     )
     args = parser.parse_args()
     rendered = render_html()
     if args.check:
         if not OUTPUT.exists() or OUTPUT.read_text() != rendered:
             raise SystemExit(
-                "docs/architecture.html is stale; run scripts/render_architecture_html.py"
+                "docs/dev/index.html is stale; run scripts/render_architecture_html.py"
             )
         return
     OUTPUT.write_text(rendered)

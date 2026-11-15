@@ -61,6 +61,12 @@ struct TerminalPaneLayoutTests {
         #expect(radius - gap == PaneGeometry.cornerRadius)
         let panes = outer.findAll(where: { (try? $0.accessibilityIdentifier())?.hasPrefix("session-pane-") == true })
         #expect(panes.count == 2)
+        // Strip controls (zoom, hide) sit as far from the border as the corner is round.
+        for pane in [first.id, shell.id] {
+            let strip = try inspection.find(viewWithAccessibilityIdentifier: "pane-strip-\(pane)")
+            #expect(try strip.padding(.leading) == PaneGeometry.inset)
+            #expect(try strip.padding(.trailing) == PaneGeometry.inset)
+        }
         let bounds = CGRect(x: 0, y: 0, width: 500, height: 400)
         let outerPath = shape.path(in: bounds)
         let innerPaths = try panes.map { pane in

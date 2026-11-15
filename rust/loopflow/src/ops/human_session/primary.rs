@@ -1,5 +1,5 @@
-//! The one ongoing conversation of a scope. A primary Session is an ordinary
-//! interactive conversation; its row names the scope it is primary for.
+//! The ongoing conversation of a scope. Shared scopes mark their primary
+//! Session; a Task points to one of its existing conversations.
 
 use std::path::Path;
 
@@ -12,14 +12,13 @@ use crate::session::{conversation, LfSession, PrimaryScope, WorkSource};
 use crate::store::SharedStore;
 
 /// Find or admit the primary conversation of a Wave, or of the repository
-/// itself, and prepare its workspace. The repository's needs no Wave, Task
-/// or planning provider.
+/// itself, and prepare its workspace; `true` when it was admitted now. The
+/// repository's needs no Wave, Task or planning provider.
 pub(crate) async fn ensure(
     store: &SharedStore,
     repo: &Path,
     wave: Option<&str>,
-    fresh: bool,
-) -> Result<SessionRecord> {
+) -> Result<(SessionRecord, bool)> {
     let binding = match wave {
         Some(wave) => {
             Some(crate::ops::resolve_work_binding(store, repo, &format!("wave:{wave}")).await?)
@@ -33,30 +32,28 @@ pub(crate) async fn ensure(
         None => PrimaryScope::Repository(crate::repository::CanonicalRepo::discover(repo)?),
     };
     let _lock = lock_scope(&scope).await?;
-    let previous = store.sqlite.primary_session(&scope)?;
-    if let Some(previous) = previous.as_ref().filter(|_| !fresh) {
-        return prepare(store, &previous.id).await;
+    if let Some(previous) = store.sqlite.primary_session(&scope)? {
+        return Ok((prepare(store, &previous.id).await?, false));
     }
     let session = match &binding {
         Some(binding) => wave_session(binding)?,
         None => repository_session(&crate::repository::CanonicalRepo::discover(repo)?)?,
     };
-    let replacing = previous.as_ref().map(|session| session.id.as_str());
-    let session = store
-        .ensure_primary_session(&scope, replacing, session)
-        .await?;
-    prepare(store, &session.id).await
+    let session = store.ensure_primary_session(&scope, session).await?;
+    Ok((prepare(store, &session.id).await?, true))
 }
 
 /// A Task's primary is one of its own conversations: the one already chosen,
 /// else its sole unfinished interactive one, else the most recently used.
-/// Only a Task with none gets a new one, in its checkout. The others stay open.
+/// Only a Task with none gets a new one, in its checkout; `true` then. The
+/// others stay open. `request` is what a person typed to start the Task; a
+/// new conversation takes it as its first turn.
 pub(crate) async fn ensure_task(
     store: &SharedStore,
     repo: &Path,
     task: &str,
-    fresh: bool,
-) -> Result<SessionRecord> {
+    request: Option<String>,
+) -> Result<(SessionRecord, bool)> {
     let selected = crate::ops::run::select_work(
         store,
         repo,
@@ -77,40 +74,99 @@ pub(crate) async fn ensure_task(
         // Opening a conversation does not invent a checkout or start a Graph.
         let repo = repo.to_path_buf();
         let id = task.id.to_string();
-        tokio::task::spawn_blocking(move || {
+        crate::journal::request::spawn_blocking(move || {
             crate::ops::task::task_checkout(&repo, &id, Default::default())
         })
         .await??;
     }
-    let chosen = if fresh {
-        None
-    } else {
-        task_conversation(store, &task.id).await?
-    };
+    let chosen = task_conversation(store, &task.id).await?;
+    let started = chosen.is_none();
     let session = if let Some(session) = chosen {
         store.choose_task_primary(&task.id, &session.id).await?
     } else {
-        let previous = if fresh {
-            store.sqlite.primary_session(&scope)?
-        } else {
-            None
-        };
         let cwd = task.worktree.as_deref().unwrap_or(repo);
         let candidate = LfSession {
             task_id: Some(task.id.clone()),
             wave_id: task.wave_id.clone(),
             work_source: Some(WorkSource::Declared),
-            ..conversation(cwd, task.agent.as_deref(), "task/session", task.title)?
+            request,
+            ..conversation(cwd, "task/session", task.title)?
         };
-        store
-            .ensure_primary_session(
-                &scope,
-                previous.as_ref().map(|session| session.id.as_str()),
-                candidate,
-            )
-            .await?
+        store.ensure_primary_session(&scope, candidate).await?
     };
-    prepare(store, &session.id).await
+    Ok((prepare(store, &session.id).await?, started))
+}
+
+/// Start a newly checked-out Task's conversation beside its Graph, so `lf
+/// resume` reattaches instead of creating it. Best-effort: a failure is logged
+/// and `lf resume` creates the conversation as before.
+pub(crate) async fn start_task_conversation(store: &SharedStore, task: &crate::work::task::Task) {
+    let (phase, subject) = match start_in_background(store, task).await {
+        Ok(Some(session)) => ("background_start", session),
+        Ok(None) => ("background_skip", task.identifier.clone()),
+        Err(error) => {
+            tracing::warn!(task = %task.identifier, error = %format!("{error:#}"), "background Task conversation did not start");
+            ("background_failed", task.identifier.clone())
+        }
+    };
+    crate::agent_input_timing::record(phase, &subject);
+}
+
+async fn start_in_background(
+    store: &SharedStore,
+    task: &crate::work::task::Task,
+) -> Result<Option<String>> {
+    let worktree = task.worktree()?.clone();
+    let wave = match &task.wave_id {
+        Some(id) => store.get_wave(id).await?,
+        None => None,
+    };
+    // A Machine with no agent selected, or without its CLI, would only record
+    // a launch that fails.
+    let config =
+        crate::config::load_wave_config(Some(&worktree), wave.as_ref().map(|wave| wave.slug()))?
+            .unwrap_or_default();
+    let Ok(agent) = config.agent() else {
+        tracing::info!(task = %task.identifier, "background Task conversation skipped: no agent selected");
+        return Ok(None);
+    };
+    let (harness, _) = crate::config::parse_agent(agent);
+    if !crate::agent::check_cli_available(&harness) {
+        tracing::info!(task = %task.identifier, %harness, "background Task conversation skipped: agent not installed");
+        return Ok(None);
+    }
+    let (session, _) = ensure_task(store, &worktree, task.id.as_str(), None).await?;
+    // Promotion can keep a repository or Wave conversation in its original
+    // checkout. Allocating the Task's own checkout does not open that conversation.
+    if Path::new(&session.cwd) != worktree.as_path()
+        || session.agent_process_id.is_some()
+        || store
+            .sqlite
+            .session_terminal(session.id.as_str())?
+            .is_some()
+    {
+        // Prepared conversations can start; previously opened ones stay as they are.
+        return Ok(None);
+    }
+    let id = session.id.to_string();
+    let argv = [
+        std::env::current_exe()?.to_string_lossy().into_owned(),
+        "session".into(),
+        "resume".into(),
+        id.clone(),
+    ];
+    let held = session.id.clone();
+    tokio::task::spawn_blocking(move || {
+        crate::transport::start_held(&argv, &worktree, Some(&held), &|command| {
+            let key = crate::work::wave::context::WAVE_ID_ENV;
+            match &wave {
+                Some(wave) => command.env(key, wave.id().as_str()),
+                None => command.env_remove(key),
+            };
+        })
+    })
+    .await??;
+    Ok(Some(id))
 }
 
 pub(super) async fn task_conversation(
@@ -174,24 +230,18 @@ fn scope_segment(scope: &PrimaryScope) -> Result<crate::git::worktrees::Worktree
 
 /// Adapt only at an idle attachment boundary. Historical captures and native
 /// conversation identity remain attached to the same Session.
-pub(crate) async fn admit_workspace(
-    store: &SharedStore,
-    mut session: LfSession,
-) -> Result<LfSession> {
+pub(crate) async fn admit_workspace(store: &SharedStore, session: LfSession) -> Result<LfSession> {
     let Some(scope) = store.sqlite.primary_scope(&session.id)? else {
         return Ok(session);
     };
-    if store
-        .sqlite
-        .session_summary(
-            &session.id,
-            time::OffsetDateTime::now_utc().unix_timestamp(),
-        )?
-        .is_some_and(|summary| {
-            summary.agent_process_id.is_some()
-                && summary.agent_process_evidence != crate::journal::ProcessIdentityEvidence::Dead
-        })
-    {
+    let summary = store.sqlite.session_summary(
+        &session.id,
+        time::OffsetDateTime::now_utc().unix_timestamp(),
+    )?;
+    if summary.as_ref().is_some_and(|summary| {
+        summary.agent_process_id.is_some()
+            && summary.agent_process_evidence != crate::journal::ProcessIdentityEvidence::Dead
+    }) {
         return Ok(session);
     }
     let cwd = match &scope {
@@ -204,10 +254,19 @@ pub(crate) async fn admit_workspace(
             ensure_scope_worktree(Path::new(wave.repo()), &scope)?.path
         }
         PrimaryScope::Task(task) => {
+            // Explicit adoption and binding already selected this directory.
+            if session.work_source == Some(WorkSource::Bound) {
+                return Ok(session);
+            }
             let task = store
                 .get_task(task)
                 .await?
                 .ok_or_else(|| anyhow!("primary Task is unavailable"))?;
+            if task.worktree.as_ref().is_some_and(|root| {
+                crate::git::worktree_root(&session.cwd).ok().as_ref() == Some(root)
+            }) {
+                return Ok(session);
+            }
             if let Some(cwd) = task.worktree.filter(|cwd| cwd.is_dir()) {
                 cwd
             } else {
@@ -217,7 +276,7 @@ pub(crate) async fn admit_workspace(
                     .as_deref()
                     .map(std::path::PathBuf::from)
                     .unwrap_or_else(|| session.cwd.clone());
-                tokio::task::spawn_blocking(move || -> Result<std::path::PathBuf> {
+                crate::journal::request::spawn_blocking(move || -> Result<std::path::PathBuf> {
                     let task = crate::ops::task::task_checkout(&repo, &task, Default::default())?;
                     Ok(task.worktree()?.clone())
                 })
@@ -226,8 +285,7 @@ pub(crate) async fn admit_workspace(
         }
     };
     if session.cwd != cwd {
-        store.sqlite.move_primary_workspace(&session, &cwd)?;
-        session.cwd = cwd;
+        return Ok(store.sqlite.admit_session_workspace(&session, &cwd)?);
     }
     Ok(session)
 }
@@ -238,7 +296,6 @@ fn wave_session(binding: &crate::ops::WorkBinding) -> Result<LfSession> {
         work_source: Some(WorkSource::Declared),
         ..conversation(
             &binding.cwd,
-            binding.agent.as_deref(),
             "wave/session",
             binding.wave_name.clone().expect("Wave primary has a Wave"),
         )?
@@ -253,19 +310,21 @@ fn repository_session(repo: &crate::repository::CanonicalRepo) -> Result<LfSessi
         .unwrap_or_else(|| repo.to_string());
     Ok(LfSession {
         repo: Some(repo.to_string()),
-        ..conversation(repo.as_path(), None, "repo/session", title)?
+        work_source: Some(WorkSource::Declared),
+        ..conversation(repo.as_path(), "repo/session", title)?
     })
 }
 
 /// Prepare the workspace; connecting owns input reservation and provider launch.
 async fn prepare(store: &SharedStore, id: &str) -> Result<SessionRecord> {
     let lock_id = id.to_string();
-    let _launch = tokio::task::spawn_blocking(move || lock_session_process(&lock_id)).await??;
+    let _launch =
+        crate::journal::request::spawn_blocking(move || lock_session_process(&lock_id)).await??;
     let session = store
         .session(id)
         .await?
         .ok_or_else(|| session_not_found(id))?;
-    if store.sqlite.session_transport(&session.id)?.is_some()
+    if store.sqlite.session_terminal(&session.id)?.is_some()
         || session
             .artifact_key
             .as_deref()
@@ -299,7 +358,7 @@ async fn lock_scope(scope: &PrimaryScope) -> Result<std::fs::File> {
         PrimaryScope::Wave(wave) => format!("primary:wave:{wave}"),
         PrimaryScope::Task(task) => format!("primary:task:{task}"),
     };
-    tokio::task::spawn_blocking(move || lock_session_process(&key))
+    crate::journal::request::spawn_blocking(move || lock_session_process(&key))
         .await
         .context("lock primary Session scope")?
 }
@@ -327,14 +386,15 @@ mod tests {
             let repo = loopflow_test_support::TestRepo::new();
             let wave = wave(&store, &repo).await;
 
-            let first = ensure(&store, repo.path(), Some("infrastructure"), false)
+            let (first, started) = ensure(&store, repo.path(), Some("infrastructure"))
                 .await
                 .unwrap();
-            let second = ensure(&store, repo.path(), Some("infrastructure"), false)
+            let (second, again) = ensure(&store, repo.path(), Some("infrastructure"))
                 .await
                 .unwrap();
 
             assert_eq!(first.id, second.id);
+            assert!(started && !again);
             assert!(store
                 .sqlite
                 .session_attachment(&first.id)
@@ -350,41 +410,6 @@ mod tests {
     }
 
     #[test]
-    fn fresh_admits_a_successor_and_connect_recovers_it() {
-        let _lock = crate::journal::test_env_lock();
-        let home = SessionHome::new();
-        tokio::runtime::Runtime::new().unwrap().block_on(async {
-            let store = home.store().await;
-            let repo = loopflow_test_support::TestRepo::new();
-            wave(&store, &repo).await;
-            let first = ensure(&store, repo.path(), Some("infrastructure"), false)
-                .await
-                .unwrap();
-
-            let successor = ensure(&store, repo.path(), Some("infrastructure"), true)
-                .await
-                .unwrap();
-
-            assert_ne!(successor.id, first.id);
-            assert!(store
-                .session(&first.id)
-                .await
-                .unwrap()
-                .unwrap()
-                .completed_at
-                .is_some());
-
-            assert_eq!(
-                ensure(&store, repo.path(), Some("infrastructure"), false)
-                    .await
-                    .unwrap()
-                    .id,
-                successor.id
-            );
-        });
-    }
-
-    #[test]
     fn a_repository_without_waves_has_its_own_conversation() {
         let _lock = crate::journal::test_env_lock();
         let home = SessionHome::new();
@@ -392,74 +417,33 @@ mod tests {
             let store = home.store().await;
             let repo = loopflow_test_support::TestRepo::new();
 
-            let first = ensure(&store, repo.path(), None, false).await.unwrap();
-            let second = ensure(&store, repo.path(), None, false).await.unwrap();
+            let (first, _) = ensure(&store, repo.path(), None).await.unwrap();
+            let (second, _) = ensure(&store, repo.path(), None).await.unwrap();
 
             assert_eq!(first.id, second.id);
             let session = store.session(&first.id).await.unwrap().unwrap();
             assert_eq!(session.skill.as_deref(), Some("repo-session"));
             assert_eq!((session.wave_id, session.task_id), (None, None));
+            // Managed like Task and Wave conversations: held, with hooks.
+            assert_eq!(
+                session.work_source,
+                Some(crate::session::WorkSource::Declared)
+            );
 
             // A Wave's conversation in the same repository is a separate scope.
             let ambient_wave = wave(&store, &repo).await;
             std::env::set_var("LF_WAVE_ID", ambient_wave.id().as_str());
             assert_eq!(
-                ensure(&store, repo.path(), None, false).await.unwrap().id,
+                ensure(&store, repo.path(), None).await.unwrap().0.id,
                 first.id
             );
 
             // Explicit selection also ignores stale ambient Wave context.
             std::env::set_var("LF_WAVE_ID", "unknown-wave");
-            let wave = ensure(&store, repo.path(), Some("infrastructure"), false)
+            let (wave, _) = ensure(&store, repo.path(), Some("infrastructure"))
                 .await
                 .unwrap();
             assert_ne!(wave.id, first.id);
-
-            let successor = ensure(&store, repo.path(), None, true).await.unwrap();
-            assert_ne!(successor.id, first.id);
-            assert_eq!(
-                ensure(&store, repo.path(), None, false).await.unwrap().id,
-                successor.id
-            );
-        });
-    }
-
-    #[test]
-    fn scope_workspaces_survive_replacement_without_task_membership() {
-        let _lock = crate::journal::test_env_lock();
-        let home = SessionHome::new();
-        tokio::runtime::Runtime::new().unwrap().block_on(async {
-            let store = home.store().await;
-            let repo = loopflow_test_support::TestRepo::new();
-            wave(&store, &repo).await;
-            let mut workspaces = Vec::new();
-            for scope in [None, Some("infrastructure")] {
-                let first = ensure(&store, repo.path(), scope, false).await.unwrap();
-                let session = store.session(&first.id).await.unwrap().unwrap();
-                assert_ne!(session.cwd, repo.path());
-                std::fs::create_dir_all(session.cwd.join("scratch")).unwrap();
-                std::fs::write(session.cwd.join("scratch/plan.md"), "private plan").unwrap();
-                std::fs::write(session.cwd.join("memory.md"), "durable decision").unwrap();
-                let successor = ensure(&store, repo.path(), scope, true).await.unwrap();
-                let session = store.session(&successor.id).await.unwrap().unwrap();
-                assert_eq!(
-                    std::fs::read_to_string(session.cwd.join("scratch/plan.md")).unwrap(),
-                    "private plan"
-                );
-                assert_eq!(
-                    std::fs::read_to_string(session.cwd.join("memory.md")).unwrap(),
-                    "durable decision"
-                );
-                let mut records = vec![successor];
-                crate::ops::human_session::workspace::associate(&store, &mut records)
-                    .await
-                    .unwrap();
-                let workspace = records[0].workspace.as_ref().unwrap();
-                assert_eq!(workspace.task_id, None);
-                assert!(records[0].task_ids.is_empty());
-                workspaces.push(session.cwd);
-            }
-            assert_ne!(workspaces[0], workspaces[1]);
         });
     }
 
@@ -474,12 +458,12 @@ mod tests {
             let previous = store
                 .ensure_primary_session(
                     &crate::session::PrimaryScope::Repository(canonical.clone()),
-                    None,
                     super::repository_session(&canonical).unwrap(),
                 )
                 .await
                 .unwrap();
-            let first = ensure(&store, repo.path(), None, false).await.unwrap();
+            let (first, started) = ensure(&store, repo.path(), None).await.unwrap();
+            assert!(!started);
             let admitted = store.session(&first.id).await.unwrap().unwrap();
             assert_eq!(admitted.id, previous.id);
             assert_eq!(admitted.title, previous.title);

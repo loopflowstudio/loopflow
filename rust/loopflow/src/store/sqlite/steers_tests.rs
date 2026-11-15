@@ -1,16 +1,20 @@
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 
 use super::{save_in, SqliteStore};
 use crate::durable::Author;
-use crate::id::LfProcessId;
-use crate::steer::{NativeBoundary, SteerAdapter, SteerContext};
+use crate::id::{LfProcessId, TerminalId};
+use crate::steer::{NativeBoundary, Steer, SteerAdapter};
+use crate::store::sqlite::sessions::TerminalRetention::LiveTurn;
 use crate::store::StoreError;
 
-fn rendered(text: &str) -> SteerContext {
-    SteerContext {
-        text: text.into(),
-        excerpts: Vec::new(),
-    }
+/// Claim the conversation's next unread steers and stamp them as printed.
+fn read(store: &SqliteStore, adapter: &SteerAdapter, thread: &str) -> Vec<Steer> {
+    let (steers, _) = store.claim_session_steers(adapter, thread).unwrap();
+    let ids: Vec<_> = steers.iter().map(|steer| steer.id.clone()).collect();
+    store
+        .deliver_session_steers(&adapter.session, &ids)
+        .unwrap();
+    steers
 }
 
 const ACTIVATE: NativeBoundary<'static> = NativeBoundary::Activate { source: "startup" };
@@ -33,6 +37,9 @@ fn fixture() -> (tempfile::TempDir, SqliteStore, SteerAdapter) {
     let claim = store
         .claim_session_attachment("session", None, &process, false)
         .unwrap();
+    store
+        .record_agent_process_identity("session", &claim, std::process::id(), 1)
+        .unwrap();
     let adapter = store.reserve_steer_adapter("session", &claim).unwrap();
     store
         .with_provider_context(&adapter, "native", ACTIVATE, || Ok(()))
@@ -40,203 +47,407 @@ fn fixture() -> (tempfile::TempDir, SqliteStore, SteerAdapter) {
     (home, store, adapter)
 }
 
-#[test]
-fn saving_a_steer_wakes_tool_hooks() {
-    let (home, store, _) = fixture();
-    let latest = crate::steer::latest_marker(home.path());
-    assert!(!latest.exists());
+/// Host the fixture's Session in a held terminal.
+fn hold(store: &SqliteStore) -> TerminalId {
+    let terminal = TerminalId::new();
+    store.create_terminal(&terminal, "build").unwrap();
     store
-        .save_session_steer("session", "Named author", "Change direction")
+        .conn
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE agent_sessions SET interactive=1,held_terminal_id=?1 WHERE id='session'",
+            [&terminal],
+        )
         .unwrap();
-    assert!(latest.exists(), "a saved steer must reach gated tool hooks");
+    terminal
+}
+
+fn native_fixture() -> (tempfile::TempDir, SqliteStore, SteerAdapter, TerminalId) {
+    let (home, store, adapter) = fixture();
+    let terminal = hold(&store);
+    {
+        let conn = store.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE processes SET agent_interactive=1 WHERE id=?1",
+            [&adapter.agent_process_id],
+        )
+        .unwrap();
+    }
+    (home, store, adapter, terminal)
 }
 
 #[test]
-fn emitted_direction_is_not_replayed_and_retry_is_explicit() {
+fn pending_requests_hold_the_terminal_until_the_current_attachment_settles_them() {
+    let (_home, store, _adapter) = fixture();
+    let first = store.session_attachment("session").unwrap().unwrap();
+    let owner = first.lf_process_id.as_ref().unwrap();
+    let terminal = hold(&store);
+    let mut activity = crate::session::SessionActivity {
+        preview: None,
+        observed_at: 1,
+        open_tools: 0,
+        pending_input: 1,
+        yielded: true,
+    };
+    store
+        .record_session_activity("session", &first, &activity)
+        .unwrap();
+    for viewed in [false, true] {
+        store
+            .record_viewer_hold(
+                &terminal,
+                viewed.then_some(crate::store::sqlite::ViewerHold::Viewed(1)),
+            )
+            .unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                r#"UPDATE session_activity SET program_status='{"records":[{"state":"idle"}]}' WHERE session_id='session'"#,
+                [],
+            )
+            .unwrap();
+        assert_eq!(store.terminal_retention(&terminal).unwrap(), Some(LiveTurn));
+    }
+    let next = store
+        .claim_session_attachment("session", Some(&first), owner, false)
+        .unwrap();
+    assert_eq!(store.terminal_retention(&terminal).unwrap(), Some(LiveTurn));
+    activity.pending_input = 0;
+    store
+        .record_session_activity("session", &first, &activity)
+        .unwrap();
+    assert_eq!(store.terminal_retention(&terminal).unwrap(), Some(LiveTurn));
+    store
+        .record_session_activity("session", &next, &activity)
+        .unwrap();
+    assert_eq!(store.terminal_retention(&terminal).unwrap(), None);
+    activity.pending_input = 1;
+    store
+        .record_session_activity("session", &next, &activity)
+        .unwrap();
+    store
+        .replace_session_agent_process("session", &next, None, || Ok(true))
+        .unwrap();
+    assert_eq!(store.terminal_retention(&terminal).unwrap(), None);
+}
+
+/// The retention of a held terminal after `setup` changes its store.
+fn retention_after(
+    setup: impl FnOnce(&rusqlite::Connection, &LfProcessId),
+) -> Option<crate::store::sqlite::sessions::TerminalRetention> {
+    let (_home, store, _adapter, terminal) = native_fixture();
+    let owner = store
+        .session_attachment("session")
+        .unwrap()
+        .unwrap()
+        .lf_process_id
+        .unwrap();
+    {
+        let conn = store.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE processes SET held_terminal_id=?1 WHERE id=?2",
+            params![terminal, owner],
+        )
+        .unwrap();
+        setup(&conn, &owner);
+    }
+    store.terminal_retention(&terminal).unwrap()
+}
+
+/// A process under `parent`; a Graph when `graph` names its Graph.
+fn insert_process(
+    conn: &rusqlite::Connection,
+    parent: Option<&LfProcessId>,
+    graph: bool,
+) -> LfProcessId {
+    let id = LfProcessId::new();
+    conn.execute(
+        "INSERT INTO processes(id,trace_id,started_at,parent_lf_process_id) VALUES(?1,'fixture',1,?2)",
+        params![id, parent],
+    )
+    .unwrap();
+    if graph {
+        conn.execute(
+            "INSERT INTO graph_processes(lf_process_id,graph,compiled) VALUES(?1,'fixture','{}')",
+            [&id],
+        )
+        .unwrap();
+    }
+    id
+}
+
+/// An idle terminal holds nothing; a Graph in it, a captured Graph step,
+/// a headless run or a finished Session each name what holds it.
+#[test]
+fn terminal_retention_names_the_graph_run_or_absence_that_holds_an_idle_terminal() {
+    use crate::store::sqlite::sessions::TerminalRetention::{
+        HeadlessRun, NoOpenSession, RunningGraph,
+    };
+    assert_eq!(retention_after(|_, _| {}), None);
+    assert_eq!(
+        retention_after(|conn, owner| {
+            insert_process(conn, Some(owner), true);
+        }),
+        Some(RunningGraph)
+    );
+    // The Session's current capture comes from a step of a Graph it doesn't own.
+    let step = retention_after(|conn, _| {
+        let graph = insert_process(conn, None, true);
+        let step = insert_process(conn, Some(&graph), false);
+        conn.execute(
+            "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,lf_process_id)
+             SELECT session_id,kind,receipt_key||':step',observed_at,payload,?1 FROM session_events
+             WHERE seq=(SELECT current_capture FROM agent_sessions WHERE id='session')",
+            [&step],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE agent_sessions SET current_capture=last_insert_rowid()",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO graph_process_steps(graph_lf_process_id,lf_process_id,node,iterations)
+             VALUES(?1,?2,0,'[]')",
+            params![graph, step],
+        )
+        .unwrap();
+    });
+    assert_eq!(step, Some(RunningGraph));
+    let run = retention_after(|conn, _| {
+        conn.execute("UPDATE agent_sessions SET interactive=0", [])
+            .unwrap();
+    });
+    assert_eq!(run, Some(HeadlessRun));
+    let completed = retention_after(|conn, _| {
+        conn.execute("UPDATE agent_sessions SET completed_at=1", [])
+            .unwrap();
+    });
+    assert_eq!(completed, Some(NoOpenSession));
+}
+
+#[test]
+fn silent_native_turns_follow_the_provider_through_attachment_handoff() {
+    let (_home, store, adapter, terminal) = native_fixture();
+    let first = store.session_attachment("session").unwrap().unwrap();
+    let owner = first.lf_process_id.as_ref().unwrap();
+    store
+        .record_native_turn(&adapter, "native", false, None)
+        .unwrap();
+    assert_eq!(store.terminal_retention(&terminal).unwrap(), Some(LiveTurn));
+    let next = store
+        .claim_session_attachment("session", Some(&first), owner, false)
+        .unwrap();
+    assert_ne!(first.token, next.token);
+    // No editor input or open tool is needed to keep an unyielded turn.
+    {
+        let conn = store.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE held_terminals SET viewed=1 WHERE id=?1",
+            [&terminal],
+        )
+        .unwrap();
+        conn.execute(
+            r#"UPDATE session_activity SET program_status='{"records":[{"state":"idle"}]}' WHERE session_id='session'"#,
+            [],
+        ).unwrap();
+    }
+    assert_eq!(store.terminal_retention(&terminal).unwrap(), Some(LiveTurn));
+    // The provider itself survived; its stop belongs to its current attachment.
+    store
+        .record_native_turn(&adapter, "native", true, Some(1))
+        .unwrap();
+    // A viewed prompt also cannot settle its provider-owned watch.
+    assert_eq!(store.terminal_retention(&terminal).unwrap(), Some(LiveTurn));
+    store
+        .record_native_turn(&adapter, "native", true, Some(0))
+        .unwrap();
+    assert_eq!(store.terminal_retention(&terminal).unwrap(), None);
+    store
+        .conn
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE held_terminals SET viewed=0 WHERE id=?1",
+            [&terminal],
+        )
+        .unwrap();
+    store
+        .record_native_turn(&adapter, "native", false, None)
+        .unwrap();
+    assert_eq!(store.terminal_retention(&terminal).unwrap(), Some(LiveTurn));
+    assert!(store
+        .record_native_turn(&adapter, "child", true, Some(0))
+        .is_err());
+    assert_eq!(store.terminal_retention(&terminal).unwrap(), Some(LiveTurn));
+    let replacement = store
+        .replace_session_agent_process("session", &next, None, || Ok(true))
+        .unwrap();
+    // Activity from the old provider cannot keep its replacement alive.
+    assert_eq!(store.terminal_retention(&terminal).unwrap(), None);
+    assert!(store
+        .record_native_turn(&adapter, "native", true, Some(1))
+        .is_err());
+    let current = store
+        .reserve_steer_adapter("session", &replacement)
+        .unwrap();
+    store
+        .with_provider_context(&current, "native", ACTIVATE, || Ok(()))
+        .unwrap();
+    store
+        .record_native_turn(&current, "native", true, Some(1))
+        .unwrap();
+    assert_eq!(store.terminal_retention(&terminal).unwrap(), Some(LiveTurn));
+    assert!(store
+        .record_native_turn(&adapter, "native", true, Some(0))
+        .is_err());
+    assert_eq!(store.terminal_retention(&terminal).unwrap(), Some(LiveTurn));
+    store
+        .record_native_turn(&current, "native", true, Some(0))
+        .unwrap();
+    assert_eq!(store.terminal_retention(&terminal).unwrap(), None);
+}
+
+/// Interactive Codex: lf spawned its app-server, so the AgentProcess is not a
+/// native terminal, but a person's client takes the turns and only its hooks
+/// see them end. A headless run reports through lf's own stream instead.
+#[test]
+fn a_conversation_on_an_app_server_records_its_turns_from_hooks() {
+    let (_home, store, adapter) = fixture();
+    let interactive = |value: bool| {
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET interactive=?1 WHERE id='session'",
+                [value],
+            )
+            .unwrap();
+    };
+    interactive(false);
+    let yielded = |store: &SqliteStore| -> Option<bool> {
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT yielded FROM session_activity WHERE session_id='session'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
+            .unwrap()
+    };
+    store
+        .record_native_turn(&adapter, "native", true, Some(0))
+        .unwrap();
+    assert_eq!(yielded(&store), None, "headless: lf's stream reports");
+    interactive(true);
+    store
+        .record_native_turn(&adapter, "native", false, None)
+        .unwrap();
+    assert_eq!(yielded(&store), Some(false));
+    store
+        .record_native_turn(&adapter, "native", true, Some(0))
+        .unwrap();
+    assert_eq!(
+        yielded(&store),
+        Some(true),
+        "idle, so the server can wake it"
+    );
+}
+
+#[test]
+fn saving_a_steer_wakes_tool_hooks() {
+    let (home, store, _) = fixture();
+    let marker = crate::steer::session_marker(home.path(), "session");
+    assert!(!marker.exists());
+    store
+        .save_session_steer("session", "Named author", "Change direction")
+        .unwrap();
+    assert!(marker.exists(), "a saved steer must reach gated tool hooks");
+    assert!(
+        !crate::steer::latest_marker(home.path()).exists(),
+        "one Session's steer starts lf in no other conversation"
+    );
+}
+
+#[test]
+fn a_read_steer_is_not_replayed() {
     let (_home, store, adapter) = fixture();
     let steer = store
         .save_session_steer("session", "Named author", "Change direction")
         .unwrap();
-    store
-        .emit_session_steers(
-            &adapter,
-            "native",
-            "tool:one",
-            |_, items, remaining| {
-                assert_eq!(items, std::slice::from_ref(&steer));
-                assert_eq!(remaining, 0);
-                Ok(rendered("payload"))
-            },
-            |payload| {
-                assert_eq!(payload, "payload");
-                Ok(())
-            },
-        )
-        .unwrap();
-    let page = store.session_steers("session", 0, 32).unwrap();
-    assert_eq!(page.items[0].evidence, "emitted");
-    assert_eq!(page.pending, 0);
-    assert!(page.items[0].payload_hash.is_some());
-    store
-        .emit_session_steers(
-            &adapter,
-            "native",
-            "compact",
-            |_, _, _| panic!("compaction replayed"),
-            |_| panic!("compaction wrote"),
-        )
-        .unwrap();
-    store.retry_session_steer("session", &steer.id).unwrap();
-    assert_eq!(store.session_steers("session", 0, 32).unwrap().pending, 1);
-    store
-        .emit_session_steers(
-            &adapter,
-            "native",
-            "tool:two",
-            |_, _, _| Ok(rendered("retry")),
-            |_| Ok(()),
-        )
-        .unwrap();
     assert_eq!(
-        store.session_steers("session", 0, 32).unwrap().items[0].attempt,
-        1
+        read(&store, &adapter, "native"),
+        std::slice::from_ref(&steer)
     );
+    let page = store.session_steers("session", 0, 32).unwrap();
+    assert!(page.items[0].delivered_at.is_some());
+    assert_eq!(page.pending, 0);
+    assert!(read(&store, &adapter, "native").is_empty());
 }
 
+/// A hook that claims and never prints: the claim hides the steer from a hook
+/// beside it, then lapses, and the steer is claimed again.
 #[test]
-fn prewrite_failure_releases_but_write_failure_retains_uncertainty() {
+fn an_unprinted_claim_hides_the_steer_then_lapses() {
     let (_home, store, adapter) = fixture();
-    store
+    let steer = store
         .save_session_steer("session", "Author", "Direction")
         .unwrap();
-    assert!(store
-        .emit_session_steers(
-            &adapter,
-            "native",
-            "first",
-            |_, _, _| Err(StoreError::InvalidData("source disk full".into())),
-            |_| panic!("render failure wrote")
-        )
-        .is_err());
-    assert_eq!(store.session_steers("session", 0, 32).unwrap().pending, 1);
-    assert!(store
-        .emit_session_steers(
-            &adapter,
-            "native",
-            "first",
-            |_, _, _| Ok(rendered("payload")),
-            |_| Err(StoreError::InvalidData("broken pipe".into()))
-        )
-        .is_err());
+    let (claimed, remaining) = store.claim_session_steers(&adapter, "native").unwrap();
     assert_eq!(
-        store.session_steers("session", 0, 32).unwrap().items[0].evidence,
-        "uncertain"
+        (claimed.as_slice(), remaining),
+        ([steer.clone()].as_slice(), 0)
     );
+    assert!(store
+        .claim_session_steers(&adapter, "native")
+        .unwrap()
+        .0
+        .is_empty());
+    let page = store.session_steers("session", 0, 32).unwrap();
+    assert_eq!((page.pending, page.items[0].delivered_at), (0, None));
     store
-        .emit_session_steers(
-            &adapter,
-            "native",
-            "next",
-            |_, _, _| panic!("uncertain replay"),
-            |_| panic!("uncertain write"),
-        )
+        .conn
+        .lock()
+        .unwrap()
+        .execute("UPDATE steer_delivered SET claimed_at=claimed_at-60", [])
         .unwrap();
+    assert_eq!(store.session_steers("session", 0, 32).unwrap().pending, 1);
+    assert_eq!(
+        read(&store, &adapter, "native"),
+        std::slice::from_ref(&steer)
+    );
 }
 
 #[test]
-fn concurrent_boundaries_reserve_independent_bounded_pages() {
+fn claims_take_bounded_pages_oldest_first() {
     let (_home, store, adapter) = fixture();
     for n in 0..20 {
         store
             .save_session_steer("session", "Author", &format!("Direction {n}"))
             .unwrap();
     }
-    let other = store.clone();
-    let another = adapter.clone();
-    store
-        .emit_session_steers(
-            &adapter,
-            "native",
-            "one",
-            |_, first, remaining| {
-                assert_eq!(first.len(), 8);
-                assert_eq!(remaining, 12);
-                other
-                    .emit_session_steers(
-                        &another,
-                        "native",
-                        "two",
-                        |_, second, pending| {
-                            assert_eq!(second.len(), 8);
-                            assert_eq!(pending, 4);
-                            assert!(second
-                                .iter()
-                                .all(|row| !first.iter().any(|item| item.id == row.id)));
-                            Ok(rendered("second"))
-                        },
-                        |_| Ok(()),
-                    )
-                    .unwrap();
-                // A status read cannot cancel the first callback's live reservation.
-                assert_eq!(other.session_steers("session", 0, 32).unwrap().pending, 4);
-                Ok(rendered("first"))
-            },
-            |_| Ok(()),
-        )
-        .unwrap();
-    store
-        .emit_session_steers(
-            &adapter,
-            "native",
-            "one",
-            |_, _, _| panic!("duplicate boundary selected the pending page"),
-            |_| panic!("duplicate write"),
-        )
-        .unwrap();
-    let first = store.session_steers("session", 0, 3).unwrap();
-    assert_eq!(first.items.len(), 3);
+    let (first, remaining) = store.claim_session_steers(&adapter, "native").unwrap();
+    assert_eq!((first.len(), remaining), (8, 12));
+    let (second, remaining) = store.claim_session_steers(&adapter, "native").unwrap();
+    assert_eq!((second.len(), remaining), (8, 4));
+    assert!(second[0].sequence > first[7].sequence);
+    let page = store.session_steers("session", 0, 3).unwrap();
+    assert_eq!(page.items.len(), 3);
     let next = store
-        .session_steers("session", first.next_after.unwrap(), 3)
+        .session_steers("session", page.next_after.unwrap(), 3)
         .unwrap();
-    assert!(next.items[0].steer.sequence > first.items[2].steer.sequence);
+    assert!(next.items[0].steer.sequence > page.items[2].steer.sequence);
 }
 
 #[test]
-fn only_abandoned_prewrite_reservations_return_to_pending() {
-    let (_home, store, adapter) = fixture();
-    let direction = store
-        .save_session_steer("session", "Author", "Direction")
-        .unwrap();
-    let crashed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        store.emit_session_steers(
-            &adapter,
-            "native",
-            "crashed",
-            |_, _, _| panic!("simulated emitter exit before write"),
-            |_| Ok(()),
-        )
-    }));
-    assert!(crashed.is_err());
-    let status = store.session_steers("session", 0, 32).unwrap();
-    assert_eq!(status.pending, 1);
-    assert_eq!(status.items[0].steer.id, direction.id);
-    store
-        .emit_session_steers(
-            &adapter,
-            "native",
-            "crashed",
-            |_, _, _| Ok(rendered("recovered")),
-            |_| Ok(()),
-        )
-        .unwrap();
-    assert_eq!(
-        store.session_steers("session", 0, 32).unwrap().items[0].evidence,
-        "emitted"
-    );
-}
-
-#[test]
-fn source_revisions_supersede_only_pending_and_keep_complete_sources() {
+fn source_revisions_supersede_unread_ones_and_keep_complete_sources() {
     let (_home, store, adapter) = fixture();
     let publish = |revision: &str, body: &str| {
         save_in(
@@ -255,20 +466,19 @@ fn source_revisions_supersede_only_pending_and_keep_complete_sources() {
     let page = store.session_steers("session", 0, 32).unwrap();
     assert_eq!(page.items.len(), 1);
     assert_eq!(page.items[0].steer, edited);
-    store
-        .emit_session_steers(
-            &adapter,
-            "native",
-            "one",
-            |_, _, _| Ok(rendered("payload")),
-            |_| Ok(()),
-        )
-        .unwrap();
+    assert_eq!(
+        read(&store, &adapter, "native"),
+        std::slice::from_ref(&edited)
+    );
+    // A correction to a steer already read is a new steer to read.
     let latest = publish("latest", &"界".repeat(20_000));
     let page = store.session_steers("session", 0, 32).unwrap();
     assert_eq!(page.items.len(), 2);
-    assert_eq!(page.items[0].evidence, "emitted");
-    assert!(store.retry_session_steer("session", &edited.id).is_err());
+    assert!(page.items[0].delivered_at.is_some());
+    assert_eq!(
+        (page.items[1].steer.id.clone(), page.pending),
+        (latest.id.clone(), 1)
+    );
     assert_eq!(
         store
             .session_steer_source("session", &latest.id)
@@ -279,7 +489,7 @@ fn source_revisions_supersede_only_pending_and_keep_complete_sources() {
 }
 
 #[test]
-fn scopes_graph_downward_and_idle_peers_keep_independent_pending_receipts() {
+fn scopes_graph_downward_and_each_session_reads_for_itself() {
     let (_home, store, adapter) = fixture();
     for name in ["peer", "sibling", "parent", "taskless"] {
         store.test_session(name, &crate::session_record::new_artifact_key());
@@ -301,9 +511,9 @@ fn scopes_graph_downward_and_idle_peers_keep_independent_pending_receipts() {
         .unwrap();
         conn.execute_batch(
             "INSERT INTO repository_plans(id,repo,selected) VALUES('repo_00000000000040008000000000000001','/repo',1);
-            INSERT INTO tasks(repository_id,id,project_id,issue_identifier,worktree,created_at)
-            VALUES('repo_00000000000040008000000000000001','task','project','T-1','/task',1),('repo_00000000000040008000000000000001','sibling-task','project','T-2','/sibling',1);
-            UPDATE tasks SET checkout_machine_id=(SELECT id FROM machines WHERE route='local');
+            INSERT INTO tasks(repository_id,id,project_id,issue_identifier,created_at)
+            VALUES('repo_00000000000040008000000000000001','task','project','T-1',1),('repo_00000000000040008000000000000001','sibling-task','project','T-2',1);
+            INSERT INTO task_checkouts(task_id,worktree) VALUES('task','/task'),('sibling-task','/sibling');
             UPDATE agent_sessions SET repo='/repo',cwd='/' ;
             UPDATE agent_sessions SET cwd='/task' WHERE id IN ('session','peer');
             UPDATE agent_sessions SET cwd='/sibling' WHERE id='sibling';",
@@ -354,18 +564,7 @@ fn scopes_graph_downward_and_idle_peers_keep_independent_pending_receipts() {
     ] {
         assert_eq!(store.session_steers(session, 0, 32).unwrap().pending, count);
     }
-    store
-        .emit_session_steers(
-            &adapter,
-            "native",
-            "tool",
-            |_, rows, _| {
-                assert_eq!(rows.len(), 4);
-                Ok(rendered("payload"))
-            },
-            |_| Ok(()),
-        )
-        .unwrap();
+    assert_eq!(read(&store, &adapter, "native").len(), 4);
     assert_eq!(store.session_steers("peer", 0, 32).unwrap().pending, 3);
     store
         .conn
@@ -387,15 +586,110 @@ fn scopes_graph_downward_and_idle_peers_keep_independent_pending_receipts() {
 }
 
 #[test]
+fn a_session_anywhere_inside_a_task_checkout_gets_its_steers() {
+    let (_home, store, _adapter) = fixture();
+    store
+        .conn
+        .lock()
+        .unwrap()
+        .execute_batch(
+            "INSERT INTO repository_plans(id,repo,selected) VALUES('repo_00000000000040008000000000000001','/repo',1);
+            INSERT INTO tasks(repository_id,id,issue_identifier,created_at)
+            VALUES('repo_00000000000040008000000000000001','task','T-1',1);
+            INSERT INTO task_checkouts(task_id,worktree) VALUES('task','/work/task');",
+        )
+        .unwrap();
+    save_in(
+        &store.conn.lock().unwrap(),
+        ("task", "task"),
+        "task",
+        "1",
+        &Author::Named("Author".into()),
+        "Task direction",
+    )
+    .unwrap();
+    let pending = |cwd: &str| {
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute("UPDATE agent_sessions SET cwd=?1 WHERE id='session'", [cwd])
+            .unwrap();
+        store.session_steers("session", 0, 32).unwrap().pending
+    };
+    assert_eq!(pending("/work/task/rust/src/"), 1);
+    assert_eq!(pending("/work/task"), 1);
+    assert_eq!(pending("/work/task-other"), 0);
+    assert_eq!(pending("/work"), 0);
+}
+
+#[test]
+fn a_new_task_session_skips_steers_an_earlier_session_read() {
+    let (_home, store, adapter) = fixture();
+    let save = |source: &str, text: &str| {
+        let conn = store.conn.lock().unwrap();
+        save_in(
+            &conn,
+            ("task", "task"),
+            source,
+            "1",
+            &Author::Named("Author".into()),
+            text,
+        )
+        .unwrap();
+    };
+    store
+        .conn
+        .lock()
+        .unwrap()
+        .execute_batch(
+            "INSERT INTO repository_plans(id,repo,selected) VALUES('repo_00000000000040008000000000000001','/repo',1);
+            INSERT INTO tasks(repository_id,id,issue_identifier,created_at)
+            VALUES('repo_00000000000040008000000000000001','task','T-1',1);
+            INSERT INTO task_checkouts(task_id,worktree) VALUES('task','/task');
+            UPDATE agent_sessions SET cwd='/task';",
+        )
+        .unwrap();
+    save("read", "Already read");
+    assert_eq!(read(&store, &adapter, "native").len(), 1);
+    // Pending for no Session when the next one starts.
+    save("unread", "Never read");
+    store.test_session("next", &crate::session_record::new_artifact_key());
+    store
+        .conn
+        .lock()
+        .unwrap()
+        .execute_batch(
+            "UPDATE steers SET created_at=unixepoch()-10;
+            UPDATE agent_sessions SET cwd='/task',created_at=unixepoch()-5 WHERE id='next';",
+        )
+        .unwrap();
+    let texts = |page: crate::steer::SessionSteerPage| {
+        page.items
+            .into_iter()
+            .map(|item| item.steer.text)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        texts(store.session_steers("next", 0, 32).unwrap()),
+        ["Never read"]
+    );
+    save("later", "Saved after it started");
+    let page = store.session_steers("next", 0, 32).unwrap();
+    assert_eq!(page.pending, 2);
+    assert_eq!(texts(page), ["Never read", "Saved after it started"]);
+}
+
+#[test]
 fn migration_preserves_released_event_copies_and_planning_receipts() {
-    use crate::store::migrations::{apply_before_current_draft, current_draft_sql};
+    use crate::store::migrations::{apply_before_migration, migration_section_sql};
     let conn = rusqlite::Connection::open_in_memory().unwrap();
-    apply_before_current_draft(&conn, "session_steers");
+    apply_before_migration(&conn, "session_steers");
     conn.execute_batch(include_str!(
         "../../../tests/fixtures/migrations/session_steers_released.sql"
     ))
     .unwrap();
-    conn.execute_batch(&current_draft_sql("session_steers"))
+    conn.execute_batch(&migration_section_sql("session_steers"))
         .unwrap();
     let body: String = conn
         .query_row(
@@ -444,69 +738,15 @@ fn migration_preserves_released_event_copies_and_planning_receipts() {
     }
 }
 
-#[test]
-fn correction_during_render_cancels_the_superseded_batch_before_write() {
-    let (_home, store, adapter) = fixture();
-    save_in(
-        &store.conn.lock().unwrap(),
-        ("session", "session"),
-        "source",
-        "1",
-        &Author::Named("Author".into()),
-        "Original",
-    )
-    .unwrap();
-    let retained = store
-        .save_session_steer("session", "Author", "Independent direction")
-        .unwrap();
-    store
-        .emit_session_steers(
-            &adapter,
-            "native",
-            "one",
-            |_, _, _| {
-                save_in(
-                    &store.conn.lock().unwrap(),
-                    ("session", "session"),
-                    "source",
-                    "2",
-                    &Author::Named("Author".into()),
-                    "Correction",
-                )
-                .unwrap();
-                Ok(rendered("obsolete rendered text"))
-            },
-            |_| panic!("superseded direction escaped"),
-        )
-        .unwrap();
-    let page = store.session_steers("session", 0, 32).unwrap();
-    assert_eq!(page.pending, 2);
-    assert_eq!(page.items[0].steer, retained);
-    assert_eq!(page.items[1].steer.text, "Correction");
-    store
-        .emit_session_steers(
-            &adapter,
-            "native",
-            "two",
-            |_, rows, _| {
-                assert_eq!(rows[0], retained);
-                assert_eq!(rows[1].text, "Correction");
-                Ok(rendered("corrected text"))
-            },
-            |_| Ok(()),
-        )
-        .unwrap();
-}
-
 fn selections(store: &SqliteStore) -> Vec<(Option<String>, String, String)> {
     store
         .conn
         .lock()
         .unwrap()
         .prepare(
-            "SELECT json_extract(payload,'$.provider_thread'),json_extract(payload,'$.next_provider_thread'),
+            "SELECT json_extract(payload,'$.transition.from_provider_session'),json_extract(payload,'$.transition.to_provider_session'),
              json_extract(payload,'$.source') FROM session_events
-             WHERE json_extract(payload,'$.type')='agent_session_selected' ORDER BY seq",
+             WHERE json_extract(payload,'$.type')='provider_transition' ORDER BY seq",
         )
         .unwrap()
         .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
@@ -536,22 +776,10 @@ fn a_cleared_conversation_becomes_the_selection_and_receives_steers() {
     assert!(
         matches!(stale, Err(StoreError::InvalidAuthority(message)) if message.contains("native") && message.contains("cleared"))
     );
-    let emitted = store
-        .with_provider_context(&adapter, "cleared", NativeBoundary::Turn, || {
-            store.emit_session_steers(
-                &adapter,
-                "cleared",
-                "UserPromptSubmit:one",
-                |_, _, _| Ok(rendered("payload")),
-                |_| Ok(()),
-            )
-        })
-        .unwrap();
-    assert!(emitted);
-    assert_eq!(
-        store.session_steers("session", 0, 32).unwrap().items[0].evidence,
-        "emitted"
-    );
+    assert_eq!(read(&store, &adapter, "cleared").len(), 1);
+    assert!(store.session_steers("session", 0, 32).unwrap().items[0]
+        .delivered_at
+        .is_some());
 }
 
 #[test]
@@ -618,16 +846,16 @@ fn activation_never_moves_an_existing_selection() {
 
 #[test]
 fn dropping_the_adapter_thread_keeps_capabilities() {
-    use crate::store::migrations::{apply_before_current_draft, current_draft_sql};
+    use crate::store::migrations::{apply_before_migration, migration_section_sql};
     let conn = rusqlite::Connection::open_in_memory().unwrap();
-    apply_before_current_draft(&conn, "drop_steer_adapter_thread");
+    apply_before_migration(&conn, "drop_steer_adapter_thread");
     conn.execute_batch(
         "INSERT INTO processes(id,trace_id,started_at) VALUES('agent','fixture',1);
          INSERT INTO steer_adapters(agent_process_id,capability,provider_thread,created_at,activated_at)
          VALUES('agent','capability','native',1,2);",
     )
     .unwrap();
-    conn.execute_batch(&current_draft_sql("drop_steer_adapter_thread"))
+    conn.execute_batch(&migration_section_sql("drop_steer_adapter_thread"))
         .unwrap();
     let kept: (String, i64) = conn
         .query_row(

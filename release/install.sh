@@ -24,6 +24,26 @@ resolve_install_dir() {
   echo "$DEFAULT_INSTALL_DIR"
 }
 
+# Follow the public entry without requiring readlink -f (absent on older Macs).
+linked_app() {
+  entry="$install_dir/lf"
+  links=0
+  while [ -L "$entry" ]; do
+    links=$((links + 1))
+    [ "$links" -le 40 ] || return 0
+    link=$(readlink "$entry") || return 0
+    case "$link" in
+      /*) entry="$link" ;;
+      *) entry="$(dirname "$entry")/$link" ;;
+    esac
+  done
+  [ -e "$entry" ] || return 0
+  directory=$(cd -P "$(dirname "$entry")" && pwd) || return 0
+  case "$directory/$(basename "$entry")" in
+    */Loopflow.app/Contents/MacOS/lf) printf '%s\n' "${directory%/Contents/MacOS}" ;;
+  esac
+}
+
 detect_target() {
   os=$(uname -s)
   arch=$(uname -m)
@@ -44,14 +64,37 @@ detect_target() {
   esac
 }
 
+# The stream `lf install` follows, recorded in the Machine's ~/.lf/config.yaml.
+STREAM_CONFIG="$HOME/.lf/config.yaml"
+
+recorded_stream() {
+  if [ -f "$STREAM_CONFIG" ]; then
+    sed -n 's/^stream:[[:space:]]*\([a-z]*\).*/\1/p' "$STREAM_CONFIG" | head -n 1
+  fi
+}
+
+record_stream() {
+  mkdir -p "$(dirname "$STREAM_CONFIG")"
+  if [ -f "$STREAM_CONFIG" ] && grep -q '^stream:' "$STREAM_CONFIG"; then
+    sed "s/^stream:.*/stream: $1/" "$STREAM_CONFIG" > "$STREAM_CONFIG.tmp"
+    mv "$STREAM_CONFIG.tmp" "$STREAM_CONFIG"
+  else
+    if [ -s "$STREAM_CONFIG" ] && [ -n "$(tail -c 1 "$STREAM_CONFIG")" ]; then
+      echo >> "$STREAM_CONFIG"
+    fi
+    echo "stream: $1" >> "$STREAM_CONFIG"
+  fi
+}
+
 main() {
   target=$(detect_target)
   install_dir="$(resolve_install_dir)"
-  version="latest"
+  version=""
+  channel=""
   cli_only="${LF_INSTALL_CLI_ONLY:-0}"
 
   usage() {
-    echo "Usage: install.sh [--version <X>] [--cli-only] [VERSION]" >&2
+    echo "Usage: install.sh [--channel stable|preview] [--version <X>] [--cli-only] [VERSION]" >&2
   }
 
   while [ $# -gt 0 ]; do
@@ -71,24 +114,74 @@ main() {
         exit 1
         ;;
       --version=*) version="${1#--version=}"; shift ;;
+      --channel)
+        if [ $# -lt 2 ]; then
+          echo "--channel requires a value" >&2
+          usage
+          exit 1
+        fi
+        channel="$2"
+        shift 2
+        ;;
+      --channel=*) channel="${1#--channel=}"; shift ;;
       --cli-only) cli_only="1"; shift ;;
       -*) echo "Unknown option: $1" >&2; usage; exit 1 ;;
       *) version="$1"; shift ;;
     esac
   done
 
-  if [ "$version" = "latest" ]; then
-    # Asset downloads end at a CDN URL that no longer contains the release tag.
-    if ! release_url=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/$REPO/releases/latest"); then
-      echo "Download failed: latest release lookup" >&2
-      exit 1
-    fi
-    case "$release_url" in
-      "https://github.com/$REPO/releases/tag/v"*)
-        tag="${release_url##*/}"
+  if [ -n "$version" ] && [ -n "$channel" ]; then
+    echo "Pass --channel or --version, not both" >&2
+    usage
+    exit 1
+  fi
+  stream="$channel"
+  if [ -z "$version" ] && [ -z "$stream" ]; then
+    stream="$(recorded_stream)"
+    stream="${stream:-stable}"
+  fi
+
+  if [ -z "$version" ]; then
+    case "$stream" in
+      stable)
+        # Asset downloads end at a CDN URL that no longer contains the release tag.
+        if ! release_url=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/$REPO/releases/latest"); then
+          echo "Download failed: stable release lookup" >&2
+          exit 1
+        fi
+        case "$release_url" in
+          "https://github.com/$REPO/releases/tag/v"*)
+            tag="${release_url##*/}"
+            ;;
+          *)
+            echo "Stable release did not resolve to a pinned tag" >&2
+            exit 1
+            ;;
+        esac
+        ;;
+      preview)
+        # The releases list is newest first; prereleases are not a stream.
+        if ! releases=$(curl -fsSL "https://api.github.com/repos/$REPO/releases?per_page=20"); then
+          echo "Download failed: preview release lookup" >&2
+          exit 1
+        fi
+        tag=$(printf '%s\n' "$releases" | tr ',' '\n' | awk '
+          /"tag_name":/ { gsub(/.*"tag_name":[[:space:]]*"|".*/, ""); candidate = $0 }
+          /"prerelease":[[:space:]]*false/ { if (candidate != "") { print candidate; exit } }
+          /"prerelease":[[:space:]]*true/ { candidate = "" }
+        ')
+        if [ -z "$tag" ]; then
+          echo "No published release found for the preview stream" >&2
+          exit 1
+        fi
+        ;;
+      dev)
+        echo "dev builds come from CI and need gh auth; install a release, then run \`lf install --dev\`" >&2
+        exit 1
         ;;
       *)
-        echo "Latest release did not resolve to a pinned tag" >&2
+        echo "Unknown channel: $stream (choose stable or preview)" >&2
+        usage
         exit 1
         ;;
     esac
@@ -157,11 +250,19 @@ main() {
   src="$tmpdir/lf"
   dst="$install_dir/lf"
   chmod +x "$src"
+  # Published older candidates require a receipt id and recover during promotion.
+  # New candidates can finish that switch before destination discovery as well.
+  if ! "$src" install recover-switch --help | grep -q '^Usage:.*--switch'; then
+    "$src" install recover-switch
+  fi
   app_source=""
-  if [ "$(uname -s)" = "Darwin" ] && [ "$cli_only" != "1" ]; then
-    applications_dir="${LF_APPLICATIONS_DIR:-/Applications}"
+  existing_app=$(linked_app)
+  applications_dir="${LF_APPLICATIONS_DIR:-${existing_app%/Loopflow.app}}"
+  applications_dir="${applications_dir:-/Applications}"
+  # CLI-only skips initial app setup; it cannot split an existing installation.
+  if [ "$(uname -s)" = "Darwin" ] && { [ "$cli_only" != "1" ] || [ -n "$existing_app" ] || [ -e "$applications_dir/Loopflow.app" ]; }; then
     if [ ! -d "$applications_dir" ] || [ ! -w "$applications_dir" ]; then
-      echo "Application target is not writable: $applications_dir (pass --cli-only to skip the app)" >&2
+      echo "Application target is not writable: $applications_dir (CLI-only skips the app only when none is installed)" >&2
       exit 1
     fi
     dmg_name="Loopflow.dmg"
@@ -194,6 +295,14 @@ main() {
       --sync-skills
   fi
 
+  if [ -n "$channel" ]; then
+    record_stream "$channel"
+    echo "Following $channel (recorded in $STREAM_CONFIG)"
+  fi
+  # lf keeps itself current on the recorded stream (daily unless rescheduled).
+  if ! LF_INSTALL_DIR="$install_dir" "$dst" install schedule; then
+    echo "warning: automatic updates are not scheduled; run \`lf install schedule\`" >&2
+  fi
   echo "Installed to $install_dir/lf"
 
   case ":$PATH:" in

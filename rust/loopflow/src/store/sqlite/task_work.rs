@@ -1,7 +1,7 @@
 //! One association rule for CLI and Desktop. Membership is additive to binding;
 //! it never rewrites event attribution or follows causal parent Processes.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::durable::TaskId;
 use crate::graph::runner::ExecutionCursor;
@@ -13,32 +13,45 @@ use crate::task_work::{TaskSession, TaskWork};
 
 use super::SqliteStore;
 
+/// Each Task with this Machine's checkout of it: `worktree` is NULL for a Task
+/// not checked out here.
+const TASK_CHECKOUTS: &str =
+    "SELECT t.id,c.worktree FROM tasks t LEFT JOIN task_checkouts c ON c.task_id=t.id";
+
 fn tasks(selector: &str) -> String {
-    format!("SELECT id,worktree,checkout_machine_id FROM tasks WHERE id={selector} OR issue_identifier={selector} OR external_issue_id={selector}")
+    format!("{TASK_CHECKOUTS} WHERE t.id={selector} OR t.issue_identifier={selector} OR t.external_issue_id={selector}")
 }
 
 fn checkout(cwd: &str) -> String {
     // Component boundaries avoid /repo.task matching /repo.task-other. Paths
     // remain usable after checkout removal; SQL LIKE would treat '%' as syntax.
-    format!("tw.checkout_machine_id=(SELECT id FROM machines WHERE route='local') AND tw.worktree!='' AND ({cwd}=rtrim(tw.worktree,'/') OR instr({cwd},rtrim(tw.worktree,'/')||'/')=1)")
+    // `tw` is any relation with the Task's `id`; the checkout is looked up here.
+    format!("EXISTS(SELECT 1 FROM task_checkouts c WHERE c.task_id=tw.id AND ({cwd}=rtrim(c.worktree,'/') OR instr({cwd},rtrim(c.worktree,'/')||'/')=1))")
+}
+
+fn has_relocations(conn: &rusqlite::Connection) -> StoreResult<bool> {
+    // Read-only clients also inspect released databases before promotion.
+    // Those schemas cannot have relocation receipts; leave them untouched.
+    Ok(conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='relocated_task_processes' AND type='table')",
+        [], |row| row.get(0),
+    )?)
 }
 
 fn process_membership(conn: &rusqlite::Connection, process: &str) -> StoreResult<String> {
-    let current = checkout(&format!("{process}.cwd"));
-    // Read-only clients also inspect released databases before promotion.
-    // Those schemas cannot have relocation receipts; leave them untouched.
-    let relocations: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='relocated_task_processes' AND type='table')",
-        [], |row| row.get(0),
-    )?;
-    Ok(if relocations {
-        format!("(({current}) AND NOT EXISTS(SELECT 1 FROM relocated_task_processes r WHERE r.process_id={process}.id)) OR EXISTS(SELECT 1 FROM relocated_task_processes r WHERE r.task_id=tw.id AND r.process_id={process}.id)")
+    Ok(if has_relocations(conn)? {
+        relocated_process_membership(process)
     } else {
-        current
+        checkout(&format!("{process}.cwd"))
     })
 }
 
-fn session_membership(session: &str) -> String {
+fn relocated_process_membership(process: &str) -> String {
+    let current = checkout(&format!("{process}.cwd"));
+    format!("(({current}) AND NOT EXISTS(SELECT 1 FROM relocated_task_processes r WHERE r.process_id={process}.id)) OR EXISTS(SELECT 1 FROM relocated_task_processes r WHERE r.task_id=tw.id AND r.process_id={process}.id)")
+}
+
+pub(super) fn session_membership(session: &str) -> String {
     format!(
         "{session}.primary_scope IS NULL
          AND ({session}.task_id=tw.id OR ({}))",
@@ -54,22 +67,51 @@ pub(super) fn session_ids(selector: &str) -> String {
     )
 }
 
+/// The Tasks a Session belongs to. A checkout holding the Session's cwd has
+/// that cwd or one of its ancestors as its worktree, so candidates come from
+/// `task_checkouts_root` rather than every Task. Explicit binding also counts.
 pub(super) fn session_tasks(session: &str) -> String {
+    // Probe checkout roots from the cwd outward. Keep paths lexical: repeated
+    // slashes and relative paths have the same meaning as in `checkout`. CROSS
+    // JOIN keeps ancestors outside the index probe instead of scanning Tasks.
     format!(
-        "SELECT tw.id FROM tasks tw WHERE {} ORDER BY tw.id",
-        session_membership(session)
+        "WITH RECURSIVE up(path) AS (
+            SELECT rtrim({session}.cwd,'/') WHERE {session}.primary_scope IS NULL
+            UNION ALL
+            SELECT rtrim(rtrim(path,replace(path,'/','')),'/') FROM up WHERE path!='')
+         SELECT id FROM tasks WHERE id={session}.task_id AND {session}.primary_scope IS NULL
+         UNION
+         SELECT c.task_id FROM up CROSS JOIN task_checkouts c
+            ON rtrim(c.worktree,'/')=up.path
+         WHERE up.path!='' OR substr({session}.cwd,1,1)='/' OR {session}.cwd=''
+         ORDER BY id"
     )
 }
 
 pub(super) fn lf_process_ids(conn: &rusqlite::Connection, selector: &str) -> StoreResult<String> {
+    let (unmoved, relocated) = if has_relocations(conn)? {
+        (
+            "AND NOT EXISTS(SELECT 1 FROM relocated_task_processes r WHERE r.process_id=ae.id)",
+            "UNION SELECT r.process_id FROM tw JOIN relocated_task_processes r ON r.task_id=tw.id",
+        )
+    } else {
+        ("", "")
+    };
     // History and attachments share one query-local membership; the partial
-    // index skips retained events that name no Process.
-    Ok(format!("WITH members AS MATERIALIZED ({})
-        SELECT ae.id FROM processes ae JOIN ({}) tw ON ({})
+    // index skips retained events that name no Process. In BINARY path order,
+    // [root+'/', root+'0') is exactly the descendants of root. CROSS JOIN keeps
+    // the selected checkouts outside the cwd probes; '%' and '_' stay literal.
+    Ok(format!("WITH members AS MATERIALIZED ({}), tw AS MATERIALIZED ({})
+        SELECT ae.id FROM tw CROSS JOIN processes ae
+        WHERE tw.worktree IS NOT NULL
+            AND (ae.cwd=rtrim(tw.worktree,'/') OR
+                (ae.cwd>=rtrim(tw.worktree,'/')||'/' AND ae.cwd<rtrim(tw.worktree,'/')||'0'))
+            {unmoved}
+        {relocated}
         UNION SELECT se.lf_process_id FROM session_events se INDEXED BY session_process_membership WHERE se.session_id IN (SELECT id FROM members) AND se.lf_process_id IS NOT NULL
         UNION SELECT p.attached_lf_process_id FROM processes p WHERE p.kind='agent' AND p.agent_session_id IN (SELECT id FROM members) AND p.attached_lf_process_id IS NOT NULL
         UNION SELECT p.id FROM processes p WHERE p.kind='agent' AND p.agent_session_id IN (SELECT id FROM members)",
-        session_ids(selector), tasks(selector), process_membership(conn, "ae")?))
+        session_ids(selector), tasks(selector)))
 }
 
 /// Prefer the deepest checkout when membership names more than one Task.
@@ -83,11 +125,11 @@ pub(super) fn task_of_process(
         .query_row(
             &format!(
                 "WITH members AS MATERIALIZED (
-                    SELECT session_id AS id FROM session_events INDEXED BY session_process_membership
+                    SELECT session_id AS id FROM session_events INDEXED BY session_events_process
                         WHERE lf_process_id=?1
                     UNION SELECT agent_session_id FROM processes
                         WHERE kind='agent' AND attached_lf_process_id=?1 AND agent_session_id IS NOT NULL)
-                 SELECT tw.id FROM tasks tw JOIN processes e ON e.id=?1
+                 SELECT tw.id FROM ({TASK_CHECKOUTS}) tw JOIN processes e ON e.id=?1
                  WHERE ({}) OR EXISTS(SELECT 1 FROM agent_sessions a
                     WHERE a.id IN (SELECT id FROM members) AND ({}))
                  ORDER BY length(tw.worktree) DESC, tw.id LIMIT 1",
@@ -99,43 +141,12 @@ pub(super) fn task_of_process(
         .optional()?)
 }
 
-/// Each Task in `tasks` paired with each Graph among its work. Membership is
-/// driven from the Graphs, so asking for every Task costs one reading: a Graph
-/// joins the checkout that is its directory or one of its ancestors, the same
-/// containment `checkout` tests from the other side.
-fn task_graph_pairs(conn: &rusqlite::Connection, tasks: &str) -> StoreResult<String> {
-    let relocations: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='relocated_task_processes' AND type='table')",
-        [], |row| row.get(0),
-    )?;
-    let (unmoved, relocated) = if relocations {
-        (
-            "WHERE NOT EXISTS(SELECT 1 FROM relocated_task_processes r WHERE r.process_id=f.id)",
-            "UNION SELECT r.task_id, r.process_id FROM relocated_task_processes r JOIN tw ON tw.id=r.task_id
-                WHERE r.process_id IN (SELECT id FROM f)",
-        )
-    } else {
-        ("", "")
-    };
-    Ok(format!(
-        "WITH RECURSIVE tw AS MATERIALIZED ({tasks}),
-            f AS MATERIALIZED (SELECT e.id, e.cwd FROM graph_processes fp JOIN processes e ON e.id=fp.lf_process_id),
-            up(id, path) AS (SELECT id, cwd FROM f {unmoved}
-                UNION ALL SELECT id, rtrim(rtrim(path, replace(path,'/','')),'/') FROM up WHERE path!=''),
-            checkouts AS MATERIALIZED (SELECT id, rtrim(worktree,'/') AS root FROM tw
-                WHERE checkout_machine_id=(SELECT id FROM machines WHERE route='local') AND worktree!=''),
-            links(session_id, graph) AS (
-                SELECT se.session_id, se.lf_process_id FROM session_events se INDEXED BY session_events_process
-                    WHERE se.lf_process_id IN (SELECT id FROM f)
-                UNION SELECT p.agent_session_id, p.attached_lf_process_id FROM processes p
-                    WHERE p.kind='agent' AND p.attached_lf_process_id IN (SELECT id FROM f) AND p.agent_session_id IS NOT NULL
-                UNION SELECT p.agent_session_id, p.id FROM processes p
-                    WHERE p.kind='agent' AND p.id IN (SELECT id FROM f) AND p.agent_session_id IS NOT NULL)
-         SELECT c.id AS task_id, up.id AS graph FROM up JOIN checkouts c ON c.root=up.path
-         {relocated}
-         UNION SELECT tw.id, l.graph FROM links l JOIN agent_sessions a ON a.id=l.session_id JOIN tw ON ({})",
-        session_membership("a"),
-    ))
+/// Each Task among `task_ids` paired with each Graph started for it. The Graph
+/// recorded its Task at launch, so the pairs come from an index probe per Task.
+fn task_graph_pairs(task_ids: &str) -> String {
+    format!(
+        "SELECT task_id, lf_process_id AS graph FROM graph_processes WHERE task_id IN ({task_ids})"
+    )
 }
 
 pub(super) fn graphs_of_task(
@@ -144,12 +155,38 @@ pub(super) fn graphs_of_task(
 ) -> StoreResult<Vec<crate::ops::graph_process::GraphProcess>> {
     super::graph_inventory::graphs_in(
         conn,
-        &format!(
-            "e.id IN (SELECT graph FROM ({}))",
-            task_graph_pairs(conn, &tasks("?1"))?
-        ),
+        &format!("e.id IN (SELECT graph FROM ({}))", task_graph_pairs("?1")),
         &[&task.as_str()],
     )
+}
+
+/// Each of `tasks`' completed Graph steps, by step process, for all of them in
+/// one reading.
+fn completed_graph_steps(
+    conn: &rusqlite::Connection,
+    tasks: &[&TaskId],
+) -> StoreResult<HashMap<TaskId, HashSet<LfProcessId>>> {
+    let mut query = conn.prepare(&format!(
+        "SELECT pairs.task_id, gs.lf_process_id FROM ({}) pairs
+         JOIN graph_process_steps gs ON gs.graph_lf_process_id=pairs.graph
+         JOIN processes s ON s.id=gs.lf_process_id
+         WHERE s.completed_at IS NOT NULL",
+        task_graph_pairs("SELECT value FROM json_each(?1)")
+    ))?;
+    let ids = super::children::ids_json(tasks.iter().map(|id| id.as_str()));
+    let mut completed = HashMap::<TaskId, HashSet<LfProcessId>>::new();
+    for row in query.query_map([&ids], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })? {
+        let (task, step) = row?;
+        let invalid = |error: &dyn std::fmt::Display| {
+            crate::store::StoreError::InvalidData(error.to_string())
+        };
+        let task = TaskId::parse(&task).map_err(|error| invalid(&error))?;
+        let step = LfProcessId::parse(&step).map_err(|error| invalid(&error))?;
+        completed.entry(task).or_default().insert(step);
+    }
+    Ok(completed)
 }
 
 /// Each of `tasks`' most recently launched Graph, for all of them in one reading.
@@ -161,11 +198,7 @@ fn latest_task_graphs(
     let mut query = conn.prepare(&format!(
         "SELECT task_id, graph FROM ({}) pairs
          ORDER BY (SELECT e.rowid FROM processes e WHERE e.id=pairs.graph)",
-        task_graph_pairs(
-            conn,
-            "SELECT id,worktree,checkout_machine_id FROM tasks
-             WHERE id IN (SELECT value FROM json_each(?1))"
-        )?
+        task_graph_pairs("SELECT value FROM json_each(?1)")
     ))?;
     let ids = super::children::ids_json(tasks.iter().map(|id| id.as_str()));
     for row in query.query_map([&ids], |row| {
@@ -197,7 +230,8 @@ fn latest_task_graphs(
 }
 
 /// The Task's Graph row: the graph it took up, the step it stands at or its
-/// run left, and that run with the cursor it began from.
+/// run left, and that run with the cursor its next attempt sets out from: where
+/// it began, then the step after the last one it finished.
 pub(crate) struct TaskGraphRow {
     pub graph: CapturedGraph,
     pub step: String,
@@ -205,8 +239,8 @@ pub(crate) struct TaskGraphRow {
 }
 
 /// A Task's Graph as another Machine takes it up: the graph it took up, the
-/// step it stands at, and the cursor its run began from, if it is on one. The
-/// run's Process stays behind.
+/// step it stands at, and the cursor its run sets out from again, if it is on
+/// one. The run's Process stays behind.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct TaskGraphRecord {
     pub graph: CapturedGraph,
@@ -239,7 +273,7 @@ fn task_graph_row(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<Opt
             conn.query_row(
                 &format!("{} WHERE e.id=?1", super::processes::PROCESS_SELECT),
                 [process],
-                super::processes::read_process,
+                super::processes::read_lf_process,
             )?,
         )),
         None => None,
@@ -254,7 +288,7 @@ fn task_graph_row(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<Opt
 /// Put the Task on a run from `start`, carried by `by`, if it still stands
 /// where the caller read it: at `step`, with `stopped` the run that last left
 /// it, if any. With `ships`, the run reaches `end` and hands the Task off,
-/// granting merge authority.
+/// granting merge authority unless a person stopped shipping it.
 #[allow(clippy::too_many_arguments)]
 fn start_run_in(
     tx: &rusqlite::Transaction<'_>,
@@ -264,11 +298,6 @@ fn start_run_in(
     by: &LfProcessId,
     ships: bool,
 ) -> StoreResult<bool> {
-    if super::durable::task_state_in(tx, task)? == crate::durable::TaskState::Deferred {
-        return Err(crate::store::StoreError::InvalidAuthority(
-            "Task is deferred; resume it before running a Graph".into(),
-        ));
-    }
     let left = tx.execute(
         "UPDATE task_graphs SET run_start=?2,lf_process_id=?3,updated_at=?4
          WHERE task_id=?1 AND step=?5 AND lf_process_id IS ?6",
@@ -291,47 +320,188 @@ fn start_run_in(
             task,
             by,
             "it runs to the end with no interactive step left",
+            Approval::Route,
         )?;
     }
     Ok(true)
 }
 
-/// A Task handed off to finish on its own: since when, this Machine's
-/// process carrying it there, and how many times in a row that process was
-/// started again after it failed.
+/// A Task handed off to finish on its own: since when, the process that
+/// approved it, this Machine's process carrying it there, and how many times
+/// in a row that process was started again after it failed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TaskShipping {
     pub shipped_at: i64,
+    pub approved_by: Option<LfProcessId>,
     pub process: Option<LfProcessId>,
     pub restarts: u32,
 }
+
+/// How a Task comes to ship. A person's stop blocks only a route.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Approval {
+    /// `lf ship`: approves it and lifts any stop.
+    Explicit,
+    /// A run reaching `end`: approves it unless a person stopped shipping.
+    Route,
+}
+
+/// A person's `lf ship --stop`: when, and the process that ran it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ShipStop {
+    pub at: i64,
+    pub by: Option<LfProcessId>,
+    pub person: Option<String>,
+}
+
+pub(super) fn ship_stop_in(
+    conn: &rusqlite::Connection,
+    task: &TaskId,
+) -> StoreResult<Option<ShipStop>> {
+    Ok(ship_log_in(conn, task)?.stop)
+}
+
+/// One kind of row in a Task's Auto-Ship log (`task_ship_events`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum ShipEvent {
+    Approved,
+    Carried,
+    Restarted,
+    Stopped,
+    Withdrawn,
+}
+
+impl ShipEvent {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Approved => "approved",
+            Self::Carried => "carried",
+            Self::Restarted => "restarted",
+            Self::Stopped => "stopped",
+            Self::Withdrawn => "withdrawn",
+        }
+    }
+}
+
+/// The latest Auto-Ship approval, as a move carries it to the Task's next Machine.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct ShipApproval {
+    pub at: i64,
+    pub by: Option<LfProcessId>,
+}
+
+/// What a Task's Auto-Ship log says now.
+#[derive(Debug, Default)]
+struct ShipLog {
+    approval: Option<ShipApproval>,
+    carrier: Option<LfProcessId>,
+    restarts: u32,
+    stop: Option<ShipStop>,
+}
+
+/// Restarts counted in a row. The repair backoff a restart waits
+/// (`ops::pr_landing::repair_backoff`) stops growing after this many, so
+/// later ones add no row; the migration's backfill keeps the same cap.
+pub(crate) const SHIP_RESTARTS_COUNTED: u32 = 6;
+
+/// Read from the latest approval or stop: each starts the log over.
+fn ship_log_in(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<ShipLog> {
+    let mut query = conn.prepare_cached(
+        "SELECT kind,at,lf_process_id,person FROM task_ship_events WHERE task_id=?1
+         AND id>=IFNULL((SELECT max(id) FROM task_ship_events
+             WHERE task_id=?1 AND kind IN ('approved','stopped')),0)
+         ORDER BY id",
+    )?;
+    let mut rows = query.query([task.as_str()])?;
+    let mut log = ShipLog::default();
+    while let Some(row) = rows.next()? {
+        let at: i64 = row.get(1)?;
+        let process: Option<LfProcessId> = row.get(2)?;
+        match serde_json::from_value::<ShipEvent>(row.get::<_, String>(0)?.into())? {
+            ShipEvent::Approved => {
+                log = ShipLog {
+                    approval: Some(ShipApproval {
+                        at,
+                        by: process.clone(),
+                    }),
+                    carrier: process,
+                    ..ShipLog::default()
+                }
+            }
+            ShipEvent::Carried => log.carrier = process,
+            ShipEvent::Restarted => log.restarts += 1,
+            ShipEvent::Stopped => {
+                log = ShipLog {
+                    stop: Some(ShipStop {
+                        at,
+                        by: process,
+                        person: row.get(3)?,
+                    }),
+                    ..ShipLog::default()
+                }
+            }
+            ShipEvent::Withdrawn => {
+                log = ShipLog {
+                    stop: log.stop.take(),
+                    ..ShipLog::default()
+                }
+            }
+        }
+    }
+    Ok(log)
+}
+
+/// A Task has one carrier: a new `carried` row replaces the last.
+fn append_ship_event_in(
+    conn: &rusqlite::Connection,
+    task: &TaskId,
+    event: ShipEvent,
+    at: i64,
+    process: Option<&LfProcessId>,
+    person: Option<&str>,
+) -> StoreResult<()> {
+    if event == ShipEvent::Carried {
+        conn.execute(
+            "DELETE FROM task_ship_events WHERE task_id=?1 AND kind='carried'",
+            [task.as_str()],
+        )?;
+    }
+    conn.execute(
+        "INSERT INTO task_ship_events(task_id,kind,at,lf_process_id,person) VALUES(?1,?2,?3,?4,?5)",
+        rusqlite::params![
+            task.as_str(),
+            event.as_str(),
+            at,
+            process.map(LfProcessId::as_str),
+            person
+        ],
+    )?;
+    Ok(())
+}
+
 pub(super) fn shipping_in(
     conn: &rusqlite::Connection,
     task: &TaskId,
 ) -> StoreResult<Option<TaskShipping>> {
     use rusqlite::OptionalExtension;
-    conn.query_row(
-        "SELECT shipped_at,ship_lf_process_id,ship_restarts FROM tasks
-         WHERE id=?1 AND shipped_at IS NOT NULL",
-        [task.as_str()],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-    )
-    .optional()?
-    .map(|(shipped_at, process, restarts)| shipping(shipped_at, process, restarts))
-    .transpose()
-}
-
-fn shipping(shipped_at: i64, process: Option<String>, restarts: u32) -> StoreResult<TaskShipping> {
-    Ok(TaskShipping {
+    let Some(shipped_at) = conn
+        .query_row(
+            "SELECT shipped_at FROM tasks WHERE id=?1 AND shipped_at IS NOT NULL",
+            [task.as_str()],
+            |row| row.get(0),
+        )
+        .optional()?
+    else {
+        return Ok(None);
+    };
+    let log = ship_log_in(conn, task)?;
+    Ok(Some(TaskShipping {
         shipped_at,
-        restarts,
-        process: process
-            .map(|id| {
-                LfProcessId::parse(&id)
-                    .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))
-            })
-            .transpose()?,
-    })
+        approved_by: log.approval.and_then(|approval| approval.by),
+        process: log.carrier,
+        restarts: log.restarts,
+    }))
 }
 
 /// End the Task's handoff, returning what it was, when it was shipping.
@@ -348,56 +518,59 @@ pub(super) fn unship_in(
                 &[crate::work::edit::WorkValue::TaskShippedAt(None)],
             ),
         )?;
-        conn.execute(
-            "UPDATE tasks SET ship_lf_process_id=NULL,ship_restarts=0 WHERE id=?1",
-            [task.as_str()],
-        )?;
+    }
+    let log = ship_log_in(conn, task)?;
+    if log.approval.is_some() || log.carrier.is_some() || log.restarts > 0 {
+        let now = crate::store::rows::now_unix();
+        append_ship_event_in(conn, task, ShipEvent::Withdrawn, now, None, None)?;
     }
     Ok(shipping)
 }
 
+/// Approve Auto-Ship, carried by `by`. A route writes nothing and returns
+/// `None` while a person's stop stands; an explicit approval lifts the stop.
 fn ship_in(
     tx: &rusqlite::Transaction<'_>,
     task: &TaskId,
     by: &LfProcessId,
     note: &str,
-) -> StoreResult<TaskShipping> {
+    approval: Approval,
+) -> StoreResult<Option<TaskShipping>> {
     let state = super::durable::task_state_in(tx, task)?;
     if state.is_terminal() {
         return Err(crate::store::StoreError::InvalidAuthority(format!(
             "Task is {state}; it cannot ship"
         )));
     }
-    let shipped_at = match shipping_in(tx, task)? {
-        Some(shipping) => shipping.shipped_at,
-        None => {
-            let now = crate::store::rows::now_unix();
-            super::planning_write::local(
-                tx,
-                &crate::work::edit::WorkEdit::for_target(
-                    task.as_str(),
-                    &[crate::work::edit::WorkValue::TaskShippedAt(Some(now))],
-                ),
-            )?;
-            super::children::insert_task_event_in(
-                tx,
-                task,
-                &crate::work::task::TaskEventKind::Progress {
-                    summary: format!("Shipping: {note}"),
-                },
-            )?;
-            now
-        }
-    };
-    tx.execute(
-        "UPDATE tasks SET ship_lf_process_id=?2 WHERE id=?1",
-        rusqlite::params![task.as_str(), by.as_str()],
-    )?;
-    Ok(TaskShipping {
-        shipped_at,
-        process: Some(by.clone()),
-        restarts: shipping_in(tx, task)?.map_or(0, |shipping| shipping.restarts),
-    })
+    let log = ship_log_in(tx, task)?;
+    if approval == Approval::Route && log.stop.is_some() {
+        return Ok(None);
+    }
+    let now = crate::store::rows::now_unix();
+    let shipping = shipping_in(tx, task)?.is_some();
+    if !shipping {
+        super::planning_write::local(
+            tx,
+            &crate::work::edit::WorkEdit::for_target(
+                task.as_str(),
+                &[crate::work::edit::WorkValue::TaskShippedAt(Some(now))],
+            ),
+        )?;
+        super::children::insert_task_event_in(
+            tx,
+            task,
+            &crate::work::task::TaskEventKind::Progress {
+                summary: format!("Shipping: {note}"),
+            },
+        )?;
+    }
+    // `lf ship` also lifts a stop that stands beside shipping a peer recorded.
+    if !shipping || log.stop.is_some() {
+        append_ship_event_in(tx, task, ShipEvent::Approved, now, Some(by), None)?;
+    } else if log.carrier.as_ref() != Some(by) {
+        append_ship_event_in(tx, task, ShipEvent::Carried, now, Some(by), None)?;
+    }
+    shipping_in(tx, task)
 }
 
 /// The run `carrier` started stopped at `step`, or reached `end`: put the
@@ -424,7 +597,13 @@ fn arrive_in(
         // A routed path may reach end even though another path had an
         // interactive step, so launch-time prediction is not sufficient.
         if !super::durable::task_state_in(tx, task)?.is_terminal() {
-            ship_in(tx, task, carrier, "its run reached the end")?;
+            ship_in(
+                tx,
+                task,
+                carrier,
+                "its run reached the end",
+                Approval::Route,
+            )?;
         }
         super::children::request_completion_in(tx, task, None)?;
     }
@@ -440,21 +619,30 @@ fn set_step_in(tx: &rusqlite::Transaction<'_>, task: &TaskId, step: &str) -> Sto
 
 /// Match unfinished Processes through checkout, Session history and attachments.
 /// Start from the small unfinished inventory and retain the attachment partial index.
-fn task_open_process_ids(conn: &rusqlite::Connection) -> StoreResult<String> {
+pub(super) fn task_open_process_ids(selector: &str, filter: &str) -> String {
+    format!(
+        "SELECT process FROM ({})",
+        task_open_process_pairs(selector, filter)
+    )
+}
+
+/// Unfinished Processes paired with every selected Task whose work contains them.
+pub(super) fn task_open_process_pairs(selector: &str, filter: &str) -> String {
     let session = session_membership("a");
-    Ok(format!(
-        "WITH task_scope AS MATERIALIZED (SELECT id,worktree,checkout_machine_id FROM tasks WHERE id=?1),
-        open AS MATERIALIZED (SELECT id,cwd,agent_session_id,attached_lf_process_id FROM processes INDEXED BY processes_unfinished
-            WHERE completed_at IS NULL),
+    format!(
+        "WITH task_scope AS MATERIALIZED (SELECT scoped.id,c.worktree FROM tasks scoped
+            LEFT JOIN task_checkouts c ON c.task_id=scoped.id WHERE scoped.id IN ({selector})),
+        open AS MATERIALIZED (SELECT p.id,p.cwd,p.agent_session_id,p.attached_lf_process_id FROM processes p INDEXED BY processes_unfinished
+            WHERE p.completed_at IS NULL AND ({filter})),
         sessions AS (SELECT DISTINCT se.lf_process_id AS process,se.session_id AS session
             FROM open CROSS JOIN session_events se ON se.lf_process_id=open.id
             UNION SELECT p.attached_lf_process_id,p.agent_session_id FROM open CROSS JOIN processes p INDEXED BY agent_process_attachment ON p.attached_lf_process_id=open.id WHERE p.kind='agent'
             UNION SELECT id,agent_session_id FROM open WHERE agent_session_id IS NOT NULL)
-        SELECT open.id FROM open JOIN task_scope tw ON {}
-        UNION SELECT s.process FROM sessions s JOIN agent_sessions a ON a.id=s.session
+        SELECT tw.id AS task_id,open.id AS process FROM open JOIN task_scope tw ON {}
+        UNION SELECT tw.id,s.process FROM sessions s CROSS JOIN agent_sessions a ON a.id=s.session
             JOIN task_scope tw ON ({session})",
-        process_membership(conn, "open")?
-    ))
+        relocated_process_membership("open")
+    )
 }
 
 /// One of a Task's Graph processes with its inventory entry.
@@ -486,28 +674,67 @@ fn members(
             })
         })?
         .collect::<StoreResult<Vec<_>>>()?;
+    Ok((sessions, member_graphs(tx, task)?))
+}
+
+/// A Task's Graphs with their inventory entries.
+fn member_graphs(tx: &rusqlite::Connection, task: &TaskId) -> StoreResult<Vec<MemberGraph>> {
     let graphs = graphs_of_task(tx, task)?;
     let wave = if graphs.is_empty() {
         None
     } else {
         super::durable::task_wave_in(tx, task)?
     };
-    let graphs = graphs
+    graphs
         .into_iter()
         .map(|graph| {
             let entry = super::graph_inventory::entry_of(&graph, Some(task.clone()), wave.clone())?;
             Ok((graph, entry))
         })
-        .collect::<StoreResult<Vec<_>>>()?;
-    Ok((sessions, graphs))
+        .collect()
 }
 
 impl SqliteStore {
+    /// Held terminals of unfinished member Sessions, without loading
+    /// retained history.
+    pub(crate) fn task_session_terminals(
+        &self,
+        task: &TaskId,
+    ) -> StoreResult<Vec<crate::id::TerminalId>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare(&format!(
+            "SELECT DISTINCT s.held_terminal_id FROM agent_sessions s
+             WHERE s.id IN ({}) AND s.completed_at IS NULL AND s.held_terminal_id IS NOT NULL",
+            session_ids("?1")
+        ))?;
+        let terminals = query
+            .query_map([task.as_str()], |row| row.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(terminals)
+    }
+
+    pub(crate) fn task_ids_in_wave(
+        &self,
+        wave: &crate::id::WaveId,
+    ) -> StoreResult<std::collections::HashSet<TaskId>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut statement = conn.prepare(
+            "SELECT t.id FROM projects p JOIN tasks t ON t.project_id=p.id WHERE p.wave_id=?1",
+        )?;
+        let rows = statement.query_map([wave], |row| row.get::<_, String>(0))?;
+        rows.map(|id| {
+            TaskId::parse(&id?)
+                .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))
+        })
+        .collect()
+    }
+
     pub(crate) fn session_task_ids(&self, session: &str) -> StoreResult<Vec<TaskId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(&format!(
-            "SELECT tw.id FROM tasks tw JOIN agent_sessions a ON a.id=?1 WHERE {} ORDER BY tw.id",
-            session_membership("a")
+            "SELECT tw.id FROM agent_sessions a JOIN tasks tw ON tw.id IN ({})
+             WHERE a.id=?1 ORDER BY tw.id",
+            session_tasks("a")
         ))?;
         let rows = query.query_map([session], |row| row.get::<_, String>(0))?;
         rows.map(|row| {
@@ -547,6 +774,25 @@ impl SqliteStore {
         ))
     }
 
+    /// The Task's Graph position and what `lf graph show --processes` says of
+    /// each of its Graphs, without listing its Sessions: a hook reads this.
+    pub(crate) fn task_progress(
+        &self,
+        task: &TaskId,
+    ) -> StoreResult<(Option<TaskGraph>, Vec<crate::durable::GraphProcessDetail>)> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.savepoint()?;
+        let graphs = member_graphs(&tx, task)?;
+        let graph = task_graph_row(&tx, task)?;
+        tx.commit()?;
+        drop(conn);
+        let details = graphs
+            .iter()
+            .map(|(graph, entry)| graph.detail(entry.clone()))
+            .collect();
+        Ok((graph.map(|row| self.read_task_graph(row)), details))
+    }
+
     /// Read all three owners in one SQLite snapshot, including closed history.
     pub fn task_work(&self, task: &TaskId) -> StoreResult<TaskWork> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
@@ -573,13 +819,16 @@ impl SqliteStore {
     }
 
     /// Single-Task execution gates need neither other Tasks nor retained Session/Graph payloads.
-    pub(crate) fn task_open_processes(&self, task: &TaskId) -> StoreResult<Vec<LfProcess>> {
+    pub(crate) fn task_open_processes(
+        &self,
+        task: &TaskId,
+    ) -> StoreResult<Vec<crate::process::ProcessEntry>> {
         let mut connection = self.conn.lock().expect("store mutex poisoned");
         let conn = connection.savepoint()?;
         let mut query = conn.prepare(&format!(
             "{} WHERE e.id IN ({}) ORDER BY e.started_at DESC,e.id",
             super::processes::PROCESS_SELECT,
-            task_open_process_ids(&conn)?,
+            task_open_process_ids("?1", "1"),
         ))?;
         let processes = query
             .query_map([task.as_str()], super::processes::read_process)?
@@ -590,7 +839,7 @@ impl SqliteStore {
     /// Whether a command with no recorded exit may still be running.
     /// Unknown is not stopped.
     pub(crate) fn process_may_run(&self, process: &crate::process::LfProcess) -> bool {
-        crate::journal::process_evidence(self, &process.id)
+        crate::journal::lf_evidence(self, &process.id)
             != crate::journal::ProcessIdentityEvidence::Dead
     }
 
@@ -610,7 +859,11 @@ impl SqliteStore {
     fn read_task_graph(&self, row: TaskGraphRow) -> TaskGraph {
         let position = match row.run {
             None => TaskGraphPosition::At { step: row.step },
-            Some((_, process)) => TaskGraphPosition::Run {
+            Some((cursor, process)) => TaskGraphPosition::Run {
+                at: row
+                    .graph
+                    .step_name_of(&cursor)
+                    .unwrap_or_else(|| row.step.clone()),
                 step: row.step,
                 lf_process_id: process.id.to_string(),
                 running: process.completed_at.is_none() && self.process_may_run(&process),
@@ -652,7 +905,7 @@ impl SqliteStore {
 
     /// Take up a Graph that moved here. A Task on a run stays on it, carried
     /// by `by`, the receiving Process: it ends with the move, so the run reads
-    /// as stopped and the next `lf task run` starts it again from where it began.
+    /// as stopped and the next `lf task run` starts it again where it stopped.
     pub(crate) fn place_moved_task_graph(
         &self,
         task: &TaskId,
@@ -715,6 +968,30 @@ impl SqliteStore {
         Ok(started)
     }
 
+    /// The run `carrier` carries finished a step: its next attempt, or the
+    /// next `lf task run`, sets out from `cursor`. A run that no longer
+    /// carries the Task writes nothing.
+    pub(crate) fn advance_task_graph_run(
+        &self,
+        task: &TaskId,
+        carrier: &LfProcessId,
+        cursor: &ExecutionCursor,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let cursor = serde_json::to_string(cursor)?;
+        conn.execute(
+            "UPDATE task_graphs SET run_start=?3,updated_at=?4
+             WHERE task_id=?1 AND lf_process_id=?2 AND run_start IS NOT ?3",
+            rusqlite::params![
+                task.as_str(),
+                carrier.as_str(),
+                cursor,
+                crate::store::rows::now_unix()
+            ],
+        )?;
+        Ok(())
+    }
+
     /// The run `carrier` carries stopped at `step` (or reached `end`): put the
     /// Task there. Returns whether it reached `end`, requesting completion.
     pub(crate) fn arrive_task_graph(
@@ -740,7 +1017,7 @@ impl SqliteStore {
             rusqlite::params![task.as_str(), END, crate::store::rows::now_unix()],
         )? > 0;
         if ended {
-            ship_in(&tx, task, by, "its run reached the end")?;
+            ship_in(&tx, task, by, "its run reached the end", Approval::Route)?;
             super::children::request_completion_in(&tx, task, None)?;
         }
         tx.commit()?;
@@ -757,8 +1034,8 @@ impl SqliteStore {
         Ok(set)
     }
 
-    /// Hand the Task off to finish on its own, carried by `by`. Shipping that
-    /// already began keeps its start; only the carrier changes.
+    /// Hand the Task off to finish on its own, carried by `by`, lifting any
+    /// stop. Shipping that already began keeps its start; only the carrier changes.
     pub(crate) fn ship_task(
         &self,
         task: &TaskId,
@@ -767,21 +1044,38 @@ impl SqliteStore {
     ) -> StoreResult<TaskShipping> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
-        let shipping = ship_in(&tx, task, by, note)?;
+        let shipping =
+            ship_in(&tx, task, by, note, Approval::Explicit)?.expect("explicit approval ships");
         tx.commit()?;
         Ok(shipping)
     }
 
-    /// Withdraw a Task's Auto-Ship approval. Returns the approval and the process
-    /// that carried it, when it was approved.
+    /// Withdraw a Task's Auto-Ship approval. With `stopped_by`, a person
+    /// stopped it: the stop stands, even when it was not shipping, until
+    /// `lf ship` approves it again. Returns the approval and the process that
+    /// carried it, when it was approved.
     pub(crate) fn stop_shipping(
         &self,
         task: &TaskId,
         note: &str,
+        stopped_by: Option<ShipStop>,
     ) -> StoreResult<Option<TaskShipping>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
-        let Some(shipping) = unship_in(&tx, task)? else {
+        let shipping = shipping_in(&tx, task)?;
+        if let Some(by) = stopped_by {
+            append_ship_event_in(
+                &tx,
+                task,
+                ShipEvent::Stopped,
+                by.at,
+                by.by.as_ref(),
+                by.person.as_deref(),
+            )?;
+        }
+        unship_in(&tx, task)?;
+        let Some(shipping) = shipping else {
+            tx.commit()?;
             return Ok(None);
         };
         super::children::insert_task_event_in(
@@ -801,50 +1095,97 @@ impl SqliteStore {
         shipping_in(&conn, task)
     }
 
+    /// The person's stop that keeps a run from approving the Task, if one stands.
+    pub(crate) fn task_ship_stop(&self, task: &TaskId) -> StoreResult<Option<ShipStop>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        ship_stop_in(&conn, task)
+    }
+
     /// Handed-off Tasks whose checkout is on this Machine, with their handoffs.
     pub(crate) fn local_shipping_tasks(&self) -> StoreResult<Vec<(TaskId, TaskShipping)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare(
-            "SELECT id,shipped_at,ship_lf_process_id,ship_restarts FROM tasks
-             WHERE shipped_at IS NOT NULL
-             AND checkout_machine_id=(SELECT id FROM machines WHERE route='local')",
-        )?;
-        let rows = query
-            .query_map([], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get(1)?,
-                    row.get(2)?,
-                    row.get(3)?,
-                ))
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-        rows.into_iter()
-            .map(|(id, shipped_at, process, restarts)| {
-                let id = TaskId::parse(&id)
-                    .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))?;
-                Ok((id, shipping(shipped_at, process, restarts)?))
-            })
-            .collect()
+        let ids = {
+            let mut query = conn.prepare(
+                "SELECT id FROM tasks WHERE shipped_at IS NOT NULL
+                 AND id IN (SELECT task_id FROM task_checkouts)",
+            )?;
+            let rows = query.query_map([], |row| row.get::<_, String>(0))?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+        let mut shipping = Vec::new();
+        for id in ids {
+            let id = TaskId::parse(&id)
+                .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))?;
+            if let Some(handoff) = shipping_in(&conn, &id)? {
+                shipping.push((id, handoff));
+            }
+        }
+        Ok(shipping)
     }
 
-    /// Count one more restart after a failed ship process.
+    /// Count one more restart after a failed ship process, up to
+    /// [`SHIP_RESTARTS_COUNTED`].
     pub(crate) fn count_ship_restart(&self, task: &TaskId) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "UPDATE tasks SET ship_restarts=ship_restarts+1 WHERE id=?1",
-            [task.as_str()],
-        )?;
-        Ok(())
+        if ship_log_in(&conn, task)?.restarts >= SHIP_RESTARTS_COUNTED {
+            return Ok(());
+        }
+        let now = crate::store::rows::now_unix();
+        append_ship_event_in(&conn, task, ShipEvent::Restarted, now, None, None)
     }
 
     /// A ship step completed: the next failure restarts without waiting long.
     pub(crate) fn reset_ship_restarts(&self, task: &TaskId) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "UPDATE tasks SET ship_restarts=0 WHERE id=?1",
+            "DELETE FROM task_ship_events WHERE task_id=?1 AND kind='restarted'",
             [task.as_str()],
         )?;
+        Ok(())
+    }
+
+    /// The Task's standing Auto-Ship approval, which a move carries along.
+    pub(crate) fn task_ship_approval(&self, task: &TaskId) -> StoreResult<Option<ShipApproval>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        if shipping_in(&conn, task)?.is_none() {
+            return Ok(None);
+        }
+        Ok(ship_log_in(&conn, task)?.approval)
+    }
+
+    /// A move arrived carrying `approval`: the Task ships here as it did
+    /// where it came from, from the same start, with no carrier yet.
+    pub(crate) fn take_in_ship_approval(
+        &self,
+        task: &TaskId,
+        approval: &ShipApproval,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction()?;
+        if shipping_in(&tx, task)?.is_none() {
+            super::planning_write::local(
+                &tx,
+                &crate::work::edit::WorkEdit::for_target(
+                    task.as_str(),
+                    &[crate::work::edit::WorkValue::TaskShippedAt(Some(
+                        approval.at,
+                    ))],
+                ),
+            )?;
+        }
+        if ship_log_in(&tx, task)?.approval.as_ref() != Some(approval) {
+            append_ship_event_in(
+                &tx,
+                task,
+                ShipEvent::Approved,
+                approval.at,
+                approval.by.as_ref(),
+                None,
+            )?;
+            // The approving Process ran where the Task came from; nothing carries it here yet.
+            append_ship_event_in(&tx, task, ShipEvent::Carried, approval.at, None, None)?;
+        }
+        tx.commit()?;
         Ok(())
     }
 
@@ -855,6 +1196,15 @@ impl SqliteStore {
     ) -> StoreResult<HashMap<TaskId, crate::ops::graph_process::GraphProcess>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         latest_task_graphs(&conn, tasks)
+    }
+
+    /// Each of `tasks`' completed Graph steps, read for all of them at once.
+    pub(crate) fn completed_graph_steps(
+        &self,
+        tasks: &[&TaskId],
+    ) -> StoreResult<HashMap<TaskId, HashSet<LfProcessId>>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        completed_graph_steps(&conn, tasks)
     }
 
     /// Every Graph among the Task's work, oldest first.
@@ -875,9 +1225,379 @@ mod tests {
 
     use crate::durable::{GraphProcessFilter, ProjectId, TaskId};
     use crate::id::{LfProcessId, TraceId, WaveId};
-    use crate::process::{LfProcessFilter, LfProcessWorkFilter};
+    use crate::process::{ProcessFilter, ProcessWorkFilter};
     use crate::session::SessionFilter;
     use crate::store::sqlite::SqliteStore;
+
+    #[test]
+    fn process_membership_upgrade_probes_cwd_and_session_indexes() {
+        use crate::store::migrations::{apply_before_migration, apply_pending_migrations};
+        use rusqlite::{types::Value, StatementStatus};
+
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        apply_before_migration(&conn, "session_list_indexes");
+        conn.execute_batch(
+            "INSERT INTO repository_plans(id,repo,selected) VALUES('repo_11111111111111111111111111111111','/repo',1);
+             INSERT INTO tasks(id,repository_id,issue_identifier,worktree,checkout_machine_id,created_at)
+             VALUES('task_11111111111111111111111111111111','repo_11111111111111111111111111111111',
+                'FIX-1','/repo/task',(SELECT id FROM machines WHERE is_local=1),1);
+             INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id)
+             VALUES('member','Member','human',1,0,'/elsewhere','task_11111111111111111111111111111111');
+             WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<6000)
+             INSERT INTO processes(id,trace_id,cwd,started_at,completed_at,kind)
+             SELECT printf('00000000-0000-4000-8000-%012x',i),
+                    printf('00000000-0000-4000-8000-%012x',i),'/unrelated/'||i,1,2,
+                    CASE WHEN i>3000 THEN 'agent' ELSE 'lf' END FROM n;
+             UPDATE processes SET cwd='/repo/task' WHERE id='00000000-0000-4000-8000-000000000001';
+             UPDATE processes SET cwd='/repo/task/sub' WHERE id='00000000-0000-4000-8000-000000000002';
+             UPDATE processes SET cwd='/repo/task-other' WHERE id='00000000-0000-4000-8000-000000000003';
+             INSERT INTO session_events(session_id,kind,receipt_key,lf_process_id,observed_at,payload)
+             VALUES('member','started','history','00000000-0000-4000-8000-000000000004',1,'{}');
+             UPDATE processes SET agent_session_id='member',attached_lf_process_id='00000000-0000-4000-8000-000000000005'
+                WHERE id='00000000-0000-4000-8000-000000001001';
+             INSERT INTO relocated_task_processes(task_id,process_id)
+             VALUES('task_11111111111111111111111111111111','00000000-0000-4000-8000-000000000006');",
+        ).unwrap();
+        let sql = format!(
+            "{} WHERE e.id IN ({}) ORDER BY e.started_at DESC,e.id",
+            super::super::processes::PROCESS_SELECT,
+            super::lf_process_ids(&conn, "?1").unwrap()
+        );
+        let read = || {
+            let mut query = conn.prepare(&sql).unwrap();
+            let width = query.column_count();
+            let rows = query
+                .query_map(["FIX-1"], |row| {
+                    (0..width)
+                        .map(|i| row.get::<_, Value>(i))
+                        .collect::<rusqlite::Result<Vec<_>>>()
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap();
+            (
+                rows,
+                query.get_status(StatementStatus::VmStep),
+                query.get_status(StatementStatus::FullscanStep),
+            )
+        };
+        // The upgrade moves the released checkout into `task_checkouts`.
+        apply_pending_migrations(&conn);
+        let (after, _, scans) = read();
+        let ids: Vec<_> = after.iter().map(|row| row[0].clone()).collect();
+        assert_eq!(
+            ids,
+            [1, 2, 4, 5, 6, 4097].map(|i| Value::Text(format!("00000000-0000-4000-8000-{i:012x}")))
+        );
+        assert!(scans < 100, "fullscan steps: {scans}");
+        let plans: Vec<String> = conn
+            .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+            .unwrap()
+            .query_map(["FIX-1"], |row| row.get(3))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        for index in [
+            "processes_cwd (cwd=?)",
+            "processes_cwd (cwd>? AND cwd<?)",
+            "processes_agent_session",
+        ] {
+            assert!(
+                plans.iter().any(|line| line.contains(index)),
+                "missing {index}: {plans:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn indexed_process_membership_keeps_lexical_paths_and_relocations() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
+        let conn = store.conn.lock().unwrap();
+        conn.execute_batch(
+            "INSERT INTO repository_plans(id,repo,selected) VALUES('repo_11111111111111111111111111111111','/repo',1);
+             INSERT INTO tasks(id,repository_id,issue_identifier,created_at)
+             VALUES('task_11111111111111111111111111111111','repo_11111111111111111111111111111111','FIX-1',1),
+                ('task_22222222222222222222222222222222','repo_11111111111111111111111111111111','FIX-2',1);
+             INSERT INTO task_checkouts(task_id,worktree)
+             VALUES('task_11111111111111111111111111111111','/repo/task'),
+                ('task_22222222222222222222222222222222','/other');",
+        ).unwrap();
+        for cwd in [
+            None,
+            Some(""),
+            Some("/"),
+            Some("//"),
+            Some("/repo/task"),
+            Some("/repo/task/"),
+            Some("/repo/task//sub"),
+            Some("/repo/task-other"),
+            Some("/repo/task0"),
+            Some("relative/sub"),
+            Some("relative"),
+            Some("relative-other"),
+            Some("/repo/%_"),
+            Some("/repo/%_/é"),
+            Some("/repo/AB/x"),
+            Some("/repo//task/sub"),
+        ] {
+            let id = LfProcessId::new();
+            conn.execute(
+                "INSERT INTO processes(id,trace_id,cwd,started_at) VALUES(?1,?1,?2,1)",
+                params![id, cwd],
+            )
+            .unwrap();
+        }
+        conn.execute_batch(
+            "INSERT INTO relocated_task_processes(task_id,process_id)
+             SELECT 'task_22222222222222222222222222222222',id FROM processes WHERE cwd='/repo/task';
+             INSERT INTO relocated_task_processes(task_id,process_id)
+             SELECT 'task_11111111111111111111111111111111',id FROM processes WHERE cwd='/repo/AB/x';",
+        ).unwrap();
+        let original = format!(
+            "SELECT ae.id FROM processes ae JOIN ({}) tw ON ({}) ORDER BY ae.id",
+            super::tasks("?1"),
+            super::process_membership(&conn, "ae").unwrap()
+        );
+        let indexed = format!(
+            "SELECT id FROM ({}) ORDER BY id",
+            super::lf_process_ids(&conn, "?1").unwrap()
+        );
+        for root in [
+            "/repo/task",
+            "/repo/task/",
+            "/repo//task//",
+            "/repo/%_",
+            "relative/",
+            "/",
+            "///",
+            "",
+        ] {
+            for local in [true, false] {
+                let task = "task_11111111111111111111111111111111";
+                conn.execute("DELETE FROM task_checkouts WHERE task_id=?1", [task])
+                    .unwrap();
+                if local && !root.is_empty() {
+                    conn.execute(
+                        "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,?2)",
+                        params![task, root],
+                    )
+                    .unwrap();
+                }
+                let read = |sql: &str| {
+                    conn.prepare(sql)
+                        .unwrap()
+                        .query_map(["FIX-1"], |row| row.get::<_, String>(0))
+                        .unwrap()
+                        .collect::<Result<Vec<_>, _>>()
+                        .unwrap()
+                };
+                assert_eq!(
+                    read(&indexed),
+                    read(&original),
+                    "root={root:?}, local={local}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn session_membership_upgrade_probes_task_indexes() {
+        use crate::store::migrations::{apply_before_migration, apply_pending_migrations};
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        apply_before_migration(&conn, "session_list_indexes");
+        conn.execute_batch(
+            "INSERT INTO repository_plans(id,repo,selected) VALUES('repo_11111111111111111111111111111111','/repo',1);
+             WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<1000)
+             INSERT INTO tasks(id,repository_id,issue_identifier,issue_title,worktree,checkout_machine_id,created_at)
+             SELECT printf('task_%032x',i),'repo_11111111111111111111111111111111','FIX-'||i,'Task','/repo/'||i,
+                (SELECT id FROM machines WHERE is_local=1),1 FROM n;
+             INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id)
+             VALUES('probe','Probe','human',1,0,'/repo/999/sub','task_00000000000000000000000000000001');
+             UPDATE tasks SET primary_session_id='probe' WHERE worktree='/repo/999';"
+        ).unwrap();
+        let sql = format!(
+            "SELECT (SELECT json_group_array(id) FROM ({})),
+                EXISTS(SELECT 1 FROM task_primary_sessions p WHERE p.session_id=a.id)
+             FROM agent_sessions a WHERE id=?1",
+            super::session_tasks("a")
+        );
+        let read = || {
+            let mut query = conn.prepare(&sql).unwrap();
+            let result: (String, bool) = query
+                .query_row(["probe"], |row| Ok((row.get(0)?, row.get(1)?)))
+                .unwrap();
+            (result, query.get_status(rusqlite::StatementStatus::VmStep))
+        };
+        // The upgrade moves the released checkouts into `task_checkouts` and the
+        // primary Session into `task_primary_sessions`.
+        apply_pending_migrations(&conn);
+        let (after, _) = read();
+        assert_eq!(after, (r#"["task_00000000000000000000000000000001","task_000000000000000000000000000003e7"]"#.into(), true));
+        let plans: Vec<String> = conn
+            .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+            .unwrap()
+            .query_map(["probe"], |row| row.get(3))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert!(
+            plans
+                .iter()
+                .any(|line| line.contains("task_checkouts_root") && line.contains("<expr>=?")),
+            "{plans:?}"
+        );
+        assert!(
+            plans
+                .iter()
+                .any(|line| line.contains("task_primary_sessions") && line.contains("INDEX")),
+            "{plans:?}"
+        );
+        assert_eq!(
+            conn.query_row("PRAGMA integrity_check", [], |row| row.get::<_, String>(0))
+                .unwrap(),
+            "ok"
+        );
+    }
+
+    #[test]
+    fn reverse_session_membership_keeps_lexical_checkout_and_binding_rules() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
+        let repository = store.ensure_repository("/repo").unwrap();
+        let roots = [
+            Some("/"),
+            Some("/repo"),
+            Some("/repo/task///"),
+            Some("/repo/task/nested"),
+            Some("/repo//task"),
+            Some("relative"),
+            Some("relative//nested/"),
+            Some("/literal%_"),
+            Some(""),
+            None,
+            Some("/foreign"),
+        ];
+        let tasks: Vec<_> = roots.iter().map(|_| TaskId::new()).collect();
+        {
+            let conn = store.conn.lock().unwrap();
+            for (index, (id, root)) in tasks.iter().zip(roots).enumerate() {
+                conn.execute(
+                    "INSERT INTO tasks(id,repository_id,issue_identifier,issue_title,created_at)
+                     VALUES(?1,?2,?1,'Task',1)",
+                    params![id.as_str(), repository.as_str()],
+                )
+                .unwrap();
+                // `/foreign` is checked out on another Machine: no row here.
+                if let Some(root) = root.filter(|root| !root.is_empty() && index != 10) {
+                    conn.execute(
+                        "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,?2)",
+                        params![id.as_str(), root],
+                    )
+                    .unwrap();
+                }
+            }
+        }
+        let mut case = 0;
+        for (cwd, expected) in [
+            ("/repo/task/nested/file", vec![0, 1, 2, 3]),
+            ("/repo/task///", vec![0, 1, 2]),
+            ("/repo/task//nested/file", vec![0, 1, 2]),
+            ("/repo//task/file", vec![0, 1, 4]),
+            ("/repo/task-other", vec![0, 1]),
+            ("/repository", vec![0]),
+            ("relative//nested/file", vec![5, 6]),
+            ("relative/", vec![5]),
+            ("elsewhere", vec![]),
+            ("", vec![0]),
+            ("///", vec![0]),
+            ("/literal%_/file", vec![0, 7]),
+            ("/literalAB/file", vec![0]),
+            ("/foreign/file", vec![0]),
+        ] {
+            for binding in [None, Some(2), Some(8), Some(9), Some(10)] {
+                for scope in [None, Some("repository"), Some("wave")] {
+                    let session = format!("lexical-{case}");
+                    case += 1;
+                    {
+                        let conn = store.conn.lock().unwrap();
+                        conn.execute(
+                            "INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,primary_scope,interactive)
+                             VALUES(?1,'Lexical','human',1,0,?2,?3,?4,1)",
+                            params![session, cwd, binding.map(|index| tasks[index].as_str()), scope],
+                        ).unwrap();
+                        super::super::sessions::test_capture(
+                            &conn,
+                            &session,
+                            &crate::session_record::new_artifact_key(),
+                        );
+                        conn.execute(
+                            "INSERT OR REPLACE INTO task_primary_sessions(task_id,session_id) VALUES(?1,?2)",
+                            params![tasks[2].as_str(), session],
+                        )
+                        .unwrap();
+                    }
+                    let mut ids: Vec<_> = if scope.is_none() {
+                        expected
+                            .iter()
+                            .copied()
+                            .chain(binding)
+                            .map(|index| tasks[index].clone())
+                            .collect()
+                    } else {
+                        Vec::new()
+                    };
+                    ids.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+                    ids.dedup();
+                    assert_eq!(
+                        store.session_task_ids(&session).unwrap(),
+                        ids,
+                        "{cwd:?}, {binding:?}, {scope:?}"
+                    );
+                    let summary = store.session_summary(&session, 0).unwrap().unwrap();
+                    assert_eq!(summary.task_ids, ids);
+                    assert!(summary.task_primary);
+                }
+            }
+        }
+        assert!(store.session_task_ids("missing").unwrap().is_empty());
+    }
+
+    #[test]
+    fn request_stop_retains_its_person_without_an_os_process() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("db");
+        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let task = store
+            .create_task(&crate::work::task::NewTask {
+                id: TaskId::new(),
+                repository_id: store.ensure_repository("/request-stop").unwrap(),
+                project_id: None,
+                title: "Stop".into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap();
+        let stop = super::ShipStop {
+            at: 25,
+            by: None,
+            person: Some("Casey".into()),
+        };
+        assert!(store
+            .stop_shipping(&task.id, "Casey", Some(stop.clone()))
+            .unwrap()
+            .is_none());
+        drop(store);
+        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        assert_eq!(store.task_ship_stop(&task.id).unwrap(), Some(stop));
+        let count: i64 = store
+            .conn
+            .lock()
+            .unwrap()
+            .query_row("SELECT count(*) FROM processes", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 0);
+    }
 
     #[test]
     fn defer_holds_the_lifecycle_and_a_run_with_nothing_interactive_ahead_ships() {
@@ -930,7 +1650,7 @@ mod tests {
             .lock()
             .unwrap()
             .execute(
-                "UPDATE tasks SET worktree='/repo/task' WHERE id=?1",
+                "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,'/repo/task')",
                 [task.as_str()],
             )
             .unwrap();
@@ -941,6 +1661,7 @@ mod tests {
                     skill: crate::graph::Skill::named("pursue"),
                     id: None,
                     interactive: false,
+                    interactive_name: None,
                     returns: None,
                     sources: Vec::new(),
                 },
@@ -950,23 +1671,8 @@ mod tests {
         let before = store.task_graph(&task).unwrap().unwrap();
         let row = store.task_graph_row(&task).unwrap().unwrap();
         let start = crate::graph::runner::ExecutionCursor::default();
-        store.set_task_deferred(&task, true).unwrap();
-        store.set_task_deferred(&task, true).unwrap();
-        assert_eq!(
-            store.task_state(&task).unwrap(),
-            crate::durable::TaskState::Deferred
-        );
-        assert!(store
-            .start_task_graph_run(&task, &row, &start, &LfProcessId::new(), true)
-            .is_err());
-        assert_eq!(store.task_graph(&task).unwrap().unwrap(), before);
         drop(store);
         let store = SqliteStore::open_ephemeral(&path).unwrap();
-        assert_eq!(
-            store.task_state(&task).unwrap(),
-            crate::durable::TaskState::Deferred
-        );
-        store.set_task_deferred(&task, false).unwrap();
         assert_eq!(
             store.task_state(&task).unwrap(),
             crate::durable::TaskState::Idle
@@ -990,34 +1696,58 @@ mod tests {
         let shipping = store.task_shipping(&task).unwrap().unwrap();
         assert_eq!(shipping.process, Some(by.clone()));
         // Only the checkout's Machine restarts its ship process.
+        let checkout = |sql: &str| {
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .execute(sql, [task.as_str()])
+                .unwrap()
+        };
+        checkout("DELETE FROM task_checkouts WHERE task_id=?1");
         assert!(store.local_shipping_tasks().unwrap().is_empty());
-        store
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                "UPDATE tasks SET checkout_machine_id=(SELECT id FROM machines WHERE route='local') WHERE id=?1",
-                [task.as_str()],
-            )
-            .unwrap();
+        checkout("INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,'/repo/task')");
         assert_eq!(
             store.local_shipping_tasks().unwrap(),
             [(task.clone(), shipping.clone())]
         );
-        // Defer holds shipping without ending it.
-        store.set_task_deferred(&task, true).unwrap();
-        assert_eq!(state(), crate::durable::TaskState::Deferred);
-        store.set_task_deferred(&task, false).unwrap();
-        assert_eq!(state(), crate::durable::TaskState::Shipping);
         // Shipping again keeps when it began.
         let again = store.ship_task(&task, &by, "again").unwrap();
         assert_eq!(again.shipped_at, shipping.shipped_at);
         // Stop withdraws the approval; the run still going keeps it moving.
-        assert_eq!(store.stop_shipping(&task, "stop").unwrap(), Some(shipping));
+        assert_eq!(shipping.approved_by, Some(by.clone()));
+        let stopper = LfProcessId::new();
+        assert_eq!(
+            store
+                .stop_shipping(
+                    &task,
+                    "stop",
+                    Some(super::ShipStop {
+                        at: crate::store::rows::now_unix(),
+                        by: Some(stopper.clone()),
+                        person: None
+                    })
+                )
+                .unwrap(),
+            Some(shipping)
+        );
         assert_eq!(state(), crate::durable::TaskState::Moving);
-        assert_eq!(store.stop_shipping(&task, "stop").unwrap(), None);
-        // Approved again with nothing running, it is idle until its ship process restarts.
+        assert_eq!(store.stop_shipping(&task, "stop", None).unwrap(), None);
+        // The person's stop stands: a relaunch running to the end does not approve it.
+        let relaunch = store.task_graph_row(&task).unwrap().unwrap();
+        assert!(store
+            .start_task_graph_run(&task, &relaunch, &start, &by, true)
+            .unwrap());
+        assert!(store.task_shipping(&task).unwrap().is_none());
+        assert_eq!(state(), crate::durable::TaskState::Moving);
+        assert_eq!(
+            store.task_ship_stop(&task).unwrap().unwrap().by,
+            Some(stopper)
+        );
+        // Approved again with nothing running, it is idle until its ship process
+        // restarts. Only `lf ship` lifts the stop.
         store.ship_task(&task, &by, "again").unwrap();
+        assert!(store.task_ship_stop(&task).unwrap().is_none());
         store
             .conn
             .lock()
@@ -1044,7 +1774,8 @@ mod tests {
             .unwrap();
             conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)",params![project.as_str(),wave]).unwrap();
             conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
-            conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,worktree,workspace_slug,branch,base_commit,created_at,updated_at,issue_title,issue_description,pm_snapshot_synced_at) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'issue','PROOF-1','/repo','proof','proof','head',1,1,'Findings','Accepted findings',1)",params![task.as_str(),project.as_str()]).unwrap();
+            conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,workspace_slug,created_at,updated_at,issue_title,issue_description,pm_snapshot_synced_at) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?1),?2,?1,'issue','PROOF-1','proof',1,1,'Findings','Accepted findings',1)",params![project.as_str(),task.as_str()]).unwrap();
+            conn.execute("INSERT INTO task_checkouts(task_id,worktree,branch,base_commit) VALUES(?1,'/repo','proof','head')",params![task.as_str()]).unwrap();
             let carrier = LfProcessId::new();
             conn.execute(
                 "INSERT INTO processes(id,trace_id,cwd,started_at) VALUES(?1,?2,'/repo',1)",
@@ -1177,20 +1908,24 @@ mod tests {
                 [],
             )
             .unwrap();
-            // A sibling whose path extends the Task's is not inside it.
             for (id, n, worktree) in [
                 (&task, 1, "/repo/task/"),
                 (&sibling, 2, "/repo/task-other"),
                 (&idle, 3, "/repo/idle"),
             ] {
-                conn.execute("INSERT INTO tasks(repository_id,id,project_id,issue_identifier,worktree,created_at,checkout_machine_id) VALUES('repo_proof',?1,?2,?3,?4,1,(SELECT id FROM machines WHERE route='local'))", params![id.as_str(), project.as_str(), format!("PROOF-{n}"), worktree]).unwrap();
+                conn.execute("INSERT INTO tasks(repository_id,id,project_id,issue_identifier,created_at) VALUES('repo_proof',?1,?2,?3,1)",params![id.as_str(),project.as_str(),format!("PROOF-{n}")]).unwrap();
+                conn.execute(
+                    "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,?2)",
+                    params![id.as_str(), worktree],
+                )
+                .unwrap();
             }
-            for cwd in [
-                "/repo/task",
-                "/repo/task-other",
-                "/repo/task/deep/er",
-                "/repo/task-other/x",
-                "/elsewhere",
+            for (cwd, owner) in [
+                ("/repo/task", Some(&task)),
+                ("/repo/task-other", Some(&sibling)),
+                ("/repo/task/deep/er", Some(&task)),
+                ("/repo/task-other/x", Some(&sibling)),
+                ("/elsewhere", None),
             ] {
                 let id = LfProcessId::new();
                 conn.execute(
@@ -1198,12 +1933,12 @@ mod tests {
                     params![id, TraceId::new(), cwd],
                 )
                 .unwrap();
-                graphs.push(id);
+                graphs.push((id, owner));
             }
         }
         let graph = crate::graph::compiled::CompiledGraph::new("proof", &[]);
-        for id in &graphs {
-            store.record_graph_process(id, &graph).unwrap();
+        for (id, owner) in &graphs {
+            store.record_graph_process(id, &graph, *owner).unwrap();
         }
         let latest = store.latest_task_graphs(&[&task, &sibling, &idle]).unwrap();
         for id in [&task, &sibling, &idle] {
@@ -1241,7 +1976,12 @@ mod tests {
         .unwrap();
         conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)", params![project.as_str(), wave]).unwrap();
         conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
-        conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,worktree,created_at,checkout_machine_id) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'issue','PROOF-1','/repo/task',1,(SELECT id FROM machines WHERE route='local'))", params![task.as_str(), project.as_str()]).unwrap();
+        conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,created_at) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?1),?2,?1,'issue','PROOF-1',1)",params![project.as_str(),task.as_str()]).unwrap();
+        conn.execute(
+            "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,'/repo/task')",
+            params![task.as_str()],
+        )
+        .unwrap();
         // The Session is bound, and its Processes ran elsewhere: only event
         // history associates them with the Task.
         conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,task_id,wave_id,cwd)
@@ -1297,7 +2037,7 @@ mod tests {
         // attachment lookup for unrelated completed providers.
         let cleanup_cost = || {
             let mut query = conn
-                .prepare(&super::task_open_process_ids(&conn).unwrap())
+                .prepare(&super::task_open_process_ids("?1", "1"))
                 .unwrap();
             let ids = query
                 .query_map([task.as_str()], |row| row.get::<_, LfProcessId>(0))
@@ -1333,14 +2073,14 @@ mod tests {
             after_cleanup.0 <= before_cleanup.0 * 2 && after_cleanup.1 <= before_cleanup.1 * 2,
             "Unrelated history increased cleanup scans: {before_cleanup:?} → {after_cleanup:?}"
         );
-        // Graph reads start from the Graphs without losing historical association
-        // when the Graph ran outside the Task's checkout.
+        // A Graph started for the Task is its work wherever it ran, and other
+        // Tasks' Graphs cost one Task's reading nothing.
         conn.execute(
-            "INSERT INTO graph_processes(lf_process_id,graph,compiled) VALUES(?1,'proof','{}')",
-            [&finished],
+            "INSERT INTO graph_processes(lf_process_id,graph,compiled,task_id) VALUES(?1,'proof','{}',?2)",
+            params![finished, task.as_str()],
         )
         .unwrap();
-        let pairs = super::task_graph_pairs(&conn, &super::tasks("?1")).unwrap();
+        let pairs = super::task_graph_pairs("?1");
         let read_graphs = || {
             let mut statement = conn.prepare(&pairs).unwrap();
             let selected = statement
@@ -1352,35 +2092,43 @@ mod tests {
             statement.get_status(rusqlite::StatementStatus::VmStep)
         };
         let before = read_graphs();
-        for _ in 0..2_000 {
+        let others: Vec<String> = conn
+            .prepare("SELECT id FROM tasks WHERE id!=?1")
+            .unwrap()
+            .query_map([task.as_str()], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        for other in &others {
+            let graph = LfProcessId::new();
             conn.execute(
                 "INSERT INTO processes(id,trace_id,cwd,started_at) VALUES(?1,?2,'/unrelated',1)",
-                params![LfProcessId::new(), TraceId::new()],
+                params![graph, TraceId::new()],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO graph_processes(lf_process_id,graph,compiled,task_id) VALUES(?1,'proof','{}',?2)",
+                params![graph, other],
             )
             .unwrap();
         }
         let after = read_graphs();
         assert!(
             after <= before * 2,
-            "Unrelated commands increased Graph membership work: {before} → {after}"
+            "Other Tasks' Graphs increased one Task's Graph reading: {before} → {after}"
         );
-        // Every Task's Graphs are one reading driven from the Graphs, so Sessions
-        // that reach no Graph cost nothing however many Tasks are read. On
-        // October 18, 2026 each Task rescanned all 4,246 of Jack Heart's
-        // Sessions: 2.3 s for 622 Tasks.
-        let every_task =
-            super::task_graph_pairs(&conn, "SELECT id,worktree,checkout_machine_id FROM tasks")
-                .unwrap();
+        // Every Task's Graphs come from the Graph records, so Sessions that
+        // reach no Graph cost nothing however many Tasks are read. On October
+        // 18, 2026 each Task rescanned all 4,246 of Jack Heart's Sessions:
+        // 2.3 s for 622 Tasks.
+        let every_task = super::task_graph_pairs("SELECT id FROM tasks");
         let read_every_task = || {
             let mut statement = conn.prepare(&every_task).unwrap();
             let pairs = statement
-                .query_map([], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                })
+                .query_map([], |row| row.get::<_, String>(0))
                 .unwrap()
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .unwrap();
-            assert_eq!(pairs, vec![(task.to_string(), finished.to_string())]);
+                .count();
+            assert_eq!(pairs, others.len() + 1);
             statement.get_status(rusqlite::StatementStatus::VmStep)
         };
         let before = read_every_task();
@@ -1423,7 +2171,12 @@ mod tests {
             .unwrap();
             conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)", params![project.as_str(),wave]).unwrap();
             conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
-            conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,issue_title,worktree,created_at,checkout_machine_id) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'issue','PROOF-1','Retained Task',?3,1,(SELECT id FROM machines WHERE route='local'))",params![task.as_str(),project.as_str(),repo.path().to_str().unwrap()]).unwrap();
+            conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,issue_title,created_at) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?1),?2,?1,'issue','PROOF-1','Retained Task',1)",params![project.as_str(),task.as_str()]).unwrap();
+            conn.execute(
+                "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,?2)",
+                params![task.as_str(), repo.path().to_str().unwrap()],
+            )
+            .unwrap();
             for (id, path, scope) in [
                 ("a-alias", alias.join("sub"), None),
                 ("b-subdir", repo.path().join("sub"), None),
@@ -1489,7 +2242,12 @@ mod tests {
             .unwrap();
             conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)", params![project.as_str(),wave]).unwrap();
             conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
-            conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,worktree,created_at,checkout_machine_id) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'issue','PROOF-1','/repo/task',1,(SELECT id FROM machines WHERE route='local'))",params![task.as_str(),project.as_str()]).unwrap();
+            conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,created_at) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?1),?2,?1,'issue','PROOF-1',1)",params![project.as_str(),task.as_str()]).unwrap();
+            conn.execute(
+                "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,'/repo/task')",
+                params![task.as_str()],
+            )
+            .unwrap();
             for (id, scope, wave_id, cwd) in [
                 ("a-task", None, None, "/repo/task/sub"),
                 ("b-repo", Some("repository"), None, "/repo/task"),
@@ -1527,7 +2285,8 @@ mod tests {
             after: Some(String::new()),
             ..Default::default()
         };
-        for expected in ["b-repo", "c-wave", "d-orphan"] {
+        // A Wave conversation has a `wave_id`, so it is not an orphan.
+        for expected in ["b-repo", "d-orphan"] {
             let page = store.session_summaries(&filter, 0).unwrap();
             assert_eq!(page.len(), 1);
             assert_eq!(page[0].id, expected);
@@ -1555,7 +2314,12 @@ mod tests {
             .unwrap();
             conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)", params![project.as_str(), wave]).unwrap();
             conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
-            conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,worktree,created_at,checkout_machine_id) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'issue','PROOF-1','/missing/task%_',1,(SELECT id FROM machines WHERE route='local'))", params![task.as_str(), project.as_str()]).unwrap();
+            conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,created_at) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?1),?2,?1,'issue','PROOF-1',1)",params![project.as_str(),task.as_str()]).unwrap();
+            conn.execute(
+                "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,'/missing/task%_')",
+                params![task.as_str()],
+            )
+            .unwrap();
             for (id, cwd, bound, complete) in [
                 ("manual", "/missing/task%_/src", false, false),
                 ("conversation", "/missing/task%_", false, false),
@@ -1622,7 +2386,7 @@ mod tests {
         assert_eq!(initial_open.len(), 2);
         assert!(initial_open
             .iter()
-            .all(|process| process.completed_at.is_none()));
+            .all(|process| process.completed_at().is_none()));
         let unfinished = LfProcessId::new();
         {
             let conn = store.conn.lock().unwrap();
@@ -1635,7 +2399,9 @@ mod tests {
         }
         let open = store.task_open_processes(&task).unwrap();
         assert_eq!(open.len(), 3);
-        assert!(open.iter().any(|process| process.id == unfinished));
+        assert!(open
+            .iter()
+            .any(|process| process.id() == unfinished.as_str()));
         // With every Process unfinished, each membership path agrees: checkout,
         // Session event and attachment.
         store
@@ -1647,10 +2413,10 @@ mod tests {
              UPDATE processes SET completed_at=NULL;",
             )
             .unwrap();
-        let ids = |processes: Vec<crate::process::LfProcess>| {
+        let ids = |processes: Vec<crate::process::ProcessEntry>| {
             processes
-                .into_iter()
-                .map(|process| process.id)
+                .iter()
+                .map(|process| process.id().to_owned())
                 .collect::<Vec<_>>()
         };
         let all = ids(store.task_work(&task).unwrap().processes);
@@ -1671,11 +2437,11 @@ mod tests {
         assert!(work
             .processes
             .iter()
-            .any(|process| process.id == mechanical));
+            .any(|process| process.id() == mechanical.as_str()));
         assert!(work
             .processes
             .iter()
-            .any(|process| process.id == bound_process));
+            .any(|process| process.id() == bound_process.as_str()));
         assert_eq!(
             store.session_task_ids("manual").unwrap(),
             std::slice::from_ref(&task)
@@ -1685,14 +2451,19 @@ mod tests {
             .session_summaries(
                 &SessionFilter {
                     task: Some("PROOF-1".into()),
-                    interactive: None,
-                    history: true,
+                    headless: true,
                     ..Default::default()
                 },
                 0,
             )
             .unwrap();
-        assert_eq!(summaries.len(), work.sessions.len());
+        assert_eq!(
+            summaries.len(),
+            work.sessions
+                .iter()
+                .filter(|session| session.completed_at.is_none())
+                .count()
+        );
         assert!(summaries
             .iter()
             .all(|session| session.task_ids == std::slice::from_ref(&task)));
@@ -1710,8 +2481,8 @@ mod tests {
         // The Graph's step is the only work performed in the checkout.
         let performed = store
             .processes(
-                &LfProcessFilter {
-                    performed_work: Some(LfProcessWorkFilter::Task(task.clone())),
+                &ProcessFilter {
+                    performed_work: Some(ProcessWorkFilter::Task(task.clone())),
                     ..Default::default()
                 },
                 None,
@@ -1723,30 +2494,44 @@ mod tests {
             performed
                 .entries
                 .iter()
-                .map(|process| &process.id)
+                .map(crate::process::ProcessEntry::id)
                 .collect::<Vec<_>>(),
-            [&graph.steps[0].process.id]
+            [graph.steps[0].process.id.as_str()]
         );
 
         let child = TaskId::new();
         {
             let conn = store.conn.lock().unwrap();
             conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
-            conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,worktree,created_at,checkout_machine_id) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'child','PROOF-2','/missing/task%_/child',1,(SELECT id FROM machines WHERE route='local'))", params![child.as_str(), project.as_str()]).unwrap();
+            conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,created_at) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?1),?2,?1,'child','PROOF-2',1)",params![project.as_str(),child.as_str()]).unwrap();
+            conn.execute(
+                "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,'/missing/task%_/child')",
+                params![child.as_str()],
+            )
+            .unwrap();
             conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,wave_id) VALUES('child-session','Child','human',1,0,'/missing/task%_/child',?1,?2)", params![child.as_str(), wave]).unwrap();
         }
-        // A nested checkout's work is also its enclosing Task's.
+        // A Graph in a nested checkout started for the deepest Task, as its
+        // launch binds it; the enclosing Task keeps the nested Session.
         let child_graph = store.test_graph(
             "child",
             "/missing/task%_/child",
             &[("implement", None)],
             None,
         );
+        let graph_ids = |task: &TaskId| {
+            store
+                .task_work(task)
+                .unwrap()
+                .graph_processes
+                .into_iter()
+                .map(|graph| graph.summary.id)
+                .collect::<Vec<_>>()
+        };
+        let enclosing = graph_ids(&task);
+        assert!(!enclosing.contains(&child_graph.to_string()));
+        assert_eq!(graph_ids(&child), [child_graph.to_string()]);
         let work = store.task_work(&task).unwrap();
-        assert!(work
-            .graph_processes
-            .iter()
-            .any(|graph| graph.summary.id == child_graph.as_str()));
         assert!(work
             .sessions
             .iter()
@@ -1755,9 +2540,13 @@ mod tests {
         assert!(memberships.contains(&task) && memberships.contains(&child));
         {
             let conn = store.conn.lock().unwrap();
-            conn.execute("UPDATE tasks SET worktree='' WHERE id=?1", [task.as_str()])
-                .unwrap();
+            conn.execute(
+                "DELETE FROM task_checkouts WHERE task_id=?1",
+                [task.as_str()],
+            )
+            .unwrap();
         }
+        // Without its checkout the Task keeps the Graphs started for it.
         let work = store.task_work(&task).unwrap();
         assert_eq!(
             work.sessions
@@ -1766,24 +2555,144 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["history"]
         );
-        assert!(work.graph_processes.is_empty());
+        assert_eq!(graph_ids(&task), enclosing);
 
-        // A Graph explicitly bound through a Session remains visible after the
-        // checkout disappears. Inventory and Task status use the same rule.
-        let bound_graph = store.test_graph("bound", "/elsewhere", &[], None);
+        // A Session that later names a taskless Graph does not make it the
+        // Task's: the Graph's Task is what its launch recorded.
+        let taskless = store.test_graph("taskless", "/elsewhere", &[], None);
         {
             let conn = store.conn.lock().unwrap();
-            conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,lf_process_id,observed_at,payload) VALUES('history','started','bound-graph',?1,3,'{}')", [&bound_graph]).unwrap();
+            conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,lf_process_id,observed_at,payload) VALUES('history','started','taskless-graph',?1,3,'{}')", [&taskless]).unwrap();
         }
-        let work = store.task_work(&task).unwrap();
-        assert_eq!(work.graph_processes.len(), 1);
-        assert_eq!(work.graph_processes[0].summary.id, bound_graph.as_str());
+        assert_eq!(graph_ids(&task), enclosing);
+        let (_, entry) = store.graph_process(taskless.as_str()).unwrap().unwrap();
+        assert_eq!(entry.summary.task_id, None);
+    }
+
+    #[test]
+    fn a_moved_task_ships_where_it_arrives_from_its_approval_with_no_carrier() {
+        let (laptop_dir, mini_dir) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let id = TaskId::new();
+        let open = |dir: &tempfile::TempDir| {
+            let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
+            store
+                .create_task(&crate::work::task::NewTask {
+                    id: id.clone(),
+                    repository_id: store.ensure_repository("/moving").unwrap(),
+                    project_id: None,
+                    title: "Move".into(),
+                    description: String::new(),
+                    due_date: None,
+                })
+                .unwrap();
+            store
+        };
+        let (laptop, mini) = (open(&laptop_dir), open(&mini_dir));
+        let approver = LfProcessId::new();
+        let shipping = laptop.ship_task(&id, &approver, "ship").unwrap();
+        let approval = laptop.task_ship_approval(&id).unwrap().unwrap();
+        assert_eq!(approval.by, Some(approver.clone()));
+        // Delivered twice, as a retried move is.
+        mini.take_in_ship_approval(&id, &approval).unwrap();
+        mini.take_in_ship_approval(&id, &approval).unwrap();
         assert_eq!(
-            work.graph_processes[0].summary.task_id.as_ref(),
-            Some(&task)
+            mini.task_shipping(&id).unwrap(),
+            Some(super::TaskShipping {
+                shipped_at: approval.at,
+                approved_by: Some(approver),
+                process: None,
+                restarts: 0,
+            })
         );
-        let (_, entry) = store.graph_process(bound_graph.as_str()).unwrap().unwrap();
-        assert_eq!(entry.summary.task_id.as_ref(), Some(&task));
-        assert_eq!(entry.summary.wave_id.as_ref(), Some(&wave));
+        assert_eq!(shipping.shipped_at, approval.at);
+    }
+
+    #[test]
+    fn a_ship_process_failing_all_day_keeps_its_log_short() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
+        let id = TaskId::new();
+        store
+            .create_task(&crate::work::task::NewTask {
+                id: id.clone(),
+                repository_id: store.ensure_repository("/shipping").unwrap(),
+                project_id: None,
+                title: "Ship".into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap();
+        store.ship_task(&id, &LfProcessId::new(), "ship").unwrap();
+        // A day of restarts at the longest backoff, each carried by a new process.
+        let mut carrier = LfProcessId::new();
+        for _ in 0..48 {
+            store.count_ship_restart(&id).unwrap();
+            carrier = LfProcessId::new();
+            store.ship_task(&id, &carrier, "ship").unwrap();
+        }
+        let shipping = store.task_shipping(&id).unwrap().unwrap();
+        assert_eq!(shipping.restarts, super::SHIP_RESTARTS_COUNTED);
+        assert_eq!(shipping.process, Some(carrier));
+        let rows = || -> i64 {
+            let conn = store.conn.lock().unwrap();
+            conn.query_row(
+                "SELECT count(*) FROM task_ship_events WHERE task_id=?1",
+                [id.as_str()],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        // The approval, its carrier and the counted restarts.
+        assert_eq!(rows(), 2 + i64::from(super::SHIP_RESTARTS_COUNTED));
+
+        store.reset_ship_restarts(&id).unwrap();
+        assert_eq!(store.task_shipping(&id).unwrap().unwrap().restarts, 0);
+        assert_eq!(rows(), 2);
+    }
+
+    #[test]
+    fn a_released_tasks_shipping_columns_become_its_auto_ship_log() {
+        use crate::store::migrations::{apply_before_migration, migration_section_sql};
+
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        apply_before_migration(&conn, "task_machine_local");
+        let (shipping, stopped) = (TaskId::new(), TaskId::new());
+        let (approver, carrier) = (LfProcessId::new(), LfProcessId::new());
+        // The carrier's Process row was pruned, as released stores allowed.
+        conn.execute_batch(&format!(
+            "PRAGMA foreign_keys=OFF;
+             INSERT INTO repository_plans(id,repo,selected) VALUES('repo_1','/repo',1);
+             INSERT INTO tasks(id,repository_id,issue_identifier,created_at,shipped_at,
+                 ship_approved_lf_process_id,ship_lf_process_id,ship_restarts)
+             VALUES('{shipping}','repo_1','SHIP-1',1,10,'{approver}','{carrier}',2);
+             INSERT INTO tasks(id,repository_id,issue_identifier,created_at,ship_stopped_at,
+                 ship_stopped_person)
+             VALUES('{stopped}','repo_1','SHIP-2',1,20,'Casey');"
+        ))
+        .unwrap();
+        conn.execute_batch(&migration_section_sql("task_machine_local"))
+            .unwrap();
+        assert_eq!(
+            super::shipping_in(&conn, &shipping).unwrap(),
+            Some(super::TaskShipping {
+                shipped_at: 10,
+                approved_by: Some(approver),
+                process: Some(carrier),
+                restarts: 2,
+            })
+        );
+        assert_eq!(super::ship_stop_in(&conn, &shipping).unwrap(), None);
+        assert_eq!(super::shipping_in(&conn, &stopped).unwrap(), None);
+        assert_eq!(
+            super::ship_stop_in(&conn, &stopped).unwrap(),
+            Some(super::ShipStop {
+                at: 20,
+                by: None,
+                person: Some("Casey".into()),
+            })
+        );
+        assert!(conn
+            .execute("UPDATE task_ship_events SET at=0", [])
+            .is_err());
     }
 }

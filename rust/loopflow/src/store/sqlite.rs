@@ -18,15 +18,108 @@ use crate::store::{
 };
 use crate::work::wave::{Wave, WaveLocator};
 
+fn is_model_weekly_window(window: &str, model: Option<&str>) -> bool {
+    model.is_some_and(|model| {
+        crate::config::CLAUDE_MODEL_FAMILIES.contains(&model)
+            && window.strip_prefix("seven_day_") == Some(model)
+    })
+}
+
+// The bucket a limit row describes: the name and scope a poll writes for a
+// known Claude row, otherwise the row's own.
+fn limit_bucket(provider: &str, window: &str, model: Option<&str>) -> (String, Option<String>) {
+    (provider == "claude")
+        .then(|| crate::provider_account::canonical_claude_window(window, model))
+        .flatten()
+        .unwrap_or_else(|| (window.to_owned(), model.map(str::to_owned)))
+}
+
+// Historical aliases can coexist with canonical observations. Prefer the newer
+// reading; at equal second-resolution timestamps retain the stricter reading.
+fn reconcile_legacy_account_windows(limits: Vec<AccountLimitRow>) -> Vec<AccountLimitRow> {
+    let mut winners = std::collections::HashMap::new();
+    let buckets: Vec<_> = limits
+        .iter()
+        .map(|row| limit_bucket(&row.provider, &row.window, row.model.as_deref()))
+        .collect();
+    for (index, (row, bucket)) in limits.iter().zip(&buckets).enumerate() {
+        let rank = (
+            row.observed_at,
+            row.limited_until,
+            row.used_percent,
+            bucket.0 == row.window,
+        );
+        let winner = winners
+            .entry((&row.provider, &row.account_id, bucket))
+            .or_insert((rank, index));
+        if rank > winner.0 {
+            *winner = (rank, index);
+        }
+    }
+    let kept: std::collections::HashSet<_> =
+        winners.into_values().map(|(_, index)| index).collect();
+    limits
+        .into_iter()
+        .zip(buckets)
+        .enumerate()
+        .filter(|(index, _)| kept.contains(index))
+        .map(|(_, (mut row, (window, model)))| {
+            row.window = window;
+            row.model = model;
+            row
+        })
+        .collect()
+}
+
+fn write_account_windows(
+    transaction: &Connection,
+    provider: &str,
+    account_id: &ProviderAccountId,
+    windows: &[crate::store::AccountLimitWindow],
+    source: &str,
+) -> StoreResult<()> {
+    let now = now_unix();
+    for window in windows {
+        transaction.execute(
+            "INSERT INTO provider_account_limits
+                 (provider, account_id, window, used_percent, resets_at, plan, observed_at, source, model, limited_until)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+             ON CONFLICT(provider, account_id, window) DO UPDATE SET
+                 used_percent = excluded.used_percent,
+                 resets_at = excluded.resets_at,
+                 plan = excluded.plan,
+                 observed_at = excluded.observed_at,
+                 source = excluded.source,
+                 model = excluded.model,
+                 limited_until = excluded.limited_until",
+            params![
+                provider,
+                account_id.as_str(),
+                window.window,
+                window.used_percent,
+                window.resets_at,
+                window.plan,
+                now,
+                source,
+                window.model,
+                window.limited_until,
+            ],
+        )?;
+    }
+    Ok(())
+}
+
 mod admission;
-mod chapters;
 mod children;
 pub(crate) mod ci_incidents;
+pub mod creation;
 mod durable;
 mod github_people;
 mod graph_inventory;
 #[cfg(test)]
 mod linear_migration_tests;
+mod project_adoption;
+mod subscription_events;
 
 mod linear_team_checks;
 mod machine_records;
@@ -41,9 +134,8 @@ mod pr_landings;
 mod processes;
 mod program_status;
 pub(crate) mod project_content;
-mod project_rotation;
 pub(crate) mod project_selection;
-mod project_transitions;
+pub mod provider_transitions;
 mod rentals;
 mod repositories;
 pub(crate) mod retention;
@@ -58,16 +150,21 @@ mod steers;
 mod task_comments;
 mod task_content;
 mod task_details;
+pub(crate) mod task_moves;
+mod task_retirement;
+mod transport;
+pub(crate) use task_retirement::{TaskRetirement, ViewerHold, WORKSPACE_GRACE};
 pub(crate) mod task_history;
 pub(crate) mod task_state_delivery;
 pub(crate) mod task_work;
 pub(crate) mod wave_definitions;
+mod wave_lifecycle;
 
 pub use children::ClosedTaskPage;
-pub(crate) use graph_inventory::{entry_of, GraphExecutionFacts};
+pub(crate) use graph_inventory::{entry_of, AgentLimitRecovery, GraphExecutionFacts};
 pub use project_selection::{ProjectActivation, ProjectReadiness, ProjectReadinessState};
 pub use revisions::StoreRevisions;
-pub use scope_defaults::ScopeSettings;
+pub(crate) use session_events::CurrentConversation;
 pub use task_details::TaskDetailFacts;
 pub(crate) use task_work::TaskShipping;
 
@@ -82,8 +179,29 @@ const WAL_SIZE_LIMIT_BYTES: i64 = 64 * 1024 * 1024;
 /// The first rollback-to-WAL transition can return BUSY immediately even with
 /// a busy handler: two readers cannot both upgrade their journal lock. Reuse
 /// migration exclusion only for that transition; ordinary WAL opens stay reads.
-fn configure_write_connection(conn: &mut Connection, path: &Path) -> StoreResult<()> {
-    conn.busy_timeout(SQLITE_WRITE_BUSY_TIMEOUT)?;
+/// Why an ordinary open refuses a shared store this build is ahead of, and the fix.
+fn unapplied_message(path: &Path, pending: &str) -> String {
+    if super::migrations::unmerged_migrations().contains(&pending) {
+        format!(
+            "shared store {} does not have this build's unmerged migration {pending}; \
+             run this build with a private LF_HOME",
+            path.display()
+        )
+    } else {
+        format!(
+            "shared store {} does not have migration {pending} yet; run `lf install` to \
+             finish installing this build",
+            path.display()
+        )
+    }
+}
+
+fn configure_write_connection(
+    conn: &mut Connection,
+    path: &Path,
+    busy: Duration,
+) -> StoreResult<()> {
+    conn.busy_timeout(busy)?;
     // A deferred transaction that reads, then writes after another process
     // committed, fails at once with SQLITE_BUSY_SNAPSHOT: the busy handler
     // never runs. Taking the write lock at BEGIN makes it wait instead.
@@ -127,6 +245,18 @@ fn waves_in(conn: &Connection, repo: Option<&str>) -> StoreResult<Vec<Wave>> {
 }
 
 impl SqliteStore {
+    /// Refresh `sqlite_stat1` for tables whose size changed enough to move a
+    /// plan. Bounded by `analysis_limit`, it holds the write lock under a
+    /// second on a store of 770 MB. The Machine server runs it at start and
+    /// about once a day; nothing else does.
+    pub(crate) fn refresh_statistics(&self) -> StoreResult<()> {
+        self.conn
+            .lock()
+            .expect("store mutex poisoned")
+            .execute_batch("PRAGMA analysis_limit=400; PRAGMA optimize=0x10002;")?;
+        Ok(())
+    }
+
     pub(crate) fn home_dir(&self) -> StoreResult<PathBuf> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         home_dir_in(&conn)
@@ -140,13 +270,12 @@ fn home_dir_in(conn: &Connection) -> StoreResult<PathBuf> {
         .ok_or_else(|| StoreError::InvalidData("store has no owning Machine path".into()))
 }
 
-/// Recorded checkout evidence remains usable without chapter metadata.
+/// A Task's checkout on this Machine, usable without chapter metadata.
 #[derive(Debug, Clone)]
 pub(crate) struct TaskCheckout {
     pub task_id: TaskId,
     pub issue_identifier: String,
     pub worktree: PathBuf,
-    pub machine_id: Option<crate::durable::MachineId>,
 }
 
 /// Stable identity fields for observation, independent of execution schema.
@@ -181,6 +310,13 @@ pub(crate) struct TaskWorktreeOwnership {
     pub path: PathBuf,
     pub completed: bool,
     pub unfinished: bool,
+}
+
+/// Copy only into a fresh fixture; reopening must retain its writes and schema.
+#[cfg(test)]
+fn copy_test_store(path: &Path) -> StoreResult<()> {
+    crate::test_support::test_database::copy(path)
+        .map_err(|error| StoreError::InvalidData(format!("copy test store: {error}")))
 }
 
 /// Open a registry read-only without migrating it.
@@ -224,9 +360,21 @@ fn task_state_sql(conn: &Connection) -> StoreResult<(String, &'static str)> {
 pub(crate) fn read_task_branches(path: &Path) -> StoreResult<Vec<(String, bool)>> {
     let conn = open_unmigrated(path)?;
     let (open, _) = task_state_sql(&conn)?;
+    let checkouts: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='task_checkouts')",
+        [],
+        |row| row.get(0),
+    )?;
+    // A registry from before `task_checkouts` keeps the branch on the Task
+    // (removed by Task 538340).
+    let checkout_branches = if checkouts {
+        "SELECT task_id, branch FROM task_checkouts"
+    } else {
+        "SELECT id AS task_id, branch FROM tasks"
+    };
     let mut statement = conn.prepare(&format!(
         "SELECT b.branch,({open}) FROM tasks t JOIN \
-         (SELECT id AS task_id, branch FROM tasks UNION SELECT task_id, branch FROM task_prs) b \
+         ({checkout_branches} UNION SELECT task_id, branch FROM task_prs) b \
          ON b.task_id=t.id"
     ))?;
     let rows = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
@@ -238,20 +386,34 @@ pub(crate) fn read_task_worktree_ownership(path: &Path) -> StoreResult<Vec<TaskW
     let (open, done) = task_state_sql(&conn)?;
     // Old registries still protect unfinished work, but cannot grant deletion
     // until they can establish this machine's positive checkout ownership.
-    let placed: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('tasks') WHERE name='checkout_machine_id')",
+    let (checkouts, placed, local_flag, local_route): (bool, bool, bool, bool) = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='task_checkouts'), \
+         EXISTS(SELECT 1 FROM pragma_table_info('tasks') WHERE name='checkout_machine_id'), \
+         EXISTS(SELECT 1 FROM pragma_table_info('machines') WHERE name='is_local'), \
+         EXISTS(SELECT 1 FROM pragma_table_info('machines') WHERE name='route')",
         [],
-        |row| row.get(0),
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
     )?;
-    let local = if placed {
-        "COALESCE(t.checkout_machine_id=(SELECT id FROM machines WHERE route='local'),0)"
+    let query = if checkouts {
+        format!(
+            "SELECT t.id,c.worktree,({done}),({open}) FROM task_checkouts c \
+             JOIN tasks t ON t.id=c.task_id"
+        )
     } else {
-        "0"
+        // A registry from before `task_checkouts` (removed by Task 538340).
+        let local = if placed && local_flag {
+            "COALESCE(t.checkout_machine_id=(SELECT id FROM machines WHERE is_local=1),0)"
+        } else if placed && local_route {
+            "COALESCE(t.checkout_machine_id=(SELECT id FROM machines WHERE route='local'),0)"
+        } else {
+            "0"
+        };
+        format!(
+            "SELECT t.id,t.worktree,({done}) AND ({local}),({open}) FROM tasks t \
+             WHERE t.worktree IS NOT NULL AND t.worktree != ''"
+        )
     };
-    let mut statement = conn.prepare(&format!(
-        "SELECT t.id,t.worktree,({done}) AND ({local}),({open}) FROM tasks t \
-         WHERE t.worktree IS NOT NULL AND t.worktree != ''"
-    ))?;
+    let mut statement = conn.prepare(&query)?;
     let rows = statement.query_map([], |row| {
         Ok(TaskWorktreeOwnership {
             task: row.get(0)?,
@@ -378,58 +540,34 @@ fn decrypt_token_row(row: TokenRow) -> StoreResult<super::ProviderToken> {
     })
 }
 
-fn read_provider_account(row: &rusqlite::Row) -> rusqlite::Result<StoreResult<ProviderAccount>> {
-    let provider = row.get(0)?;
-    let account_id = row.get::<_, String>(1)?;
-    let home = row
-        .get::<_, Option<String>>(2)?
-        .map(std::path::PathBuf::from);
-    let login_email = row.get::<_, Option<String>>(3)?;
-    let credential_state = row.get::<_, String>(4)?;
-    let routing_state = row.get::<_, String>(5)?;
-    let plan = row.get(6)?;
-    let paid_through = row.get::<_, Option<i32>>(7)?;
-    let utilization_percent = row.get(8)?;
-    let cooldown_until = row.get(9)?;
-    let cooldown_reason = row.get(10)?;
-    let last_selected_at = row.get(11)?;
-    let created_at = row.get(12)?;
-    let updated_at = row.get(13)?;
-    Ok((|| {
-        let account_id = ProviderAccountId::parse(&account_id).map_err(StoreError::InvalidData)?;
-        let login_email = login_email
-            .map(|value| EmailAddress::parse(&value))
-            .transpose()
-            .map_err(StoreError::InvalidData)?;
-        let credential_state =
-            CredentialState::from_db(&credential_state).map_err(StoreError::InvalidData)?;
-        let routing_state =
-            RoutingState::from_db(&routing_state).map_err(StoreError::InvalidData)?;
-        let paid_through = paid_through
-            .map(time::Date::from_julian_day)
-            .transpose()
-            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
-        Ok(ProviderAccount {
-            provider,
-            account_id,
-            home,
-            login_email,
-            observed_email: row.get(14)?,
-            observed_subject: row.get(15)?,
-            observed_plan: row.get(16)?,
-            observed_credential_digest: row.get(17)?,
-            credential_state,
-            routing_state,
-            plan,
-            paid_through,
-            utilization_percent,
-            cooldown_until,
-            cooldown_reason,
-            last_selected_at,
-            created_at,
-            updated_at,
-        })
-    })())
+const PROVIDER_ACCOUNT_COLUMNS: &str = "provider, account_id, home, credential_state,
+    utilization_percent, cooldown_until, cooldown_reason, last_selected_at,
+    created_at, updated_at, observed_email, observed_subject, observed_plan, observed_credential_digest";
+
+fn read_provider_account(row: &rusqlite::Row) -> StoreResult<ProviderAccount> {
+    Ok(ProviderAccount {
+        provider: row.get(0)?,
+        account_id: ProviderAccountId::parse(&row.get::<_, String>(1)?)
+            .map_err(StoreError::InvalidData)?,
+        home: row.get::<_, Option<String>>(2)?.map(PathBuf::from),
+        credential_state: CredentialState::from_db(&row.get::<_, String>(3)?)
+            .map_err(StoreError::InvalidData)?,
+        utilization_percent: row.get(4)?,
+        cooldown_until: row.get(5)?,
+        cooldown_reason: row.get(6)?,
+        last_selected_at: row.get(7)?,
+        created_at: row.get(8)?,
+        updated_at: row.get(9)?,
+        observed_email: row.get(10)?,
+        observed_subject: row.get(11)?,
+        observed_plan: row.get(12)?,
+        observed_credential_digest: row.get(13)?,
+        // Authored preferences are applied from one configuration read per operation.
+        login_email: None,
+        routing_state: RoutingState::Automatic,
+        plan: None,
+        paid_through: None,
+    })
 }
 
 fn read_account_limit_row(row: &rusqlite::Row) -> rusqlite::Result<StoreResult<AccountLimitRow>> {
@@ -447,6 +585,8 @@ fn read_account_limit_row(row: &rusqlite::Row) -> rusqlite::Result<StoreResult<A
         plan: row.get(5)?,
         observed_at: row.get(6)?,
         source: row.get(7)?,
+        model: row.get(8)?,
+        limited_until: row.get(9)?,
     }))
 }
 
@@ -474,42 +614,6 @@ fn read_access_profile(row: &rusqlite::Row) -> rusqlite::Result<StoreResult<Acce
         }))
 }
 
-fn read_auth_browser_binding(
-    row: &rusqlite::Row,
-) -> rusqlite::Result<StoreResult<AuthBrowserBinding>> {
-    let provider = row.get::<_, String>(0)?;
-    let account_id = row.get::<_, Option<String>>(1)?;
-    let position = row.get::<_, i64>(2)? as usize;
-    let profile_id = row.get::<_, String>(3)?;
-    Ok(provider
-        .parse::<Provider>()
-        .map_err(|error| StoreError::InvalidData(error.to_string()))
-        .and_then(|provider| {
-            account_id
-                .as_deref()
-                .map(ProviderAccountId::parse)
-                .transpose()
-                .map_err(StoreError::InvalidData)
-                .map(|account_id| (provider, account_id))
-        })
-        .and_then(|(provider, account_id)| {
-            ProfileId::parse(&profile_id)
-                .map_err(StoreError::InvalidData)
-                .map(|profile_id| AuthBrowserBinding {
-                    provider,
-                    account_id,
-                    position,
-                    profile_id,
-                })
-        }))
-}
-
-fn read_provider_route_account(row: &rusqlite::Row) -> rusqlite::Result<ProviderAccountId> {
-    ProviderAccountId::parse(&row.get::<_, String>(0)?).map_err(|error| {
-        rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, error.into())
-    })
-}
-
 impl SqliteStore {
     #[cfg(test)]
     pub(crate) fn assert_no_historical_runs(&self) {
@@ -533,27 +637,32 @@ impl SqliteStore {
     /// shared frontier is the promotion boundary's job — see
     /// [`Self::open_as_promotion_boundary`].
     pub fn new(path: &Path) -> StoreResult<Self> {
-        Self::open(path, super::FrontierAdvance::Forbidden)
+        Self::open(
+            path,
+            super::FrontierAdvance::Forbidden,
+            SQLITE_WRITE_BUSY_TIMEOUT,
+        )
     }
 
     /// Revalidate a connection after a child executable may have upgraded it.
     pub(crate) fn validate_current_schema(&self) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        super::migrations::validate_experimental_schema(
-            &conn,
-            crate::build_info::migration_draft_manifest(),
-        )
+        super::migrations::validate_sqlite_schema(&conn)
     }
 
     /// Open the shared store as `lf install promote` — the single authorized
     /// owner of the migration frontier. Applies pending migrations under the
     /// caller's exclusive promotion lock.
     pub(crate) fn open_as_promotion_boundary(path: &Path) -> StoreResult<Self> {
-        Self::open(path, super::FrontierAdvance::Authorized)
+        Self::open(
+            path,
+            super::FrontierAdvance::Authorized,
+            SQLITE_WRITE_BUSY_TIMEOUT,
+        )
     }
 
-    /// Open a hermetic, fully-migrated store at `path`: the base canonical
-    /// migrations plus this build's exact embedded draft manifest, reading **no**
+    /// Open a hermetic, fully-migrated store at `path`: this build's whole
+    /// migration catalog, reading **no**
     /// process- or machine-global state — no `LF_HOME`, no install selection, no
     /// shared `~/.lf` identity, no frontier authority. Tests use this so their
     /// schema is deterministic under parallel execution; the production
@@ -565,38 +674,29 @@ impl SqliteStore {
                 StoreError::InvalidData(format!("failed to create db dir: {error}"))
             })?;
         }
+        #[cfg(test)]
+        copy_test_store(path)?;
         let mut conn = Connection::open(path)?;
         crate::performance::observe_sqlite(&conn);
-        configure_write_connection(&mut conn, path)?;
-        super::migrations::initialize_experimental_sqlite(
-            &conn,
-            crate::build_info::migration_draft_manifest(),
-        )?;
+        configure_write_connection(&mut conn, path, SQLITE_WRITE_BUSY_TIMEOUT)?;
+        super::migrations::apply_sqlite(&conn)?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
         })
     }
 
-    fn open(path: &Path, advance: super::FrontierAdvance) -> StoreResult<Self> {
-        Self::open_with(
-            path,
-            crate::build_info::migration_authority(),
-            &super::machine_home_dir(),
-            advance,
-        )
+    fn open(path: &Path, advance: super::FrontierAdvance, busy: Duration) -> StoreResult<Self> {
+        Self::open_with(path, &super::machine_home_dir(), advance, busy)
     }
 
-    /// Open resolving the migration decision against an explicit authority and
-    /// machine home rather than this build's compiled-in values. Production opens
-    /// pass the real ones through [`Self::open`]; the same-module shared-frontier
-    /// regressions pass a temp home and a chosen authority so they drive the
-    /// published and promotion-boundary branches a validation-only test build
-    /// cannot reach through the compiled-in authority.
+    /// Open resolving the migration decision against an explicit machine home.
+    /// Production opens pass the real one through [`Self::open`]; the
+    /// same-module shared-frontier regressions pass a temp home.
     fn open_with(
         path: &Path,
-        authority: crate::build_info::MigrationAuthority,
         home: &Path,
         advance: super::FrontierAdvance,
+        busy: Duration,
     ) -> StoreResult<Self> {
         let existing_database = std::fs::metadata(path).is_ok_and(|metadata| metadata.len() > 0);
         // Resolve the frontier authority before touching the filesystem. An
@@ -604,8 +704,8 @@ impl SqliteStore {
         // before create_dir_all/Connection::open would leave an empty
         // ~/.lf/loopflow.db behind — a file whose mere existence a liveness or
         // bootstrap check could misread as "the shared store is initialized".
-        let may_apply_migrations = super::may_apply_migrations(path, authority, home, advance)
-            .map_err(|error| {
+        let may_apply_migrations =
+            super::may_apply_migrations(path, home, advance).map_err(|error| {
                 StoreError::InvalidData(format!("resolve migration authority: {error}"))
             })?;
         let shared_database = super::same_database_file(path, &home.join(".lf/loopflow.db"))
@@ -616,7 +716,7 @@ impl SqliteStore {
         if !may_apply_migrations && !existing_database {
             return Err(StoreError::InvalidData(format!(
                 "shared store {} is not initialized and an ordinary lf may not create it; \
-                 install a published release with `lf install`",
+                 install lf with `lf self install`",
                 path.display()
             )));
         }
@@ -627,19 +727,17 @@ impl SqliteStore {
             })?;
         }
 
+        #[cfg(test)]
+        if !existing_database {
+            copy_test_store(path)?;
+        }
         let mut conn = Connection::open(path)?;
         crate::performance::observe_sqlite(&conn);
         // Install the handler before journal-mode negotiation: that pragma can
         // itself meet another process opening the same WAL database.
-        configure_write_connection(&mut conn, path)?;
+        configure_write_connection(&mut conn, path, busy)?;
 
-        if !shared_database {
-            super::migrations::initialize_experimental_sqlite(
-                &conn,
-                crate::build_info::migration_draft_manifest(),
-            )
-            .map_err(|error| super::migrations::experimental_store_diagnostic(&conn, error))?;
-        } else if !may_apply_migrations {
+        if shared_database && !may_apply_migrations {
             // Validate the applied history first (preserving divergent/incompatible
             // and store-ahead errors), then refuse if this binary knows a migration
             // the store has not applied. An ordinary open must not hand back a store
@@ -647,15 +745,21 @@ impl SqliteStore {
             // columns that pending migration adds.
             super::migrations::validate_sqlite_schema(&conn)?;
             if let Some(pending) = super::migrations::pending_shared_migration(&conn)? {
-                return Err(StoreError::InvalidData(format!(
-                    "shared store {} is at an older frontier than this lf (pending {pending}); \
-                     an ordinary lf must not advance it — install a published release with \
-                     `lf install`",
-                    path.display()
-                )));
+                return Err(StoreError::InvalidData(unapplied_message(path, &pending)));
             }
         } else if existing_database {
             super::migrations::apply_sqlite_with_backup(&conn, path)?;
+            if !shared_database {
+                // A private home holds exactly this build's schema; one changed
+                // outside lf is never repaired.
+                super::migrations::validate_sqlite_schema(&conn).map_err(|error| {
+                    StoreError::InvalidData(format!(
+                        "{error}\nDatabase: {}\nA private LF_HOME is disposable: start a fresh one; \
+                         lf will not repair it.",
+                        path.display()
+                    ))
+                })?;
+            }
         } else {
             super::migrations::apply_sqlite(&conn)?;
         }
@@ -678,12 +782,6 @@ impl SqliteStore {
             validate_process_schema(&conn)?;
         }
         Ok(store)
-    }
-
-    /// The oldest lf release that can open this store; `None` when it is empty.
-    pub(crate) fn reader_floor(&self) -> StoreResult<Option<String>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        crate::store::migrations::store_reader_floor(&conn)
     }
 
     /// Append process evidence to an existing compatible store, never initialize it.
@@ -1069,56 +1167,14 @@ impl SqliteStore {
 
     pub fn upsert_provider_account(&self, account: &ProviderAccount) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "INSERT INTO provider_accounts (
-                provider, account_id, home, login_email, credential_state,
-                routing_state, plan, paid_through, utilization_percent,
-                cooldown_until, cooldown_reason, last_selected_at, created_at,
-                updated_at, observed_email, observed_subject, observed_plan, observed_credential_digest
-             ) VALUES (
-                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-                ?14, ?15, ?16, ?17, ?18
-             )
-             ON CONFLICT(provider, account_id) DO UPDATE SET
-                home = excluded.home,
-                login_email = excluded.login_email,
-                observed_email = excluded.observed_email,
-                observed_subject = excluded.observed_subject,
-                observed_plan = excluded.observed_plan,
-                observed_credential_digest = excluded.observed_credential_digest,
-                credential_state = excluded.credential_state,
-                routing_state = excluded.routing_state,
-                plan = excluded.plan,
-                paid_through = excluded.paid_through,
-                utilization_percent = excluded.utilization_percent,
-                cooldown_until = excluded.cooldown_until,
-                cooldown_reason = excluded.cooldown_reason,
-                last_selected_at = excluded.last_selected_at,
-                updated_at = excluded.updated_at",
-            params![
-                account.provider,
-                account.account_id.as_str(),
-                account
-                    .home
-                    .as_ref()
-                    .map(|path| path.to_string_lossy().to_string()),
-                account.login_email.as_ref().map(EmailAddress::as_str),
-                account.credential_state.as_str(),
-                account.routing_state.as_str(),
-                account.plan,
-                account.paid_through.map(time::Date::to_julian_day),
-                account.utilization_percent,
-                account.cooldown_until,
-                account.cooldown_reason,
-                account.last_selected_at,
-                account.created_at,
-                account.updated_at,
-                account.observed_email,
-                account.observed_subject,
-                account.observed_plan,
-                account.observed_credential_digest,
-            ],
-        )?;
+        // The preferences file is written before the row, outside any write
+        // transaction: a rejected preference writes neither.
+        crate::config::placement::write_account_preferences(&conn, account)
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+        conn.execute("INSERT INTO provider_accounts(provider,account_id,home,credential_state,utilization_percent,cooldown_until,cooldown_reason,last_selected_at,created_at,updated_at,observed_email,observed_subject,observed_plan,observed_credential_digest)
+            VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)
+            ON CONFLICT(provider,account_id) DO UPDATE SET capacity_revision=provider_accounts.capacity_revision+1,home=excluded.home,credential_state=excluded.credential_state,utilization_percent=excluded.utilization_percent,cooldown_until=excluded.cooldown_until,cooldown_reason=excluded.cooldown_reason,last_selected_at=excluded.last_selected_at,updated_at=excluded.updated_at,observed_email=excluded.observed_email,observed_subject=excluded.observed_subject,observed_plan=excluded.observed_plan,observed_credential_digest=excluded.observed_credential_digest",
+            params![account.provider,account.account_id.as_str(),account.home.as_ref().map(|path| path.to_string_lossy().to_string()),account.credential_state.as_str(),account.utilization_percent,account.cooldown_until,account.cooldown_reason,account.last_selected_at,account.created_at,account.updated_at,account.observed_email,account.observed_subject,account.observed_plan,account.observed_credential_digest])?;
         Ok(())
     }
 
@@ -1155,19 +1211,21 @@ impl SqliteStore {
     ) -> StoreResult<Option<ProviderAccount>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare(
-            "SELECT provider, account_id, home, login_email, credential_state,
-                    routing_state, plan, paid_through, utilization_percent,
-                    cooldown_until, cooldown_reason, last_selected_at,
-                    created_at, updated_at, observed_email, observed_subject, observed_plan, observed_credential_digest
-             FROM provider_accounts
-             WHERE provider = ?1 AND account_id = ?2",
+            &format!("SELECT {PROVIDER_ACCOUNT_COLUMNS} FROM provider_accounts WHERE provider = ?1 AND account_id = ?2"),
         )?;
         statement
-            .query_row(
-                params![provider, account_id.as_str()],
-                read_provider_account,
-            )
+            .query_row(params![provider, account_id.as_str()], |row| {
+                Ok(read_provider_account(row))
+            })
             .optional()?
+            .transpose()?
+            .map(|account| {
+                crate::config::placement::global_settings(&conn)
+                    .and_then(|config| {
+                        crate::config::placement::account_preferences(&config, account)
+                    })
+                    .map_err(|error| StoreError::InvalidData(error.to_string()))
+            })
             .transpose()
     }
 
@@ -1176,125 +1234,33 @@ impl SqliteStore {
         provider: Option<&str>,
     ) -> StoreResult<Vec<ProviderAccount>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let sql = match provider {
-            Some(_) => {
-                "SELECT provider, account_id, home, login_email, credential_state,
-                        routing_state, plan, paid_through, utilization_percent,
-                        cooldown_until, cooldown_reason, last_selected_at,
-                        created_at, updated_at, observed_email, observed_subject, observed_plan, observed_credential_digest
-                 FROM provider_accounts
-                 WHERE provider = ?1
-                 ORDER BY provider, account_id"
-            }
-            None => {
-                "SELECT provider, account_id, home, login_email, credential_state,
-                        routing_state, plan, paid_through, utilization_percent,
-                        cooldown_until, cooldown_reason, last_selected_at,
-                        created_at, updated_at, observed_email, observed_subject, observed_plan, observed_credential_digest
-                 FROM provider_accounts
-                 ORDER BY provider, account_id"
-            }
-        };
-        let mut statement = conn.prepare(sql)?;
-        let mut accounts = Vec::new();
-        match provider {
-            Some(provider) => {
-                let rows = statement.query_map([provider], read_provider_account)?;
-                for row in rows {
-                    accounts.push(row??);
-                }
-            }
-            None => {
-                let rows = statement.query_map([], read_provider_account)?;
-                for row in rows {
-                    accounts.push(row??);
-                }
-            }
-        }
-        Ok(accounts)
-    }
-
-    /// Store a long-lived token on an existing account. False when no such account.
-    pub fn set_long_lived_token(
-        &self,
-        provider: &str,
-        account_id: &ProviderAccountId,
-        token: &str,
-        minted_at: i64,
-    ) -> StoreResult<bool> {
-        let encrypted = token_crypto::encrypt_token(token).map_err(|error| {
-            StoreError::InvalidData(format!(
-                "failed to encrypt long-lived token for account '{account_id}': {error}"
-            ))
-        })?;
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let changed = conn.execute(
-            "UPDATE provider_accounts
-             SET long_lived_token = ?3, long_lived_token_minted_at = ?4, updated_at = ?5
-             WHERE provider = ?1 AND account_id = ?2",
-            params![
-                provider,
-                account_id.as_str(),
-                encrypted,
-                minted_at,
-                now_unix()
-            ],
-        )?;
-        Ok(changed == 1)
-    }
-
-    pub fn long_lived_token(
-        &self,
-        provider: &str,
-        account_id: &ProviderAccountId,
-    ) -> StoreResult<Option<super::LongLivedToken>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let row: Option<(Option<String>, Option<i64>)> = conn
-            .query_row(
-                "SELECT long_lived_token, long_lived_token_minted_at FROM provider_accounts
-                 WHERE provider = ?1 AND account_id = ?2",
-                params![provider, account_id.as_str()],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .optional()?;
-        let Some((Some(encrypted), Some(minted_at))) = row else {
-            return Ok(None);
-        };
-        let token = token_crypto::decrypt_token(&encrypted).map_err(|error| {
-            StoreError::InvalidData(format!(
-                "failed to decrypt long-lived token for account '{account_id}': {error}"
-            ))
-        })?;
-        Ok(Some(super::LongLivedToken {
-            token: secrecy::SecretString::new(token),
-            minted_at,
-        }))
+        let mut statement = conn.prepare(&format!(
+            "SELECT {PROVIDER_ACCOUNT_COLUMNS} FROM provider_accounts
+             WHERE (?1 IS NULL OR provider = ?1) ORDER BY provider, account_id"
+        ))?;
+        let accounts = statement.query_map([provider], |row| Ok(read_provider_account(row)))?;
+        let config = crate::config::placement::global_settings(&conn)
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+        accounts
+            .map(|account| {
+                crate::config::placement::account_preferences(&config, account??)
+                    .map_err(|error| StoreError::InvalidData(error.to_string()))
+            })
+            .collect()
     }
 
     pub fn update_provider_account_lifecycle(&self, account: &ProviderAccount) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let changed = conn.execute(
-            "UPDATE provider_accounts
-             SET login_email = ?3,
-                 routing_state = ?4,
-                 plan = ?5,
-                 paid_through = ?6,
-                 updated_at = ?7
-             WHERE provider = ?1 AND account_id = ?2",
-            params![
-                account.provider,
-                account.account_id.as_str(),
-                account.login_email.as_ref().map(EmailAddress::as_str),
-                account.routing_state.as_str(),
-                account.plan,
-                account.paid_through.map(time::Date::to_julian_day),
-                account.updated_at,
-            ],
+        let exists: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM provider_accounts WHERE provider=?1 AND account_id=?2)",
+            params![account.provider, account.account_id.as_str()],
+            |row| row.get(0),
         )?;
-        if changed == 0 {
+        if !exists {
             return Err(StoreError::NotFound);
         }
-        Ok(())
+        crate::config::placement::write_account_preferences(&conn, account)
+            .map_err(|error| StoreError::InvalidData(error.to_string()))
     }
 
     pub fn clear_provider_account_cooldown(
@@ -1302,15 +1268,21 @@ impl SqliteStore {
         provider: &str,
         account_id: &ProviderAccountId,
     ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let changed = conn.execute(
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let changed = transaction.execute(
             "UPDATE provider_accounts SET cooldown_until = NULL, cooldown_reason = NULL,
-             updated_at = ?3 WHERE provider = ?1 AND account_id = ?2",
+             capacity_revision = capacity_revision + 1, updated_at = ?3 WHERE provider = ?1 AND account_id = ?2",
             params![provider, account_id.as_str(), now_unix()],
         )?;
         if changed == 0 {
             return Err(StoreError::NotFound);
         }
+        transaction.execute(
+            "UPDATE provider_account_limits SET limited_until=NULL WHERE provider=?1 AND account_id=?2",
+            params![provider, account_id.as_str()],
+        )?;
+        transaction.commit()?;
         Ok(())
     }
 
@@ -1350,7 +1322,7 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let changed = conn.execute(
             "UPDATE provider_accounts
-             SET credential_state = 'missing',
+             SET capacity_revision = capacity_revision + 1, credential_state = 'missing',
                  cooldown_until = NULL,
                  cooldown_reason = ?3,
                  updated_at = ?4
@@ -1378,25 +1350,175 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let changed = conn.execute(
-            "UPDATE provider_accounts
-             SET utilization_percent = ?3,
-                 cooldown_until = ?4,
-                 cooldown_reason = ?5,
-                 updated_at = ?6
-             WHERE provider = ?1 AND account_id = ?2",
+            "UPDATE provider_accounts SET utilization_percent=?3, cooldown_until=?4,
+             cooldown_reason=?5, capacity_revision=capacity_revision+1, updated_at=?6
+             WHERE provider=?1 AND account_id=?2",
             params![
                 provider,
                 account_id.as_str(),
                 utilization_percent,
                 cooldown_until,
                 cooldown_reason,
-                now_unix(),
+                now_unix()
             ],
         )?;
         if changed == 0 {
             return Err(StoreError::NotFound);
         }
         Ok(())
+    }
+
+    pub(crate) fn provider_account_capacity_revision(
+        &self,
+        provider: &str,
+        account_id: &ProviderAccountId,
+    ) -> StoreResult<i64> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.query_row(
+            "SELECT capacity_revision FROM provider_accounts WHERE provider=?1 AND account_id=?2",
+            params![provider, account_id.as_str()],
+            |row| row.get(0),
+        )?)
+    }
+
+    pub(crate) fn record_provider_account_capacity(
+        &self,
+        provider: &str,
+        account_id: &ProviderAccountId,
+        capacity: &crate::store::AccountCapacity,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        // A warning or a scoped rejection cannot erase an account-wide rejection.
+        let changed = transaction.execute(
+            "UPDATE provider_accounts SET utilization_percent=?3,
+             cooldown_until=CASE WHEN ?4 IS NOT NULL THEN ?4 ELSE cooldown_until END,
+             cooldown_reason=CASE WHEN ?4 IS NOT NULL THEN ?5 ELSE cooldown_reason END,
+             capacity_revision=capacity_revision+1, updated_at=?6
+             WHERE provider=?1 AND account_id=?2",
+            params![
+                provider,
+                account_id.as_str(),
+                capacity.utilization_percent,
+                capacity.cooldown_until,
+                capacity.cooldown_reason,
+                now_unix()
+            ],
+        )?;
+        if changed == 0 {
+            return Err(StoreError::NotFound);
+        }
+        write_account_windows(
+            &transaction,
+            provider,
+            account_id,
+            &capacity.windows,
+            "stream",
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    pub(crate) fn reconcile_provider_account_capacity(
+        &self,
+        account: &ProviderAccount,
+        revision: i64,
+        windows: &[crate::store::AccountLimitWindow],
+    ) -> StoreResult<bool> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let (current_revision, cooldown_reason, cooldown_until): (
+            i64,
+            Option<String>,
+            Option<i64>,
+        ) = transaction.query_row(
+            "SELECT capacity_revision, cooldown_reason, cooldown_until FROM provider_accounts
+             WHERE provider=?1 AND account_id=?2",
+            params![account.provider, account.account_id.as_str()],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        if current_revision != revision {
+            return Ok(false);
+        }
+        let prior = {
+            let mut statement = transaction.prepare(
+                "SELECT provider, account_id, window, used_percent, resets_at, plan, observed_at, source, model, limited_until
+                 FROM provider_account_limits WHERE provider=?1 AND account_id=?2",
+            )?;
+            let rows = statement.query_map(
+                params![account.provider, account.account_id.as_str()],
+                read_account_limit_row,
+            )?;
+            let mut prior = Vec::new();
+            for row in rows {
+                prior.push(row??);
+            }
+            prior
+        };
+        let key = |name: &str, model: Option<&str>| limit_bucket(&account.provider, name, model);
+        let cause = cooldown_reason.as_deref().map(|reason| {
+            if account.provider == "claude" {
+                reason
+            } else {
+                reason.rsplit(": ").next().unwrap_or(reason)
+            }
+        });
+        let cause_matches = |window: &crate::store::AccountLimitWindow| {
+            cause.is_some_and(|cause| {
+                key(cause, window.model.as_deref()) == key(&window.window, window.model.as_deref())
+            })
+        };
+        let mut windows = windows.to_vec();
+        for window in &mut windows {
+            let bucket = key(&window.window, window.model.as_deref());
+            let matching: Vec<_> = prior
+                .iter()
+                .filter(|row| key(&row.window, row.model.as_deref()) == bucket)
+                .collect();
+            if window.used_percent >= 100 && window.limited_until.is_none() {
+                window.limited_until = matching
+                    .iter()
+                    .filter_map(|row| row.limited_until)
+                    .max()
+                    .or_else(|| cause_matches(window).then_some(cooldown_until).flatten());
+            }
+            for row in matching {
+                transaction.execute(
+                    "DELETE FROM provider_account_limits WHERE provider=?1 AND account_id=?2 AND window=?3",
+                    params![account.provider, account.account_id.as_str(), row.window],
+                )?;
+            }
+        }
+        let recovered = windows.iter().any(|window| {
+            cause_matches(window)
+                && (is_model_weekly_window(&window.window, window.model.as_deref())
+                    || (matches!(
+                        window.window.as_str(),
+                        "five_hour" | "seven_day" | "weekly" | "session"
+                    ) && window.model.is_none()
+                        && window.used_percent < 100))
+        });
+        write_account_windows(
+            &transaction,
+            &account.provider,
+            &account.account_id,
+            &windows,
+            "poll",
+        )?;
+        transaction.execute(
+            "UPDATE provider_accounts SET capacity_revision=capacity_revision+1,
+             cooldown_until=CASE WHEN ?3 THEN NULL ELSE cooldown_until END,
+             cooldown_reason=CASE WHEN ?3 THEN NULL ELSE cooldown_reason END, updated_at=?4
+             WHERE provider=?1 AND account_id=?2",
+            params![
+                account.provider,
+                account.account_id.as_str(),
+                recovered,
+                now_unix()
+            ],
+        )?;
+        transaction.commit()?;
+        Ok(true)
     }
 
     /// Record observed subscription window state for one account, replacing
@@ -1410,30 +1532,11 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction()?;
-        let now = now_unix();
-        for window in windows {
-            transaction.execute(
-                "INSERT INTO provider_account_limits
-                     (provider, account_id, window, used_percent, resets_at, plan, observed_at, source)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-                 ON CONFLICT(provider, account_id, window) DO UPDATE SET
-                     used_percent = excluded.used_percent,
-                     resets_at = excluded.resets_at,
-                     plan = excluded.plan,
-                     observed_at = excluded.observed_at,
-                     source = excluded.source",
-                params![
-                    provider,
-                    account_id.as_str(),
-                    window.window,
-                    window.used_percent,
-                    window.resets_at,
-                    window.plan,
-                    now,
-                    source,
-                ],
-            )?;
-        }
+        transaction.execute(
+            "UPDATE provider_accounts SET capacity_revision=capacity_revision+1 WHERE provider=?1 AND account_id=?2",
+            params![provider, account_id.as_str()],
+        )?;
+        write_account_windows(&transaction, provider, account_id, windows, source)?;
         transaction.commit()?;
         Ok(())
     }
@@ -1444,7 +1547,7 @@ impl SqliteStore {
     ) -> StoreResult<Vec<crate::store::AccountLimitRow>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare(
-            "SELECT provider, account_id, window, used_percent, resets_at, plan, observed_at, source
+            "SELECT provider, account_id, window, used_percent, resets_at, plan, observed_at, source, model, limited_until
              FROM provider_account_limits
              WHERE ?1 IS NULL OR provider = ?1
              ORDER BY provider, account_id, window",
@@ -1454,7 +1557,44 @@ impl SqliteStore {
         for row in rows {
             limits.push(row??);
         }
-        Ok(limits)
+        Ok(reconcile_legacy_account_windows(limits))
+    }
+
+    // -- Session moves --------------------------------------------------------
+
+    /// Leave a move for a busy Session; its next Stop hook applies it.
+    pub fn record_session_move(&self, session: &str, agent: &str) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO session_moves (session_id, agent, requested_at) VALUES (?1, ?2, ?3)
+             ON CONFLICT(session_id) DO UPDATE SET
+                agent = excluded.agent,
+                requested_at = excluded.requested_at",
+            params![session, agent, now_unix()],
+        )?;
+        Ok(())
+    }
+
+    /// The agent a move left for `session` names, if one waits.
+    pub fn pending_session_move(&self, session: &str) -> StoreResult<Option<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                "SELECT agent FROM session_moves WHERE session_id = ?1",
+                [session],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?)
+    }
+
+    /// Clear an applied move. A move re-requested for another agent meanwhile stays.
+    pub fn clear_session_move(&self, session: &str, agent: &str) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "DELETE FROM session_moves WHERE session_id = ?1 AND agent = ?2",
+            [session, agent],
+        )?;
+        Ok(())
     }
 
     // -- Access profiles and provider routes ----------------------------------
@@ -1508,32 +1648,23 @@ impl SqliteStore {
         account_id: Option<&ProviderAccountId>,
         profile_ids: &[ProfileId],
     ) -> StoreResult<()> {
-        let unique = profile_ids.iter().collect::<std::collections::HashSet<_>>();
-        if unique.len() != profile_ids.len() {
-            return Err(StoreError::InvalidData(
-                "account access profiles must be unique".to_string(),
-            ));
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut path = vec!["auth_browsers", provider.as_str()];
+        if let Some(account) = account_id {
+            path.extend(["accounts", account.as_str()]);
+        } else {
+            path.push("default");
         }
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        transaction.execute(
-            "DELETE FROM auth_browser_bindings WHERE provider = ?1 AND account_id IS ?2",
-            params![provider.as_str(), account_id.map(ProviderAccountId::as_str)],
-        )?;
-        for (position, profile_id) in profile_ids.iter().enumerate() {
-            transaction.execute(
-                "INSERT INTO auth_browser_bindings (
-                    provider, account_id, position, profile_id
-                 ) VALUES (?1, ?2, ?3, ?4)",
-                params![
-                    provider.as_str(),
-                    account_id.map(ProviderAccountId::as_str),
-                    position as i64,
-                    profile_id.as_str(),
-                ],
-            )?;
-        }
-        transaction.commit()?;
+        crate::config::placement::write(
+            &conn,
+            None,
+            &path,
+            Some(
+                serde_yaml_ng::to_value(profile_ids)
+                    .map_err(|error| StoreError::InvalidData(error.to_string()))?,
+            ),
+        )
+        .map_err(|error| StoreError::InvalidData(error.to_string()))?;
         Ok(())
     }
 
@@ -1543,76 +1674,116 @@ impl SqliteStore {
         account_id: Option<&ProviderAccountId>,
     ) -> StoreResult<Vec<AuthBrowserBinding>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let provider = provider.map(|value| value.as_str());
-        let account_id = account_id.map(ProviderAccountId::as_str);
-        let mut statement = conn.prepare(
-            "SELECT provider, account_id, position, profile_id
-             FROM auth_browser_bindings
-             WHERE (?1 IS NULL OR provider = ?1)
-               AND (?2 IS NULL OR account_id = ?2)
-             ORDER BY provider, account_id, position",
-        )?;
-        let rows = statement.query_map(params![provider, account_id], read_auth_browser_binding)?;
-        rows.map(|row| row?).collect()
+        let declarations = crate::config::placement::global_settings(&conn)
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?
+            .auth_browsers;
+        let mut out = Vec::new();
+        for (name, declaration) in declarations {
+            let selected = name
+                .parse::<Provider>()
+                .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+            if provider.is_some_and(|provider| provider != selected) {
+                continue;
+            }
+            for (account, profiles) in std::iter::once((None, declaration.default)).chain(
+                declaration
+                    .accounts
+                    .into_iter()
+                    .map(|(account, profiles)| (Some(account), profiles)),
+            ) {
+                if account_id.is_some_and(|id| account.as_deref() != Some(id.as_str())) {
+                    continue;
+                }
+                for (position, profile) in profiles.into_iter().enumerate() {
+                    out.push(AuthBrowserBinding {
+                        provider: selected,
+                        account_id: account
+                            .as_deref()
+                            .map(ProviderAccountId::parse)
+                            .transpose()
+                            .map_err(StoreError::InvalidData)?,
+                        position,
+                        profile_id: ProfileId::parse(&profile).map_err(StoreError::InvalidData)?,
+                    });
+                }
+            }
+        }
+        Ok(out)
     }
 
     pub fn set_provider_route(&self, route: &ProviderRoute) -> StoreResult<()> {
-        if route.accounts.is_empty() {
-            return Err(StoreError::InvalidData(
-                "provider route needs at least one account".to_string(),
-            ));
-        }
-        let unique = route
-            .accounts
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let (path, prefix) = crate::config::placement::route_location(&conn, &route.scope)
+            .map_err(|e| StoreError::InvalidData(e.to_string()))?;
+        let parts: Vec<_> = prefix
             .iter()
-            .collect::<std::collections::HashSet<_>>();
-        if unique.len() != route.accounts.len() {
-            return Err(StoreError::InvalidData(
-                "provider route accounts must be unique".to_string(),
-            ));
-        }
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        transaction.execute(
-            "DELETE FROM provider_routes
-             WHERE scope = ?1 AND scope_id = ?2 AND provider = ?3",
-            params![
-                route.scope.kind(),
-                route.scope.id(),
-                route.provider.as_str()
-            ],
-        )?;
-        for (position, account_id) in route.accounts.iter().enumerate() {
-            transaction.execute(
-                "INSERT INTO provider_routes (
-                    scope, scope_id, provider, position, account_id, created_at, updated_at
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![
-                    route.scope.kind(),
-                    route.scope.id(),
-                    route.provider.as_str(),
-                    position as i64,
-                    account_id.as_str(),
-                    route.created_at,
-                    route.updated_at,
-                ],
-            )?;
-        }
-        transaction.commit()?;
-        Ok(())
+            .map(String::as_str)
+            .chain(["account", route.provider.as_str()])
+            .collect();
+        crate::config::files::update(&path, |document| {
+            crate::config::settings::insert(
+                document,
+                &parts,
+                serde_yaml_ng::to_value(&route.accounts)?,
+            );
+            Ok(())
+        })
+        .map_err(|e| StoreError::InvalidData(e.to_string()))
     }
 
-    /// Clear a provider's route at one scope; false when it had none.
     pub fn clear_provider_route(
         &self,
         scope: &RouteScope,
         provider: Provider,
     ) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn.execute(
-            "DELETE FROM provider_routes WHERE scope = ?1 AND scope_id = ?2 AND provider = ?3",
-            params![scope.kind(), scope.id(), provider.as_str()],
-        )? > 0)
+        let (path, prefix) = crate::config::placement::route_location(&conn, scope)
+            .map_err(|e| StoreError::InvalidData(e.to_string()))?;
+        let parts: Vec<_> = prefix
+            .iter()
+            .map(String::as_str)
+            .chain(["account", provider.as_str()])
+            .collect();
+        crate::config::files::update(&path, |document| {
+            Ok(crate::config::files::remove(document, &parts))
+        })
+        .map_err(|e| StoreError::InvalidData(e.to_string()))
+    }
+
+    pub(crate) fn account_declarations(
+        &self,
+        scopes: &[RouteScope],
+    ) -> StoreResult<Vec<crate::config::ConfigDeclarations>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        scopes
+            .iter()
+            .map(|scope| {
+                let (path, prefix) = crate::config::placement::route_location(&conn, scope)
+                    .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+                let mut document = crate::config::files::read(&path)
+                    .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+                crate::config::remote::apply_document(&path, &mut document)
+                    .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+                let accounts = prefix
+                    .iter()
+                    .try_fold(&document, |value, key| value.get(key))
+                    .and_then(|value| value.get("account"));
+                let mut value = serde_yaml_ng::Value::Mapping(Default::default());
+                if let Some(accounts) = accounts {
+                    value["account"] = accounts.clone();
+                }
+                Ok(crate::config::ConfigDeclarations {
+                    source: crate::config::ConfigSource::Personal,
+                    scope: match scope {
+                        RouteScope::Wave(_) => crate::config::settings::SettingScope::Wave,
+                        RouteScope::Repo(_) => crate::config::settings::SettingScope::Repository,
+                        RouteScope::Default => crate::config::settings::SettingScope::Global,
+                    },
+                    path,
+                    value,
+                })
+            })
+            .collect()
     }
 
     pub fn provider_route(
@@ -1620,42 +1791,53 @@ impl SqliteStore {
         scope: &RouteScope,
         provider: Provider,
     ) -> StoreResult<Option<ProviderRoute>> {
+        let observed = self.list_provider_accounts(Some(provider.as_str()))?;
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut statement = conn.prepare(
-            "SELECT account_id, created_at, updated_at
-             FROM provider_routes
-             WHERE scope = ?1 AND scope_id = ?2 AND provider = ?3
-             ORDER BY position",
-        )?;
-        let rows = statement.query_map(
-            params![scope.kind(), scope.id(), provider.as_str()],
-            |row| {
-                Ok((
-                    read_provider_route_account(row)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, i64>(2)?,
-                ))
-            },
-        )?;
-        let mut accounts = Vec::new();
-        let mut created_at = 0;
-        let mut updated_at = 0;
-        for row in rows {
-            let (account_id, row_created_at, row_updated_at) = row?;
-            accounts.push(account_id);
-            created_at = if created_at == 0 {
-                row_created_at
-            } else {
-                created_at.min(row_created_at)
-            };
-            updated_at = updated_at.max(row_updated_at);
-        }
-        Ok((!accounts.is_empty()).then(|| ProviderRoute {
+        let (path, prefix) = crate::config::placement::route_location(&conn, scope)
+            .map_err(|e| StoreError::InvalidData(e.to_string()))?;
+        let mut document = crate::config::files::read(&path)
+            .map_err(|e| StoreError::InvalidData(e.to_string()))?;
+        crate::config::remote::apply_document(&path, &mut document)
+            .map_err(|e| StoreError::InvalidData(e.to_string()))?;
+        let parts: Vec<_> = prefix
+            .iter()
+            .map(String::as_str)
+            .chain(["account", provider.as_str()])
+            .collect();
+        let Some(value) = parts
+            .iter()
+            .try_fold(&document, |value, key| value.get(*key))
+        else {
+            return Ok(None);
+        };
+        let order: crate::config::placement::AccountOrder =
+            serde_yaml_ng::from_value(value.clone())
+                .map_err(|e| StoreError::InvalidData(e.to_string()))?;
+        let candidates: Vec<_> = observed.iter().collect();
+        let accounts = order
+            .iter()
+            .map(
+                |selector| match crate::provider_account::match_account(&candidates, selector) {
+                    crate::provider_account::AccountMatch::One(account) => {
+                        Ok(account.account_id.clone())
+                    }
+                    crate::provider_account::AccountMatch::None => Err(StoreError::InvalidData(
+                        format!("account reference {selector} has no resident login"),
+                    )),
+                    crate::provider_account::AccountMatch::Ambiguous(_) => {
+                        Err(StoreError::InvalidData(format!(
+                            "account reference {selector} is ambiguous"
+                        )))
+                    }
+                },
+            )
+            .collect::<StoreResult<Vec<_>>>()?;
+        Ok(Some(ProviderRoute {
             scope: scope.clone(),
             provider,
             accounts,
-            created_at,
-            updated_at,
+            created_at: 0,
+            updated_at: 0,
         }))
     }
 
@@ -1664,44 +1846,46 @@ impl SqliteStore {
         provider: Provider,
         agent_session: &AgentSessionId,
         account_id: &ProviderAccountId,
-        isolated: bool,
     ) -> StoreResult<()> {
+        // Every launch runs in the shared home, so the conversation lives
+        // there from now on, wherever it ran before.
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
             "INSERT INTO provider_session_accounts (
                 provider, provider_session_id, account_id, created_at, isolated
-             ) VALUES (?1, ?2, ?3, ?4, ?5)
+             ) VALUES (?1, ?2, ?3, ?4, 0)
              ON CONFLICT(provider, provider_session_id) DO UPDATE SET
                 account_id = excluded.account_id,
                 created_at = excluded.created_at,
-                isolated = excluded.isolated",
+                isolated = 0",
             params![
                 provider.as_str(),
                 agent_session,
                 account_id.as_str(),
                 now_unix(),
-                isolated,
             ],
         )?;
         Ok(())
     }
 
-    /// The home a recorded conversation lives in: its account's own
-    /// (`true`) or the provider's native one.
-    pub fn provider_session_isolated(
+    /// The account a launch last ran this conversation on.
+    pub fn provider_session_account(
         &self,
         provider: Provider,
         agent_session: &AgentSessionId,
-    ) -> StoreResult<Option<bool>> {
+    ) -> StoreResult<Option<ProviderAccountId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn
-            .query_row(
-                "SELECT isolated FROM provider_session_accounts
-                 WHERE provider = ?1 AND provider_session_id = ?2",
-                params![provider.as_str(), agent_session],
-                |row| row.get(0),
-            )
-            .optional()?)
+        conn.query_row(
+            "SELECT account_id FROM provider_session_accounts
+             WHERE provider = ?1 AND provider_session_id = ?2",
+            params![provider.as_str(), agent_session],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?
+        .as_deref()
+        .map(ProviderAccountId::parse)
+        .transpose()
+        .map_err(StoreError::InvalidData)
     }
 
     pub fn record_provider_account_switch(
@@ -1742,7 +1926,9 @@ impl SqliteStore {
         .map_err(StoreError::InvalidData)
     }
 
-    pub fn provider_session_account(
+    /// The account whose own home still holds this conversation: it ran
+    /// there before every launch shared one, and has not resumed since.
+    pub fn provider_session_account_home(
         &self,
         provider: Provider,
         agent_session: &AgentSessionId,
@@ -1761,11 +1947,34 @@ impl SqliteStore {
         .map_err(StoreError::InvalidData)
     }
 
+    /// Record that `agent_session` ran in `account_id`'s own home, as every
+    /// conversation did before launches shared one. Nothing writes this now.
+    #[cfg(test)]
+    pub(crate) fn record_account_home_conversation(
+        &self,
+        provider: Provider,
+        agent_session: &str,
+        account_id: &str,
+    ) {
+        self.conn
+            .lock()
+            .expect("store mutex poisoned")
+            .execute(
+                "INSERT INTO provider_session_accounts
+                    (provider, provider_session_id, account_id, created_at, isolated)
+                 VALUES (?1, ?2, ?3, 1, 1)",
+                params![provider.as_str(), agent_session, account_id],
+            )
+            .expect("record account-home conversation");
+    }
+
+    /// The most urgent eligible candidate for `model` (`None`: a
+    /// launch whose model the provider picks, held back by every scoped limit).
     pub fn select_provider_account(
         &self,
         provider: Provider,
         candidates: &[ProviderAccountId],
-        agent_session: Option<&AgentSessionId>,
+        model: Option<&str>,
     ) -> StoreResult<Option<ProviderAccountSelection>> {
         if candidates.is_empty() {
             return Ok(None);
@@ -1780,20 +1989,9 @@ impl SqliteStore {
             |row| row.get::<_, i64>(0),
         )?;
         let selection_time = now.max(newest_selection + 1);
-        let requested = match agent_session {
-            Some(session_id) => transaction
-                .query_row(
-                    "SELECT account_id FROM provider_session_accounts
-                     WHERE provider = ?1 AND provider_session_id = ?2 AND isolated = 1",
-                    params![provider.as_str(), session_id],
-                    |row| row.get::<_, String>(0),
-                )
-                .optional()?,
-            None => None,
-        };
         let limits = {
             let mut statement = transaction.prepare(
-                "SELECT provider, account_id, window, used_percent, resets_at, plan, observed_at, source
+                "SELECT provider, account_id, window, used_percent, resets_at, plan, observed_at, source, model, limited_until
                  FROM provider_account_limits
                  WHERE provider = ?1
                  ORDER BY account_id, window",
@@ -1803,50 +2001,39 @@ impl SqliteStore {
             for row in rows {
                 limits.push(row??);
             }
-            limits
+            reconcile_legacy_account_windows(limits)
         };
         let mut account_statement = transaction.prepare(
-            "SELECT provider, account_id, home, login_email, credential_state,
-                    routing_state, plan, paid_through, utilization_percent,
-                    cooldown_until, cooldown_reason, last_selected_at,
-                    created_at, updated_at, observed_email, observed_subject, observed_plan, observed_credential_digest
-             FROM provider_accounts
-             WHERE provider = ?1 AND account_id = ?2",
+            &format!("SELECT {PROVIDER_ACCOUNT_COLUMNS} FROM provider_accounts WHERE provider = ?1 AND account_id = ?2"),
         )?;
+        let config = crate::config::placement::global_settings(&transaction)
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
         let mut available = Vec::new();
         for account_id in candidates {
             let account = account_statement
-                .query_row(
-                    params![provider.as_str(), account_id.as_str()],
-                    read_provider_account,
-                )
+                .query_row(params![provider.as_str(), account_id.as_str()], |row| {
+                    Ok(read_provider_account(row))
+                })
                 .optional()?
                 .transpose()?;
-            if let Some(account) = account
-                .filter(|account| crate::provider_account::account_route_eligible(account, now))
-            {
+            let account = account
+                .map(|account| {
+                    crate::config::placement::account_preferences(&config, account)
+                        .map_err(|error| StoreError::InvalidData(error.to_string()))
+                })
+                .transpose()?;
+            if let Some(account) = account.filter(|account| {
+                crate::provider_account::account_route_eligible(account, &limits, model, now)
+            }) {
                 available.push(account);
             }
         }
         drop(account_statement);
 
-        let resumed = requested.as_ref().and_then(|account_id| {
-            available
-                .iter()
-                .position(|account| account.account_id.as_str() == account_id)
-        });
-        let mut account = match resumed {
-            Some(index) => available.remove(index),
-            None => {
-                crate::provider_account::order_accounts_by_room(&mut available, &limits, now);
-                match available.into_iter().next() {
-                    Some(selection) => selection,
-                    None => {
-                        transaction.commit()?;
-                        return Ok(None);
-                    }
-                }
-            }
+        crate::provider_account::order_accounts_by_urgency(&mut available, &limits, model, now);
+        let Some(mut account) = available.into_iter().next() else {
+            transaction.commit()?;
+            return Ok(None);
         };
         transaction.execute(
             "UPDATE provider_accounts
@@ -1974,48 +2161,16 @@ impl SqliteStore {
                     |row| row.get::<_, String>(0),
                 )
                 .optional()?;
-            if collision.as_deref()
-                != update
-                    .retire_collision
-                    .as_ref()
-                    .map(crate::id::WaveId::as_str)
-            {
+            if let Some(collision) = collision {
                 return Err(StoreError::InvalidData(format!(
-                    "target {}/{} collision changed while relocation was staged",
+                    "Wave {}/{} already exists as {collision}",
                     update.target.repo(),
                     update.target.slug()
                 )));
             }
-            if let Some(collision) = &update.retire_collision {
-                let blockers = Self::wave_retirement_blockers_in(&tx, collision)?;
-                if !blockers.is_empty() {
-                    return Err(StoreError::InvalidData(format!(
-                        "cannot retire destination Wave {collision}: {}",
-                        blockers.join(", ")
-                    )));
-                }
-            }
         }
 
         for update in updates {
-            if let Some(collision) = &update.retire_collision {
-                let retired_at = now_unix();
-                tx.execute(
-                    "UPDATE waves
-                     SET retired_at = ?2,
-                         superseded_by_wave_id = ?3,
-                         retirement_reason = ?4,
-                         work_state = 'abandoned',
-                         work_terminal_at = ?2
-                     WHERE id = ?1 AND retired_at IS NULL",
-                    params![
-                        collision,
-                        retired_at,
-                        update.wave_id,
-                        "registration-only destination shadow retired during relocation"
-                    ],
-                )?;
-            }
             let (parent_slug, name) = update
                 .target
                 .slug()
@@ -2049,73 +2204,6 @@ impl SqliteStore {
                 ),
             )?;
         }
-        tx.commit()?;
-        Ok(())
-    }
-
-    pub(crate) fn wave_retirement_blockers(&self, wave_id: &WaveId) -> StoreResult<Vec<String>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Self::wave_retirement_blockers_in(&conn, wave_id)
-    }
-
-    fn wave_retirement_blockers_in(
-        conn: &Connection,
-        wave_id: &WaveId,
-    ) -> StoreResult<Vec<String>> {
-        let mut blockers = Vec::new();
-        let projects: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM projects WHERE wave_id = ?1",
-            params![wave_id],
-            |row| row.get(0),
-        )?;
-        if projects > 0 {
-            blockers.push(format!("{projects} Projects"));
-        }
-        let tasks: i64 = conn.query_row(
-            "SELECT COUNT(*)
-             FROM tasks JOIN projects ON projects.id = tasks.project_id
-             WHERE projects.wave_id = ?1",
-            params![wave_id],
-            |row| row.get(0),
-        )?;
-        if tasks > 0 {
-            blockers.push(format!("{tasks} Tasks"));
-        }
-        let children: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM waves
-             WHERE parent_wave_id = ?1 AND retired_at IS NULL",
-            params![wave_id],
-            |row| row.get(0),
-        )?;
-        if children > 0 {
-            blockers.push(format!("{children} child Waves"));
-        }
-        let snapshots: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM pm_wave_sync WHERE wave_id = ?1",
-            params![wave_id],
-            |row| row.get(0),
-        )?;
-        if snapshots > 0 {
-            blockers.push("PM snapshot".to_string());
-        }
-        let promoted = conn
-            .query_row(
-                "SELECT promoted_at FROM waves WHERE id = ?1",
-                params![wave_id],
-                |row| row.get::<_, Option<i64>>(0),
-            )
-            .optional()?
-            .flatten();
-        if promoted.is_some() {
-            blockers.push("promotion receipt".to_string());
-        }
-        Ok(blockers)
-    }
-
-    pub fn delete_wave(&self, wave_id: &WaveId) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        tx.execute("DELETE FROM waves WHERE id = ?1", params![wave_id])?;
         tx.commit()?;
         Ok(())
     }
@@ -2156,8 +2244,17 @@ impl SqliteStore {
     /// writer holds the lock only briefly; a row an interrupted exit leaves is
     /// forgotten by the retention prune.
     pub fn record_process(&self, process: &crate::process::LfProcess) -> StoreResult<()> {
+        self.record_hosted_process(process, None)
+    }
+
+    /// Record a Process start or exit; a start inside a held terminal names it.
+    fn record_hosted_process(
+        &self,
+        process: &crate::process::LfProcess,
+        held_terminal: Option<&crate::id::TerminalId>,
+    ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        record_process_in(&conn, process)?;
+        record_process_in(&conn, process, held_terminal)?;
         if process.completed_at.is_some() {
             let forget = |scope: &str| {
                 conn.execute(
@@ -2181,6 +2278,7 @@ impl SqliteStore {
     pub(crate) fn record_process_within(
         &self,
         process: &crate::process::LfProcess,
+        held_terminal: Option<&crate::id::TerminalId>,
         wait: Duration,
     ) -> StoreResult<()> {
         let previous: u32 = {
@@ -2189,7 +2287,7 @@ impl SqliteStore {
             conn.busy_timeout(wait)?;
             previous
         };
-        let result = self.record_process(process);
+        let result = self.record_hosted_process(process, held_terminal);
         self.conn
             .lock()
             .expect("store mutex poisoned")
@@ -2205,22 +2303,25 @@ impl SqliteStore {
 }
 
 /// A start record never overwrites an existing row; a terminal record completes
-/// the row it started.
+/// the row it started. `held_terminal` is the terminal a held lf process runs
+/// in, so rules scoped to that terminal find the work started inside it.
 pub(super) fn record_process_in(
     conn: &rusqlite::Connection,
     process: &crate::process::LfProcess,
+    held_terminal: Option<&crate::id::TerminalId>,
 ) -> StoreResult<()> {
     conn.execute(
         "INSERT INTO processes(id,trace_id,parent_lf_process_id,command,repo,cwd,started_at,
-            via_agent,caller_session_id,caller_agent_process_id,completed_at,outcome,exit_code,signal,error,pid,os_started_at)
-         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)
+            via_agent,caller_session_id,caller_agent_process_id,completed_at,outcome,exit_code,signal,error,pid,os_started_at,
+            held_terminal_id)
+         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)
          ON CONFLICT(id) DO UPDATE SET completed_at=excluded.completed_at,
             outcome=excluded.outcome,exit_code=excluded.exit_code,signal=excluded.signal,error=excluded.error
          WHERE processes.completed_at IS NULL AND excluded.completed_at IS NOT NULL",
         params![process.id,process.trace_id,process.parent_lf_process_id,process.command,process.repo,process.cwd,
             process.started_at,process.via_agent,process.caller_session_id,process.caller_agent_process_id,
             process.completed_at,process.outcome,process.exit_code,process.signal,process.error,process.pid,
-            process.os_started_at],
+            process.os_started_at,held_terminal],
     )?;
     Ok(())
 }
@@ -2228,16 +2329,105 @@ pub(super) fn record_process_in(
 #[cfg(test)]
 mod frontier_tests {
     use super::SqliteStore;
-    use crate::build_info::MigrationAuthority::{self, Published, ValidationOnly};
     use crate::durable::{WorkRef, WorkStatus};
     use crate::id::WaveId;
     use crate::store::migrations::{
-        apply_all_but_head, apply_newer_release, latest_applied_version_sqlite,
+        apply_all_but_head, apply_newer_migration, latest_applied_version_sqlite,
         latest_known_version, prior_known_version,
     };
     use crate::store::FrontierAdvance::{self, Authorized, Forbidden};
     use crate::work::wave::Wave;
     use std::path::{Path, PathBuf};
+
+    #[test]
+    fn concurrent_copies_share_one_initialized_machine() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("store.db");
+        let start = std::sync::Barrier::new(8);
+        let machines = std::thread::scope(|scope| {
+            let workers: Vec<_> = (0..8)
+                .map(|_| {
+                    scope.spawn(|| {
+                        start.wait();
+                        super::copy_test_store(&path).unwrap();
+                        rusqlite::Connection::open(&path)
+                            .unwrap()
+                            .query_row("SELECT id FROM machines WHERE is_local=1", [], |row| {
+                                row.get::<_, String>(0)
+                            })
+                            .unwrap()
+                    })
+                })
+                .collect();
+            workers
+                .into_iter()
+                .map(|worker| worker.join().unwrap())
+                .collect::<Vec<_>>()
+        });
+        assert!(machines.iter().all(|machine| machine == &machines[0]));
+    }
+
+    #[test]
+    fn test_store_image_matches_migrations_and_copies_are_independent() {
+        let migrated = rusqlite::Connection::open_in_memory().unwrap();
+        crate::store::migrations::apply_sqlite(&migrated).unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let first = directory.path().join("first.db");
+        let second = directory.path().join("second.db");
+        super::copy_test_store(&first).unwrap();
+        super::copy_test_store(&second).unwrap();
+        let image = rusqlite::Connection::open(&first).unwrap();
+        let schema = crate::store::migration_schema::product_schema(&migrated).unwrap();
+        assert_eq!(
+            *schema,
+            *crate::store::migration_schema::product_schema(&image).unwrap()
+        );
+        for table in schema.iter().filter(|object| object.object_type == "table") {
+            let rows = |conn: &rusqlite::Connection| {
+                let mut query = conn
+                    .prepare(&format!("SELECT * FROM [{}]", table.name))
+                    .unwrap();
+                let columns = query.column_count();
+                let mut rows: Vec<_> = query
+                    .query_map([], |row| {
+                        (if table.name == "machines" { 3 } else { 0 }..columns)
+                            .map(|column| row.get::<_, rusqlite::types::Value>(column))
+                            .collect::<rusqlite::Result<Vec<_>>>()
+                    })
+                    .unwrap()
+                    .map(|row| format!("{:?}", row.unwrap()))
+                    .collect();
+                rows.sort();
+                rows
+            };
+            assert_eq!(rows(&migrated), rows(&image), "{}", table.name);
+        }
+        let machine = |conn: &rusqlite::Connection| {
+            conn.query_row("SELECT id FROM machines WHERE is_local=1", [], |row| {
+                row.get::<_, String>(0)
+            })
+            .unwrap()
+        };
+        assert_ne!(
+            machine(&image),
+            machine(&rusqlite::Connection::open(&second).unwrap())
+        );
+        image
+            .execute_batch("CREATE TABLE fixture_write(value); INSERT INTO fixture_write VALUES(1)")
+            .unwrap();
+        super::copy_test_store(&first).unwrap();
+        assert_eq!(
+            image
+                .query_row("SELECT value FROM fixture_write", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert!(rusqlite::Connection::open(second)
+            .unwrap()
+            .prepare("SELECT * FROM fixture_write")
+            .is_err());
+    }
 
     #[test]
     fn observation_reads_identity_without_execution_schema() {
@@ -2301,11 +2491,10 @@ mod frontier_tests {
 
     fn open(
         path: &Path,
-        authority: MigrationAuthority,
         home: &Path,
         advance: FrontierAdvance,
     ) -> crate::store::StoreResult<SqliteStore> {
-        SqliteStore::open_with(path, authority, home, advance)
+        SqliteStore::open_with(path, home, advance, super::SQLITE_WRITE_BUSY_TIMEOUT)
     }
 
     fn frontier(path: &Path) -> Option<String> {
@@ -2338,40 +2527,39 @@ mod frontier_tests {
     }
 
     #[test]
-    fn development_build_uses_compatible_shared_work_without_migrating() {
+    fn any_build_uses_compatible_shared_work_without_migrating() {
         let shared = SharedMachine::new();
         let path = shared.shared_db();
-        open(&path, Published, &shared.home, Authorized).unwrap();
+        open(&path, &shared.home, Authorized).unwrap();
         seed_current_wave(&path);
         let before = frontier(&path);
-        let store = open(&path, ValidationOnly, &shared.home, Forbidden).unwrap();
+        let store = open(&path, &shared.home, Forbidden).unwrap();
         let wave = Wave::new(WaveId::new(), "From app".into(), "/repo".into());
         store.create_wave(&wave).unwrap();
         assert_eq!(current_wave(&path), "Current");
         assert_eq!(frontier(&path), before);
-        open(&path, Published, &shared.home, Forbidden).unwrap();
+        open(&path, &shared.home, Forbidden).unwrap();
     }
 
-    /// A newer release that only adds leaves this lf reading and writing the
-    /// shared store; one that breaks names the release that locked it out.
+    /// A newer build leaves this lf reading and writing the shared store.
+    /// Promotion selecting this build applies nothing to history it does not know.
     #[test]
-    fn an_older_lf_keeps_working_on_a_store_a_newer_release_extended() {
+    fn an_older_lf_keeps_working_on_a_store_a_newer_build_extended() {
         let shared = SharedMachine::new();
         let path = shared.shared_db();
-        open(&path, Published, &shared.home, Authorized).unwrap();
+        open(&path, &shared.home, Authorized).unwrap();
         seed_current_wave(&path);
         let conn = rusqlite::Connection::open(&path).unwrap();
-        apply_newer_release(
+        apply_newer_migration(
             &conn,
             "ALTER TABLE waves ADD COLUMN colour TEXT;
              CREATE TABLE wave_badges (wave_id TEXT NOT NULL, badge TEXT);",
-            true,
         )
         .unwrap();
         let newer = frontier(&path);
 
-        let store = open(&path, Published, &shared.home, Forbidden)
-            .expect("an additive newer release leaves the store readable");
+        let store =
+            open(&path, &shared.home, Forbidden).expect("a newer build leaves the store readable");
         let wave = Wave::new(WaveId::new(), "From older lf".into(), "/repo".into());
         store.create_wave(&wave).unwrap();
         assert_eq!(
@@ -2383,35 +2571,74 @@ mod frontier_tests {
         );
         assert_eq!(current_wave(&path), "Current");
         assert_eq!(frontier(&path), newer);
-        open(&path, Published, &shared.home, Authorized)
-            .expect_err("promotion never accepts history it does not know");
+        open(&path, &shared.home, Authorized).expect("selecting an older build applies nothing");
+        assert_eq!(frontier(&path), newer);
+    }
 
-        let broken = SharedMachine::new();
-        let path = broken.shared_db();
-        open(&path, Published, &broken.home, Authorized).unwrap();
+    /// A contract migration past its staging window still opens: the one
+    /// statement that reads what it dropped fails, naming the column.
+    #[test]
+    fn a_dropped_column_fails_the_statement_that_reads_it_and_nothing_else() {
+        let shared = SharedMachine::new();
+        let path = shared.shared_db();
+        open(&path, &shared.home, Authorized).unwrap();
+        let running = open(&path, &shared.home, Forbidden).unwrap();
         let conn = rusqlite::Connection::open(&path).unwrap();
-        let release = apply_newer_release(
-            &conn,
-            "CREATE TABLE wave_badges (wave_id TEXT NOT NULL, badge TEXT);",
-            false,
+        apply_newer_migration(&conn, "ALTER TABLE waves DROP COLUMN promoted_at;").unwrap();
+
+        running
+            .validate_current_schema()
+            .expect("the running reader keeps its store");
+        let store = open(&path, &shared.home, Forbidden).expect("a fresh open keeps working");
+
+        let error = store.get_wave(&WaveId::new()).unwrap_err().to_string();
+
+        assert!(error.contains("promoted_at"), "{error}");
+        assert!(!error.contains("lf install"), "{error}");
+        store.health_check().expect("the rest of the store answers");
+    }
+
+    /// A Graph holds its store across steps and revalidates it after each one
+    /// (`validate_current_schema`). A newer build that adds a slug migration
+    /// meanwhile leaves that running reader working.
+    #[test]
+    fn a_running_older_reader_survives_an_upgrade_under_it() {
+        let shared = SharedMachine::new();
+        let path = shared.shared_db();
+        open(&path, &shared.home, Authorized).unwrap();
+        let running = open(&path, &shared.home, Forbidden).unwrap();
+        let before = Wave::new(WaveId::new(), "Before upgrade".into(), "/repo".into());
+        running.create_wave(&before).unwrap();
+
+        let newer = rusqlite::Connection::open(&path).unwrap();
+        apply_newer_migration(
+            &newer,
+            "ALTER TABLE waves ADD COLUMN colour TEXT;
+             CREATE TABLE wave_badges (wave_id TEXT NOT NULL, badge TEXT);",
         )
         .unwrap();
-        let refusal = open(&path, Published, &broken.home, Forbidden)
-            .expect_err("a breaking newer release locks this lf out")
-            .to_string();
-        assert!(
-            refusal.contains(&format!("this store needs lf {release} or newer (it has "))
-                && refusal.ends_with("install it with lf install"),
-            "{refusal}"
-        );
+
+        running
+            .validate_current_schema()
+            .expect("a newer migration keeps the running reader valid");
+        let after = Wave::new(WaveId::new(), "After upgrade".into(), "/repo".into());
+        running.create_wave(&after).unwrap();
+        for wave in [&before, &after] {
+            assert_eq!(
+                running
+                    .get_wave(wave.id())
+                    .unwrap()
+                    .map(|w| w.name().to_string()),
+                Some(wave.name().to_string())
+            );
+        }
     }
 
     #[test]
-    fn private_development_store_opens_with_the_current_work_schema() {
+    fn a_private_store_opens_with_the_current_work_schema() {
         let shared = SharedMachine::new();
         let path = shared.home.join("private/loopflow.db");
-        let store = open(&path, ValidationOnly, &shared.home, Forbidden)
-            .expect("private development store opens at the embedded draft frontier");
+        let store = open(&path, &shared.home, Forbidden).expect("a private store migrates itself");
         let wave = Wave::new(
             WaveId::new(),
             "private-development".to_string(),
@@ -2437,10 +2664,10 @@ mod frontier_tests {
         let shared = SharedMachine::new();
         let path = shared.shared_db();
 
-        let error = open(&path, Published, &shared.home, Forbidden)
+        let error = open(&path, &shared.home, Forbidden)
             .expect_err("an ordinary open must not initialize the shared store");
         assert!(
-            error.to_string().contains("lf install"),
+            error.to_string().contains("lf self install"),
             "the refusal must name the authorized boundary: {error}"
         );
         assert!(
@@ -2465,16 +2692,17 @@ mod frontier_tests {
 
         // The candidate is one migration ahead; its ordinary open refuses rather
         // than reuse a schema older than its own code.
-        let error = open(&path, Published, &shared.home, Forbidden)
+        let error = open(&path, &shared.home, Forbidden)
             .expect_err("an ordinary open ahead of the frontier must refuse");
+        // `lf install` finishes an app Sparkle replaced; `--dev` would move a
+        // stable Machine to dev.
+        let error = error.to_string();
         assert!(
-            error.to_string().contains("lf install"),
-            "the refusal must name the authorized boundary: {error}"
-        );
-        assert!(
-            error.to_string().contains(&installed_frontier)
-                || error.to_string().contains(&latest_known_version()),
-            "the refusal names the pending frontier: {error}"
+            error.contains(&latest_known_version())
+                && (error.contains("run `lf install` to finish")
+                    || error.contains("private LF_HOME"))
+                && !error.contains("--dev"),
+            "the refusal names the pending migration and its fix: {error}"
         );
         assert_eq!(
             frontier(&path).as_deref(),
@@ -2498,7 +2726,7 @@ mod frontier_tests {
         let path = shared.shared_db();
 
         // Initialization from absent.
-        open(&path, Published, &shared.home, Authorized).expect("boundary initializes");
+        open(&path, &shared.home, Authorized).expect("boundary initializes");
         assert_eq!(
             frontier(&path).as_deref(),
             Some(latest_known_version().as_str())
@@ -2506,7 +2734,7 @@ mod frontier_tests {
 
         // Once the boundary has initialized it, an ordinary open validates the
         // now-existing store read-only and leaves the frontier at the head.
-        open(&path, Published, &shared.home, Forbidden)
+        open(&path, &shared.home, Forbidden)
             .expect("an ordinary open validates the initialized store");
         assert_eq!(
             frontier(&path).as_deref(),
@@ -2521,7 +2749,7 @@ mod frontier_tests {
             frontier(&advanced_path).as_deref(),
             Some(prior_known_version().as_str())
         );
-        open(&advanced_path, Published, &advanced.home, Authorized).expect("boundary advances");
+        open(&advanced_path, &advanced.home, Authorized).expect("boundary advances");
         assert_eq!(
             frontier(&advanced_path).as_deref(),
             Some(latest_known_version().as_str())
@@ -2545,8 +2773,8 @@ mod frontier_tests {
         );
         assert_eq!(current_wave(&path), "Current");
 
-        open(&path, Published, &shared.home, Forbidden)
-            .expect_err("ordinary branch candidate must not promote its draft migration");
+        open(&path, &shared.home, Forbidden)
+            .expect_err("ordinary branch candidate must not apply its migration");
         assert_eq!(
             frontier(&path).as_deref(),
             Some(installed_frontier.as_str())
@@ -2559,17 +2787,17 @@ mod frontier_tests {
         );
         drop(installed);
 
-        open(&path, Published, &shared.home, Authorized)
+        open(&path, &shared.home, Authorized)
             .expect("explicit promotion advances the shared frontier");
         let promoted_frontier = latest_known_version();
         assert_eq!(frontier(&path).as_deref(), Some(promoted_frontier.as_str()));
         assert_eq!(current_wave(&path), "Current");
 
-        open(&path, Published, &shared.home, Authorized)
+        open(&path, &shared.home, Authorized)
             .expect("repeating promotion at the same frontier is a no-op");
         assert_eq!(frontier(&path).as_deref(), Some(promoted_frontier.as_str()));
         assert_eq!(current_wave(&path), "Current");
-        open(&path, Published, &shared.home, Forbidden)
+        open(&path, &shared.home, Forbidden)
             .expect("ordinary current binary opens after promotion");
     }
 
@@ -2579,7 +2807,7 @@ mod frontier_tests {
     fn an_ordinary_open_of_the_shared_store_does_not_scan_stored_rows() {
         let shared = SharedMachine::new();
         let path = shared.shared_db();
-        open(&path, Published, &shared.home, Authorized).expect("boundary initializes");
+        open(&path, &shared.home, Authorized).expect("boundary initializes");
         let conn = rusqlite::Connection::open(&path).unwrap();
         conn.execute_batch(
             "PRAGMA foreign_keys = OFF;
@@ -2588,27 +2816,18 @@ mod frontier_tests {
         )
         .unwrap();
 
-        open(&path, Published, &shared.home, Forbidden)
+        open(&path, &shared.home, Forbidden)
             .expect("an ordinary open validates ledger and schema only");
         crate::store::migrations::validate_sqlite(&conn)
             .expect_err("full diagnosis still reports the dangling reference");
     }
 
-    /// A validation-only build never advances the shared store even at the
-    /// nominal boundary, and a private/isolated DB stays freely initializable —
-    /// the isolated dev escape the directive preserves.
+    /// A private path (not ~/.lf/loopflow.db) initializes and migrates itself.
     #[test]
-    fn validation_only_is_walled_from_the_shared_store_but_not_private_ones() {
+    fn a_private_store_initializes_without_the_promotion_boundary() {
         let shared = SharedMachine::new();
-        let path = shared.shared_db();
-        open(&path, ValidationOnly, &shared.home, Authorized)
-            .expect_err("a validation-only build must never initialize the shared store");
-        assert!(!path.exists());
-
-        // A private path (not ~/.lf/loopflow.db) initializes regardless of
-        // authority or boundary.
         let private = shared.home.join(".lf-dev/branch/loopflow.db");
-        open(&private, ValidationOnly, &shared.home, Forbidden).expect("private DB initializes");
+        open(&private, &shared.home, Forbidden).expect("private DB initializes");
         assert_eq!(
             frontier(&private).as_deref(),
             Some(latest_known_version().as_str())
@@ -2618,14 +2837,14 @@ mod frontier_tests {
 
 #[cfg(test)]
 mod wal_tests {
-    use super::{configure_write_connection, WAL_SIZE_LIMIT_BYTES};
+    use super::{configure_write_connection, SQLITE_WRITE_BUSY_TIMEOUT, WAL_SIZE_LIMIT_BYTES};
 
     #[test]
     fn a_burst_does_not_leave_its_wal_on_disk() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("loopflow.db");
         let mut conn = rusqlite::Connection::open(&path).unwrap();
-        configure_write_connection(&mut conn, &path).unwrap();
+        configure_write_connection(&mut conn, &path, SQLITE_WRITE_BUSY_TIMEOUT).unwrap();
         conn.execute_batch("CREATE TABLE history (payload BLOB)")
             .unwrap();
         let wal = directory.path().join("loopflow.db-wal");
@@ -2649,7 +2868,7 @@ mod wal_tests {
         let path = directory.path().join("loopflow.db");
         let open = || {
             let mut conn = rusqlite::Connection::open(&path).unwrap();
-            configure_write_connection(&mut conn, &path).unwrap();
+            configure_write_connection(&mut conn, &path, SQLITE_WRITE_BUSY_TIMEOUT).unwrap();
             conn
         };
         let mut first = open();
@@ -2766,8 +2985,6 @@ mod linear_oauth_tests {
 #[cfg(test)]
 mod account_observation_tests {
     use super::SqliteStore;
-    use crate::profile::{ProviderRoute, RouteScope};
-    use crate::provider_auth::Provider;
     use crate::store::{
         AccountLimitWindow, CredentialState, ProviderAccount, ProviderAccountId, RoutingState,
     };
@@ -2795,33 +3012,552 @@ mod account_observation_tests {
         }
     }
 
+    fn window(name: &str, used: u8, model: Option<&str>) -> AccountLimitWindow {
+        AccountLimitWindow {
+            window: name.into(),
+            used_percent: used,
+            model: model.map(str::to_owned),
+            resets_at: Some(1_900_000_000),
+            plan: None,
+            limited_until: (used == 100).then_some(1_900_000_005),
+        }
+    }
+
     #[test]
-    fn route_edits_invalidate_wave_setup() {
+    fn claude_capacity_historical_names_reconcile_and_refresh() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&directory.path().join("registry.db")).unwrap();
+        let mut account = account();
+        account.cooldown_until = None;
+        store.upsert_provider_account(&account).unwrap();
+        for (name, model, canonical, scope) in [
+            ("seven_day_overage_included", Some("fable"), "seven_day_fable", Some("fable")),
+            ("rejected: seven_day_overage_included", Some("fable"), "seven_day_fable", Some("fable")),
+            ("blocked: seven_day_fable", Some("fable"), "seven_day_fable", Some("fable")),
+            ("limited: seven_day_overage_included", Some("fable"), "seven_day_fable", Some("fable")),
+            ("rate_limit_reached: seven_day_fable", Some("fable"), "seven_day_fable", Some("fable")),
+            ("You've hit your Fable limit · resets Nov 18 at 4am (America/Los_Angeles)", Some("fable"), "seven_day_fable", Some("fable")),
+            ("You've reached your Fable limit. Run /usage-credits to continue or switch models with /model.", Some("fable"), "seven_day_fable", Some("fable")),
+            ("weekly:fable", None, "seven_day_fable", Some("fable")),
+            ("weekly", None, "seven_day", None),
+            ("session", None, "five_hour", None),
+        ] {
+            store.upsert_provider_account_limits("claude", &account.account_id, &[window(name, 100, model)], "stream").unwrap();
+            let rows = store.provider_account_limits(None).unwrap();
+            assert_eq!(rows.len(), 1, "{name}");
+            assert_eq!(rows[0].window, canonical);
+            assert_eq!(rows[0].model.as_deref(), scope);
+            assert!(rows[0].limited_until.is_some());
+            let revision = store.provider_account_capacity_revision("claude", &account.account_id).unwrap();
+            store.reconcile_provider_account_capacity(&account, revision, &[window(canonical, 16, scope)]).unwrap();
+            let rows = store.provider_account_limits(None).unwrap();
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].used_percent, 16);
+            assert_eq!(rows[0].limited_until, None);
+            let conn = store.conn.lock().unwrap();
+            let raw: String = conn.query_row("SELECT window FROM provider_account_limits", [], |row| row.get(0)).unwrap();
+            assert_eq!(raw, canonical);
+            conn.execute("DELETE FROM provider_account_limits", []).unwrap();
+        }
+    }
+
+    #[test]
+    fn claude_capacity_historical_unknown_credit_and_mismatched_rows_stay() {
         let directory = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&directory.path().join("registry.db")).unwrap();
         let account = account();
         store.upsert_provider_account(&account).unwrap();
-        let before = store.revisions().unwrap().planning;
-        store
-            .set_provider_route(&ProviderRoute {
-                scope: RouteScope::Default,
-                provider: Provider::Claude,
-                accounts: vec![account.account_id],
-                created_at: 1,
-                updated_at: 1,
-            })
+        for (name, model) in [
+            ("rejected: overage", Some("fable")),
+            ("You're out of usage credits. Run /usage-credits to keep using Fable 5.2 or /model to switch models.", Some("fable")),
+            ("rejected: seven_day_overage_included", Some("future")),
+            ("rejected: seven_day_fable", Some("sonnet")),
+            ("unknown", None),
+        ] {
+            store.upsert_provider_account_limits("claude", &account.account_id, &[window(name, 100, model)], "stream").unwrap();
+        }
+        let before = store.provider_account_limits(None).unwrap();
+        let revision = store
+            .provider_account_capacity_revision("claude", &account.account_id)
             .unwrap();
-        let after_set = store.revisions().unwrap().planning;
-        assert!(after_set > before);
-        assert!(store
-            .clear_provider_route(&RouteScope::Default, Provider::Claude)
-            .unwrap());
-        let after_unset = store.revisions().unwrap().planning;
-        assert!(after_unset > after_set);
+        store
+            .reconcile_provider_account_capacity(
+                &account,
+                revision,
+                &[window("seven_day_fable", 16, Some("fable"))],
+            )
+            .unwrap();
+        let after = store.provider_account_limits(None).unwrap();
+        for row in before {
+            assert!(after.contains(&row), "{row:?}");
+        }
+    }
+
+    #[test]
+    fn claude_capacity_clear_releases_all_holds_and_supersedes_polls() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&directory.path().join("registry.db")).unwrap();
+        let account = account();
+        store.upsert_provider_account(&account).unwrap();
+        store
+            .upsert_provider_account_limits(
+                "claude",
+                &account.account_id,
+                &[
+                    window("seven_day", 100, None),
+                    window("seven_day_fable", 100, Some("fable")),
+                    window("unknown", 100, Some("opus")),
+                ],
+                "stream",
+            )
+            .unwrap();
+        let before = store.provider_account_limits(None).unwrap();
+        let revision = store
+            .provider_account_capacity_revision("claude", &account.account_id)
+            .unwrap();
+        store
+            .clear_provider_account_cooldown("claude", &account.account_id)
+            .unwrap();
+        let current = store
+            .get_provider_account("claude", &account.account_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(current.cooldown_until, None);
+        assert_eq!(current.cooldown_reason, None);
+        let after = store.provider_account_limits(None).unwrap();
+        for (mut before, after) in before.into_iter().zip(after) {
+            before.limited_until = None;
+            assert_eq!(before, after);
+        }
+        assert!(
+            store
+                .provider_account_capacity_revision("claude", &account.account_id)
+                .unwrap()
+                > revision
+        );
         assert!(!store
-            .clear_provider_route(&RouteScope::Default, Provider::Claude)
+            .reconcile_provider_account_capacity(
+                &account,
+                revision,
+                &[window("seven_day", 100, None)]
+            )
             .unwrap());
-        assert_eq!(store.revisions().unwrap().planning, after_unset);
+    }
+
+    #[test]
+    fn claude_usage_reconciliation_keeps_only_matching_aliases_and_scopes() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&directory.path().join("registry.db")).unwrap();
+        for (id, percent) in [("first", 11), ("second", 100)] {
+            let mut account = account();
+            account.account_id = ProviderAccountId::parse(id).unwrap();
+            account.cooldown_until = None;
+            account.cooldown_reason = None;
+            store.upsert_provider_account(&account).unwrap();
+            let old = [
+                window("seven_day_overage_included", 100, Some("fable")),
+                window("usage credits", 100, Some("opus")),
+                window("unknown", 100, None),
+            ];
+            store
+                .upsert_provider_account_limits("claude", &account.account_id, &old, "stream")
+                .unwrap();
+            let revision = store
+                .provider_account_capacity_revision("claude", &account.account_id)
+                .unwrap();
+            let polled = [
+                window("seven_day", 66, None),
+                window("seven_day_fable", percent, Some("fable")),
+            ];
+            assert!(store
+                .reconcile_provider_account_capacity(&account, revision, &polled)
+                .unwrap());
+            let limits = store.provider_account_limits(Some("claude")).unwrap();
+            let own: Vec<_> = limits
+                .iter()
+                .filter(|row| row.account_id == account.account_id)
+                .cloned()
+                .collect();
+            assert_eq!(own.len(), 4);
+            assert!(!own
+                .iter()
+                .any(|row| row.window == "seven_day_overage_included"));
+            assert!(own.iter().any(|row| row.window == "usage credits"));
+            // Remove unrelated holds only from this local assertion's input.
+            let included: Vec<_> = own
+                .into_iter()
+                .filter(|row| row.window.starts_with("seven_day"))
+                .collect();
+            for model in ["opus", "sonnet", "haiku"] {
+                assert_eq!(
+                    crate::provider_account::account_held_until(
+                        &account,
+                        &included,
+                        Some(model),
+                        1_800_000_000
+                    ),
+                    None
+                );
+            }
+            assert_eq!(
+                crate::provider_account::account_held_until(
+                    &account,
+                    &included,
+                    Some("fable"),
+                    1_800_000_000
+                ),
+                (percent == 100).then_some(1_900_000_005)
+            );
+            assert_eq!(
+                crate::provider_account::account_held_until(
+                    &account,
+                    &included,
+                    Some("fable"),
+                    1_900_000_005
+                ),
+                None
+            );
+        }
+    }
+
+    #[test]
+    fn claude_usage_reconciliation_revision_rejects_delayed_polls_and_rolls_back() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("registry.db");
+        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let account = account();
+        store.upsert_provider_account(&account).unwrap();
+        let revision = store
+            .provider_account_capacity_revision("claude", &account.account_id)
+            .unwrap();
+        // Two independent writers can observe and write in the same second.
+        let writer = SqliteStore::open_ephemeral(&path).unwrap();
+        writer
+            .record_provider_account_capacity(
+                "claude",
+                &account.account_id,
+                &crate::store::AccountCapacity {
+                    utilization_percent: Some(100),
+                    cooldown_until: Some(1_900_000_005),
+                    cooldown_reason: Some("rejected: seven_day".into()),
+                    windows: vec![window("seven_day", 100, None)],
+                },
+            )
+            .unwrap();
+        assert!(!store
+            .reconcile_provider_account_capacity(
+                &account,
+                revision,
+                &[window("seven_day", 10, None)]
+            )
+            .unwrap());
+        assert_eq!(
+            store.provider_account_limits(None).unwrap()[0].used_percent,
+            100
+        );
+        let revision = store
+            .provider_account_capacity_revision("claude", &account.account_id)
+            .unwrap();
+        assert!(store
+            .reconcile_provider_account_capacity(
+                &account,
+                revision,
+                &[window("seven_day", 20, None)]
+            )
+            .unwrap());
+        assert!(!writer
+            .reconcile_provider_account_capacity(
+                &account,
+                revision,
+                &[window("seven_day", 90, None)]
+            )
+            .unwrap());
+        assert_eq!(
+            store.provider_account_limits(None).unwrap()[0].used_percent,
+            20
+        );
+        assert_eq!(
+            store
+                .get_provider_account("claude", &account.account_id)
+                .unwrap()
+                .unwrap()
+                .cooldown_until,
+            None
+        );
+
+        let revision = store
+            .provider_account_capacity_revision("claude", &account.account_id)
+            .unwrap();
+        store.conn.lock().unwrap().execute_batch("CREATE TRIGGER fail_window BEFORE INSERT ON provider_account_limits WHEN NEW.window='fail' BEGIN SELECT RAISE(ABORT, 'fixture failure'); END;").unwrap();
+        assert!(store
+            .reconcile_provider_account_capacity(
+                &account,
+                revision,
+                &[window("seven_day", 5, None), window("fail", 5, None)]
+            )
+            .is_err());
+        assert_eq!(
+            store
+                .provider_account_capacity_revision("claude", &account.account_id)
+                .unwrap(),
+            revision
+        );
+        assert_eq!(
+            store.provider_account_limits(None).unwrap()[0].used_percent,
+            20
+        );
+    }
+
+    #[test]
+    fn claude_usage_reconciliation_requires_the_cause_and_preserves_global_rejection() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&directory.path().join("registry.db")).unwrap();
+        for (cause, polled, cleared) in [
+            (
+                "rejected: seven_day",
+                vec![window("seven_day_fable", 11, Some("fable"))],
+                false,
+            ),
+            (
+                "rejected: seven_day",
+                vec![window("seven_day", 66, None)],
+                true,
+            ),
+            (
+                "rejected: five_hour",
+                vec![window("seven_day", 66, None)],
+                false,
+            ),
+            (
+                "rejected: five_hour",
+                vec![window("five_hour", 10, None)],
+                true,
+            ),
+            (
+                "rejected: seven_day",
+                vec![window("seven_day", 100, None)],
+                false,
+            ),
+            (
+                "rejected: seven_day_fable",
+                vec![window("seven_day_fable", 100, Some("fable"))],
+                true,
+            ),
+            (
+                "rejected: seven_day_overage_included",
+                vec![window("seven_day", 66, None)],
+                false,
+            ),
+            ("usage credits", vec![window("seven_day", 66, None)], false),
+            ("rejected", vec![window("seven_day", 66, None)], false),
+            (
+                "unknown: seven_day",
+                vec![window("seven_day", 66, None)],
+                false,
+            ),
+            ("rejected: seven_day", vec![], false),
+        ] {
+            let mut account = account();
+            account.cooldown_reason = Some(cause.into());
+            store.upsert_provider_account(&account).unwrap();
+            let revision = store
+                .provider_account_capacity_revision("claude", &account.account_id)
+                .unwrap();
+            assert!(store
+                .reconcile_provider_account_capacity(&account, revision, &polled)
+                .unwrap());
+            let current = store
+                .get_provider_account("claude", &account.account_id)
+                .unwrap()
+                .unwrap();
+            assert_eq!(current.cooldown_until.is_none(), cleared, "{cause}");
+        }
+        store
+            .record_provider_account_health(
+                "claude",
+                &account().account_id,
+                Some(100),
+                Some(1_900_000_000),
+                Some("rejected: seven_day"),
+            )
+            .unwrap();
+        store
+            .record_provider_account_capacity(
+                "claude",
+                &account().account_id,
+                &crate::store::AccountCapacity {
+                    utilization_percent: Some(50),
+                    cooldown_until: None,
+                    cooldown_reason: None,
+                    windows: vec![window("five_hour", 50, None)],
+                },
+            )
+            .unwrap();
+        let current = store
+            .get_provider_account("claude", &account().account_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(current.cooldown_until, Some(1_900_000_000));
+        assert_eq!(
+            current.cooldown_reason.as_deref(),
+            Some("rejected: seven_day")
+        );
+    }
+
+    #[test]
+    fn claude_usage_reconciliation_missing_reset_keeps_rejection_deadline() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&directory.path().join("registry.db")).unwrap();
+        let mut account = account();
+        account.cooldown_until = None;
+        store.upsert_provider_account(&account).unwrap();
+        store
+            .upsert_provider_account_limits(
+                "claude",
+                &account.account_id,
+                &[window("seven_day_overage_included", 100, Some("fable"))],
+                "stream",
+            )
+            .unwrap();
+        let mut spent = window("seven_day_fable", 100, Some("fable"));
+        spent.resets_at = None;
+        spent.limited_until = None;
+        let revision = store
+            .provider_account_capacity_revision("claude", &account.account_id)
+            .unwrap();
+        assert!(store
+            .reconcile_provider_account_capacity(&account, revision, &[spent])
+            .unwrap());
+        let current = store.provider_account_limits(None).unwrap();
+        assert_eq!(current.len(), 1);
+        assert_eq!(current[0].resets_at, None);
+        assert_eq!(current[0].limited_until, Some(1_900_000_005));
+        let revision = store
+            .provider_account_capacity_revision("claude", &account.account_id)
+            .unwrap();
+        store
+            .clear_provider_account_cooldown("claude", &account.account_id)
+            .unwrap();
+        assert!(!store
+            .reconcile_provider_account_capacity(&account, revision, &[])
+            .unwrap());
+        let revision = store
+            .provider_account_capacity_revision("claude", &account.account_id)
+            .unwrap();
+        store
+            .record_provider_account_credential_invalidated(
+                "claude",
+                &account.account_id,
+                "fixture",
+            )
+            .unwrap();
+        assert!(!store
+            .reconcile_provider_account_capacity(&account, revision, &[])
+            .unwrap());
+    }
+
+    #[test]
+    fn claude_usage_reconciliation_legacy_precedence_and_indexed_lookups() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&directory.path().join("registry.db")).unwrap();
+        let account = account();
+        store.upsert_provider_account(&account).unwrap();
+        store
+            .upsert_provider_account_limits(
+                "claude",
+                &account.account_id,
+                &[
+                    window("rejected: seven_day_overage_included", 100, Some("fable")),
+                    window("seven_day_fable", 11, Some("fable")),
+                ],
+                "stream",
+            )
+            .unwrap();
+        // Equal timestamps keep the rejection; a strictly newer canonical row wins.
+        assert_eq!(
+            store.provider_account_limits(None).unwrap()[0].used_percent,
+            100
+        );
+        let conn = store.conn.lock().unwrap();
+        conn.execute("UPDATE provider_account_limits SET observed_at=observed_at+1 WHERE window='seven_day_fable'", []).unwrap();
+        drop(conn);
+        assert_eq!(
+            store.provider_account_limits(None).unwrap()[0].used_percent,
+            11
+        );
+        let conn = store.conn.lock().unwrap();
+        conn.execute("UPDATE provider_account_limits SET observed_at=observed_at+2 WHERE window='rejected: seven_day_overage_included'", []).unwrap();
+        drop(conn);
+        let rows = store.provider_account_limits(None).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].window, "seven_day_fable");
+        assert_eq!(rows[0].used_percent, 100);
+        assert_eq!(rows[0].limited_until, Some(1_900_000_005));
+        let conn = store.conn.lock().unwrap();
+        conn.execute_batch("WITH RECURSIVE accounts(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM accounts WHERE n<10000)
+            INSERT INTO provider_accounts(provider,account_id,credential_state,created_at,updated_at)
+            SELECT 'claude', 'fixture-'||n, 'connected', 1, 1 FROM accounts;").unwrap();
+        for sql in [
+            "SELECT capacity_revision FROM provider_accounts WHERE provider='claude' AND account_id='primary'",
+            "DELETE FROM provider_account_limits WHERE provider='claude' AND account_id='primary' AND window='seven_day_fable'",
+            "SELECT provider, account_id, window, used_percent, resets_at, plan, observed_at, source, model, limited_until FROM provider_account_limits WHERE provider='claude' AND account_id='primary'",
+        ] {
+            let plan: Vec<String> = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap()
+                .query_map([], |row| row.get(3)).unwrap().collect::<Result<_, _>>().unwrap();
+            assert!(plan.iter().any(|line| line.contains("SEARCH") && line.contains("INDEX")), "{plan:?}");
+            assert!(!plan.iter().any(|line| line.contains("SCAN")), "{plan:?}");
+        }
+    }
+
+    #[test]
+    fn account_file_edits_apply_to_single_and_filtered_reads() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&directory.path().join("registry.db")).unwrap();
+        let mut expected = account();
+        expected.login_email =
+            Some(crate::profile::EmailAddress::parse("work@example.com").unwrap());
+        expected.paid_through =
+            Some(time::Date::from_calendar_date(2026, time::Month::December, 1).unwrap());
+        expected.observed_email = Some("observed@example.com".into());
+        expected.observed_subject = Some("subject".into());
+        expected.observed_plan = Some("observed plan".into());
+        expected.observed_credential_digest = Some("digest".into());
+        store.upsert_provider_account(&expected).unwrap();
+
+        let assert_reads = |expected: &ProviderAccount| {
+            assert_eq!(
+                store
+                    .get_provider_account("claude", &expected.account_id)
+                    .unwrap()
+                    .as_ref(),
+                Some(expected)
+            );
+            for provider in [None, Some("claude")] {
+                assert_eq!(
+                    store.list_provider_accounts(provider).unwrap(),
+                    std::slice::from_ref(expected)
+                );
+            }
+            assert!(store
+                .list_provider_accounts(Some("codex"))
+                .unwrap()
+                .is_empty());
+        };
+        assert_reads(&expected);
+        let path = directory.path().join("config.yaml");
+        let mut declarations = crate::config::files::read(&path).unwrap();
+        declarations["accounts"]["claude"]["primary"]["plan"] = "edited".into();
+        std::fs::write(&path, serde_yaml_ng::to_string(&declarations).unwrap()).unwrap();
+        expected.plan = Some("edited".into());
+        assert_reads(&expected);
+
+        std::fs::write(path, "{}\n").unwrap();
+        expected.login_email = None;
+        expected.routing_state = RoutingState::Automatic;
+        expected.plan = None;
+        expected.paid_through = None;
+        assert_reads(&expected);
     }
 
     #[test]
@@ -2835,6 +3571,8 @@ mod account_observation_tests {
             used_percent: 98,
             resets_at: Some(1900000000),
             plan: Some("max".into()),
+            model: None,
+            limited_until: None,
         };
         store
             .upsert_provider_account_limits("claude", &expected.account_id, &[weekly], "stream")
@@ -2858,6 +3596,8 @@ mod account_observation_tests {
             used_percent: 2,
             resets_at: None,
             plan: None,
+            model: None,
+            limited_until: None,
         };
         store
             .upsert_provider_account_limits("claude", &expected.account_id, &[session], "poll")
@@ -2865,7 +3605,7 @@ mod account_observation_tests {
         let rows = store.provider_account_limits(None).unwrap();
         assert_eq!(rows.len(), 2);
         assert_eq!(
-            rows.iter().find(|row| row.window == "weekly"),
+            rows.iter().find(|row| row.window == "seven_day"),
             Some(&previous)
         );
     }
@@ -2881,6 +3621,8 @@ mod account_observation_tests {
             used_percent: 22,
             resets_at: None,
             plan: None,
+            model: None,
+            limited_until: None,
         };
         store
             .upsert_provider_account_limits(

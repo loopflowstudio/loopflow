@@ -9,13 +9,15 @@
     "title_source": "human",
     "detail": "review-design",
     "provider": "codex",
+    "model": null,
+    "blocked": false,
     "cwd": "/src/loopflow.task",
     "state": "active",
     "ready_summary": null,
     "open_argv": [
       "lf",
       "session",
-      "connect",
+      "resume",
       "task_00000000000000000000000000000001:task-design:review_kickoff:0"
     ],
     "wave_id": "00000000-0000-0000-0000-000000000001",
@@ -23,19 +25,27 @@
       "task_00000000000000000000000000000001"
     ],
     "terminal_ids": [],
+    "turn": null,
+    "raw": false,
     "work_path": "product / LOO-291",
     "actions": [
       {
         "kind": "open",
         "label": "Open here",
         "help": "Open this Session in a terminal",
-        "unavailable_reason": "This Session is active in another terminal; use Move here to transfer it"
+        "unavailable_reason": "This Session is active in another terminal; use Take back to transfer it"
       },
       {
         "kind": "move_here",
-        "label": "Move here",
+        "label": "Take back",
         "help": "Transfer control here; unsent text in the previous terminal is not transferred",
         "unavailable_reason": null
+      },
+      {
+        "kind": "reveal",
+        "label": "Show conversation",
+        "help": "Continue existing history without taking another terminal's input",
+        "unavailable_reason": "This conversation is controlled elsewhere; use Take back to continue here"
       }
     ],
     "graph_membership": {
@@ -61,7 +71,8 @@
     "task_primary": false,
     "program_status": null,
     "agent_process_id": "44444444-4444-4444-8444-444444444444",
-    "preview": null
+    "preview": null,
+    "transition": null
   },
   {
     "id": "run_00000000000000000000000000000002",
@@ -73,13 +84,15 @@
     "title_source": "generated",
     "detail": "claude",
     "provider": "claude",
+    "model": null,
+    "blocked": false,
     "cwd": "/src/loopflow.task",
     "state": "closed",
     "ready_summary": null,
     "open_argv": [
       "lf",
       "session",
-      "connect",
+      "resume",
       "run_00000000000000000000000000000002"
     ],
     "wave_id": "00000000-0000-0000-0000-000000000001",
@@ -87,12 +100,20 @@
       "task_00000000000000000000000000000001"
     ],
     "terminal_ids": [],
+    "turn": null,
+    "raw": false,
     "work_path": "product / LOO-291",
     "actions": [
       {
         "kind": "open",
         "label": "Open here",
         "help": "Open this Session in a terminal",
+        "unavailable_reason": null
+      },
+      {
+        "kind": "reveal",
+        "label": "Show conversation",
+        "help": "Continue existing history without taking another terminal's input",
         "unavailable_reason": null
       }
     ],
@@ -125,7 +146,8 @@
     "task_primary": false,
     "program_status": null,
     "agent_process_id": "44444444-4444-4444-8444-444444444444",
-    "preview": null
+    "preview": null,
+    "transition": null
   },
   {
     "id": "run_00000000000000000000000000000003",
@@ -137,13 +159,15 @@
     "title_source": "human",
     "detail": "claude",
     "provider": "claude",
+    "model": null,
+    "blocked": false,
     "cwd": "/src/loopflow.task",
     "state": "active",
     "ready_summary": null,
     "open_argv": [
       "lf",
       "session",
-      "connect",
+      "resume",
       "run_00000000000000000000000000000003"
     ],
     "wave_id": "00000000-0000-0000-0000-000000000001",
@@ -151,19 +175,27 @@
       "task_00000000000000000000000000000001"
     ],
     "terminal_ids": [],
+    "turn": null,
+    "raw": false,
     "work_path": "product / LOO-291",
     "actions": [
       {
         "kind": "open",
         "label": "Open here",
         "help": "Open this Session in a terminal",
-        "unavailable_reason": "This Session is active in another terminal; use Move here to transfer it"
+        "unavailable_reason": "This Session is active in another terminal; use Take back to transfer it"
       },
       {
         "kind": "move_here",
-        "label": "Move here",
+        "label": "Take back",
         "help": "Transfer control here; unsent text in the previous terminal is not transferred",
         "unavailable_reason": null
+      },
+      {
+        "kind": "reveal",
+        "label": "Show conversation",
+        "help": "Continue existing history without taking another terminal's input",
+        "unavailable_reason": "This conversation is controlled elsewhere; use Take back to continue here"
       }
     ],
     "graph_membership": {
@@ -181,7 +213,8 @@
     "task_primary": false,
     "program_status": null,
     "agent_process_id": "44444444-4444-4444-8444-444444444444",
-    "preview": null
+    "preview": null,
+    "transition": null
   },
   {
     "id": "run_00000000000000000000000000000004",
@@ -193,13 +226,15 @@
     "title_source": "generated",
     "detail": "claude",
     "provider": "claude",
+    "model": null,
+    "blocked": false,
     "cwd": "/src/loopflow.task",
     "state": "closed",
     "ready_summary": null,
     "open_argv": [
       "lf",
       "session",
-      "connect",
+      "resume",
       "run_00000000000000000000000000000004"
     ],
     "wave_id": "00000000-0000-0000-0000-000000000001",
@@ -207,12 +242,20 @@
       "task_00000000000000000000000000000001"
     ],
     "terminal_ids": [],
+    "turn": null,
+    "raw": false,
     "work_path": "product / LOO-291",
     "actions": [
       {
         "kind": "open",
         "label": "Open here",
         "help": "Open this Session in a terminal",
+        "unavailable_reason": null
+      },
+      {
+        "kind": "reveal",
+        "label": "Show conversation",
+        "help": "Continue existing history without taking another terminal's input",
         "unavailable_reason": null
       }
     ],
@@ -232,7 +275,8 @@
     "task_primary": false,
     "program_status": null,
     "agent_process_id": "44444444-4444-4444-8444-444444444444",
-    "preview": null
+    "preview": null,
+    "transition": null
   },
   {
     "id": "run_00000000000000000000000000000006",
@@ -244,13 +288,15 @@
     "title_source": "generated",
     "detail": "claude",
     "provider": "claude",
+    "model": null,
+    "blocked": false,
     "cwd": "/src/loopflow.task",
     "state": "closed",
     "ready_summary": null,
     "open_argv": [
       "lf",
       "session",
-      "connect",
+      "resume",
       "run_00000000000000000000000000000006"
     ],
     "wave_id": "00000000-0000-0000-0000-000000000001",
@@ -258,12 +304,20 @@
       "task_00000000000000000000000000000001"
     ],
     "terminal_ids": [],
+    "turn": null,
+    "raw": false,
     "work_path": "product / LOO-291",
     "actions": [
       {
         "kind": "open",
         "label": "Open here",
         "help": "Open this Session in a terminal",
+        "unavailable_reason": null
+      },
+      {
+        "kind": "reveal",
+        "label": "Show conversation",
+        "help": "Continue existing history without taking another terminal's input",
         "unavailable_reason": null
       }
     ],
@@ -293,7 +347,8 @@
     "task_primary": false,
     "program_status": null,
     "agent_process_id": "44444444-4444-4444-8444-444444444444",
-    "preview": null
+    "preview": null,
+    "transition": null
   },
   {
     "id": "run_00000000000000000000000000000007",
@@ -305,13 +360,15 @@
     "title_source": "generated",
     "detail": "claude",
     "provider": "claude",
+    "model": null,
+    "blocked": false,
     "cwd": "/src/loopflow.task",
     "state": "closed",
     "ready_summary": null,
     "open_argv": [
       "lf",
       "session",
-      "connect",
+      "resume",
       "run_00000000000000000000000000000007"
     ],
     "wave_id": "00000000-0000-0000-0000-000000000001",
@@ -319,12 +376,20 @@
       "task_00000000000000000000000000000001"
     ],
     "terminal_ids": [],
+    "turn": null,
+    "raw": false,
     "work_path": "product / LOO-291",
     "actions": [
       {
         "kind": "open",
         "label": "Open here",
         "help": "Open this Session in a terminal",
+        "unavailable_reason": null
+      },
+      {
+        "kind": "reveal",
+        "label": "Show conversation",
+        "help": "Continue existing history without taking another terminal's input",
         "unavailable_reason": null
       }
     ],
@@ -349,7 +414,8 @@
     "task_primary": false,
     "program_status": null,
     "agent_process_id": "44444444-4444-4444-8444-444444444444",
-    "preview": null
+    "preview": null,
+    "transition": null
   },
   {
     "id": "task_00000000000000000000000000000001:feature:demo:0",
@@ -361,6 +427,8 @@
     "title_source": "unavailable",
     "detail": "demo",
     "provider": null,
+    "model": null,
+    "blocked": false,
     "cwd": "/src/loopflow.task",
     "state": "unknown",
     "ready_summary": null,
@@ -369,7 +437,7 @@
       "ssh",
       "home_remote",
       "session",
-      "connect",
+      "resume",
       "task_00000000000000000000000000000001:feature:demo:0"
     ],
     "wave_id": "00000000-0000-0000-0000-000000000001",
@@ -377,12 +445,20 @@
       "task_00000000000000000000000000000001"
     ],
     "terminal_ids": [],
+    "turn": null,
+    "raw": false,
     "work_path": "product / LOO-291",
     "actions": [
       {
         "kind": "open",
         "label": "Open here",
         "help": "Open this Session in a terminal",
+        "unavailable_reason": null
+      },
+      {
+        "kind": "reveal",
+        "label": "Show conversation",
+        "help": "Continue existing history without taking another terminal's input",
         "unavailable_reason": null
       }
     ],
@@ -412,6 +488,7 @@
     "task_primary": false,
     "program_status": null,
     "agent_process_id": "44444444-4444-4444-8444-444444444444",
-    "preview": null
+    "preview": null,
+    "transition": null
   }
 ]

@@ -10,9 +10,13 @@ pub mod config;
 pub mod context_block;
 pub mod context_usage;
 pub mod definition;
+pub mod desktop;
+pub(crate) mod desktop_exits;
 pub mod diagnostic_log;
 pub mod durable;
+pub mod engine;
 pub mod error;
+pub(crate) mod ghostty_vt;
 pub mod git;
 pub mod graph;
 pub mod harness;
@@ -28,6 +32,7 @@ pub mod platform;
 pub mod portfolio;
 pub mod process;
 pub mod prompt;
+pub mod server;
 pub mod skills;
 pub(crate) mod startup;
 pub mod task_graph;
@@ -35,11 +40,10 @@ pub mod task_work;
 pub(crate) mod terminal_output;
 pub(crate) mod terminal_title;
 // Build-time parsing lives here so its golden tests compile against the exact parser.
-pub mod data_clone;
 pub mod linear;
 #[allow(dead_code)]
-pub(crate) mod migration_drafts;
 pub mod notion;
+pub(crate) mod observe;
 pub mod ops;
 pub mod performance;
 pub mod planning_exchange;
@@ -95,14 +99,14 @@ mod repository_team_matrix;
 #[path = "../tests/linear/status_tests.rs"]
 mod status_tests;
 #[cfg(test)]
+#[path = "../tests/linear/subscribe.rs"]
+mod subscribe;
+#[cfg(test)]
 #[path = "../tests/linear/task_adoption_tests.rs"]
 mod task_adoption_tests;
 #[cfg(test)]
 #[path = "../tests/linear/task_graph_launch_tests.rs"]
 mod task_graph_launch_tests;
-#[cfg(test)]
-#[path = "../tests/linear/watch.rs"]
-mod watch;
 #[cfg(test)]
 #[path = "../tests/linear/wave_repository_ownership.rs"]
 mod wave_repository_ownership;

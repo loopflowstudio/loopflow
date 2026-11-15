@@ -5,7 +5,7 @@ use loopflow::ops::{
     continue_sync_for_resolution, plan_sync, recover_sync, sync_with_plan, sync_with_recovery,
     NullProgress, OpsError, SyncClass, SyncOptions, SyncRecovery, SyncStrategy,
 };
-use loopflow::work::task::{GithubPr, PrPublication};
+use loopflow::work::task::{GithubPr, PrPublication, Task};
 use loopflow_test_support::TestRepo;
 use std::process::Command;
 use support::EnvGuard;
@@ -22,6 +22,66 @@ fn git(repo: &std::path::Path, args: &[&str]) -> String {
         String::from_utf8_lossy(&output.stderr)
     );
     String::from_utf8_lossy(&output.stdout).trim().to_string()
+}
+
+/// Run `lf` in `dir` and return its output, failing the test unless it succeeds.
+fn lf(dir: &std::path::Path, args: &[&str]) -> std::process::Output {
+    let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .args(args)
+        .current_dir(dir)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "lf {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    output
+}
+
+fn commit_file(dir: &std::path::Path, file: &str, contents: &str) {
+    std::fs::write(dir.join(file), contents).unwrap();
+    git(dir, &["add", file]);
+    git(dir, &["commit", "-m", file]);
+}
+
+/// Publish `parent`'s PR at `head`, stack `child` on it, then record the
+/// parent's `merge` commit when given.
+fn stack_on_published_parent(
+    parent: &support::RegisteredTask,
+    child: &Task,
+    head: &str,
+    merge: Option<&str>,
+) {
+    let mut parent_pr = parent.pr.clone();
+    parent_pr.publication = Some(PrPublication {
+        requested_at: parent_pr.created_at,
+        presentation: None,
+        github: Some(GithubPr {
+            number: 41,
+            url: "https://github.com/fixture/repo/pull/41".into(),
+            head_sha: Some(head.to_string()),
+        }),
+        merge: None,
+    });
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime
+        .block_on(parent.store.update_task_pr(&parent_pr))
+        .unwrap();
+    runtime
+        .block_on(
+            parent
+                .store
+                .stack_task_placement(child, &parent.pr.id, &child.base_commit),
+        )
+        .unwrap();
+    if let Some(merge) = merge {
+        parent_pr.merge_commit = Some(merge.to_string());
+        runtime
+            .block_on(parent.store.update_task_pr(&parent_pr))
+            .unwrap();
+    }
 }
 
 fn create_conflicting_repo() -> TestRepo {
@@ -679,6 +739,7 @@ fn sync_after_squash_merge_leaves_only_unique_diff() {
 
 #[test]
 fn existing_root_child_syncs_parent_from_its_original_fork() {
+    let _env = EnvGuard::new(&[]);
     let repo = TestRepo::new();
     let original_fork = repo.head_sha();
     repo.create_branch("child");
@@ -775,6 +836,194 @@ fn stacked_child_merges_main_after_parent_squash() {
 }
 
 #[test]
+fn stacking_retry_replaces_an_abandoned_parent_and_syncs() {
+    for live_parent in [false, true] {
+        let home = tempfile::TempDir::new().unwrap();
+        let repo = TestRepo::new();
+        let _env = EnvGuard::with_lf_home(&[], home.path());
+        let parent_path = repo.create_named_worktree("parent");
+        commit_file(&parent_path, "parent.txt", "parent work\n");
+        let parent_tip = git(&parent_path, &["rev-parse", "HEAD"]);
+        let parent =
+            support::register_task_with_pr(home.path(), &parent_path, "parent", &repo.head_sha());
+        let child_path = repo.create_named_worktree("child");
+        let child = support::register_sibling_task(&parent, "INF-124", "child", &child_path);
+        stack_on_published_parent(&parent, &child, &parent_tip, None);
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let mut closed = runtime
+            .block_on(parent.store.get_task_pr(&parent.pr.id))
+            .unwrap()
+            .unwrap();
+        closed.abandoned_at = Some(closed.created_at);
+        runtime
+            .block_on(parent.store.update_task_pr(&closed))
+            .unwrap();
+        assert!(task_stack(&child_path)
+            .unwrap_err()
+            .to_string()
+            .contains("closed without merging"));
+        let closed = runtime
+            .block_on(parent.store.get_task_pr(&closed.id))
+            .unwrap()
+            .unwrap();
+        let live = if live_parent {
+            let mut next = closed.clone();
+            next.id = loopflow::work::task::TaskPrId::new();
+            next.sequence += 1;
+            next.publication = None;
+            next.abandoned_at = None;
+            runtime
+                .block_on(parent.store.insert_task_pr(&next))
+                .unwrap();
+            Some(next.id)
+        } else {
+            None
+        };
+
+        let output = lf(
+            &child_path,
+            &["checkout", "INF-124", "--stack-on", "INF-123"],
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("pushed INF-123's branch"), "{stderr}");
+        assert!(
+            stderr.contains("This Task's checkout and PR are unchanged"),
+            "{stderr}"
+        );
+        let selected = runtime
+            .block_on(parent.store.active_task_pr(&parent.task.id))
+            .unwrap()
+            .unwrap();
+        assert_ne!(selected.id, closed.id);
+        assert_eq!(selected.sequence, closed.sequence + 1);
+        if let Some(live) = live {
+            assert_eq!(selected.id, live);
+        }
+        assert_eq!(
+            runtime
+                .block_on(parent.store.get_task_pr(&closed.id))
+                .unwrap(),
+            Some(closed)
+        );
+        let stacked = task_stack(&child_path)
+            .unwrap()
+            .expect("retry restores a live stack");
+        assert_eq!(stacked.child.parent_pr_id, Some(selected.id));
+        lf(&child_path, &["sync"]);
+        assert_eq!(
+            std::fs::read_to_string(child_path.join("parent.txt")).unwrap(),
+            "parent work\n"
+        );
+    }
+}
+
+#[test]
+fn stacking_on_a_different_parent_keeps_inherited_files_on_sync() {
+    let home = tempfile::TempDir::new().unwrap();
+    let repo = TestRepo::new();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    let main = repo.head_sha();
+    let parent_path = repo.create_named_worktree("parent");
+    commit_file(&parent_path, "inherited.txt", "old parent work\n");
+    commit_file(&parent_path, "edited.txt", "old parent version\n");
+    let parent_tip = git(&parent_path, &["rev-parse", "HEAD"]);
+    let parent = support::register_task_without_pr(home.path(), &parent_path, "parent", &main);
+    let next_path = repo.create_named_worktree("next");
+    commit_file(&next_path, "next.txt", "new parent work\n");
+    support::register_sibling_task(&parent, "INF-125", "next", &next_path);
+    let child_path = repo.create_named_worktree("child");
+    git(&child_path, &["merge", "--ff-only", "parent"]);
+    let child = support::register_sibling_task(&parent, "INF-124", "child", &child_path);
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime
+        .block_on(parent.store.sync_task_placement(
+            &child.id,
+            &parent_tip,
+            false,
+            time::OffsetDateTime::now_utc(),
+        ))
+        .unwrap();
+    lf(
+        &child_path,
+        &["checkout", "INF-124", "--stack-on", "INF-123"],
+    );
+    commit_file(&child_path, "edited.txt", "child version\n");
+    commit_file(&child_path, "child.txt", "child work\n");
+    let original_head = git(&child_path, &["rev-parse", "HEAD"]);
+
+    // Selecting INF-125 replaces the old parent's fork; repeating it keeps the new one.
+    for _ in 0..2 {
+        lf(
+            &child_path,
+            &["checkout", "INF-124", "--stack-on", "INF-125"],
+        );
+        let stacked = task_stack(&child_path).unwrap().unwrap();
+        assert_eq!(stacked.fork_base, main);
+        assert_eq!(stacked.parent_branch.as_deref(), Some("next"));
+    }
+    assert_eq!(git(&child_path, &["rev-parse", "HEAD"]), original_head);
+
+    lf(&child_path, &["sync"]);
+    for (file, contents) in [
+        ("inherited.txt", "old parent work\n"),
+        ("edited.txt", "child version\n"),
+        ("child.txt", "child work\n"),
+        ("next.txt", "new parent work\n"),
+    ] {
+        assert_eq!(
+            std::fs::read_to_string(child_path.join(file)).unwrap(),
+            contents
+        );
+    }
+    assert!(loopflow::git::is_ancestor(&child_path, &original_head, "HEAD").unwrap());
+}
+
+#[test]
+fn stacking_on_an_unpushed_parent_pushes_its_branch_and_sync_follows_it() {
+    let home = tempfile::TempDir::new().unwrap();
+    let repo = TestRepo::new();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    let parent_path = repo.create_named_worktree("parent");
+    commit_file(&parent_path, "parent.txt", "parent work\n");
+    let parent_tip = git(&parent_path, &["rev-parse", "HEAD"]);
+    let parent =
+        support::register_task_without_pr(home.path(), &parent_path, "parent", &repo.head_sha());
+    let child_path = repo.create_named_worktree("child");
+    let child = support::register_sibling_task(&parent, "INF-124", "child", &child_path);
+
+    lf(
+        &child_path,
+        &["checkout", "INF-124", "--stack-on", "INF-123"],
+    );
+
+    assert_eq!(
+        git(repo.bare_path(), &["rev-parse", "refs/heads/parent"]),
+        parent_tip
+    );
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let parent_pr = runtime
+        .block_on(parent.store.active_task_pr(&parent.task.id))
+        .unwrap()
+        .expect("stacking records the parent's PR");
+    assert!(parent_pr.publication.is_none());
+    let child = runtime
+        .block_on(parent.store.get_task(&child.id))
+        .unwrap()
+        .unwrap();
+    assert_eq!(child.parent_pr_id, Some(parent_pr.id));
+    let stacked = task_stack(&child_path).unwrap().expect("child is stacked");
+    assert_eq!(stacked.parent_branch.as_deref(), Some("parent"));
+    let output = lf(&child_path, &["sync", "--plan"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("base: origin/parent\n"), "{stdout}");
+    lf(&child_path, &["sync"]);
+    assert_eq!(
+        std::fs::read_to_string(child_path.join("parent.txt")).unwrap(),
+        "parent work\n"
+    );
+}
+
+#[test]
 fn stacked_child_targets_main_after_merged_parent_checkout_is_removed() {
     // A landed parent's removed checkout is ordinary state: the child plans
     // its sync onto the default branch without the parent's git dir.
@@ -786,28 +1035,12 @@ fn stacked_child_targets_main_after_merged_parent_checkout_is_removed() {
         support::register_task_with_pr(home.path(), &parent_path, "parent", &repo.head_sha());
     let child_path = repo.create_named_worktree("child");
     let child = support::register_sibling_task(&parent, "INF-124", "child", &child_path);
-    let mut parent_pr = parent.pr.clone();
-    parent_pr.publication = Some(PrPublication {
-        requested_at: parent_pr.created_at,
-        presentation: None,
-        github: Some(GithubPr {
-            number: 41,
-            url: "https://github.com/fixture/repo/pull/41".into(),
-            head_sha: Some(parent_pr.base_commit.clone()),
-        }),
-        merge: None,
-    });
-    let runtime = tokio::runtime::Runtime::new().unwrap();
-    runtime
-        .block_on(parent.store.update_task_pr(&parent_pr))
-        .unwrap();
-    runtime
-        .block_on(parent.store.stack_task_placement(&child, &parent.pr.id))
-        .unwrap();
-    parent_pr.merge_commit = Some(repo.head_sha());
-    runtime
-        .block_on(parent.store.update_task_pr(&parent_pr))
-        .unwrap();
+    stack_on_published_parent(
+        &parent,
+        &child,
+        &parent.pr.base_commit,
+        Some(&repo.head_sha()),
+    );
     git(
         repo.path(),
         &[
@@ -834,6 +1067,226 @@ fn stacked_child_targets_main_after_merged_parent_checkout_is_removed() {
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("base: main\n"), "{stdout}");
+}
+
+#[test]
+fn explicit_main_sync_detaches_only_the_child_and_preserves_its_pr() {
+    for (conflict, missing_base) in [(false, false), (true, false), (false, true)] {
+        let home = tempfile::tempdir().unwrap();
+        let repo = TestRepo::new();
+        let _env = EnvGuard::with_lf_home(
+            &[(
+                "gh",
+                r#"#!/bin/sh
+case "$1 $2" in
+  'pr list') echo '[{"number":42,"url":"https://github.com/fixture/repo/pull/42","state":"OPEN","isDraft":true}]' ;;
+  'pr edit')
+    test ! -f "$LF_HOME/retarget-fails" || exit 1
+    printf '%s' "$3 $5" > "$LF_HOME/pr-base" ;;
+  *) exit 1 ;;
+esac
+"#,
+            )],
+            home.path(),
+        );
+        let main = repo.head_sha();
+        repo.create_branch("parent");
+        repo.create_file("parent.txt", "parent work\n");
+        repo.stage_all();
+        repo.commit("Parent work");
+        repo.push_new_branch("parent");
+        let fork = repo.head_sha();
+        let parent = support::register_task_with_pr(home.path(), repo.path(), "parent", &fork);
+        let child_path = repo.create_named_worktree("child");
+        // TestRepo forks main by default; explicitly incorporate the parent.
+        git(&child_path, &["merge", "--ff-only", "parent"]);
+        let child = support::register_sibling_task(&parent, "INF-124", "child", &child_path);
+        stack_on_published_parent(&parent, &child, &fork, None);
+        std::fs::write(child_path.join("child.txt"), "child work\n").unwrap();
+        if conflict {
+            std::fs::write(child_path.join("parent.txt"), "child changes parent\n").unwrap();
+        }
+        git(&child_path, &["add", "."]);
+        git(&child_path, &["commit", "-m", "Child work"]);
+        let original = git(&child_path, &["rev-parse", "HEAD"]);
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        if missing_base {
+            runtime
+                .block_on(parent.store.sync_task_placement(
+                    &child.id,
+                    "0000000000000000000000000000000000000001",
+                    false,
+                    time::OffsetDateTime::now_utc(),
+                ))
+                .unwrap();
+            assert_eq!(task_stack(&child_path).unwrap().unwrap().fork_base, fork);
+            assert_eq!(
+                runtime
+                    .block_on(parent.store.get_task(&child.id))
+                    .unwrap()
+                    .unwrap()
+                    .base_commit,
+                "0000000000000000000000000000000000000001"
+            );
+        }
+        let mut pr = parent.pr.clone();
+        pr.id = loopflow::work::task::TaskPrId::new();
+        pr.task_id = child.id.clone();
+        pr.branch = child.branch.clone();
+        pr.slug = child.workspace_slug.clone();
+        let placed = runtime
+            .block_on(parent.store.get_task(&child.id))
+            .unwrap()
+            .unwrap();
+        pr.base_commit = placed.base_commit;
+        pr.parent_pr_id = placed.parent_pr_id;
+        pr.publication = Some(PrPublication {
+            requested_at: pr.created_at,
+            presentation: None,
+            github: Some(GithubPr {
+                number: 42,
+                url: "https://github.com/fixture/repo/pull/42".into(),
+                head_sha: Some(original.clone()),
+            }),
+            merge: None,
+        });
+        runtime.block_on(parent.store.insert_task_pr(&pr)).unwrap();
+        let run = |args: &[&str]| {
+            Command::new(env!("CARGO_BIN_EXE_lf"))
+                .current_dir(&child_path)
+                .args(args)
+                .output()
+                .unwrap()
+        };
+        let plan = run(&["sync", "main", "--plan"]);
+        assert!(
+            plan.status.success(),
+            "{}",
+            String::from_utf8_lossy(&plan.stderr)
+        );
+        assert!(String::from_utf8_lossy(&plan.stdout).contains("strategy: merge_target"));
+        assert!(runtime
+            .block_on(parent.store.get_task(&child.id))
+            .unwrap()
+            .unwrap()
+            .parent_pr_id
+            .is_some());
+        if !conflict {
+            std::fs::write(home.path().join("retarget-fails"), "offline").unwrap();
+            let failed = run(&["sync", "main", "--manual"]);
+            assert!(!failed.status.success());
+            assert!(runtime
+                .block_on(parent.store.get_task(&child.id))
+                .unwrap()
+                .unwrap()
+                .parent_pr_id
+                .is_some());
+            std::fs::remove_file(home.path().join("retarget-fails")).unwrap();
+        }
+        let sync = run(&["sync", "main", "--manual"]);
+        if conflict {
+            assert!(!sync.status.success());
+            assert!(runtime
+                .block_on(parent.store.get_task(&child.id))
+                .unwrap()
+                .unwrap()
+                .parent_pr_id
+                .is_some());
+            assert!(!home.path().join("pr-base").exists());
+            git(&child_path, &["rm", "parent.txt"]);
+            let continued = run(&["sync", "--continue"]);
+            assert!(
+                continued.status.success(),
+                "{}",
+                String::from_utf8_lossy(&continued.stderr)
+            );
+        } else {
+            assert!(
+                sync.status.success(),
+                "{}",
+                String::from_utf8_lossy(&sync.stderr)
+            );
+        }
+        let placed = runtime
+            .block_on(parent.store.get_task(&child.id))
+            .unwrap()
+            .unwrap();
+        assert_eq!(placed.parent_pr_id, None);
+        assert_eq!(placed.base_commit, main);
+        assert_eq!(placed.worktree, child.worktree);
+        assert_eq!(
+            runtime
+                .block_on(parent.store.active_task_pr(&child.id))
+                .unwrap()
+                .unwrap()
+                .id,
+            pr.id
+        );
+        assert_eq!(
+            std::fs::read_to_string(home.path().join("pr-base")).unwrap(),
+            "42 main"
+        );
+        assert_eq!(
+            git(&child_path, &["diff", "--name-only", "origin/main...HEAD"]),
+            "child.txt"
+        );
+        assert!(loopflow::git::is_ancestor(&child_path, &original, "HEAD").unwrap());
+        assert_eq!(git(repo.path(), &["rev-parse", "parent"]), fork);
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("parent.txt")).unwrap(),
+            "parent work\n"
+        );
+    }
+}
+
+#[test]
+fn stacked_child_rebased_onto_main_syncs_from_its_parents_merge() {
+    // LOO-669: after its parent squash-merged, the child was rebased onto main.
+    // Its HEAD holds the parent's merge commit but not the recorded parent tip.
+    let home = tempfile::TempDir::new().unwrap();
+    let repo = TestRepo::new();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    let commit = |dir: &std::path::Path, file: &str| {
+        std::fs::write(dir.join(file), file).unwrap();
+        git(dir, &["add", file]);
+        git(dir, &["commit", "-m", file]);
+    };
+    let parent_path = repo.create_named_worktree("parent");
+    commit(&parent_path, "parent.txt");
+    let parent_tip = git(&parent_path, &["rev-parse", "HEAD"]);
+    git(repo.path(), &["merge", "--squash", "parent"]);
+    git(repo.path(), &["commit", "-m", "squash parent"]);
+    let merge = repo.head_sha();
+    repo.push();
+    let child_path = repo.create_named_worktree("child");
+    commit(&child_path, "child.txt");
+    commit(repo.path(), "later.txt");
+    repo.push();
+
+    let parent = support::register_task_with_pr(home.path(), &parent_path, "parent", &parent_tip);
+    let child = support::register_sibling_task(&parent, "INF-124", "child", &child_path);
+    stack_on_published_parent(&parent, &child, &parent_tip, Some(&merge));
+    assert_eq!(child.base_commit, parent_tip);
+
+    let stacked = task_stack(&child_path).unwrap().expect("child is stacked");
+    assert_eq!(stacked.fork_base, merge);
+    sync_with_recovery(
+        &child_path,
+        &SyncOptions {
+            onto: "origin/main".to_string(),
+            push: false,
+            fork_base: Some(stacked.fork_base),
+        },
+        &NullProgress,
+    )
+    .expect("the child holds its parent's work through main");
+    for file in ["parent.txt", "child.txt", "later.txt"] {
+        assert!(child_path.join(file).exists(), "{file}");
+    }
+    assert_eq!(
+        git(&child_path, &["diff", "--name-only", "origin/main...HEAD"]),
+        "child.txt"
+    );
 }
 
 #[test]
@@ -1256,24 +1709,8 @@ fn saved_graph_sync_follows_task_parent_and_skips_an_already_contained_head() {
         ],
     );
     let child = support::register_sibling_task(&parent, "INF-124", "child", &child_path);
+    stack_on_published_parent(&parent, &child, &parent.pr.base_commit, None);
     let runtime = tokio::runtime::Runtime::new().unwrap();
-    let mut parent_pr = parent.pr.clone();
-    parent_pr.publication = Some(PrPublication {
-        requested_at: parent_pr.created_at,
-        presentation: None,
-        github: Some(GithubPr {
-            number: 41,
-            url: "https://github.com/fixture/repo/pull/41".into(),
-            head_sha: Some(parent_pr.base_commit.clone()),
-        }),
-        merge: None,
-    });
-    runtime
-        .block_on(parent.store.update_task_pr(&parent_pr))
-        .unwrap();
-    runtime
-        .block_on(parent.store.stack_task_placement(&child, &parent.pr.id))
-        .unwrap();
     std::fs::write(child_path.join("shared.txt"), "child\n").unwrap();
     git(&child_path, &["commit", "-am", "Child work"]);
     let child_head = git(&child_path, &["rev-parse", "HEAD"]);

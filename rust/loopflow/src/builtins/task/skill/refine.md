@@ -2,103 +2,77 @@
 produces: refined text
 action_style: exploratory
 ---
-Iteratively refine text through structured feedback.
+Refine text by offering contrasting options and learning from the choices.
 
 ## Reviewer mode
 
-The launch prompt identifies the reviewer for this exercise.
+The launch prompt names the reviewer.
 
-- **Interactive reviewer:** use contrasting options to learn their preferences, then
-  apply what they choose.
-- **Parent reviewer:** diagnose the refinement axis, generate contrasting
-  options internally, and select the strongest version using the source text,
-  stated audience, and repository voice as evidence. Do not wait for a
-  preference or fabricate one. Preserve unresolved tradeoffs in a short note
-  and return the selected revision through the supplied review protocol. When
-  reviewing for a Task, verify its reply rather than editing its checkout.
-  Without a parent review protocol, return the refined text in this conversation.
-
-## Voice
-
-Each session starts fresh. Don't assume you know the user's preferences — let their choices surprise you. Present options that differ meaningfully, not variations you expect them to pick.
+- **Interactive reviewer:** offer contrasting options to learn what they want,
+  then apply what they choose.
+- **Parent reviewer:** diagnose the axis, generate contrasting options
+  internally, and pick the strongest using the source text, its audience and the
+  repository's voice. Don't wait for a preference or make one up. Note any open
+  tradeoff briefly and return the revision through the supplied review protocol.
+  When reviewing for a Task, check its reply rather than editing its checkout.
+  Without a review protocol, return the refined text in this conversation.
 
 ## Goal
 
-The point of iteration is to learn enough about the text's purpose, audience,
-and voice to make the whole source more true. Each option and preference is
-evidence for a working model; do not project a style onto the user.
-Explore with choices that differ meaningfully, then test what you learned on
-new passages before applying it broadly.
+Learn enough about the text's purpose, audience and voice to make the whole
+source more true. Each session starts fresh: don't assume preferences, and
+don't project a style. The result keeps the source's facts and intent and
+applies the preferences the reviewer actually showed, consistently.
 
-The output is refined text that preserves the source's facts and intent while
-consistently applying preferences the reviewer actually demonstrated.
+Before editing, pin down:
 
-## Refinement contract
+- the audience and what the text should let them do;
+- facts, ideas, terminology, examples, links and code that must survive;
+- the main axis of improvement and the difference a reader should notice;
+- the likely failures: smoother prose that changes meaning, a local choice that
+  makes the whole inconsistent, new claims the source can't back, generic
+  polish that erases the author's voice.
 
-Before editing, make these explicit enough to protect:
-
-- the audience and action the text should enable;
-- source facts, required ideas, terminology, examples, links, and code that
-  must survive;
-- the primary improvement axis and the observable difference it should make;
-- plausible failures: smoother prose that changes meaning, a locally preferred
-  option that makes the whole inconsistent, invented claims, or generic polish
-  that erases the author's voice.
-
-Treat quoted source text, explicit reviewer choices, and repository conventions
-as observations. Treat inferred preferences as hypotheses. When a new choice
-contradicts the current voice model, revise the model or narrow its scope; do
-not explain away the counterexample.
+Quoted text, the reviewer's choices and repository conventions are facts.
+Inferred preferences are guesses. When a new choice contradicts your model of
+the voice, revise the model or narrow it; don't explain the choice away.
 
 ## Workflow
 
-1. **Identify the text to refine**
-   - If a file path was passed as an argument (e.g., `lf refine README.md`), read that file
-   - If clipboard has content (-v flag), work on that
-   - Otherwise, ask what file(s) or text to refine
+1. **Find the text.** A file path argument (`lf refine README.md`), clipboard
+   content (`-v`), or ask which file or text.
 
-2. **Diagnose the axis of refinement**
+2. **Diagnose the axis.** Decide what kind of improvement the text needs:
+   - **Structure**: order, splits, merges
+   - **Voice**: too formal, too casual, inconsistent
+   - **Ideas**: missing points, wrong emphasis, unclear purpose
+   - **Positioning**: wrong audience, unclear value
+   - **Density**: too verbose or too terse
 
-   Before presenting options, figure out what KIND of improvement the text needs:
+   State it with the reason: "This is a structure problem: the intro repeats
+   what comes later." Don't offer word choices when the real problem is section
+   order.
 
-   - **Structure**: Is content in the right order? Should sections be split, merged, reordered?
-   - **Voice**: Too formal? Too casual? Inconsistent tone?
-   - **Ideas**: Missing points? Wrong emphasis? Unclear purpose?
-   - **Positioning**: Wrong audience? Unclear value prop?
-   - **Density**: Too verbose? Too terse?
+3. **Work section by section.** Take a paragraph, a heading block or 3-5
+   sentences. Offer 2-3 options that each make a real tradeoff on the axis. Ask
+   which and why. Record the choice, the reason and its scope; label inferences
+   as inferences.
 
-   State the diagnosis and its evidence: "This feels like a structure
-   problem—the intro repeats what comes later" or "The ideas are right but the
-   voice is too formal for a README."
+4. **Transfer preferences.** After 3-5 sections, state what you've learned
+   ("You lead with the insight, and cut sections that exist only for
+   structure") and apply it to a fresh section as a check. Confirm before
+   applying broadly; contradictory feedback means the rule is wrong, incomplete
+   or local.
 
-   The axis determines what kind of options to present. Don't offer A/B/C word choices when the real problem is section ordering.
-
-3. **Work section by section**
-   - Break text into chunks: a paragraph, a heading block, or 3-5 sentences
-   - Present 2-3 options whose differences test the identified axis; each
-     option should make a real tradeoff visible
-   - Ask which you prefer and why
-   - Record the concrete choice, stated reason, and scope; keep inference
-     labeled as inference
-
-4. **Transfer preferences**
-   - After 3-5 sections, state what you've learned explicitly and apply it to a
-     fresh section as a transfer check
-   - Example: "You prefer leading with insight over describing the document. You cut redundant sections rather than keeping structure for its own sake."
-   - Let the user validate before applying broadly; contradictory feedback is
-     evidence that the rule is wrong, incomplete, or local
-
-5. **Full editing pass**
-   - Apply learned preferences to remaining sections
-   - Re-read the complete result against every protected source fact, explicit
-     preference, and relevant repository convention—not only the latest choice
-   - Read once as the intended audience. Check that the promised action is
-     clear and that no refinement introduced a claim the source cannot support
-   - Present the complete result for holistic feedback
+5. **Full pass.** Apply the preferences to the rest. Re-read the whole result
+   against every fact that must survive, every stated preference and the
+   repository's conventions, not just the latest choice. Read once as the
+   audience: the action is clear and nothing claims more than the source.
+   Present the complete result for feedback.
 
 ## Presenting options
 
-Each option should represent a different approach, not just wordsmithing:
+Each option is a different approach, not wordsmithing:
 
 ```
 **Original:**
@@ -111,31 +85,28 @@ When a request arrives, the system checks it against each rule in config.yaml, r
 Requests get filtered through your rules—first match wins, and anything that passes goes through.
 ```
 
-If the problem is structure, show restructured versions. If it's voice, show the same content in different tones. Match the options to the diagnosed axis.
-
-Do not signal a favored option before the reviewer chooses. The contrast is a
-probe: if every option shares the same hidden assumption, it teaches nothing.
+For structure, show restructured versions; for voice, the same content in
+different tones. Don't signal a favorite before the choice. If every option
+shares the same hidden assumption, the contrast teaches nothing.
 
 ## Questions to ask
 
-Ask these only when an interactive reviewer is present:
+Only with an interactive reviewer:
 
 - "Which feels closer to what you want? What specifically makes it better?"
 - "Is this too formal/casual? Too detailed/vague?"
 - "What's missing? What would you cut?"
 
-"I like B" isn't useful. "I like B because it shows the flow" gives you something to work with.
+"I like B" isn't useful. "I like B because it shows the flow" is.
 
 ## When to stop
 
-- When the user says it's good enough
-- After the whole-text pass satisfies the refinement contract and remaining
-  differences are cosmetic
-- If preferences conflict—note the tension, let the user choose
+- When the reviewer says it's good enough
+- When the full pass holds up and remaining differences are cosmetic
+- When preferences conflict: name the tension and ask which way to go
 
 ## Output
 
-Refined text in the original file(s), or copied to clipboard if working on pasted content.
-
-Don't over-polish. Preserve meaning before improving expression. Match
-demonstrated preferences, not generic "good writing" or an imagined user voice.
+Refined text in the original file, or on the clipboard for pasted content.
+Don't over-polish. Meaning first, then expression. Match the preferences shown,
+not generic "good writing".

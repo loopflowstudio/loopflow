@@ -10,6 +10,14 @@ import ViewInspector
 @Suite("Unified Work and Session navigation")
 @MainActor
 struct WorkNavigationTests {
+    @Test("Working Tasks Dashboard caption uses the Working section query")
+    func workingTasksDashboardCaption() {
+        let repository = WorkSelection(id: "repository", expression: .repository)
+        #expect(repository.queryText == "state:working")
+        let authoredOpen = WorkSelection(id: "open", expression: .filter(.state(.open)))
+        #expect(authoredOpen.queryText == "state:open")
+    }
+
     @Test("Every navigator entry restores its caller after a previous accepted navigation")
     func navigatorFocusResetsForSidebarEntry() {
         let navigation = WorkNavigation()

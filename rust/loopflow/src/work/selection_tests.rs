@@ -31,55 +31,38 @@ fn defaults_include_child_waves_and_working_wave_tasks() {
     let child = WaveId::new();
     let empty = WaveId::new();
     let work: Vec<_> = [
-        (key(root.as_str(), WorkWorkspaceKind::Wave), None, None),
+        (key(root.as_str(), WorkWorkspaceKind::Wave), None),
         (
             key(child.as_str(), WorkWorkspaceKind::Wave),
             Some(root.clone()),
-            None,
         ),
         (
             key(empty.as_str(), WorkWorkspaceKind::Wave),
             Some(root.clone()),
-            None,
         ),
         (
             key("unstarted", WorkWorkspaceKind::Task),
             Some(root.clone()),
-            Some(true),
         ),
-        (
-            key("idle", WorkWorkspaceKind::Task),
-            Some(child),
-            Some(true),
-        ),
-        (
-            key("backlog", WorkWorkspaceKind::Task),
-            Some(root.clone()),
-            Some(false),
-        ),
-        (
-            key("done", WorkWorkspaceKind::Task),
-            Some(root.clone()),
-            Some(false),
-        ),
-        (
-            key("unknown", WorkWorkspaceKind::Task),
-            Some(root.clone()),
-            None,
-        ),
+        (key("idle", WorkWorkspaceKind::Task), Some(child)),
+        (key("backlog", WorkWorkspaceKind::Task), Some(root.clone())),
+        (key("done", WorkWorkspaceKind::Task), Some(root.clone())),
     ]
     .into_iter()
-    .map(|(key, parent_wave, open)| SelectionWork {
+    .map(|(key, parent_wave)| SelectionWork {
         states: match key.id.as_str() {
             "backlog" => BTreeSet::from([SelectionState::Backlog]),
             "done" => BTreeSet::from([SelectionState::Done]),
-            "unstarted" => BTreeSet::from([SelectionState::Unstarted]),
-            "idle" => BTreeSet::from([SelectionState::Idle, SelectionState::Working]),
+            "unstarted" => BTreeSet::from([SelectionState::Open, SelectionState::Unstarted]),
+            "idle" => BTreeSet::from([
+                SelectionState::Open,
+                SelectionState::Idle,
+                SelectionState::Working,
+            ]),
             _ => BTreeSet::new(),
         },
         key,
         parent_wave,
-        open,
         name: String::new(),
         activity_known: false,
     })
@@ -94,7 +77,7 @@ fn defaults_include_child_waves_and_working_wave_tasks() {
             .collect::<Vec<_>>(),
         [work[1].key.id.as_str(), empty.as_str(), "idle"]
     );
-    assert_eq!(wave.unavailable.len(), 1);
+    assert!(wave.unavailable.is_empty());
     let filtered = Selection::parse(&format!("wave:{root} state:open"), None)
         .unwrap()
         .resolve("repo", &work, &BTreeMap::new())
@@ -107,7 +90,7 @@ fn defaults_include_child_waves_and_working_wave_tasks() {
             .collect::<Vec<_>>(),
         ["unstarted", "idle"]
     );
-    assert_eq!(filtered.unavailable.len(), 1);
+    assert!(filtered.unavailable.is_empty());
     let repo = node("root", SelectionExpression::Repository)
         .resolve("repo", &work, &BTreeMap::new())
         .unwrap();
@@ -128,9 +111,12 @@ fn nested_sources_survive_insertions_and_report_unavailable_queries_and_cycles()
     let work = vec![SelectionWork {
         key: key("task", WorkWorkspaceKind::Task),
         parent_wave: None,
-        open: Some(true),
         name: String::new(),
-        states: BTreeSet::from([SelectionState::Idle, SelectionState::Working]),
+        states: BTreeSet::from([
+            SelectionState::Open,
+            SelectionState::Idle,
+            SelectionState::Working,
+        ]),
         activity_known: false,
     }];
     let query = DashboardId("saved".into());
@@ -314,7 +300,6 @@ fn query_work() -> Vec<SelectionWork> {
         SelectionWork {
             key: key(wave.as_str(), WorkWorkspaceKind::Wave),
             parent_wave: None,
-            open: None,
             name: "Product".into(),
             states: Default::default(),
             activity_known: false,
@@ -322,7 +307,6 @@ fn query_work() -> Vec<SelectionWork> {
         SelectionWork {
             key: key("a", WorkWorkspaceKind::Task),
             parent_wave: Some(wave.clone()),
-            open: Some(true),
             name: "FIX-1".into(),
             states: [SelectionState::Open, SelectionState::Available].into(),
             activity_known: true,
@@ -330,7 +314,6 @@ fn query_work() -> Vec<SelectionWork> {
         SelectionWork {
             key: key("b", WorkWorkspaceKind::Task),
             parent_wave: Some(wave),
-            open: Some(false),
             name: "FIX-2".into(),
             states: [SelectionState::Backlog].into(),
             activity_known: true,
@@ -566,7 +549,6 @@ fn working_tasks_are_the_working_section_and_the_others_have_their_own_queries()
     .map(|(id, state, section)| SelectionWork {
         key: key(id, WorkWorkspaceKind::Task),
         parent_wave: Some(wave.clone()),
-        open: Some(true),
         name: id.into(),
         states: BTreeSet::from([SelectionState::Open, state, section]),
         activity_known: true,
@@ -574,7 +556,6 @@ fn working_tasks_are_the_working_section_and_the_others_have_their_own_queries()
     .chain([SelectionWork {
         key: key(wave.as_str(), WorkWorkspaceKind::Wave),
         parent_wave: None,
-        open: None,
         name: "wave".into(),
         states: BTreeSet::new(),
         activity_known: false,

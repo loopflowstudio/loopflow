@@ -21,7 +21,7 @@ struct TaskRowMetadataTests {
         let status = SessionProgramStatus(sessions: [waiting, reporting], unavailable: nil)
         #expect(status.label == label)
         let task = try #require(roadmap().waves.first?.tasks.items[1])
-        let row = TaskRowMetadata(task: task, status: status)
+        let row = TaskRowMetadata(id: task.id, task: task, status: status)
         #expect(try row.inspect().find(text: label).string() == label)
         let pane = ProgramStatusLabel(status: try #require(reporting.programStatus))
         #expect(try pane.inspect().find(text: "\(label) · **literal**").string() == "\(label) · **literal**")

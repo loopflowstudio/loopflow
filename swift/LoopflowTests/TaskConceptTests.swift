@@ -158,7 +158,7 @@ struct TaskConceptTests {
         #expect(board.session == .available)
         #expect(task.selectionStates.contains(.busy))
         let status = SessionProgramStatus(sessions: [conversation], unavailable: nil)
-        let row = TaskRowMetadata(task: task, status: status)
+        let row = TaskRowMetadata(id: task.id, task: task, status: status)
         #expect(try row.inspect().find(text: "Blocked").string() == "Blocked")
         let pane = ProgramStatusLabel(status: try #require(conversation.programStatus))
         #expect(try pane.inspect().find(text: "Blocked").string() == "Blocked")

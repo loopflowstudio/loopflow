@@ -114,8 +114,8 @@ lf desktop dashboard query attention 'state:available or state:blocked'   # save
 ```
 
 Queries take `wave:`, `task:`, `kind:task|wave` and
-`state:open|available|running|blocked|paused|idle|backlog|done`; whitespace
-means AND, and `or` and parentheses compose.
+`state:open|available|busy|blocked|unstarted|idle|active|moving|shipping|backlog|working|autonomous|done`;
+whitespace means AND, and `or` and parentheses compose.
 
 ### Connection recovery
 

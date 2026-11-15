@@ -13,11 +13,14 @@ body{max-width:800px;margin:40px auto;padding:0 22px}h1{font-size:1.8rem;line-he
 Sources: scratch/loo-696-reevaluation.md; docs/surfaces.md; swift/README.md;
 durable.rs; store/sqlite/selections.rs; lf/commands/waves.rs; WorkProjection.swift;
 WorkCache.swift; ProgramStatus.swift; SessionProgramStatus.swift;
-TaskRowMetadataTests.swift; TaskConceptTests.swift; scratch/qa.html §4.</small></header>
+TaskRowMetadataTests.swift; TaskConceptTests.swift; WorkNavigationTests.swift;
+lf/commands/open.rs; work/selection/query.rs; scratch/qa.html round 2.</small></header>
 <h1>Advance the existing design.</h1>
 <p>No further design change or open product choice. The QA wording correction is
-implemented and has focused headless production-view coverage. Gate and the
-interactive demo remain.</p>
+implemented. The interrupted follow-up also covers the Working caption and
+Desktop URL expressions and removes unreachable per-Task state uncertainty.
+Focused checks are recorded in the working design; this review reran no tests.
+Gate and the interactive demo remain.</p>
 <h2>The biggest mismatch</h2>
 <p><strong>Before:</strong> one running Task could say Todo on its page, Active in
 its heading and Not started in its picker after unassignment.<br>
@@ -28,11 +31,17 @@ checkout, PR and conversations remain.</p>
 <strong>Implemented:</strong> conversation row <b>Available</b> · pane
 <b>Available</b> · Task filter <b>Available</b>. A working report reads <b>Busy</b>
 in both report views. One enum-to-label mapping supplies both.</p>
+<p><strong>QA round 2 before correction:</strong> Working Tasks caption
+<code>state:open</code> included an owned unstarted Task when typed as a query.<br>
+<strong>Implemented:</strong> caption and repository/Wave Desktop opening use
+<code>state:working</code>. The owned unstarted Task stays Open and Backlog;
+Working excludes it. Regression tests cover all three consumers.</p>
 <table>
 <thead><tr><th>Action</th><th>Concept</th><th>Shared read → mutation</th></tr></thead>
 <tbody>
 <tr><td>Open Task or picker</td><td>Lifecycle</td><td><code>RoadmapTask.lifecycle</code> → existing Task run/reopen controls</td></tr>
 <tr><td>Unassign / reclaim</td><td>Ownership, board section</td><td><code>TaskSection::of</code> → existing ownership operations</td></tr>
+<tr><td>Open Working Tasks</td><td>Working section, distinct from Open</td><td><code>SelectionState::Working</code> → existing Desktop view/open operations</td></tr>
 <tr><td>Filter Available / Busy</td><td>Aggregate Task activity</td><td><code>task_selection_states</code> → existing Session reports</td></tr>
 <tr><td>Follow a conversation</td><td>Individual program report</td><td><code>ProgramStatusState.label</code> → existing report/clear events; wire states unchanged</td></tr>
 <tr><td>Choose a conversation</td><td>Task membership</td><td><code>SessionRecord.task_ids</code> → existing Session bind/open operations</td></tr>
@@ -44,6 +53,10 @@ in both report views. One enum-to-label mapping supplies both.</p>
 activity and run/ship permissions. An incomplete read retains last-good content,
 panes and drafts; fresh subscriptions restore current facts. No new store or
 polling loop. Mutations still recheck current state.</p>
+<p><strong>Removed:</strong> the parallel Open/state-known flag and synthetic
+per-row unknown-state branches. <code>work_in</code> requires every Task state
+and fails the whole read when one cannot be read. Unknown activity and missing
+Work/query references retain their real unavailable results.</p>
 <p>Keep the counterexamples: never-started completion offers Reopen; started work
 ignores conflicting planning completion; Available and Busy can coexist; saved
 Dashboard arrangements and Done dates keep their own order. NOW condition remains
@@ -52,12 +65,15 @@ separate from lifecycle.</p>
 an Available Task that also matches Busy. Report views keep Blocked and its
 source; Rust aggregates all conversations for filters and the board. A reported
 Done never completes the Task. QA screenshots show the earlier build; the wording
-correction was verified in production leaf views headlessly, not in a new mounted demo.</p>
+correction was verified in production leaf views and in the round 2 Dev app.
+Broader native interaction remains for the demo.</p>
 <h2>Review questions, resolved by the working design</h2>
 <ol>
 <li>Does unassignment mean never started? <strong>No.</strong> Keep Active and change ownership/section.</li>
 <li>Does an open Session imply Busy? <strong>No.</strong> Require current activity facts.</li>
 <li>Does a retained Auto-Ship handoff imply runtime Shipping? <strong>No.</strong> Keep Stop Auto-Ship through restart or unassignment.</li>
 <li>Must a pane equal its Task's aggregate activity? <strong>No.</strong> Share wording, retain report scope and provenance.</li>
+<li>Does ownership make an unstarted Task Working? <strong>No.</strong> It remains Open/Backlog until started.</li>
+<li>Does a complete Task row need a state-known flag? <strong>No.</strong> State failures fail the read; retain unavailable activity and missing-reference results.</li>
 </ol>
 </html>

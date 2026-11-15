@@ -79,7 +79,6 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
     let repository_work = SelectionWork {
         key: key(WorkWorkspaceKind::Repository, repository.to_string()),
         parent_wave: None,
-        open: None,
         name: repo.clone(),
         states: BTreeSet::new(),
         activity_known: false,
@@ -89,7 +88,6 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
         wave_work.push(SelectionWork {
             key: key(WorkWorkspaceKind::Wave, wave.id().to_string()),
             parent_wave: wave.parent_wave_id().cloned(),
-            open: None,
             name: wave.name().to_string(),
             states: BTreeSet::new(),
             activity_known: false,
@@ -112,7 +110,7 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
             .get(&task.id)
             .ok_or_else(|| invalid(format!("Task {} has no state", task.id)))?;
         let owned = owners.contains_key(&task.id);
-        let (states, open) = task_selection_states(
+        let states = task_selection_states(
             state,
             owned,
             published.contains(&task.id),
@@ -129,7 +127,6 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
             SelectionWork {
                 key: key(WorkWorkspaceKind::Task, task.id.to_string()),
                 parent_wave: task.wave_id,
-                open: Some(open),
                 name: task.identifier,
                 states,
                 activity_known,
@@ -188,11 +185,10 @@ pub(crate) fn task_selection_states(
     published: bool,
     plan_state: Option<&str>,
     activity: Option<&TaskActivity>,
-) -> (BTreeSet<SelectionState>, bool) {
+) -> BTreeSet<SelectionState> {
     let state = runtime.lifecycle(plan_state);
-    let open = (owned || published) && !state.is_terminal();
     let mut states = activity.map_or_else(BTreeSet::new, |activity| activity.states.clone());
-    if open {
+    if (owned || published) && !state.is_terminal() {
         states.insert(SelectionState::Open);
     }
     states.insert(match state {
@@ -209,7 +205,7 @@ pub(crate) fn task_selection_states(
         TaskSection::Autonomous => SelectionState::Autonomous,
         TaskSection::Done | TaskSection::Abandoned => SelectionState::Done,
     });
-    (states, open)
+    states
 }
 
 fn task_selection_in(
@@ -1124,6 +1120,41 @@ mod tests {
             store.read_dashboard(&repo, &id).unwrap().unwrap().saved,
             moved
         );
+    }
+
+    #[test]
+    fn owned_unstarted_task_is_open_but_excluded_from_working_queries() {
+        let (_dir, store, repo) = fixture();
+        let task = "task_33333333333333333333333333333333";
+        store.conn.lock().unwrap().execute(
+            "INSERT INTO task_ownership(id,task_id,kind,person,machine_id,at,ordered_at,written_here)
+             VALUES('own_33333333333333333333333333333333',?1,'recorded',NULL,NULL,2,2000,1)",
+            [task],
+        ).unwrap();
+        for expression in [
+            None,
+            Some("state:working"),
+            Some("wave:Product state:working"),
+        ] {
+            let plan = store.view_plan(&repo, expression).unwrap();
+            assert_eq!(
+                plan.resolution.task_ids(),
+                ["task_22222222222222222222222222222222"]
+            );
+            assert!(plan.resolution.unavailable.is_empty());
+        }
+        for expression in [
+            "state:open",
+            "wave:Product state:open",
+            "state:unstarted state:backlog",
+        ] {
+            let plan = store.view_plan(&repo, Some(expression)).unwrap();
+            assert!(
+                plan.resolution.task_ids().iter().any(|id| id == task),
+                "{expression}"
+            );
+            assert!(plan.resolution.unavailable.is_empty());
+        }
     }
 
     #[test]

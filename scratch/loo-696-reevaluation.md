@@ -159,6 +159,11 @@ not lifecycle sections. Preserve it and its tests.
 - Raw-state capitalization in `SessionProgramStatus.label` and
   `ProgramStatusReport.displayText`; both consume `ProgramStatusState.label`.
   Keep individual report provenance, details, priority, and wire values.
+- `SelectionWork.open`, its temporary `state_known` replacement, and
+  `task_selection_states`' parallel open return value; `state:open` reads the shared
+  state set. Production Task state reads fail as a whole, so remove the unreachable
+  per-row state-unavailable branches and their synthetic fixture. Keep real missing
+  references, unknown activity, and failed-read/last-good behavior.
 
 Replace assertions that encode those rules, including WaveStandup rank-order
 expectations. Keep tests for ownership/person grouping, Done date windows,
@@ -216,6 +221,23 @@ performance/read-volume checks, full platform suites and final review; the
 interactive demo below remains. Publication and landing belong to their Graph
 steps, with no merge authorization implied here.
 
+QA round 2 (November 14, `scratch/qa.html`): live Dev app shows Busy/Available
+in row and pane header in agreement with Rust. The Working Tasks Dashboard caption
+said `state:open` while its members are the Working section; an owned unstarted
+Task is `open` but Backlog. Caption and `lf open`'s Desktop expression now say
+`state:working`; docs list the parser's states. The follow-up removes
+`SelectionWork.state_known`: `work_in` requires every Task state and propagates
+missing/read errors before producing rows. Unknown process activity and missing
+Work/query references retain their unavailable results. Focused regression coverage
+checks the Dashboard caption, Desktop workspace URL expressions, and an owned
+unstarted Task remaining Open/Backlog while excluded from Working.
+The first follow-up Swift build found two report tests still calling
+`TaskRowMetadata` without the `id` required after #1943; both now pass `task.id`.
+
+- `scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone --filter 'workingTasksDashboardCaption|reportedStatus|individual'` — app/test build and 2 tests passed (reported status covers five states); the initial missing-`id` build failure is repaired.
+- `scripts/test_desktop.sh --skip-build --filter conversationReportsRemainSeparateFromTaskActivity` — passed, retaining the Blocked-conversation/Available-Task distinction.
+
+
 ## Concept review — November 14
 
 No product choice remains open; advance. `scratch/concept-review.html` records
@@ -226,13 +248,22 @@ a Blocked conversation beside an Available Task that also matches Busy. Preserve
 that distinction, report provenance and Done as an individual program result.
 Lifecycle, ownership, Auto-Ship handoff and NOW condition remain separate.
 
-The correction follows the existing design; no further implementation direction
-or open product choice remains. Unknown/cleared reports remain unlabeled, failed
-reads retain last-good content, and fresh reports restore current presentation
-without starting execution. Existing focused production-view checks cover this
-iteration; this review changed no production code and reran no tests. Gate retains
-broader performance/platform checks; mounted clarity and native input remain for
-the demo. The original QA screenshots document the pre-correction build.
+The continuation reviewed QA round 2 and the interrupted follow-up against the
+current source. The Dashboard caption and `lf open` expressions now name Working;
+the Rust reader regression retains an owned unstarted Task in Open/Backlog and
+excludes it from repository and Wave Working queries. The caption and URL tests
+exercise the production renderers. `SelectionWork` no longer carries a parallel
+open/state-known flag: a missing Task state fails `work_in` before rows exist.
+Unknown activity and missing Work/query references still have reachable
+unavailable results. No new persistence, execution or recovery mechanism is needed.
+
+No further implementation direction or open product choice remains; advance.
+Unknown/cleared reports remain unlabeled, failed reads retain last-good content,
+and fresh reports restore current presentation without starting execution.
+The completed follow-up checks are recorded under Compression. This review changed
+no production code and reran no tests. Gate retains broader performance/platform
+checks; mounted clarity and native input remain for the demo. Round 2 screenshots
+show the corrected report wording and Working caption.
 
 ## Compression — November 14
 
@@ -243,8 +274,17 @@ mixed Work-kind sort, redundant Swift membership checks and duplicate test model
 SQL seeds now use `include_str!`; fixture comparison names the stable concepts
 and excludes timestamps/process IDs intentionally.
 
+Continuation: the remaining `SelectionWork.open` field sent `state:open` through
+a separate query branch despite the shared state set already containing Open.
+The query now reads that set. The temporary state-known boolean and its test-only
+unavailable branches are removed; real Task-state failures fail the shared read.
+Keep the separate roadmap ordering pass: `closed_task_page_snapshot` calls the
+same detail batch and must retain completion-date order.
+
 - `cargo test -p loopflow --lib store::sqlite::selections::tests::` — 22 passed;
-  gate owns broader performance/read-volume checks.
+  all 22 also passed against the final continuation binary. Gate owns broader
+  performance/read-volume checks.
+- `cargo nextest run -p loopflow --lib -E 'test(work::selection_tests::) | test(desktop_workspace_urls_select_working_tasks_in_repository_and_wave) | test(owned_unstarted_task_is_open_but_excluded_from_working_queries)'` — 20 passed after removing `state_known`; includes Working/Open, Desktop URLs, incomplete reads and missing references.
 - `cargo test -p loopflow --lib lf::commands::waves::tests::task_concepts_share_lifecycle_activity_membership_and_order` — passed against the final source; the known macOS linker unwind-table warning remained.
 - `swift build --build-tests --package-path swift --jobs 4 -Xswiftc -gnone` — passed.
 - `scripts/test_desktop.sh --skip-build --filter 'TaskConceptTests|WorkNavigationTests|WorktreeWorkspaceTests'` — 63 passed headless; visible demo remains.

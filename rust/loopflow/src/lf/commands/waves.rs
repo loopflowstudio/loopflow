@@ -2027,8 +2027,7 @@ async fn snapshot_task_detail(
             reads.selection_readings[&task.repository_id]
                 .activity
                 .get(&task.id),
-        )
-        .0,
+        ),
         runtime: Some(runtime),
         next_move,
         condition,

@@ -340,7 +340,7 @@ extension WorkSelection {
     var queryText: String {
         func value(_ text: String) -> String { text.contains(where: { $0.isWhitespace || $0 == "(" || $0 == ")" }) ? "\"" + text + "\"" : text }
         switch expression {
-        case .repository: return "state:open"
+        case .repository: return "state:working"
         case .wave(let id): return "wave:" + value(id)
         case .work(let work): return work.kind.rawValue + ":" + value(work.id)
         case .query(let id): return "query:" + value(id)

@@ -355,7 +355,7 @@ pub(super) async fn apply_response(
                 .ok_or_else(|| message("Wave is missing"))?;
             let initiative = super::linear::read_initiative(repo, wave.slug())
                 .ok_or_else(|| message("Wave has no Linear Initiative"))?;
-            crate::linear::acceptance::accept_linear_project_in(
+            crate::store::sqlite::linear_acceptance::accept_linear_project_in(
                 &store.sqlite,
                 &project.wave_id,
                 &initiative,
@@ -454,7 +454,7 @@ async fn observe(
                 .ok_or_else(|| message("Project Wave is missing"))?;
             let initiative = super::linear::read_initiative(repo, wave.slug())
                 .ok_or_else(|| message("Wave has no Linear Initiative"))?;
-            crate::linear::acceptance::accept_linear_project_in(
+            crate::store::sqlite::linear_acceptance::accept_linear_project_in(
                 &store.sqlite,
                 &project.wave_id,
                 &initiative,
@@ -556,7 +556,7 @@ pub(super) async fn ingest_task(
             }
         }
     }
-    crate::linear::acceptance::accept_linear_issue_in(
+    crate::store::sqlite::linear_acceptance::accept_linear_issue_in(
         &store.sqlite,
         &repo.to_string_lossy(),
         issue,

@@ -65,3 +65,7 @@
   concept-review cut in `loo-650.md`: SQL selects and reads one input's evidence;
   the application validates the full manifest and projects it. Keep activity's
   early stop before evidence loading; no eager page or partial manifest decoder.
+
+- Mixed child fixtures use observed peer import above storage; prepared SQL tests
+  keep local writer/title repair and Task-field persistence below it. This avoids
+  exporting a transaction helper solely for the application fixtures.

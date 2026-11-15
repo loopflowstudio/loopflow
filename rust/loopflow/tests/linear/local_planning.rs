@@ -1126,7 +1126,7 @@ fn project_creation_binding_and_activation_save_offline() {
                     "initiative_ids": ["initiative"], "team_ids": ["fixture-team"]
                 }))
                 .unwrap();
-                loopflow::linear::acceptance::accept_linear_project_in(
+                loopflow::store::sqlite::linear_acceptance::accept_linear_project_in(
                     &store,
                     wave.id(),
                     "initiative",
@@ -1410,7 +1410,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
             initiative_ids: vec!["initiative".into()],
             team_ids: vec!["fixture-team".into()],
         };
-        loopflow::linear::acceptance::accept_linear_project_in(
+        loopflow::store::sqlite::linear_acceptance::accept_linear_project_in(
             &store,
             wave.id(),
             "initiative",
@@ -1521,7 +1521,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
             incoming.name = "Remote name".into();
             incoming.revision = Some("2026-10-08T11:00:00Z".into());
             incoming.krs[0].holds = true;
-            loopflow::linear::acceptance::accept_linear_project_in(
+            loopflow::store::sqlite::linear_acceptance::accept_linear_project_in(
                 &store,
                 wave.id(),
                 "initiative",
@@ -1554,7 +1554,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
             // A provider edit matching the save neither settles nor duplicates it.
             incoming.name = "Saved".into();
             incoming.revision = Some("2026-10-08T12:00:00Z".into());
-            loopflow::linear::acceptance::accept_linear_project_in(
+            loopflow::store::sqlite::linear_acceptance::accept_linear_project_in(
                 &store,
                 wave.id(),
                 "initiative",
@@ -1612,7 +1612,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
             let mut incoming = project.clone();
             incoming.revision = Some("2026-10-08T13:00:00Z".into());
             incoming.krs[0].text = "Keep the concurrent provider plan".into();
-            loopflow::linear::acceptance::accept_linear_project_in(
+            loopflow::store::sqlite::linear_acceptance::accept_linear_project_in(
                 &store,
                 wave.id(),
                 "initiative",
@@ -1679,7 +1679,7 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
             initiative_ids: vec!["initiative".into()],
             team_ids: vec!["fixture-team".into()],
         };
-        loopflow::linear::acceptance::accept_linear_project_in(
+        loopflow::store::sqlite::linear_acceptance::accept_linear_project_in(
             &store,
             wave.id(),
             "initiative",
@@ -2044,7 +2044,7 @@ fn moving_saves_membership_offline_and_retains_inbound_changes() {
                     team_ids: vec!["fixture-team".into()],
                     revision: None,
                 };
-                loopflow::linear::acceptance::accept_linear_project_in(
+                loopflow::store::sqlite::linear_acceptance::accept_linear_project_in(
                     &store,
                     wave.id(),
                     name,
@@ -3104,7 +3104,7 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
         "summary":"", "description":"Saved Project prose", "status":"started",
         "krs":[], "metric_targets":[], "initiative_ids":["initiative"], "team_ids":["team"], "revision":null
     })).unwrap();
-    loopflow::linear::acceptance::accept_linear_project_in(
+    loopflow::store::sqlite::linear_acceptance::accept_linear_project_in(
         &store,
         task.wave_id.as_ref().unwrap(),
         "initiative",

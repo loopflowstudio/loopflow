@@ -265,7 +265,10 @@ mod tests {
     fn reservations_do_not_report_success_and_observed_replacements_keep_lineage() {
         let home = tempfile::tempdir().unwrap();
         let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
-        store.test_session("conversation", &crate::session_record::new_artifact_key());
+        store.test_session(
+            "conversation",
+            &crate::store::session_record::new_artifact_key(),
+        );
         let owner = LfProcessId::new();
         store
             .conn

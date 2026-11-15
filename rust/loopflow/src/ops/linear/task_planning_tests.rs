@@ -29,7 +29,7 @@ async fn planning_repo(fixture: &Fixture) -> (PathBuf, crate::work::wave::Wave) 
         "initiative_ids": ["initiative-1"], "team_ids": ["team-1"]
     }))
     .unwrap();
-    crate::linear::acceptance::accept_linear_project_in(
+    crate::store::sqlite::linear_acceptance::accept_linear_project_in(
         &fixture.store.sqlite,
         wave.id(),
         "initiative-1",
@@ -1378,13 +1378,15 @@ fn task_completion_ingestion_preserves_baseline_and_atomically_adopts_linear() {
         let mut late = remote.item.clone();
         late.state = Some("completed".into());
         late.completed = true;
-        assert!(!crate::linear::acceptance::observe_task_state(
-            &fixture.store.sqlite,
-            &delivery,
-            &late,
-            crate::linear::StateHistory::Unknown
-        )
-        .unwrap());
+        assert!(
+            !crate::store::sqlite::linear_acceptance::observe_task_state(
+                &fixture.store.sqlite,
+                &delivery,
+                &late,
+                crate::linear::StateHistory::Unknown
+            )
+            .unwrap()
+        );
         fixture
             .store
             .sqlite
@@ -1510,13 +1512,15 @@ fn task_completion_late_acknowledgement_preserves_explicit_reopening() {
             .item;
         late.state = Some("canceled".into());
         late.revision = Some("2026-10-08T03:00:00Z".into());
-        assert!(!crate::linear::acceptance::observe_task_state(
-            &fixture.store.sqlite,
-            &completed,
-            &late,
-            crate::linear::StateHistory::Unknown
-        )
-        .unwrap());
+        assert!(
+            !crate::store::sqlite::linear_acceptance::observe_task_state(
+                &fixture.store.sqlite,
+                &completed,
+                &late,
+                crate::linear::StateHistory::Unknown
+            )
+            .unwrap()
+        );
         assert_eq!(
             fixture
                 .store
@@ -1975,13 +1979,15 @@ fn task_completion_lost_reply_adopts_linear_reopening() {
             .item;
         late.state = Some("completed".into());
         late.completed = true;
-        assert!(!crate::linear::acceptance::observe_task_state(
-            &fixture.store.sqlite,
-            &original,
-            &late,
-            crate::linear::StateHistory::Unknown
-        )
-        .unwrap());
+        assert!(
+            !crate::store::sqlite::linear_acceptance::observe_task_state(
+                &fixture.store.sqlite,
+                &original,
+                &late,
+                crate::linear::StateHistory::Unknown
+            )
+            .unwrap()
+        );
         assert!(fixture
             .store
             .sqlite
@@ -3684,7 +3690,7 @@ fn planning_fields_deliver_project_activation_and_task_membership_without_execut
                 .await
                 .extra_projects
                 .push(planning_project("project-2", "project-2"));
-            crate::linear::acceptance::accept_linear_project_in(&fixture
+            crate::store::sqlite::linear_acceptance::accept_linear_project_in(&fixture
                 .store
                 .sqlite, task.wave_id.as_ref().unwrap(), "initiative-1", &destination, now())
                 .unwrap();

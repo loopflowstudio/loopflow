@@ -487,7 +487,12 @@ fn a_new_task_session_skips_steers_an_earlier_session_read() {
 fn migration_preserves_released_event_copies_and_planning_receipts() {
     use crate::store::migration_runner::{apply_before_migration, migration_section_sql};
     let conn = rusqlite::Connection::open_in_memory().unwrap();
-    apply_before_migration(&conn, "session_steers");
+    apply_before_migration(
+        &crate::store::test_fixture::observers(),
+        &crate::store::test_fixture::build(),
+        &conn,
+        "session_steers",
+    );
     conn.execute_batch(include_str!(
         "../../../tests/fixtures/migrations/session_steers_released.sql"
     ))
@@ -632,7 +637,12 @@ fn activation_never_moves_an_existing_selection() {
 fn dropping_the_adapter_thread_keeps_capabilities() {
     use crate::store::migration_runner::{apply_before_migration, migration_section_sql};
     let conn = rusqlite::Connection::open_in_memory().unwrap();
-    apply_before_migration(&conn, "drop_steer_adapter_thread");
+    apply_before_migration(
+        &crate::store::test_fixture::observers(),
+        &crate::store::test_fixture::build(),
+        &conn,
+        "drop_steer_adapter_thread",
+    );
     conn.execute_batch(
         "INSERT INTO processes(id,trace_id,started_at) VALUES('agent','fixture',1);
          INSERT INTO steer_adapters(agent_process_id,capability,provider_thread,created_at,activated_at)

@@ -185,7 +185,7 @@ fn validate_move(
 
 #[cfg(test)]
 mod tests {
-    use crate::session_record::new_artifact_key;
+    use crate::store::session_record::new_artifact_key;
 
     use crate::store::work::task::{NewTask, TaskUpdate};
     use loopflow_model::durable::TaskId;
@@ -304,7 +304,7 @@ mod tests {
         let captured = crate::store::sessions::replace_session_input(
             &store,
             bound.captured,
-            crate::session::LfSession {
+            crate::store::session::LfSession {
                 artifact_key: Some(new_artifact_key()),
                 ..bound
             },
@@ -329,7 +329,7 @@ mod tests {
         let next = crate::store::sessions::replace_session_input(
             &store,
             captured.captured,
-            crate::session::LfSession {
+            crate::store::session::LfSession {
                 artifact_key: Some(new_artifact_key()),
                 ..captured
             },
@@ -348,7 +348,7 @@ mod tests {
         let final_input = crate::store::sessions::replace_session_input(
             &store,
             next.captured,
-            crate::session::LfSession {
+            crate::store::session::LfSession {
                 artifact_key: Some(new_artifact_key()),
                 ..next
             },

@@ -2142,14 +2142,19 @@ mod metadata_tests {
     use rusqlite::params;
     use serde_json::json;
 
-    use crate::session::{GraphProcessSummaryState, SessionFilter};
+    use crate::store::session::{GraphProcessSummaryState, SessionFilter};
 
     #[test]
     fn a_released_tasks_primary_session_stays_its_conversation_here() {
         use crate::store::migration_runner::{apply_before_migration, migration_section_sql};
 
         let conn = rusqlite::Connection::open_in_memory().unwrap();
-        apply_before_migration(&conn, "task_machine_local");
+        apply_before_migration(
+            &crate::store::test_fixture::observers(),
+            &crate::store::test_fixture::build(),
+            &conn,
+            "task_machine_local",
+        );
         conn.execute_batch(
             "INSERT INTO repository_plans(id,repo,selected) VALUES('repo_1','/repo',1);
              INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd)
@@ -2184,8 +2189,8 @@ mod metadata_tests {
     fn session_inventory_distinguishes_primary_sessions_from_unassigned_tasks() {
         let home = tempfile::tempdir().unwrap();
         let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
-        store.test_session("primary", &crate::session_record::new_artifact_key());
-        store.test_session("other", &crate::session_record::new_artifact_key());
+        store.test_session("primary", &crate::store::session_record::new_artifact_key());
+        store.test_session("other", &crate::store::session_record::new_artifact_key());
         let repository = loopflow_model::durable::RepositoryId::new();
         {
             let conn = store.conn.lock().unwrap();
@@ -2227,7 +2232,8 @@ mod metadata_tests {
     fn input_replacement_retains_workspace_and_task_membership() {
         let home = tempfile::tempdir().unwrap();
         let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
-        let session = store.test_session("moving", &crate::session_record::new_artifact_key());
+        let session =
+            store.test_session("moving", &crate::store::session_record::new_artifact_key());
         let wave = loopflow_model::id::WaveId::new();
         let project = crate::store::work::project::ProjectId::new();
         let task = loopflow_model::durable::TaskId::new();
@@ -2257,7 +2263,7 @@ mod metadata_tests {
         let exclusion = crate::store::admission::lock_checkout(&store, &session.cwd).unwrap();
         let mut next = session.clone();
         next.cwd = home.path().join("destination");
-        next.artifact_key = Some(crate::session_record::new_artifact_key());
+        next.artifact_key = Some(crate::store::session_record::new_artifact_key());
         assert!(crate::store::sessions::replace_session_input(
             &store,
             session.captured,
@@ -2293,7 +2299,10 @@ mod metadata_tests {
     fn retained_sessions_without_repo_use_their_recorded_wave() {
         let home = tempfile::tempdir().unwrap();
         let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
-        store.test_session("retained", &crate::session_record::new_artifact_key());
+        store.test_session(
+            "retained",
+            &crate::store::session_record::new_artifact_key(),
+        );
         let wave = loopflow_model::id::WaveId::new();
         {
             let conn = store.conn.lock().unwrap();
@@ -2336,9 +2345,10 @@ mod metadata_tests {
     fn retrying_retired_input_preserves_completion_and_rejects_stale_snapshots() {
         let home = tempfile::tempdir().unwrap();
         let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
-        let first = store.test_session("retired", &crate::session_record::new_artifact_key());
+        let first =
+            store.test_session("retired", &crate::store::session_record::new_artifact_key());
         let mut next = first.clone();
-        next.artifact_key = Some(crate::session_record::new_artifact_key());
+        next.artifact_key = Some(crate::store::session_record::new_artifact_key());
         next.input_published = false;
         store
             .conn
@@ -2380,11 +2390,11 @@ mod metadata_tests {
         let history = store.session_history("conversation", 0, 100).unwrap();
         assert_eq!(
             history.first().unwrap().kind,
-            crate::session::SessionEventKind::Captured
+            crate::store::session::SessionEventKind::Captured
         );
         assert_eq!(history.first().unwrap().seq, first.captured.unwrap());
         let mut next = first.clone();
-        next.artifact_key = Some(crate::session_record::new_artifact_key());
+        next.artifact_key = Some(crate::store::session_record::new_artifact_key());
         next.input_published = false;
         let next =
             crate::store::sessions::replace_session_input(&store, first.captured, next, None)
@@ -2431,7 +2441,7 @@ mod metadata_tests {
     fn session_metadata_reads_its_graph_from_the_process_that_captured_its_input() {
         let home = tempfile::tempdir().unwrap();
         let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
-        let input = crate::session_record::new_artifact_key();
+        let input = crate::store::session_record::new_artifact_key();
         let graph_process =
             store.test_graph("retained", "/unavailable", &[("implement", None)], None);
         {
@@ -2515,10 +2525,10 @@ mod metadata_tests {
     fn session_metadata_receipts_remain_idempotent_and_conflicts_do_not_relabel() {
         let home = tempfile::tempdir().unwrap();
         let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
-        let input = crate::session_record::new_artifact_key();
+        let input = crate::store::session_record::new_artifact_key();
         store.test_session("imported", &input);
         let session = store.session("imported").unwrap().unwrap();
-        let mut observation = crate::session::SessionObservation {
+        let mut observation = crate::store::session::SessionObservation {
             artifact_key: input.clone(),
             source: "manifest.json".into(),
             observed_at: 1,
@@ -2572,7 +2582,7 @@ mod metadata_tests {
                 ("foreign", "Foreign", true, "/other", None),
                 ("later", "Zulu", true, "/repo", None),
             ] {
-                let input = crate::session_record::new_artifact_key();
+                let input = crate::store::session_record::new_artifact_key();
                 conn.execute(
                     "INSERT INTO agent_sessions(id,title,title_source,created_at,
                     interactive,input_published,cwd,repo)

@@ -1,4 +1,4 @@
-use crate::store::migrations::apply_sqlite;
+use crate::store::test_fixture::build;
 use std::sync::{Arc, Mutex};
 
 use fs2::FileExt;
@@ -7,19 +7,27 @@ use rusqlite::{params, Connection};
 
 use super::{_migration_transaction, apply_pending_migrations};
 use crate::store::canonical_ids::{preflight, session_fence_file};
+use crate::store::metric::MetricObservation;
 use crate::store::sqlite::SqliteStore;
 use crate::store::ProcessIdentityEvidence;
-use crate::work::wave::metrics::MetricObservation;
+
+fn observers() -> super::MigrationObservers<'static> {
+    super::MigrationObservers {
+        export_contract: &|_, _| Ok(()),
+        process_evidence: &|_, _| ProcessIdentityEvidence::Dead,
+    }
+}
+
+fn apply_sqlite(conn: &Connection) -> crate::store::StoreResult<()> {
+    super::apply_sqlite(&build(), conn, &observers())
+}
 
 const SESSION: &str = "SESSION_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 const PROCESS: &str = "BBBBBBBB-BBBB-4BBB-8BBB-BBBBBBBBBBBB";
 const TRACE: &str = "CCCCCCCC-CCCC-4CCC-8CCC-CCCCCCCCCCCC";
 
 fn released() -> (tempfile::TempDir, Connection) {
-    super::canonical_fixture(
-        &crate::store::migrations::observers(),
-        &crate::store::migrations::build(),
-    )
+    super::canonical_fixture(&observers(), &build())
 }
 
 /// Released stores open as experiments only after this build's drafts apply.
@@ -84,7 +92,7 @@ fn canonical_ids_retained_fence_serializes_stale_waiter_after_identity_change() 
     let waiter = caller.unwrap().join().unwrap();
     let store = SqliteStore::open_processes_read_only(
         &home.path().join("loopflow.db"),
-        crate::store::token_key::encryption_key,
+        crate::store::test_fixture::key,
     )
     .unwrap();
     assert!(store.session_attachment(SESSION).unwrap().is_none());
@@ -349,7 +357,7 @@ fn canonical_ids_released_work_upgrades_without_replacing_history() {
         .collect::<Result<_, _>>()
         .unwrap();
     apply_sqlite(&conn).unwrap();
-    apply_pending_migrations(&conn);
+    apply_pending_migrations(&observers(), &build(), &conn);
     assert_eq!(
         conn.query_row(
             "SELECT session_id,payload FROM session_events WHERE receipt_key='Case-Receipt'",
@@ -432,7 +440,7 @@ fn canonical_ids_released_work_upgrades_without_replacing_history() {
     assert_eq!(saved.merge(&original).unwrap().changes.len(), 2);
     let store = SqliteStore::open_processes_read_only(
         &home.path().join("loopflow.db"),
-        crate::store::token_key::encryption_key,
+        crate::store::test_fixture::key,
     )
     .unwrap();
     for selector in [

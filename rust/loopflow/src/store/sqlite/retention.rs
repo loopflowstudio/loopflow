@@ -377,7 +377,10 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("store.db");
         let store = crate::store::opening::open_ephemeral(&path).unwrap();
-        store.test_session("conversation", &crate::session_record::new_artifact_key());
+        store.test_session(
+            "conversation",
+            &crate::store::session_record::new_artifact_key(),
+        );
         let conn = Connection::open(&path).unwrap();
         for (receipt, total) in [("r1", 10), ("r2", 20)] {
             let counts = serde_json::json!({"inputTokens":total,"outputTokens":0});
@@ -557,7 +560,7 @@ mod tests {
             ("run", "00000000-0000-4000-8000-000000000001", false),
             ("conversation", "00000000-0000-4000-8000-000000000002", true),
         ] {
-            store.test_session(session, &crate::session_record::new_artifact_key());
+            store.test_session(session, &crate::store::session_record::new_artifact_key());
             conn.execute(
                 "INSERT INTO processes(id,trace_id,pid,started_at,kind,agent_session_id)
                  VALUES(?1,?1,?2,?3,'agent',?4)",

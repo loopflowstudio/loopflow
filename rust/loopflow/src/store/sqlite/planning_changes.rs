@@ -527,7 +527,12 @@ mod tests {
     #[test]
     fn released_attempt_acknowledgment_rebases_without_clearing_later_save() {
         let conn = Connection::open_in_memory().unwrap();
-        apply_before_migration(&conn, "planning_peers");
+        apply_before_migration(
+            &crate::store::test_fixture::observers(),
+            &crate::store::test_fixture::build(),
+            &conn,
+            "planning_peers",
+        );
         conn.execute_batch(include_str!(
             "../../../tests/fixtures/migrations/creation_baselines.sql"
         ))
@@ -591,7 +596,12 @@ mod tests {
                 ),
             ] {
                 let conn = Connection::open_in_memory().unwrap();
-                apply_before_migration(&conn, "planning_peers");
+                apply_before_migration(
+                    &crate::store::test_fixture::observers(),
+                    &crate::store::test_fixture::build(),
+                    &conn,
+                    "planning_peers",
+                );
                 conn.execute_batch(include_str!(
                     "../../../tests/fixtures/migrations/planning_relationships.sql"
                 ))
@@ -611,7 +621,12 @@ mod tests {
                     [input.to_string()],
                 )
                 .unwrap();
-                upgrade_from_migration(&conn, "planning_peers");
+                upgrade_from_migration(
+                    &crate::store::test_fixture::observers(),
+                    &crate::store::test_fixture::build(),
+                    &conn,
+                    "planning_peers",
+                );
                 let task = TaskId::from_raw("task-proof");
                 assert!(PlanningChanges::Task(&task)
                     .record(

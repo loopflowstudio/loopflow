@@ -2654,7 +2654,12 @@ mod local_planning_tests {
         use crate::store::migration_runner::{apply_before_migration, migration_section_sql};
 
         let conn = rusqlite::Connection::open_in_memory().unwrap();
-        apply_before_migration(&conn, "retired_work_lookup");
+        apply_before_migration(
+            &crate::store::test_fixture::observers(),
+            &crate::store::test_fixture::build(),
+            &conn,
+            "retired_work_lookup",
+        );
         let wave = WaveId::new();
         let project = ProjectId::new();
         conn.execute(

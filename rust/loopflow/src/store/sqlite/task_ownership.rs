@@ -1175,7 +1175,12 @@ mod tests {
         use crate::store::migration_runner::{apply_before_migration, migration_section_sql};
 
         let conn = rusqlite::Connection::open_in_memory().unwrap();
-        apply_before_migration(&conn, "task_machine_local");
+        apply_before_migration(
+            &crate::store::test_fixture::observers(),
+            &crate::store::test_fixture::build(),
+            &conn,
+            "task_machine_local",
+        );
         let laptop = super::local_machine_in(&conn).unwrap();
         let mini = MachineId::new();
         for (id, machine, here) in [("own_here", &laptop, 1), ("own_there", &mini, 0)] {
@@ -1213,7 +1218,12 @@ mod tests {
         use crate::store::migration_runner::{apply_before_migration, migration_section_sql};
 
         let conn = rusqlite::Connection::open_in_memory().unwrap();
-        apply_before_migration(&conn, "task_machine_local");
+        apply_before_migration(
+            &crate::store::test_fixture::observers(),
+            &crate::store::test_fixture::build(),
+            &conn,
+            "task_machine_local",
+        );
         let key = uuid::Uuid::new_v4().to_string();
         conn.execute(
             "INSERT INTO planning_user(singleton,user_key) VALUES(1,?1)",

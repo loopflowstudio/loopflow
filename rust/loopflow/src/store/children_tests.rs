@@ -1,4 +1,5 @@
 use crate::process::attachment;
+use crate::store::planning_exchange::PlanningMutation;
 use crate::store::sqlite::SqliteStore;
 use crate::store::work::task::{NewTask, TaskUpdate};
 use loopflow_model::durable::{ProjectId, RepositoryId, TaskId};
@@ -21,6 +22,44 @@ fn local_project(store: &SqliteStore) -> ProjectId {
     )
     .unwrap()
     .id
+}
+
+fn import_edits(
+    store: &SqliteStore,
+    edits: &[crate::store::work::edit::WorkEdit],
+) -> crate::store::StoreResult<()> {
+    let repo = store.home_dir()?.canonicalize().unwrap();
+    let repo = repo.to_str().unwrap();
+    let destination = crate::planning_git::PlanningDestination::new(
+        "/fixture.git",
+        "refs/loopflow/planning/shared/title-fixture",
+    )
+    .unwrap();
+    let route = store.bind_peer_planning(repo, &destination)?;
+    let mut snapshot = store.export_peer_planning(repo, &route)?;
+    let clock = snapshot
+        .changes
+        .values()
+        .map(|change| change.clock)
+        .max()
+        .unwrap_or(0)
+        + 1;
+    for edit in edits {
+        let parents = snapshot
+            .heads()
+            .filter(|(_, change)| change.edit.key() == edit.key())
+            .map(|(id, _)| id.to_string())
+            .collect();
+        snapshot.changes.insert(
+            uuid::Uuid::new_v4().to_string(),
+            PlanningMutation {
+                edit: edit.clone(),
+                clock,
+                parents,
+            },
+        );
+    }
+    crate::store::planning_peers::import_peer_planning(store, repo, &route, "edited", &snapshot)
 }
 
 #[test]
@@ -95,16 +134,13 @@ fn task_identifier_repairs_all_generated_titles_from_a_replaced_editor_with_fore
                 crate::session_record::CAPTURE_KEY_ENV,
                 crate::session_record::new_artifact_key(),
             );
-            let mut conn = store.conn.lock().unwrap();
-            let tx = conn.transaction().unwrap();
-            crate::store::sqlite::planning_write::local(
-                &tx,
+            import_edits(
+                &store,
                 &WorkEdit::for_target(
                     task.id.as_str(),
                     &[WorkValue::TaskIdentifier("ENG-123".into())],
                 ),
             )?;
-            tx.commit()?;
             Ok(())
         },
     )
@@ -221,17 +257,14 @@ fn task_labels_and_generated_names_follow_local_identity_and_linear_mapping() {
         .iter()
         .all(|input| input.task_identifier.as_deref() == Some("abcdef")));
     {
-        let mut conn = store.conn.lock().unwrap();
-        let tx = conn.transaction().unwrap();
-        crate::store::sqlite::planning_write::local(
-            &tx,
+        import_edits(
+            &store,
             &WorkEdit::for_target(
                 task.id.as_str(),
                 &[WorkValue::TaskIdentifier("ENG-123".into())],
             ),
         )
         .unwrap();
-        tx.commit().unwrap();
     }
     let mapped = store.task(&task.id).unwrap().unwrap();
     assert_eq!(mapped.identifier, "ENG-123");
@@ -351,7 +384,6 @@ fn task_checkout_reads_this_machines_checkout() {
 #[test]
 fn canonical_task_fields_survive_restart_and_peer_import() {
     use crate::planning_git::PlanningDestination;
-    use crate::store::sqlite::planning_write;
     use crate::store::work::edit::{Disposition, WorkValue};
 
     let source = tempfile::tempdir().unwrap();
@@ -370,10 +402,8 @@ fn canonical_task_fields_survive_restart_and_peer_import() {
         .unwrap();
     assert_eq!(task.due_date.as_deref(), Some("2026-10-15"));
     {
-        let conn = store.conn.lock().unwrap();
-        let tx = conn.unchecked_transaction().unwrap();
-        planning_write::local(
-            &tx,
+        import_edits(
+            &store,
             &crate::store::work::edit::WorkEdit::for_target(
                 task.id.as_str(),
                 &[
@@ -388,7 +418,6 @@ fn canonical_task_fields_survive_restart_and_peer_import() {
             ),
         )
         .unwrap();
-        tx.commit().unwrap();
     }
     drop(store);
     let store = crate::store::opening::open_ephemeral(&path).unwrap();

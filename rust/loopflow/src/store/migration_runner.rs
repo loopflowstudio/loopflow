@@ -121,9 +121,13 @@ pub(crate) fn apply_released_planning_fixture(
 }
 
 #[cfg(test)]
-pub(crate) use tests::{
+pub(crate) use fixtures::{
     apply_before_migration, apply_pending_migrations, migration_section_sql, upgrade_from_migration,
 };
+
+#[cfg(test)]
+#[path = "migration_fixtures.rs"]
+pub(crate) mod fixtures;
 
 /// The exact branch-local history that reached one production ledger before
 /// main established `0.11.008_interactive_handoffs`. These ids were never
@@ -1590,7 +1594,15 @@ mod tests {
         DIVERGENT_MIGRATIONS, MIGRATIONS,
     };
 
-    use crate::store::migrations::{apply_sqlite, build, observers};
+    use super::fixtures::{
+        apply_before_migration, apply_pending_migrations, migration_section_sql, section,
+        upgrade_from_migration,
+    };
+    use crate::store::test_fixture::{build, observers};
+
+    fn apply_sqlite(conn: &rusqlite::Connection) -> crate::store::StoreResult<()> {
+        super::apply_sqlite(&build(), conn, &observers())
+    }
 
     #[test]
     fn supplied_upgrade_observations_keep_transaction_order_and_skip_preview_export() {
@@ -1670,7 +1682,12 @@ mod tests {
     #[test]
     fn finished_headless_sessions_upgrade_to_history_without_closing_live_runs() {
         let conn = open();
-        apply_before_migration(&conn, "complete_finished_headless_sessions");
+        apply_before_migration(
+            &observers(),
+            &build(),
+            &conn,
+            "complete_finished_headless_sessions",
+        );
         for (session, interactive, completed) in [
             ("finished", false, None),
             ("no-process", false, None),
@@ -1718,7 +1735,12 @@ mod tests {
             .unwrap();
         }
 
-        upgrade_from_migration(&conn, "complete_finished_headless_sessions");
+        upgrade_from_migration(
+            &observers(),
+            &build(),
+            &conn,
+            "complete_finished_headless_sessions",
+        );
 
         let sessions = conn
             .prepare("SELECT id,completed_at FROM agent_sessions ORDER BY id")
@@ -1745,7 +1767,12 @@ mod tests {
     #[test]
     fn sessions_upgrade_to_the_provider_that_recorded_their_thread() {
         let conn = open();
-        apply_before_migration(&conn, "resume_on_latest_input_provider");
+        apply_before_migration(
+            &observers(),
+            &build(),
+            &conn,
+            "resume_on_latest_input_provider",
+        );
         conn.execute_batch(
             "INSERT INTO provider_accounts(provider,account_id,credential_state,created_at,updated_at)
              VALUES('codex','account','connected',10,10),('opencode','account','connected',10,10)",
@@ -1790,7 +1817,12 @@ mod tests {
         )
         .unwrap();
 
-        upgrade_from_migration(&conn, "resume_on_latest_input_provider");
+        upgrade_from_migration(
+            &observers(),
+            &build(),
+            &conn,
+            "resume_on_latest_input_provider",
+        );
 
         let sessions = conn
             .prepare("SELECT id,provider,model FROM agent_sessions ORDER BY id")
@@ -1821,7 +1853,7 @@ mod tests {
     #[test]
     fn task_update_revision_upgrade_preserves_existing_counters() {
         let conn = open();
-        apply_before_migration(&conn, "task_update_revision");
+        apply_before_migration(&observers(), &build(), &conn, "task_update_revision");
         conn.execute("UPDATE store_revisions SET revision=41", [])
             .unwrap();
         let counters = || {
@@ -1830,7 +1862,7 @@ mod tests {
                 .unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap()
         };
         let before = counters();
-        apply_pending_migrations(&conn);
+        apply_pending_migrations(&observers(), &build(), &conn);
         assert_eq!(counters(), before);
         assert_eq!(
             conn.query_row(
@@ -1847,12 +1879,12 @@ mod tests {
     #[test]
     fn task_session_promotion_releases_shared_scope_but_preserves_permanent_binds() {
         let conn = open();
-        apply_before_migration(&conn, "task_session_promotion");
+        apply_before_migration(&observers(), &build(), &conn, "task_session_promotion");
         conn.execute_batch(include_str!(
             "../../tests/fixtures/migrations/task_session_promotion.sql"
         ))
         .unwrap();
-        apply_pending_migrations(&conn);
+        apply_pending_migrations(&observers(), &build(), &conn);
 
         conn.execute(
             "UPDATE agent_sessions SET primary_scope=NULL,wave_id=NULL WHERE id='primary'",
@@ -1878,12 +1910,12 @@ mod tests {
     #[test]
     fn graph_process_task_backfills_the_read_time_pairing() {
         let conn = open();
-        apply_before_migration(&conn, "graph_process_task");
+        apply_before_migration(&observers(), &build(), &conn, "graph_process_task");
         conn.execute_batch(include_str!(
             "../../tests/fixtures/migrations/graph_process_task_released.sql"
         ))
         .unwrap();
-        apply_pending_migrations(&conn);
+        apply_pending_migrations(&observers(), &build(), &conn);
 
         let tasks: Vec<(String, Option<String>)> = conn
             .prepare("SELECT lf_process_id,task_id FROM graph_processes ORDER BY lf_process_id")
@@ -1950,7 +1982,7 @@ mod tests {
     #[test]
     fn structured_project_conversion_refuses_unreadable_criteria_without_losing_original() {
         let conn = open();
-        apply_before_migration(&conn, "planning_peers");
+        apply_before_migration(&observers(), &build(), &conn, "planning_peers");
         conn.execute_batch(include_str!(
             "../../tests/fixtures/migrations/project_content.sql"
         ))
@@ -1988,7 +2020,7 @@ mod tests {
     #[test]
     fn project_prose_receipt_migration_preserves_uncertain_effects() {
         let conn = open();
-        apply_before_migration(&conn, "planning_peers");
+        apply_before_migration(&observers(), &build(), &conn, "planning_peers");
         conn.execute_batch("INSERT INTO waves(id,name,repo,created_at) VALUES('wave-proof','proof','/repo',1);
             INSERT INTO projects(id,wave_id,created_at) VALUES('project-proof','wave-proof',1);
             INSERT INTO project_changes(seq,id,project_id,field,value_json,base_json,conflict_json,attempted,error,acknowledged_revision,acknowledged,order_effects_json)
@@ -2028,7 +2060,7 @@ mod tests {
     #[test]
     fn provider_columns_preserve_released_observations_and_local_execution() {
         let conn = open();
-        apply_before_migration(&conn, "planning_peers");
+        apply_before_migration(&observers(), &build(), &conn, "planning_peers");
         conn.execute_batch(include_str!(
             "../../tests/fixtures/migrations/planning_relationships.sql"
         ))
@@ -2143,7 +2175,7 @@ mod tests {
             r#"{"completed":1}"#,
         ] {
             let conn = open();
-            apply_before_migration(&conn, "planning_peers");
+            apply_before_migration(&observers(), &build(), &conn, "planning_peers");
             conn.execute("INSERT INTO pm_items(repo,provider,id,identifier,observed_at,body) VALUES('/repo','linear','unreadable','OTHER-1',17,?1)",[body]).unwrap();
             let error = super::_migration_transaction(&conn, |conn, _guards| {
                 conn.execute_batch(&migration_section_sql("planning_peers"))?;
@@ -2171,7 +2203,7 @@ mod tests {
     #[test]
     fn typed_journal_seeding_preserves_released_relationships_authors_and_receipts() {
         let conn = open();
-        apply_before_migration(&conn, "planning_peers");
+        apply_before_migration(&observers(), &build(), &conn, "planning_peers");
         conn.execute_batch(include_str!(
             "../../tests/fixtures/migrations/planning_relationships.sql"
         ))
@@ -2234,7 +2266,7 @@ mod tests {
     #[test]
     fn structured_project_content_preserves_released_work_and_pending_delivery() {
         let conn = open();
-        apply_before_migration(&conn, "planning_peers");
+        apply_before_migration(&observers(), &build(), &conn, "planning_peers");
         conn.execute_batch(include_str!(
             "../../tests/fixtures/migrations/project_content.sql"
         ))
@@ -2319,7 +2351,7 @@ mod tests {
     #[test]
     fn task_checkout_machine_migration_preserves_locations_and_history() {
         let conn = open();
-        apply_before_migration(&conn, "task_checkout_machine");
+        apply_before_migration(&observers(), &build(), &conn, "task_checkout_machine");
         conn.execute_batch(r#"
             INSERT INTO waves(id,name,repo,created_at) VALUES('w','proof','/repo',1);
             INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES('p','w','external-p',1);
@@ -2426,7 +2458,7 @@ mod tests {
     #[test]
     fn task_pr_continuation_preserves_released_delivery_and_one_current_pr() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
-        apply_before_migration(&conn, "task_pr_continuation");
+        apply_before_migration(&observers(), &build(), &conn, "task_pr_continuation");
         conn.execute_batch(include_str!(
             "../../tests/fixtures/migrations/task_pr_continuation.sql"
         ))
@@ -2472,7 +2504,7 @@ mod tests {
     #[test]
     fn optional_task_pr_preserves_placement_and_freezes_prior_delivery() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
-        apply_before_migration(&conn, "local_planning");
+        apply_before_migration(&observers(), &build(), &conn, "local_planning");
         conn.execute_batch(r#"
             INSERT INTO waves(id,name,repo,created_at) VALUES('w','product','/repo',1);
             INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES('p','w','linear-p',1);
@@ -2510,7 +2542,7 @@ mod tests {
         ))
         .unwrap();
         apply_sqlite(&conn).unwrap();
-        apply_pending_migrations(&conn);
+        apply_pending_migrations(&observers(), &build(), &conn);
         assert_eq!(
             conn.query_row(
                 "SELECT planning_completed FROM tasks WHERE id='research'",
@@ -2623,7 +2655,7 @@ mod tests {
     #[test]
     fn process_names_preserves_released_history_and_constraints() {
         let conn = open();
-        apply_before_migration(&conn, "process_names");
+        apply_before_migration(&observers(), &build(), &conn, "process_names");
         conn.execute_batch(include_str!(
             "../../tests/fixtures/migrations/process_names_released.sql"
         ))
@@ -2701,7 +2733,7 @@ mod tests {
     #[test]
     fn store_revisions_upgrade_starts_counting_without_touching_released_rows() {
         let conn = open();
-        apply_before_migration(&conn, "store_revisions");
+        apply_before_migration(&observers(), &build(), &conn, "store_revisions");
         conn.execute_batch(
             "INSERT INTO waves(id,name,repo,created_at) VALUES('wave-released','proof','/repo',1);",
         )
@@ -2739,7 +2771,7 @@ mod tests {
     #[test]
     fn remove_ask_preserves_conversations_and_history() {
         let conn = open();
-        apply_before_migration(&conn, "remove_ask");
+        apply_before_migration(&observers(), &build(), &conn, "remove_ask");
         conn.execute_batch("INSERT INTO waves(id,name,repo,created_at) VALUES('wave-preserved','proof','/repo',1);
             INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES('project-preserved','wave-preserved','external-project',1);
             INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at) VALUES('task-preserved','project-preserved','external-issue','PROOF-1','/repo',1);").unwrap();
@@ -3069,62 +3101,6 @@ mod tests {
         .unwrap();
     }
 
-    /// A migration's section of the catalog: a slug migration's whole file, or
-    /// the `-- draft: <name>` section of the released batch that carries it.
-    struct Section {
-        index: usize,
-        sql: &'static str,
-        start: usize,
-        body: std::ops::Range<usize>,
-    }
-
-    fn section(name: &str) -> Section {
-        let marker = format!("-- draft: {name}");
-        MIGRATIONS
-            .iter()
-            .enumerate()
-            .find_map(|(index, migration)| {
-                if migration.version == name {
-                    return Some(Section {
-                        index,
-                        sql: migration.sql,
-                        start: 0,
-                        body: 0..migration.sql.len(),
-                    });
-                }
-                let start = migration.sql.find(&marker)?;
-                let sql = migration.sql;
-                let body_start = sql[start..]
-                    .find('\n')
-                    .map(|offset| start + offset + 1)
-                    .unwrap_or(sql.len());
-                let body_end = sql[body_start..]
-                    .find("\n-- draft: ")
-                    .map(|offset| body_start + offset)
-                    .unwrap_or(sql.len());
-                Some(Section {
-                    index,
-                    sql,
-                    start,
-                    body: body_start..body_end,
-                })
-            })
-            .unwrap_or_else(|| panic!("migration {name} is in the catalog"))
-    }
-
-    fn apply_before_draft(conn: &rusqlite::Connection, name: &str) {
-        let section = section(name);
-        apply_set(
-            &observers(),
-            &build(),
-            conn,
-            &MIGRATIONS[..section.index],
-            &mut Vec::new(),
-        )
-        .unwrap();
-        conn.execute_batch(&section.sql[..section.start]).unwrap();
-    }
-
     fn apply_draft(conn: &rusqlite::Connection, name: &str) {
         let section = section(name);
         conn.execute_batch(&section.sql[section.body]).unwrap();
@@ -3133,7 +3109,7 @@ mod tests {
     #[test]
     fn conversation_admission_preserves_started_history_and_starts_only_on_input() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
-        apply_before_migration(&conn, "session_admission");
+        apply_before_migration(&observers(), &build(), &conn, "session_admission");
         conn.execute_batch(include_str!(
             "../../tests/fixtures/migrations/conversation_admission_released.sql"
         ))
@@ -3184,7 +3160,7 @@ mod tests {
     #[test]
     fn repository_relocation_upgrade_retains_released_work() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
-        apply_before_migration(&conn, "repository_relocation");
+        apply_before_migration(&observers(), &build(), &conn, "repository_relocation");
         conn.execute_batch(include_str!(
             "../../tests/fixtures/migrations/repository_relocation_released.sql"
         ))
@@ -3205,7 +3181,7 @@ mod tests {
     #[test]
     fn designated_panes_resets_released_free_trees() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
-        apply_before_migration(&conn, "designated_panes");
+        apply_before_migration(&observers(), &build(), &conn, "designated_panes");
         conn.execute_batch(include_str!(
             "../../tests/fixtures/migrations/pane_layouts_released.sql"
         ))
@@ -3252,7 +3228,7 @@ mod tests {
     #[test]
     fn session_preview_upgrades_released_activity_without_inventing_output() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
-        apply_before_migration(&conn, "session_preview");
+        apply_before_migration(&observers(), &build(), &conn, "session_preview");
         conn.execute_batch(include_str!(
             "../../tests/fixtures/migrations/session_preview_released.sql"
         ))
@@ -3268,7 +3244,7 @@ mod tests {
     #[test]
     fn session_facts_only_folds_stream_usage_into_native_turns_and_keeps_facts() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
-        apply_before_migration(&conn, "session_facts_only");
+        apply_before_migration(&observers(), &build(), &conn, "session_facts_only");
         conn.execute_batch(include_str!(
             "../../tests/fixtures/migrations/session_facts_only_released.sql"
         ))
@@ -3402,44 +3378,6 @@ mod tests {
         assert_eq!(revision("usage"), usage_revision + 1);
     }
 
-    /// Apply the catalog up to the named migration, as a fixture released
-    /// before it would have it.
-    pub(crate) fn apply_before_migration(conn: &rusqlite::Connection, name: &str) {
-        apply_before_draft(conn, name);
-    }
-
-    /// Finish a historical fixture's partial migration before using current readers.
-    pub(crate) fn upgrade_from_migration(conn: &rusqlite::Connection, name: &str) {
-        super::_migration_transaction(conn, |conn, guards| {
-            let section = section(name);
-            conn.execute_batch(&section.sql[section.start..])?;
-            super::convert_released_data(conn, section.sql)?;
-            super::insert_applied_migration(
-                &build(),
-                conn,
-                &MIGRATIONS[section.index],
-                &super::migration_prefix_fingerprint(&MIGRATIONS[..section.index]),
-            )?;
-            apply_set(&observers(), &build(), conn, MIGRATIONS, guards)?;
-            super::validate_foreign_keys(conn)
-        })
-        .unwrap();
-    }
-
-    /// Bring a fixture seeded at a released frontier to this build's schema.
-    pub(crate) fn apply_pending_migrations(conn: &rusqlite::Connection) {
-        super::_migration_transaction(conn, |conn, guards| {
-            apply_set(&observers(), &build(), conn, MIGRATIONS, guards)
-        })
-        .unwrap();
-    }
-
-    /// One migration's own SQL: a slug file, or a released batch's section.
-    pub(crate) fn migration_section_sql(name: &str) -> String {
-        let section = section(name);
-        section.sql[section.body].to_string()
-    }
-
     fn reader_floors(conn: &rusqlite::Connection) -> Vec<Option<String>> {
         conn.prepare("SELECT reader_floor FROM schema_migrations ORDER BY applied_at, rowid")
             .unwrap()
@@ -3454,7 +3392,7 @@ mod tests {
     #[test]
     fn every_new_migration_repeats_the_ledgers_newest_reader_floor() {
         let conn = open();
-        apply_pending_migrations(&conn);
+        apply_pending_migrations(&observers(), &build(), &conn);
         conn.execute_batch(
             "UPDATE schema_migrations SET reader_floor='older_floor' WHERE rowid=1;
              UPDATE schema_migrations SET reader_floor='recorded_floor' WHERE rowid=2;",
@@ -3484,7 +3422,7 @@ mod tests {
     #[test]
     fn a_ledger_with_no_recorded_floor_stays_without_one() {
         let conn = open();
-        apply_pending_migrations(&conn);
+        apply_pending_migrations(&observers(), &build(), &conn);
 
         apply_newer_migration(
             &observers(),
@@ -3500,12 +3438,12 @@ mod tests {
     #[test]
     fn server_request_stops_preserve_unknown_historical_attribution() {
         let conn = open();
-        apply_before_migration(&conn, "server_request_stops");
+        apply_before_migration(&observers(), &build(), &conn, "server_request_stops");
         conn.execute_batch(include_str!(
             "../../tests/fixtures/migrations/request_stops_released.sql"
         ))
         .unwrap();
-        apply_pending_migrations(&conn);
+        apply_pending_migrations(&observers(), &build(), &conn);
         let stop: (i64, Option<String>, Option<String>) = conn.query_row(
             "SELECT ship_stopped_at,ship_stopped_lf_process_id,ship_stopped_person FROM tasks WHERE issue_identifier='STOP-1'",
             [], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
@@ -3516,12 +3454,12 @@ mod tests {
     #[test]
     fn task_workspace_teardown_upgrade_keeps_explicit_closes_and_rejudges_automatic_closes() {
         let conn = open();
-        apply_before_migration(&conn, "task_workspace_teardown");
+        apply_before_migration(&observers(), &build(), &conn, "task_workspace_teardown");
         conn.execute_batch(include_str!(
             "../../tests/fixtures/migrations/task_workspace_teardown_released.sql"
         ))
         .unwrap();
-        apply_pending_migrations(&conn);
+        apply_pending_migrations(&observers(), &build(), &conn);
         let mut query = conn
             .prepare(
                 "SELECT id,close_requested FROM desktop_shells WHERE owner IS NOT NULL ORDER BY id",
@@ -3550,13 +3488,13 @@ mod tests {
     #[test]
     fn task_workspace_upgrade_preserves_checkout_and_adds_retry_queue() {
         let conn = open();
-        apply_before_migration(&conn, "task_workspace_lifetimes");
+        apply_before_migration(&observers(), &build(), &conn, "task_workspace_lifetimes");
         conn.execute_batch(include_str!(
             "../../tests/fixtures/migrations/task_workspace_released.sql"
         ))
         .unwrap();
-        apply_pending_migrations(&conn);
-        apply_pending_migrations(&conn);
+        apply_pending_migrations(&observers(), &build(), &conn);
+        apply_pending_migrations(&observers(), &build(), &conn);
         let checkout: String = conn
             .query_row(
                 "SELECT worktree FROM tasks WHERE id='task_workspace'",
@@ -3598,7 +3536,7 @@ mod tests {
     #[test]
     fn ownership_log_records_released_evidence_without_inventing_owners() {
         let conn = open();
-        apply_before_migration(&conn, "task_ownership");
+        apply_before_migration(&observers(), &build(), &conn, "task_ownership");
         conn.execute_batch(include_str!(
             "../../tests/fixtures/migrations/ownership_log_released.sql"
         ))
@@ -3683,7 +3621,7 @@ mod tests {
     #[test]
     fn optional_task_ancestry_preserves_released_work_and_current_defaults() {
         let conn = open();
-        apply_before_migration(&conn, "optional_task_ancestry");
+        apply_before_migration(&observers(), &build(), &conn, "optional_task_ancestry");
         conn.execute_batch(include_str!(
             "../../tests/fixtures/migrations/optional_task_ancestry.sql"
         ))
@@ -3761,7 +3699,7 @@ mod tests {
     #[test]
     fn paused_migration_keeps_existing_tasks_unpaused_and_retains_work() {
         let conn = open();
-        apply_before_migration(&conn, "task_paused");
+        apply_before_migration(&observers(), &build(), &conn, "task_paused");
         conn.execute_batch("INSERT INTO waves(id,name,repo,created_at) VALUES('w','product','/repo',1);
             INSERT INTO projects(id,wave_id,created_at) VALUES('p','w',1);
             INSERT INTO tasks(id,project_id,issue_identifier,issue_title,worktree,created_at) VALUES('t','p','PROOF-1','Retained','/repo/task',1);").unwrap();
@@ -3780,7 +3718,7 @@ mod tests {
     #[test]
     fn task_flow_observations_removes_scheduling_and_worker_control_and_preserves_history() {
         let conn = open();
-        apply_before_migration(&conn, "task_flow_observations");
+        apply_before_migration(&observers(), &build(), &conn, "task_flow_observations");
         conn.execute_batch(r#"
             INSERT INTO execs(id,trace_id,started_at,outcome) VALUES('old-exec','trace',1,'interrupted');
             INSERT INTO waves(id,name,repo,created_at) VALUES('w','product','/repo',1);
@@ -3977,33 +3915,9 @@ mod tests {
     }
 
     #[test]
-    fn settings_authority_preserves_task_history_and_migrates_preferences() {
-        let home = tempfile::tempdir().unwrap();
-        let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-        apply_before_migration(&conn, "settings_authority");
-        conn.execute_batch(include_str!(
-            "../../tests/fixtures/migrations/settings_authority_released.sql"
-        ))
-        .unwrap();
-        let mut guards = Vec::new();
-        crate::config::migrate::preflight(&conn, &mut guards).unwrap();
-        drop(guards);
-        upgrade_from_migration(&conn, "settings_authority");
-        let retained: (String, String) = conn.query_row("SELECT t.worktree,s.provider FROM tasks t JOIN agent_sessions s ON s.task_id=t.id WHERE t.id='retained'", [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
-        assert_eq!(retained, ("/repo.task".into(), "claude".into()));
-        let values: serde_yaml_ng::Value = serde_yaml_ng::from_str(
-            &std::fs::read_to_string(home.path().join("config.yaml")).unwrap(),
-        )
-        .unwrap();
-        assert_eq!(values["skills"]["design"]["agent"], "codex:o3");
-        assert_eq!(values["skills"]["implement"]["agent"], "codex");
-        assert_eq!(conn.query_row("SELECT count(*) FROM sqlite_master WHERE name IN ('scope_settings','scope_defaults','provider_routes')", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
-    }
-
-    #[test]
     fn task_issue_identities_migration_preserves_confirmation_and_planning() {
         let conn = open();
-        apply_before_migration(&conn, "task_issue_identities");
+        apply_before_migration(&observers(), &build(), &conn, "task_issue_identities");
         conn.execute_batch(
             r#"INSERT INTO waves(id,name,repo,created_at) VALUES('wave_history','history','/repo',100);
              INSERT INTO task_deletions(wave_id,issue_id,identifier,confirmed_at)
@@ -4052,7 +3966,7 @@ mod tests {
     #[test]
     fn task_deletions_migration_preserves_terminal_history_without_inventing_confirmation() {
         let conn = open();
-        apply_before_migration(&conn, "task_deletions");
+        apply_before_migration(&observers(), &build(), &conn, "task_deletions");
         conn.execute_batch(
             r#"INSERT INTO waves(id,name,repo,created_at) VALUES('wave_history','history','/repo',100);
              INSERT INTO projects(id,wave_id,external_project_id,created_at,updated_at)
@@ -4111,7 +4025,7 @@ mod tests {
     #[test]
     fn machine_connections_preserve_released_records() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
-        apply_before_migration(&conn, "rename_home_to_machine");
+        apply_before_migration(&observers(), &build(), &conn, "rename_home_to_machine");
         conn.execute_batch("INSERT INTO homes (id, route, created_at, observed_at)
             VALUES ('home_11111111111111111111111111111111', 'ssh://jack@mini', 9, 10);
             INSERT INTO waves (id, name, repo, created_at) VALUES ('machine-wave', 'machine', '/repo', 7);
@@ -4132,7 +4046,7 @@ mod tests {
     #[test]
     fn machine_rename_preserves_released_identity_and_placement() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
-        apply_before_migration(&conn, "rename_home_to_machine");
+        apply_before_migration(&observers(), &build(), &conn, "rename_home_to_machine");
         let id: String = conn
             .query_row("SELECT id FROM homes WHERE route='local'", [], |row| {
                 row.get(0)
@@ -4172,7 +4086,7 @@ mod tests {
     #[test]
     fn landing_timeout_removal_preserves_intent_and_recovers_synthetic_blocks() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
-        apply_before_migration(&conn, "remove_landing_timeouts");
+        apply_before_migration(&observers(), &build(), &conn, "remove_landing_timeouts");
         conn.execute_batch(include_str!(
             "../../tests/fixtures/migrations/landing_timeouts.sql"
         ))
@@ -4211,200 +4125,11 @@ mod tests {
         validate_foreign_keys(&conn).unwrap();
     }
 
-    #[tokio::test]
-    async fn retired_home_landings_remain_readable_and_fence_old_supervisors() {
-        use std::sync::Arc;
-
-        use crate::ops::pr_landing::{
-            reconcile_pr_landing, LandingIo, LandingObservation, ObservePr,
-        };
-        use crate::store::pr_landing::{
-            LandingPlacement, LandingSupervisor, PrLandingId, PrLandingState,
-        };
-
-        use time::OffsetDateTime;
-
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("registry.db");
-        let conn = rusqlite::Connection::open(&path).unwrap();
-        apply_before_migration(&conn, "retire_home_landing_supervisors");
-        conn.execute_batch(
-            "INSERT INTO homes (id, route, created_at, observed_at)
-             VALUES ('retired_home', 'remote', 1, 2);
-             INSERT INTO waves (id, name, repo, created_at)
-             VALUES ('landing_wave', 'landing', '/repo', 1);
-             INSERT INTO projects (id, wave_id, external_project_id, created_at, updated_at)
-             VALUES ('landing_project', 'landing_wave', 'linear-project', 1, 1);
-             INSERT INTO tasks (id, project_id, external_issue_id, issue_identifier,
-                worktree, workspace_slug, created_at, updated_at)
-             VALUES ('landing_task', 'landing_project', 'linear-task', 'INF-1',
-                '/tmp/landing', 'landing', 1, 1);",
-        )
-        .unwrap();
-        for (index, state) in ["watching", "repairing", "blocked", "merged", "closed"]
-            .iter()
-            .enumerate()
-        {
-            for placement in ["home", "local"] {
-                conn.execute(
-                    include_str!("../../tests/fixtures/migrations/retired_home_landing.sql"),
-                    rusqlite::params![
-                        format!("{placement}_{state}"),
-                        index as i64 + if placement == "home" { 1 } else { 11 },
-                        (*state == "merged").then_some("merge"),
-                        state,
-                        placement,
-                        (placement == "home").then_some("retired_home"),
-                        (*state == "blocked").then_some("credential revoked"),
-                    ],
-                )
-                .unwrap();
-            }
-        }
-        // A taskless retained delivery can settle through the real reconciler.
-        assert!(std::process::Command::new("git")
-            .args(["init", "--quiet"])
-            .current_dir(directory.path())
-            .status()
-            .unwrap()
-            .success());
-        conn.execute(
-            "INSERT INTO pr_landings (id, repo, pr_number, worktree, branch,
-                requested_head_sha, observed_head_sha, state, generation,
-                supervisor_placement, supervisor_home_id, supervisor_process_id,
-                supervisor_heartbeat_at, created_at, updated_at)
-             VALUES ('home_taskless', 'taskless/repo', 42, ?1, 'repair', 'head', 'head',
-                'watching', 7, 'home', 'retired_home', 123, 30, 10, 40)",
-            [directory.path().to_str().unwrap()],
-        )
-        .unwrap();
-        super::_migration_transaction(&conn, |conn, guards| {
-            apply_set(&observers(), &build(), conn, MIGRATIONS, guards)?;
-            validate_foreign_keys(conn)
-        })
-        .unwrap();
-        drop(conn);
-        let store = crate::store::opening::open_ephemeral(&path).unwrap();
-        assert_eq!(store.pending_pr_landings("owner/repo").unwrap().len(), 6);
-        let now = OffsetDateTime::from_unix_timestamp(50).unwrap();
-        for state in ["watching", "repairing", "blocked", "merged", "closed"] {
-            for placement in ["home", "local"] {
-                let id = PrLandingId::from_raw(format!("{placement}_{state}"));
-                let landing = store.get_pr_landing(&id).unwrap().unwrap();
-                assert_eq!(landing.state.as_str(), state);
-                assert_eq!(landing.requested_head_sha, "requested");
-                assert_eq!(landing.observed_head_sha, "observed");
-                assert_eq!(landing.task_id.as_ref().unwrap().as_str(), "landing_task");
-                let historical: (String, String) = rusqlite::Connection::open(&path)
-                    .unwrap()
-                    .query_row(
-                        "SELECT after_merge,next_slug FROM pr_landings WHERE id=?1",
-                        [id.as_str()],
-                        |row| Ok((row.get(0)?, row.get(1)?)),
-                    )
-                    .unwrap();
-                assert_eq!(historical, ("continue_task".into(), "follow-up".into()));
-                assert_eq!(landing.updated_at.unix_timestamp(), 40);
-                assert_eq!(
-                    landing.blocked_reason.as_deref(),
-                    (state == "blocked").then_some("credential revoked")
-                );
-                if placement == "local" {
-                    assert_eq!(landing.generation, 7);
-                    assert_eq!(landing.supervisor.unwrap().process_id, 123);
-                    continue;
-                }
-                assert_eq!(landing.generation, 8);
-                assert!(landing.supervisor.is_none());
-                assert!(!store.heartbeat_pr_landing(&id, 7, now).unwrap());
-                let mut stale = landing;
-                stale.generation = 7;
-                stale.state = PrLandingState::Closed;
-                stale.blocked_reason = None;
-                assert!(!store.update_pr_landing(&stale).unwrap());
-                assert!(store
-                    .claim_pr_landing(
-                        &id,
-                        7,
-                        &LandingSupervisor {
-                            placement: LandingPlacement::Local,
-                            process_id: 456,
-                            heartbeat_at: now,
-                        },
-                        now
-                    )
-                    .unwrap()
-                    .is_none());
-            }
-        }
-        drop(store);
-        let store = crate::store::opening::open_ephemeral(&path).unwrap();
-        assert_eq!(store.pending_pr_landings("owner/repo").unwrap().len(), 6);
-        let conn = rusqlite::Connection::open(&path).unwrap();
-        assert!(conn.execute(
-            "UPDATE pr_landings SET supervisor_placement='home', supervisor_machine_id='retired_home',
-                supervisor_process_id=456, supervisor_heartbeat_at=50 WHERE id='home_watching' AND generation=8", [],
-        ).is_err());
-        let history: String = conn
-            .query_row(
-                "SELECT retired_supervisor_json FROM pr_landings WHERE id='home_blocked'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&history).unwrap(),
-            serde_json::json!({
-                "placement": "home", "home_id": "retired_home", "process_id": 123,
-                "heartbeat_at": 30, "generation": 7,
-            })
-        );
-        validate_foreign_keys(&conn).unwrap();
-        drop(conn);
-        drop(store);
-
-        // A merged delivery is observed without ever being offered a repair.
-        let merged_observation: ObservePr = Arc::new(|_| {
-            Ok(LandingObservation::Merged {
-                head_sha: "head".into(),
-                merge_commit: "merge".into(),
-            })
-        });
-        let store = Arc::new(
-            crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(path))
-                .await
-                .unwrap(),
-        );
-        let id = PrLandingId::from_raw("home_taskless");
-        let landing = store.get_pr_landing(&id).await.unwrap().unwrap();
-        let merged = reconcile_pr_landing(
-            store.clone(),
-            landing,
-            LandingIo::scripted(merged_observation.clone(), None),
-        )
-        .await
-        .unwrap();
-        assert_eq!(merged.state, PrLandingState::Merged);
-        assert_eq!(merged.merge_commit.as_deref(), Some("merge"));
-        let repeated = reconcile_pr_landing(
-            store.clone(),
-            merged.clone(),
-            LandingIo::scripted(merged_observation, None),
-        )
-        .await
-        .unwrap();
-        assert_eq!(repeated, merged);
-        assert_eq!(
-            store.pending_pr_landings("owner/repo").await.unwrap().len(),
-            6
-        );
-    }
-
     #[test]
     fn landing_repair_counter_removal_preserves_supervision() {
         let conn = open();
         let name = "remove_landing_repair_counter";
-        apply_before_migration(&conn, name);
+        apply_before_migration(&observers(), &build(), &conn, name);
         conn.execute_batch(
             "INSERT INTO pr_landings (
                 id, repo, pr_number, worktree, branch, requested_head_sha,
@@ -4447,7 +4172,7 @@ mod tests {
     fn stable_work_draft_keeps_definitions_and_clears_execution_state() {
         let conn = open();
         conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
-        apply_before_migration(&conn, "stable_work_state");
+        apply_before_migration(&observers(), &build(), &conn, "stable_work_state");
         if !columns(&conn, "tasks").contains(&"work_state".to_string()) {
             conn.execute_batch(&migration_section_sql("opaque_steer_run_provenance"))
                 .unwrap();
@@ -4501,7 +4226,7 @@ mod tests {
     fn obsolete_sql_lifecycle_draft_preserves_only_the_outer_exec_ledger() {
         let conn = open();
         conn.execute_batch("PRAGMA foreign_keys = OFF").unwrap();
-        apply_before_migration(&conn, "obsolete_sql_lifecycle");
+        apply_before_migration(&observers(), &build(), &conn, "obsolete_sql_lifecycle");
         if !columns(&conn, "tasks").contains(&"work_state".to_string()) {
             for draft in ["opaque_steer_run_provenance", "stable_work_state"] {
                 conn.execute_batch(&migration_section_sql(draft)).unwrap();
@@ -4558,7 +4283,12 @@ mod tests {
     #[test]
     fn task_lifecycle_outcome_is_removed_from_the_persisted_model() {
         let conn = open();
-        apply_before_migration(&conn, REMOVE_TASK_LIFECYCLE_OUTCOME_NAME);
+        apply_before_migration(
+            &observers(),
+            &build(),
+            &conn,
+            REMOVE_TASK_LIFECYCLE_OUTCOME_NAME,
+        );
         assert!(columns(&conn, "tasks")
             .iter()
             .any(|column| column == "lifecycle_outcome"));
@@ -4577,7 +4307,7 @@ mod tests {
     #[test]
     fn run_identity_removes_secret_columns_and_preserves_run_invariants() {
         let conn = open();
-        apply_before_migration(&conn, RUN_IDENTITY_NAME);
+        apply_before_migration(&observers(), &build(), &conn, RUN_IDENTITY_NAME);
         conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
         conn.execute_batch(&migration_section_sql(RUN_IDENTITY_NAME))
             .unwrap();
@@ -4616,7 +4346,7 @@ mod tests {
     #[test]
     fn turn_usage_samples_move_provider_receipts_out_of_turn_lifecycle() {
         let conn = open();
-        apply_before_migration(&conn, TURN_USAGE_SAMPLES_NAME);
+        apply_before_migration(&observers(), &build(), &conn, TURN_USAGE_SAMPLES_NAME);
         conn.execute_batch(
             "INSERT INTO agent_invocations (
                 id, run_id, process_id, started_at, ended_at, repo, worktree,
@@ -4759,7 +4489,7 @@ mod tests {
     #[test]
     fn repository_owned_waves_preserve_uuid_projection_and_allow_duplicate_slugs() {
         let conn = open();
-        apply_before_migration(&conn, REPOSITORY_OWNED_WAVES_NAME);
+        apply_before_migration(&observers(), &build(), &conn, REPOSITORY_OWNED_WAVES_NAME);
         conn.execute(
             "INSERT INTO waves (id, name, repo, created_at) VALUES ('wave-a', 'infrastructure', '/repo/a', 1)",
             [],
@@ -4849,7 +4579,7 @@ mod tests {
     #[test]
     fn repository_owned_waves_abort_on_an_unmatched_pm_projection() {
         let mut conn = open();
-        apply_before_migration(&conn, REPOSITORY_OWNED_WAVES_NAME);
+        apply_before_migration(&observers(), &build(), &conn, REPOSITORY_OWNED_WAVES_NAME);
         conn.execute(
             "INSERT INTO waves (id, name, repo, created_at) VALUES ('wave-a', 'infrastructure', '/repo/a', 1)",
             [],
@@ -5569,7 +5299,7 @@ mod tests {
     #[test]
     fn provider_account_identity_preserves_existing_labels_and_health() {
         let conn = open();
-        apply_before_migration(&conn, "provider_account_identity");
+        apply_before_migration(&observers(), &build(), &conn, "provider_account_identity");
         conn.execute_batch("INSERT INTO provider_accounts (provider, account_id, home, login_email, credential_state, routing_state, plan, cooldown_until, created_at, updated_at)
             VALUES ('codex', 'engineering', '/fixture/account', 'eng@example.com', 'connected', 'automatic', 'pro', 123, 1, 2);").unwrap();
         conn.execute_batch(&migration_section_sql("provider_account_identity"))
@@ -5581,7 +5311,12 @@ mod tests {
     #[test]
     fn provider_account_credential_identity_retains_unbound_historical_observations() {
         let conn = open();
-        apply_before_migration(&conn, "provider_account_credential_identity");
+        apply_before_migration(
+            &observers(),
+            &build(),
+            &conn,
+            "provider_account_credential_identity",
+        );
         conn.execute_batch("INSERT INTO provider_accounts (provider, account_id, home, login_email, credential_state, routing_state, observed_email, observed_subject, cooldown_until, created_at, updated_at)
             VALUES ('claude', 'engineering', '/fixture/account', 'eng@example.com', 'connected', 'explicit_only', 'eng@example.com', 'user-one', 123, 1, 2);").unwrap();
         conn.execute_batch(&migration_section_sql(
@@ -5604,7 +5339,7 @@ mod tests {
     #[test]
     fn auth_browser_bindings_preserve_populated_profiles_accounts_and_routes() {
         let conn = open();
-        apply_before_migration(&conn, "auth_browser_bindings");
+        apply_before_migration(&observers(), &build(), &conn, "auth_browser_bindings");
         conn.execute_batch("INSERT INTO provider_accounts (provider, account_id, home, login_email, credential_state, routing_state, created_at, updated_at)
             VALUES ('codex', 'primary', '/account', 'person@example.com', 'connected', 'explicit_only', 1, 2);
             INSERT INTO access_profiles VALUES ('Work', 'Profile 3', 'person@example.com', 1, 2), ('Personal', 'Default', 'other@example.com', 3, 4);
@@ -6000,7 +5735,7 @@ mod tests {
 
         apply_sqlite(&conn).unwrap();
 
-        apply_pending_migrations(&conn);
+        apply_pending_migrations(&observers(), &build(), &conn);
 
         let task: (String, String, String, String) = conn
             .query_row(
@@ -6070,24 +5805,21 @@ mod tests {
     fn planning_cutover_preserves_provider_fields_and_editable_project_content() {
         let conn = open();
         conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
-        apply_before_migration(&conn, "local_planning");
-        let mut snapshot: crate::test_linear_input::Inventory = serde_json::from_str(include_str!(
+        apply_before_migration(&observers(), &build(), &conn, "local_planning");
+        let mut snapshot: serde_json::Value = serde_json::from_str(include_str!(
             "../../../../tests/fixtures/dto/task_history_planning.json"
         ))
         .unwrap();
-        let project = &mut snapshot.projects[0];
-        project.krs = vec![crate::store::work::project::ProjectKR {
-            text: "Saved planning survives".into(),
-            holds: true,
-        }];
-        let item = &mut snapshot.items[0];
-        item.state = None;
-        item.completed = true;
-        item.completed_at = Some("2026-10-05T12:00:00Z".into());
-        item.url = Some("https://linear.app/example".into());
-        item.branch_name = Some("saved-branch".into());
-        item.rank = 7;
-        item.assignee = Some("person-id".into());
+        let mut project = snapshot["projects"][0].take();
+        project["krs"] = serde_json::json!([{"text":"Saved planning survives","holds":true}]);
+        let item = &mut snapshot["items"][0];
+        item["state"] = serde_json::Value::Null;
+        item["completed"] = serde_json::json!(true);
+        item["completed_at"] = serde_json::json!("2026-10-05T12:00:00Z");
+        item["url"] = serde_json::json!("https://linear.app/example");
+        item["branch_name"] = serde_json::json!("saved-branch");
+        item["rank"] = serde_json::json!(7);
+        item["assignee"] = serde_json::json!("person-id");
         conn.execute_batch("INSERT INTO waves(id,name,repo,created_at) VALUES('wave_fields','fields','/repo',1);
             INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES('project_fields','wave_fields','current',1);
             INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,created_at)
@@ -6161,8 +5893,11 @@ mod tests {
             .unwrap();
         let content =
             crate::store::linear_records::project_document::parse_project_document(&text).unwrap();
-        assert_eq!(content.krs, project.krs);
-        assert_eq!(content.metric_targets, project.metric_targets);
+        assert_eq!(serde_json::to_value(content.krs).unwrap(), project["krs"]);
+        assert_eq!(
+            serde_json::to_value(content.metric_targets).unwrap(),
+            project["metric_targets"]
+        );
         conn.execute("INSERT INTO task_changes(id,task_id,field,value_json) VALUES('membership','task_fields','project_id','\"project_fields\"')", []).unwrap();
         assert_eq!(
             conn.query_row(
@@ -6179,7 +5914,7 @@ mod tests {
     fn local_planning_preserves_pending_decisions_without_workflow_history() {
         let conn = open();
         conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
-        apply_before_migration(&conn, "local_planning");
+        apply_before_migration(&observers(), &build(), &conn, "local_planning");
         conn.execute_batch(
             "INSERT INTO waves(id,name,repo,created_at) VALUES('wave_delivery','delivery','/repo',1);
              INSERT INTO projects(id,wave_id,external_project_id,created_at)
@@ -6431,7 +6166,7 @@ mod tests {
         validate_persisted_json(&conn).unwrap();
         drop(conn);
 
-        let store = crate::store::open_sqlite(&path).unwrap();
+        let store = crate::store::test_fixture::open(&path).unwrap();
         store.health_check().unwrap();
         let tasks = store.list_tasks(None).unwrap();
         assert_eq!(tasks.len(), 6);
@@ -6448,7 +6183,7 @@ mod tests {
     #[test]
     fn after_merge_review_rows_become_continue_task() {
         let conn = open();
-        apply_before_draft(&conn, "after_merge_continue_task");
+        apply_before_migration(&observers(), &build(), &conn, "after_merge_continue_task");
         conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
         conn.execute(
             "INSERT INTO task_prs (
@@ -6486,7 +6221,7 @@ mod tests {
     #[test]
     fn historical_publications_gain_no_implicit_merge_request() {
         let conn = open();
-        apply_before_draft(&conn, "explicit_pr_merge_requests");
+        apply_before_migration(&observers(), &build(), &conn, "explicit_pr_merge_requests");
         conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
         conn.execute(
             "INSERT INTO task_prs (
@@ -6811,14 +6546,14 @@ mod tests {
     #[test]
     fn claude_usage_reconciliation_upgrade_keeps_capacity_and_adds_revision() {
         let conn = open();
-        apply_before_migration(&conn, "account_capacity_revision");
+        apply_before_migration(&observers(), &build(), &conn, "account_capacity_revision");
         conn.execute_batch("INSERT INTO provider_accounts
             (provider,account_id,credential_state,cooldown_until,cooldown_reason,created_at,updated_at)
             VALUES ('claude','primary','connected',1900000005,'rejected: seven_day',1,1);
             INSERT INTO provider_account_limits
             (provider,account_id,window,used_percent,resets_at,observed_at,source,model,limited_until)
             VALUES ('claude','primary','seven_day_overage_included',100,1900000000,1,'stream','fable',1900000005);").unwrap();
-        apply_pending_migrations(&conn);
+        apply_pending_migrations(&observers(), &build(), &conn);
         let capacity: (i64, i64, String) = conn
             .query_row(
                 "SELECT capacity_revision,cooldown_until,cooldown_reason FROM provider_accounts
@@ -7081,7 +6816,7 @@ mod tests {
             "this is not the case under test unless the file has bytes already"
         );
 
-        let store = crate::store::open_sqlite(&path).unwrap();
+        let store = crate::store::test_fixture::open(&path).unwrap();
 
         // A bare `Ok` is not the proof: the regression opened fine and failed
         // on the first read of a table it never created.
@@ -7138,7 +6873,7 @@ mod tests {
     #[test]
     fn task_feedback_reviewers_rename_columns_and_map_authority() {
         let conn = open();
-        apply_before_draft(&conn, "task_feedback_reviewers");
+        apply_before_migration(&observers(), &build(), &conn, "task_feedback_reviewers");
         conn.execute_batch(
             "INSERT INTO waves (id, name, repo, created_at)
                  VALUES ('wave_test', 'test', '/repo', 100);
@@ -7189,7 +6924,7 @@ mod tests {
     #[test]
     fn ownership_cutover_keeps_current_task_review_without_importing_history() {
         let conn = open();
-        apply_before_migration(&conn, "session_ownership");
+        apply_before_migration(&observers(), &build(), &conn, "session_ownership");
         conn.execute_batch(r#"
             INSERT INTO waves(id,name,repo,created_at) VALUES('w','infra','/repo',1);
             INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES('p','w','linear-p',1);
@@ -7246,7 +6981,7 @@ mod tests {
     #[test]
     fn project_status_adoption_preserves_current_identity_and_custom_flow() {
         let conn = open();
-        apply_before_migration(&conn, "project_status_chapters");
+        apply_before_migration(&observers(), &build(), &conn, "project_status_chapters");
         conn.execute_batch(
             r#"INSERT INTO waves(id,name,repo,created_at) VALUES('w','infra','/repo',1);
             INSERT INTO projects(id,wave_id,external_project_id,created_at,updated_at,
@@ -7309,7 +7044,7 @@ mod tests {
     #[test]
     fn dropping_project_fingerprint_preserves_planning_and_progress() {
         let conn = open();
-        apply_before_migration(&conn, "drop_project_fingerprint");
+        apply_before_migration(&observers(), &build(), &conn, "drop_project_fingerprint");
         conn.execute_batch(
             "INSERT INTO waves (id, name, repo, created_at)
              VALUES ('wave_project', 'project', '/repo', 100);
@@ -7358,7 +7093,7 @@ mod tests {
     #[test]
     fn task_loop_review_preserves_existing_human_and_claimed_positions() {
         let conn = open();
-        apply_before_migration(&conn, "task_loop_review");
+        apply_before_migration(&observers(), &build(), &conn, "task_loop_review");
         conn.execute_batch(
             "INSERT INTO task_flow_positions (
                 task_id, invocation_json, flow, step, node_id, human, session_run_id,
@@ -7410,7 +7145,7 @@ mod tests {
     #[test]
     fn durable_ask_invocations_migrate_pending_and_answered_history() {
         let conn = open();
-        apply_before_draft(&conn, "durable_ask_invocations");
+        apply_before_migration(&observers(), &build(), &conn, "durable_ask_invocations");
         conn.execute_batch(
             "PRAGMA foreign_keys=OFF;
              INSERT INTO waves (id, name, repo, created_at)
@@ -7614,7 +7349,7 @@ mod tests {
     #[test]
     fn legacy_task_flow_repair_restores_existing_tasks_without_moving_their_work() {
         let conn = open();
-        apply_before_draft(&conn, LEGACY_TASK_FLOW_REPAIR_NAME);
+        apply_before_migration(&observers(), &build(), &conn, LEGACY_TASK_FLOW_REPAIR_NAME);
         conn.execute_batch(
             "INSERT INTO waves (id, name, repo, created_at)
                  VALUES ('wave_restore', 'restore', '/repo', 100);
@@ -7754,7 +7489,12 @@ mod tests {
         assert!(time::OffsetDateTime::from_unix_timestamp(LATEST_VALID_SECOND + 1).is_err());
 
         let conn = open();
-        apply_before_draft(&conn, "repair_durable_input_timestamp_units");
+        apply_before_migration(
+            &observers(),
+            &build(),
+            &conn,
+            "repair_durable_input_timestamp_units",
+        );
         conn.execute_batch(&format!(
             "PRAGMA foreign_keys = OFF;
              INSERT INTO epoch_revisions (epoch_id, rev, kind, source_id, created_at)
@@ -7831,7 +7571,7 @@ mod tests {
     #[test]
     fn wave_directory_migration_preserves_ids_and_derives_parent_addresses() {
         let conn = open();
-        apply_before_migration(&conn, "wave_directory_parents");
+        apply_before_migration(&observers(), &build(), &conn, "wave_directory_parents");
         conn.execute_batch(
             "INSERT INTO waves(id,name,repo,created_at) VALUES
             ('parent','infrastructure','/repo',1),
@@ -7907,7 +7647,7 @@ mod tests {
     #[test]
     fn wave_directory_migration_preserves_paths_across_retired_ancestors() {
         let conn = open();
-        apply_before_migration(&conn, "wave_directory_parents");
+        apply_before_migration(&observers(), &build(), &conn, "wave_directory_parents");
         conn.execute_batch(
             "INSERT INTO waves(id,name,repo,created_at,retired_at,superseded_by_wave_id,retirement_reason) VALUES
             ('retired-parent','infra','/repo',1,2,'root','relocated'),
@@ -7968,7 +7708,7 @@ mod tests {
     #[test]
     fn wave_promotion_occurrence_does_not_backfill_existing_ancestry() {
         let conn = open();
-        apply_before_draft(&conn, "wave_promotion_occurrence");
+        apply_before_migration(&observers(), &build(), &conn, "wave_promotion_occurrence");
         conn.execute_batch(
             "INSERT INTO waves (id, name, repo, created_at)
                  VALUES ('wave_parent', 'parent', '/repo', 100);
@@ -7993,7 +7733,7 @@ mod tests {
     #[test]
     fn status_surfaces_migration_attributes_only_uniquely_contained_project_failures() {
         let conn = open();
-        apply_before_migration(&conn, "status_truth");
+        apply_before_migration(&observers(), &build(), &conn, "status_truth");
         conn.execute_batch(
             "PRAGMA foreign_keys=OFF;
              INSERT INTO waves (id, name, repo, created_at)

@@ -182,12 +182,21 @@ mod tests {
         use crate::store::migration_runner::{apply_before_migration, apply_pending_migrations};
 
         let conn = rusqlite::Connection::open_in_memory().unwrap();
-        apply_before_migration(&conn, "wave_removal");
+        apply_before_migration(
+            &crate::store::test_fixture::observers(),
+            &crate::store::test_fixture::build(),
+            &conn,
+            "wave_removal",
+        );
         conn.execute_batch(include_str!(
             "../../../tests/fixtures/migrations/wave_removal_released.sql"
         ))
         .unwrap();
-        apply_pending_migrations(&conn);
+        apply_pending_migrations(
+            &crate::store::test_fixture::observers(),
+            &crate::store::test_fixture::build(),
+            &conn,
+        );
 
         let old: (Option<String>, Option<String>) = conn
             .query_row(

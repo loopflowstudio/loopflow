@@ -434,7 +434,7 @@ async fn attach_project(
             "Created Project has conflicting Initiative membership; receipt retained",
         ));
     }
-    crate::linear::acceptance::accept_linear_project_in(
+    crate::store::sqlite::linear_acceptance::accept_linear_project_in(
         &store.sqlite,
         wave,
         initiative,

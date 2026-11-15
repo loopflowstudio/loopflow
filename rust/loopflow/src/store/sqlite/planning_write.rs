@@ -560,12 +560,13 @@ pub(crate) fn create(conn: &Connection, repo: &str, edits: &[WorkEdit]) -> Store
 #[cfg(test)]
 mod tests {
     use super::{create, local};
-    use crate::planning_git::PlanningDestination;
-    use crate::store::sqlite::SqliteStore;
-    use crate::store::work::edit::{WorkEdit, WorkValue, WorkValue as Edit};
+    use crate::store::planning_destination::PlanningDestination;
+    use crate::store::session::{LfSession, TitleSource};
+    use crate::store::sqlite::{SessionCaller, SqliteStore};
+    use crate::store::work::edit::{Disposition, WorkEdit, WorkValue, WorkValue as Edit};
     use crate::store::work::task::NewTask;
     use crate::store::work::task::TaskUpdate;
-    use crate::work::wave::Wave;
+    use crate::store::work::wave::Wave;
     use loopflow_model::comment::{TaskComment, TaskCommentAuthor};
     use loopflow_model::durable::{ProjectId, TaskId};
     use loopflow_model::id::WaveId;
@@ -613,6 +614,148 @@ mod tests {
             })
             .unwrap();
         id
+    }
+
+    #[test]
+    fn local_task_fields_survive_restart_in_the_planning_journal() {
+        let (_home, store, id) = crate::store::test_fixture::store_with_task();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE tasks SET planning_due_date='2026-10-15' WHERE id=?1",
+                [id.as_str()],
+            )
+            .unwrap();
+        let before = store.task(&id).unwrap().unwrap();
+        let path = std::path::PathBuf::from(store.conn.lock().unwrap().path().unwrap());
+        {
+            let mut conn = store.conn.lock().unwrap();
+            let tx = conn.transaction().unwrap();
+            local(
+                &tx,
+                &crate::store::work::edit::WorkEdit::for_target(
+                    id.as_str(),
+                    &[
+                        Edit::TaskRank(7),
+                        Edit::TaskAssignee(Some("assignee-1".into())),
+                        Edit::Disposition(Disposition {
+                            planning_state: Some("completed".into()),
+                            planning_completed: 1,
+                            planning_completed_at: Some("2026-10-10T12:00:00Z".into()),
+                        }),
+                    ],
+                ),
+            )
+            .unwrap();
+            tx.commit().unwrap();
+        }
+        drop(store);
+        let store = crate::store::test_fixture::open(&path).unwrap();
+        let saved = store.task(&id).unwrap().unwrap();
+        assert_eq!(saved.rank, 7);
+        assert_eq!(saved.assignee.as_deref(), Some("assignee-1"));
+        assert_eq!(saved.state.as_deref(), Some("completed"));
+        assert_eq!(saved.completed_at.as_deref(), Some("2026-10-10T12:00:00Z"));
+        assert_eq!(saved.worktree, before.worktree);
+        assert_eq!(saved.branch, before.branch);
+        assert_eq!(saved.due_date, before.due_date);
+        let destination = crate::store::planning_destination::PlanningDestination::new(
+            "/fixture.git",
+            "refs/loopflow/planning/shared/fields",
+        )
+        .unwrap();
+        let route = store.bind_peer_planning("/repo", &destination).unwrap();
+        let snapshot = store.export_peer_planning("/repo", &route).unwrap();
+        assert!(snapshot
+            .winners()
+            .any(|(_, change)| change.edit.target == id.as_str()
+                && change.edit.change == Edit::TaskRank(7)));
+        assert!(snapshot
+            .winners()
+            .any(|(_, change)| change.edit.target == id.as_str()
+                && change.edit.change == Edit::TaskAssignee(Some("assignee-1".into()))));
+        assert!(snapshot
+            .winners()
+            .any(|(_, change)| change.edit.target == id.as_str()
+                && change.edit.change
+                    == Edit::Disposition(Disposition {
+                        planning_state: Some("completed".into()),
+                        planning_completed: 1,
+                        planning_completed_at: Some("2026-10-10T12:00:00Z".into()),
+                    })));
+        assert!(snapshot
+            .winners()
+            .any(|(_, change)| change.edit.target == id.as_str()
+                && change.edit.change == Edit::TaskDueDate(Some("2026-10-15".into()))));
+    }
+
+    #[test]
+    fn local_identifier_repair_uses_saved_titles_and_attachments() {
+        let (_home, store, task) = crate::store::test_fixture::store_with_task();
+        let template =
+            crate::store::test_fixture::unpublished_conversation(Some(task.clone()), None, 1);
+        for (id, title_source) in [
+            ("editor", TitleSource::Generated),
+            ("other", TitleSource::Generated),
+            ("human", TitleSource::Human),
+        ] {
+            store
+                .create_session_prepared(
+                    LfSession {
+                        id: id.into(),
+                        title: "Saved title".into(),
+                        title_source,
+                        artifact_key: Some(crate::store::session_record::new_artifact_key()),
+                        ..template.clone()
+                    },
+                    None,
+                )
+                .unwrap();
+        }
+        let process = loopflow_model::id::LfProcessId::new();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'saved',1)",
+                [&process],
+            )
+            .unwrap();
+        let caller = SessionCaller {
+            agent: None,
+            capture_key: None,
+        };
+        let old = store
+            .attach_session("editor", None, &process, true, None, &caller)
+            .unwrap();
+        store
+            .attach_session("editor", Some(&old), &process, true, None, &caller)
+            .unwrap();
+        let mut conn = store.conn.lock().unwrap();
+        let tx = conn.transaction().unwrap();
+        local(
+            &tx,
+            &crate::store::work::edit::WorkEdit::for_target(
+                task.as_str(),
+                &[Edit::TaskIdentifier("ENG-123".into())],
+            ),
+        )
+        .unwrap();
+        tx.commit().unwrap();
+        drop(conn);
+        for id in ["editor", "other"] {
+            assert_eq!(
+                store.session(id).unwrap().unwrap().title,
+                "ENG-123 Saved title"
+            );
+        }
+        assert_eq!(
+            store.session("human").unwrap().unwrap().title,
+            "Saved title"
+        );
     }
 
     #[test]

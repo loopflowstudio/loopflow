@@ -323,7 +323,7 @@ pub(super) fn comment_steer_in(
 #[cfg(test)]
 mod tests {
 
-    use crate::work::wave::Wave;
+    use crate::store::work::wave::Wave;
     use loopflow_model::comment::{TaskComment, TaskCommentAuthor};
     use loopflow_model::durable::TaskId;
     use loopflow_model::id::WaveId;

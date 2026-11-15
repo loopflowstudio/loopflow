@@ -2175,14 +2175,16 @@ mod tests {
             )
             .await
             .unwrap();
-        assert!(crate::linear::acceptance::accept_linear_project_in(
-            &store.sqlite,
-            wave.id(),
-            &snapshot.initiative,
-            &old,
-            20
-        )
-        .is_err());
+        assert!(
+            crate::store::sqlite::linear_acceptance::accept_linear_project_in(
+                &store.sqlite,
+                wave.id(),
+                &snapshot.initiative,
+                &old,
+                20
+            )
+            .is_err()
+        );
         assert!(store.seed_inventory(snapshot, None).await.is_err());
         assert_eq!(wave_refresh_at(_directory.path(), &wave), None);
         assert!(store
@@ -2221,7 +2223,7 @@ mod tests {
             holds: false,
         });
         confirmed.revision = Some("2026-10-05T12:00:01Z".into());
-        crate::linear::acceptance::accept_linear_project_in(
+        crate::store::sqlite::linear_acceptance::accept_linear_project_in(
             &store.sqlite,
             wave.id(),
             &snapshot.initiative,
@@ -2252,14 +2254,16 @@ mod tests {
         assert_eq!(durable.krs, confirmed.krs);
         let other = Wave::new(WaveId::new(), "other".into(), wave.repo().into());
         store.create_wave(&other).await.unwrap();
-        assert!(crate::linear::acceptance::accept_linear_project_in(
-            &store.sqlite,
-            other.id(),
-            &snapshot.initiative,
-            &confirmed,
-            20
-        )
-        .is_err());
+        assert!(
+            crate::store::sqlite::linear_acceptance::accept_linear_project_in(
+                &store.sqlite,
+                other.id(),
+                &snapshot.initiative,
+                &confirmed,
+                20
+            )
+            .is_err()
+        );
         assert_eq!(
             store.get_project(&project.id).await.unwrap().unwrap(),
             durable
@@ -2830,7 +2834,7 @@ mod tests {
         let mut snapshot = task_planning_snapshot(&wave, &project, &task);
         let mut observed = snapshot.snapshot.projects.remove(0);
         observed.status = crate::store::work::project::ProjectStatus::Completed;
-        crate::linear::acceptance::accept_linear_project_in(
+        crate::store::sqlite::linear_acceptance::accept_linear_project_in(
             &store.sqlite,
             wave.id(),
             &snapshot.initiative,
@@ -3615,3 +3619,8 @@ mod tests {
             .is_some());
     }
 }
+
+#[cfg(test)]
+mod account_lifecycle_tests;
+#[cfg(test)]
+mod linear_migration_tests;

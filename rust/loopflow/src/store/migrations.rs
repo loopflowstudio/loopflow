@@ -101,3 +101,22 @@ pub(crate) fn validate_sqlite(conn: &rusqlite::Connection) -> StoreResult<()> {
 #[cfg(test)]
 #[path = "canonical_lifecycle_tests.rs"]
 mod canonical_lifecycle_tests;
+
+#[cfg(test)]
+pub(crate) fn apply_before_migration(conn: &rusqlite::Connection, name: &str) {
+    super::migration_runner::fixtures::apply_before_migration(&observers(), &build(), conn, name);
+}
+
+#[cfg(test)]
+pub(crate) fn upgrade_from_migration(conn: &rusqlite::Connection, name: &str) {
+    super::migration_runner::fixtures::upgrade_from_migration(&observers(), &build(), conn, name);
+}
+
+#[cfg(test)]
+pub(crate) fn apply_pending_migrations(conn: &rusqlite::Connection) {
+    super::migration_runner::fixtures::apply_pending_migrations(&observers(), &build(), conn);
+}
+
+#[cfg(test)]
+#[path = "migration_lifecycle_tests.rs"]
+mod migration_lifecycle_tests;

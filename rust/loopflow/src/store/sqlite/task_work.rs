@@ -1204,7 +1204,7 @@ mod tests {
 
     use crate::durable::GraphProcessFilter;
     use crate::process::{ProcessFilter, ProcessWorkFilter};
-    use crate::session::SessionFilter;
+    use crate::store::session::SessionFilter;
 
     use loopflow_model::durable::{ProjectId, TaskId};
     use loopflow_model::id::{LfProcessId, TraceId, WaveId};
@@ -1215,7 +1215,12 @@ mod tests {
         use rusqlite::{types::Value, StatementStatus};
 
         let conn = rusqlite::Connection::open_in_memory().unwrap();
-        apply_before_migration(&conn, "session_list_indexes");
+        apply_before_migration(
+            &crate::store::test_fixture::observers(),
+            &crate::store::test_fixture::build(),
+            &conn,
+            "session_list_indexes",
+        );
         conn.execute_batch(
             "INSERT INTO repository_plans(id,repo,selected) VALUES('repo_11111111111111111111111111111111','/repo',1);
              INSERT INTO tasks(id,repository_id,issue_identifier,worktree,checkout_machine_id,created_at)
@@ -1262,7 +1267,11 @@ mod tests {
             )
         };
         // The upgrade moves the released checkout into `task_checkouts`.
-        apply_pending_migrations(&conn);
+        apply_pending_migrations(
+            &crate::store::test_fixture::observers(),
+            &crate::store::test_fixture::build(),
+            &conn,
+        );
         let (after, _, scans) = read();
         let ids: Vec<_> = after.iter().map(|row| row[0].clone()).collect();
         assert_eq!(
@@ -1385,7 +1394,12 @@ mod tests {
     fn session_membership_upgrade_probes_task_indexes() {
         use crate::store::migration_runner::{apply_before_migration, apply_pending_migrations};
         let conn = rusqlite::Connection::open_in_memory().unwrap();
-        apply_before_migration(&conn, "session_list_indexes");
+        apply_before_migration(
+            &crate::store::test_fixture::observers(),
+            &crate::store::test_fixture::build(),
+            &conn,
+            "session_list_indexes",
+        );
         conn.execute_batch(
             "INSERT INTO repository_plans(id,repo,selected) VALUES('repo_11111111111111111111111111111111','/repo',1);
              WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<1000)
@@ -1411,7 +1425,11 @@ mod tests {
         };
         // The upgrade moves the released checkouts into `task_checkouts` and the
         // primary Session into `task_primary_sessions`.
-        apply_pending_migrations(&conn);
+        apply_pending_migrations(
+            &crate::store::test_fixture::observers(),
+            &crate::store::test_fixture::build(),
+            &conn,
+        );
         let (after, _) = read();
         assert_eq!(after, (r#"["task_00000000000000000000000000000001","task_000000000000000000000000000003e7"]"#.into(), true));
         let plans: Vec<String> = conn
@@ -1509,7 +1527,7 @@ mod tests {
                         super::super::sessions::test_capture(
                             &conn,
                             &session,
-                            &crate::session_record::new_artifact_key(),
+                            &crate::store::session_record::new_artifact_key(),
                         );
                         conn.execute(
                             "INSERT OR REPLACE INTO task_primary_sessions(task_id,session_id) VALUES(?1,?2)",
@@ -2201,7 +2219,7 @@ mod tests {
                 super::super::sessions::test_capture(
                     &conn,
                     id,
-                    &crate::session_record::new_artifact_key(),
+                    &crate::store::session_record::new_artifact_key(),
                 );
             }
         }
@@ -2275,7 +2293,7 @@ mod tests {
                 super::super::sessions::test_capture(
                     &conn,
                     id,
-                    &crate::session_record::new_artifact_key(),
+                    &crate::store::session_record::new_artifact_key(),
                 );
             }
         }
@@ -2350,7 +2368,7 @@ mod tests {
                 super::super::sessions::test_capture(
                     &conn,
                     id,
-                    &crate::session_record::new_artifact_key(),
+                    &crate::store::session_record::new_artifact_key(),
                 );
             }
             for (id, cwd) in [
@@ -2676,7 +2694,12 @@ mod tests {
         use crate::store::migration_runner::{apply_before_migration, migration_section_sql};
 
         let conn = rusqlite::Connection::open_in_memory().unwrap();
-        apply_before_migration(&conn, "task_machine_local");
+        apply_before_migration(
+            &crate::store::test_fixture::observers(),
+            &crate::store::test_fixture::build(),
+            &conn,
+            "task_machine_local",
+        );
         let (shipping, stopped) = (TaskId::new(), TaskId::new());
         let (approver, carrier) = (LfProcessId::new(), LfProcessId::new());
         // The carrier's Process row was pruned, as released stores allowed.

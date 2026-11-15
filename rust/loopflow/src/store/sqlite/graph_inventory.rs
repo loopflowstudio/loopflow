@@ -635,7 +635,7 @@ mod tests {
     use std::num::NonZeroU32;
 
     use crate::durable::GraphProcessFilter;
-    use crate::session::GraphProcessSummaryState;
+    use crate::store::session::GraphProcessSummaryState;
 
     /// Two waits on one Task's step and a later wait still running its time.
     #[test]
@@ -920,7 +920,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let database = directory.path().join("released.db");
         let conn = rusqlite::Connection::open(&database).unwrap();
-        crate::store::migration_runner::apply_before_migration(&conn, "rename_flow_to_graph");
+        crate::store::migrations::apply_before_migration(&conn, "rename_flow_to_graph");
         let step = ConcreteStep::Skill(ConcreteSkill {
             skill: Skill::named("implement"),
             id: None,
@@ -949,7 +949,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        crate::store::migration_runner::upgrade_from_migration(&conn, "rename_flow_to_graph");
+        crate::store::migrations::upgrade_from_migration(&conn, "rename_flow_to_graph");
         drop(conn);
 
         let store = crate::store::open_sqlite(&database).unwrap();

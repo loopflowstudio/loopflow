@@ -66,7 +66,12 @@ fn hardware_rented_before_spot_existed_reads_as_on_demand() {
     use crate::store::migration_runner::{apply_before_migration, migration_section_sql};
 
     let conn = rusqlite::Connection::open_in_memory().unwrap();
-    apply_before_migration(&conn, "rental_spot");
+    apply_before_migration(
+        &crate::store::test_fixture::observers(),
+        &crate::store::test_fixture::build(),
+        &conn,
+        "rental_spot",
+    );
     conn.execute_batch(include_str!(
         "../../../tests/fixtures/migrations/rental_spot_released.sql"
     ))
@@ -88,7 +93,12 @@ fn runpod_rows_from_0_14_16_go_and_current_ones_stay() {
     use crate::store::migration_runner::{apply_before_migration, migration_section_sql};
 
     let conn = rusqlite::Connection::open_in_memory().unwrap();
-    apply_before_migration(&conn, "scope_tasks_capacity");
+    apply_before_migration(
+        &crate::store::test_fixture::observers(),
+        &crate::store::test_fixture::build(),
+        &conn,
+        "scope_tasks_capacity",
+    );
     conn.execute_batch(include_str!(
         "../../../tests/fixtures/migrations/scope_tasks_capacity_released.sql"
     ))
@@ -114,7 +124,12 @@ fn fly_rows_from_0_14_17_go_and_the_rest_still_read() {
     use crate::store::migration_runner::{apply_before_migration, migration_section_sql};
 
     let conn = rusqlite::Connection::open_in_memory().unwrap();
-    apply_before_migration(&conn, "forget_fly_rentals");
+    apply_before_migration(
+        &crate::store::test_fixture::observers(),
+        &crate::store::test_fixture::build(),
+        &conn,
+        "forget_fly_rentals",
+    );
     conn.execute_batch(include_str!(
         "../../../tests/fixtures/migrations/forget_fly_rentals_released.sql"
     ))
@@ -143,7 +158,12 @@ fn an_owned_machines_pool_cost_and_expiry_move_to_pool_machines() {
     use crate::store::migration_runner::{apply_before_migration, migration_section_sql};
 
     let conn = rusqlite::Connection::open_in_memory().unwrap();
-    apply_before_migration(&conn, "task_machine_local");
+    apply_before_migration(
+        &crate::store::test_fixture::observers(),
+        &crate::store::test_fixture::build(),
+        &conn,
+        "task_machine_local",
+    );
     conn.execute_batch(
         "INSERT INTO pools(name,created_at) VALUES('lab',1);
          INSERT INTO machines(id,is_local,created_at,observed_at,pool,cost_usd,expires_at)

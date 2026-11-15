@@ -388,8 +388,8 @@ fn readiness_in(conn: &Connection, wave: &WaveId) -> StoreResult<ProjectReadines
 #[cfg(test)]
 mod tests {
     use super::{read_project_binding, write_project_binding, ProjectReadinessState};
+    use crate::store::work::wave::Wave;
     use crate::store::PlanningLocks;
-    use crate::work::wave::Wave;
     use loopflow_model::id::WaveId;
 
     #[test]
@@ -509,7 +509,7 @@ mod tests {
 #[cfg(test)]
 mod activation_tests {
 
-    use crate::work::wave::Wave;
+    use crate::store::work::wave::Wave;
     use loopflow_model::id::{LfProcessId, TraceId, WaveId};
 
     #[test]

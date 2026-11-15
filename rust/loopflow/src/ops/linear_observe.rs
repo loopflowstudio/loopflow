@@ -431,7 +431,7 @@ pub(crate) async fn deliver_task_state(store: &Store, task: &Task, retry: bool) 
             )));
         }
         let history = state_history(&client, issue.as_str(), &delivery, &observed).await;
-        if !crate::linear::acceptance::observe_task_state(
+        if !crate::store::sqlite::linear_acceptance::observe_task_state(
             &store.sqlite,
             &delivery,
             &observed,
@@ -491,7 +491,7 @@ pub(crate) async fn deliver_task_state(store: &Store, task: &Task, retry: bool) 
             }
             _ => StateHistory::Unknown,
         };
-        if crate::linear::acceptance::observe_task_state(
+        if crate::store::sqlite::linear_acceptance::observe_task_state(
             &store.sqlite,
             &delivery,
             &confirmed,

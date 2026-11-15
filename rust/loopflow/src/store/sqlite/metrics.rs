@@ -258,8 +258,8 @@ mod tests {
     use tempfile::tempdir;
     use time::Duration;
 
+    use crate::store::work::wave::Wave;
     use crate::work::wave::metrics::{MetricContractDefinition, MetricDuration, MetricStage};
-    use crate::work::wave::Wave;
     use loopflow_model::id::WaveId;
 
     use super::*;

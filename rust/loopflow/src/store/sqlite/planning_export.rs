@@ -444,7 +444,12 @@ mod tests {
     #[test]
     fn historical_creation_keeps_intent_values_after_local_edits() {
         let conn = Connection::open_in_memory().unwrap();
-        apply_before_migration(&conn, "planning_peers");
+        apply_before_migration(
+            &crate::store::test_fixture::observers(),
+            &crate::store::test_fixture::build(),
+            &conn,
+            "planning_peers",
+        );
         conn.execute_batch(include_str!(
             "../../../tests/fixtures/migrations/creation_baselines.sql"
         ))
@@ -508,7 +513,12 @@ mod tests {
     #[test]
     fn malformed_creation_baseline_keeps_released_receipts_and_schema() {
         let mut conn = Connection::open_in_memory().unwrap();
-        apply_before_migration(&conn, "planning_peers");
+        apply_before_migration(
+            &crate::store::test_fixture::observers(),
+            &crate::store::test_fixture::build(),
+            &conn,
+            "planning_peers",
+        );
         conn.execute_batch(include_str!(
             "../../../tests/fixtures/migrations/creation_baselines.sql"
         ))
@@ -538,7 +548,12 @@ mod tests {
         for project in [false, true] {
             for changed_readback in [false, true] {
                 let conn = Connection::open_in_memory().unwrap();
-                apply_before_migration(&conn, "planning_peers");
+                apply_before_migration(
+                    &crate::store::test_fixture::observers(),
+                    &crate::store::test_fixture::build(),
+                    &conn,
+                    "planning_peers",
+                );
                 conn.execute_batch(include_str!(
                     "../../../tests/fixtures/migrations/creation_baselines.sql"
                 ))

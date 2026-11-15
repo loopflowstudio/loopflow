@@ -368,7 +368,7 @@ mod tests {
 
     fn session_terminal(store: &SqliteStore, task: &TaskId, session: &str) -> TerminalId {
         let terminal = terminal(store);
-        store.test_session(session, &crate::session_record::new_artifact_key());
+        store.test_session(session, &crate::store::session_record::new_artifact_key());
         store.conn.lock().unwrap().execute("UPDATE agent_sessions SET task_id=?1,interactive=1,held_terminal_id=?2 WHERE id=?3", params![task.as_str(),terminal,session]).unwrap();
         terminal
     }

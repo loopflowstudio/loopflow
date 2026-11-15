@@ -117,7 +117,7 @@ impl SqliteStore {
 mod tests {
     use crate::process::attachment;
 
-    use crate::session::{SessionActivity, SessionFilter};
+    use crate::store::session::{SessionActivity, SessionFilter};
 
     use loopflow_model::id::LfProcessId;
     use loopflow_model::program_status::{Kind, Records, Report, State};
@@ -136,7 +136,7 @@ mod tests {
                 let home = tempfile::tempdir().unwrap();
                 let store =
                     crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
-                store.test_session("session", &crate::session_record::new_artifact_key());
+                store.test_session("session", &crate::store::session_record::new_artifact_key());
                 let attachment = attachment::claim_session_attachment(
                     &store,
                     "session",

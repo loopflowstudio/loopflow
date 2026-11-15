@@ -171,8 +171,8 @@ mod tests {
     #[test]
     fn a_read_snapshot_keeps_joined_queries_and_revisions_at_one_commit() {
         let (dir, writer) = store();
-        writer.test_session("first", &crate::session_record::new_artifact_key());
-        writer.test_session("second", &crate::session_record::new_artifact_key());
+        writer.test_session("first", &crate::store::session_record::new_artifact_key());
+        writer.test_session("second", &crate::store::session_record::new_artifact_key());
         let reader = SqliteStore::open_read_only(
             &dir.path().join("db"),
             crate::store::token_key::encryption_key,
@@ -319,7 +319,10 @@ mod tests {
     #[test]
     fn a_session_reading_moves_sessions_only_when_availability_could_change() {
         let (_dir, store) = store();
-        store.test_session("conversation", &crate::session_record::new_artifact_key());
+        store.test_session(
+            "conversation",
+            &crate::store::session_record::new_artifact_key(),
+        );
         let process = LfProcessId::new();
         store
             .conn
@@ -339,7 +342,7 @@ mod tests {
                 .record_session_activity(
                     "conversation",
                     &attachment,
-                    &crate::session::SessionActivity {
+                    &crate::store::session::SessionActivity {
                         preview: None,
                         observed_at,
                         open_tools,

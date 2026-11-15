@@ -775,12 +775,12 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::PeerImport;
-    use crate::planning_git::PlanningDestination;
+    use crate::store::planning_destination::PlanningDestination;
     use crate::store::planning_exchange::{PlanningMutation, PlanningSnapshot};
     use crate::store::query_plans::{assert_no_empty_writes, growing_scans, statements};
     use crate::store::sqlite::{planning_write, SqliteStore};
     use crate::store::work::edit::{WorkEdit, WorkValue};
-    use crate::work::wave::Wave;
+    use crate::store::work::wave::Wave;
     use loopflow_model::id::WaveId;
 
     fn destination(store: &SqliteStore, repo: &str, name: &str) -> String {

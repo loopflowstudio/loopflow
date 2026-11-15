@@ -1717,7 +1717,7 @@ mod discovery_tests {
     fn legacy_unknown_spawn_state_is_not_a_reservation_or_an_exit() {
         let home = tempfile::tempdir().unwrap();
         let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
-        store.test_session("session", &crate::session_record::new_artifact_key());
+        store.test_session("session", &crate::store::session_record::new_artifact_key());
         let attachment = attachment::claim_session_attachment(
             &store,
             "session",
@@ -1742,7 +1742,7 @@ mod discovery_tests {
     fn ended_agent_socket_cannot_be_adopted() {
         let home = tempfile::tempdir().unwrap();
         let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
-        store.test_session("session", &crate::session_record::new_artifact_key());
+        store.test_session("session", &crate::store::session_record::new_artifact_key());
         let attachment = attachment::claim_session_attachment(
             &store,
             "session",
@@ -1789,14 +1789,16 @@ mod discovery_tests {
     fn losing_input_claim_rolls_back_capture_and_provider_reservation() {
         let home = tempfile::tempdir().unwrap();
         let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
-        let session =
-            store.test_session("conversation", &crate::session_record::new_artifact_key());
+        let session = store.test_session(
+            "conversation",
+            &crate::store::session_record::new_artifact_key(),
+        );
         let first = insert_process(&store, 1, 1);
         let second = insert_process(&store, 2, 2);
         let attachment =
             attachment::claim_session_attachment(&store, &session.id, None, &first, true).unwrap();
         let mut next = session.clone();
-        next.artifact_key = Some(crate::session_record::new_artifact_key());
+        next.artifact_key = Some(crate::store::session_record::new_artifact_key());
         next.input_published = false;
         let before = store.session_history(&session.id, 0, 0).unwrap();
         assert!(
@@ -1895,7 +1897,7 @@ mod discovery_tests {
         );
         assert_eq!(reserved.parent_lf_process_id.as_ref(), Some(&second));
         assert!(reserved.completed_at.is_none());
-        next.artifact_key = Some(crate::session_record::new_artifact_key());
+        next.artifact_key = Some(crate::store::session_record::new_artifact_key());
         assert!(
             attachment::claim_session_input(&store, next, Some(&claimed), &first, || panic!(
                 "reserved process needs no close"
@@ -2375,7 +2377,7 @@ mod attachment_tests {
 
     use super::discovery_tests::insert_process;
     use super::SessionCaller;
-    use crate::session::SessionActivity;
+    use crate::store::session::SessionActivity;
 
     use crate::store::StoreError;
     use loopflow_model::id::LfProcessId;
@@ -2383,7 +2385,7 @@ mod attachment_tests {
     #[test]
     fn replaced_callers_cannot_rename_bind_or_attach_either_title_source() {
         use crate::process::AgentCaller;
-        use crate::session::TitleSource;
+        use crate::store::session::TitleSource;
         use loopflow_model::durable::TaskId;
 
         let home = tempfile::tempdir().unwrap();
@@ -2392,7 +2394,8 @@ mod attachment_tests {
         let replacement = insert_process(&store, 2, 2);
         for source in [TitleSource::Generated, TitleSource::Human] {
             let id = format!("conversation-{source:?}");
-            let session = store.test_session(&id, &crate::session_record::new_artifact_key());
+            let session =
+                store.test_session(&id, &crate::store::session_record::new_artifact_key());
             store
                 .conn
                 .lock()
@@ -2469,9 +2472,11 @@ mod attachment_tests {
         use crate::process::AgentCaller;
         let home = tempfile::tempdir().unwrap();
         let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
-        let session =
-            store.test_session("conversation", &crate::session_record::new_artifact_key());
-        let other = store.test_session("other", &crate::session_record::new_artifact_key());
+        let session = store.test_session(
+            "conversation",
+            &crate::store::session_record::new_artifact_key(),
+        );
+        let other = store.test_session("other", &crate::store::session_record::new_artifact_key());
         let process = insert_process(&store, 1, 1);
         let first = store
             .attach_session(
@@ -2497,7 +2502,7 @@ mod attachment_tests {
         let result = store.rename_session_prepared(
             "conversation",
             "Changed",
-            crate::session::TitleSource::Human,
+            crate::store::session::TitleSource::Human,
             &caller,
         );
         assert!(
@@ -2510,7 +2515,10 @@ mod attachment_tests {
     fn attaching_start_receipt_and_terminal_commit_only_with_the_agent() {
         let home = tempfile::tempdir().unwrap();
         let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
-        store.test_session("conversation", &crate::session_record::new_artifact_key());
+        store.test_session(
+            "conversation",
+            &crate::store::session_record::new_artifact_key(),
+        );
         let seed = insert_process(&store, 1, 1);
         let mut process = store.lf_process(&seed).unwrap().unwrap();
         process.id = LfProcessId::new();
@@ -2593,8 +2601,14 @@ mod attachment_tests {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("store.db");
         let store = crate::store::opening::open_ephemeral(&path).unwrap();
-        store.test_session("conversation", &crate::session_record::new_artifact_key());
-        store.test_session("unrelated", &crate::session_record::new_artifact_key());
+        store.test_session(
+            "conversation",
+            &crate::store::session_record::new_artifact_key(),
+        );
+        store.test_session(
+            "unrelated",
+            &crate::store::session_record::new_artifact_key(),
+        );
         let parent = insert_process(&store, 1, 1);
         let attachment =
             attachment::claim_session_attachment(&store, "conversation", None, &parent, true)
@@ -2619,7 +2633,7 @@ mod attachment_tests {
                 &store,
                 "unrelated",
                 "Saved during close",
-                crate::session::TitleSource::Human,
+                crate::store::session::TitleSource::Human,
             )?;
             assert_eq!(
                 store.session_attachment("conversation")?,
@@ -2955,7 +2969,12 @@ mod attachment_tests {
     fn attachment_migration_preserves_released_history_and_waiting_evidence() {
         use crate::store::migration_runner::{apply_before_migration, migration_section_sql};
         let conn = rusqlite::Connection::open_in_memory().unwrap();
-        apply_before_migration(&conn, "agent_process");
+        apply_before_migration(
+            &crate::store::test_fixture::observers(),
+            &crate::store::test_fixture::build(),
+            &conn,
+            "agent_process",
+        );
         conn.execute_batch(include_str!(
             "../../../tests/fixtures/migrations/agent_process_released.sql"
         ))
@@ -3093,7 +3112,12 @@ mod attachment_tests {
         use rusqlite::{types::Value, StatementStatus};
 
         let conn = rusqlite::Connection::open_in_memory().unwrap();
-        apply_before_migration(&conn, "session_list_indexes");
+        apply_before_migration(
+            &crate::store::test_fixture::observers(),
+            &crate::store::test_fixture::build(),
+            &conn,
+            "session_list_indexes",
+        );
         conn.execute_batch(
             "WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<6000)
              INSERT INTO processes(id,trace_id,started_at,kind,completed_at)
@@ -3133,7 +3157,11 @@ mod attachment_tests {
             )
         };
         let (before, before_steps, _) = read();
-        apply_pending_migrations(&conn);
+        apply_pending_migrations(
+            &crate::store::test_fixture::observers(),
+            &crate::store::test_fixture::build(),
+            &conn,
+        );
         let (after, after_steps, scans) = read();
         assert_eq!(after, before);
         assert_eq!(after.len(), 2); // Detached previous agent and reserved replacement.
@@ -3169,8 +3197,10 @@ mod attachment_tests {
     fn detached_and_replaced_agents_remain_in_the_process_inventory() {
         let home = tempfile::tempdir().unwrap();
         let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
-        let session =
-            store.test_session("conversation", &crate::session_record::new_artifact_key());
+        let session = store.test_session(
+            "conversation",
+            &crate::store::session_record::new_artifact_key(),
+        );
         let a = insert_process(&store, 1, 1);
         let b = insert_process(&store, 2, 2);
         let first =
@@ -3213,8 +3243,10 @@ mod attachment_tests {
     fn agent_spawn_lifecycle_uses_the_record_and_retains_failed_identity() {
         let home = tempfile::tempdir().unwrap();
         let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
-        let session =
-            store.test_session("conversation", &crate::session_record::new_artifact_key());
+        let session = store.test_session(
+            "conversation",
+            &crate::store::session_record::new_artifact_key(),
+        );
         let parent = insert_process(&store, 1, 1);
         let attachment =
             attachment::claim_session_attachment(&store, &session.id, None, &parent, true).unwrap();
@@ -3264,8 +3296,10 @@ mod attachment_tests {
     fn stale_orphan_observation_cannot_settle_a_transferred_agent() {
         let home = tempfile::tempdir().unwrap();
         let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
-        let session =
-            store.test_session("conversation", &crate::session_record::new_artifact_key());
+        let session = store.test_session(
+            "conversation",
+            &crate::store::session_record::new_artifact_key(),
+        );
         let a = insert_process(&store, 1, 1);
         let b = insert_process(&store, 2, 2);
         let first =
@@ -3304,7 +3338,7 @@ mod attachment_tests {
         let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
         let mut completed = Vec::new();
         for (number, id, interactive) in [(1, "run", false), (2, "conversation", true)] {
-            let session = store.test_session(id, &crate::session_record::new_artifact_key());
+            let session = store.test_session(id, &crate::store::session_record::new_artifact_key());
             store
                 .conn
                 .lock()
@@ -3344,7 +3378,8 @@ mod forget_tests {
     fn an_exit_forgets_the_process_unless_something_still_needs_it() {
         let home = tempfile::tempdir().unwrap();
         let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
-        let session = store.test_session("session", &crate::session_record::new_artifact_key());
+        let session =
+            store.test_session("session", &crate::store::session_record::new_artifact_key());
         let start = |parent: Option<&LfProcessId>, via_agent: bool| {
             let process = crate::process::LfProcess {
                 id: LfProcessId::new(),

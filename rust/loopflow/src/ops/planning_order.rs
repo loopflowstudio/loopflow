@@ -32,7 +32,7 @@ pub(super) async fn sync_order(
     let mut issues = client.ordered_items(external).await.map_err(message)?;
     loop {
         let items = issues.iter().map(|i| i.item.clone()).collect::<Vec<_>>();
-        if !crate::linear::acceptance::accept_linear_project_order_in(
+        if !crate::store::sqlite::linear_acceptance::accept_linear_project_order_in(
             &store.sqlite,
             &repo.to_string_lossy(),
             external,

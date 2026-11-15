@@ -251,7 +251,7 @@ mod tests {
     use super::{RetainedFiling, SqliteStore};
     use crate::store::sqlite::planning_changes::PlanningChanges;
     use crate::store::work::task::TaskEventKind;
-    use crate::work::wave::Wave;
+    use crate::store::work::wave::Wave;
     use loopflow_model::durable::{ProjectId, TaskId};
     use loopflow_model::id::WaveId;
     use rusqlite::params;

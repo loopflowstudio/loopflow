@@ -16,11 +16,12 @@ li{margin:.4rem 0}.proposed{border-left:3px solid light-dark(#23734c,#8cd6ad);pa
 @media(max-width:520px){body{margin-top:1rem}table{font-size:.76rem}}
 </style>
 <header>LOO-650 · concept-review · November 15, 2026<br>
-Reviewed at <code>07a49a47a9</code>. Built from <code>scratch/loo-650.md</code>, retained relocation compiler logs,
+Reviewed at <code>b86c3e720d</code> plus the interrupted workspace edits. Built from <code>scratch/loo-650.md</code>, retained relocation compiler logs,
 <code>store/sqlite/{desktop_shells,linear_observations,session_events,steers_tests,rentals_tests}.rs</code>,
 <code>store/children_tests.rs</code>,
 <code>store/{native_usage_tests,rental_lifecycle_tests,test_fixture}.rs</code>,
-<code>store/{session,execution,pr_landing,opening,migration_runner,canonical_ids_tests}.rs</code>,
+<code>store/{session,execution,pr_landing,opening,migration_runner,migration_fixtures,migration_lifecycle_tests,opening_frontier_tests,canonical_ids_tests}.rs</code>,
+<code>store/sqlite/{linear_acceptance,planning_write}.rs</code>, <code>linear/acceptance.rs</code>,
 <code>harness/fact_writer.rs</code> and migration build/check/package scripts.</header>
 <main>
 <h1>Continue the existing design: finish the storage extraction.</h1>
@@ -35,17 +36,20 @@ The remaining implementation follows the existing ownership contract.</p>
 their values. Migration history includes both source paths. Full-manifest history
 projection and activity’s early stop remain. Admission, ownership, steer, rental
 and native-usage lifecycle tests now sit above SQL; prepared storage fixtures
-supply build and observer values. <strong>Pending:</strong> remaining title-repair
-and migration test splits, the storage
+supply build and observer values. Linear acceptance transactions now sit beside
+their private SQL helpers; async attribution remains above. Migration settings
+export and landing reconciliation remain application scenarios. Local title repair
+and Task-field persistence have separate prepared SQL checks. <strong>Pending:</strong>
+remaining mixed-test splits, the storage
 crate, its independent test build, and rebuild measurements.</p>
 <h2>Actions → concepts → APIs</h2>
 <table>
 <tr><th>Action / concept</th><th>Current checkout</th><th>Proposed extraction</th></tr>
 <tr><td>Open shell / consumed receipt</td><td>Storage-classified SQL, application launch</td><td>Move SQL owner unchanged; lost acknowledgment still consumes launch once</td></tr>
-<tr><td>Acquire Linear changes / saved evidence</td><td>Atomic observation and Work writes under storage</td><td>Storage owns transactions; acquisition remains above</td></tr>
+<tr><td>Acquire Linear changes / saved evidence</td><td><code>linear::acceptance</code> attributes requests; <code>sqlite::linear_acceptance</code> commits facts and Work together</td><td>Move the SQL owner with its private helpers; acquisition remains above</td></tr>
 <tr><td>Inspect context / tally</td><td><code>TurnContext::request/compacted</code>; writer interprets events</td><td>Move saved tally and arithmetic together; keep token counting above</td></tr>
 <tr><td>Build a worktree / migration identity</td><td>Both source paths contribute first-addition history</td><td>One SQL directory and catalogue generator; application supplies provenance</td></tr>
-<tr><td>Check continuity / fixture inputs</td><td>Several lifecycle splits built; title-repair and migration tests still mix owners</td><td>SQL tests beside helpers; application tests prepare inputs and use public operations</td></tr>
+<tr><td>Check continuity / fixture inputs</td><td>Migration lifecycle scenarios stay above; prepared SQL checks retain local title and field behavior</td><td>Finish remaining mixed fixtures; compile each crate’s tests independently</td></tr>
 </table>
 <h2>Proposed source contract</h2>
 <p class="proposed">Application acquisition and policy → synchronous storage →
@@ -63,7 +67,7 @@ crate’s manifest path. Generated schema fixtures follow the catalogue owner.</
 recommendation and uncertain-receipt handling remain application decisions;
 unsupported values never invent a launch or completion.</p>
 <h2>Normal → failure → recovery</h2>
-<p>A shipping edit should reuse storage; a Task-record edit rebuilds storage and
+<p><strong>Proposed, not measured:</strong> a shipping edit should reuse storage; a Task-record edit rebuilds storage and
 application. A fresh root should reuse unchanged libraries. Measure these three
 cases separately, including CPU, memory and cache receipts.</p>
 <p>A shell’s lost acknowledgment leaves its consumed receipt discoverable.
@@ -78,10 +82,12 @@ An interrupted upgrade keeps its transaction, export fences and existing refusal
 policy. A migration move retains ordered SQL bytes and staging age; refreshing
 only origin/main updates the catalogue. No new recovery lifecycle is proposed.</p>
 <h2>What to show next</h2>
-<p>Compile storage tests independently before compiling application tests with the
+<p>Finish the mixed fixtures and extract storage with its schema and catalogue.
+Compile storage tests independently before compiling application tests with the
 dev-only inspection feature. This exposes misplaced acquisition before feature
 unification can hide it. Then run continuity, history and migration checks and
-measure the three rebuild cases. Root upkeep, whole-application cost, interactive
+measure the three rebuild cases. Root upkeep still needs a shared-daemon owner;
+the private refresh probe establishes no live integration. Whole-application cost, interactive
 demo and review remain open.</p>
 <h2>Review questions</h2>
 <ol>

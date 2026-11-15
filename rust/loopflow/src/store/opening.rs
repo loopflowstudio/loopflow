@@ -120,3 +120,7 @@ mod tests {
         assert_eq!(reader.get_provider_token("linear").unwrap(), Some(token));
     }
 }
+
+#[cfg(test)]
+#[path = "opening_frontier_tests.rs"]
+mod frontier_tests;

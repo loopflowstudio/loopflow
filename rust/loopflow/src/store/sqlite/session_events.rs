@@ -870,7 +870,7 @@ mod tests {
     use crate::process::attachment;
     use crate::store::sessions::history_tests::record_captured_start;
 
-    use crate::session::SessionEventKind;
+    use crate::store::session::SessionEventKind;
     use crate::store::sqlite::SqliteStore;
     use crate::store::RecordingGap;
     use serde_json::json;
@@ -879,7 +879,10 @@ mod tests {
     fn native_event_preparation_stays_bounded_and_keeps_identity_checks() {
         let home = tempfile::tempdir().unwrap();
         let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
-        store.test_session("conversation", &crate::session_record::new_artifact_key());
+        store.test_session(
+            "conversation",
+            &crate::store::session_record::new_artifact_key(),
+        );
         {
             let conn = store.conn.lock().unwrap();
             // Count the real writer's compiled program, including all triggers.
@@ -978,7 +981,7 @@ mod tests {
     fn a_recovered_gap_enters_the_sessions_history_once() {
         let home = tempfile::tempdir().unwrap();
         let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
-        store.test_session("session", &crate::session_record::new_artifact_key());
+        store.test_session("session", &crate::store::session_record::new_artifact_key());
         let marker = home.path().join("thread.store-gap");
         let gap = || RecordingGap::marked(marker.clone());
         let observations = || -> i64 {
@@ -1028,8 +1031,10 @@ mod tests {
     fn delayed_origin_preserves_pre_bind_assignment_and_rejects_conflicting_repeat() {
         let home = tempfile::tempdir().unwrap();
         let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
-        let session =
-            store.test_session("conversation", &crate::session_record::new_artifact_key());
+        let session = store.test_session(
+            "conversation",
+            &crate::store::session_record::new_artifact_key(),
+        );
         let process = loopflow_model::id::LfProcessId::new();
         let wave = loopflow_model::id::WaveId::new();
         let project = crate::store::work::project::ProjectId::new();
@@ -1113,15 +1118,16 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("conversation", "run_00000000000000000000000000000001");
-        let input =
-            crate::session_record::parse_artifact_key("run_00000000000000000000000000000001")
-                .unwrap();
+        let input = crate::store::session_record::parse_artifact_key(
+            "run_00000000000000000000000000000001",
+        )
+        .unwrap();
         let session = store.session("conversation").unwrap().unwrap();
         let retain = |source: &str, evidence: serde_json::Value| {
             store
                 .retain_session_observation(
                     &session,
-                    &crate::session::SessionObservation {
+                    &crate::store::session::SessionObservation {
                         artifact_key: input.clone(),
                         source: source.into(),
                         observed_at: 1,
@@ -1205,9 +1211,10 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("conversation", "run_00000000000000000000000000000001");
-        let input =
-            crate::session_record::parse_artifact_key("run_00000000000000000000000000000001")
-                .unwrap();
+        let input = crate::store::session_record::parse_artifact_key(
+            "run_00000000000000000000000000000001",
+        )
+        .unwrap();
         let session = store.session("conversation").unwrap().unwrap();
         // Retained out of order: the later silence is imported first.
         for (seq, since, until) in [(12, 5_000, 6_000), (3, 100, 900)] {
@@ -1215,7 +1222,7 @@ mod tests {
             store
                 .retain_session_observation(
                     &session,
-                    &crate::session::SessionObservation {
+                    &crate::store::session::SessionObservation {
                         artifact_key: input.clone(),
                         source: source.clone(),
                         observed_at: until,
@@ -1243,8 +1250,10 @@ mod tests {
             let home = tempfile::tempdir().unwrap();
             let store =
                 crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
-            let session =
-                store.test_session("conversation", &crate::session_record::new_artifact_key());
+            let session = store.test_session(
+                "conversation",
+                &crate::store::session_record::new_artifact_key(),
+            );
             let first = loopflow_model::id::LfProcessId::new();
             let second = loopflow_model::id::LfProcessId::new();
             {
@@ -1368,7 +1377,7 @@ mod tests {
             ("task-run", None, "interrupted", true),
             ("task-failed-run", None, "failed", true),
         ] {
-            let session = store.test_session(id, &crate::session_record::new_artifact_key());
+            let session = store.test_session(id, &crate::store::session_record::new_artifact_key());
             let process = loopflow_model::id::LfProcessId::new();
             {
                 let conn = store.conn.lock().unwrap();
@@ -1410,7 +1419,7 @@ mod tests {
         }
         assert!(!crate::store::session_projection::session_summaries(
             &store,
-            &crate::session::SessionFilter::default(),
+            &crate::store::session::SessionFilter::default(),
             0
         )
         .unwrap()
@@ -1459,7 +1468,10 @@ mod tests {
     fn completed_turn_does_not_complete_the_conversation() {
         let home = tempfile::tempdir().unwrap();
         let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
-        let session = store.test_session("unfinished", &crate::session_record::new_artifact_key());
+        let session = store.test_session(
+            "unfinished",
+            &crate::store::session_record::new_artifact_key(),
+        );
         for kind in [SessionEventKind::Started, SessionEventKind::Completed] {
             store
                 .record_session_event(
@@ -1474,7 +1486,7 @@ mod tests {
         for _ in 0..2 {
             let rows = crate::store::session_projection::session_summaries(
                 &store,
-                &crate::session::SessionFilter::default(),
+                &crate::store::session::SessionFilter::default(),
                 0,
             )
             .unwrap();
@@ -1488,8 +1500,10 @@ mod tests {
     fn stopped_turn_and_stale_attachment_cannot_retire_a_resumed_conversation() {
         let home = tempfile::tempdir().unwrap();
         let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
-        let session =
-            store.test_session("conversation", &crate::session_record::new_artifact_key());
+        let session = store.test_session(
+            "conversation",
+            &crate::store::session_record::new_artifact_key(),
+        );
         let first = loopflow_model::id::LfProcessId::new();
         let second = loopflow_model::id::LfProcessId::new();
         for process in [&first, &second] {
@@ -1648,7 +1662,10 @@ mod tests {
     fn a_second_usage_receipt_for_a_turn_conflicts() {
         let home = tempfile::tempdir().unwrap();
         let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
-        store.test_session("conversation", &crate::session_record::new_artifact_key());
+        store.test_session(
+            "conversation",
+            &crate::store::session_record::new_artifact_key(),
+        );
         let usage = |total: u64| {
             let counts = json!({"inputTokens":total,"outputTokens":0});
             store.record_session_event(

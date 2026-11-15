@@ -41,9 +41,8 @@ Earlier direction, retained:
 Jack Heart:
 > “this is meant for deskto”
 > “it takes like >10 seconds and there are a lot of intermediate states”
-> “another thing i will add is that completing a task should make it disappear immediately”
-> “can we talk about what are the fundamental causes of so many intermediate states and non-immediate reactivity?”
-> “is it about slow sql? insufficient reactive UI archtiecture?”
+
+Other quotes: `desktop-reactivity-feedback.md`.
 
 The LOO-904 screenshot (not available here) was described as Reading workflow,
 Restoring workspace, Not started/Start, and Conversation change unconfirmed.
@@ -237,11 +236,7 @@ only; SQLite commits precede rewrites.
 Still remove, with their consumers:
 
 - `ServerClient.subscribe`'s `RawJSON`→`Data` erasure and attribution-less
-  `LineSubscription.lines` payload. Replace with receiving-link attribution
-  through every raw/line/WorkFrame consumer and detached decoder. Keep exact
-  bytes, queued baselines, resume/checkpoints, scope cancellation and guarded
-  resource reads; CLI inventory without a negotiated link supplies no external
-  revalidation. Keep attribution outside wire stamps.
+  `LineSubscription.lines` payload (replacement: Persisted normalization section).
 
 - Desktop `TaskRunDraft.phase`, other mutation refresh barriers
   (`performTaskAction`) and bind replacement bookkeeping (`replaceSession`,
@@ -335,12 +330,8 @@ Earlier handoff and reordered-reading detail:
 
 ### Query destinations and leases
 
-Built at `6e944e73b5a` (details in that commit's plan); current behavior is under
-Current implementation cut. Two-client closed-query convergence is unexercised.
-
-Earlier cut ownership, deletions and checks:
-`9fbc729a63b4eb6286159bcfa04090a68f6a9388:scratch/instant-task-session.md`.
-Claim, Wave/Dashboard rename and other mutations remain unmigrated.
+Built at `6e944e73b5a`; earlier ownership/checks at `9fbc729a63`. Claim,
+Wave/Dashboard rename and other mutations remain unmigrated.
 
 ### Why Move cannot use the current reducer
 
@@ -446,23 +437,15 @@ Proposed usage text for both READMEs after acceptance:
 > change, leaving later edits and navigation alone. Incomplete cached destinations
 > remain visibly incomplete until their missing data arrives.
 
-No builtin skill needs a new interaction rule; its existing save/recover semantics
-remain. Keep shipped README claims limited to built behavior until this cut passes.
-
-### External-observation counterexample · 2026-11-15
-
-`process_exit_changes_selection_without_advancing_sqlite_provenance` establishes
-that activity and order can change without SQLite revisions. The Review direction
-below resolves this with captured observations. Original investigation and teardown
-checks: `0883b66cf08b145df0cd462a9c8dca06b0f3e15a:scratch/instant-task-session.md`
-(External-observation counterexample).
+No builtin skill changes; shipped READMEs claim only built behavior until acceptance.
 
 ### Review direction: one observation source, independent facts · 2026-11-15
 
-Headless concept review against `5231746858`. This resolves the engineering gap
-above, not the three independent product questions. Source/capture primitives and
-wire transport are built in this cut; field declarations and normalized persisted
-facts remain unbuilt. The experience stays the same: a Task whose provider exits stops looking Busy in every
+Headless concept review against `5231746858`. It resolves
+`process_exit_changes_selection_without_advancing_sqlite_provenance` (activity and
+order change without SQLite revisions; investigation at `0883b66cf0`), not the
+three product questions. Source/capture, field declarations
+and SQL-only persisted normalization are built (sections below). The experience stays the same: a Task whose provider exits stops looking Busy in every
 cached view; missing activity does not undo an already incorporated Move. A
 Machine restart keeps conversations and saved changes, while live status awaits
 that Machine's new observations.
@@ -609,16 +592,13 @@ the other as a coherent Machine snapshot. Repeat reordered and after offline
 restart on both hosts. Receipt delivery remains unresolved until its own recovery
 answers; field incorporation never authorizes a resend or changes navigation.
 
-Typed-field cut (`f9a8da8ae9`): activity conservatively declares the repository
-Session read's consumed set; narrowing it keeps the contract. The transient union setter
+Typed-field cut (`f9a8da8ae9`): activity declares the repository Session read's
+consumed set. The transient union setter
 (`WorkMembershipPlan.Facts.states`) clears support and repeats Rust's
 `SelectionState::is_activity` split as a literal Swift set; both go with the
 state-only reducer. Wire values alone do not complete normalization acceptance.
 
-Prior typed-field checks and 10k query plans:
-`0883b66cf08b145df0cd462a9c8dca06b0f3e15a:scratch/instant-task-session.md`
-(Concept review: fields carry their own support). Native latency is unmeasured;
-the nextest LEAK above remains gate work.
+Prior typed-field checks and 10k query plans: `0883b66cf0` (this section).
 
 ### Persisted normalization and receiving-link gap · 2026-11-15
 
@@ -642,19 +622,10 @@ never borrows the ambient connection to normalize captured activity. Existing
 query rendering remains unchanged, and external normalized values are unbuilt
 in live consumers. Direct owner tests supply an explicit receiving connection.
 
-Revised prerequisite: carry receiving-link attribution beside raw bytes through
-the existing subscription/line/WorkFrame transports and detached decoding, then
-compare that attribution to the Machine owner's current generation inside the
-client owner. Keep it outside encoded stamps and persisted Machine revisions.
-Unattributed CLI/cache bodies cannot revalidate external values. Test buffered A
-→ disconnect → same-source B welcome → consume A → consume B on both hosts;
-only B can establish current external coverage. Keep SQL-only incorporation and
-original request recovery independent. Then finish derived-answer dependencies,
-field-targeted effects and dynamic membership/Move with the predecessor deletion
-cut. No product judgment is missing; this changes the engineering order.
-
-**Concept-review refinement: attribution belongs to the reading, not the
-subscription.** Carry one local envelope containing unchanged bytes and the
+**Next prerequisite: attribution belongs to the reading, not the
+subscription.** Then derived-answer dependencies, field-targeted effects
+(`WorkFieldFact.covers(_:CommitFence)` exists, test-only caller) and dynamic
+membership/Move with the predecessor deletion cut. Carry one local envelope containing unchanged bytes and the
 receiving link's Machine, generation and negotiated observation source. Construct
 it at `ServerSubscription.receive`, before yielding to a buffered stream. Preserve
 it through `ServerClient.subscribe`, `LineSubscription`, `WorkFrame`, Dashboard
@@ -765,8 +736,6 @@ backend-stage baseline exists. Raw files and earlier detail: `8b42a874db`,
 `bb936ac371` (`scratch/instant-task-session.md`).
 
 Implementation owns the baseline; demo owns native usability.
-
-Earlier checks: `57cb8a3a22`, `6e944e73b5a` (10k query), `85564c1f20`.
 
 ## Conversation review retained
 

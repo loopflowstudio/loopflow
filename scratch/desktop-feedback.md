@@ -16,8 +16,8 @@ Observed on November 14:
   finishes`. The receipt remains at `stopping`; absence of a live provider cannot
   safely authorize another reset.
 
-Remaining: finish focused Swift checks, publish for native review. Verify actual
-pane switching and initial Files population, plus notice context/dismissal in
+Remaining: native review of actual pane switching and initial Files population,
+plus notice context/dismissal in
 Light and Dark. Headless view inspection covers both color schemes; it does not
 establish mounted visual acceptance.
 - At 18:07 the Machine load average was 285; the active shared Swift compilation
@@ -31,3 +31,19 @@ Checks:
 - `scripts/test_desktop.sh --skip-build --filter 'TaskFilesTests|CreationSubmissionTests'`:
   41 tests passed; the optional display diagnostic was skipped. This includes
   Light/Dark retry and dismissal controls. Native walkthrough remains for review.
+
+## Duplicate connection labels
+
+Jack Heart supplied a second screenshot and asked: “another issue is what are
+these New Conversation things”. It shows the same transition explanation under
+TaskWorkflowBar and again inside Ghostty's connection bar. Both are app-owned.
+Remove the global duplicate and keep the terminal connection bar quiet for normal
+started/retained/resumed transitions. Forks, leaving a previous provider thread
+behind, and connection/input problems still need a notice.
+
+Checks for duplicate labels:
+- `swift build --build-tests --package-path swift`: passed.
+- `scripts/test_desktop.sh --skip-build --filter 'ServerConnectionTests|ProviderTransitionTests|CreationSubmissionTests'`:
+  20 tests passed. Normal ready connections have no banner; forks, replacement,
+  opening, read-only, reconnect, and failed-status paths remain covered.
+- Native Light/Dark walkthrough remains for review; the running app was not replaced.

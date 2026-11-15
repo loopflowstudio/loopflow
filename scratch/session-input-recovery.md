@@ -188,7 +188,9 @@ first Task open and 61 s on one Refresh, at load average 160–240; a sampled re
 did not hang.
 
 QA found that another viewer displaced Desktop into a failed pane; the competing-
-viewer iteration above repairs that lifecycle. Mounted confirmation remains for demo.
+viewer iteration (commit `765c7944d5`) repairs that lifecycle and its transport
+and Swift regressions pass. QA did not rerun live against it; mounted confirmation
+remains for demo.
 
 ## Remaining
 
@@ -217,10 +219,10 @@ needed. Next show the mounted competing-viewer walkthrough alongside crash/reope
 and focus recovery. Review page: `scratch/concept-review.html`.
 
 - Gate checks above (add `cargo test -p loopflow --lib a_held_task_conversation_without_a_view_offers_attach` and `scripts/test_desktop.sh --filter WarmPaneMountTests`), then the mounted demo walkthrough.
-- Overlap: #1861 (LOO-774, open at `07a21c5956`: transport endings,
-  `connection.rs`, `ServerConnection.swift`) and #1862 (LOO-811, open at
-  `753d49e7e2`: provider recovery, Session DTOs, pane presentation), unchanged as of
-  this pass. Whichever lands second rebases over the other. Out of scope: LOO-905
+- Overlap: #1861 (LOO-774, transport endings) merged 2026-11-15 and is this
+  branch's base (`a7244b4c2b`, merged in at `d622e6b574`). #1862 (LOO-811, open
+  at `3bec58a76f`: provider recovery, Session DTOs, pane presentation) still
+  overlaps; whichever lands second rebases over the other. Out of scope: LOO-905
   placeholders, LOO-906 startup speed, provider limits, account switching.
 
 Done when returning to the surviving Task permits editing and one new submission

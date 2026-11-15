@@ -830,8 +830,11 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
               !isHiddenOrHasHiddenAncestor,
               window?.occlusionState.contains(.visible) != false
         else { return }
-        ghostty_surface_draw(surface)
         if let keyToDraw {
+            // Ghostty owns its render thread and display link. Forcing a draw
+            // every frame serializes Metal work with scrolling on the main
+            // thread. Only the pending key measurement needs a synchronous draw.
+            ghostty_surface_draw(surface)
             self.keyToDraw = nil
             if case .session(let id, _) = terminal { Perf.agentInput("key_draw", session: id) }
             Perf.signposter.endInterval(Perf.terminalKeyToDraw, keyToDraw)
@@ -1054,6 +1057,16 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     override func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
         updateContentScale()
+    }
+
+    override func viewDidHide() {
+        super.viewDidHide()
+        updateFeedbackPreferences()
+    }
+
+    override func viewDidUnhide() {
+        super.viewDidUnhide()
+        updateFeedbackPreferences()
     }
 
     override func setFrameSize(_ newSize: NSSize) {
@@ -1519,6 +1532,9 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         if let applied = appliedFeedback, applied.surface == surface,
            applied.visible == visible, applied.reduceMotion == reduceMotion { return }
         appliedFeedback = (surface, visible, reduceMotion)
+        // Retained off-window Sessions keep their PTY and history, but must
+        // release the renderer's display link and interactive scheduling.
+        ghostty_surface_set_occlusion(surface, visible)
         ghostty_surface_set_feedback(surface, visible, reduceMotion)
     }
 

@@ -828,6 +828,11 @@ same local protocol, including Task files, diffs, Waves, Machine identity,
 Portfolio, saved panes, Task ownership and Graphs. Desktop links no Loopflow Rust
 library; GhosttyKit remains its native renderer.
 
+Ghostty owns terminal frame scheduling. Desktop forces a synchronous draw only
+for a pending key-to-draw measurement, rather than on every display tick.
+Hidden or detached retained surfaces pause rendering while their children and
+terminal history continue; showing them resumes the native renderer.
+
 The [server boundary](../docs/dev/server.md) puts registration and updates under
 installation. First connection obtains the selected helper; later connections
 only reconnect. CLI commands and served writes call the same Rust operations,

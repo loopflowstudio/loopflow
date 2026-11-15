@@ -1,5 +1,9 @@
 # Reversible implementation choices
 
+November 14, Jack Heart: “ok land it”. Continue the remaining delivery steps
+through merge and completion. Keep the PR's native-verification limits visible;
+the landing direction does not establish rendered or provider-input results.
+
 - LOO-905: reuse existing saved roadmap identity and live Task-list content;
   introduce no additional persistent title cache. Use Loading Task… when no
   readable identity exists during an initial read, and a generic Task unavailable

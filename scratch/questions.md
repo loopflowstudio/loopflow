@@ -1,5 +1,11 @@
 # Working assumptions
 
+- Headless engineering clarification, 2026-11-15: typed fields carry producer-declared
+  support; clients cannot split the invocation's opaque dependency bag. Invalid
+  observed activity must not stop incorporation of a separately supported parent
+  or lifecycle value. The next cut keeps field support and answer completeness
+  separate (`instant-task-session.md`, Concept review). No product answer inferred.
+
 - Headless engineering choice, 2026-11-15: OS process exit changes activity and
   ordering with unchanged SQLite revisions, so observed facts get a
   connection-established cache incarnation, a non-reusing cache clock, captured

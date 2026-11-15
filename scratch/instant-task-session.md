@@ -619,6 +619,43 @@ Checks · 2026-11-15 (`LF_*` cleared; broader acceptance belongs to gate):
 - `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings`: passed on the final source/capture cut.
 - `uv run python scripts/check_swift_multiplatform_boundaries.py`: passed. Desktop/shared and iOS builds passed; no native latency measurement.
 
+### Concept review: fields carry their own support · 2026-11-15
+
+Review against `86f99e3315`. The source/capture prerequisite is built; the next
+cut must export typed field support from Rust before clients normalize values.
+The current `stamp.observations` validates the whole invocation, while
+`WorkMembershipPlan.Facts` still combines selection states without per-field
+support. A query-wide dependency bag cannot tell Swift which inputs produced a
+parent, lifecycle or activity value. Do not infer that mapping from opaque fact
+IDs, trim the bag on the client, or treat null observation evidence as an empty
+validated set.
+
+The producer declares each field's complete SQLite and observation inputs,
+including the field's derivation identity so changed rules cannot share an old
+value's proof. Keep the existing invocation capture/answer reuse; record consumed
+support for typed outputs within that owner. SQL-only parent/lifecycle values
+can normalize independently when an unrelated observed input fails validation.
+A derived activity field with missing/invalid support remains last-known or
+unavailable; a validated empty external set is a different result. Both clients
+persist and consume this distinction in the existing SQLite owner. No second
+capture cache or client reconstruction of lifecycle rules.
+
+Add the failure/recovery counterexample: a reading contains a newer committed
+parent and activity whose dependency changes during capture. Incorporate the
+parent once, retain the prior activity as last-known, and make only answers that
+consume the missing activity incomplete. An unfiltered destination may still
+show the real cached Task; Busy membership, activity-based ordering and their
+counts cannot claim freshness. A later complete activity capture repairs those
+answers without reapplying Move or changing selection. Reordered old fields,
+restart and source replacement must retain the same separation on both hosts.
+
+Next implement: typed field wire support and fixtures → persisted normalization
+and incorporation → derived-answer coverage → dynamic membership and disconnected
+Move with deletion of the old reducer. Keep the proposed Move usage above;
+no new product vocabulary or builtin rule is needed. The three unanswered product
+choices remain independent of this cut. Native latency is still unmeasured.
+Review outcome: design changed — iterate to implement.
+
 ### Open product choices
 
 Unanswered, numbered in `scratch/concept-review.html`: (1) queue Abandon offline

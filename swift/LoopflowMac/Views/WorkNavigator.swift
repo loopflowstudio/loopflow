@@ -263,11 +263,11 @@ struct WorkNavigator: View {
             let fallback = found?.task.task.description ?? ""
             let current = status.preview(now: .now, fallback: fallback, sessions: sessions)
             if current.age == nil {
-                rowDetail(current, id: id, presentation: presentation, hasSummary: !fallback.isEmpty, slotHint: slotHint, found: found, status: status, selected: selected, hover: hover)
+                rowDetail(current, id: id, waitingForDetails: found == nil && presentation.context == nil, slotHint: slotHint, task: found?.task, status: status, selected: selected, hover: hover)
             } else {
                 TimelineView(.periodic(from: .now, by: 5)) { clock in
                     rowDetail(status.preview(now: clock.date, fallback: fallback, sessions: sessions),
-                              id: id, presentation: presentation, hasSummary: !fallback.isEmpty, slotHint: slotHint, found: found, status: status, selected: selected, hover: hover)
+                              id: id, waitingForDetails: found == nil && presentation.context == nil, slotHint: slotHint, task: found?.task, status: status, selected: selected, hover: hover)
                 }
             }
         }
@@ -302,18 +302,27 @@ struct WorkNavigator: View {
     }
 
     /// The preview line and metadata beneath a row's title.
-    private func rowDetail(_ preview: (text: String, help: String, age: String?), id: String, presentation: WorkModel.TaskPresentation, hasSummary: Bool, slotHint: String?, found: (wave: WaveRoadmap?, task: RoadmapTask)?,
+    private func rowDetail(_ preview: (text: String, help: String, age: String?), id: String,
+                           waitingForDetails: Bool, slotHint: String?, task: RoadmapTask?,
                            status: SessionProgramStatus, selected: Bool, hover: HoverFlag) -> some View {
-        let shipping = found?.task.shipping.map { "\($0.label) · \($0.reason)" }
+        let detail: (text: String, help: String)?
+        if let shipping = task?.shipping {
+            detail = ("\(shipping.label) · \(shipping.reason)", preview.help)
+        } else if task?.task.description.isEmpty == false || preview.age != nil {
+            detail = (preview.text, preview.help)
+        } else if waitingForDetails {
+            detail = ("Loading planning…", "Waiting for Task details")
+        } else {
+            detail = nil
+        }
         return VStack(alignment: .leading, spacing: 6) {
-            if shipping != nil || hasSummary || preview.age != nil || (found == nil && presentation.context == nil) {
-                Text(shipping ?? (hasSummary || preview.age != nil ? preview.text : "Loading planning…"))
+            if let detail {
+                Text(detail.text)
                     .font(Typography.code(11)).lineLimit(status.session?.availability == .available ? 2 : 1)
                     .foregroundStyle(selected ? palette.workSelectedSecondaryText : palette.textSecondary)
-                    .help(hasSummary || preview.age != nil ? preview.help : "Waiting for Task details")
-                    .allowsHitTesting(false)
+                    .help(detail.help).allowsHitTesting(false)
             }
-            TaskRowMetadata(id: id, task: found?.task, status: status, selected: selected,
+            TaskRowMetadata(id: id, task: task, status: status, selected: selected,
                 slotHint: slotHint,
                 showsSlotHint: model.navigation.showsSlotHints, hover: hover,
                 sourceAge: preview.age)

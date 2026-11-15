@@ -176,52 +176,43 @@ from headless test results; missing native observation is reported as unverified
 
 ## Built, remaining, checks
 
-### Built (branch head, checked against code November 14)
+### Surviving implementation
 
-Steps 1–5 of the chosen mechanism exist: `WorkModel.taskPresentation` derives
-row/title/breadcrumb identity from current record, scoped list/selection content
-and retained workspace titles; `WorkNavigator.taskRow` no longer renders raw IDs
-or "Summary · Planning unavailable"; list loading/failure feeds `workStatus`;
-Retry uses the model refresh owner; README startup wording updated.
+`WorkModel.taskPresentation` selects a current name before retained names, in
+source order: roadmap, Task subscription, retained selection, scoped Task list,
+selection plans, retained workspace. Each source supplies its own freshness;
+selection-only evidence says Updating. Metadata/actions use the first record
+from `taskRecords`, regardless of which source supplies the displayed name.
 
-### November 14 concept-review corrections (built in c403bc9a8b)
+`WorkNavigator` shares identity across rows and breadcrumbs, omits empty summaries,
+keeps shipping visible while updating, and offers Retry through `WorkModel.refresh`.
+Saved membership lasts only until the independent list answers, even if empty.
+README startup wording matches; no cache, DTO or read owner was added.
 
-The review's three defects are fixed in `WorkModel.taskPresentation` and
-`WorkNavigator.rowDetail`:
+The November 14 concept-review corrections are in c403bc9a8b and the subsequent
+subscription repair in 9c9c536019. Historical review: `scratch/concept-review.html`.
+The competing-record case now runs in `currentSubscriptionName`: absent/retained
+roadmap × both arrival orders, both Task keys, own-source failure, identical-row
+recovery and restored roadmap priority. `independentNameFreshness`,
+`currentSelectionName` and `emptyDescription` retain the other counterexamples.
 
-- Name freshness follows the source that supplies the name. Current roadmap,
-  Task-list and selection-plan names come first, in that order, ahead of retained
-  names. A failure in another source stays in `workStatus` and does not mark
-  the name. Saved identity says Updating; a failed source says Last known.
-- A loaded Task with an empty description shows no preview. Only a title-only
-  member with no record shows "Loading planning…".
-- Shipping context renders whatever the identity context is, Updating included.
-
-`swift/README.md` matches these distinctions. Counterexample tests:
-`independentNameFreshness`, `currentSelectionName`, `emptyDescription`
-(`WorkModelTests.swift`). No cache or read owner was added, and no product
-choice is open.
-
-Each record source carries its own reading's context. `WorkModel.taskRecords`
-returns every record naming the Task in authority order (roadmap, Task
-subscription, retained selection), each with its own freshness; `taskEvidence`
-(and so `task(id:)` metadata/actions) takes the first, unchanged.
-`taskPresentation` weighs every record, then scoped Task-list and selection-plan
-content, and picks the first current name before any retained one. A healthy
-Task subscription therefore names the Task while a retained roadmap row says
-Last known or a saved roadmap says Updating; a healthy roadmap still wins when
-it supplies the name. Retained selection-only evidence says Updating rather than
-inheriting an unrelated roadmap error.
-
-Counterexample tests: `currentSubscriptionName` (no roadmap row) and
-`subscriptionOutranksRetainedRoadmap` (differently named last-good roadmap row,
-both arrival orders, planning and runtime Work keys, Task failure → Last known,
-identical row → current, healthy roadmap → its name). When both record readings
-fail, the roadmap's older name shows as Last known; readable, not necessarily
-the newest. No cache, DTO, persistence or subscription was added; no product
-choice is open.
+Compression removes the single-use `taskEvidence` wrapper and the synthetic
+array-valued `WorkReading`; display selection only needs plans and their error.
+One parameterized subscription test replaces duplicate feed/fixture setup without
+losing either case. Row detail now chooses optional text/help once and accepts
+only the Task and loading flag it uses, rather than Wave/presentation/summary data.
+No remaining deletion targets; the exclusions in Delete above still apply.
 
 ### Check results
+
+- November 14 compress: `swift build --build-tests --package-path swift` — passed
+  (307.01 s, existing warnings); no Rust code changed.
+- `scripts/test_desktop.sh --skip-build --filter 'TaskPlanningReadabilityTests|TaskRowMetadataTests|WorkNavigationTests/dashboardSidebarHeader'`
+  — 25 tests in 3 suites passed (9.342 s), WindowServer denied; covers the
+  simplified candidate selection, subscription cases and production row detail.
+- Compress: `uv run python scripts/check_architecture.py` and
+  `uv run python scripts/check_swift_multiplatform_boundaries.py` — passed;
+  `git diff --check` — passed. Gate retains broader checks and demo native checks.
 
 - November 14 concept-review continuation: `scripts/test_desktop.sh --skip-build --filter TaskPlanningReadabilityTests`
   — 13 tests passed (18.970 s), WindowServer denied. No code changed in this

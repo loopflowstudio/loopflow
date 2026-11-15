@@ -2196,15 +2196,13 @@ final class WorkModel {
         var candidates = records.map {
             TaskPresentation(title: $0.task.task.name, identifier: $0.task.task.identifier, context: $0.context)
         }
-        let listSource: WorkReading<[WorkViewPlan]> = switch taskListReading {
-        case .loading: .loading
-        case .available(let plan): .available([plan])
-        case .unavailable(let plan, let reason): .unavailable(lastGood: plan.map { [$0] }, reason: reason)
-        }
-        let sources = [listSource, selectionPlans]
+        let sources = [
+            (plans: taskListReading.value.map { [$0] } ?? [], error: taskListReading.errorMessage),
+            (plans: selectionPlans.value ?? [], error: selectionPlans.errorMessage),
+        ]
         var missingFacts = false
         for source in sources {
-            let contents = (source.value ?? []).lazy
+            let contents = source.plans.lazy
                 .filter { repository == nil || $0.repository == repository }
                 .flatMap(\.contents).filter {
                     $0.work.kind == .task && ($0.work.id == workID || $0.work.id == id)
@@ -2214,7 +2212,7 @@ final class WorkModel {
                 $0.title != $0.work.id && !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             }) {
                 candidates.append(TaskPresentation(title: member.title, identifier: member.identifier,
-                    context: source.errorMessage != nil ? "Last known" : nil))
+                    context: source.error != nil ? "Last known" : nil))
             }
         }
         // Prefer current identity in source order before falling back to retained identity.
@@ -2855,16 +2853,11 @@ final class WorkModel {
     }
 
     func task(id: String) -> (wave: WaveRoadmap?, task: RoadmapTask)? {
-        guard let evidence = taskEvidence(id: id) else { return nil }
+        guard let evidence = taskRecords(id: id).first else { return nil }
         return (evidence.wave, evidence.task)
     }
 
     private typealias TaskRecord = (wave: WaveRoadmap?, task: RoadmapTask, context: String?)
-
-    /// Metadata and actions use the first record; display identity weighs each by its own reading.
-    private func taskEvidence(id: String) -> TaskRecord? {
-        taskRecords(id: id).first
-    }
 
     /// Every record naming the Task, in authority order (roadmap, subscription, retained selection),
     /// each with its own reading's freshness.

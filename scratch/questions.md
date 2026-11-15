@@ -24,3 +24,5 @@
 - 2026-11-14 implement assumptions: next/previous change is `]`/`[` (Files pane focused) plus toolbar arrows; ⌥⌘arrows stay pane focus. **Ask in conversation** types a one-line `path:Lx-y (side, revision)` reference without the code, because terminal input can't carry a newline without submitting. Side by side falls back to unified under 640 pt. Moves are detected only between a pure removal and a pure addition in one file.
 
 - 2026-11-14 tree assumptions: tree files open in Read (Diff is one picker away); badges are `M` changed, `R` renamed, `U` untracked, `•` folder holding changes, since `lf task changes` carries no added/deleted kind; ↓ from the search field moves into the tree; search stays over loaded entries plus changed paths (no server search).
+
+- 2026-11-14 one diff reader: the comparison's base branch name comes from GitHub's `baseRefName` once the PR is read; before that (no PR, `gh` offline) it reads "the Task's base". `lf task changes` carries no branch name; adding one (what `lf pr open` would target) is a Rust DTO change left out of this pass.

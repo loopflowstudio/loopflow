@@ -444,12 +444,8 @@ struct TaskFilesView: View {
         if store.selection == nil {
             ContentUnavailableView("Select a file", systemImage: "doc.text")
         } else if store.mode == .diff {
-            if let diff = store.diff {
-                if diff.binary { ContentUnavailableView("Binary diff", systemImage: "doc") }
-                else {
-                    TaskPatchView(patch: diff.patch, lines: store.patchLines)
-                    if diff.truncated { Text("Diff truncated at 1 MB").font(.caption) }
-                }
+            if let review = store.fileReview {
+                TaskFileDiffView(store: store, review: review, addToConversation: addToConversation)
             } else if let reason = store.changesError {
                 ContentUnavailableView("Comparison unavailable", systemImage: "doc", description: Text(reason))
             } else { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
@@ -599,54 +595,45 @@ private struct TaskDocumentView: NSViewRepresentable {
     }
 }
 
-private struct TaskPatchView: NSViewRepresentable {
-    let patch: String
-    let lines: [TaskPatchLine]
+/// Files' Diff mode: one file through the review stream, compared with the
+/// unsaved draft while there is one.
+private struct TaskFileDiffView: View {
+    @Bindable var store: TaskFilesStore
+    let review: TaskFilesStore.FileReview
+    let addToConversation: ((String) -> Void)?
     @Environment(\.palette) private var palette
-    func makeNSView(context: Context) -> NSScrollView {
-        let scroll = NSScrollView()
-        let text = TaskPatchTextView(usingTextLayoutManager: true)
-        text.isEditable = false
-        text.isRichText = false
-        text.usesFindBar = true
-        text.isVerticallyResizable = true
-        text.autoresizingMask = [.width]
-        text.textContainer?.widthTracksTextView = true
-        text.textContainerInset = NSSize(width: 12, height: 12)
-        scroll.hasVerticalScroller = true
-        scroll.documentView = text
-        return scroll
-    }
-    func updateNSView(_ scroll: NSScrollView, context: Context) {
-        guard let text = scroll.documentView as? TaskPatchTextView else { return }
-        text.update(patch: patch, lines: lines, palette: palette)
-        scroll.backgroundColor = NSColor(palette.background)
-    }
-}
+    @State private var width: CGFloat = 0
 
-final class TaskPatchTextView: NSTextView {
-    private var renderedPalette: PaletteDefinition?
-    private var renderedLines: [TaskPatchLine] = []
-
-    func update(patch: String, lines: [TaskPatchLine], palette: LoopflowPalette) {
-        let display = patch.isEmpty ? "No textual changes." : patch
-        guard string != display || renderedPalette != palette.definition || renderedLines != lines else { return }
-        if string != display { string = display }
-        let storage = textStorage
-        storage?.beginEditing()
-        storage?.setAttributes([
-            .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular),
-            .foregroundColor: NSColor(palette.text),
-        ], range: NSRange(location: 0, length: (display as NSString).length))
-        for line in lines {
-            storage?.addAttribute(.backgroundColor,
-                                  value: NSColor(line.added ? palette.successTone.fill : palette.failureTone.fill),
-                                  range: line.range)
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Text((store.comparisonDescription ?? store.comparison.title) + (review.draft ? " · unsaved draft" : ""))
+                    .font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
+                    .lineLimit(1).truncationMode(.middle)
+                    .accessibilityIdentifier("files-diff-comparison")
+                Spacer(minLength: 4)
+                ReviewLayoutPicker(store: store, width: width)
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 10)
+            .frame(height: TaskFileChrome.headerHeight)
+            Divider()
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    if review.truncated { ReviewNotice(text: "Diff truncated at 1 MB") }
+                    if review.diff.files.isEmpty {
+                        ReviewNotice(text: "No changes in \(review.path)")
+                    }
+                    ReviewStream(store: store, files: review.diff.files,
+                                 split: store.reviewLayout == .split && width >= ReviewLayoutPicker.splitWidth)
+                }
+            }
+            .onGeometryChange(for: CGFloat.self, of: \.size.width) { width = $0 }
+            .accessibilityIdentifier("files-diff")
+            if let selection = store.reviewSelection, review.diff.file(selection.path) != nil {
+                ReviewSelectionBar(store: store, selection: selection, diff: review.diff, addToConversation: addToConversation)
+            }
         }
-        storage?.endEditing()
-        applyPalette(palette)
-        renderedPalette = palette.definition
-        renderedLines = lines
     }
 }
 

@@ -248,27 +248,6 @@ final class TaskFileTextView: NSTextView {
     }
 }
 
-struct TaskPatchLine: Equatable, Sendable {
-    let range: NSRange
-    let added: Bool
-
-    /// Added and removed lines inside hunks. File headers such as `+++ b/path` stay plain.
-    static func changes(in patch: String) -> [TaskPatchLine] {
-        var lines: [TaskPatchLine] = []
-        var inHunk = false
-        let source = patch as NSString
-        source.enumerateSubstrings(in: NSRange(location: 0, length: source.length), options: .byLines) { line, range, _, _ in
-            guard let line else { return }
-            switch PatchLineKind.next(line, inHunk: &inHunk) {
-            case .added: lines.append(TaskPatchLine(range: range, added: true))
-            case .removed: lines.append(TaskPatchLine(range: range, added: false))
-            case .header, .hunk, .context: break
-            }
-        }
-        return lines
-    }
-}
-
 @MainActor
 @Observable
 final class TaskFilesStore {
@@ -536,8 +515,8 @@ final class TaskFilesStore {
     private(set) var isRefreshingChanges = false
     private(set) var changesError: String?
     private(set) var documents: [String: TaskFileDocument] = [:]
-    private(set) var diff: TaskDiffSnapshot?
-    private(set) var patchLines: [TaskPatchLine] = []
+    /// Files' Diff mode: the selected file through the review stream.
+    private(set) var fileReview: FileReview?
     private(set) var error: String?
     private var refreshGeneration = 0
     private var fileGeneration = 0
@@ -771,7 +750,7 @@ final class TaskFilesStore {
         } catch {
             guard !Task.isCancelled, generation == refreshGeneration else { return }
             changes = nil
-            diff = nil
+            fileReview = nil
             changesError = error.localizedDescription
         }
     }
@@ -849,35 +828,48 @@ final class TaskFilesStore {
         return stop
     }
 
-    /// Which comparison the stream shows, for a conversation reference.
-    var reviewRevision: String {
-        let head = changes.map { String($0.headCommit.prefix(10)) } ?? "unknown head"
-        return comparison.head == nil ? "working tree on \(head)" : "\(comparison.title) at \(head)"
+    /// What the stream compares, named as the PR would: its base branch and
+    /// commit, then the head. Footer and conversation references share it.
+    var comparisonDescription: String? {
+        guard let changes else { return nil }
+        let branch = pullRequest.pullRequest?.baseRefName ?? "the Task's base"
+        let compared = "Compared with \(branch) at \(changes.baseCommit.prefix(10))"
+        return comparison.head == nil ? "\(compared) · includes uncommitted changes"
+            : "\(compared) · \(comparison.title) at \(changes.headCommit.prefix(10))"
     }
 
+    // MARK: One file
+
+    struct FileReview: Equatable {
+        let path: String
+        let baseCommit: String
+        let diff: ReviewDiff
+        let truncated: Bool
+        /// Compared with the unsaved draft rather than the file on disk.
+        let draft: Bool
+    }
+
+    /// The selected file's diff. A dirty draft is compared as typed, debounced.
     func loadDiff() async {
         if changes == nil { await refreshChanges() }
         diffGeneration += 1
         let generation = diffGeneration
-        // Keep the displayed patch for the same document while its replacement loads.
-        if diff?.path != selection || diff?.baseCommit != changes?.baseCommit { diff = nil }
+        // Keep the displayed diff for the same file while its replacement loads.
+        if fileReview?.path != selection || fileReview?.baseCommit != changes?.baseCommit { fileReview = nil }
         guard let path = selection, let base = changes?.baseCommit else { return }
         observation?.watch(path)
         let document = selectedDocument
         let version = document?.editVersion
         let target = comparison
+        let draft = target.head == nil && document?.dirty == true ? document?.text : nil
         do {
             // Debounce edits; identity checks also protect transports that finish after cancellation.
             if document?.dirty == true { try await Task.sleep(for: .milliseconds(180)) }
-            let next = try await query.taskDiff(issue: issue, path: path, base: base, head: target.head,
-                                               draft: target.head == nil && document?.dirty == true ? document?.text : nil)
-            let lines = await Task.detached(priority: .userInitiated) {
-                TaskPatchLine.changes(in: next.patch)
-            }.value
+            let next = try await query.taskDiff(issue: issue, path: path, base: base, head: target.head, draft: draft)
+            let parsed = await Task.detached(priority: .userInitiated) { ReviewDiff.parse(next.patch) }.value
             guard !Task.isCancelled, generation == diffGeneration, selection == path, changes?.baseCommit == base, comparison == target,
                   selectedDocument?.editVersion == version else { return }
-            patchLines = lines
-            diff = next
+            fileReview = FileReview(path: path, baseCommit: base, diff: parsed, truncated: next.truncated, draft: draft != nil)
             changesError = nil
         } catch {
             guard !Task.isCancelled, generation == diffGeneration, selection == path, changes?.baseCommit == base, comparison == target else { return }

@@ -23,35 +23,22 @@ What pursue builds for the Changes page:
 
 Sections below from October (PR card, Files, Brief) still stand as the plan unless they conflict with this section; the October line "No GitHub patch renderer remains" stands: the stream renders the local PR-equivalent diff.
 
-## Concept review — November 14 (next implement direction)
+## Concept review — November 14
 
-Against the built change. Page: `scratch/concept-review.html`.
+Page: `scratch/concept-review.html`. Both findings are built:
 
-- **One diff reader.** Files' `Diff` mode still renders its own patch
-  (`TaskPatchView`, `TaskPatchTextView`, `TaskPatchLine`, `patchLines`), and
-  Changes' file menu "Open in Files" sends a file there. That is the "second
-  Diff renderer" the forbidden outcomes rule out, and it lacks the five
-  priorities. Direction: Files' Diff mode shows that one file through the
-  review stream (`ReviewDiff` of `lf task diff <path>`, same rows, layout
-  toggle, word emphasis, moves, selection → Ask), keeping its one ability the
-  stream lacks: diffing the unsaved draft (`draft:` on `taskDiff`, 180 ms
-  debounce). Delete `TaskPatchView`, `TaskPatchTextView`, `TaskPatchLine`,
-  `patchLines`. "Open in Files" from Changes keeps the file and mode.
-- **Name the comparison as the PR would.** The footer reads
-  `Working tree · parent <sha>`; "parent" is the `lf task changes --base`
-  selector (the Task's recorded base commit), and in a stacked Task reads as
-  the parent Task. Show what `lf pr open` would compare: `Compared with
-  <base branch> at <sha> · includes uncommitted changes` when the head is the
-  working tree. The `Ask` reference's revision string follows the same words.
-- **Keep, no change:** `TaskDelivery` as one derived value (no stored state);
-  `CheckoutTree` as plain state on `TaskFilesStore`; the `details` action's
-  three pages.
+- **One diff reader.** `ReviewStream` (`Views/ReviewStreamView.swift`) renders
+  Changes' whole comparison and Files' Diff mode (`TaskFileDiffView`, one file
+  from `lf task diff <path>`, draft included with the 180 ms debounce). Same
+  rows, layout toggle, word emphasis, moves, selection → Copy/Ask. The text
+  patch renderer is deleted.
+- **Comparison named as the PR would.** Footer, Files' Diff header and the Ask
+  reference read `Compared with <base branch> at <sha> · includes uncommitted
+  changes`; the branch is GitHub's `baseRefName` once a PR is read, else
+  "the Task's base" (see `scratch/questions.md`).
 - **Noted, not this Task:** a `.changes(comparison:)` browser tab and the Files
-  tool's Changes page are two representations of one view. Merging them
+  tool's Changes page are two representations of one view; merging them
   changes the persisted `WorkBrowserTab` shape, which LOO-497/416 own.
-
-No open product choice: both changes follow from "B review stream", the
-five priorities and the forbidden outcomes.
 
 ## How the direction was chosen — November 14
 
@@ -74,10 +61,11 @@ Built (one PR, Swift + one Rust routing line):
 
 Remaining:
 
-- Moves inside mixed change runs; shortcut for Ask (none yet).
+- Moves inside mixed change runs; shortcut for Ask (none yet); `]`/`[` stepping inside Files' Diff mode (Changes only).
 - Demo on a real Task: long brief, no-PR Task, offline `gh`, large patch performance of the LazyVStack stream, a `node_modules`-scale folder.
 
 Compress: `test_desktop.sh --filter 'TaskFilesTests|RegistryQueryTests'` → 54 passed.
+One diff reader: `scripts/test_desktop.sh --filter 'TaskFilesTests|ReviewDiffTests|PullRequestTests|ThemeTests'` → 62 passed (incl. `diffModeComparesTheUnsavedDraftInTheReviewStream`).
 Checks: `scripts/test_desktop.sh --filter 'TaskFilesTests|ReviewDiffTests|TaskBriefTests|PullRequestTests|DesktopPaneControlTests|DTOFixtureTests|WorkDestinationTests|DesktopPerformanceFixtureTests|RegistryQueryTests'` → 222 run, then `TaskFilesTests` 33 passed; `ServerProtocolTests` 20 passed. `cargo nextest -p loopflow --lib 'test(server::schema::tests::) | test(lf::commands::read::)'` → 11 passed (schema fixture regenerated). Gate runs clippy, `documented_commands::`, golden.
 
 ## Demo

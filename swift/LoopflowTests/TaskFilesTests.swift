@@ -730,14 +730,6 @@ struct TaskFilesTests {
         #expect(fixture.file.recoveries.first?.changed == true)
     }
 
-    @Test func patchTintsHunkChangesAndLeavesFileHeadersPlain() {
-        let patch = "diff --git a/old.txt b/new.txt\n--- a/old.txt\n+++ b/new.txt\n@@ -1 +1 @@\n-- old\n+draft\n same\n"
-        let lines = TaskPatchLine.changes(in: patch)
-        let source = patch as NSString
-        #expect(lines.map { source.substring(with: $0.range) } == ["-- old", "+draft"])
-        #expect(lines.map(\.added) == [false, true])
-    }
-
     @Test func lateFileReadCannotReplaceAnotherSelection() async throws {
         let source = HeldTaskFileRead()
         let store = TaskFilesStore(issue: "TEST-1", cwd: "/fixture", query: RegistryQuery { args, _ in
@@ -762,7 +754,8 @@ struct TaskFilesTests {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let file = directory.appendingPathComponent("new.txt")
-        try Data("+edit 1\n".utf8).write(to: file)
+        let header = "diff --git a/new.txt b/new.txt\n--- a/new.txt\n+++ b/new.txt\n@@ -1 +1 @@\n-old\n"
+        try Data((header + "+edit 1\n").utf8).write(to: file)
         let fixture = try Data(contentsOf: URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("tests/fixtures/dto/task_files.json"))
@@ -777,11 +770,52 @@ struct TaskFilesTests {
         store.observeFiles()
         await store.refresh()
         await store.loadDiff()
-        #expect(store.diff?.patch == "+edit 1\n")
-        try Data("+edit 2\n".utf8).write(to: file, options: .atomic)
-        try await eventually { store.diff?.patch == "+edit 2\n" }
-        #expect(store.diff?.patch == "+edit 2\n")
+        let added = { store.fileReview?.diff.file("new.txt")?.lines.filter { $0.kind == .added }.map(\.text) }
+        #expect(added() == ["edit 1"])
+        try Data((header + "+edit 2\n").utf8).write(to: file, options: .atomic)
+        try await eventually { added() == ["edit 2"] }
+        #expect(added() == ["edit 2"])
         #expect(store.documents.isEmpty)
+    }
+
+    /// Files' Diff mode reads the unsaved draft through the same stream as Changes.
+    @Test func diffModeComparesTheUnsavedDraftInTheReviewStream() async throws {
+        let fixture = try Data(contentsOf: URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("tests/fixtures/dto/task_files.json"))
+        let reply: @Sendable ([String], String?) throws -> String = { args, draft in
+            let root = try JSONSerialization.jsonObject(with: fixture) as! [String: Any]
+            var value = root[args[1] == "changes" ? "changes" : "diff"] as! [String: Any]
+            if args[1] == "diff" {
+                let added = draft.map { "+" + $0.trimmingCharacters(in: .newlines) } ?? "+saved"
+                value["patch"] = "diff --git a/new.txt b/new.txt\n--- a/new.txt\n+++ b/new.txt\n@@ -1 +1 @@\n-saved\n\(added)\n"
+            }
+            return String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self)
+        }
+        let store = TaskFilesStore(issue: "TEST-1", cwd: "/fixture", query: RegistryQuery(
+            runWithInput: { args, _, draft in try reply(args, draft) },
+            run: { args, _ in try reply(args, nil) }))
+        store.autosave = false
+        store.selection = "new.txt"
+        store.mode = .diff
+        let document = store.document("new.txt")
+        await document.reconcile(snapshot("saved\n"))
+        await store.loadDiff()
+        #expect(store.fileReview?.draft == false)
+        document.editor.insertText("typed ", replacementRange: NSRange(location: 0, length: 0))
+        await store.loadDiff()
+        let review = try #require(store.fileReview)
+        #expect(review.draft)
+        let file = try #require(review.diff.file("new.txt"))
+        let change = try #require(file.blocks.compactMap { block -> ReviewChange? in
+            if case .change(let change) = block { return change }
+            return nil
+        }.first)
+        // An edited line pairs its before and after and emphasizes the typed words.
+        #expect(change.pairs.first?.added?.text == "typed saved")
+        #expect(change.pairs.first?.addedSegments?.filter(\.changed).map(\.text).joined().contains("typed") == true)
+        #expect(store.comparisonDescription?.hasSuffix("· includes uncommitted changes") == true)
+        #expect(store.comparisonDescription?.hasPrefix("Compared with the Task's base at aaaaaaaaaa") == true)
     }
 
     /// A commit in a linked worktree changes no file in the checkout.

@@ -210,8 +210,6 @@ Paradev also has a broader, configurable workspace and delivery surface. Copying
 
 ## What this changes for LOO-515
 
-After syncing, the actual `TaskFilesView.swift` still mixes Brief, Changes, Pull request, and document tabs in one strip. Its navigator still lists scratch and changed files, not a general directory tree. The brief now uses `TaskPlanningFactsView`, so the old “identifier, title, due date only” description needs revisiting. The README contains both the current chooser description and an older full-tree description; source is the stronger evidence here. [Current view](../swift/LoopflowMac/Views/TaskFilesView.swift), [retained document/store](../swift/LoopflowMac/TaskFileDocument.swift), [README](../swift/README.md)
-
 Proposed revisions to the October design, **not accepted choices**:
 
 1. **Keep one retained companion beside the conversation.** Give Brief, Changes, PR, and open documents recognizable destinations. Avoid competing global and file navigation in one undifferentiated strip. The evidence favors a revision of A/C over B’s single scrolling dossier as the whole workspace.
@@ -220,9 +218,7 @@ Proposed revisions to the October design, **not accepted choices**:
 4. **Let reading dominate the space.** Optional tree, explicit comparison label, continuous diff, file reveal, and stable scroll/folds. Widen or zoom the companion when needed while preserving easy return to the conversation.
 5. **Keep the brief authoritative.** Outcome, acceptance, dependencies, and status come from the Task. Plans, walkthroughs, and source files can open alongside it. None of the reviewed components establishes a direct equivalent of Loopflow’s Task/Graph authority.
 
-## Sync and research record
-
-`lf sync --manual --json` finished against `main` without conflicts. Loopflow HEAD is `88c1de33b388776ab46aaa07954cc157426849f7`; the existing draft and all three prototypes remain. Main advanced by one commit during research; a second conflict-free sync included it. The sync is local. No tests were rerun for the conflict-free sync.
+## Research record
 
 ### Evidence boundary
 
@@ -234,14 +230,7 @@ Current upstream source, documentation, test cases, and repository-supplied scre
 | Paseo | `7286d3ef81077654e30fe50393dc449b52c84c72` |
 | Paradev, formerly Superset | `c524b94c53e566487cb7551c3ed082771de9e292` |
 
-Local source copies are under `/tmp/loo515-research.PNUUaR/`. Source links below pin the inspected revisions. Paseo’s commit is dated November 15 UTC, consistent with this November 14 Pacific review.
-
-Report check: Chrome render passed at desktop and mobile widths, with dark mode and no horizontal overflow or script errors.
-
-## Decisions for the next prototype
-
-1. **Companion structure:** (a) T3-style retained tabs for brief, changes, PR, and files; or (b) fixed Brief / Changes / Files pages with PR review inside Changes?
-2. **Review interaction:** (a) make line/file context into a conversation draft in the first slice; or (b) first fix navigation and reading, then add contextual feedback?
+Source links pin the inspected revisions.
 
 [t3-panel]: https://github.com/pingdotgg/t3code/blob/3e1761821226c472318168238c7599eea26dc49c/apps/web/src/components/chat/ChatRightPanel.tsx
 [t3-state]: https://github.com/pingdotgg/t3code/blob/3e1761821226c472318168238c7599eea26dc49c/apps/web/src/rightPanelStore.ts

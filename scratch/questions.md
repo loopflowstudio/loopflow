@@ -1,19 +1,11 @@
 # Working assumptions
 
-- Implementation, 2026-11-15: dependent field/manifest/Move work stopped on a
-  concrete clock counterexample. OS process exit changes activity and ordering
-  with unchanged SQLite revisions. The proposed per-field domain fences cannot
-  order those inputs; exporting `observe` counters without an incarnation also
-  reuses revisions after eviction. Proposed correction and acceptance are in
-  `instant-task-session.md` (External-observation counterexample). Source
-  replacement, persistence and eviction are now specified by the headless concept
-  review in that design (Review direction: one observation source, independent
-  facts). Proposed: connection-established cache incarnation, non-reusing cache
-  clock, captured dependency evidence and persisted last-known values. Implement
-  this observation contract before field/answer separation and disconnected Move;
-  no new product preference is inferred.
-  The SQLite teardown repair is implemented; Move remains unbuilt. The three
-  product questions remain open and independent of this engineering gap.
+- Headless engineering choice, 2026-11-15: OS process exit changes activity and
+  ordering with unchanged SQLite revisions, so observed facts get a
+  connection-established cache incarnation, a non-reusing cache clock, captured
+  dependency evidence and persisted last-known values (`instant-task-session.md`,
+  Review direction). Built before field/answer separation and Move. No product
+  preference is inferred.
 
 - Jack Heart replied “1a” to the 2026-11-15 conversation review's disconnected-edit
   question: save and project Complete/rename/move locally, show “Waiting for
@@ -120,17 +112,11 @@
     empty). The prior Desktop Abandon picked next, then previous, then the Wave; the
     current cut uses the shared next-Task rule.
 
-- Open product questions from the 2026-11-15 headless concept review of the
-  healthy-change/reconnect cut. Nobody has answered either; the built behavior
-  stands meanwhile. They are numbered in `scratch/concept-review.html`.
-  - Abandon while disconnected. The cut saves Abandon like Complete and delivers
-    it on reconnect, however much later. The "1a" option named Complete, rename
-    and move; Abandon closes PRs and removes branches. Alternative: Abandon needs
-    a reachable Machine and says so.
-  - A change waiting for connection has no way back. Its row offers no action,
-    so a mistaken Complete or Abandon made offline will be sent. A change never
-    sent could offer Cancel, removing the saved request and its projection; one
-    already sent could not.
+- Open product questions, numbered in `scratch/concept-review.html`; nobody has
+  answered them. Built behavior meanwhile: Abandon saves offline like Complete
+  and is delivered on reconnect (it closes PRs and removes branches; "1a" named
+  only Complete, rename and move); a change waiting for connection offers no
+  Cancel, so a mistaken offline Complete or Abandon will be sent.
 - Headless reading of "rename" in the 1a answer: the renames the apps offer
   (Session, Wave, Dashboard). No command edits a Task title.
 

@@ -2,9 +2,10 @@
 
 Conversation/Machine-link cut committed at `a2a0a0fb33` on origin/main
 `9cafc410ee`. Unreachable-Machine presentation and Desktop Session rename are
-committed at `35e2835de1`. The next implementation needs the external-observation provenance correction
-below before replacing query-local effect incorporation with field incorporation
-and derived-query coverage, then migrating Move. Supersedes the
+committed at `35e2835de1`; SQLite fixture teardown at `5231746858`. Next
+implementation, in order: the observation-source contract (Review direction: one
+observation source), field incorporation and derived-answer coverage, then
+dynamic membership with disconnected Move. Supersedes the
 Desktop-only delivery boundary. No shipping or merge decision is recorded. Placement remains this Task;
 no Wave is selected.
 
@@ -330,10 +331,8 @@ input readiness and Retry opening for the same Session.
 
 ### Query destinations and leases
 
-Built at `6e944e73b5a`; detailed checks and contracts remain in that commit's
-`scratch/instant-task-session.md`. Current lease/cache behavior is summarized
-under Current implementation cut. Two-client convergence on a closed query
-remains unexercised.
+Built at `6e944e73b5a` (details in that commit's plan); current behavior is under
+Current implementation cut. Two-client closed-query convergence is unexercised.
 
 ### Prior conversation and pending-command cuts
 
@@ -426,11 +425,7 @@ only changes states of facts already present. A cached destination that omitted
 Task A cannot acquire it. Separately, `WorkQueryEffect.covered` decides by the
 held query's own `ReadingStamp`, so Complete→Reopen seen through another query,
 or Move A→B→C, would reapply the older effect. No partial dynamic-program code
-remains. Acceptance before migrating callers: held source and destination Wave
-readings with A absent from the destination; move offline; source removal,
-destination insertion and counts in two windows and both clients; restart with
-both queries closed; reordered older values rejected; refusal restores only its
-membership without changing later navigation.
+remains. Acceptance is the Required counterexamples list below.
 
 ### Next implement direction: facts absorb effects; queries prove their answers
 
@@ -529,9 +524,6 @@ Proposed usage text for both READMEs after acceptance:
 
 No builtin skill needs a new interaction rule; its existing save/recover semantics
 remain. Keep shipped README claims limited to built behavior until this cut passes.
-The SQLite fixture teardown now awaits the owners and closes SQLite before
-removing temporary directories; no sleep or retry. Checks are recorded below.
-Native latency remains unmeasured and does not gate this pass.
 
 ### External-observation counterexample · 2026-11-15
 
@@ -553,47 +545,22 @@ those dependencies. `Cache` entries can disappear and be recreated, so exporting
 their bare counters would allow revision reuse. No normalization code or Move
 caller was added on this incomplete clock model.
 
-Design correction, proposed for review: keep SQLite-only parent/lifecycle facts
-separate from observed activity. Activity and ordering dependencies need an
-observer incarnation plus per-fact revision, captured with their values by the
-existing observation owner. Include the identity of the observed process; a PID
-alone is reusable. Declare exactly which predicates consume which inputs; a
-planning fence can incorporate a parent/lifecycle effect without establishing
-current activity, content, order or candidate coverage. A client-derived answer
-retains those independent dependencies without changing the exact-query stamp.
-A new observer incarnation cannot be ordered by arrival time or compared by its
-reset counter. Establish its current source through a fresh Machine reading;
-prior cached activity remains last-known/incomplete until then. Source replacement,
-persistence and eviction are settled as the next engineering direction below;
-the wire/client cut remains unbuilt. Never promote observation evidence into
-native input readiness.
+The correction keeps SQLite-only parent/lifecycle facts separate from observed
+activity; its specified form is the Review direction below. Never promote
+observation evidence into native input readiness.
 
-Add to acceptance: a live Task has a Busy answer; its provider exits and is
-reaped, with every SQLite revision unchanged; another query supplies the new
-activity. Both held answers update, including ordering and counts, while a
-reordered old observation cannot restore Busy. Repeat after observer-cache and
-server restart, with parent incorporation already complete. Missing activity
-coverage must not reactivate the old Move or Complete.
+`process_exit_changes_selection_without_advancing_sqlite_provenance`
+(`store/sqlite/selections.rs`) exercises that store boundary with a child process
+and no timing sleep.
 
-The new focused Rust case
-`process_exit_changes_selection_without_advancing_sqlite_provenance` exercises
-that store boundary with a child process and no timing sleep. Its result and
-fixture teardown checks are recorded below.
-
-Fixture cut: `WorkInteraction.shutdown()` returns a joinable cancellation task,
-including scheduled refreshes and retiring receipt observers. Shared XCTest
-fixtures await it, then `ClientWorkStore.close()` releases connection observation
-and SQLite, then directory teardown runs. The phone's direct query reader has the
-same joinable close. Restart shutdown calls await the old recovery owner. Delete targets
-for this cut were the immediate unlink defers and fire-and-forget teardown; saved
-commands, normal query-close recovery and cancellation behavior remain.
-
-Checks, 2026-11-15, inherited `LF_*` cleared:
-- `scripts/test_desktop.sh --filter 'ClientWorkQueryTests/testHealthyCompletionWaitsAndReconnectsAfterRestartWithoutAnotherGesture|ClientWorkQueryTests/testDispatchedCompleteSurvivesReplacementEpochWithoutReplayAfterRestart|ClientWorkQueryTests/testRecentQueryReopensFromDiskWhileNoServerAnswerCanArrive' --jobs 4 -Xswiftc -gnone`: built, 3 passed.
-- `scripts/test_ios.py` with `-only-testing:LoopflowiOSTests/ClientWorkQueryTests/` selecting `testUnreachableMachineShowsWaitingForColdAndSavedFeedsAndRefreshReturns`, `testPhoneCompleteButtonPublishesBothFeedsAndReplacesOnlyTheOriginRouteBeforeDisk`, `testPhoneAbandonPublishesBothFeedsAndReplacesOnlyTheOriginRouteBeforeDisk`, `testHealthyCompletionWaitsAndReconnectsAfterRestartWithoutAnotherGesture`, plus `MobileTaskCreationTests/testCreateButtonSelectsSubmittedWordsBeforeHeldSaveAndClosesEditor` and `ClientWorkStoreTests/testSubmittedWordsSurvivePhoneRestartWithoutSending`: 6 passed, no SQLite unlink warning; disposable Simulator removed.
-- `cargo test -p loopflow --lib process_exit_changes_selection_without_advancing_sqlite_provenance`: passed after fixing the new fixture's Task/Wave association; debug linker reported oversized `__eh_frame`.
-- `cargo test -p loopflow --test integration documented_commands::`: 4 passed.
-- `check_swift_multiplatform_boundaries.py`, `git diff --check`, `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`: passed; gate owns broader suites and Desktop Xcode fallback.
+Fixture teardown, committed at `5231746858`: `WorkInteraction.shutdown()` returns
+a joinable cancellation task; XCTest fixtures await it, then
+`ClientWorkStore.close()`, then remove directories. Checks, 2026-11-15, `LF_*`
+cleared: 3 Desktop `ClientWorkQueryTests` and 6 iOS
+`ClientWorkQueryTests`/`MobileTaskCreationTests`/`ClientWorkStoreTests` cases
+passed with no SQLite unlink warning; the Rust case above, `documented_commands::`
+(4), multiplatform boundaries, `cargo fmt --check` and clippy passed. Exact
+filters: `5231746858:scratch/instant-task-session.md`. Gate owns broader suites.
 
 ### Review direction: one observation source, independent facts · 2026-11-15
 
@@ -667,8 +634,7 @@ do not persist the server's clock as a durable Machine revision. Parent/lifecycl
 incorporation survives independently, so stale/missing activity cannot revive an
 absorbed Complete or Move. Eviction retains sufficient facts/coverage or the
 existing scoped reload floor. Missing content need not retain a full delivered
-command. Old query caches without external evidence cannot be upgraded by
-assigning the current incarnation.
+command. Old caches cannot be upgraded by assigning the current incarnation.
 
 **Implement order and deletion.** First extend the observation owner and required
 wire DTO/fixtures on Rust, Desktop and iOS; then add field incorporation and
@@ -697,19 +663,14 @@ Acceptance adds these deterministic cases to the retained Move counterexamples:
   recovery survive without resend or later navigation.
 
 No new runtime measurements in this review. Next implement owns these checks;
-native latency remains unmeasured and does not block this cut. Outcome for
-loop-or-next: **design changed — iterate to implement** this observation contract,
-then field/answer separation and Move. The unanswered product choices below do
-not block that direction.
+native latency remains unmeasured and does not block this cut.
 
 ### Open product choices
 
-The disconnected-edit answer named Complete, rename and move. It does not settle
-three choices numbered in `scratch/concept-review.html`: (1) queue destructive
-Abandon offline or require a reachable Machine; (2) offer Cancel before first send
-or no cancellation; (3) keep Task titles on the phone or show/rename Session names.
-Nobody has answered them; built provisional behavior is in `scratch/questions.md`.
-None blocks field incorporation or Move; (3) decides whether phone rename exists.
+Unanswered, numbered in `scratch/concept-review.html`: (1) queue Abandon offline
+or require a reachable Machine; (2) Cancel before first send or none; (3) phone
+shows Task titles or shows/renames Session names. Built provisional behavior is
+in `questions.md`. None blocks this work; (3) decides whether phone rename exists.
 
 ## Current implementation cut
 
@@ -738,7 +699,7 @@ including without a network event. Retirement cancels its receipt observer and
 transfers lagging effects or scoped reload floors. The complete prior contracts and
 query checks remain at `6e944e73b5a:scratch/instant-task-session.md`.
 
-Remaining: external-observation provenance (design correction below), field incorporation and answer coverage, then disconnected Move; effect-policy duplication; cross-client closed-query convergence; exhaustive
+Remaining: the observation-source contract (Review direction above), field incorporation and answer coverage, then disconnected Move; effect-policy duplication; cross-client closed-query convergence; exhaustive
 effect/dependency declarations and cross-query provenance; other mutation recovery
 and resource lanes; retained mobile `SessionLink`; projected inspection;
 historical-restoration epoch reset; valid native benchmark baseline. One cross-platform PR; no shipping decision. SQLite
@@ -782,15 +743,12 @@ backend-stage baseline exists. Raw files and earlier detail: `8b42a874db`,
 
 Implementation owns a valid benchmark baseline; demo owns native usability.
 
-Earlier checks: `57cb8a3a22:scratch/instant-task-session.md`; 10k client-query
-observations: `6e944e73b5a:scratch/instant-task-session.md`. Healthy-change check details: `85564c1f20:scratch/instant-task-session.md`.
+Earlier checks: `57cb8a3a22`, `6e944e73b5a` (10k client-query), `85564c1f20`
+(healthy-change), each in `scratch/instant-task-session.md`.
 
 ## Conversation review retained
 
-The 2026-11-15 review, its numbered disconnected-edit option and proposed usage
-remain at `f2438fb1b49:scratch/instant-task-session.md` under Conversation concept
-review. Jack Heart's “1a” selects saved disconnected Complete/rename/Move on the
-original Machine, retaining IDs across restart and uncertain delivery. Move,
-other mutation families, mobile retained Session ownership and the native
-acceptance journeys remain unbuilt or unmeasured as listed above. No later
-receipt, save failure or refusal may choose navigation.
+The 2026-11-15 review and its numbered disconnected-edit option:
+`f2438fb1b49:scratch/instant-task-session.md` (Conversation concept review).
+Jack Heart's “1a” selects saved disconnected Complete/rename/Move on the original
+Machine, keeping IDs across restart and uncertain delivery.

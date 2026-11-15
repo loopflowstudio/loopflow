@@ -85,7 +85,8 @@ In a Task workspace with the conversation on the left and Files on the right:
    above the review stream. `]` steps change by change across files; toggle
    Side by side; expand a collapsed move; select lines → Ask in conversation
    puts `path:Lx-y (side, revision)` in the terminal unsent.
-3. ⌥⌘3, expand `rust/loopflow/src/ops/task/` in the tree, open `directory.rs`.
+3. ⌥⌘3, expand `rust/loopflow/src/ops/task/` in the tree, open `directory.rs`;
+   in Diff, `]` past its last change opens the next changed file's Diff.
 4. Click the conversation, ask "why is PAGE_SIZE 500?", read the answer.
 5. Switch to another Task with Cmd-2 and back with Cmd-1: Files, the tree's
    expanded directories, the Diff's scroll and the Brief's scroll are where you
@@ -171,10 +172,6 @@ the navigator's `Changed files` section, Files' patch renderer (`TaskPatch*`).
 - Recursive server-side file search, editing outside text files, an IDE.
 - Linear relation fields for dependencies; PR history beyond the current
   `RoadmapTask.pr` (no multi-PR reader exists in the row).
-
-## Internal slices (one PR)
-
-1–5 done (delete, header/Brief, Changes, Files tree, README).
 
 ## Done when
 

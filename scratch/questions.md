@@ -68,11 +68,10 @@
   under its reload floor. These are internal cache sizes, not product preferences.
 
 - Retired imported/editor-linked creations keep only request/draft identities,
-  a canonical command digest and retirement time in the same SQLite owner. Source
-  rewrites release them; indexed pending reads exclude them. Legacy files use
-  their modification date as submission time. These are internal migration choices.
-  Phone source cleanup considers only records older than its saved editor snapshot,
-  so delayed housekeeping cannot release a later submission's source identity.
+  a canonical command digest and retirement time in the same SQLite owner, outside
+  indexed pending reads. Legacy files use their modification date as submission
+  time. Internal migration choices; release on source rewrite is built but the
+  next cut deletes it (last bullet).
 
 - Creation action labels, headless reversible choice from the 2026-11-15
   concept-review: one vocabulary on both hosts, replacing Desktop "Retry

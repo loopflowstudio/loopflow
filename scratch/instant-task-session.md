@@ -1,6 +1,6 @@
 # LOO-906: immediate interactions across Desktop and mobile
 
-Realigned 2026-11-15 at code `5ccc4563bd` on origin/main `9cafc410ee`
+Realigned 2026-11-15 at code `72bb1d06d4` on origin/main `9cafc410ee`
 (unchanged). Supersedes the Desktop-only delivery
 boundary. No shipping or merge decision is recorded. Placement remains this Task;
 no Wave is selected.
@@ -453,22 +453,16 @@ existing bounded input owners: no offline keystroke queue or automatic resend.
 
 ## Delete — do not maintain
 
-Already removed (details in each commit and `6e944e73b5a`'s plan): `Selection::expand`'s
-snapshot interpreter; `.view(WorkViewPlan)` navigation, `replacePlan`, one-shot
-`openView`/`refreshSelectedView`; unbounded `WorkInteraction.reads`/`bases`; Desktop
-Complete's checkpoint path; phone stream-owned rows; Dashboard's `resolution.members`
-mutation; `sidebarTaskRows`' roadmap fallback; `ClientWorkStore.presented` deletion
-and `recover`'s separate reducer; newest-only delivery acknowledgment; Git discovery
-in `operation::admit`/`check_creation`; `waveRow`'s delayed selection;
-`CreationSubmissions` and `CreationRecovery`'s poll; Desktop `StartingTask`/
-`pendingTaskReconciliations`; mobile `MobileTaskOutcome`, draft-file submission
-writers, sheet-owned sends and the Open Task gate. `LegacyTaskDraft` reads released
-files only; SQLite commits precede rewrites. Creation in `CreationRecovery`, its
-Task presentation map, host request filters and the phone query-before-opening
-path are removed by the current creation cut.
+Already removed: the list at `908e317e4f:scratch/instant-task-session.md`, plus
+creation in `CreationRecovery`, its Task presentation map, host request filters
+and the phone query-before-opening path. `LegacyTaskDraft` reads released files
+only; SQLite commits precede rewrites.
 
 Still remove, with their consumers:
 
+- `WorkInteraction.Failure`/`failures`, `failedCreations`, `failedDeliveries`,
+  `WorkModel.completionFailures`, both "Retry Complete" rows, `CreationOperation.Action.open`,
+  the retired-source release path and the rest of `CreationRecovery` (next direction).
 - Desktop `TaskRunDraft.phase`, `abandoningTaskIDs`, other mutation refresh
   barriers and rename/bind replacement bookkeeping.
 - View-owned mobile `SessionLink` teardown on ordinary Task switching; keep
@@ -528,16 +522,14 @@ module filters. Gate owns wider suites; display diagnostics remain demo work.
 
 ## Latency and open review decisions
 
-Trace gestures through event handling, observable state publication and the next
-render commit; selection adds cached-content and input-ready endpoints, disclosure
-adds arrow/children/data-ready endpoints. Separate retained hits, cold misses and
-memory-pressure eviction. Trace one operation through gesture→local projection
-→durable save→network admission
-→domain commit→subscription apply→native readiness. Add separate backend spans for
-SQLite lock wait/query, planning network, Git/worktree, Graph registration and
-provider attach. Log IDs and durations, never authored text. Compare in-process
-fixtures, Desktop local transport and mobile remote transport. Check changed SQL
-with EXPLAIN on the 10,000-Task fixture; unrelated events must not reread every Task.
+Trace gesture → state publication → render commit; selection adds cached-content
+and input-ready endpoints, disclosure adds arrow/children/data-ready. Separate
+retained hits, cold misses and eviction. Trace one operation through local
+projection → save → admission → domain commit → subscription apply → native
+readiness, with backend spans for SQLite lock/query, planning network, Git,
+Graph registration and provider attach. Log IDs and durations, never authored
+text. Compare in-process, Desktop local and mobile remote transports. EXPLAIN
+changed SQL on the 10,000-Task fixture.
 
 Proposed target: local reaction P95 under 100 ms, at least 20 native samples per
 journey/platform, endpoints reported separately. Nothing here is measured yet.
@@ -571,17 +563,9 @@ remains unexercised.
 
 ### Start selects a conversation owned by the operation
 
-Built at `5ccc4563bd`; the full direction, proposed usage text and acceptance list
-are at `6e944e73b5a:scratch/instant-task-session.md`. Creation enters the shared
-synchronous intent path: payload, ID, submission time and scope freeze before the
-selection callback; save precedes send; the route identifies the operation, and
-receipt stages bind exact Task/Session identities without navigating after
-departure. Phone draft-file submissions/outcomes import transactionally into the
-one SQLite owner (matching rows keep send epoch and receipt; conflicts and missing
-send evidence stay inspectable). Desktop `StartingTask` checkpoint ownership and
-the phone sheet-owned send/Open Task gate are deleted. Usage docs in
-`swift/README.md` and `swift/LoopflowiOS/README.md` still describe the
-host-specific labels the next section replaces.
+Built at `5ccc4563bd`; direction and acceptance at
+`6e944e73b5a:scratch/instant-task-session.md`, summarized under Current
+implementation cut. `swift/LoopflowiOS/README.md:41` still names **Retry opening**; item 3 changes it.
 
 ### A submitted conversation is one thing on both hosts
 
@@ -604,8 +588,8 @@ command recovery remains visible alongside a recorded conversation. Desktop Star
 requires a repository and keeps the editor words when none is resolved.
 
 Retirement removes authored payloads and receipts. A compact identity in the same
-SQLite owner retains request ID, draft ID, command digest and retirement time only
-while a source could resurrect it. Source rewrites release that identity. Opening
+SQLite owner retains request ID, draft ID, command digest and retirement time.
+As built, source rewrites release it; item 4 below deletes that release. Opening
 an older branch-format database compacts its retired payloads before file import.
 An editor cleanup crash must still prevent duplicate creation.
 
@@ -713,8 +697,11 @@ including without a network event. Retirement cancels its receipt observer and
 transfers lagging effects or scoped reload floors. The complete prior contracts and
 query checks remain at `6e944e73b5a:scratch/instant-task-session.md`.
 
-Remaining: disconnected Complete/rename/move delivery and Waiting for connection
-under the recorded 1a direction; cross-client closed-query convergence; exhaustive
+Remaining: the five items under "a pending command is one thing" (one presentation
+for every pending command, attention messages as data, reopen owned by attachment
+with the phone's Reconnect restored, keep retired identities without release,
+Desktop no-repository reason); disconnected Complete/rename/move delivery and
+Waiting for connection under the recorded 1a direction, built on that one presentation; cross-client closed-query convergence; exhaustive
 effect/dependency declarations and cross-query provenance; other mutation recovery
 and resource lanes; retained mobile `SessionLink`; projected inspection;
 historical-restoration epoch reset; valid native benchmark baseline. One cross-platform PR; no shipping decision. SQLite
@@ -722,14 +709,10 @@ fences cannot certify filesystem/provider readiness.
 
 ### Admission identity and recovery contract
 
-Built: admission saves the submitted envelope before any discovery, Git, planning,
-lock or provider call. Submitted content (versioned encoding plus digest) and the
-released canonical creation fingerprint stay separate in the one receipt owner;
-released rows adopt only the first verified envelope through recoverable candidate
-validation, never replacing an existing outcome. Adopted rows keep their domain
-recovery disposition (Complete/Continue/Inspect) and are never generically queued.
-Full contract: `465274b547:scratch/instant-task-session.md`; server fixtures list at
-`19612daf41:scratch/instant-task-session.md`.
+Built: the submitted envelope saves before discovery, Git, planning, lock or
+provider calls; released rows adopt only the first verified envelope and keep their
+domain recovery disposition. Contract: `465274b547:scratch/instant-task-session.md`;
+server fixtures: `19612daf41:scratch/instant-task-session.md`.
 
 Still open: reordered validation replies must update only the active epoch with a
 newer receipt revision, never enabling input or retiring overlays, and full
@@ -737,11 +720,9 @@ cross-platform presentation acceptance.
 
 ## Upstream acceptance retained
 
-Origin/main `9cafc410ee` supplies `selection_states` (#1947), terminal paste
-continuity (#1944), name freshness/failure presentation (#1943), and retained
-surface visibility (#1942). Shared projection and retained-occurrence migration
-must retain their coverage. The detailed predecessor map is at
-`639411f1b27fbdb1532ac206ceb775a0dc76fde9:scratch/instant-task-session.md`.
+Origin/main `9cafc410ee` supplies #1942–#1944 and #1947 (`selection_states`); the
+shared projection and retained-occurrence migration keep their coverage. Map:
+`639411f1b2:scratch/instant-task-session.md`.
 
 ## Benchmark implementation and observations (2026-11-14)
 

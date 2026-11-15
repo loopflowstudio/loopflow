@@ -909,6 +909,122 @@ final class ClientWorkQueryTests: XCTestCase {
         XCTAssertNil(try database.cached(machine: "machine", key: key(query)), "B's fence must not substitute for A's missing effect")
     }
 
+    func testHealthyCompletionWaitsAndReconnectsAfterRestartWithoutAnotherGesture() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let machine = HeldCompletionMachine()
+        func client() -> ClientWorkStore {
+            ClientWorkStore(directory: directory, machine: { XCTFail("Saved work needs no discovery"); return "machine" },
+                read: { _ in "null" }, observe: { machine.observe($0) }, send: { machine.send($0) })
+        }
+        let disk = client()
+        let owner = WorkInteraction(machine: "machine", store: disk)
+        let a = WorkWorkspaceKey(repository: "repo", kind: .task, id: "a")
+        let b = WorkWorkspaceKey(repository: "repo", kind: .task, id: "b")
+        var selected: WorkWorkspaceKey? = a
+        let id = owner.complete(a, issue: "a", directory: "/repo", selected: a, visible: [a, b]) { selected = $0 }
+        XCTAssertEqual(selected, b)
+        XCTAssertTrue(owner.listedOperations.isEmpty, "A healthy change shows only its projection")
+        await owner.persistPending()
+        var watches = machine.observations.makeAsyncIterator()
+        _ = await watches.next()
+        machine.setWaiting(true)
+        await owner.refreshFromStore()
+        let operation = try XCTUnwrap(owner.listedOperations.first)
+        XCTAssertEqual(operation.presentation().status, .waitingForConnection)
+        XCTAssertTrue(operation.presentation().actions.isEmpty)
+        XCTAssertTrue(owner.isCompleting(issue: "a", directory: "/repo"))
+        XCTAssertTrue(machine.submissions.isEmpty)
+        owner.shutdown()
+        for await _ in await disk.changes() {
+            if await !disk.isRecovering(id) { break }
+        }
+        let restartedDisk = client()
+        let restarted = WorkInteraction(machine: "machine", store: restartedDisk)
+        defer { restarted.shutdown() }
+        restarted.start()
+        _ = await watches.next()
+        await restarted.refreshFromStore()
+        XCTAssertEqual(restarted.listedOperations.map(\.id), [id])
+        XCTAssertEqual(restarted.listedOperations.first?.presentation().status, .waitingForConnection)
+        machine.setWaiting(false)
+        machine.publish(try completionFrame(nil, epoch: "epoch"))
+        var sends = machine.sends.makeAsyncIterator()
+        _ = await sends.next()
+        await restarted.refreshFromStore()
+        XCTAssertTrue(restarted.listedOperations.isEmpty)
+        XCTAssertEqual(machine.submissions.count, 1)
+        let envelope = try XCTUnwrap(JSONSerialization.jsonObject(with: machine.submissions[0]) as? [String: Any])
+        XCTAssertEqual(envelope["request_id"] as? String, id)
+        XCTAssertEqual(selected, b)
+    }
+
+    func testReconnectReadsTheLostSendOutcomeWithoutExecutingAgain() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let machine = HeldCompletionMachine()
+        let disk = ClientWorkStore(directory: directory, machine: { "machine" }, read: { _ in "null" },
+            observe: { machine.observe($0) }, send: {
+                machine.send($0)
+                throw ServerConnectionUnavailable(RegistryQueryError("Answer lost"))
+            })
+        let record = try await disk.record(.taskComplete(directory: "/repo", issue: "a"), requestID: "saved")
+        let delivery = Task { try await disk.reconcile(record) }
+        var observations = machine.observations.makeAsyncIterator()
+        _ = await observations.next()
+        machine.publish(try completionFrame(nil, epoch: "epoch"))
+        var sends = machine.sends.makeAsyncIterator()
+        _ = await sends.next()
+        machine.setWaiting(true)
+        let completed = try receipt(kind: "task.complete", stage: "task.completed")
+        machine.setWaiting(false)
+        machine.publish(try completionFrame(completed, epoch: "epoch"))
+        let result = try await delivery.value
+        XCTAssertEqual(result?.delivery, .finished)
+        XCTAssertEqual(machine.submissions.count, 1)
+        let pending = try await disk.pending()
+        XCTAssertTrue(pending.isEmpty)
+    }
+
+    func testAbandonSharesRemovalNavigationAndRefusalWithoutStealingLaterSelection() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let machine = HeldCompletionMachine()
+        let disk = ClientWorkStore(directory: directory, machine: { "machine" }, read: { _ in "null" },
+            observe: { machine.observe($0) }, send: { machine.send($0) })
+        let query = ServedRead.viewSelect(expression: "state:working")
+        let base = try workingPlan(["a", "b"])
+        _ = try await disk.receivePlans([base], stamp: stamp("list", revision: 6), for: query)
+        let prepared = try await disk.presentation(machine: "machine", queries: [key(query): query])
+        let owner = WorkInteraction(machine: "machine", store: disk)
+        defer { owner.shutdown() }
+        var shown: ProjectedWorkPlan?
+        _ = owner.open(query) { shown = $0?.first }
+        owner.apply(prepared)
+        let a = base.contents[0].work, b = base.contents[1].work
+        var selected: WorkWorkspaceKey? = a
+        let id = owner.abandon(a, issue: "a", directory: "/repo", selected: a, visible: [a, a, b]) { selected = $0 }
+        XCTAssertEqual(selected, b)
+        XCTAssertEqual(shown?.projection.visible.map(\.work), [b])
+        XCTAssertTrue(owner.listedOperations.isEmpty)
+        selected = a // A deliberate later visit must survive a refusal.
+        await owner.persistPending()
+        var observations = machine.observations.makeAsyncIterator()
+        _ = await observations.next()
+        var wire = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(
+            receipt(kind: "task.abandon", stage: "task.abandoned", diagnostic: "Cannot abandon", resolution: .definitelyRefused))) as? [String: Any])
+        wire["request_id"] = id
+        machine.publish(try completionFrame(JSONDecoder().decode(OperationReceipt.self, from: JSONSerialization.data(withJSONObject: wire)), epoch: "epoch"))
+        for await _ in await disk.changes() {
+            if try await disk.receipt(id)?.error != nil { break }
+        }
+        await owner.refreshFromStore()
+        XCTAssertEqual(shown?.projection.visible.map(\.work), [a, b])
+        XCTAssertEqual(selected, a)
+        XCTAssertTrue(owner.listedOperations.first?.presentation().status.text.contains("Cannot abandon") == true)
+        XCTAssertTrue(machine.submissions.isEmpty)
+    }
+
     func completionFrame(_ receipt: OperationReceipt?, epoch: String) throws -> SubscriptionReading<OperationReceipt> {
         let wire: [String: Any] = ["body": try receipt.map { try JSONSerialization.jsonObject(with: JSONEncoder().encode($0)) } ?? NSNull(),
             "stamp": try JSONSerialization.jsonObject(with: JSONEncoder().encode(stamp("receipt", revision: 7, epoch: epoch))),
@@ -941,6 +1057,11 @@ private final class HeldCompletionMachine: @unchecked Sendable {
     private var watches: [UUID: AsyncThrowingStream<SubscriptionReading<OperationReceipt>, any Error>.Continuation] = [:]
     private var current: SubscriptionReading<OperationReceipt>?
     private var sent: [Data] = []
+    private var waiting = false
+    private var connections: [UUID: AsyncStream<Void>.Continuation] = [:]
+    func setWaiting(_ value: Bool) {
+        lock.withLock { waiting = value; for connection in connections.values { connection.yield(()) } }
+    }
     var submissions: [Data] { lock.withLock { sent } }
     let observations: AsyncStream<Void>
     private let observing: AsyncStream<Void>.Continuation
@@ -953,11 +1074,12 @@ private final class HeldCompletionMachine: @unchecked Sendable {
     func observe(_ id: String) -> ClientWorkStore.ReceiptWatch {
         let key = UUID()
         let (stream, continuation) = AsyncThrowingStream<SubscriptionReading<OperationReceipt>, any Error>.makeStream()
-        lock.withLock { watches[key] = continuation; if let current { continuation.yield(current) } }
+        let (changes, connection) = AsyncStream<Void>.makeStream()
+        lock.withLock { watches[key] = continuation; connections[key] = connection; if let current { continuation.yield(current) } }
         observing.yield(())
         return ServerWatch(updates: stream, checkpoint: { _ in }, cancel: { [self] in
-            lock.withLock { watches.removeValue(forKey: key)?.finish() }
-        })
+            lock.withLock { watches.removeValue(forKey: key)?.finish(); connections.removeValue(forKey: key)?.finish() }
+        }, connections: changes, isWaiting: { [self] in lock.withLock { waiting } })
     }
     func publish(_ frame: SubscriptionReading<OperationReceipt>) {
         lock.withLock { current = frame; for watch in watches.values { watch.yield(frame) } }

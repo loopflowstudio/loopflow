@@ -112,7 +112,7 @@ final class WorkModel {
     @ObservationIgnored private var workspaceRegistry: SessionsWorkspaceRegistry?
     @ObservationIgnored private var workspaceRepository: String?
 
-    @ObservationIgnored private var interaction: WorkInteraction?
+    @ObservationIgnored private(set) var interaction: WorkInteraction?
     @ObservationIgnored private var queryLeases: [UUID] = []
     @ObservationIgnored private var leasedScope: WorkScope?
 
@@ -155,7 +155,7 @@ final class WorkModel {
 
     var presentationError: String? { interaction?.cacheError }
 
-    var pendingCommands: [PendingOperation] { interaction?.listedOperations ?? [] }
+    var pendingOperations: [PendingOperation] { interaction?.listedOperations ?? [] }
 
     func selectCreation(_ operation: PendingOperation) {
         setRepoPath(operation.directory)
@@ -266,7 +266,6 @@ final class WorkModel {
 
     private var selectionOpening: DesktopOpening?
     /// Tasks whose abandonment was requested; they leave the sidebar at once.
-    private(set) var abandoningTaskIDs: Set<String> = []
     var dashboardError: String?
     private(set) var dashboardSaving = false
 
@@ -530,10 +529,6 @@ final class WorkModel {
 
     func presentedSessionResult(_ sessionID: String) async {
         try? await interaction?.presented(.session(sessionID))
-    }
-
-    func inspectedCreation(_ id: String) async {
-        try? await interaction?.presented(id)
     }
 
     func mountedCreation(taskID: String) async {
@@ -2351,7 +2346,7 @@ final class WorkModel {
         var seen = Set<String>()
         return (visibleOnly ? plan.projection.visible : plan.resolution.members).filter { $0.work.kind == .task }.compactMap { member in
             let id = task(id: member.work.id)?.task.id ?? member.work.id
-            guard seen.insert(id).inserted, !abandoningTaskIDs.contains(id) else { return nil }
+            guard seen.insert(id).inserted else { return nil }
             return (id, states[member.work] ?? [])
         }
     }
@@ -2753,7 +2748,6 @@ final class WorkModel {
         }
     }
 
-    func retryCreation(_ id: String) { interaction?.retry(id) }
 
     func openCreatedTask(_ operation: PendingOperation) async {
         guard navigation.startingTask === operation, let receipt = operation.receipt,
@@ -2850,6 +2844,10 @@ final class WorkModel {
     }
 
     func completeTask(_ task: RoadmapTask, visible origin: [WorkWorkspaceKey]? = nil) {
+        leaveTask(task, abandoning: false, visible: origin)
+    }
+
+    private func leaveTask(_ task: RoadmapTask, abandoning: Bool, visible origin: [WorkWorkspaceKey]? = nil) {
         if interaction == nil { interaction = .local(observingMachineId) }
         guard let interaction else { return }
         let repository = selectedViewPlan?.repository ?? taskList?.repository ?? selectionPlans.value?.first?.repository ?? ""
@@ -2860,36 +2858,19 @@ final class WorkModel {
                 ?? WorkWorkspaceKey(repository: repository, kind: .task, id: canonical)
         }
         let visible = order ?? (sidebarTaskIDs + sidebarAutonomousTaskIDs).map(key)
-        _ = interaction.complete(key(task.id), issue: task.task.identifier,
-            directory: WaveOrigin.cached(task.task.repo), selected: selection.flatMap { $0.kind == .task ? key($0.id) : nil },
-            visible: visible) { [self] next in select(next.map { .task(id: $0.id) }) }
+        let leave = abandoning ? interaction.abandon : interaction.complete
+        _ = leave(key(task.id), task.task.identifier, WaveOrigin.cached(task.task.repo),
+            selection.flatMap { $0.kind == .task ? key($0.id) : nil }, visible,
+            { [self] next in select(next.map { .task(id: $0.id) }) })
     }
 
     func reopenTask(_ task: RoadmapTask) async {
-        abandoningTaskIDs.remove(task.id)
         await performTaskAction(task.id) {
             try await query.reopenTask(issue: task.task.identifier, cwd: WaveOrigin.resolve(task.task.repo))
         }
     }
 
-    /// The row leaves the sidebar and the selection moves on before the slow
-    /// cleanup (PRs, branches, checkout) returns; a failure puts the row back.
-    func abandonTask(_ task: RoadmapTask) async {
-        let rows = sidebarTaskIDs + sidebarAutonomousTaskIDs
-        abandoningTaskIDs.insert(task.id)
-        if isSelected(.task(id: task.id)) {
-            let index = rows.firstIndex(of: task.id) ?? rows.count
-            let next = rows.dropFirst(index + 1).first ?? rows.prefix(index).last
-            select(next.map { .task(id: $0) } ?? sidebarWave.map { .wave(id: $0.wave.id) })
-        }
-        let accepted = await performTaskAction(task.id) {
-            try await query.abandonTask(issue: task.task.identifier, cwd: WaveOrigin.resolve(task.task.repo))
-        }
-        if !accepted {
-            abandoningTaskIDs.remove(task.id)
-            dashboardError = navigation.taskRunDrafts[task.id]?.error
-        }
-    }
+    func abandonTask(_ task: RoadmapTask) async { leaveTask(task, abandoning: true) }
 
     /// Feedback belongs to the navigation and Task that began the command.
     /// Returns whether the command was accepted, refreshed or not.

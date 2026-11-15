@@ -22,8 +22,8 @@ extension ClientWorkQueryTests {
         await owner.persistPending()
         let view = StartingTaskView(model: model, launch: operation)
         _ = try view.inspect().find(button: "Edit request")
-        XCTAssertEqual(model.pendingCommands.count, 1)
-        XCTAssertEqual(model.pendingCommands.map(\.id), [operation.id])
+        XCTAssertEqual(model.pendingOperations.count, 1)
+        XCTAssertEqual(model.pendingOperations.map(\.id), [operation.id])
         fault.recover()
         try view.inspect().find(button: "Try again").tap()
         await owner.persistPending()
@@ -31,7 +31,7 @@ extension ClientWorkQueryTests {
         XCTAssertEqual(pending.map(\.id), [operation.id])
         XCTAssertFalse(model.canEditCreation(operation.id))
         XCTAssertThrowsError(try view.inspect().find(button: "Edit request"))
-        _ = try view.inspect().find(button: "Check request")
+        XCTAssertThrowsError(try view.inspect().find(button: "Check request"))
     }
 
     func testRestartPresentsAnUncertainSavedCreationWithoutResubmitting() async throws {
@@ -121,9 +121,9 @@ extension ClientWorkQueryTests {
         await waitForCreation(operation) { operation.receipt?.sessionId != nil }
         XCTAssertEqual(model.selection, .task(id: "issue-review"))
         XCTAssertTrue(server.submissions.isEmpty)
-        XCTAssertEqual(model.pendingCommands.count, 1)
+        XCTAssertEqual(model.pendingOperations.count, 1)
         await model.presentedTaskResult("created")
-        XCTAssertTrue(model.pendingCommands.isEmpty)
+        XCTAssertTrue(model.pendingOperations.isEmpty)
         XCTAssertEqual(model.selection, .task(id: "issue-review"))
     }
 }

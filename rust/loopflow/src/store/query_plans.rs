@@ -330,7 +330,7 @@ mod tests {
     use crate::durable::TaskId;
     use crate::store::contention::empty_writes;
     use crate::store::sqlite::{SqliteStore, ViewerHold};
-    use rusqlite::params;
+    use rusqlite::{params, OptionalExtension};
 
     fn take_the_lock_for_nothing(store: &SqliteStore) {
         let mut conn = store.conn.lock().unwrap();
@@ -732,6 +732,10 @@ mod tests {
             tx.commit().unwrap();
         }
         let traced = statements(&store, || {
+            let _latest_cancellation: Option<String> = store.conn.lock().unwrap().query_row(
+                "SELECT id FROM task_state_deliveries WHERE task_id=?1 AND target='canceled' ORDER BY seq DESC LIMIT 1",
+                [task.as_str()], |row| row.get(0),
+            ).optional().unwrap();
             // Historical newest-only recovery missed this writer when a newer
             // decision had already settled. Repository maintenance must find it.
             assert_eq!(store.pending_planning_tasks("/repo").unwrap().len(), 1);

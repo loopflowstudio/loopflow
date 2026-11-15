@@ -8,6 +8,14 @@ import ViewInspector
 
 extension ClientWorkQueryTests {
     func testDesktopCompleteButtonPublishesBothWindowsAndOnlyNavigatesItsOriginBeforeDisk() async throws {
+        try await leaveBothWindows(abandon: false)
+    }
+
+    func testDesktopAbandonPublishesBothWindowsAndOnlyNavigatesItsOriginBeforeDisk() async throws {
+        try await leaveBothWindows(abandon: true)
+    }
+
+    private func leaveBothWindows(abandon: Bool) async throws {
         let fixture = try WorkTestFixture.load()
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -46,8 +54,13 @@ extension ClientWorkQueryTests {
         let first = window()
         let second = window()
         let task = try XCTUnwrap(first.task(id: "issue-now")?.task)
-        let button = TaskWorkflowHeader(model: first, task: task, work: .loading)
-        try button.inspect().find(viewWithAccessibilityIdentifier: "task-complete").button().tap()
+        if abandon { await first.abandonTask(task) }
+        else {
+            let button = TaskWorkflowHeader(model: first, task: task, work: .loading)
+            try button.inspect().find(viewWithAccessibilityIdentifier: "task-complete").button().tap()
+        }
+        XCTAssertTrue(first.pendingOperations.isEmpty)
+        XCTAssertTrue(second.pendingOperations.isEmpty)
         XCTAssertEqual(first.sidebarTaskIDs, ["issue-review"])
         XCTAssertEqual(second.sidebarTaskIDs, ["issue-review"])
         XCTAssertEqual(first.taskListReading.value?.taskCount, 1)

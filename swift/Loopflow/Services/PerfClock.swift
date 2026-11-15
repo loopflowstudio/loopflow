@@ -29,7 +29,7 @@ extension ContinuousClock.Instant {
 
 extension PerfClock {
     public enum Journey: String, Sendable {
-        case taskCreate = "task_create", taskComplete = "task_complete", taskSelect = "task_select"
+        case taskCreate = "task_create", taskComplete = "task_complete", taskAbandon = "task_abandon", taskSelect = "task_select"
         case waveSelect = "wave_select"
     }
 

@@ -42,7 +42,7 @@ final class RemoteMobileClient: MobileTaskCreationClient {
             guard let self else { throw RegistryQueryError("The original Machine connection is closed") }
             return try await connection().request(.read(query), deadline: Self.requestDeadline).printed
         }, observe: { [weak self] id in
-            ServerLink.subscribe(.operationGet(requestID: id), connect: { [weak self] in
+            ServerLink.subscribe(.operationGet(requestID: id), reconnect: true, connect: { [weak self] in
                 guard let self else { throw RegistryQueryError("The original Machine connection is closed") }
                 return try await self.connection()
             }) { update in
@@ -52,7 +52,12 @@ final class RemoteMobileClient: MobileTaskCreationClient {
         }, send: { [weak self] payload in
             guard let self else { throw RegistryQueryError("The original Machine connection is closed") }
             let creation = try JSONDecoder().decode(JSONValue.self, from: payload)
-            _ = try await connection().request(.submittedOperation(creation), deadline: Self.requestDeadline)
+            let link = try await connection()
+            do { _ = try await link.request(.submittedOperation(creation), deadline: Self.requestDeadline) }
+            catch {
+                if await link.isClosed { throw ServerConnectionUnavailable(error) }
+                throw error
+            }
         })
     }()
 

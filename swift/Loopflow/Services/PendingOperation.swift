@@ -9,6 +9,7 @@ public final class PendingOperation: Identifiable {
     public let id: String
     public let payload: Data
     public let kind: String
+    public let targetIssue: String?
     public let request: String
     public let directory: String
     public let wave: String?
@@ -42,14 +43,26 @@ public final class PendingOperation: Identifiable {
         case tryAgain = "Try again", edit = "Edit request", check = "Check request", inspect = "Inspect"
         public var id: String { rawValue }
     }
+    public enum Status: Equatable {
+        case delivering, waitingForConnection, needsAttention([String])
+
+        public var text: String {
+            switch self {
+            case .delivering: "Delivering request…"
+            case .waitingForConnection: "Waiting for connection"
+            case .needsAttention(let messages): messages.joined(separator: "\n")
+            }
+        }
+    }
     public struct Presentation {
-        public let messages: [String]
+        public let status: Status
         public let actions: [Action]
         public let evidence: String?
     }
     private var needsInspection: Bool {
         if error != nil { return true }
         if evidence?.validation == .conflict { return true }
+        guard evidence != nil else { return legacyOutcome != nil }
         // Normal preparation continues after its filed result is shown. Its
         // observer stays alive, and any later failure makes the request visible.
         if evidence?.delivery == .queued || evidence?.delivery == .dispatched {
@@ -57,27 +70,25 @@ public final class PendingOperation: Identifiable {
         }
         return recovery?.needsInspection == true
     }
+    var projectsEffect: Bool {
+        if let declaration = OperationDeclaration(kind: kind), let evidence,
+           let resolutions = declaration.resolutions(in: evidence),
+           resolutions.allSatisfy({ $0.resolution == .definitelyRefused }) { return false }
+        return saved || error == nil
+    }
     public var isCreation: Bool { kind == "task.create" }
     public var title: String {
         if isCreation { return receipt?.task.title ?? request }
-        let command = try? JSONDecoder().decode(JSONValue.self, from: payload)
-        let noun: String
-        switch kind {
-        case "task.complete": noun = "Complete Task"
-        case "task.update": noun = "Update Task"
-        case "task.move": noun = "Move Task"
-        case "task.reopen": noun = "Reopen Task"
-        case "session.new": noun = "New Session"
-        default: noun = "Request"
-        }
-        if case .string(let issue) = command?["issue"] { return "\(noun) · \(issue)" }
+        let noun = OperationDeclaration(kind: kind)?.label ?? "Request"
+        if let targetIssue { return "\(noun) · \(targetIssue)" }
         return noun
     }
     public var isListed: Bool {
-        if needsInspection { return true }
+        if waitingForConnection || needsInspection { return true }
         if OperationDeclaration(kind: kind)?.requiresPresentation == true { return recovery?.resultPresented != true }
-        return evidence?.delivery != .finished
+        return false
     }
+    var waitingForConnection = false
     // Delivery is paused after a failed attempt until Check request deliberately
     // restarts it. A store publication alone must not make a retry loop.
     var deliveryFailed = false
@@ -87,11 +98,12 @@ public final class PendingOperation: Identifiable {
     /// recovery vocabulary for the submitted command.
     public func presentation() -> Presentation {
         var actions: [Action] = []
+        if waitingForConnection { return Presentation(status: .waitingForConnection, actions: [], evidence: nil) }
         if !saved, error != nil {
             actions.append(.tryAgain)
             if isCreation { actions.append(.edit) }
         }
-        if saved, evidence == nil || needsInspection { actions.append(.check) }
+        if saved, needsInspection { actions.append(.check) }
         let evidence = evidence.flatMap { try? JSONEncoder().encode($0) }
             ?? legacyOutcome.flatMap { try? JSONEncoder().encode($0) }
         if evidence != nil, needsInspection { actions.append(.inspect) }
@@ -101,12 +113,15 @@ public final class PendingOperation: Identifiable {
         }
         var seen = Set<String>()
         messages = messages.filter { seen.insert($0).inserted }
-        return Presentation(messages: messages,
+        if needsInspection && messages.isEmpty { messages = ["The original request needs inspection"] }
+        return Presentation(status: needsInspection ? .needsAttention(messages) : .delivering,
             actions: actions, evidence: evidence.map { String(decoding: $0, as: UTF8.self) })
     }
 
     init(id: String, payload: Data, kind: String, request: String, directory: String, wave: String?, graph: String?, submittedAt: Date, destination: String?) {
         self.payload = payload
+        let command = try? JSONDecoder().decode(JSONValue.self, from: payload)
+        if case .string(let issue) = command?["issue"] { targetIssue = issue } else { targetIssue = nil }
         self.kind = kind
         self.destination = destination
         self.id = id
@@ -127,6 +142,7 @@ public final class PendingOperation: Identifiable {
 
     func receive(_ value: PendingOperationSnapshot) {
         saved = true
+        waitingForConnection = value.waitingForConnection
         destination = value.record.destination
         receipt = value.result
         if evidence?.revision != value.receipt?.revision { error = nil }
@@ -140,23 +156,38 @@ public final class PendingOperation: Identifiable {
     func fail(_ message: String) { error = message }
 }
 
-/// Recovery controls stay available beside a live conversation as well as its
-/// pending row. Hosts supply only their native opening and editor actions.
-public struct PendingCommandActions: View {
-    public let presentation: PendingOperation.Presentation
-    public let perform: (PendingOperation.Action) -> Void
+/// One request presentation on lists and conversations. Hosts own only selection
+/// and the editor; receipt inspection and recovery belong to the shared owner.
+public struct PendingOperationRow: View {
+    public let operation: PendingOperation
+    public let interaction: WorkInteraction
+    public let edit: (PendingOperation) -> Void
+    public let select: ((PendingOperation) -> Void)?
     @State private var inspecting = false
 
-    public init(presentation: PendingOperation.Presentation, perform: @escaping (PendingOperation.Action) -> Void) {
-        self.presentation = presentation
-        self.perform = perform
+    public init(operation: PendingOperation, interaction: WorkInteraction,
+                edit: @escaping (PendingOperation) -> Void, select: ((PendingOperation) -> Void)? = nil) {
+        self.operation = operation
+        self.interaction = interaction
+        self.edit = edit
+        self.select = select
     }
 
     public var body: some View {
-        ForEach(presentation.actions) { action in
-            Button(action.rawValue) {
-                if action == .inspect { inspecting = true }
-                else { perform(action) }
+        let presentation = operation.presentation()
+        VStack(alignment: .leading, spacing: 4) {
+            if operation.isCreation, let select {
+                Button { select(operation) } label: { Text(operation.title).lineLimit(2) }
+            } else { Text(operation.title).lineLimit(2) }
+            Text(presentation.status.text).font(.caption).textSelection(.enabled)
+            ForEach(presentation.actions) { action in
+                Button(action.rawValue) {
+                    switch action {
+                    case .inspect: inspecting = true
+                    case .tryAgain, .check: interaction.retry(operation.id)
+                    case .edit: edit(operation)
+                    }
+                }
             }
         }
         .sheet(isPresented: $inspecting) {
@@ -170,7 +201,7 @@ public struct PendingCommandActions: View {
             }
             .padding(20)
             .frame(minWidth: 320, minHeight: 300)
-            .task { perform(.inspect) }
+            .task { try? await interaction.presented(operation.id) }
         }
     }
 }
@@ -187,6 +218,7 @@ struct PendingOperationSnapshot: Sendable {
     let recovery: OperationRecovery?
     let legacyOutcome: JSONValue?
     let diagnostic: String?
+    var waitingForConnection = false
 
     init(record: SubmittedOperation, command: JSONValue, receipt: OperationReceipt?, recovery: OperationRecovery?, legacyOutcome: JSONValue?) throws {
         self.legacyOutcome = legacyOutcome

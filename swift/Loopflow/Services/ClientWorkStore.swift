@@ -58,6 +58,7 @@ public actor ClientWorkStore {
     private let prepareDirectory: @Sendable (URL) throws -> Void
     private var database: ClientWorkDatabase?
     private var active: Set<String> = []
+    private var watches: [String: ReceiptWatch] = [:]
     private let currentMachine: @Sendable () async throws -> String
     private let read: @Sendable (ServedRead) async throws -> String
     private let observe: @Sendable (String) -> ReceiptWatch
@@ -120,8 +121,10 @@ public actor ClientWorkStore {
         let records = try pending().filter { $0.destination == machine }
         let operations = try records.map { record in
             let command = try JSONDecoder().decode(JSONValue.self, from: record.payload)
-            return try PendingOperationSnapshot(record: record, command: command,
+            var snapshot = try PendingOperationSnapshot(record: record, command: command,
                 receipt: receipt(record.id), recovery: recovery(record.id), legacyOutcome: disk().state(record.id)?.legacyOutcome)
+            snapshot.waitingForConnection = watches[record.id]?.isWaiting() == true
+            return snapshot
         }
         return Presentation(revision: publication, requested: Set(queries.keys), records: records, queries: readings, operations: operations)
     }
@@ -255,7 +258,13 @@ public actor ClientWorkStore {
         guard let state = try disk().state(record.id), state.retiredAt == nil else { return }
         try await verify(record)
         let watch = observe(record.id)
-        defer { watch.cancel() }
+        watches[record.id] = watch
+        let connectionChanges = Task { [weak self] in
+            if let connections = watch.connections {
+                for await _ in connections { await self?.changed() }
+            }
+        }
+        defer { watch.cancel(); connectionChanges.cancel(); watches[record.id] = nil }
         var cursor = ReceiptCursor(machine: record.destination)
         for try await frame in watch.updates {
             try Task.checkCancellation()
@@ -267,9 +276,6 @@ public actor ClientWorkStore {
     }
 
     private func verify(_ record: SubmittedOperation) async throws {
-        guard try await currentMachine() == record.destination else {
-            throw RegistryQueryError("Waiting for the original Machine \(record.destination)")
-        }
         guard let saved = try disk().state(record.id), try saved.record.hasSameCommand(as: record) else {
             throw RegistryQueryError("The original saved operation is unavailable")
         }
@@ -307,7 +313,13 @@ public actor ClientWorkStore {
     private func recover(_ record: SubmittedOperation) async throws -> OperationReceipt? {
         try await verify(record)
         let watch = observe(record.id)
-        defer { watch.cancel() }
+        watches[record.id] = watch
+        let connectionChanges = Task { [weak self] in
+            if let connections = watch.connections {
+                for await _ in connections { await self?.changed() }
+            }
+        }
+        defer { watch.cancel(); connectionChanges.cancel(); watches[record.id] = nil }
         var cursor = ReceiptCursor(machine: record.destination)
         var submitted = false
         for try await frame in watch.updates {
@@ -330,7 +342,8 @@ public actor ClientWorkStore {
                     canContinue = domain?.disposition == .continue || domain?.disposition == .complete
                 } else { canContinue = false }
                 if !submitted && (canContinue || receipt.delivery == .untracked || receipt.delivery == .queued || receipt.validation == .unbound) {
-                    try await admit(record, epoch: epoch)
+                    do { try await admit(record, epoch: epoch) }
+                    catch is ServerConnectionUnavailable { continue }
                     submitted = true
                     watch.checkpoint(1)
                     continue
@@ -343,7 +356,8 @@ public actor ClientWorkStore {
                 guard state.sentEpoch == nil || state.sentEpoch == epoch else {
                     throw RegistryQueryError("The Machine's database changed; inspect the original request before continuing")
                 }
-                try await admit(record, epoch: epoch)
+                do { try await admit(record, epoch: epoch) }
+                catch is ServerConnectionUnavailable { continue }
                 submitted = true
                 watch.checkpoint(1)
             }

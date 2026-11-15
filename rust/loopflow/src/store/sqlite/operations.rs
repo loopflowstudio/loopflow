@@ -1720,6 +1720,56 @@ mod tests {
         assert!(store.operation_revision().unwrap() > before);
     }
     #[test]
+    fn abandonment_receipts_keep_the_same_canceled_delivery_on_repeat() {
+        let (_dir, store) = store();
+        let repo = loopflow_test_support::TestRepo::new();
+        let repository_id = store
+            .ensure_repository(repo.path().to_str().unwrap())
+            .unwrap();
+        let task = store
+            .create_task(&crate::work::task::NewTask {
+                id: crate::durable::TaskId::new(),
+                repository_id,
+                project_id: None,
+                title: "Abandon receipt".into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap();
+        let mut original = None;
+        for id in ["abandon", "already-abandoned"] {
+            store
+                .admit_operation(
+                    &store.reading_identity().unwrap().1,
+                    id,
+                    "task.abandon",
+                    "hash",
+                    &json!({}),
+                )
+                .unwrap();
+            assert!(store.dispatch_operation(id).unwrap());
+            crate::journal::request::with_operation(Some(id.into()), || {
+                store
+                    .abandon(&crate::durable::WorkRef::Task(task.id.clone()), "Canceled")
+                    .unwrap();
+            });
+            let receipt = store.operation_receipt(id).unwrap().unwrap();
+            assert_eq!(receipt.commits.len(), 1);
+            let commit = &receipt.commits[0];
+            assert_eq!(commit.stage, "task.abandoned");
+            assert_eq!(
+                commit.fence.revisions["planning"],
+                store.revisions().unwrap().planning
+            );
+            assert_eq!(commit.planning_changes.len(), 1);
+            if let Some(original) = &original {
+                assert_eq!(&commit.planning_changes, original);
+            }
+            original = Some(commit.planning_changes.clone());
+        }
+    }
+
+    #[test]
     fn periodic_settlement_confirms_every_subscriber_to_the_exact_completion_request() {
         let (dir, store) = store();
         let repo = loopflow_test_support::TestRepo::new();

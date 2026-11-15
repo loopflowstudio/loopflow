@@ -193,7 +193,7 @@ extension ClientWorkQueryTests {
         await owner.persistPending()
         XCTAssertEqual(owner.listedOperations.map(\.id), [creation.id, completion])
         let complete = try XCTUnwrap(owner.operations.first { $0.id == completion })
-        XCTAssertEqual(creation.presentation().messages, complete.presentation().messages)
+        XCTAssertEqual(creation.presentation().status, complete.presentation().status)
         XCTAssertEqual(creation.presentation().actions, [.tryAgain, .edit])
         XCTAssertEqual(complete.presentation().actions, [.tryAgain])
         XCTAssertFalse(owner.isCompleting(issue: "a", directory: "/repo"), "An unsaved failure withdraws only its overlay")
@@ -202,12 +202,12 @@ extension ClientWorkQueryTests {
         XCTAssertTrue(owner.isCompleting(issue: "a", directory: "/repo"))
         await owner.persistPending()
         XCTAssertTrue(complete.saved)
-        XCTAssertEqual(complete.presentation().actions, [.check])
+        XCTAssertEqual(complete.presentation().actions, [])
         XCTAssertEqual(creation.presentation().actions, [.tryAgain, .edit])
         let saved = try await disk.pending()
         XCTAssertEqual(saved.map(\.id), [completion])
         owner.editCreation(creation.id) { XCTAssertEqual($0.request, "Exact words") }
-        XCTAssertEqual(owner.listedOperations.map(\.id), [completion])
+        XCTAssertTrue(owner.listedOperations.isEmpty)
     }
 
     func testUnsavedCreationCanReturnItsWordsToTheEditorWithoutSending() async throws {

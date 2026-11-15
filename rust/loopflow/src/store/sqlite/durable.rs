@@ -193,13 +193,14 @@ impl SqliteStore {
                 // Migrated cancellations can predate delivery receipts. An explicit
                 // repeat repairs that missing intention without replacing uncertainty.
                 let has_delivery: bool = tx.query_row(
-                    "SELECT EXISTS(SELECT 1 FROM task_state_deliveries WHERE task_id=?1)",
+                    "SELECT EXISTS(SELECT 1 FROM task_state_deliveries WHERE task_id=?1 AND target='canceled')",
                     [task_id.as_str()],
                     |row| row.get(0),
                 )?;
                 if !has_delivery {
                     super::task_state_delivery::queue_in(&tx, task_id, "canceled")?;
                 }
+                commit_abandon_in(&tx, task_id)?;
                 tx.commit()?;
                 return Ok(AbandonReceipt {
                     work: work.clone(),
@@ -220,11 +221,19 @@ impl SqliteStore {
             ),
         };
         if tx.execute(&abandon, params![id, now])? != 1 {
-            return Err(StoreError::InvalidAuthority(format!(
-                "{} {} is not ready",
-                work.kind(),
-                work.id()
-            )));
+            let error =
+                StoreError::InvalidAuthority(format!("{} {} is not ready", work.kind(), work.id()));
+            if let WorkRef::Task(task_id) = work {
+                super::operations::refuse_current_in(
+                    &tx,
+                    "task.abandoned",
+                    &[task_id.as_str()],
+                    &["planning"],
+                    &error,
+                )?;
+                tx.commit()?;
+            }
+            return Err(error);
         }
         if let WorkRef::Task(task_id) = work {
             tx.execute(
@@ -232,6 +241,7 @@ impl SqliteStore {
                 params![task_id.as_str(), reason],
             )?;
             super::task_state_delivery::queue_in(&tx, task_id, "canceled")?;
+            commit_abandon_in(&tx, task_id)?;
         }
         tx.commit()?;
         Ok(AbandonReceipt {
@@ -476,6 +486,34 @@ pub(super) fn map_machine_by_id(
         created_at: OffsetDateTime::from_unix_timestamp(created).map_err(invalid_durable)?,
         observed_at: OffsetDateTime::from_unix_timestamp(observed).map_err(invalid_durable)?,
     }))
+}
+
+fn commit_abandon_in(conn: &Connection, task: &TaskId) -> StoreResult<()> {
+    if crate::journal::request::operation_id().is_none() {
+        return Ok(());
+    }
+    let delivery: String = conn.query_row(
+        "SELECT id FROM task_state_deliveries WHERE task_id=?1 AND target='canceled' ORDER BY seq DESC LIMIT 1",
+        [task.as_str()], |row| row.get(0),
+    )?;
+    super::operations::commit_current_in(
+        conn,
+        "task.abandoned",
+        &[task.as_str()],
+        &["planning"],
+        vec![crate::store::planning_sync::PlanningChangeRef {
+            kind: crate::store::planning_sync::PlanningChangeKind::TaskState,
+            owner: task.to_string(),
+            id: delivery,
+        }],
+        || {
+            Ok(serde_json::to_value(
+                super::children::task_on(conn, task)?
+                    .ok_or(StoreError::NotFound)?
+                    .identifier,
+            )?)
+        },
+    )
 }
 
 /// Completion and abandonment are durable. An open Task's state follows

@@ -399,16 +399,15 @@ final class ClientWorkDatabase {
 
     private func membershipEffect(_ state: State) throws -> WorkQueryEffect? {
         let command = try JSONDecoder().decode(JSONValue.self, from: state.record.payload)
-        guard case .object(let fields) = command, fields["kind"] == .string("task.complete"),
+        guard case .object(let fields) = command, case .string(let kind) = fields["kind"],
+              let declaration = OperationDeclaration(kind: kind), declaration.changesMembership,
               case .string(let directory) = fields["directory"],
               case .string(let issue) = fields["issue"] else { return nil }
         let sequence = try rows("SELECT CAST(sequence AS BLOB) FROM operations WHERE id=?", id: state.record.id).first
             .flatMap { Int64(String(decoding: $0, as: UTF8.self)) }
         guard let sequence else { return nil }
         let receipt = state.receiptEpoch == (try activeEpoch(machine: state.record.destination)) ? state.receipt : nil
-        let resolution = receipt?.commits.first { $0.stage == "task.completed" }
-        return WorkQueryEffect(operationID: state.record.id, sequence: sequence, directory: directory,
-            kind: "task.complete", issue: issue, resolution: resolution)
+        return declaration.effect(id: state.record.id, sequence: sequence, directory: directory, issue: issue, receipt: receipt)
     }
 
     private func effectsCover(_ fence: CommitFence, in reading: ClientWorkQuery) -> Bool {

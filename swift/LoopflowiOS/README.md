@@ -38,8 +38,11 @@ Task row, clears the redundant request row; unresolved recovery stays visible.
 After a local save failure, **Try again** retries the same ID and **Edit request**
 returns the words to the editor. Once saved, **Check request** recovers the original
 result and **Inspect** shows its receipt when recovery needs attention.
-**Reconnect** reopens the same Session after attachment fails. Each pending command
-has one row with the same recovery controls.
+**Reconnect** reopens the same Session after attachment fails. Complete and Abandon
+show no extra request row while delivering. A disconnected request shows
+**Waiting for connection** without an action and resumes automatically on its
+original Machine, including after app restart. A request needing attention shows
+recovery controls; a creation also keeps its row until its result has been shown.
 
 The shared SQLite outbox saves the original request
 before `operation.submit` admits it. Receipt subscriptions observe preparation;
@@ -75,7 +78,8 @@ opens the whole file. A Task with no conversation opens on its Changes.
 replaces this route with the next visible Task or returns to the list. Other feeds
 keep their selections. The same command saves before sending; its request row's
 **Check request** recovers its original identity after an unanswered send. Save failure restores membership
-without changing your newer navigation. A retained Task shows **Completing…** while
+without changing your newer navigation. **Abandon** in Task actions follows the same removal and next-Task rule.
+A retained Task shows **Completing…** while
 its command remains pending. These local changes work while the network is waiting;
 provider readiness still comes from the Session connection.
 

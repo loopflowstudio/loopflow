@@ -58,7 +58,9 @@ public actor ServerLink {
     static let handshakeExpired = "Loopflow server did not answer within 10s; check `lf server status`"
 
     public static func open(_ endpoint: ServerEndpoint) async throws -> ServerLink {
-        let carrier = try await endpoint.control()
+        let carrier: any ServerCarrier
+        do { carrier = try await endpoint.control() }
+        catch { throw ServerConnectionUnavailable(error) }
         do {
             let welcome = try await bounded(handshake, carrier, expired: handshakeExpired) {
                 try await carrier.send(try line(.hello(ServerHello(
@@ -77,7 +79,8 @@ public actor ServerLink {
             return link
         } catch {
             await carrier.close()
-            throw error
+            if error is ServerError || error is RegistryQueryError || error is DecodingError { throw error }
+            throw ServerConnectionUnavailable(error)
         }
     }
 
@@ -195,16 +198,17 @@ public actor ServerLink {
     /// `answers` is `n`; `cancel` ends it.
     public nonisolated static func subscribe<Output: Sendable>(
         _ query: ServedRead, events: Bool = false, buffer: Int = 8,
+        reconnect: Bool = false,
         connect: @escaping @Sendable () async throws -> ServerLink,
         map: @escaping @Sendable (ServerSubscriptionUpdate) throws -> Output?
     ) -> ServerWatch<Output> {
         let (updates, continuation) = AsyncThrowingStream<Output, any Error>.makeStream(bufferingPolicy: .bufferingOldest(buffer))
-        let subscription = ServerSubscription(continuation, query: query, events: events, encode: map, connect: connect)
-        Task {
-            do { try await subscription.start() }
-            catch { subscription.finish(throwing: error) }
-        }
-        return ServerWatch(updates: updates, checkpoint: subscription.checkpoint, cancel: subscription.cancel)
+        let (connections, connectionUpdates) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        let subscription = ServerSubscription(continuation, query: query, events: events, reconnect: reconnect,
+            connectionUpdates: connectionUpdates, encode: map, connect: connect)
+        subscription.begin()
+        return ServerWatch(updates: updates, checkpoint: subscription.checkpoint, cancel: subscription.cancel,
+            connections: connections, isWaiting: { subscription.isWaiting })
     }
 
     fileprivate func register(_ subscription: ServerSubscription, query: ServedRead, resume: String?) async throws {
@@ -388,11 +392,21 @@ public enum ServerSubscriptionUpdate: Sendable {
     case event(SubscriptionEvent)
 }
 
+/// A connection failed before an answer was available. Receipt recovery still
+/// decides whether the original command can be admitted again.
+public struct ServerConnectionUnavailable: LocalizedError {
+    public let cause: any Error
+    public init(_ cause: any Error) { self.cause = cause }
+    public var errorDescription: String? { cause.localizedDescription }
+}
+
 /// A live subscription's updates and its two controls.
 public struct ServerWatch<Output: Sendable>: Sendable {
     public let updates: AsyncThrowingStream<Output, any Error>
     public let checkpoint: @Sendable (UInt64) -> Void
     public let cancel: @Sendable () -> Void
+    public var connections: AsyncStream<Void>? = nil
+    public var isWaiting: @Sendable () -> Bool = { false }
 }
 
 /// One subscription's updates across links; checkpoints before a link is ready wait.
@@ -411,12 +425,24 @@ final class ServerSubscription: @unchecked Sendable {
     private let consumesEvents: Bool
     private let connect: @Sendable () async throws -> ServerLink
     private var stopped = false
+    private let reconnect: Bool
+    private let connectionUpdates: AsyncStream<Void>.Continuation
+    private var waiting = false
+    var isWaiting: Bool { lock.withLock { waiting } }
+
+    private func setWaiting(_ value: Bool) {
+        lock.withLock { waiting = value }
+        connectionUpdates.yield(())
+    }
 
     init<Output: Sendable>(_ continuation: AsyncThrowingStream<Output, any Error>.Continuation,
-                           query: ServedRead, events: Bool,
+                           query: ServedRead, events: Bool, reconnect: Bool,
+                           connectionUpdates: AsyncStream<Void>.Continuation,
                            encode: @escaping @Sendable (ServerSubscriptionUpdate) throws -> Output?,
                            connect: @escaping @Sendable () async throws -> ServerLink) {
         self.query = query
+        self.reconnect = reconnect
+        self.connectionUpdates = connectionUpdates
         self.consumesEvents = events
         self.connect = connect
         self.deliver = { update in
@@ -431,17 +457,48 @@ final class ServerSubscription: @unchecked Sendable {
         continuation.onTermination = { [weak self] _ in self?.stop(nil) }
     }
 
-    func start() async throws {
+    func begin() {
+        lock.withLock {
+            guard !stopped else { return }
+            recovery = Task { [self] in
+                do { try await start() }
+                catch is CancellationError { }
+                catch { finish(throwing: error) }
+            }
+        }
+    }
+
+    private func start() async throws {
+        var attempt = 0
+        while !lock.withLock({ stopped }) {
+            do { try await open(); setWaiting(false); return }
+            catch is ServerConnectionUnavailable where reconnect {
+                try Task.checkCancellation()
+                guard !lock.withLock({ stopped }) else { return }
+                setWaiting(true)
+                // Backoff belongs to opening the transport, never to submitting
+                // an operation. A new reading decides any subsequent admission.
+                attempt = min(attempt + 1, 6)
+                try await Task.sleep(for: .milliseconds(min(100 << (attempt - 1), 3200)))
+            }
+        }
+    }
+
+    private func open() async throws {
         try Task.checkCancellation()
         let link = try await connect()
         try Task.checkCancellation()
         let (stopped, resume) = lock.withLock { (self.stopped, consumesEvents ? nil : resumeToken) }
         guard !stopped else { return }
-        try await link.register(self, query: query, resume: resume)
+        do { try await link.register(self, query: query, resume: resume) }
+        catch {
+            if await link.isClosed { throw ServerConnectionUnavailable(error) }
+            throw error
+        }
         let checkpoint: UInt64? = lock.withLock {
             self.link = link
             eventBaseline = false
-            return pending
+            return pending ?? (reconnect ? 0 : nil)
         }
         // A failed send ends the link; its failure resumes this watch.
         if let checkpoint { try? await link.checkpoint(id, checkpoint) }
@@ -450,10 +507,10 @@ final class ServerSubscription: @unchecked Sendable {
     /// Keep queued readings in this same stream: the resume token never outruns
     /// the baseline its consumer receives. A new stream starts without a token.
     func disconnected(from link: ServerLink, error: any Error) {
-        let resume = lock.withLock {
-            guard !stopped, self.link === link else { return true }
+        let resume: Bool? = lock.withLock {
+            guard !stopped, self.link === link else { return nil }
             self.link = nil
-            guard resumeToken != nil else { return false }
+            guard reconnect || resumeToken != nil else { return false }
             recovery = Task { [self] in
                 do {
                     try await Task.sleep(for: .milliseconds(100))
@@ -463,6 +520,8 @@ final class ServerSubscription: @unchecked Sendable {
             }
             return true
         }
+        guard let resume else { return }
+        if reconnect { setWaiting(true) }
         if !resume { finish(throwing: error) }
     }
 
@@ -531,6 +590,7 @@ final class ServerSubscription: @unchecked Sendable {
         }
         guard first else { return }
         if let link { Task { [id] in await link.unsubscribe(id) } }
+        connectionUpdates.finish()
         finishStream(error)
     }
 }

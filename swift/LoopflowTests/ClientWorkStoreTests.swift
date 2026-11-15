@@ -423,6 +423,12 @@ struct ClientWorkStoreTests {
         let server = try OperationServer()
         let store = client(root, server)
         let record = try await store.record(command, requestID: "same")
+        let originalStamp = try #require(operationTestFrame(delivery: nil).stamp)
+        var stamp = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(originalStamp)) as? [String: Any])
+        var wire: [String: Any] = ["body": NSNull(), "answers": NSNull(), "unavailable": NSNull()]
+        stamp["machine"] = "other"
+        wire["stamp"] = stamp
+        server.publish(try JSONDecoder().decode(SubscriptionReading<OperationReceipt>.self, from: JSONSerialization.data(withJSONObject: wire)))
         let other = ClientWorkStore(directory: root, machine: { "other" }, read: { _ in "null" }, observe: { server.observe($0) }, send: { try server.send($0) })
         await #expect(throws: (any Error).self) { try await other.reconcile(record) }
         #expect(server.submissions.isEmpty)

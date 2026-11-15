@@ -66,8 +66,8 @@ struct WorkNavigator: View {
                 .compactMap({ $0 }).contains(error) {
                 Text(error).font(Typography.body(11)).foregroundStyle(palette.warning).padding(10)
             }
-            ForEach(model.pendingCommands) { operation in
-                PendingCommandRow(model: model, operation: operation)
+            ForEach(model.pendingOperations) { operation in
+                DesktopPendingOperationRow(model: model, operation: operation)
             }
             // The repository tops the sidebar; a selected Wave moves up under it.
             VStack(alignment: .leading, spacing: 5) {
@@ -920,25 +920,15 @@ struct WorkReadStatus: View {
 }
 
 /// The request retains its recovery controls even after native input is ready.
-struct PendingCommandRow: View {
+struct DesktopPendingOperationRow: View {
     let model: WorkModel
     let operation: PendingOperation
-    @Environment(\.palette) private var palette
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            if operation.isCreation {
-                Button { model.selectCreation(operation) } label: { Text(operation.title).lineLimit(2) }.buttonStyle(.plain)
-            } else { Text(operation.title).lineLimit(2) }
-            let presentation = operation.presentation()
-            Text(presentation.messages.isEmpty ? "Request pending…" : presentation.messages.joined(separator: "\n")).font(Typography.body(11)).foregroundStyle(palette.textSecondary)
-            PendingCommandActions(presentation: presentation) { action in
-                switch action {
-                case .edit: model.editCreation(operation.id)
-                case .tryAgain, .check: model.retryCreation(operation.id)
-                case .inspect: Task { await model.inspectedCreation(operation.id) }
-                }
-            }.controlSize(.small)
-        }.padding(10)
+        if let interaction = model.interaction {
+            PendingOperationRow(operation: operation, interaction: interaction,
+                edit: { model.editCreation($0.id) }, select: { model.selectCreation($0) })
+                .buttonStyle(.plain).controlSize(.small).padding(10)
+        }
     }
 }

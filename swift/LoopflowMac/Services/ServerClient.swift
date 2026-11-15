@@ -25,11 +25,16 @@ enum ServerClient {
 
     static func submittedOperation(_ payload: Data) async throws -> String {
         let value = try JSONDecoder().decode(JSONValue.self, from: payload)
-        return String(decoding: try await request(.submittedOperation(value), location: .shared).bytes, as: UTF8.self)
+        let link = try await links.link(for: .shared)
+        do { return String(decoding: try await link.request(.submittedOperation(value)).bytes, as: UTF8.self) }
+        catch {
+            if await link.isClosed { throw ServerConnectionUnavailable(error) }
+            throw error
+        }
     }
 
     static func operationReceipts(_ id: String) -> ClientWorkStore.ReceiptWatch {
-        ServerLink.subscribe(.operationGet(requestID: id), connect: { try await links.link(for: .shared) }) { update in
+        ServerLink.subscribe(.operationGet(requestID: id), reconnect: true, connect: { try await links.link(for: .shared) }) { update in
             guard case .reading(let frame) = update else { return nil }
             return try frame.decode(SubscriptionReading<OperationReceipt>.self)
         }

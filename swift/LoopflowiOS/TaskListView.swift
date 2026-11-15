@@ -84,9 +84,19 @@ final class TaskFeed {
 
     func complete(_ task: WorkViewPlan.Content, selected: WorkWorkspaceKey?, visible: [WorkWorkspaceKey],
                   select: (WorkWorkspaceKey?) -> Void) {
+        leave(task, abandoning: false, selected: selected, visible: visible, select: select)
+    }
+
+    func abandon(_ task: WorkViewPlan.Content, selected: WorkWorkspaceKey?, visible: [WorkWorkspaceKey],
+                 select: (WorkWorkspaceKey?) -> Void) {
+        leave(task, abandoning: true, selected: selected, visible: visible, select: select)
+    }
+
+    private func leave(_ task: WorkViewPlan.Content, abandoning: Bool, selected: WorkWorkspaceKey?,
+                       visible: [WorkWorkspaceKey], select: (WorkWorkspaceKey?) -> Void) {
         guard let directory = repositories.first(where: { $0.repository == task.work.repository })?.path else { return }
-        client.interaction.complete(task.work, issue: task.identifier ?? task.work.id,
-                directory: directory, selected: selected, visible: visible, select: select)
+        let leave = abandoning ? client.interaction.abandon : client.interaction.complete
+        _ = leave(task.work, task.identifier ?? task.work.id, directory, selected, visible, select)
     }
 
     func refresh() async {
@@ -186,25 +196,12 @@ struct TaskListView: View {
         NavigationStack(path: $path) {
             List {
                 ForEach(client.interaction.listedOperations) { operation in
-                    VStack(alignment: .leading) {
-                        if operation.isCreation {
-                            Button { selectedOperation = operation; path = [.operation(operation.id)] } label: {
-                                Text(operation.title).lineLimit(2)
-                            }
-                        } else { Text(operation.title) }
-                        let presentation = operation.presentation()
-                        Text(presentation.messages.isEmpty ? "Request pending…" : presentation.messages.joined(separator: "\n"))
-                            .font(Typography.caption(13))
-                        PendingCommandActions(presentation: presentation) { action in
-                            switch action {
-                            case .edit:
-                                client.interaction.editCreation(operation.id) { creation = MobileTaskCreation(client: client, request: $0) }
-                            case .tryAgain, .check: client.interaction.retry(operation.id)
-                            case .inspect: Task { try? await client.interaction.presented(operation.id) }
-                            }
-                        }
-                    }.buttonStyle(.borderless)
+                    PendingOperationRow(operation: operation, interaction: client.interaction, edit: {
+                        client.interaction.editCreation($0.id) { creation = MobileTaskCreation(client: client, request: $0) }
+                    }, select: { selectedOperation = $0; path = [.operation($0.id)] })
+                    .buttonStyle(.borderless)
                 }
+
                 if let error = feed.error ?? client.interaction.cacheError {
                     VStack(alignment: .leading, spacing: 8) {
                         Label("Couldn’t update Tasks", systemImage: "wifi.exclamationmark").font(Typography.strong(15))
@@ -352,15 +349,20 @@ struct TaskListView: View {
     private func workspace(_ task: WorkViewPlan.Content) -> some View {
         TaskWorkspaceView(client: client, task: task, theme: theme, draft: Binding(
             get: { drafts[task.work] ?? "" },
-            set: { drafts[task.work] = $0 }), complete: {
-                let visible = sections.flatMap { $0.open + $0.quiet }.map(\.work)
-                feed.complete(task, selected: path.last?.work, visible: visible) { next in
-                    if let next, let content = feed.repositories.flatMap(\.tasks).first(where: { $0.work == next }) {
-                        retained[next] = content
-                    }
-                    path = next.map { [.work($0)] } ?? []
-                }
-            }, completionDirectory: feed.repositories.first { $0.repository == task.work.repository }?.path)
+            set: { drafts[task.work] = $0 }), complete: { leave(task, abandoning: false) },
+            abandon: { leave(task, abandoning: true) },
+            completionDirectory: feed.repositories.first { $0.repository == task.work.repository }?.path)
+    }
+
+    private func leave(_ task: WorkViewPlan.Content, abandoning: Bool) {
+        let visible = sections.flatMap { $0.open + $0.quiet }.map(\.work)
+        let leave = abandoning ? feed.abandon : feed.complete
+        leave(task, path.last?.work, visible) { next in
+            if let next, let content = feed.repositories.flatMap(\.tasks).first(where: { $0.work == next }) {
+                retained[next] = content
+            }
+            path = next.map { [.work($0)] } ?? []
+        }
     }
 
     private func row(_ task: WorkViewPlan.Content) -> some View {

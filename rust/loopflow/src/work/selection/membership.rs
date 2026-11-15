@@ -180,28 +180,53 @@ impl Selection {
                 })
                 .collect(),
             unavailable,
-            effects: BTreeMap::from([(
-                "task.complete".into(),
-                MembershipStateEffect {
-                    stage: "task.completed".into(),
-                    domains: BTreeSet::from(["planning".into()]),
-                    remove: BTreeSet::from([
-                        SelectionState::Open,
-                        SelectionState::Available,
-                        SelectionState::Busy,
-                        SelectionState::Blocked,
-                        SelectionState::Unstarted,
-                        SelectionState::Idle,
-                        SelectionState::Active,
-                        SelectionState::Moving,
-                        SelectionState::Shipping,
-                        SelectionState::Backlog,
-                        SelectionState::Working,
-                        SelectionState::Autonomous,
-                    ]),
-                    insert: BTreeSet::from([SelectionState::Done]),
-                },
-            )]),
+            effects: BTreeMap::from([
+                (
+                    "task.complete".into(),
+                    MembershipStateEffect {
+                        stage: "task.completed".into(),
+                        domains: BTreeSet::from(["planning".into()]),
+                        remove: BTreeSet::from([
+                            SelectionState::Open,
+                            SelectionState::Available,
+                            SelectionState::Busy,
+                            SelectionState::Blocked,
+                            SelectionState::Unstarted,
+                            SelectionState::Idle,
+                            SelectionState::Active,
+                            SelectionState::Moving,
+                            SelectionState::Shipping,
+                            SelectionState::Backlog,
+                            SelectionState::Working,
+                            SelectionState::Autonomous,
+                        ]),
+                        insert: BTreeSet::from([SelectionState::Done]),
+                    },
+                ),
+                (
+                    "task.abandon".into(),
+                    MembershipStateEffect {
+                        stage: "task.abandoned".into(),
+                        domains: BTreeSet::from(["planning".into()]),
+                        remove: BTreeSet::from([
+                            SelectionState::Open,
+                            SelectionState::Available,
+                            SelectionState::Busy,
+                            SelectionState::Blocked,
+                            SelectionState::Unstarted,
+                            SelectionState::Idle,
+                            SelectionState::Active,
+                            SelectionState::Moving,
+                            SelectionState::Shipping,
+                            SelectionState::Backlog,
+                            SelectionState::Working,
+                            SelectionState::Autonomous,
+                            SelectionState::Done,
+                        ]),
+                        insert: BTreeSet::new(),
+                    },
+                ),
+            ]),
         })
     }
 

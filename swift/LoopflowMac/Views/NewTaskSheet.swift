@@ -307,18 +307,12 @@ struct StartingTaskView: View {
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            let presentation = launch.presentation()
             if let reason = model.taskOpening?.reason {
                 Text(reason).foregroundStyle(palette.textSecondary)
                 Button("Retry opening") { Task { await model.openCreatedTask(launch) } }
             }
-            Text(presentation.messages.isEmpty ? "Starting conversation…" : presentation.messages.joined(separator: "\n")).foregroundStyle(palette.textSecondary).textSelection(.enabled)
-            PendingCommandActions(presentation: presentation) { action in
-                switch action {
-                case .edit: model.editCreation(launch.id)
-                case .tryAgain, .check: model.retryCreation(launch.id)
-                case .inspect: Task { await model.inspectedCreation(launch.id) }
-                }
+            if let interaction = model.interaction {
+                PendingOperationRow(operation: launch, interaction: interaction, edit: { model.editCreation($0.id) })
             }
             Spacer(minLength: 0)
         }

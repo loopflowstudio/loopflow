@@ -32,7 +32,7 @@ final class MobileTaskCreationTests: XCTestCase {
         let pending = try await disk.pending()
         XCTAssertEqual(pending.map(\.id), [operation.id])
         XCTAssertThrowsError(try view.inspect().find(button: "Edit request"))
-        _ = try view.inspect().find(button: "Check request")
+        XCTAssertThrowsError(try view.inspect().find(button: "Check request"))
     }
 
     func testCreateButtonSelectsSubmittedWordsBeforeHeldSaveAndClosesEditor() async throws {

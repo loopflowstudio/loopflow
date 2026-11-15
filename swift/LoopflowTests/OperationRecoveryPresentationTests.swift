@@ -29,7 +29,7 @@ struct OperationRecoveryPresentationTests {
         _ = await watches.next()
         _ = await watches.next()
         try await recovery.presented(record.id)
-        #expect(recovery.listedOperations.first?.presentation().messages.joined(separator: "\n").contains("lost delivery acknowledgment") == true)
+        #expect(recovery.listedOperations.first?.presentation().status.text.contains("lost delivery acknowledgment") == true)
         #expect(server.watchCount == 1)
 
         let changes = await submissions.changes()
@@ -128,7 +128,7 @@ struct OperationRecoveryPresentationTests {
         }
         await owner.refreshFromStore()
         #expect(owner.listedOperations.map(\.sessionID) == ["original"])
-        #expect(owner.listedOperations.first?.presentation().messages.isEmpty == true)
+        #expect(owner.listedOperations.first?.presentation().status == .delivering)
         try await owner.presented(.session("another"))
         #expect(try await store.pending().count == 1)
         try await owner.presented(.session("original"))
@@ -169,7 +169,7 @@ struct OperationRecoveryPresentationTests {
         recovery.start()
         await recovery.refreshFromStore()
         #expect(recovery.listedOperations.first?.presentation().actions.contains(.inspect) == true)
-        #expect(recovery.listedOperations.first?.presentation().messages.joined(separator: "\n").contains("lost delivery acknowledgment") == true)
+        #expect(recovery.listedOperations.first?.presentation().status.text.contains("lost delivery acknowledgment") == true)
         _ = await watches.next() // saved-result lookup
         _ = await watches.next() // continued observation after returning the result
 
@@ -180,8 +180,8 @@ struct OperationRecoveryPresentationTests {
         }
         await recovery.refreshFromStore()
         #expect(recovery.listedOperations.first?.presentation().actions.contains(.inspect) == true)
-        #expect(recovery.listedOperations.first?.presentation().messages.joined(separator: "\n").contains("planning response lost") == true)
-        #expect(recovery.listedOperations.first?.presentation().messages.joined(separator: "\n").contains("lost delivery acknowledgment") == false)
+        #expect(recovery.listedOperations.first?.presentation().status.text.contains("planning response lost") == true)
+        #expect(recovery.listedOperations.first?.presentation().status.text.contains("lost delivery acknowledgment") == false)
         #expect(try await submissions.receipt(record.id)?.error == older.body?.error)
         #expect(try await submissions.receipt(record.id)?.result == older.body?.result)
 
@@ -196,7 +196,7 @@ struct OperationRecoveryPresentationTests {
         #expect(server.watchCount == 1)
         #expect(try await submissions.recovery(record.id)?.resultPresented == true)
         #expect(recovery.listedOperations.first?.presentation().actions.contains(.inspect) == true)
-        #expect(recovery.listedOperations.first?.presentation().messages.joined(separator: "\n").contains("planning response lost") == true)
+        #expect(recovery.listedOperations.first?.presentation().status.text.contains("planning response lost") == true)
         #expect(try await submissions.pending().first?.payload == record.payload)
     }
 }

@@ -239,10 +239,10 @@ struct WorkDestinationTests {
             session: record.id, diagnostic: "Planning sync failed", taskID: task.id, identifier: task.task.identifier))
         await waitForCreation(operation) { operation.error != nil }
         await model.mountedCreation(taskID: task.id)
-        let recoveryRow = try PendingCommandRow(model: model, operation: operation).inspect()
+        let recoveryRow = try DesktopPendingOperationRow(model: model, operation: operation).inspect()
         _ = try recoveryRow.find(button: "Check request")
         _ = try recoveryRow.find(button: "Inspect")
-        #expect(model.pendingCommands.map(\.id) == [operation.id])
+        #expect(model.pendingOperations.map(\.id) == [operation.id])
         #expect(server.submissions.isEmpty)
         let pending = try await disk.pending()
         let recovery = try await disk.recovery(operation.id)

@@ -27,7 +27,8 @@ public final class WorkInteraction {
     public var listedOperations: [PendingOperation] { operations.filter(\.isListed) }
     public private(set) var machine: String?
     public private(set) var cacheError: String?
-    private var commandPayloads: [Data] = []
+    private var completing: Set<TaskTarget> = []
+    private struct TaskTarget: Hashable { let issue: String; let directory: String }
     @ObservationIgnored private var saved: [SubmittedOperation] = []
     @ObservationIgnored private let store: ClientWorkStore
     @ObservationIgnored private var leases: [UUID: Lease] = [:]
@@ -95,6 +96,7 @@ public final class WorkInteraction {
             for await _ in await store.changes() {
                 guard !Task.isCancelled else { return }
                 await self?.refreshFromStore()
+                guard !Task.isCancelled else { return }
                 await self?.resumeSaved()
             }
         }
@@ -163,14 +165,28 @@ public final class WorkInteraction {
     public func complete(_ work: WorkWorkspaceKey, issue: String, directory: String,
                          selected: WorkWorkspaceKey?, visible: [WorkWorkspaceKey],
                          select: (WorkWorkspaceKey?) -> Void) -> String {
+        leave(work, command: .taskComplete(directory: directory, issue: issue), kind: "task.complete",
+            issue: issue, directory: directory, selected: selected, visible: visible, select: select)
+    }
+
+    @discardableResult
+    public func abandon(_ work: WorkWorkspaceKey, issue: String, directory: String,
+                        selected: WorkWorkspaceKey?, visible: [WorkWorkspaceKey], select: (WorkWorkspaceKey?) -> Void) -> String {
+        leave(work, command: .taskAbandon(directory: directory, issue: issue), kind: "task.abandon",
+            issue: issue, directory: directory, selected: selected, visible: visible, select: select)
+    }
+
+    private func leave(_ work: WorkWorkspaceKey, command: ServedWrite, kind: String, issue: String, directory: String,
+                       selected: WorkWorkspaceKey?, visible: [WorkWorkspaceKey], select: (WorkWorkspaceKey?) -> Void) -> String {
         let id = UUID().uuidString.lowercased()
-        PerfClock.interaction(.taskComplete, .gesture, id: id)
+        let journey: PerfClock.Journey = kind == "task.abandon" ? .taskAbandon : .taskComplete
+        PerfClock.interaction(journey, .gesture, id: id)
         // ServedWrite's finite strings/enums cannot fail encoding.
-        let payload = try! JSONEncoder().encode(ServedWrite.taskComplete(directory: directory, issue: issue))
+        let payload = try! JSONEncoder().encode(command)
         let effect = WorkQueryEffect(operationID: id, sequence: 0, directory: directory,
-            kind: "task.complete", issue: issue, resolution: nil)
+            kind: kind, issue: issue, resolution: nil)
         let intent = Intent(id: id, payload: payload, submittedAt: Date(), draftID: nil, destination: machine, effect: effect)
-        operations.append(PendingOperation(id: id, payload: payload, kind: "task.complete", request: "",
+        operations.append(PendingOperation(id: id, payload: payload, kind: kind, request: "",
             directory: directory, wave: nil, graph: nil, submittedAt: intent.submittedAt, destination: machine))
         intents.append(intent)
         publish()
@@ -181,7 +197,7 @@ public final class WorkInteraction {
             let following = order.dropFirst(min(index + 1, order.count)) + order.prefix(index)
             select(following.first { $0 != work && $0.kind == .task })
         }
-        PerfClock.interaction(.taskComplete, .statePublished, id: id)
+        PerfClock.interaction(journey, .statePublished, id: id)
         start()
         enqueue(intent)
         return id
@@ -245,6 +261,7 @@ public final class WorkInteraction {
                     intents[index].savedRevision = revision
                 }
                 await refreshFromStore()
+                guard !Task.isCancelled else { return }
                 deliver(record)
             } catch {
                 operations.first { $0.id == intent.id }?.fail(error.localizedDescription)
@@ -254,7 +271,7 @@ public final class WorkInteraction {
     }
 
     private func resumeSaved() async {
-        guard machine != nil, let records = try? await store.pending() else { return }
+        guard changes != nil, !Task.isCancelled, machine != nil, let records = try? await store.pending() else { return }
         for record in records where record.destination == machine {
             guard deliveries[record.id] == nil,
                   operations.first(where: { $0.id == record.id })?.deliveryFailed != true,
@@ -264,7 +281,7 @@ public final class WorkInteraction {
     }
 
     private func deliver(_ record: SubmittedOperation) {
-        guard deliveries[record.id] == nil else { return }
+        guard changes != nil, !Task.isCancelled, deliveries[record.id] == nil else { return }
         let attempt = UUID()
         let operation = operations.first { $0.id == record.id }
         operation?.deliveryAttempt = attempt
@@ -298,18 +315,14 @@ public final class WorkInteraction {
     }
 
     public func isCompleting(issue: String, directory: String) -> Bool {
-        commandPayloads.contains { payload in
-            guard let command = try? JSONDecoder().decode(JSONValue.self, from: payload),
-                  case .object(let fields) = command else { return false }
-            return fields["kind"] == .string("task.complete") && fields["directory"] == .string(directory)
-                && fields["issue"] == .string(issue)
-        }
+        completing.contains(TaskTarget(issue: issue, directory: directory))
     }
 
     private func publish() {
-        commandPayloads = saved.map(\.payload) + intents.filter { intent in
-            !saved.contains(where: { $0.id == intent.id }) && operations.first(where: { $0.id == intent.id })?.error == nil
-        }.map(\.payload)
+        completing = Set(operations.filter { $0.kind == "task.complete" && $0.projectsEffect }.compactMap {
+            guard let issue = $0.targetIssue else { return nil }
+            return TaskTarget(issue: issue, directory: $0.directory)
+        })
         for lease in Array(leases.values) { lease.receive(reconciled.contains(lease.key) ? bases[lease.key].map(project) : nil) }
     }
 

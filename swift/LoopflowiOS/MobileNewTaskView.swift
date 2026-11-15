@@ -155,7 +155,7 @@ struct MobileCreationConversation: View {
                         title: operation.receipt?.task.title ?? "New Task", theme: theme, draft: $reply)
                         .id(session)
                         .task { try? await client.interaction.presented(.session(session)) }
-                    if !operation.presentation().messages.isEmpty || !operation.presentation().actions.isEmpty {
+                    if operation.presentation().status != .delivering || !operation.presentation().actions.isEmpty {
                         recoveryControls.padding()
                     }
                 }
@@ -174,18 +174,10 @@ struct MobileCreationConversation: View {
 
     private var recoveryControls: some View {
         VStack(alignment: .leading) {
-            let presentation = operation.presentation()
             if operation.destination != client.savedMachine.machineID {
                 Text("Reconnect the original Machine to open this request")
             }
-            Text(presentation.messages.isEmpty ? "Starting conversation…" : presentation.messages.joined(separator: "\n"))
-            PendingCommandActions(presentation: presentation) { action in
-                switch action {
-                case .edit: onEdit(operation)
-                case .tryAgain, .check: client.interaction.retry(operation.id)
-                case .inspect: Task { try? await client.interaction.presented(operation.id) }
-                }
-            }
+            PendingOperationRow(operation: operation, interaction: client.interaction, edit: onEdit)
         }
     }
 

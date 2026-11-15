@@ -9,6 +9,7 @@ struct TaskWorkspaceView: View {
     let theme: ThemeDefinition
     @Binding var draft: String
     var complete: (() -> Void)? = nil
+    var abandon: (() -> Void)? = nil
     var completionDirectory: String? = nil
 
     private var completionPending: Bool {
@@ -45,6 +46,13 @@ struct TaskWorkspaceView: View {
             }
         }
         .toolbar {
+            if let abandon {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu { Button("Abandon", role: .destructive, action: abandon) } label: {
+                        Image(systemName: "ellipsis")
+                    }.accessibilityLabel("Task actions")
+                }
+            }
             if let complete {
                 ToolbarItem(placement: .topBarTrailing) {
                     TaskCompleteButton(complete: complete, pending: completionPending)

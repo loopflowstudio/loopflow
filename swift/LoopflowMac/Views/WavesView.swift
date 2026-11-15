@@ -93,8 +93,8 @@ struct WavesView: View {
         .background(palette.background)
         .safeAreaInset(edge: .bottom) {
             VStack(alignment: .leading, spacing: 0) {
-                ForEach(model.pendingCommands.filter { !$0.isCreation }) { operation in
-                    PendingCommandRow(model: model, operation: operation)
+                ForEach(model.pendingOperations.filter { !$0.isCreation }) { operation in
+                    DesktopPendingOperationRow(model: model, operation: operation)
                 }
             }
         }

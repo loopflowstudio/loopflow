@@ -300,33 +300,6 @@ struct WorkNavigationTests {
         #expect(model.sidebarAutonomousTaskIDs.isEmpty)
     }
 
-    @Test("Abandoning the open Task drops its row and opens the next one before the command returns; a refusal puts it back")
-    func abandonLeavesTheSidebarAtOnce() async throws {
-        let model = WorkModel(query: RegistryQuery { args, _ in
-            if args.contains("abandon") {
-                try await Task.sleep(for: .milliseconds(50))
-                throw RegistryQueryError("Task has unpushed commits")
-            }
-            throw RegistryQueryError("unused")
-        }, repoPath: "/src/loopflow")
-        model.applyFixture(roadmap: .available(try roadmap()), waves: .available([]), workActivity: .loading, repos: [])
-        func task(_ id: String) -> WorkViewPlan.Content {
-            fixtureViewContent(work: .init(repository: "repo", kind: .task, id: id), title: id)
-        }
-        model.applySelectionPlans([fixtureViewPlan(owner: .init(repository: "repo", kind: .repository, id: "repo"),
-                                                   members: [task("issue-review"), task("issue-now")])], reason: "")
-        model.applyStartedFixture(working: ["issue-review", "issue-now"])
-        model.select(.task(id: "issue-review"))
-        let abandoned = try #require(model.task(id: "issue-review")?.task)
-        let abandon = Task { await model.abandonTask(abandoned) }
-        for _ in 0..<20 where !model.abandoningTaskIDs.contains("issue-review") { await Task.yield() }
-        #expect(model.sidebarTaskIDs == ["issue-now"])
-        #expect(model.selection == .task(id: "issue-now"))
-        await abandon.value
-        #expect(model.sidebarTaskIDs == ["issue-review", "issue-now"])
-        #expect(model.dashboardError == "Task has unpushed commits")
-    }
-
     @Test("A row dragged over another lands there on release and leaves no drag behind")
     func draggedRowLandsOnRelease() {
         let drag = TaskOrderDrag.State()

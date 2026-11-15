@@ -82,15 +82,19 @@ until the request has text and a repository is resolved. Without one, the sheet
 says **Open a repository to start a Task.**
 
 The sheet closes immediately into the new conversation, with your request and
-**Starting conversation…** visible while its workspace and provider prepare.
+**Delivering request…** visible while its workspace and provider prepare.
 The live conversation replaces that status in place; typing becomes available
 when it is connected and ready. You can navigate elsewhere while it starts;
 completion leaves your newer selection alone. Filed identity, Graph admission,
 native attachment and Work query freshness remain separate facts. A stale query
 cannot replace the operation's saved outcome.
 
-Each pending command has one row with its recovery controls. Launch errors also
-appear in the conversation. After a local save failure, **Try again** retries the
+Complete and Abandon show their projected result while delivering, with no extra request
+row. A disconnected request shows **Waiting for connection** without an action;
+its saved identity resumes automatically when its original Machine reconnects,
+including after app restart. Requests needing attention show recovery controls.
+Creations also keep a row until their result has been shown. Launch errors appear
+in the conversation. After a local save failure, **Try again** retries the
 same request ID; **Edit request** returns an unsaved creation's words to the editor.
 Once saved, **Check request** recovers the original result. **Inspect** shows its
 receipt when recovery needs attention. **Retry opening** reopens the recorded

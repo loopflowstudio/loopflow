@@ -160,6 +160,44 @@ struct ServerClientTests {
         #expect(try await ServerClient.read(.repoPath(id: "repo_1"), location: peer.location) == "/src/again")
     }
 
+    @Test func receiptWatchWaitsAcrossFailedOpensAndLossBeforeItsFirstReading() async throws {
+        let peer = try ServerPeer()
+        let attempts = Mutex(0)
+        peer.serve { message, respond in
+            guard message["type"] as? String == "subscribe" else { return true }
+            respond(["type": "response", "id": message["id"]!, "trace_id": "trace", "result": NSNull()])
+            // Lose this link before any baseline. The receipt watch still owns
+            // reconnection; an ordinary watch keeps its existing failure policy.
+            peer.serve { message, respond in
+                if message["type"] as? String == "subscribe" {
+                    #expect(message["resume"] is NSNull)
+                    respond(["type": "response", "id": message["id"]!, "trace_id": "trace", "result": NSNull()])
+                } else if message["type"] as? String == "checkpoint" {
+                    respond(["type": "reading", "id": message["id"]!, "checkpoint": "current",
+                        "frame": ["answers": message["checkpoint"]!, "stamp": NSNull(), "unavailable": NSNull(), "body": "reconnected"]])
+                }
+                return true
+            }
+            return false
+        }
+        let watch = ServerLink.subscribe(.operationGet(requestID: "original"), reconnect: true, connect: {
+            if attempts.increment() <= 2 { throw ServerConnectionUnavailable(RegistryQueryError("Offline")) }
+            return try await ServerLink.open(.unix(path: peer.location.path()))
+        }) { update -> RawJSON? in
+            guard case .reading(let frame) = update else { return nil }
+            return frame
+        }
+        defer { watch.cancel() }
+        var connections = try #require(watch.connections).makeAsyncIterator()
+        _ = await connections.next()
+        #expect(watch.isWaiting())
+        var frames = watch.updates.makeAsyncIterator()
+        let frame = try #require(try await frames.next())
+        #expect(try frame.fields()["body"]?.decode(String.self) == "reconnected")
+        #expect(attempts.get() == 4)
+        #expect(!watch.isWaiting())
+    }
+
     @Test func disconnectedWatchResumesItsBaselineAndNewestConfirmation() async throws {
         let peer = try ServerPeer()
         peer.serve { message, respond in

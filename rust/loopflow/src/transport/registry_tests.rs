@@ -1,6 +1,7 @@
 //! A registry hosting terminals that a holder on another thread keeps.
 
 use crate::process::attachment;
+use crate::store::session_projection;
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::time::{Duration, Instant};
@@ -651,14 +652,14 @@ read answer",
         .record_agent_process_identity(session.id.as_str(), &attachment, pid, started)
         .unwrap();
     let available = || {
-        store
-            .session_summary(
-                session.id.as_str(),
-                time::OffsetDateTime::now_utc().unix_timestamp(),
-            )
-            .unwrap()
-            .unwrap()
-            .available
+        session_projection::session_summary(
+            &store,
+            session.id.as_str(),
+            time::OffsetDateTime::now_utc().unix_timestamp(),
+        )
+        .unwrap()
+        .unwrap()
+        .available
     };
     assert!(!available(), "a working agent waits on nobody");
     std::fs::write(&ask, "").unwrap();

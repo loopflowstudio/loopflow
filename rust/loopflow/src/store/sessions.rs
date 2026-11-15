@@ -1,4 +1,5 @@
 use crate::session::{LfSession, TitleSource};
+use crate::store::session_projection;
 use loopflow_model::durable::TaskId;
 
 use super::{run_sqlite, Store, StoreResult};
@@ -11,7 +12,7 @@ impl Store {
     ) -> StoreResult<Vec<crate::session::SessionSummary>> {
         let filter = filter.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.session_summaries(&filter, now)
+            session_projection::session_summaries(&store, &filter, now)
         })
         .await
     }
@@ -109,7 +110,10 @@ impl Store {
         filter: &crate::session::SessionFilter,
     ) -> StoreResult<Vec<LfSession>> {
         let filter = filter.clone();
-        run_sqlite(&self.sqlite, move |store| store.sessions(&filter)).await
+        run_sqlite(&self.sqlite, move |store| {
+            session_projection::sessions(&store, &filter)
+        })
+        .await
     }
 
     pub async fn session_inputs(&self, id: &str) -> StoreResult<Vec<String>> {

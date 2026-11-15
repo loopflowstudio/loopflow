@@ -2,6 +2,7 @@
 //! `workspace` applies layouts and follows Task arrivals. Both use the shared
 //! non-replacing Session connection; explicit resume owns input takeover.
 
+use crate::store::session_projection;
 mod cmux;
 mod conversation;
 mod files;
@@ -945,15 +946,14 @@ pub(crate) fn host_placement() -> Option<String> {
 fn viewed_placement() -> Option<(OpenHost, String)> {
     let caller = crate::journal::agent_caller()?;
     let store = crate::store::read_existing_registry().ok().flatten()?;
-    let placement = store
-        .sqlite
-        .session_summary(
-            caller.session_id.as_str(),
-            time::OffsetDateTime::now_utc().unix_timestamp(),
-        )
-        .ok()
-        .flatten()?
-        .terminal_id?;
+    let placement = session_projection::session_summary(
+        &store.sqlite,
+        caller.session_id.as_str(),
+        time::OffsetDateTime::now_utc().unix_timestamp(),
+    )
+    .ok()
+    .flatten()?
+    .terminal_id?;
     placement_host(&placement).map(|(host, id)| (host, id.to_owned()))
 }
 
@@ -1066,7 +1066,7 @@ fn conversation_view(target: &Resolved) -> Result<Option<ConversationView>> {
         return Ok(desktop);
     };
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    let Some(summary) = store.sqlite.session_summary(id, now)? else {
+    let Some(summary) = session_projection::session_summary(&store.sqlite, id, now)? else {
         return Ok(desktop);
     };
     // The terminal's stored viewer flag can lag the attachment handshake.

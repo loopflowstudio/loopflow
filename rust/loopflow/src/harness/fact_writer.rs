@@ -518,11 +518,14 @@ mod tests {
         /// Whether the inventory calls it Available `quiet` seconds after the
         /// last message.
         fn available_after(&self, quiet: i64) -> bool {
-            self.store
-                .session_summary("conversation", self.now + quiet)
-                .unwrap()
-                .unwrap()
-                .available
+            crate::store::session_projection::session_summary(
+                &self.store,
+                "conversation",
+                self.now + quiet,
+            )
+            .unwrap()
+            .unwrap()
+            .available
         }
     }
 
@@ -716,7 +719,11 @@ mod tests {
                 after: Some(String::new()),
                 ..Default::default()
             };
-            let rows = session.store.session_summaries(&filter, session.now);
+            let rows = crate::store::session_projection::session_summaries(
+                &session.store,
+                &filter,
+                session.now,
+            );
             rows.unwrap().remove(0).id
         };
         assert_eq!(page(false), "a");
@@ -1063,8 +1070,7 @@ mod tests {
             assert_eq!(reading.provider_turn, turn);
             assert_eq!(reading.text, turn);
             assert_eq!(
-                store
-                    .session_summary("conversation", 1000)
+                crate::store::session_projection::session_summary(&store, "conversation", 1000)
                     .unwrap()
                     .unwrap()
                     .preview,
@@ -1084,8 +1090,7 @@ mod tests {
             .record_session_agent_session("conversation", &attachment, &"replacement".into())
             .unwrap();
         assert_eq!(
-            store
-                .session_summary("conversation", 1000)
+            crate::store::session_projection::session_summary(&store, "conversation", 1000)
                 .unwrap()
                 .unwrap()
                 .preview,

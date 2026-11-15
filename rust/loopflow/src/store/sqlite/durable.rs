@@ -1852,12 +1852,14 @@ mod durable_store_tests {
             .unwrap_err();
         assert!(refused.to_string().contains("another Wave"), "{refused}");
         assert_eq!(store.session("elsewhere").unwrap().unwrap().task_id, None);
-        let listed = store
-            .sessions(&crate::session::SessionFilter {
+        let listed = crate::store::session_projection::sessions(
+            &store,
+            &crate::session::SessionFilter {
                 task: Some(task_id.to_string()),
                 ..Default::default()
-            })
-            .unwrap();
+            },
+        )
+        .unwrap();
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].artifact_key, future.artifact_key);
     }

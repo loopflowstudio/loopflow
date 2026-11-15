@@ -3,23 +3,18 @@
 use std::collections::HashMap;
 
 use crate::journal::{agent_process_evidence, process_identity_evidence, ProcessIdentityEvidence};
-use crate::store::sqlite::sessions::{
-    session_projection_inputs_in, SessionProjection, SessionProjectionInputs,
-};
+use crate::store::sqlite::sessions::{SessionProjection, SessionProjectionInputs};
 use crate::store::sqlite::SqliteStore;
 use crate::store::StoreResult;
 
 #[derive(Debug)]
 pub(crate) struct Reading {
-    inputs: SessionProjectionInputs,
-    read_at: i64,
-    session: Option<String>,
+    pub inputs: SessionProjectionInputs,
     pub values: SessionProjection,
 }
 
 impl Reading {
     pub fn acquire(store: &SqliteStore, mut now: i64, session: Option<&str>) -> StoreResult<Self> {
-        let read_at = now;
         let inputs = store.session_projection_inputs(now, session)?;
         let mut evidence = HashMap::new();
         let mut live = Vec::new();
@@ -49,8 +44,6 @@ impl Reading {
         let live_agents = serde_json::to_string(&live)?;
         Ok(Self {
             inputs,
-            read_at,
-            session: session.map(str::to_owned),
             values: SessionProjection {
                 now,
                 live_agents,
@@ -58,26 +51,88 @@ impl Reading {
             },
         })
     }
+}
 
-    pub fn is_current(&self, conn: &rusqlite::Connection) -> StoreResult<bool> {
-        Ok(
-            session_projection_inputs_in(conn, self.read_at, self.session.as_deref())?
-                == self.inputs,
-        )
-    }
-
-    /// The final projection uses these exact saved identities and quiet deadlines.
-    /// A concurrent write restarts acquisition; no connection is lent during observation.
-    pub fn pin<'a>(
-        &self,
-        conn: &'a mut rusqlite::Connection,
-    ) -> StoreResult<Option<rusqlite::Savepoint<'a>>> {
-        let snapshot = conn.savepoint()?;
-        if !self.is_current(&snapshot)? {
-            return Ok(None);
+pub(crate) fn session_summaries(
+    store: &SqliteStore,
+    filter: &crate::session::SessionFilter,
+    now: i64,
+) -> StoreResult<Vec<crate::session::SessionSummary>> {
+    loop {
+        let reading = Reading::acquire(store, now, None)?;
+        if let Some(summaries) =
+            store.projected_session_summaries(filter, &reading.inputs, &reading.values)?
+        {
+            return Ok(summaries);
         }
-        Ok(Some(snapshot))
     }
+}
+
+pub(crate) fn session_summary(
+    store: &SqliteStore,
+    id: &str,
+    now: i64,
+) -> StoreResult<Option<crate::session::SessionSummary>> {
+    let id = loopflow_model::id::canonical_session(id);
+    loop {
+        let reading = Reading::acquire(store, now, Some(&id))?;
+        if let Some(summary) =
+            store.projected_session_summary(&id, &reading.inputs, &reading.values)?
+        {
+            return Ok(summary);
+        }
+    }
+}
+
+pub(crate) fn sessions(
+    store: &SqliteStore,
+    filter: &crate::session::SessionFilter,
+) -> StoreResult<Vec<crate::session::LfSession>> {
+    loop {
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
+        let reading = filter
+            .available
+            .then(|| Reading::acquire(store, now, None))
+            .transpose()?;
+        if let Some(sessions) = store.projected_sessions(
+            filter,
+            reading.as_ref().map(|r| &r.inputs),
+            reading.as_ref().map_or(now, |r| r.values.now),
+            reading
+                .as_ref()
+                .map_or("[]", |r| r.values.live_agents.as_str()),
+        )? {
+            return Ok(sessions);
+        }
+    }
+}
+
+pub(crate) fn provider_lineage(
+    store: &SqliteStore,
+    source: &crate::session::LfSession,
+) -> StoreResult<crate::store::sqlite::provider_transitions::ProviderLineage> {
+    let thread = source
+        .artifact_key
+        .as_deref()
+        .map(|key| store.input_provider_session(key))
+        .transpose()?
+        .flatten()
+        .map(|t| t.agent_session.to_string());
+    let summary = session_summary(store, &source.id, crate::store::rows::now_unix())?;
+    let process = summary.as_ref().and_then(|s| s.agent_process_id.clone());
+    let running = summary.and_then(|s| match s.agent_process_evidence {
+        crate::journal::ProcessIdentityEvidence::Live => Some(true),
+        crate::journal::ProcessIdentityEvidence::Dead => Some(false),
+        crate::journal::ProcessIdentityEvidence::Unknown => None,
+    });
+    Ok(
+        crate::store::sqlite::provider_transitions::ProviderLineage {
+            source_session: source.id.to_string(),
+            provider_session: thread,
+            agent_process: process,
+            original_running: running,
+        },
+    )
 }
 
 #[cfg(test)]
@@ -133,16 +188,21 @@ mod tests {
                 ..Default::default()
             };
             assert_eq!(
-                store.session_summaries(&filter, 500).unwrap()[0]
+                crate::store::session_projection::session_summaries(&store, &filter, 500).unwrap()
+                    [0]
+                .id
+                .as_str(),
+                "c-live"
+            );
+            assert_eq!(
+                crate::store::session_projection::sessions(&store, &filter).unwrap()[0]
                     .id
                     .as_str(),
                 "c-live"
             );
-            assert_eq!(store.sessions(&filter).unwrap()[0].id.as_str(), "c-live");
         }
         assert_eq!(
-            store
-                .session_summary("b-unknown", 500)
+            crate::store::session_projection::session_summary(&store, "b-unknown", 500)
                 .unwrap()
                 .unwrap()
                 .agent_process_evidence,
@@ -198,12 +258,11 @@ mod tests {
             .unwrap();
         {
             let mut conn = store.conn.lock().unwrap();
-            assert!(projection.pin(&mut conn).unwrap().is_none());
+            assert!(projection.inputs.pin(&mut conn).unwrap().is_none());
         }
         drop(projection);
         assert!(
-            !store
-                .session_summary("session", 500)
+            !crate::store::session_projection::session_summary(&store, "session", 500)
                 .unwrap()
                 .unwrap()
                 .available
@@ -221,7 +280,7 @@ mod tests {
             let reading = super::Reading::acquire(&store, 500, None).unwrap();
             assert_eq!(reading.values.evidence.len(), 1);
             let mut conn = store.conn.lock().unwrap();
-            assert!(reading.pin(&mut conn).unwrap().is_some());
+            assert!(reading.inputs.pin(&mut conn).unwrap().is_some());
         };
         let before = statements(&store, read);
         store.conn.lock().unwrap().execute_batch(

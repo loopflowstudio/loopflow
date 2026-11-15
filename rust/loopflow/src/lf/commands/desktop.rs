@@ -1,4 +1,5 @@
 //! Shared selection and saved intent use lfdb; live pane control uses Desktop's Apple events.
+use crate::store::selections;
 use crate::work::selection::{WorkWorkspaceKey, WorkWorkspaceKind};
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -713,7 +714,7 @@ pub(crate) fn read_plans(
         .ok_or(crate::store::StoreError::NotFound)
         .context("Work registry is unavailable")?;
     let repository = repository_in(selected, directory, &store.sqlite)?;
-    Ok(store.sqlite.selection_plans(&repository)?)
+    Ok(selections::selection_plans(&store.sqlite, &repository)?)
 }
 
 /// `lf desktop view list --subscribe` for `--repository`, else the repository
@@ -731,7 +732,7 @@ pub(crate) fn subscribe_plans(
                 .context("Work registry is unavailable")
                 .and_then(|store| {
                     let repository = repository_in(selected.as_ref(), &directory, &store.sqlite)?;
-                    Ok(store.sqlite.selection_plans(&repository)?)
+                    Ok(selections::selection_plans(&store.sqlite, &repository)?)
                 });
             async move { result }
         },
@@ -757,7 +758,11 @@ pub(crate) fn subscribe_view_plan(
                 .context("Work registry is unavailable")
                 .and_then(|store| {
                     let repository = repository_in(None, &directory, &store.sqlite)?;
-                    Ok(store.sqlite.view_plan(&repository, expression.as_deref())?)
+                    Ok(selections::view_plan(
+                        &store.sqlite,
+                        &repository,
+                        expression.as_deref(),
+                    )?)
                 });
             async move { result }
         },
@@ -788,9 +793,11 @@ pub(crate) fn read_all_view_plans(
     let store = crate::store::read_existing_registry()?
         .ok_or(crate::store::StoreError::NotFound)
         .context("Work registry is unavailable")?;
-    Ok(store
-        .sqlite
-        .all_view_plans(expression, &portfolio_repos()?)?)
+    Ok(selections::all_view_plans(
+        &store.sqlite,
+        expression,
+        &portfolio_repos()?,
+    )?)
 }
 
 pub(crate) fn subscribe_all_view_plans(
@@ -806,9 +813,11 @@ pub(crate) fn subscribe_all_view_plans(
         Arguments { expression },
         |store, args| async move {
             let store = super::subscribe::require_store(store)?;
-            Ok(store
-                .sqlite
-                .all_view_plans(args.expression.as_deref(), &portfolio_repos()?)?)
+            Ok(selections::all_view_plans(
+                &store.sqlite,
+                args.expression.as_deref(),
+                &portfolio_repos()?,
+            )?)
         },
         transport,
     )
@@ -828,7 +837,11 @@ pub fn plan_view(
         .ok_or(crate::store::StoreError::NotFound)
         .context("Work registry is unavailable")?;
     let repository = repository_in(selected, directory, &store.sqlite)?;
-    Ok(store.sqlite.view_plan(&repository, expression)?)
+    Ok(selections::view_plan(
+        &store.sqlite,
+        &repository,
+        expression,
+    )?)
 }
 
 fn view_plan(
@@ -886,7 +899,8 @@ fn view_plan(
                 wave: loopflow_model::id::WaveId::parse(bound(&resolution.wave, "Wave")?)?,
             }
         };
-        store.sqlite.plan_selection(
+        selections::plan_selection(
+            &store.sqlite,
             &repository,
             Selection {
                 id: SelectionId("work-default".into()),
@@ -959,9 +973,7 @@ pub fn saved_layout(
     let repository = repository_in(selected, directory, &reader.sqlite)?;
     Ok(match work.strip_prefix("query:") {
         Some(id) => serde_json::to_value(DesktopLayoutRecord::Dashboard(
-            &reader
-                .sqlite
-                .read_dashboard(&repository, &DashboardId(id.into()))?
+            &selections::read_dashboard(&reader.sqlite, &repository, &DashboardId(id.into()))?
                 .ok_or(crate::store::StoreError::NotFound)?
                 .saved,
         ))?,
@@ -1014,7 +1026,8 @@ pub fn save_arrangement(
             let task = target.strip_prefix("task:").expect("matched Task target");
             let key = work_key(&repository, target)?;
             // The shared reader checks repository ownership before the Task writer runs.
-            let resolved = store.resolve_selection(
+            let resolved = selections::resolve_selection(
+                &store,
                 &repository,
                 &crate::work::selection::Selection {
                     id: crate::work::selection::SelectionId("rename-target".into()),
@@ -1087,7 +1100,13 @@ pub(crate) fn save_dashboard(
             expression,
             revision,
             ..
-        } => store.edit_dashboard(&repository, &dashboard_id(container), expression, *revision),
+        } => selections::edit_dashboard(
+            &store,
+            &repository,
+            &dashboard_id(container),
+            expression,
+            *revision,
+        ),
         DashboardCommand::Pin {
             query, revision, ..
         }
@@ -2085,7 +2104,7 @@ fn edit_tiles(
                 .into());
             }
             return Ok(DesktopTileRecord::Tasks(
-                store.reorder_task(repository, &member.id, &to.id).map_err(
+                selections::reorder_task(&store, repository, &member.id, &to.id).map_err(
                     |error| match error {
                         crate::store::StoreError::NotFound => absent(member),
                         error => error.into(),
@@ -2095,13 +2114,13 @@ fn edit_tiles(
         }
         TileBoard::Dashboard(id) => id,
     };
-    let reading = store
-        .read_dashboard(repository, id)?
+    let reading = selections::read_dashboard(&store, repository, id)?
         .ok_or_else(|| DesktopError::Target(format!("No Dashboard {}; nothing changed.", id.0)))?;
     let revision = reading.saved.revision;
     let mut arrangement = reading.arrangement.clone();
     let save = |arrangement: &crate::work::selection::Arrangement| {
-        store.save_dashboard(
+        selections::save_dashboard(
+            &store,
             repository,
             id,
             Some(revision),
@@ -2114,12 +2133,12 @@ fn edit_tiles(
             if arrangement.winner(to).is_none() {
                 return Err(absent(to));
             }
-            store
-                .reorder_dashboard(repository, id, revision, member, to)
-                .map_err(|error| match error {
+            selections::reorder_dashboard(&store, repository, id, revision, member, to).map_err(
+                |error| match error {
                     crate::store::StoreError::NotFound => absent(member),
                     error => error.into(),
-                })?
+                },
+            )?
         }
         TileEdit::Hide => {
             let index = arrangement.winner(member).ok_or_else(|| absent(member))?;

@@ -1807,11 +1807,14 @@ mod tests {
                 .iter()
                 .any(|event| event.kind == SessionEventKind::Completed));
         }
-        assert!(!store
-            .session_summaries(&crate::session::SessionFilter::default(), 0)
-            .unwrap()
-            .iter()
-            .any(|session| session.id == "orphan"));
+        assert!(!crate::store::session_projection::session_summaries(
+            &store,
+            &crate::session::SessionFilter::default(),
+            0
+        )
+        .unwrap()
+        .iter()
+        .any(|session| session.id == "orphan"));
 
         // Another turn on the finished run reopens it until that turn exits.
         let process = loopflow_model::id::LfProcessId::new();
@@ -1947,9 +1950,12 @@ mod tests {
                 .unwrap();
         }
         for _ in 0..2 {
-            let rows = store
-                .session_summaries(&crate::session::SessionFilter::default(), 0)
-                .unwrap();
+            let rows = crate::store::session_projection::session_summaries(
+                &store,
+                &crate::session::SessionFilter::default(),
+                0,
+            )
+            .unwrap();
             assert_eq!(rows.len(), 1);
             assert_eq!(rows[0].id, session.id.as_str());
             assert!(rows[0].completed_at.is_none());

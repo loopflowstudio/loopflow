@@ -803,8 +803,8 @@ mod tests {
         let revision = store.revisions().unwrap();
         let read = || {
             (
-                store.session_summaries(&filter, now).unwrap(),
-                store.resolve_selection(&repo, &selection).unwrap(),
+                crate::store::session_projection::session_summaries(&store, &filter, now).unwrap(),
+                crate::store::selections::resolve_selection(&store, &repo, &selection).unwrap(),
             )
         };
         let (before, dependencies) = cache.capture(read);
@@ -865,8 +865,8 @@ mod tests {
         let revision = store.revisions().unwrap();
         let read = || {
             (
-                store.session_summaries(&filter, 500).unwrap(),
-                store.resolve_selection(&repo, &selection).unwrap(),
+                crate::store::session_projection::session_summaries(&store, &filter, 500).unwrap(),
+                crate::store::selections::resolve_selection(&store, &repo, &selection).unwrap(),
             )
         };
         let (before, dependencies) = cache.capture(read);

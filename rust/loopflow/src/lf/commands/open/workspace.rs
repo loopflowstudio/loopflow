@@ -2,6 +2,7 @@
 //! splits, in a Rex session, Herdr workspace or cmux group. The host owns them
 //! afterwards: LF records no host, container, tab or creation state. Native
 //! handles live only in this command, or in a Rex follower while it runs.
+use crate::store::selections;
 mod layout;
 mod tools;
 
@@ -58,7 +59,7 @@ fn workspace_plan(
             expression => expression.clone(),
         },
     };
-    let mut plan = store.plan_selection(repository, inventory)?;
+    let mut plan = selections::plan_selection(store, repository, inventory)?;
     plan.selection = selected;
     Ok(plan)
 }

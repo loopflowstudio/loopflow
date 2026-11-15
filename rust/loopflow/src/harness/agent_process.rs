@@ -1189,7 +1189,9 @@ mod tests {
         store
             .record_session_terminal(&session.id, &attachment, Some("first-pane"))
             .unwrap();
-        let summary = store.session_summary(&session.id, 1).unwrap().unwrap();
+        let summary = crate::store::session_projection::session_summary(&store, &session.id, 1)
+            .unwrap()
+            .unwrap();
         assert_eq!(summary.terminal_id.as_deref(), Some("first-pane"));
         assert_eq!(
             summary.agent_process_evidence,
@@ -1203,12 +1205,13 @@ mod tests {
             false,
         )
         .unwrap();
-        assert!(store
-            .session_summary(&session.id, 1)
-            .unwrap()
-            .unwrap()
-            .terminal_id
-            .is_none());
+        assert!(
+            crate::store::session_projection::session_summary(&store, &session.id, 1)
+                .unwrap()
+                .unwrap()
+                .terminal_id
+                .is_none()
+        );
         assert!(store
             .record_session_terminal(&session.id, &attachment, Some("stale"))
             .is_err());
@@ -1216,8 +1219,7 @@ mod tests {
             .record_session_terminal(&session.id, &replacement, Some("second-pane"))
             .unwrap();
         assert_eq!(
-            store
-                .session_summary(&session.id, 1)
+            crate::store::session_projection::session_summary(&store, &session.id, 1)
                 .unwrap()
                 .unwrap()
                 .terminal_id
@@ -1233,7 +1235,9 @@ mod tests {
         let _ = child.kill();
         child.wait().unwrap();
         stopped.unwrap();
-        let summary = store.session_summary(&session.id, 1).unwrap().unwrap();
+        let summary = crate::store::session_projection::session_summary(&store, &session.id, 1)
+            .unwrap()
+            .unwrap();
         assert_eq!(
             summary.agent_process_evidence,
             crate::journal::ProcessIdentityEvidence::Dead

@@ -2,6 +2,7 @@
 //! transcript. Raw conversations, provider processes open here that Loopflow
 //! is not holding, list beside the Sessions with what their transcript shows.
 
+use crate::store::session_projection;
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -81,7 +82,7 @@ pub(super) fn raw(store: &SqliteStore, repo: Option<&str>) -> Result<Vec<Session
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
     let mut summaries = HashMap::new();
     for (thread, session) in &recorded {
-        if let Some(summary) = store.session_summary(session, now)? {
+        if let Some(summary) = session_projection::session_summary(store, session, now)? {
             summaries.insert(thread.as_str(), summary);
         }
     }

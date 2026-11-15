@@ -2764,9 +2764,12 @@ mod local_planning_tests {
             )
             .unwrap();
         }
-        let summaries = store
-            .session_summaries(&SessionFilter::default(), 0)
-            .unwrap();
+        let summaries = crate::store::session_projection::session_summaries(
+            &store,
+            &SessionFilter::default(),
+            0,
+        )
+        .unwrap();
         let summary = summaries
             .iter()
             .find(|session| session.id == "generated")
@@ -2843,7 +2846,9 @@ mod local_planning_tests {
         assert!(history
             .iter()
             .all(|input| input.task_identifier.as_deref() == Some("ENG-123")));
-        let summary = store.session_summary("generated", 0).unwrap().unwrap();
+        let summary = crate::store::session_projection::session_summary(&store, "generated", 0)
+            .unwrap()
+            .unwrap();
         assert_eq!(summary.task_identifier.as_deref(), Some("ENG-123"));
     }
 

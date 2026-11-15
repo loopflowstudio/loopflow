@@ -1125,7 +1125,8 @@ mod tests {
             task: None,
         };
         let filter = read.session_filter(home.path()).unwrap();
-        let sessions = store.session_summaries(&filter, 0).unwrap();
+        let sessions =
+            crate::store::session_projection::session_summaries(&store, &filter, 0).unwrap();
         assert_eq!(sessions.len(), 101);
         assert!(sessions.iter().any(|session| session.id == "session-100"));
     }
@@ -1153,7 +1154,9 @@ mod tests {
                     task: None,
                 };
                 let filter = read.session_filter(home.path()).unwrap();
-                let sessions = store.session_summaries(&filter, 0).unwrap();
+                let sessions =
+                    crate::store::session_projection::session_summaries(&store, &filter, 0)
+                        .unwrap();
                 let mut ids = sessions
                     .iter()
                     .map(|row| row.id.as_str())

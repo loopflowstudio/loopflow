@@ -1,3 +1,4 @@
+use crate::store::session_projection;
 pub(crate) use primary::admit_workspace;
 mod resume_explanation;
 pub(crate) use resume_explanation::explain_resume;
@@ -678,9 +679,7 @@ pub(crate) fn listed(
     capacity: &LaunchCapacity,
 ) -> Result<Option<SessionRecord>> {
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    let Some(mut session) = store
-        .sqlite
-        .session_summary(id, now)?
+    let Some(mut session) = session_projection::session_summary(&store.sqlite, id, now)?
         .map(|session| summary_surface(&session, capacity))
     else {
         return Ok(turns::raw(&store.sqlite, None)?
@@ -1398,9 +1397,10 @@ async fn fork(
         "Forked {} into {}; the original keeps running.",
         source.id, next.id
     ));
-    store
-        .sqlite
-        .record_provider_lineage(&next, &store.sqlite.provider_lineage(source)?)?;
+    store.sqlite.record_provider_lineage(
+        &next,
+        &session_projection::provider_lineage(&store.sqlite, source)?,
+    )?;
     let record = surface(store, &next).await?;
     if launch {
         open_prepared(store, &next.id, json).await?;
@@ -1424,9 +1424,9 @@ pub(crate) fn run_refusal(store: &SqliteStore, session: &LfSession) -> Result<Op
     if session.interactive {
         return Ok(None);
     }
-    let summary = store
-        .session_summary(&session.id, crate::store::rows::now_unix())?
-        .ok_or_else(|| session_not_found(&session.id))?;
+    let summary =
+        session_projection::session_summary(store, &session.id, crate::store::rows::now_unix())?
+            .ok_or_else(|| session_not_found(&session.id))?;
     let running = summary.completed_at.is_none()
         && summary.agent_process_evidence == crate::journal::ProcessIdentityEvidence::Live;
     let mut what: Vec<&str> = Vec::new();
@@ -1611,7 +1611,7 @@ pub(crate) async fn new_thread(
         session.request.clone()
     };
     let lineage = threaded
-        .then(|| store.sqlite.provider_lineage(&session))
+        .then(|| session_projection::provider_lineage(&store.sqlite, &session))
         .transpose()?;
     let artifact = crate::session_record::new_artifact_key();
     store
@@ -1781,7 +1781,7 @@ pub(crate) fn viewed_summary(
     id: &str,
 ) -> Result<Option<crate::session::SessionSummary>> {
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    let Some(mut summary) = store.session_summary(id, now)? else {
+    let Some(mut summary) = session_projection::session_summary(store, id, now)? else {
         return Ok(None);
     };
     let released = !summary.unviewed
@@ -2130,13 +2130,12 @@ pub(crate) async fn record_program_status(
         return Ok(());
     }
     if sequence == 1 {
-        let current = store
-            .sqlite
-            .session_summary(
-                &session.id,
-                time::OffsetDateTime::now_utc().unix_timestamp(),
-            )?
-            .context("Session disappeared")?;
+        let current = session_projection::session_summary(
+            &store.sqlite,
+            &session.id,
+            time::OffsetDateTime::now_utc().unix_timestamp(),
+        )?
+        .context("Session disappeared")?;
         anyhow::ensure!(
             current.agent_process_id.as_ref() == agent_process,
             "Session provider changed"

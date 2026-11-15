@@ -1555,7 +1555,10 @@ mod tests {
                         ids,
                         "{cwd:?}, {binding:?}, {scope:?}"
                     );
-                    let summary = store.session_summary(&session, 0).unwrap().unwrap();
+                    let summary =
+                        crate::store::session_projection::session_summary(&store, &session, 0)
+                            .unwrap()
+                            .unwrap();
                     assert_eq!(summary.task_ids, ids);
                     assert!(summary.task_primary);
                 }
@@ -2288,12 +2291,17 @@ mod tests {
         };
         // A Wave conversation has a `wave_id`, so it is not an orphan.
         for expected in ["b-repo", "d-orphan"] {
-            let page = store.session_summaries(&filter, 0).unwrap();
+            let page =
+                crate::store::session_projection::session_summaries(&store, &filter, 0).unwrap();
             assert_eq!(page.len(), 1);
             assert_eq!(page[0].id, expected);
             filter.after = Some(page[0].id.to_string());
         }
-        assert!(store.session_summaries(&filter, 0).unwrap().is_empty());
+        assert!(
+            crate::store::session_projection::session_summaries(&store, &filter, 0)
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -2448,16 +2456,16 @@ mod tests {
             std::slice::from_ref(&task)
         );
         assert!(store.session_task_ids("sibling").unwrap().is_empty());
-        let summaries = store
-            .session_summaries(
-                &SessionFilter {
-                    task: Some("PROOF-1".into()),
-                    headless: true,
-                    ..Default::default()
-                },
-                0,
-            )
-            .unwrap();
+        let summaries = crate::store::session_projection::session_summaries(
+            &store,
+            &SessionFilter {
+                task: Some("PROOF-1".into()),
+                headless: true,
+                ..Default::default()
+            },
+            0,
+        )
+        .unwrap();
         assert_eq!(
             summaries.len(),
             work.sessions

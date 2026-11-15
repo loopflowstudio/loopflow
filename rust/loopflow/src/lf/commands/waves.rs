@@ -10,6 +10,7 @@
 //! audit surface that renders "I could not look" as "nothing happened" is worse
 //! than one that says nothing at all.
 
+use crate::store::selections;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
@@ -1347,7 +1348,10 @@ impl SharedTaskReads {
         match selections.entry(repository.clone()) {
             std::collections::hash_map::Entry::Occupied(entry) => Ok(entry.get().clone()),
             std::collections::hash_map::Entry::Vacant(entry) => Ok(entry
-                .insert(Arc::new(store.sqlite.task_selection_reading(repository)?))
+                .insert(Arc::new(selections::task_selection_reading(
+                    &store.sqlite,
+                    repository,
+                )?))
                 .clone()),
         }
     }
@@ -3228,7 +3232,7 @@ mod tests {
             [other],
         )
         .unwrap();
-        store.sqlite.reorder_task(&repo, active, other).unwrap();
+        crate::store::selections::reorder_task(&store.sqlite, &repo, active, other).unwrap();
         let attachment = attachment::claim_session_attachment(
             &store.sqlite,
             "bound",
@@ -3294,11 +3298,13 @@ mod tests {
             .iter()
             .any(|s| s == "busy"));
         assert_eq!(
-            store
-                .sqlite
-                .resolve_selection(&repo, &Selection::parse("state:busy", None).unwrap())
-                .unwrap()
-                .task_ids(),
+            crate::store::selections::resolve_selection(
+                &store.sqlite,
+                &repo,
+                &Selection::parse("state:busy", None).unwrap()
+            )
+            .unwrap()
+            .task_ids(),
             [active]
         );
         db.execute("INSERT INTO task_ownership(id,task_id,kind,person,machine_id,at,ordered_at,written_here)
@@ -3326,11 +3332,13 @@ mod tests {
         assert!(states.contains(&SelectionState::Busy));
         for query in ["state:busy", "state:available", "state:blocked"] {
             assert_eq!(
-                store
-                    .sqlite
-                    .resolve_selection(&repo, &Selection::parse(query, None).unwrap())
-                    .unwrap()
-                    .task_ids(),
+                crate::store::selections::resolve_selection(
+                    &store.sqlite,
+                    &repo,
+                    &Selection::parse(query, None).unwrap()
+                )
+                .unwrap()
+                .task_ids(),
                 [active]
             );
         }

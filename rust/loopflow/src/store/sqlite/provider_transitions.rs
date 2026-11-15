@@ -29,10 +29,10 @@ pub struct ProviderTransition {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct ProviderLineage {
-    source_session: String,
-    provider_session: Option<String>,
-    agent_process: Option<loopflow_model::id::AgentProcessId>,
-    original_running: Option<bool>,
+    pub(crate) source_session: String,
+    pub(crate) provider_session: Option<String>,
+    pub(crate) agent_process: Option<loopflow_model::id::AgentProcessId>,
+    pub(crate) original_running: Option<bool>,
 }
 
 // Transitions are the observations whose receipt keys name them; the predicate
@@ -197,32 +197,6 @@ impl SqliteStore {
             decode(&payload, at)
         })
         .collect()
-    }
-
-    pub(crate) fn provider_lineage(
-        &self,
-        source: &crate::session::LfSession,
-    ) -> StoreResult<ProviderLineage> {
-        let thread = source
-            .artifact_key
-            .as_deref()
-            .map(|key| self.input_provider_session(key))
-            .transpose()?
-            .flatten()
-            .map(|t| t.agent_session.to_string());
-        let summary = self.session_summary(&source.id, crate::store::rows::now_unix())?;
-        let process = summary.as_ref().and_then(|s| s.agent_process_id.clone());
-        let running = summary.and_then(|s| match s.agent_process_evidence {
-            crate::journal::ProcessIdentityEvidence::Live => Some(true),
-            crate::journal::ProcessIdentityEvidence::Dead => Some(false),
-            crate::journal::ProcessIdentityEvidence::Unknown => None,
-        });
-        Ok(ProviderLineage {
-            source_session: source.id.to_string(),
-            provider_session: thread,
-            agent_process: process,
-            original_running: running,
-        })
     }
 
     pub(crate) fn record_provider_lineage(

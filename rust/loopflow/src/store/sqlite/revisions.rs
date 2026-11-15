@@ -177,7 +177,10 @@ mod tests {
         let snapshot = reader.read_snapshot().unwrap();
         let before = reader.revisions().unwrap();
         assert_eq!(
-            reader.session_summary("first", 1).unwrap().unwrap().title,
+            crate::store::session_projection::session_summary(&reader, "first", 1)
+                .unwrap()
+                .unwrap()
+                .title,
             "Retained"
         );
         writer
@@ -188,17 +191,26 @@ mod tests {
             .unwrap();
         // These readers have their own savepoints, nested inside the pinned read.
         assert_eq!(
-            reader.session_summary("second", 1).unwrap().unwrap().title,
+            crate::store::session_projection::session_summary(&reader, "second", 1)
+                .unwrap()
+                .unwrap()
+                .title,
             "Retained"
         );
         assert_eq!(reader.revisions().unwrap(), before);
         drop(snapshot);
         assert_eq!(
-            reader.session_summary("first", 1).unwrap().unwrap().title,
+            crate::store::session_projection::session_summary(&reader, "first", 1)
+                .unwrap()
+                .unwrap()
+                .title,
             "committed"
         );
         assert_eq!(
-            reader.session_summary("second", 1).unwrap().unwrap().title,
+            crate::store::session_projection::session_summary(&reader, "second", 1)
+                .unwrap()
+                .unwrap()
+                .title,
             "committed"
         );
         assert!(reader.revisions().unwrap().sessions > before.sessions);

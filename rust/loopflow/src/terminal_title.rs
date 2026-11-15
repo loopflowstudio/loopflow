@@ -6,6 +6,7 @@
 //! and follows only the Task title, unless someone renamed it by hand; tabs and
 //! tmux windows follow the Session.
 
+use crate::store::session_projection;
 use std::collections::BTreeMap;
 use std::io::{IsTerminal, Write};
 use std::process::{Command, Stdio};
@@ -61,8 +62,7 @@ fn standing(
 ) -> StoreResult<Option<String>> {
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
     let available = match conversation {
-        Some(id) => store
-            .session_summary(id, now)?
+        Some(id) => session_projection::session_summary(store, id, now)?
             .is_some_and(|summary| summary.available),
         None => false,
     };

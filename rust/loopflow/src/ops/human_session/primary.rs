@@ -1,6 +1,7 @@
 //! The ongoing conversation of a scope. Shared scopes mark their primary
 //! Session; a Task points to one of its existing conversations.
 
+use crate::store::session_projection;
 use std::path::Path;
 
 use anyhow::{anyhow, bail, Context, Result};
@@ -234,7 +235,8 @@ pub(crate) async fn admit_workspace(store: &SharedStore, session: LfSession) -> 
     let Some(scope) = store.sqlite.primary_scope(&session.id)? else {
         return Ok(session);
     };
-    let summary = store.sqlite.session_summary(
+    let summary = session_projection::session_summary(
+        &store.sqlite,
         &session.id,
         time::OffsetDateTime::now_utc().unix_timestamp(),
     )?;

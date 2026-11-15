@@ -43,6 +43,8 @@ impl SessionProjection {
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct SessionProjectionInputs {
+    read_at: i64,
+    session: Option<String>,
     pub identities: Vec<SessionProcessIdentity>,
     pub deadlines: Vec<i64>,
 }
@@ -83,9 +85,28 @@ pub(crate) fn session_projection_inputs_in(
         )?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(SessionProjectionInputs {
+        read_at: now,
+        session: session.map(str::to_owned),
         identities,
         deadlines,
     })
+}
+
+impl SessionProjectionInputs {
+    pub(crate) fn is_current(&self, conn: &Connection) -> StoreResult<bool> {
+        Ok(session_projection_inputs_in(conn, self.read_at, self.session.as_deref())? == *self)
+    }
+
+    pub(crate) fn pin<'a>(
+        &self,
+        conn: &'a mut Connection,
+    ) -> StoreResult<Option<rusqlite::Savepoint<'a>>> {
+        let snapshot = conn.savepoint()?;
+        if !self.is_current(&snapshot)? {
+            return Ok(None);
+        }
+        Ok(Some(snapshot))
+    }
 }
 
 impl SqliteStore {
@@ -911,19 +932,17 @@ impl SqliteStore {
     }
 
     /// Each row's Available is judged at `now`.
-    pub(crate) fn session_summaries(
+    pub(crate) fn projected_session_summaries(
         &self,
         filter: &crate::session::SessionFilter,
-        now: i64,
-    ) -> StoreResult<Vec<crate::session::SessionSummary>> {
-        loop {
-            let projection = crate::store::session_projection::Reading::acquire(self, now, None)?;
-            let mut conn = self.conn.lock().expect("store mutex poisoned");
-            let Some(conn) = projection.pin(&mut conn)? else {
-                continue;
-            };
-            return session_summaries_in(&conn, filter, &projection.values);
-        }
+        inputs: &SessionProjectionInputs,
+        projection: &SessionProjection,
+    ) -> StoreResult<Option<Vec<crate::session::SessionSummary>>> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let Some(snapshot) = inputs.pin(&mut conn)? else {
+            return Ok(None);
+        };
+        Ok(Some(session_summaries_in(&snapshot, filter, projection)?))
     }
 
     /// Whether `session`'s current AgentProcess has reported what it is doing:
@@ -939,31 +958,30 @@ impl SqliteStore {
         )?)
     }
 
-    pub(crate) fn session_summary(
+    pub(crate) fn projected_session_summary(
         &self,
         id: &str,
-        now: i64,
-    ) -> StoreResult<Option<crate::session::SessionSummary>> {
-        let canonical = loopflow_model::id::canonical_session(id);
-        let id = canonical.as_str();
-        loop {
-            let projection =
-                crate::store::session_projection::Reading::acquire(self, now, Some(id))?;
-            let mut conn = self.conn.lock().expect("store mutex poisoned");
-            let Some(conn) = projection.pin(&mut conn)? else {
-                continue;
-            };
-            let now = projection.values.now;
-            let mut labels = std::collections::HashMap::new();
-            return conn
-                .query_row(
-                    &summary_query(&format!("{SUMMARY_SELECT} WHERE s.id=?1"), false, now),
-                    [id],
-                    |row| read_summary(&conn, &mut labels, row, &projection.values),
-                )
-                .optional()?
-                .transpose();
-        }
+        inputs: &SessionProjectionInputs,
+        projection: &SessionProjection,
+    ) -> StoreResult<Option<Option<crate::session::SessionSummary>>> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let Some(conn) = inputs.pin(&mut conn)? else {
+            return Ok(None);
+        };
+        let mut labels = std::collections::HashMap::new();
+        Ok(Some(
+            conn.query_row(
+                &summary_query(
+                    &format!("{SUMMARY_SELECT} WHERE s.id=?1"),
+                    false,
+                    projection.now,
+                ),
+                [id],
+                |row| read_summary(&conn, &mut labels, row, projection),
+            )
+            .optional()?
+            .transpose()?,
+        ))
     }
 
     /// Resolve a conversation or captured-input selector from its SQLite owner.
@@ -1672,31 +1690,24 @@ impl SqliteStore {
     }
 
     /// Every open Session.
-    pub fn sessions(&self, filter: &crate::session::SessionFilter) -> StoreResult<Vec<LfSession>> {
-        loop {
-            let now = time::OffsetDateTime::now_utc().unix_timestamp();
-            let projection = filter
-                .available
-                .then(|| crate::store::session_projection::Reading::acquire(self, now, None))
-                .transpose()?;
-            let mut conn = self.conn.lock().expect("store mutex poisoned");
-            let conn = conn.savepoint()?;
-            if let Some(projection) = &projection {
-                if !projection.is_current(&conn)? {
-                    continue;
-                }
+    pub(crate) fn projected_sessions(
+        &self,
+        filter: &crate::session::SessionFilter,
+        inputs: Option<&SessionProjectionInputs>,
+        now: i64,
+        live_agents: &str,
+    ) -> StoreResult<Option<Vec<LfSession>>> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let snapshot = conn.savepoint()?;
+        if let Some(inputs) = inputs {
+            if !inputs.is_current(&snapshot)? {
+                return Ok(None);
             }
-            let now = projection
-                .as_ref()
-                .map_or(now, |reading| reading.values.now);
-            let live_agents = projection
-                .as_ref()
-                .map_or("[]", |reading| reading.values.live_agents.as_str());
-            let (sql, values) = inventory_query(filter, SESSION_SELECT, now, live_agents)?;
-            let mut query = conn.prepare(&sql)?;
-            let rows = query.query_map(rusqlite::params_from_iter(values), read_session)?;
-            return rows.map(|row| row?).collect();
         }
+        let (sql, values) = inventory_query(filter, SESSION_SELECT, now, live_agents)?;
+        let mut query = snapshot.prepare(&sql)?;
+        let rows = query.query_map(rusqlite::params_from_iter(values), read_session)?;
+        Ok(Some(rows.map(|row| row?).collect::<StoreResult<_>>()?))
     }
 
     pub fn session_inputs(&self, id: &str) -> StoreResult<Vec<String>> {
@@ -2266,9 +2277,12 @@ mod metadata_tests {
                 }
             }
         }
-        let rows = store
-            .session_summaries(&SessionFilter::default(), 0)
-            .unwrap();
+        let rows = crate::store::session_projection::session_summaries(
+            &store,
+            &SessionFilter::default(),
+            0,
+        )
+        .unwrap();
         assert_eq!(rows.len(), 2);
         for row in rows {
             assert_eq!(row.task_primary, row.id.as_str() == "primary");
@@ -2347,7 +2361,7 @@ mod metadata_tests {
             ..SessionFilter::default()
         };
         assert_eq!(
-            store.session_summaries(&filter, 0).unwrap()[0].id,
+            crate::store::session_projection::session_summaries(&store, &filter, 0).unwrap()[0].id,
             "retained"
         );
         store
@@ -2359,7 +2373,11 @@ mod metadata_tests {
                 [],
             )
             .unwrap();
-        assert!(store.session_summaries(&filter, 0).unwrap().is_empty());
+        assert!(
+            crate::store::session_projection::session_summaries(&store, &filter, 0)
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -2486,9 +2504,12 @@ mod metadata_tests {
             .unwrap();
         }
         // Listing reads the Graph from Processes and survives unreadable detail.
-        let rows = store
-            .session_summaries(&SessionFilter::default(), 0)
-            .unwrap();
+        let rows = crate::store::session_projection::session_summaries(
+            &store,
+            &SessionFilter::default(),
+            0,
+        )
+        .unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(
             rows[0].graph_lf_process_id.as_deref(),
@@ -2522,8 +2543,7 @@ mod metadata_tests {
                 params![graph_process],
             )
             .unwrap();
-        let graph = store
-            .session_summary("session", 0)
+        let graph = crate::store::session_projection::session_summary(&store, "session", 0)
             .unwrap()
             .unwrap()
             .graph
@@ -2548,8 +2568,7 @@ mod metadata_tests {
                 "artifact_key":input.as_str(),"schema_version":1,"flow":{"kind":"independent"}}}),
         };
         assert!(
-            !store
-                .session_summary("imported", 0)
+            !crate::store::session_projection::session_summary(&store, "imported", 0)
                 .unwrap()
                 .unwrap()
                 .independent
@@ -2560,8 +2579,7 @@ mod metadata_tests {
                 .unwrap();
         }
         assert!(
-            store
-                .session_summary("imported", 0)
+            crate::store::session_projection::session_summary(&store, "imported", 0)
                 .unwrap()
                 .unwrap()
                 .independent
@@ -2572,8 +2590,7 @@ mod metadata_tests {
             .retain_session_observation(&session, &observation)
             .is_err());
         assert!(
-            store
-                .session_summary("imported", 0)
+            crate::store::session_projection::session_summary(&store, "imported", 0)
                 .unwrap()
                 .unwrap()
                 .independent
@@ -2805,7 +2822,7 @@ mod metadata_tests {
             limit: 2,
             ..SessionFilter::default()
         };
-        let rows = store.session_summaries(&filter, 0).unwrap();
+        let rows = crate::store::session_projection::session_summaries(&store, &filter, 0).unwrap();
         assert_eq!(
             rows.iter().map(|row| row.id.as_str()).collect::<Vec<_>>(),
             ["a", "b"]
@@ -2814,18 +2831,22 @@ mod metadata_tests {
         assert!(!rows[1].independent);
         filter.search = Some("%".into());
         assert_eq!(
-            store.session_summaries(&filter, 0).unwrap().len(),
+            crate::store::session_projection::session_summaries(&store, &filter, 0)
+                .unwrap()
+                .len(),
             1,
             "Contains search is literal"
         );
         filter.search = Some("ALPHA".into());
-        assert_eq!(store.session_summaries(&filter, 0).unwrap()[0].id, "a");
+        assert_eq!(
+            crate::store::session_projection::session_summaries(&store, &filter, 0).unwrap()[0].id,
+            "a"
+        );
         filter.search = None;
         filter.headless = true;
         filter.limit = 0;
         assert_eq!(
-            store
-                .session_summaries(&filter, 0)
+            crate::store::session_projection::session_summaries(&store, &filter, 0)
                 .unwrap()
                 .iter()
                 .map(|row| row.id.as_str())
@@ -2835,7 +2856,8 @@ mod metadata_tests {
         filter.headless = false;
         filter.limit = 1;
         filter.after = Some(String::new());
-        let first = store.session_summaries(&filter, 0).unwrap();
+        let first =
+            crate::store::session_projection::session_summaries(&store, &filter, 0).unwrap();
         assert_eq!(first[0].id, "a");
         store
             .conn
@@ -2847,14 +2869,14 @@ mod metadata_tests {
             )
             .unwrap();
         filter.after = Some(first[0].id.to_string());
-        let second = store.session_summaries(&filter, 0).unwrap();
+        let second =
+            crate::store::session_projection::session_summaries(&store, &filter, 0).unwrap();
         assert_eq!(second[0].id, "b");
         assert_eq!(second[0].title, "000 renamed");
         filter.after = Some(String::new());
         filter.limit = 2;
         assert_eq!(
-            store
-                .session_summaries(&filter, 0)
+            crate::store::session_projection::session_summaries(&store, &filter, 0)
                 .unwrap()
                 .iter()
                 .map(|row| row.id.as_str())

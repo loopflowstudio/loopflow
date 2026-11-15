@@ -208,7 +208,12 @@ mod tests {
                     available: true,
                     ..SessionFilter::default()
                 };
-                assert_eq!(store.session_summaries(&filter, 500).unwrap().len(), 1);
+                assert_eq!(
+                    crate::store::session_projection::session_summaries(&store, &filter, 500)
+                        .unwrap()
+                        .len(),
+                    1
+                );
                 child.0.kill().unwrap();
                 child.0.wait().unwrap();
                 if record_exit {
@@ -216,12 +221,22 @@ mod tests {
                         .record_agent_process_exit("session", &attachment, true)
                         .unwrap();
                 }
-                assert!(store.sessions(&filter).unwrap().is_empty(), "{reading}");
                 assert!(
-                    store.session_summaries(&filter, 500).unwrap().is_empty(),
+                    crate::store::session_projection::sessions(&store, &filter)
+                        .unwrap()
+                        .is_empty(),
                     "{reading}"
                 );
-                let summary = store.session_summary("session", 500).unwrap().unwrap();
+                assert!(
+                    crate::store::session_projection::session_summaries(&store, &filter, 500)
+                        .unwrap()
+                        .is_empty(),
+                    "{reading}"
+                );
+                let summary =
+                    crate::store::session_projection::session_summary(&store, "session", 500)
+                        .unwrap()
+                        .unwrap();
                 assert!(!summary.available);
                 assert!(summary.program_status.is_none());
                 assert_eq!(
@@ -284,7 +299,12 @@ mod tests {
             headless: true,
             ..SessionFilter::default()
         };
-        assert_eq!(store.session_summaries(&filter, 500).unwrap().len(), 1);
+        assert_eq!(
+            crate::store::session_projection::session_summaries(&store, &filter, 500)
+                .unwrap()
+                .len(),
+            1
+        );
         assert!(store
             .begin_program_status("session", Some(&first.agent_process_id), "surface-a")
             .unwrap());
@@ -309,7 +329,11 @@ mod tests {
                 &records
             )
             .unwrap());
-        assert!(store.session_summaries(&filter, 500).unwrap().is_empty());
+        assert!(
+            crate::store::session_projection::session_summaries(&store, &filter, 500)
+                .unwrap()
+                .is_empty()
+        );
         records.records.push(Report {
             state: State::Blocked,
             id: Some("worker".into()),
@@ -335,7 +359,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            store.session_summaries(&filter, 500).unwrap()[0]
+            crate::store::session_projection::session_summaries(&store, &filter, 500).unwrap()[0]
                 .program_status
                 .as_ref(),
             Some(&records)
@@ -371,7 +395,11 @@ mod tests {
                 &records
             )
             .unwrap());
-        assert!(store.session_summaries(&filter, 500).unwrap().is_empty());
+        assert!(
+            crate::store::session_projection::session_summaries(&store, &filter, 500)
+                .unwrap()
+                .is_empty()
+        );
         let third = attachment::claim_session_attachment(
             &store,
             "session",
@@ -389,13 +417,18 @@ mod tests {
                 &records
             )
             .unwrap());
-        assert!(store.session_summaries(&filter, 500).unwrap().is_empty());
-        assert!(store
-            .session_summary("session", 500)
-            .unwrap()
-            .unwrap()
-            .program_status
-            .is_none());
+        assert!(
+            crate::store::session_projection::session_summaries(&store, &filter, 500)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            crate::store::session_projection::session_summary(&store, "session", 500)
+                .unwrap()
+                .unwrap()
+                .program_status
+                .is_none()
+        );
         store
             .record_session_activity(
                 "session",
@@ -410,7 +443,9 @@ mod tests {
             )
             .unwrap();
         assert!(
-            store.session_summaries(&filter, 501).unwrap().is_empty(),
+            crate::store::session_projection::session_summaries(&store, &filter, 501)
+                .unwrap()
+                .is_empty(),
             "unknown replacement is not live"
         );
         store
@@ -423,7 +458,12 @@ mod tests {
                     .unwrap(),
             )
             .unwrap();
-        assert_eq!(store.session_summaries(&filter, 501).unwrap().len(), 1);
+        assert_eq!(
+            crate::store::session_projection::session_summaries(&store, &filter, 501)
+                .unwrap()
+                .len(),
+            1
+        );
         assert!(store
             .session("session")
             .unwrap()

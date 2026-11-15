@@ -237,15 +237,26 @@ existing Complete/Continue/Inspect recovery rules; only a domain-proven continua
 can resume after dispatch. Completion continues only its saved domain request;
 reopening or requesting completion again cannot authorize replay of that request.
 Settlement records `task.completed` for every receipt waiting on that exact request,
-including when a periodic check settles it after the original worker exits.
+including when a periodic check settles it after the original worker exits or
+command output has already returned. Reopen, replacement PR insertion and a newer
+accepted planning status resolve a withdrawn request as `superseded` in their own
+transaction. Late settlement cannot overwrite that resolution or borrow a newer
+request's completion. Recovery never repeats a superseded request.
 Completion and reopen recover their original committed Task result after a lost
 reply, even if the Task has since changed. Later failures remain in `error`: the
 recovered Task result does not certify cleanup or planning delivery. Other sent
 commands remain inspectable unless their domain authorizes continuation. There is
 no generic retry of uncertain effects.
 
-`commits` contains semantic stages with resource IDs, an authoritative result and
+`commits` contains semantic stages with resource IDs, a result and
 Machine/epoch/schema/domain revision fences written in the domain transaction.
+Every entry requires `resolution`: `committed`, `definitely_refused` or
+`superseded`. The stage names the intended effect; a superseded `task.completed`
+is not a completion. Its result identifies the withdrawn request, and its fence
+requires a covering replacement reading before dropping the pending membership
+projection. Only `committed` entries can supply recovered command output.
+Refusal is reserved for domain-established noncommit, never inferred from an
+error or missing stage. Delivery, resolution and query incorporation are separate.
 Each receipt's monotonic `revision` orders updates within its database epoch;
 a held admission reply cannot supersede a newer receipt. Command output is
 separate: `finished` alone cannot retire an optimistic layer or

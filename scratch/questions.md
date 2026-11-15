@@ -33,3 +33,8 @@
   their exact command, but a missing receipt cannot distinguish an unsent file
   from an effect lost by historical restoration. Keep it inspectable instead of
   replaying it. A present legacy receipt can adopt the saved envelope.
+
+- Stage resolutions stay in the existing semantic `commits` entries, with a required
+  typed disposition. Supersession results identify the withdrawn request; clients
+  need a covering replacement reading before showing the unoverlaid membership.
+  This avoids a second resolution ledger and guessed replacement Task values.

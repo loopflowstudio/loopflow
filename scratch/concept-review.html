@@ -2,44 +2,41 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-906 · Resolving replaced intent</title>
+<title>LOO-906 · Pending intent across queries</title>
 <style>
-:root{color-scheme:light dark;--paper:#faf9f5;--ink:#252621;--muted:#65665d;--line:#cbcfc3;--accent:#426343}*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.45 system-ui,sans-serif}main{max-width:780px;margin:auto;padding:28px 22px 48px}header,.status{color:var(--muted);font-size:13px}h1{font-size:29px;line-height:1.15;margin:22px 0 12px}h2{font-size:20px;margin:24px 0 8px}p{margin:10px 0}code{font-size:.85em;overflow-wrap:anywhere}table{width:100%;border-collapse:collapse;font-size:14px}th,td{text-align:left;vertical-align:top;padding:9px 5px;border-bottom:1px solid var(--line)}.journey{padding:12px 16px;border-left:3px solid var(--accent)}details{margin:16px 0}summary{cursor:pointer;font-weight:600}li{margin:10px 0}.sources{overflow-wrap:anywhere} @media(prefers-color-scheme:dark){:root{--paper:#1d211d;--ink:#eceee5;--muted:#b1b8ac;--line:#495146;--accent:#a0c398}}@media(max-width:520px){main{padding:22px 14px}table{font-size:12px}th,td{padding:7px 3px}h1{font-size:25px}}
+:root{color-scheme:light dark}body{font:16px/1.5 system-ui,sans-serif;margin:0}main{max-width:760px;margin:auto;padding:24px}header,small{opacity:.75;font-size:13px}h1{font-size:28px;line-height:1.2}h2{font-size:20px}table{width:100%;border-collapse:collapse}td,th{text-align:left;vertical-align:top;padding:8px;border-bottom:1px solid #8886}code{overflow-wrap:anywhere}blockquote{margin:16px 0;padding-left:16px;border-left:3px solid #888}li{margin:12px 0}@media(max-width:520px){main{padding:14px}table{font-size:12px}td,th{padding:5px}}
 </style>
 <main>
-<header>LOO-906 · concept-review · 2026-11-15
-<p class="sources">Built from scratch/{instant-task-session,desktop-reactivity-feedback,questions}.md; rust/loopflow/src/{engine/operation.rs,ops/task.rs,store/sqlite/{children,operations}.rs}; swift/Loopflow/Services/{ClientWorkStore,ClientWorkDatabase,OperationReceipt}.swift.</p></header>
-<h1>A replaced completion must stop hiding the Task</h1>
-<p><strong>Decision for the next implementation:</strong> record exact-request supersession alongside commits in the existing receipt owner. Reconcile its effect without replaying Complete or changing a later selection. No open product choice stops this work.</p>
-<p><strong>Biggest mismatch:</strong> the interrupted recovery cut preserves exact completion identity, but withdrawal leaves its receipt uncertain. The planned projection would retain the removal and conflicting-operation lane without a domain resolution.</p>
+<header>LOO-906 · concept-review · 2026-11-15<br>Sources: scratch/{instant-task-session,desktop-reactivity-feedback,questions}.md; rust/loopflow/src/{engine/operation.rs,store/sqlite/operations.rs,work/selection.rs}; swift/Loopflow/Services/{ClientWorkStore,ClientWorkDatabase,ReadingStamp}.swift.</header>
+<h1>Opening another list must keep the pending change</h1>
+<p><strong>Next implement direction:</strong> derive affected queries from shared dependencies, including queries opened after the gesture. Persist incorporation or cache invalidation before retiring an operation. No open product choice stops this work.</p>
+<p><strong>Biggest mismatch:</strong> the current client store saves commands and receipts, but has no shared confirmed cache or query projection. Tracking only views open at submission would let another window show an older row or count.</p>
 <table>
-<thead><tr><th>Action</th><th>Concept</th><th>API / owner</th></tr></thead>
-<tbody>
-<tr><td>Complete A</td><td>Saved operation + immediate removal</td><td>Proposed shared <code>begin</code>; existing exact domain-request binding</td></tr>
-<tr><td>Reopen elsewhere</td><td>Newer intent replaces that request</td><td>Existing <code>reopen_task</code>; proposed atomic supersession for its subscribers</td></tr>
-<tr><td>Recover</td><td>Typed domain resolution</td><td>Proposed receipt resolution; delivery/error alone cannot resolve effects</td></tr>
-<tr><td>Receive list / count</td><td>Incorporation per query</td><td>Proposed shared <code>receive</code>; rebase against covering replacement facts</td></tr>
-<tr><td>Select / expand</td><td>Local navigation / disclosure</td><td>Immediate local state; never receipt recovery</td></tr>
-</tbody></table>
-<h2>Complete, before → proposed</h2>
-<p class="status">Existing recovery: save request → Reopen withdraws it → recovery reports uncertain. Shared completion projection is unfinished.</p>
-<div class="journey">Complete A → hide A and select B → another client reopens A → save exact-request supersession → covering facts restore A → B stays selected.</div>
-<p><strong>Failure / restart:</strong> retain the command and resolution; recover without repeating Complete. If completion won the race, keep its original commit/result and then show the newer Reopen facts. A later completion cannot stand in for the withdrawn request.</p>
+<tr><th>Action</th><th>Concept</th><th>API / owner</th></tr>
+<tr><td>Complete A</td><td>Durable intent; immediate removal</td><td>Proposed shared <code>begin</code>; existing exact-request receipt</td></tr>
+<tr><td>Open Dashboard later</td><td>Same effects over that query's base</td><td>Proposed <code>projection(for:)</code> + declarative plan</td></tr>
+<tr><td>Receive list / count</td><td>Independent incorporation</td><td>Proposed <code>receive</code>; stage fence + complete reading</td></tr>
+<tr><td>Close / restart</td><td>Saved cache obligations</td><td>Proposed atomic cache/outbox transaction</td></tr>
+<tr><td>Select / expand</td><td>Local navigation / disclosure</td><td>Immediate local state; recovery never selects again</td></tr>
+</table>
+<h2>Existing → proposed</h2>
+<p><small>Existing: server supersession resolves exact withdrawn completion requests. Client creation uses the SQLite outbox; shared completion projection and both-client migration remain unfinished.</small></p>
+<blockquote>Complete A → hide A and select B → open another cached list → A stays hidden → each covering reading replaces its own effect exactly once.</blockquote>
+<p><strong>Failure / recovery:</strong> Reopen can supersede the exact request. Covering replacement facts restore A without selecting it. A committed completion survives later output failure. Restart restores saved intent and cache obligations without resending uncertain work.</p>
 <details>
-<summary>Follow the model through recovery and both clients</summary>
-<p><strong>Proposed contract:</strong> typed committed, refused and superseded resolutions attach to effects in the one receipt owner. Every request-replacing writer, including CLI and periodic work, records its resolution in the domain transaction. Extend the command registry and Rust/Swift fixtures; historical absence stays inspectable unless exact recovery establishes an outcome.</p>
-<p><strong>Projection:</strong> persist resolution, confirmed cache and per-query incorporation atomically. Retain the effect over a stale base until replacement facts cover its fence. A fresh count and a held list incorporate independently. Release the relevant resource lane when its prior domain writer can no longer mutate it; remaining query coverage does not hold dispatch.</p>
-<p><strong>Partial success:</strong> keep earlier commits and unresolved external-stage recovery. A recovered Task result with an error cannot imply cleanup or planning delivery. No fabricated SQLite fence certifies a provider effect.</p>
-<p><strong>Existing design retained:</strong> showing a result acknowledges presentation only. Retire when domain recovery, query coverage and applicable presentation obligations finish. Replace launch checkpoints, duplicate caches and per-action pending owners during both-client migration.</p>
-<p><strong>Proposed usage:</strong> “If a newer action replaces a pending completion, the list follows that newer state without changing your current selection.” Existing creation-recovery instructions need no change.</p>
-<p><strong>Epoch replacement:</strong> old resolutions/fences cannot certify the new database or authorize replay. Preserve submitted content and local presentation acknowledgment.</p>
-<p class="status">Next: mutation-family recovery, terminal resolutions and stage fences → transactional cache/membership projection → both clients. Native latency and historical-restore epoch reset remain open. This prose review reruns no production tests and does not diagnose the earlier leaked-handle warning.</p>
+<summary>Follow the rule through storage and both clients</summary>
+<p><strong>Applicability:</strong> derive it from operation resources/fact dependencies and the query plan. Store plan identity/version with membership; changed filters or plans cannot borrow another query's acknowledgment. Unknown membership remains unknown.</p>
+<p><strong>Retirement:</strong> incorporate each affected stored query or invalidate its base with its required confirmation fence in the cache/outbox transaction. Future queries evaluate retained effects. After operation retirement, cache provenance still prevents reuse of an invalidated base before a covering read. No need to open every possible view.</p>
+<p><strong>Counts:</strong> a fresh count covering settlement receives no extra decrement; a held older list retains its removal. Delivery finished and showing a result cannot discharge either obligation.</p>
+<p><strong>Epoch:</strong> old fences cannot certify a replacement database or authorize replay. Preserve submitted content and recover on the original Machine. Native owners retain input readiness.</p>
+<p><strong>Proposed usage:</strong> “Opening another list or window shows the same pending changes; an older cached list never brings a completed Task back while confirmation is pending.” Existing recovery skill instructions need no change.</p>
+<p><small>Next: mutation-family recovery/stage policies → transactional cache/membership projection → both clients and predecessor removal. Native latency remains unmeasured after failed host preflight. No production code or execution changed in this review.</small></p>
 </details>
 <h2>Questions for the implementation check</h2>
 <ol>
-<li>Withdraw Complete while settlement is held, then restart and reorder receipt/list/count replies. Does A return without reselecting it or blocking later operations forever?<br><strong>1a.</strong> Demonstrated on both clients. <strong>1b.</strong> Implement exact-request resolution and incorporation.</li>
-<li>Race settlement against Reopen in both orders; complete a newer request after withdrawing the old one. Are original commits retained without replay or attributing the newer result to the old operation?<br><strong>2a.</strong> Demonstrated with reordered replies. <strong>2b.</strong> Extend recovery/projection coverage.</li>
+<li>Open another window/filter after Complete, then reorder fresh count and held list replies. Is removal applied once per query without selecting A?<br><strong>1a.</strong> Demonstrated on both clients. <strong>1b.</strong> Implement dependency-based projection and incorporation.</li>
+<li>Close all affected views, restart and reopen cached data after operation retirement. Can stale membership appear, or does retirement require opening every view?<br><strong>2a.</strong> Neither occurs. <strong>2b.</strong> Implement transactional invalidation and reload fences.</li>
 </ol>
-<p class="status">Verification questions; no pending product choice. Headless outcome: design changed → iterate to implement. Production code and execution unchanged by this review.</p>
+<p><small>Verification questions; no pending product choice. Headless outcome: design changed → iterate to implement.</small></p>
 </main>
 </html>

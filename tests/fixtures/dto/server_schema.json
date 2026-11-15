@@ -5950,6 +5950,9 @@
         "fence": {
           "$ref": "#/$defs/CommitFence"
         },
+        "resolution": {
+          "$ref": "#/$defs/OperationResolution"
+        },
         "resources": {
           "items": {
             "type": "string"
@@ -5962,6 +5965,7 @@
         }
       },
       "required": [
+        "resolution",
         "stage",
         "resources",
         "fence",
@@ -6049,6 +6053,15 @@
         "updated_at"
       ],
       "type": "object"
+    },
+    "OperationResolution": {
+      "description": "Resolution of this semantic stage, independent of delivery and other stages.",
+      "enum": [
+        "committed",
+        "definitely_refused",
+        "superseded"
+      ],
+      "type": "string"
     },
     "OperationValidation": {
       "description": "A pending legacy candidate is reserved, but has no permission to execute.",

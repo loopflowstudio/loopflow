@@ -527,12 +527,12 @@ impl SqliteStore {
                 "An abandoned Task cannot be reopened".into(),
             ));
         }
-        let (completed, pending): (bool, bool) = tx.query_row(
-            "SELECT planning_completed,completion_request IS NOT NULL FROM tasks WHERE id=?1",
+        let (completed, pending): (bool, Option<i64>) = tx.query_row(
+            "SELECT planning_completed,completion_request FROM tasks WHERE id=?1",
             [id.as_str()],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
-        if completed || pending {
+        if completed || pending.is_some() {
             tx.execute(
                 "UPDATE tasks SET completion_request=NULL,completion_error=NULL WHERE id=?1",
                 [id.as_str()],
@@ -550,6 +550,9 @@ impl SqliteStore {
                     ),
                 },
             )?;
+        }
+        if let Some(request) = pending {
+            super::operations::completion_superseded_in(&tx, id.as_str(), request)?;
         }
         let task = task_on(&tx, id)?.ok_or(StoreError::NotFound)?;
         super::operations::commit_current_in(
@@ -873,11 +876,17 @@ impl SqliteStore {
     pub fn insert_task_pr(&self, pr: &TaskPr) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let mut withdrawn = None;
         if let Some(previous) = active_task_pr_on(&tx, &pr.task_id)? {
             if previous.is_settled() && pr.sequence > previous.sequence {
                 tx.execute(
                     "UPDATE task_prs SET historical=1 WHERE id=?1",
                     [previous.id.as_str()],
+                )?;
+                withdrawn = tx.query_row(
+                    "SELECT completion_request FROM tasks WHERE id=?1",
+                    [pr.task_id.as_str()],
+                    |row| row.get::<_, Option<i64>>(0),
                 )?;
                 tx.execute(
                     "UPDATE tasks SET completion_request=NULL,completion_error=NULL WHERE id=?1",
@@ -887,6 +896,9 @@ impl SqliteStore {
             }
         }
         insert_task_pr(&tx, pr)?;
+        if let Some(request) = withdrawn {
+            super::operations::completion_superseded_in(&tx, pr.task_id.as_str(), request)?;
+        }
         tx.commit()?;
         Ok(())
     }

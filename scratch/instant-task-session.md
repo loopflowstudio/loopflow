@@ -50,28 +50,19 @@ interactions has been measured.
 
 ## What the current code establishes
 
-Reactive rendering and synchronization are separate problems. Both clients already
-use SwiftUI/Observation. Their command, cache and navigation owners disagree about
-when an interaction has happened:
+Both clients use SwiftUI/Observation; their command, cache and navigation owners
+still disagree about when an interaction happened. Desktop `WorkModel`/
+`TaskRunDraft`, launch checkpoints and `abandoningTaskIDs`, plus mobile
+`MobileTaskDraft`/view-owned `SessionLink`, remain replacement targets (see the
+delete list). Revision-6 subscriptions now provide exact-query snapshot stamps;
+server operation admission covers all typed writes, while live client outbox
+migration still specializes creation. Native Session/Graph owners retain readiness.
+The detailed predecessor map is at
+`bb936ac371143106c3ef7569a0366214cfdcfada:scratch/instant-task-session.md`.
 
-| Area | Current owners and sequencing | Replacement obligation |
-|---|---|---|
-| Desktop mutations | `WorkModel.performTaskAction`, `TaskRunDraft`, `confirmWorkUpdate`; Complete waits through command and observation | Immediate shared projection; acceptance survives refresh failure |
-| Desktop removal | `abandoningTaskIDs` filters rows and separately advances selection | Same operation projection as Complete; navigation remains its own choice |
-| Desktop creation | `StartingTask`, creation journal/recovery/presentation, exact Session attachment; branch reconciliation map | Shared operation destination and reconciliation, retain exact Session owner |
-| Mobile creation | Shared `ClientWorkStore` now admits creations; `MobileTaskDraft.submission/outcome/savedRequests` and sheet-owned lifetime still duplicate presentation | One durable submitted-operation owner; draft stores editable text only |
-| Read freshness | Desktop part sequence/floors and checkpoint waiters; mobile `RemoteTaskObservation` refresh/coalescing; saved Work and list files | One stamped read/reconciliation engine, platform-specific transport only |
-| Task selection | Desktop `select` sets selection synchronously but continues through `openSelectedWorkspace`/warm conversation reconciliation; mobile pushes `NavigationLink` content and creates/closes a view-owned `SessionLink` | Small immediate navigation reducer; cached content/native occurrence retention independent of refresh |
-| Wave navigation/disclosure | `WorkNavigator.waveRow` now selects synchronously; the delayed `pressedScope` path is deleted | Keep disclosure/route changes local before loading children |
-| Shared commands | Typed `ServedWrite`/Rust `Write`; creations alone have durable request receipts | Stable operation IDs and outcomes for every UI command |
-| Backend reads | SQLite domain revisions and pinned snapshots now reach revision-6 stamped subscriptions with exact query scope | Use shared causal reconciliation; do not compare unrelated checkpoints |
-
-`task_complete` already saves a completion request, checks PR/execution conditions,
-settles state, syncs planning and schedules retirement. Creation already performs
-planning, primary Session preparation and Graph admission. These paths contain
-potential waits; their durations do not establish which is slow. Server effects
-continue after the connection drops, but ordinary request IDs are transport-local
-and are not durable command identities.
+Completion already saves a domain request, checks execution/PR conditions, settles
+state, syncs planning and schedules retirement. Creation already prepares its
+primary Session and Graph. Those waits are not a measured SQL/latency diagnosis.
 
 ## Established designs and dependency choices
 
@@ -95,19 +86,11 @@ rollback, durable uncertain-outcome recovery and predictable navigation. The tes
 below must demonstrate these properties; framework branding or a new placeholder
 is not a substitute.
 
-### Two storage architectures
-
-| Candidate | Benefits | Costs and failure modes |
-|---|---|---|
-| Mutable client replica: local entities/queries become primary app state; bidirectional sync reconciles writes | All queries run locally; broad offline editing; strong normalization | Must reproduce derived Work status, membership and permissions or move their evaluator into a portable shared core; conflict policy for every field, replicated schema and execution-derived data; snapshot rollback can clobber overlapping writes |
-| Confirmed cache plus ordered operation overlays, exposed through one client store | Keeps server derivation and domain execution; operation-local rollback/rebase; smaller recovery/migration cut | Requires complete query dependencies/membership rules and causal stamps; raw per-screen JSON patches would recreate the current fragmentation |
-
-Next implement direction: the second, with a real shared client store containing
-both cached facts and a transactional outbox. This is an architecture replacement,
-not a window-local list of exceptions. It must normalize entity identity and
-project every affected query, including Dashboard membership and counts. If the
-membership cut cannot be made complete, the design must move the pure projection
-core into shared portable code; silently leaving those surfaces stale is invalid.
+The mutable-replica comparison is retained at
+`bb936ac371143106c3ef7569a0366214cfdcfada:scratch/instant-task-session.md`.
+The cache/overlay owner must project every affected query, including Dashboard
+membership and counts. If declarative membership cannot cover them, move the pure
+projection into a shared portable core before client migration.
 
 ```mermaid
 flowchart LR
@@ -352,9 +335,9 @@ Before projection cutover, hold settlement across withdrawal, restart and reorde
 receipt/list/count replies. Race settlement against Reopen in both transaction
 orders, and withdraw an old request before completing a newer one. Assert eventual
 row/count convergence, unchanged later selection, no duplicate dispatch and no
-permanent lane blockage once that domain obligation resolves. These extend the
-existing success and uncertainty cases; the current withdrawn-request fixture
-deliberately stops at `uncertain` and does not establish this behavior.
+permanent lane blockage once that domain obligation resolves. These extend the existing success and uncertainty cases. Server withdrawal and
+restart cases now record supersession; client projection and navigation checks
+remain open.
 
 ### Seeing a result does not incorporate its effects
 
@@ -395,6 +378,43 @@ This settles an implementation consequence of the existing lossless recovery and
 per-query incorporation contracts. There is no open product choice. Replace the
 interim `presented` deletion and creation-only presentation map as part of the
 shared projection migration, after domain recovery and effect/stage coverage.
+
+### Opening another query must preserve pending intent
+
+Next implement direction: affected-query coverage is a dependency rule, not a
+fixed list of the views open when `begin` runs. Opening another window, changing a
+filter or returning to a cached query must evaluate the same ordered effects
+before exposing its first cached frame. Derive applicability from the command's
+resource/fact dependencies and the declarative query plan. Persist the plan's
+identity/version with cached membership; a changed plan cannot reuse an old
+incorporation acknowledgment. Unknown membership stays unknown as specified above.
+
+Concrete interaction: Complete A hides it in Working, then open Dashboard while
+its older cached count still includes A. Apply the same removal there. If that
+count instead comes from a covering settlement reading, do not subtract again.
+If Reopen superseded the request, retain the pending projection only until a
+replacement reading covers that resolution. None of these reads changes selection.
+
+Make operation retirement finite without requiring every possible future query
+to be opened. In the cache/outbox transaction, either incorporate each affected
+stored query or invalidate its base with its required confirmation fence. Opening
+an invalidated query cannot expose that stale base as current. Queries created
+later evaluate retained effects; after operation retirement they must use a base
+that satisfies the persisted invalidation requirement or fetch a covering reading.
+Keep such requirements with cache provenance, not an immortal saved command.
+An epoch change still requires original-Machine recovery; invalidation is never
+permission to replay uncertain work.
+
+Before cutover, open a second window/query after Complete, close every affected
+view, restart, then reopen from disk. Reorder a covering count and lagging list;
+change filter/plan identity while replies are held. Assert one removal per query,
+no stale row flash, no lost effect and eventual operation retirement without
+opening every view. Cover Desktop and mobile through the same reducer.
+
+This makes the existing per-query and closed-cache contracts concrete; it adds no
+product choice. The interrupted supersession implementation is retained. Finish
+mutation-family recovery and stage policies first, then implement this rule with
+transactional cache/membership projection before migrating either client's views.
 
 ## Local navigation, disclosure and retained content
 
@@ -607,6 +627,8 @@ Proposed usage text for the affected Desktop/mobile docs:
 > Opening a finished result clears its Show result prompt. List and count updates
 > continue in the background; leaving the result does not cancel them. Unresolved
 > failures keep their recovery actions.
+> Opening another list or window shows the same pending changes; an older cached
+> list never brings a completed Task back while confirmation is pending.
 > Selecting a recent Task shows its retained content while refreshing. Expanding
 > a Wave opens its children immediately; a cold section loads in place.
 
@@ -632,23 +654,30 @@ checks are at `aeb4ed3b2b0e7256748fa69bd76f77acff966b98:scratch/instant-task-ses
 The launch checkpoint, presentation-driven retirement and phone sheet/outcome
 presentation remain interim; no shared projection cutover is claimed.
 
-2026-11-15 implementation finding: periodic completion settlement has no original
-worker scope. Recording only the current operation's fence loses acknowledgment
-when that writer settles a request later. Completion receipts now bind the exact
-Task/request in the original request transaction; an indexed lookup lets settlement
-write all subscribers' fences in its domain transaction. A withdrawn request never
-borrows a later request's completion. The single draft migration gains the request
-column/index without changing released data.
+Exact-request settlement and continuation details are retained at
+`bb936ac371143106c3ef7569a0366214cfdcfada:scratch/instant-task-session.md`.
+Completion/reopen recover their saved committed result without reissuing intent;
+subsequent errors remain visible rather than certifying cleanup/planning delivery.
+Other mutation families and both clients' completion presentation remain unfinished.
 
-Completion recovery continues only that saved domain request, never calls Complete
-again. Completion and reopen recover the saved committed Task result after lost
-output without applying the intent again; a later failure stays in the receipt's
-error rather than certifying cleanup/planning delivery. Other mutation families'
-continuations, refusal classification and terminal fences remain unfinished.
-Client recovery still specializes creation; this server slice does not establish
-both clients' completion presentation or effect acknowledgment.
+2026-11-15 supersession cut: each semantic entry in the existing `commits` array
+has a required typed `resolution` (committed, definitely_refused, superseded),
+with its resource/result/fence. No second ledger or schema migration is added;
+released creation rows have no stage entries to convert. Superseded completion
+entries name the intended `task.completed` stage and exact withdrawn request;
+their fence requires a replacement reading, rather than supplying a guessed Task.
+Reopen, replacement PR insertion and accepted Linear status changes resolve that
+request in their existing transaction. First resolution wins, even after command
+delivery finishes. Recovery uses only committed results and never continues a
+superseded request. Definitive-refusal classification remains unfinished.
 
-Remaining, in order: all mutation-family recovery and fences (remote/detached and
+The 10k trace caught `SCAN repository_plans` in the new status-withdrawal lookup
+(`/tmp/loo906-supersession-atomic-query.log`). A Task-to-repository primary-key
+join, and correlated lookup in the existing clear-request write, replace the
+materialized repo-path subqueries. No selected-plan restriction or index is added;
+this is a recovery-query finding, not native latency attribution.
+
+Remaining, in order: remaining mutation-family recovery and fences (remote/detached and
 external file/config confirmation included); exhaustive effect/stage registry and a
 declarative membership plan over #1947's `selection_states`; transactional confirmed cache and ordered effect/query
 projection; both clients' interaction/retained-occurrence migration and deletion
@@ -795,24 +824,22 @@ all 20 receipt SQL statements used keyed indexes without table scans.
 The corrected benchmark invocation puts its output variable inside the network
 boundary; the first invocation skipped when that boundary cleared `LF_*`.
 
-Checks from the preceding admission/client cut, including 47 Desktop and four iOS
-cases, remain at `aeb4ed3b2b0e7256748fa69bd76f77acff966b98:scratch/instant-task-session.md`.
-The reported nextest LEAK moved to the pure schema test in that cut; no cause has
-been established. No leaked-handle diagnosis or repair is claimed here.
+Earlier check observations and raw-file references remain at
+`bb936ac371143106c3ef7569a0366214cfdcfada:scratch/instant-task-session.md`.
+The earlier admission LEAK has no established cause; none appeared in this cut.
 
-- `uv run python scripts/check_migrations.py`: passed; one draft `client_operations.sql`.
-- `uv run python scripts/check_architecture.py`: passed, 89/89 SQLite owners.
-- `cargo fmt` and `git diff --check`: passed for the recovery cut.
-- `cargo nextest run -p loopflow --lib --build-jobs 4 --success-output immediate -E 'test(engine::operation::tests::completion_recovery_never_reissues) | test(store::sqlite::operations::tests::periodic_settlement) | test(store::sqlite::operations::tests::completion_and_reopen) | test(store::sqlite::operations::tests::receipt_reads_and_duplicate_admission)'`: 4 passed on final sources; `/tmp/loo-906-completion-final.log`. Restart/real continuation, lost output, no-request uncertainty, withdrawn/newer requests and reopen recovery pass. No LEAK reported. At 10k Tasks/receipts, all traced queries/updates avoid table scans (only per-receipt JSON iteration); 20-sample diagnostic P95 0.062 ms for lookup/admission and 0.098 ms for exact-request settlement. These loaded-host timings are not native baselines; macOS ld still warns about large `__eh_frame`.
-- `uv run python scripts/desktop_performance.py preflight --output /tmp/loo-906-recovery-preflight`: rejected at 2026-11-15T08:46:01Z, background CPU 826.5%, one-minute load 44.25; raw `/tmp/loo-906-recovery-preflight/preflight.json`. Native trials remain unavailable on this host.
+Current checks (inherited `LF_*` cleared; logs under `/tmp/loo906-supersession-*`):
 
-Realign after merging `9cafc410ee`: #1947 moved `recordPaneFailure` to take a
-`SessionItem`; the one stale branch test call is repaired. `swift build
---build-tests --package-path swift -Xswiftc -gnone` passed;
-`scripts/test_desktop.sh --skip-build -Xswiftc -gnone --filter
-'WorkDestinationTests|ClientWorkStoreTests|WorkNavigationTests|TaskConceptTests'`
-passed 144; `cargo nextest run -p loopflow --test integration --lib -E
-'test(dto_fixtures::) | test(ops::human_session::)'` passed 103, no LEAK.
+- `cargo nextest run -p loopflow --lib -E 'test(store::sqlite::operations::tests::replacement_pr_resolves) | test(store::sqlite::operations::tests::linear_status_resolves) | test(store::sqlite::operations::tests::receipt_fixture_keeps) | test(store::sqlite::operations::tests::receipt_reads_and_duplicate_admission)'`: 4 passed; `final.log`. Earlier exact-request engine/periodic recovery results remain applicable (`rust.log`).
+- `cargo nextest run -p loopflow --lib -E 'test(store::sqlite::operations::tests::withdrawn_completion) | test(store::sqlite::operations::tests::receipt_reads_and_duplicate_admission)'`: rollback/restart passed; newly expanded query trace failed on the repo scan; `atomic-query.log`. The repaired query is checked below.
+- `cargo nextest run -p loopflow --lib -E 'test(store::sqlite::operations::tests::linear_status_resolves) | test(store::sqlite::operations::tests::receipt_reads_and_duplicate_admission)'`: 2 passed; `index.log`; all traced SELECT/UPDATE plans indexed except per-receipt JSON iteration.
+- `cargo nextest run -p loopflow --lib -E 'test(server::schema::tests::)'`: 8 passed; schema regenerated; `/tmp/loo906-schema-tests.log`.
+- `cargo nextest run -p loopflow --test integration -E 'test(documented_commands::)'`: 4 passed; `doc-tests.log`.
+- `swift build --build-tests --jobs 4 --package-path swift -Xswiftc -gnone`: passed; `swift-build.log`.
+- `swift test --skip-build --disable-sandbox --package-path swift --no-parallel -Xswiftc -gnone --filter 'ServerProtocolTests|restartRetainsSupersessionAfterAnOlderReceiptArrives'`: 26 passed under Desktop network boundary with private `LF_HOME`; `swift-tests.log`.
+- `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/ReadingStampTests`: 3 passed; `ios.log`.
+- `uv run python scripts/check_migrations.py`, `uv run python scripts/check_architecture.py`, `cargo fmt`, `git diff --check`: passed; still one draft migration and 89/89 SQLite owners.
+- `uv run python scripts/desktop_performance.py preflight --output /tmp/loo906-supersession-preflight`: rejected 2026-11-15T09:34:29Z, CPU 280%, one-minute load 8.75; raw `preflight/preflight.json`. Native trials remain unmeasured.
 
 Gate owns wider store/transport/lifecycle, DTO integration, documented-command,
 packaging and clippy checks. Implementation still owns a valid benchmark baseline

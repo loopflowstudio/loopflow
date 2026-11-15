@@ -96,6 +96,35 @@ struct ClientWorkStoreTests {
         #expect(try await restarted.pending().isEmpty)
     }
 
+    @Test func restartRetainsSupersessionAfterAnOlderReceiptArrives() throws {
+        let root = directory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fixture = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("rust/loopflow/tests/fixtures/dto/server/operation_receipt.json")
+        let result = try #require(try RawJSON(Data(contentsOf: fixture)).fields()["result"])
+        let resolved = try result.decode(OperationReceipt.self)
+        var prior = try #require(JSONSerialization.jsonObject(with: result.bytes) as? [String: Any])
+        prior["revision"] = resolved.revision - 1
+        prior["commits"] = Array((try #require(prior["commits"] as? [Any])).prefix(1))
+        let older = try JSONDecoder().decode(OperationReceipt.self, from: JSONSerialization.data(withJSONObject: prior))
+        let record = SubmittedOperation(requestID: resolved.requestID, destination: "machine_fixture",
+            payload: try JSONEncoder().encode(ServedWrite.taskComplete(directory: "/repo", issue: "LOO-1")),
+            version: ServerProtocol.revision, submittedAt: Date())
+        do {
+            let database = try ClientWorkDatabase(directory: root)
+            try database.save(record)
+            try database.receive(resolved, epoch: "epoch", id: record.id)
+            try database.receive(older, epoch: "epoch", id: record.id)
+        }
+        let restarted = try ClientWorkDatabase(directory: root)
+        let saved = try #require(try restarted.state(record.id))
+        #expect(saved.record.payload == record.payload)
+        #expect(saved.receipt == resolved)
+        #expect(saved.receipt?.commits.last?.resolution == .superseded)
+        #expect(saved.receipt?.delivery == .uncertain)
+    }
+
     @Test func heldDomainWorkHasDurableAdmissionAndNoSecondSend() async throws {
         let root = directory()
         defer { try? FileManager.default.removeItem(at: root) }

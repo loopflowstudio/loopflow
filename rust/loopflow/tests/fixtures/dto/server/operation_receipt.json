@@ -25,7 +25,26 @@
         },
         "result": {
           "request": 42
-        }
+        },
+        "resolution": "committed"
+      },
+      {
+        "stage": "task.completed",
+        "resources": [
+          "task_fixture"
+        ],
+        "fence": {
+          "machine": "machine_fixture",
+          "epoch": "ab0123456789ab0123456789ab01234567",
+          "schema": 6,
+          "revisions": {
+            "planning": 8
+          }
+        },
+        "result": {
+          "request": 42
+        },
+        "resolution": "superseded"
       }
     ],
     "created_at": 1,

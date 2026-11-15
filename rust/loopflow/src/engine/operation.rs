@@ -154,6 +154,12 @@ fn recover_completion(store: &SqliteStore, id: &str) -> Result<()> {
     if receipt.delivery == crate::store::sqlite::operations::OperationDelivery::Finished {
         return Ok(());
     }
+    if receipt.commits.iter().any(|commit| {
+        commit.stage == "task.completed"
+            && commit.resolution != crate::store::sqlite::operations::OperationResolution::Committed
+    }) {
+        return Ok(()); // The exact request can no longer settle; never reissue it.
+    }
     let Some(commit) = receipt
         .commits
         .iter()
@@ -294,8 +300,22 @@ mod tests {
         super::execute(&store, "withdrawn").unwrap();
         assert!(store.task_completion_pending(&task.id).unwrap().is_none());
         let withdrawn = store.operation_receipt("withdrawn").unwrap().unwrap();
-        assert_eq!(withdrawn.delivery, OperationDelivery::Uncertain);
-        assert_eq!(withdrawn.commits.len(), 1);
+        assert_eq!(withdrawn.delivery, OperationDelivery::Dispatched);
+        assert_eq!(withdrawn.commits.len(), 2);
+        assert_eq!(
+            withdrawn.commits[1].resolution,
+            crate::store::sqlite::operations::OperationResolution::Superseded
+        );
+        let revision = withdrawn.revision;
+        super::execute(&store, "withdrawn").unwrap();
+        assert_eq!(
+            store
+                .operation_receipt("withdrawn")
+                .unwrap()
+                .unwrap()
+                .revision,
+            revision
+        );
 
         super::admit("settled", &epoch, &complete).unwrap();
         assert!(store.dispatch_operation("settled").unwrap());

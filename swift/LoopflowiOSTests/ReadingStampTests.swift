@@ -13,6 +13,9 @@ final class ReadingStampTests: XCTestCase {
         XCTAssertNil(receipt.fingerprint)
         XCTAssertNotNil(receipt.submittedFingerprint)
         XCTAssertEqual(receipt.commits.first?.fence.revisions["planning"], 7)
+        XCTAssertEqual(receipt.commits.map(\.resolution), [.committed, .superseded])
+        XCTAssertEqual(receipt.commits.last?.stage, "task.completed")
+        XCTAssertEqual(receipt.commits.last?.fence.revisions["planning"], 8)
         XCTAssertNil(receipt.result)
         XCTAssertNotNil(receipt.error)
     }

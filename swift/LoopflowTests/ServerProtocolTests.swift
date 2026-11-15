@@ -27,6 +27,35 @@ struct ServerProtocolTests {
         }
     }
 
+    @Test func stageResolutionIsRequiredAndIndependentOfDelivery() throws {
+        guard case .response(_, _, let result) = try message("operation_receipt") else { Issue.record("Expected receipt"); return }
+        let receipt = try result.decode(OperationReceipt.self)
+        #expect(receipt.delivery == .uncertain)
+        #expect(receipt.commits.map(\.resolution) == [.committed, .superseded])
+        let stage = try #require(receipt.commits.last)
+        #expect(stage.stage == "task.completed")
+        let frame = try #require(try RawJSON(fixture("reading_stamped")).fields()["frame"])
+        let stamp = try #require(try frame.decode(SubscriptionReading<[JSONValue]>.self).stamp)
+        let query = try #require(stamp.query)
+        #expect(!stage.fence.isCovered(by: stamp, query: query))
+        var replacement = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(stamp)) as? [String: Any])
+        var revisions = try #require(replacement["revisions"] as? [String: Any])
+        revisions["planning"] = 8
+        replacement["revisions"] = revisions
+        let newer = try JSONDecoder().decode(ReadingStamp.self, from: JSONSerialization.data(withJSONObject: replacement))
+        #expect(stage.fence.isCovered(by: newer, query: query))
+        var object = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(stage)) as? [String: Any])
+        object.removeValue(forKey: "resolution")
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(OperationCommit.self, from: JSONSerialization.data(withJSONObject: object))
+        }
+        for resolution in ["committed", "definitely_refused", "superseded"] {
+            object["resolution"] = resolution
+            let decoded = try JSONDecoder().decode(OperationCommit.self, from: JSONSerialization.data(withJSONObject: object))
+            #expect(decoded.resolution.rawValue == resolution)
+        }
+    }
+
     @Test func creationAdmissionIsSeparateFromCanonicalValidation() throws {
         let states: [(String, OperationReceipt.Validation, OperationReceipt.Delivery)] = [
             ("operation_pending", .pending, .queued),

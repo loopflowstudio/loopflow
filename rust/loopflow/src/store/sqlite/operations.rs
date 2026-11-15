@@ -18,10 +18,21 @@ pub struct CommitFence {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct OperationCommit {
+    pub resolution: OperationResolution,
     pub stage: String,
     pub resources: Vec<String>,
     pub fence: CommitFence,
     pub result: serde_json::Value,
+}
+
+/// Resolution of this semantic stage, independent of delivery and other stages.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum OperationResolution {
+    Committed,
+    DefinitelyRefused,
+    Superseded,
 }
 
 /// Dispatch state is not a prediction about a provider, Graph or native surface.
@@ -135,6 +146,7 @@ fn domain_commit_in(
         revisions.insert((*domain).to_owned(), revision);
     }
     Ok(OperationCommit {
+        resolution: OperationResolution::Committed,
         stage: stage.into(),
         resources: resources.iter().map(|id| (*id).to_owned()).collect(),
         fence: CommitFence {
@@ -196,20 +208,48 @@ pub(super) fn completion_committed_in(
     request: i64,
     result: &serde_json::Value,
 ) -> StoreResult<()> {
+    completion_resolved_in(conn, task, request, OperationResolution::Committed, result)
+}
+
+/// Every writer withdrawing a completion records the replacement facts after
+/// its changes, inside the same transaction. Historical absence proves nothing.
+pub(crate) fn completion_superseded_in(
+    conn: &Connection,
+    task: &str,
+    request: i64,
+) -> StoreResult<()> {
+    completion_resolved_in(
+        conn,
+        task,
+        request,
+        OperationResolution::Superseded,
+        &serde_json::json!({"request": request}),
+    )
+}
+
+fn completion_resolved_in(
+    conn: &Connection,
+    task: &str,
+    request: i64,
+    resolution: OperationResolution,
+    result: &serde_json::Value,
+) -> StoreResult<()> {
     let waiting: bool = conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM creation_receipts
-         WHERE kind='task.complete' AND task_id=?1 AND completion_request=?2 AND delivery_state<>'finished')",
+         WHERE kind='task.complete' AND task_id=?1 AND completion_request=?2
+         AND NOT EXISTS(SELECT 1 FROM json_each(commits) WHERE json_extract(value,'$.stage')='task.completed'))",
         params![task,request], |row| row.get(0),
     )?;
     if !waiting {
         return Ok(());
     }
-    let commit = domain_commit_in(conn, "task.completed", &[task], &["planning"], result)?;
-    // One indexed update fans out to the exact request's subscribers. Never
-    // replace the first result/fence when another settler observes Done.
+    let mut commit = domain_commit_in(conn, "task.completed", &[task], &["planning"], result)?;
+    commit.resolution = resolution;
+    // Delivery may already have finished while settlement was pending. It does
+    // not discharge this domain obligation. The first resolution always wins.
     conn.execute(
         "UPDATE creation_receipts SET commits=json_insert(commits,'$[#]',json(?3)),updated_at=?4
-         WHERE kind='task.complete' AND task_id=?1 AND completion_request=?2 AND delivery_state<>'finished'
+         WHERE kind='task.complete' AND task_id=?1 AND completion_request=?2
          AND NOT EXISTS(SELECT 1 FROM json_each(commits) WHERE json_extract(value,'$.stage')='task.completed')",
         params![task,request,serde_json::to_string(&commit)?,crate::store::rows::now_unix()],
     )?;
@@ -419,7 +459,9 @@ impl SqliteStore {
         let Some(receipt) = operation_in(&conn, id)? else {
             return Ok(false);
         };
-        let Some(commit) = receipt.commits.iter().find(|commit| commit.stage == stage) else {
+        let Some(commit) = receipt.commits.iter().find(|commit| {
+            commit.stage == stage && commit.resolution == OperationResolution::Committed
+        }) else {
             return Ok(false);
         };
         Ok(conn.execute(
@@ -726,7 +768,7 @@ mod tests {
     use rusqlite::params;
     use serde_json::json;
 
-    use super::{commit_in, OperationDelivery, SqliteStore};
+    use super::{commit_in, OperationDelivery, OperationResolution, SqliteStore};
 
     fn store() -> (tempfile::TempDir, SqliteStore) {
         let dir = tempfile::tempdir().unwrap();
@@ -773,6 +815,15 @@ mod tests {
         let wire = message["result"].clone();
         let receipt: super::OperationReceipt = serde_json::from_value(wire.clone()).unwrap();
         assert_eq!(serde_json::to_value(receipt).unwrap(), wire);
+        for resolution in ["committed", "definitely_refused", "superseded"] {
+            let mut stage = wire["commits"][1].clone();
+            stage["resolution"] = json!(resolution);
+            let decoded: super::OperationCommit = serde_json::from_value(stage.clone()).unwrap();
+            assert_eq!(serde_json::to_value(decoded).unwrap(), stage);
+        }
+        let mut missing = wire["commits"][1].clone();
+        missing.as_object_mut().unwrap().remove("resolution");
+        assert!(serde_json::from_value::<super::OperationCommit>(missing).is_err());
         for field in [
             "request_id",
             "kind",
@@ -1393,8 +1444,274 @@ mod tests {
         assert!(store.complete_task(&task, newer).unwrap());
         assert!(store.complete_task(&task, withdrawn).unwrap());
         let old = store.operation_receipt("withdrawn").unwrap().unwrap();
-        assert_eq!(old.commits.len(), 1);
+        assert_eq!(old.commits.len(), 2);
         assert_eq!(old.commits[0].stage, "task.completion_requested");
+        assert_eq!(old.commits[1].resolution, OperationResolution::Superseded);
+        assert!(!store
+            .recover_operation_result("withdrawn", "task.completed")
+            .unwrap());
+    }
+
+    #[test]
+    fn withdrawn_completion_keeps_its_replacement_fence_across_restart_and_late_settlement() {
+        let (dir, store) = store();
+        let repo = loopflow_test_support::TestRepo::new();
+        let repository_id = store
+            .ensure_repository(repo.path().to_str().unwrap())
+            .unwrap();
+        let task = store
+            .create_task(&crate::work::task::NewTask {
+                id: crate::durable::TaskId::new(),
+                repository_id,
+                project_id: None,
+                title: "Withdrawn completion".into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap();
+        let mut request = None;
+        for id in ["lost-worker", "returned-worker"] {
+            store
+                .admit_operation(
+                    &store.reading_identity().unwrap().1,
+                    id,
+                    "task.complete",
+                    "hash",
+                    &json!({}),
+                )
+                .unwrap();
+            assert!(store.dispatch_operation(id).unwrap());
+            request = crate::journal::request::with_operation(Some(id.into()), || {
+                store.request_task_completion(&task.id, None).unwrap()
+            });
+        }
+        // Command output can return before settlement: delivery cannot hide a
+        // later domain resolution from that subscriber.
+        store
+            .finish_operation("returned-worker", Ok(&json!({"pending":true})))
+            .unwrap();
+        let before = store.revisions().unwrap().planning;
+        store.conn.lock().unwrap().execute_batch(
+            "CREATE TEMP TRIGGER fail_resolution BEFORE UPDATE OF commits ON creation_receipts
+             WHEN EXISTS(SELECT 1 FROM json_each(NEW.commits) WHERE json_extract(value,'$.stage')='task.completed')
+             BEGIN SELECT RAISE(ABORT,'receipt write failed'); END;",
+        ).unwrap();
+        assert!(store.reopen_task(&task.id, None).is_err());
+        assert_eq!(
+            store
+                .task_completion_pending(&task.id)
+                .unwrap()
+                .map(|(id, _)| id),
+            request
+        );
+        assert_eq!(
+            store
+                .operation_receipt("lost-worker")
+                .unwrap()
+                .unwrap()
+                .commits
+                .len(),
+            1
+        );
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute_batch("DROP TRIGGER fail_resolution")
+            .unwrap();
+        store.reopen_task(&task.id, None).unwrap();
+        let receipt = store.operation_receipt("lost-worker").unwrap().unwrap();
+        assert_eq!(
+            receipt.commits,
+            store
+                .operation_receipt("returned-worker")
+                .unwrap()
+                .unwrap()
+                .commits
+        );
+        let resolution = &receipt.commits[1];
+        assert_eq!(resolution.stage, "task.completed");
+        assert_eq!(resolution.resolution, OperationResolution::Superseded);
+        assert_eq!(resolution.result, json!({"request":request.unwrap()}));
+        assert!(resolution.fence.revisions["planning"] > before);
+        assert_eq!(
+            resolution.fence.revisions["planning"],
+            store.revisions().unwrap().planning
+        );
+        assert!(!store.complete_task(&task, request.unwrap()).unwrap());
+        assert!(store.task_completion_pending(&task.id).unwrap().is_none());
+        drop(store);
+        let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
+        assert_eq!(
+            store
+                .operation_receipt("lost-worker")
+                .unwrap()
+                .unwrap()
+                .commits,
+            receipt.commits
+        );
+        assert!(!store
+            .recover_operation_result("lost-worker", "task.completed")
+            .unwrap());
+        store.reopen_task(&task.id, None).unwrap();
+        let newer = store
+            .request_task_completion(&task.id, None)
+            .unwrap()
+            .unwrap();
+        assert!(store.complete_task(&task, newer).unwrap());
+        assert!(store.complete_task(&task, request.unwrap()).unwrap());
+        assert_eq!(
+            store
+                .operation_receipt("lost-worker")
+                .unwrap()
+                .unwrap()
+                .commits,
+            receipt.commits
+        );
+    }
+
+    #[test]
+    fn replacement_pr_resolves_its_withdrawn_completion_request() {
+        let (_dir, store) = store();
+        let repository_id = store.ensure_repository("/supersession").unwrap();
+        let task = store
+            .create_task(&crate::work::task::NewTask {
+                id: crate::durable::TaskId::new(),
+                repository_id,
+                project_id: None,
+                title: "Replaced completion".into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap();
+        let mut pr = crate::work::task::TaskPr {
+            id: crate::work::task::TaskPrId::new(),
+            task_id: task.id.clone(),
+            sequence: 1,
+            slug: "first".into(),
+            branch: "first".into(),
+            base_commit: "base".into(),
+            parent_pr_id: None,
+            publication: None,
+            merge_commit: None,
+            abandoned_at: Some(task.created_at),
+            ci_observation: None,
+            github_observation: None,
+            linear_attachment_id: None,
+            linear_comment_id: None,
+            linear_link_error: None,
+            created_at: task.created_at,
+            updated_at: task.updated_at,
+        };
+        store.conn.lock().unwrap().execute(
+            "INSERT INTO task_checkouts(task_id,worktree,branch,base_commit,parent_pr_id) VALUES(?1,'/supersession/task',?2,?3,NULL)",
+            params![task.id.as_str(), pr.branch, pr.base_commit],
+        ).unwrap();
+        store.insert_task_pr(&pr).unwrap();
+        store
+            .admit_operation(
+                &store.reading_identity().unwrap().1,
+                "pr",
+                "task.complete",
+                "hash",
+                &json!({}),
+            )
+            .unwrap();
+        let request = crate::journal::request::with_operation(Some("pr".into()), || {
+            store
+                .request_task_completion(&task.id, None)
+                .unwrap()
+                .unwrap()
+        });
+        pr.id = crate::work::task::TaskPrId::new();
+        pr.sequence = 2;
+        pr.slug = "second".into();
+        pr.abandoned_at = None;
+        store.insert_task_pr(&pr).unwrap();
+        assert!(store.task_completion_pending(&task.id).unwrap().is_none());
+        let receipt = store.operation_receipt("pr").unwrap().unwrap();
+        assert_eq!(
+            receipt.commits[1].resolution,
+            OperationResolution::Superseded
+        );
+        assert_eq!(receipt.commits[1].result, json!({"request":request}));
+    }
+
+    #[test]
+    fn linear_status_resolves_its_withdrawn_completion_request() {
+        let (_dir, store) = store();
+        let repository_id = store.ensure_repository("/supersession").unwrap();
+        let task = store
+            .create_task(&crate::work::task::NewTask {
+                id: crate::durable::TaskId::new(),
+                repository_id,
+                project_id: None,
+                title: "Replaced completion".into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap();
+        let inventory: crate::test_linear_input::Inventory = serde_json::from_str(include_str!(
+            "../../../../../tests/fixtures/dto/task_history_planning.json"
+        ))
+        .unwrap();
+        let mut item = inventory.items[0].clone();
+        item.project_id = None;
+        item.completed = false;
+        item.state = Some("unstarted".into());
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE tasks SET external_issue_id=?2 WHERE id=?1",
+                params![task.id.as_str(), item.id],
+            )
+            .unwrap();
+        crate::linear::acceptance::accept_linear_issue_in(
+            &store,
+            "/supersession",
+            &item,
+            None,
+            1,
+            None,
+        )
+        .unwrap();
+        store
+            .admit_operation(
+                &store.reading_identity().unwrap().1,
+                "linear",
+                "task.complete",
+                "hash",
+                &json!({}),
+            )
+            .unwrap();
+        let request = crate::journal::request::with_operation(Some("linear".into()), || {
+            store
+                .request_task_completion(&task.id, None)
+                .unwrap()
+                .unwrap()
+        });
+        item.state = Some("started".into());
+        crate::linear::acceptance::accept_linear_issue_in(
+            &store,
+            "/supersession",
+            &item,
+            None,
+            2,
+            None,
+        )
+        .unwrap();
+        assert!(store.task_completion_pending(&task.id).unwrap().is_none());
+        let receipt = store.operation_receipt("linear").unwrap().unwrap();
+        assert_eq!(
+            receipt.commits[1].resolution,
+            OperationResolution::Superseded
+        );
+        assert_eq!(receipt.commits[1].result, json!({"request":request}));
+        assert!(
+            receipt.commits[1].fence.revisions["planning"] <= store.revisions().unwrap().planning
+        );
     }
 
     #[test]
@@ -1608,6 +1925,27 @@ mod tests {
         }
         settlement_samples.sort_by(f64::total_cmp);
         println!("10k Tasks/receipts; exact-request settlement lookup; n=20, P95={:.3} ms (loaded-host diagnostic)", settlement_samples[18]);
+        store.conn.lock().unwrap().execute(
+            "UPDATE creation_receipts SET completion_request=2 WHERE request_id='receipt_task_receipt_2'", [],
+        ).unwrap();
+        traced.extend(crate::store::query_plans::statements(&store, || {
+            let mut conn = store.conn.lock().unwrap();
+            let tx = conn.transaction().unwrap();
+            super::completion_superseded_in(&tx, "task_receipt_2", 2).unwrap();
+            tx.commit().unwrap();
+        }));
+        let inventory: crate::test_linear_input::Inventory = serde_json::from_str(include_str!(
+            "../../../../../tests/fixtures/dto/task_history_planning.json"
+        ))
+        .unwrap();
+        let mut issue = inventory.items[0].clone();
+        issue.project_id = None;
+        traced.extend(crate::store::query_plans::statements(&store, || {
+            let mut conn = store.conn.lock().unwrap();
+            let tx = conn.transaction().unwrap();
+            crate::linear::acceptance::put_item(&tx, "/receipt-benchmark", 1, &issue).unwrap();
+            tx.commit().unwrap();
+        }));
         let conn = store.conn.lock().unwrap();
         for sql in traced {
             if !sql.starts_with("SELECT") && !sql.starts_with("UPDATE") {

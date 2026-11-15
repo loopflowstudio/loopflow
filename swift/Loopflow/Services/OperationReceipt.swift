@@ -1,8 +1,13 @@
 import Foundation
 
-/// A domain result and its fence commit in the transaction that changes the
-/// displayed facts. A command response alone cannot acknowledge a projection.
+/// A semantic stage resolves in the transaction that changes its displayed
+/// facts. Supersession ends the intended effect and requires replacement coverage;
+/// delivery alone cannot acknowledge a projection.
 public struct OperationCommit: Codable, Equatable, Sendable {
+    public enum Resolution: String, Codable, Sendable {
+        case committed, definitelyRefused = "definitely_refused", superseded
+    }
+    public let resolution: Resolution
     public let stage: String
     public let resources: [String]
     public let fence: CommitFence

@@ -2,10 +2,11 @@
 
 Conversation/Machine-link cut committed at `a2a0a0fb33` on origin/main
 `9cafc410ee`. Unreachable-Machine presentation and Desktop Session rename are
-committed at `35e2835de1`; SQLite fixture teardown at `5231746858`. Next
-implementation, in order: finish field-level observation support using the source
-and capture primitives below, field incorporation and derived-answer coverage, then
-dynamic membership with disconnected Move. Supersedes the
+committed at `35e2835de1`; SQLite fixture teardown at `5231746858`; observation
+source/capture at `86f99e3315`. Next implementation, in order (Concept review:
+fields carry their own support): typed per-field support on the wire, persisted
+normalization and incorporation, derived-answer coverage, then dynamic membership
+with disconnected Move. Supersedes the
 Desktop-only delivery boundary. No shipping or merge decision is recorded. Placement remains this Task;
 no Wave is selected.
 
@@ -472,11 +473,8 @@ equal-provenance conflict described above. Task ordering also consumes this
 activity (`TaskOrder::key`), so separating only the displayed activity badge is
 insufficient.
 
-`observe::Dependencies` already tracks private per-entry revisions and wakes
-served reads for such changes; `ReadingStamp` intentionally carries none of
-those dependencies. `Cache` entries can disappear and be recreated, so exporting
-their bare counters would allow revision reuse. No normalization code or Move
-caller was added on this incomplete clock model.
+Bare per-entry counters could repeat after `Cache` eviction; the source/capture
+cut below replaced them with an incarnation and non-reusing clock.
 
 The correction keeps SQLite-only parent/lifecycle facts separate from observed
 activity; its specified form is the Review direction below. Never promote
@@ -609,15 +607,12 @@ state-only reducer remain deletion targets, not extension points. Same-SQLite
 Busy/order/count and replaced-process acceptance still needs that consumer cut.
 Native latency remains unmeasured.
 
-
-Checks · 2026-11-15 (`LF_*` cleared; broader acceptance belongs to gate):
-- `cargo nextest run -p loopflow --lib -E 'test(/^observe::tests::/)'`: 11 passed, including held I/O, process exit, capture changes and eviction.
-- Source/schema/resume run `7bb50caf-46f5-485f-a8ff-d882ea6e5a98`: 21 passed; nextest marked `server::schema::tests::bare_time_serializes_as_its_described_tuple` LEAK. That case and the binary constructor launch no children; cause unresolved, retained for gate rather than retried away. Schema/fixture and scope/resume checks passed before the final capture scheduling refinement.
-- `cargo nextest run -p loopflow --lib --test integration -E 'test(/^observe::tests::a_capture_reuses_answers_across_changes_and_inherited_workers$/) | test(documented_commands::)'`: 5 passed; documentation results remain applicable after the capture-only refinement.
-- `scripts/test_desktop.sh --skip-build --filter 'ServerClientTests/(observationSourceComesFromTheCurrentWelcomeAcrossSharedConsumers|readingCannotReplaceTheNegotiatedObservationSource|disconnectedWatchKeepsItsQueuedBaselineUntilTheConsumerReadsIt|disconnectedWatchResumesItsBaselineAndNewestConfirmation)|ServerProtocolTests/(readingStampsRequireEveryFieldAndRoundTrip|helloAndWelcomeNegotiateTheRevision)'`: 6 passed; the separate `ClientWorkQueryTests/testObservationUpgradeDropsOldBasesAndRetainsSavedCommands` check also passed.
-- `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/ReadingStampTests -only-testing:LoopflowiOSTests/ClientWorkQueryTests/testObservationUpgradeDropsOldBasesAndRetainsSavedCommands`: 6 passed.
-- `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings`: passed on the final source/capture cut.
-- `uv run python scripts/check_swift_multiplatform_boundaries.py`: passed. Desktop/shared and iOS builds passed; no native latency measurement.
+Checks for this cut (observe 11, Desktop 7, iOS 6 focused cases, fmt, clippy,
+multiplatform boundaries; exact filters at `86f99e3315:scratch/instant-task-session.md`)
+passed with `LF_*` cleared. Unresolved: in run
+`7bb50caf-46f5-485f-a8ff-d882ea6e5a98` nextest marked
+`server::schema::tests::bare_time_serializes_as_its_described_tuple` LEAK; that
+case launches no children. Gate owns it; no retry was taken as a fix.
 
 ### Concept review: fields carry their own support · 2026-11-15
 

@@ -46,8 +46,8 @@
   cross-platform interaction cutover is not claimed.
 
 - Completion now transfers lagging stored-query effects on retirement; query
-  open/close leases now belong to the presentation owner; finite invalidation for
-  closed bases remains migration work.
+  open/close leases belong to the presentation owner. Closed bases now use compact
+  scoped reload requirements instead of per-operation effects.
   New completion reload requirements are scoped to repository and declared effect;
   preexisting broad requirements retain their conservative meaning until epoch reset.
 
@@ -55,5 +55,8 @@
   pending. A saved query opened through an expression retains that identity in
   history; a saved Dashboard selected by ID keeps its ID. Deferred Machine
   discovery binds an unsaved Complete through the original store endpoint before
-  saving; it never retargets a saved command. Prepared query entries now remain
-  with the shared owner across close/reopen; bounded eviction remains open.
+  saving; it never retargets a saved command. Prepared query entries use
+  the shared owner's bounded reusable set across close/reopen. Headless reversible
+  sizing: eight unleased prepared answers plus pinned live queries, with at most
+  64 retired effects per retained base; exceeding that budget makes the base cold
+  under its reload floor. These are internal cache sizes, not product preferences.

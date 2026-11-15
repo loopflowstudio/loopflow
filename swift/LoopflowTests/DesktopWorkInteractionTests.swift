@@ -140,7 +140,8 @@ extension ClientWorkQueryTests {
             return LineSubscription(lines: lines, send: { _ in }, cancel: { continuation.finish() })
         }) { _, _ in throw RegistryQueryError("No unstamped refresh") }
         let model = WorkModel(query: query, repoPath: "/repo")
-        defer { model.select(nil); connecting.finish() }
+        let other = WorkModel(query: query, repoPath: "/repo")
+        defer { model.select(nil); other.select(nil); connecting.finish() }
         model.useInteractionForTesting(owner)
         model.confirmMachine("machine")
         model.selectDashboard("picked")
@@ -148,6 +149,12 @@ extension ClientWorkQueryTests {
         XCTAssertEqual(model.selectedViewPlan?.taskCount, 1)
         let firstConnection = await connectionsIterator.next()
         let first = try XCTUnwrap(firstConnection)
+        other.useInteractionForTesting(owner)
+        other.confirmMachine("machine")
+        other.selectDashboard("picked")
+        XCTAssertEqual(other.selectedViewPlan?.taskCount, 1)
+        let otherConnection = await connectionsIterator.next()
+        XCTAssertNotNil(otherConnection)
         let content = try XCTUnwrap(model.selectedViewPlan?.contents.last)
         await model.setDashboardTile("unrelated", member: content.work, hidden: true)
         XCTAssertEqual(model.selectedViewPlan?.taskCount, 1)
@@ -159,6 +166,9 @@ extension ClientWorkQueryTests {
         XCTAssertEqual(model.selectedViewPlan?.taskCount, 1)
         XCTAssertEqual(model.navigation.destination, destination)
         XCTAssertEqual(model.dashboardError, "Refresh unavailable")
+        other.select(nil)
+        await owner.refreshFromStore()
+        XCTAssertEqual(model.selectedViewPlan?.taskCount, 1, "One failed window keeps usable content when its sibling closes")
         model.retrySelectedQuery()
         XCTAssertEqual(model.selectedViewPlan?.taskCount, 1)
         let secondConnection = await connectionsIterator.next()
@@ -173,6 +183,15 @@ extension ClientWorkQueryTests {
         await fulfillment(of: [refreshed], timeout: 10)
         XCTAssertEqual(model.selectedViewPlan?.taskCount, 1)
         XCTAssertEqual(model.navigation.destination, destination)
+        model.select(nil)
+        owner.shutdown()
+        let restarted = WorkInteraction(machine: "machine", store: store(directory))
+        defer { restarted.shutdown() }
+        model.useInteractionForTesting(restarted)
+        model.selectDashboard("picked")
+        XCTAssertEqual(model.navigation.destination, destination)
+        await restarted.refreshFromStore()
+        XCTAssertEqual(model.selectedViewPlan?.taskCount, 1)
     }
 
     func testDelayedDashboardSaveCannotSelectAfterLeavingAndReturningToItsExpression() async throws {

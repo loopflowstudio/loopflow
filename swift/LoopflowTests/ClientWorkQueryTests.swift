@@ -1,4 +1,5 @@
 import Foundation
+import SQLite3
 import XCTest
 @testable import Loopflow
 
@@ -234,6 +235,7 @@ final class ClientWorkQueryTests: XCTestCase {
             if countFirst {
                 _ = try await client.receivePlans([workingPlan(["b"])], stamp: stamp("count", revision: 7), for: count)
             }
+            try database.retainQueries(machine: "machine", keys: [key(list), key(count)])
             try database.receive(receipt(kind: "task.complete", stage: "task.completed"), epoch: "epoch", id: "saved")
             try database.retireIfConverged("saved")
             XCTAssertTrue(try database.pending().isEmpty)
@@ -292,6 +294,7 @@ final class ClientWorkQueryTests: XCTestCase {
         fence["revisions"] = ["planning": 8]
         commits[0]["fence"] = fence
         wire["commits"] = commits
+        try database.retainQueries(machine: "machine", keys: [key(query)])
         try database.receive(JSONDecoder().decode(OperationReceipt.self, from: JSONSerialization.data(withJSONObject: wire)), epoch: "epoch", id: "saved")
         try database.retireIfConverged("saved")
         XCTAssertTrue(try database.pending().isEmpty)
@@ -352,6 +355,7 @@ final class ClientWorkQueryTests: XCTestCase {
             version: ServerProtocol.revision, submittedAt: Date()))
         let hidden = try await client.cachedPlans(machine: "machine", for: query)
         XCTAssertEqual(hidden?.projection.first?.taskCount, 0)
+        try database.retainQueries(machine: "machine", keys: [key(query)])
         try database.receive(receipt(kind: "task.complete", stage: "task.completed", resolution: .definitelyRefused), epoch: "epoch", id: "saved")
         try database.retireIfConverged("saved")
         let refused = try await store(directory).cachedPlans(machine: "machine", for: query)
@@ -585,14 +589,18 @@ final class ClientWorkQueryTests: XCTestCase {
         owner.apply(prepared) // A prepared base crosses the gesture/save boundary.
         XCTAssertEqual(second.first?.taskCount, 1)
         selected = work // Later deliberate navigation must survive save and replies.
+        owner.close(secondLease) // Every view closes while this save is still held.
+        var resumed: [ProjectedWorkPlan]?
+        let resumedLease = owner.open(query) { resumed = $0 }
+        XCTAssertNil(resumed, "Suspended observation cannot republish its old prepared answer")
         hold.release()
         await owner.persistPending()
         await owner.refreshFromStore()
-        XCTAssertEqual(second.first?.taskCount, 1, "Durable adoption must not remove twice")
+        XCTAssertEqual(resumed?.first?.taskCount, 1, "Durable adoption after all leases close must not remove twice")
         XCTAssertEqual(selected, work)
         let saved = try await disk.pending()
         XCTAssertEqual(saved.map(\.id), [id])
-        owner.close(secondLease)
+        owner.close(resumedLease)
         let restarted = store(directory)
         let restored = try await restarted.cachedPlans(machine: "machine", for: query)
         XCTAssertEqual(restored?.projection.first?.projection.visible.map(\.work.id), ["b"])
@@ -755,6 +763,151 @@ final class ClientWorkQueryTests: XCTestCase {
     }
 
 
+
+    func testSuspendedAnswerReconcilesBeforeReopenAfterClosedSettlementAndRestart() async throws {
+        for disposition in [OperationCommit.Resolution.committed, .superseded, .definitelyRefused] {
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let disk = store(directory)
+            let owner = WorkInteraction(machine: "machine", store: disk)
+            defer { owner.shutdown() }
+            let query = ServedRead.viewSelect(expression: "state:working")
+            let base = try workingPlan(["a", "b"])
+            var frames: [[ProjectedWorkPlan]?] = []
+            let lease = owner.open(query) { frames.append($0) }
+            try await owner.receive([base], stamp: stamp("list", revision: 6), for: query)
+            XCTAssertEqual(frames.last??.first?.taskCount, 2)
+            owner.close(lease)
+            await owner.refreshFromStore() // Drain close and release disk retention.
+            let database = try complete(directory)
+            try database.receive(receipt(kind: "task.complete", stage: "task.completed", resolution: disposition), epoch: "epoch", id: "saved")
+            try database.retireIfConverged("saved")
+            XCTAssertTrue(try database.pending().isEmpty)
+            frames = []
+            let reopened = owner.open(query) { frames.append($0) }
+            XCTAssertTrue(frames.allSatisfy { $0 == nil }, "A suspended prepared answer cannot publish before disk reconciliation")
+            await owner.refreshFromStore()
+            XCTAssertNil(frames.last ?? nil, "The closed base requires a covering reading")
+            let restarted = store(directory)
+            let restored = try await restarted.cachedPlans(machine: "machine", for: query)
+            XCTAssertNil(restored)
+            // A saved Dashboard can change scope while the same query is held.
+            let unrelated = try plan()
+            let changed = try await restarted.receivePlans([unrelated], stamp: stamp("list", revision: 6), for: query)
+            XCTAssertEqual(changed?.plans, [unrelated])
+            let oldPlan = try await restarted.receivePlans([base], stamp: stamp("list", revision: 6), for: query)
+            XCTAssertNil(oldPlan, "Changing the plan never discharges the original scope's floor")
+            let replacement = disposition == .committed ? try workingPlan(["b"]) : base
+            try await owner.receive([replacement], stamp: stamp("list", revision: 7), for: query)
+            XCTAssertEqual(frames.last??.first?.taskCount, disposition == .committed ? 1 : 2)
+            owner.close(reopened)
+        }
+    }
+
+    func testReusableWorkingSetEvictsOldAnswersButPinsIndependentLeases() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let disk = store(directory)
+        let owner = WorkInteraction(machine: "machine", store: disk)
+        defer { owner.shutdown() }
+        let base = try workingPlan(["a", "b"])
+        let pinned = ServedRead.viewSelect(expression: "pinned")
+        var pinnedFrames = 0
+        let first = owner.open(pinned) { _ in pinnedFrames += 1 }
+        let second = owner.open(pinned) { _ in pinnedFrames += 1 }
+        try await owner.receive([base], stamp: stamp("pinned", revision: 6), for: pinned)
+        owner.close(first)
+        var oldest: ServedRead?
+        var newest: ServedRead?
+        for index in 0..<(WorkInteraction.reusableQueryLimit + 3) {
+            let query = ServedRead.viewSelect(expression: "query-\(index)")
+            if oldest == nil { oldest = query }
+            newest = query
+            let lease = owner.open(query) { _ in }
+            try await owner.receive([base], stamp: stamp("q-\(index)", revision: 6), for: query)
+            owner.close(lease)
+        }
+        var warm: [ProjectedWorkPlan]?
+        _ = owner.open(try XCTUnwrap(newest)) { warm = $0 }
+        XCTAssertEqual(warm?.first?.taskCount, 2, "Recent unleased answers remain immediately usable")
+        var coldFrames = 0
+        _ = owner.open(try XCTUnwrap(oldest)) { if $0 != nil { coldFrames += 1 } }
+        XCTAssertEqual(coldFrames, 0, "An evicted answer must be reconciled before reuse")
+        let before = pinnedFrames
+        await owner.refreshFromStore()
+        XCTAssertGreaterThan(pinnedFrames, before, "Closing one lease leaves its other window live")
+        XCTAssertGreaterThan(coldFrames, 0)
+        owner.close(second)
+    }
+
+    func testRepeatedSettlementBoundsEffectsAndCompactsClosedReloadRequirements() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = try ClientWorkDatabase(directory: directory)
+        let query = ServedRead.viewSelect(expression: "state:working")
+        let closed = ServedRead.viewSelect(expression: "closed")
+        let base = try workingPlan(["a", "b"])
+        _ = try database.cache(ClientWorkQuery(stamp: stamp("list", revision: 6), plans: [base]), key: key(query))
+        _ = try database.cache(ClientWorkQuery(stamp: stamp("closed", revision: 6), plans: [base]), key: key(closed))
+        try database.retainQueries(machine: "machine", keys: [key(query)])
+        for index in 0..<(ClientWorkDatabase.retainedEffectLimit + 3) {
+            let id = "completion-\(index)"
+            try database.save(SubmittedOperation(requestID: id, destination: "machine",
+                payload: JSONEncoder().encode(ServedWrite.taskComplete(directory: "/repo", issue: "a")),
+                version: ServerProtocol.revision, submittedAt: Date()))
+            XCTAssertTrue(try database.observeEpoch("epoch", id: id))
+            var wire = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(
+                receipt(kind: "task.complete", stage: "task.completed"))) as? [String: Any])
+            wire["request_id"] = id
+            try database.receive(JSONDecoder().decode(OperationReceipt.self, from: JSONSerialization.data(withJSONObject: wire)), epoch: "epoch", id: id)
+            try database.retireIfConverged(id)
+            XCTAssertTrue(try database.pending().isEmpty)
+            let held = try database.cached(machine: "machine", key: key(query))
+            XCTAssertLessThanOrEqual(held?.effects?.count ?? 0, ClientWorkDatabase.retainedEffectLimit)
+            XCTAssertNil(try database.cached(machine: "machine", key: key(closed)))
+        }
+        var connection: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(directory.appendingPathComponent("work.sqlite").path, &connection), SQLITE_OK)
+        defer { sqlite3_close(connection) }
+        var statement: OpaquePointer?
+        XCTAssertEqual(sqlite3_prepare_v2(connection,
+            "SELECT json_array_length(CAST(state AS TEXT)) FROM work_requirements WHERE id='machine'", -1, &statement, nil), SQLITE_OK)
+        defer { sqlite3_finalize(statement) }
+        XCTAssertEqual(sqlite3_step(statement), SQLITE_ROW)
+        XCTAssertEqual(sqlite3_column_int(statement, 0), 1, "Reload metadata grows by scope, never by operation")
+        XCTAssertNil(try database.cached(machine: "machine", key: key(query)), "A held answer exceeding the effect budget becomes cold")
+        let restarted = try ClientWorkDatabase(directory: directory)
+        XCTAssertTrue(try restarted.pending().isEmpty)
+        XCTAssertNil(try restarted.cached(machine: "machine", key: key(closed)))
+        let covering = try restarted.cache(ClientWorkQuery(stamp: stamp("closed", revision: 7), plans: [workingPlan(["b"])]), key: key(closed))
+        XCTAssertEqual(covering?.projection.first?.taskCount, 1)
+        // The compact frontier applies even to expressions created after retirement.
+        let future = try restarted.cache(ClientWorkQuery(stamp: stamp("future", revision: 6), plans: [base]), key: "future")
+        XCTAssertNil(future)
+    }
+
+    func testLaterSettlementCannotReviveAnInvalidatedBaseWithAnUnrelatedEffect() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let query = ServedRead.viewSelect(expression: "state:working")
+        let database = try complete(directory)
+        _ = try database.cache(ClientWorkQuery(stamp: stamp("list", revision: 6), plans: [workingPlan(["a", "b"])]), key: key(query))
+        let first = try receipt(kind: "task.complete", stage: "task.completed")
+        try database.receive(first, epoch: "epoch", id: "saved")
+        try database.retireIfConverged("saved")
+        XCTAssertNil(try database.cached(machine: "machine", key: key(query)))
+        try database.retainQueries(machine: "machine", keys: [key(query)])
+        try database.save(SubmittedOperation(requestID: "later", destination: "machine",
+            payload: JSONEncoder().encode(ServedWrite.taskComplete(directory: "/repo", issue: "b")),
+            version: ServerProtocol.revision, submittedAt: Date()))
+        XCTAssertTrue(try database.observeEpoch("epoch", id: "later"))
+        var wire = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(first)) as? [String: Any])
+        wire["request_id"] = "later"
+        try database.receive(JSONDecoder().decode(OperationReceipt.self, from: JSONSerialization.data(withJSONObject: wire)), epoch: "epoch", id: "later")
+        try database.retireIfConverged("later")
+        XCTAssertTrue(try database.pending().isEmpty)
+        XCTAssertNil(try database.cached(machine: "machine", key: key(query)), "B's fence must not substitute for A's missing effect")
+    }
 
     func completionFrame(_ receipt: OperationReceipt?, epoch: String) throws -> SubscriptionReading<OperationReceipt> {
         let wire: [String: Any] = ["body": try receipt.map { try JSONSerialization.jsonObject(with: JSONEncoder().encode($0)) } ?? NSNull(),

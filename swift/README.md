@@ -1364,6 +1364,12 @@ to the query with current pending changes. Failed refreshes keep usable content
 beside **Retry**. Completing a Task follows that view's displayed occurrence order,
 with repeated occurrences counted once.
 
+Recent query answers share a bounded cache across windows. Live views stay pinned;
+returning after cache eviction or invalidation loads in the selected query. After
+observation pauses, a retained answer is checked against saved pending changes
+before display. Closing a view never cancels its submitted commands. Old closed
+membership stays unavailable until a covering reading arrives.
+
 Save an open query to name, pin and arrange it. Edit changes only that Dashboard;
 repository and Wave conversations keep their normal views. Unstarted Tasks show
 **Start** and their brief without opening a Session. Tasks appear side by side

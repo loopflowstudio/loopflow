@@ -40,6 +40,11 @@ cached filter applies pending completion before showing its rows. Separate feeds
 keep their own query leases; closing one leaves the other feed current. A failed
 refresh keeps usable cached content beside **Try again**.
 
+Recent feeds share a bounded cache. Returning after eviction or invalidation loads
+in the selected feed; a retained answer is checked against saved pending changes
+after observation resumes. Closing a feed never cancels its submitted commands.
+A feed known to predate settled changes waits for a covering reading.
+
 ## Task
 
 Opening a Task opens its conversation and fits the terminal to the phone.

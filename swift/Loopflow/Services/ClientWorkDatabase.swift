@@ -33,6 +33,8 @@ final class ClientWorkDatabase {
             return fence.requiring(domains) ?? fence
         }
     }
+    static let retainedEffectLimit = 64
+    private var retainedQueries: [String: Set<String>] = [:]
     private let connection: OpaquePointer
 
     init(directory: URL, prepareDirectory: (URL) throws -> Void = { _ in }) throws {
@@ -52,6 +54,7 @@ final class ClientWorkDatabase {
         try execute("PRAGMA synchronous=FULL")
         try execute("CREATE TABLE IF NOT EXISTS operations (sequence INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, state BLOB NOT NULL)")
         try execute("CREATE TABLE IF NOT EXISTS work_queries (id TEXT PRIMARY KEY, state BLOB NOT NULL)")
+        try execute("CREATE INDEX IF NOT EXISTS work_queries_with_effects ON work_queries(id) WHERE json_array_length(CAST(state AS TEXT),'$.effects')>0")
         try execute("CREATE TABLE IF NOT EXISTS work_epochs (id TEXT PRIMARY KEY, state BLOB NOT NULL)")
         try execute("CREATE TABLE IF NOT EXISTS work_requirements (id TEXT PRIMARY KEY, state BLOB NOT NULL)")
         // Confirmed caches are replaceable. The outbox and its reload floors
@@ -176,17 +179,22 @@ final class ClientWorkDatabase {
             $0.fence.machine == state.record.destination && $0.fence.epoch == epoch
                 && $0.fence.schema == ServerProtocol.revision && !$0.fence.revisions.isEmpty
         }) else { return }
-        // A stored query can keep its confirmed body under an ordered effect.
-        // Transfer that obligation before deleting the command, in this same
-        // transaction. It ends only when this query covers the semantic stage.
+        // Only the reusable working set keeps an exact ordered effect. Closed
+        // bases become unavailable under the compact floors below, atomically
+        // with retirement. A long-held query also has a finite effect budget.
         let membershipEffect = try membershipEffect(state)
         if let effect = membershipEffect {
-            for (key, base) in try queries(machine: state.record.destination) {
+            for key in (retainedQueries[state.record.destination] ?? []).sorted() {
+                guard let base = try queryState(key) else { continue }
                 var reading = base
                 guard reading.stamp.machine == state.record.destination,
                       reading.stamp.epoch == epoch,
                       reading.plans.contains(where: { $0.repositoryPath == effect.directory && $0.membership.effects[effect.kind] != nil }),
                       !effect.covered(by: reading.stamp, plans: reading.plans) else { continue }
+                guard try usable(reading), (reading.effects ?? []).count < Self.retainedEffectLimit else {
+                    try execute("DELETE FROM work_queries WHERE id=?", id: key)
+                    continue
+                }
                 var effects = reading.effects ?? []
                 effects.removeAll { $0.operationID == effect.operationID }
                 effects.append(effect)
@@ -212,6 +220,22 @@ final class ClientWorkDatabase {
         try execute("INSERT OR REPLACE INTO work_requirements(id,state) VALUES(?,?)",
             id: state.record.destination, data: JSONEncoder().encode(requirements))
         try execute("DELETE FROM operations WHERE id=?", id: id)
+    }
+
+    func retainQueries(machine: String, keys: Set<String>) throws {
+        let ids = Set(keys.map { queryID(machine: machine, query: $0) })
+        guard retainedQueries[machine] != ids else { return }
+        let prefix = queryID(machine: machine, query: "")
+        // Read IDs only: old membership bodies are not decoded on navigation.
+        // Existing transferred effects always have a persisted reload floor.
+        try transaction {
+            let stored = try rows("SELECT CAST(id AS BLOB) FROM work_queries WHERE id>=?1 AND id<(?1 || char(1114111)) AND json_array_length(CAST(state AS TEXT),'$.effects')>0", id: prefix)
+            for data in stored {
+                let id = String(decoding: data, as: UTF8.self)
+                if !ids.contains(id) { try execute("DELETE FROM work_queries WHERE id=?", id: id) }
+            }
+        }
+        retainedQueries[machine] = ids
     }
 
     func currentPlanning(_ state: State) throws -> OperationPlanningReading? {
@@ -260,13 +284,7 @@ final class ClientWorkDatabase {
     }
 
     func cached(machine: String, key: String) throws -> ClientWorkQuery? {
-        guard var reading = try queryState(queryID(machine: machine, query: key)), let query = reading.stamp.query else { return nil }
-        let epochs = try machineEpochs(machine)
-        guard epochs?.current == reading.stamp.epoch,
-              try requirements(machine).filter({ $0.fence.epoch == reading.stamp.epoch }).allSatisfy({
-                  guard let fence = $0.requiredFence(in: reading) else { return true }
-                  return fence.isCovered(by: reading.stamp, query: query) || self.effectsCover(fence, in: reading)
-              }) else { return nil }
+        guard var reading = try queryState(queryID(machine: machine, query: key)), try usable(reading) else { return nil }
         var effects = reading.effects ?? []
         for record in try pending() where record.destination == machine {
             guard let state = try state(record.id), let effect = try membershipEffect(state),
@@ -277,6 +295,15 @@ final class ClientWorkDatabase {
         reading.effects = effects
         reading.prepareProjection()
         return reading
+    }
+
+    private func usable(_ reading: ClientWorkQuery) throws -> Bool {
+        guard let query = reading.stamp.query,
+              try machineEpochs(reading.stamp.machine)?.current == reading.stamp.epoch else { return false }
+        return try requirements(reading.stamp.machine).filter { $0.fence.epoch == reading.stamp.epoch }.allSatisfy {
+            guard let fence = $0.requiredFence(in: reading) else { return true }
+            return fence.isCovered(by: reading.stamp, query: query) || effectsCover(fence, in: reading)
+        }
     }
 
     private func membershipEffect(_ state: State) throws -> WorkQueryEffect? {
@@ -306,24 +333,6 @@ final class ClientWorkDatabase {
                     && resolution.fence.schema == fence.schema && (resolution.fence.revisions[domain] ?? -1) >= revision
             }
         }
-    }
-
-    private func queries(machine: String) throws -> [(String, ClientWorkQuery)] {
-        // Query IDs have a length-prefixed Machine followed by encoded JSON.
-        // Range bounds use the primary key instead of scanning other Machines.
-        let statement = try statement("SELECT id,state FROM work_queries WHERE id>=?1 AND id<(?1 || char(1114111))",
-            id: queryID(machine: machine, query: ""), data: nil)
-        defer { sqlite3_finalize(statement) }
-        var result: [(String, ClientWorkQuery)] = []
-        var code = sqlite3_step(statement)
-        while code == SQLITE_ROW {
-            let key = String(cString: sqlite3_column_text(statement, 0))
-            let data = Data(bytes: sqlite3_column_blob(statement, 1), count: Int(sqlite3_column_bytes(statement, 1)))
-            result.append((key, try JSONDecoder().decode(ClientWorkQuery.self, from: data)))
-            code = sqlite3_step(statement)
-        }
-        guard code == SQLITE_DONE else { throw failure() }
-        return result
     }
 
     func forgetQueries(machine: String) throws {

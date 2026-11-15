@@ -87,7 +87,12 @@ public actor ClientWorkStore {
         let queries: [String: ClientWorkQuery]
     }
 
-    func presentation(machine: String, queries: [String: ServedRead]) throws -> Presentation {
+    func retainQueries(machine: String, keys: Set<String>) throws {
+        try disk().retainQueries(machine: machine, keys: keys)
+    }
+
+    func presentation(machine: String, queries: [String: ServedRead], reusable: Set<String>? = nil) throws -> Presentation {
+        try retainQueries(machine: machine, keys: reusable ?? Set(queries.keys))
         var readings: [String: ClientWorkQuery] = [:]
         for (key, read) in queries { readings[key] = try cachedPlans(machine: machine, for: read) }
         return Presentation(revision: publication, requested: Set(queries.keys), records: try pending().filter { $0.destination == machine }, queries: readings)

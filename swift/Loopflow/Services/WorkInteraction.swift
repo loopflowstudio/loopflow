@@ -35,6 +35,11 @@ public final class WorkInteraction {
     @ObservationIgnored private var saved: [SubmittedOperation] = []
     @ObservationIgnored private let store: ClientWorkStore
     @ObservationIgnored private var leases: [UUID: Lease] = [:]
+    // Live queries are pinned; recent unleased answers share one bounded LRU.
+    static let reusableQueryLimit = 8
+    @ObservationIgnored private var recent: [String] = []
+    @ObservationIgnored private var generation: UInt64 = 0
+    @ObservationIgnored private var reconciled: Set<String> = []
     @ObservationIgnored private var reads: [String: ServedRead] = [:]
     @ObservationIgnored private var bases: [String: ClientWorkQuery] = [:]
     @ObservationIgnored private var intents: [Intent] = []
@@ -63,8 +68,10 @@ public final class WorkInteraction {
         // ServedRead encodes only finite enums, strings and integers.
         let key = String(decoding: try! encoder.encode(read), as: UTF8.self)
         reads[key] = read
+        recent.removeAll { $0 == key }; recent.append(key)
         leases[id] = Lease(key: key, receive: receive)
-        if let base = bases[key] { receive(project(base)) }
+        prune()
+        receive(reconciled.contains(key) ? bases[key].map(project) : nil)
         if changes == nil {
             changes = Task { [weak self, store] in
                 for await _ in await store.changes() {
@@ -79,7 +86,23 @@ public final class WorkInteraction {
 
     public func close(_ id: UUID) {
         leases[id] = nil
-        if leases.isEmpty { changes?.cancel(); changes = nil }
+        prune()
+        if leases.isEmpty {
+            changes?.cancel(); changes = nil
+            generation &+= 1
+            reconciled = []
+        }
+        Task { [weak self] in await self?.refreshFromStore() }
+    }
+
+    private func prune() {
+        let pinned = Set(leases.values.map(\.key))
+        let reusable = recent.filter { !pinned.contains($0) }.suffix(Self.reusableQueryLimit)
+        let retained = pinned.union(reusable)
+        recent.removeAll { !retained.contains($0) }
+        reads = reads.filter { retained.contains($0.key) }
+        bases = bases.filter { retained.contains($0.key) }
+        reconciled.formIntersection(retained)
     }
 
     public func receive(_ plans: [WorkViewPlan], stamp: ReadingStamp, for read: ServedRead) async throws {
@@ -202,7 +225,7 @@ public final class WorkInteraction {
 
     private func publish() {
         commandPayloads = saved.map(\.payload) + intents.filter { intent in !saved.contains(where: { $0.id == intent.id }) }.map(\.payload)
-        for lease in Array(leases.values) { lease.receive(bases[lease.key].map(project)) }
+        for lease in Array(leases.values) { lease.receive(reconciled.contains(lease.key) ? bases[lease.key].map(project) : nil) }
     }
 
     /// Finish the ordered local saves, including when the application backgrounds.
@@ -210,9 +233,13 @@ public final class WorkInteraction {
 
     public func refreshFromStore() async {
         let queries = reads
+        let generation = generation
         guard let machine else { return }
         do {
-            apply(try await store.presentation(machine: machine, queries: queries))
+            let update = try await store.presentation(machine: machine, queries: queries,
+                reusable: changes == nil ? [] : Set(queries.keys))
+            guard generation == self.generation, changes != nil else { return }
+            apply(update)
             cacheError = nil
         } catch {
             // Keep the published projection while offering the cache error.
@@ -226,7 +253,10 @@ public final class WorkInteraction {
         let savedIDs = Set(update.records.map(\.id))
         intents.removeAll { savedIDs.contains($0.id) || $0.savedRevision.map { $0 <= update.revision } == true }
         saved = update.records
-        for key in update.requested { bases[key] = update.queries[key] }
+        for key in update.requested where reads[key] != nil {
+            bases[key] = update.queries[key]
+            reconciled.insert(key)
+        }
         publish()
     }
 
@@ -237,5 +267,7 @@ public final class WorkInteraction {
         for task in deliveries.values { task.cancel() }
         deliveries = [:]
         leases = [:]
+        generation &+= 1
+        reconciled = []
     }
 }

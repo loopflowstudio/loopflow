@@ -461,6 +461,10 @@ existing bounded input owners: no offline keystroke queue or automatic resend.
   one-shot `openView`/`refreshSelectedView` publication, and Complete's pre-publication
   Machine/mount refusal. Query identity, subscription leases and shared projection
   replace these paths; keep cached content, native ownership and error/Retry.
+- Removed in the query lifecycle cut: unbounded `WorkInteraction.reads`/`bases`
+  retention, pre-reconciliation suspended-answer publication, and the database's
+  full stored-query decoding iterator. Keep shared leases, warm Retry, exact
+  transferred effects for retained bases, compact floors and original commands.
 - Removed: Desktop Complete's checkpoint/action path and async button wrappers;
   phone stream-owned displayed rows and unbound Task navigation links. Shared
   intent, leases and outbox publications replace them; keep generic command
@@ -600,15 +604,14 @@ cached expression A→B→back during a held Complete save with reordered list
 replies; origin order opposite the sidebar; stamped saved-Dashboard refresh after
 an unrelated write; delayed Dashboard save after leaving and returning; cold query
 selection before its read with failure kept in that destination; independent
-same-query leases; restart with a lagging list; phone filter reopening. Not yet
-exercised at the Desktop model: refresh failure followed by close of one of two
-same-query mounts and restart, as one sequence.
+same-query leases; restart with a lagging list; phone filter reopening. The Desktop model now also exercises refresh failure, close of one of two
+same-query mounts, covering refresh and restart as one sequence.
 
 ### Closing a view must not keep its whole answer alive
 
 Headless concept-review of the query-destination cut, 2026-11-15; no builds or
-latency trials ran in it. Next implement direction: finish the
-query lifecycle by separating a mounted lease, a reusable prepared answer and a
+latency trials ran in that review. Implemented query lifecycle direction: separate
+a mounted lease, a reusable prepared answer and a
 durable reload requirement. These are internal ownership distinctions; opening,
 closing and returning remain the only actions people learn. No product choice is
 open.
@@ -620,12 +623,11 @@ loads there; it never briefly shows membership known to predate a resolved effec
 A failed refresh keeps any still-usable projection with Retry. Loading a cold
 invalidated query does not reopen a Task or attach its native Session.
 
-The current shared owner retains every `reads`/`bases` entry after `close`, and
-`presentation` prepares every retained query on each store change. Retirement
-also copies an exact effect into every lagging stored query. This makes work and
-retained effects grow with navigation and completion history. Operation retirement
-alone does not finish the cache lifecycle. The existing fence transfer remains
-necessary until its replacement is transactional; do not simply delete it.
+Built 2026-11-15: the shared owner pins live leases and keeps eight recent unleased
+answers. Last-lease close suspends observation and clears reuse eligibility;
+reopening reconciles disk/outbox before displaying retained membership. Publication
+generations reject pre-suspension answers. Closing one lease leaves other mounts
+live. No command or native workspace lifetime belongs to this cache.
 
 Implement one bounded reusable query working set in the shared owner. Live leases
 pin their entry; unleased entries can be evicted without touching navigation,
@@ -663,12 +665,17 @@ when this lifecycle is built.
 ## Current implementation cut
 
 Production Complete uses shared `WorkInteraction` on both hosts, and Desktop
-queries are mounted stamped subscriptions (section above). Prepared entries
-survive lease close; reopening projects pending intent before its first cached
-frame. Gap seen in `WorkInteraction`: `reads`/`bases` are never pruned, and when
-the last lease closes `close` cancels store observation, so `open` projects the
-retained base before `refreshFromStore` reconciles it. The lifecycle section
-above owns that fix.
+queries are mounted stamped subscriptions. The bounded reusable working set now
+reconciles suspended answers before first display. Retirement transfers exact
+resolved effects only into retained usable bases; closed or already-invalidated
+bases use compact scoped reload floors in the same outbox transaction. A retained
+base exceeding 64 retired effects becomes cold. Eviction drops transferred effects
+with their base, keeping its floor; no per-completion metadata remains for closed
+queries. The old full-cache decoding iterator is deleted. A partial SQLite index
+bounds eviction cleanup to effect-bearing bases; unchanged lease sets do no cleanup.
+Legacy broad floors, epoch recovery, unsent intent and unseen results retain their
+existing semantics. A later effect cannot revive a base invalidated by an earlier
+Task's completion.
 
 Complete no longer discovers a Machine or mounts queries before publication.
 An unsaved intent contains immutable payload, ID and submission time; an unknown
@@ -688,8 +695,7 @@ lagging lists retain their effects across retirement/restart. No SQL/native
 latency diagnosis follows from these correctness checks.
 
 Remaining: exhaustive effect/dependency declarations and normalized cross-query
-provenance; finite incorporation/invalidation of closed queries; bounded
-prepared-query eviction; remaining mutation-family recovery and resource lanes (remote/files/config/planning);
+provenance; remaining mutation-family recovery and resource lanes (remote/files/config/planning);
 creation and retained-occurrence cutover on both clients; projected inspection
 DTO alongside confirmed inspection; historical-restoration epoch reset;
 crash/native acceptance and a valid benchmark baseline. This remains one
@@ -744,7 +750,8 @@ Checks before this cut: `d9bf1c21ae:scratch/instant-task-session.md` records foc
 Desktop/iOS query, receipt and recovery passes; Rust operations/schema/DTO passes;
 fmt/clippy and multiplatform checks. Archive/documentation checks remain gate-owned.
 
-Checks at `3b096ece9d` (2026-11-15; inherited `LF_*` cleared):
-- `swift build --build-tests --package-path swift --jobs 4 -Xswiftc -gnone` + private-Home/network-boundary `swift test --skip-build --disable-sandbox --no-parallel --filter 'ClientWorkQueryTests|liveQueriesUseDashboardsWithoutAcquiringWork'`: build, 28 XCTest and 1 Swift Testing (2 cases) passed; gate owns wider Desktop suites.
-- `scripts/test_ios.py -only-testing:LoopflowiOSTests/ClientWorkQueryTests`: 24 passed, including phone filter reopening, shared leases, held discovery/save, restart, receipt/list/count permutations, refusal, supersession and epoch coverage; disposable Simulator removed.
-- Multiplatform boundaries and `git diff --check`: passed. No Rust changes in that cut; earlier focused checks/clippy remain applicable. Gate owns archive/documentation checks. Native latency remains unmeasured.
+Query-lifecycle checks (2026-11-15; inherited `LF_*` cleared):
+- `swift build --build-tests --package-path swift --jobs 4 -Xswiftc -gnone` and `scripts/test_desktop.sh --skip-build --filter ClientWorkQueryTests`: build and 32 focused Desktop checks passed; the final all-leases-close-during-save assertion also passed by exact filter. Gate owns wider suites.
+- `scripts/test_ios.py -only-testing:LoopflowiOSTests/ClientWorkQueryTests`: 28 shared cases passed, including bounded retention, closed settlement/restart, changed saved plans and invalidation across two different completions. The final held-save assertion passed separately by exact method filter. iOS also logged SQLite vnode-unlinked diagnostics during fixture directory removal while handles remained open; fixture teardown remains a gate follow-up.
+- 10,000-query SQLite `EXPLAIN QUERY PLAN`: cleanup uses `SEARCH work_queries USING INDEX work_queries_with_effects (id>? AND id<?)`; retained metadata stays one scoped floor across 67 completions in the shared regression test.
+- Multiplatform boundaries and `git diff --check`: passed. No Rust change in this cut; gate owns documentation/archive checks. Native latency remains unmeasured. Earlier check details: `741c95cbd7:scratch/instant-task-session.md`.

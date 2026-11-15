@@ -1,6 +1,6 @@
 # LOO-906: immediate interactions across Desktop and mobile
 
-Realigned 2026-11-15 at code `14d5127895` on origin/main `9cafc410ee`
+Realigned 2026-11-15 at code `5ccc4563bd` on origin/main `9cafc410ee`
 (unchanged). Supersedes the Desktop-only delivery
 boundary. No shipping or merge decision is recorded. Placement remains this Task;
 no Wave is selected.
@@ -453,59 +453,32 @@ existing bounded input owners: no offline keystroke queue or automatic resend.
 
 ## Delete — do not maintain
 
-- Removed in this cut: `Selection::expand`'s snapshot-only interpreter. Rust now
-  compiles the finite membership program and evaluates that same program. Keep
-  selection identity, scope/name resolution, unavailable evidence and server order.
-- Removed at `3b096ece9d`: `.view(WorkViewPlan)` navigation, `replacePlan`,
-  one-shot `openView`/`refreshSelectedView` publication, and Complete's pre-publication
-  Machine/mount refusal. Query identity, subscription leases and shared projection
-  replace these paths; keep cached content, native ownership and error/Retry.
-- Removed in the query lifecycle cut: unbounded `WorkInteraction.reads`/`bases`
-  retention, pre-reconciliation suspended-answer publication, and the database's
-  full stored-query decoding iterator. Keep shared leases, warm Retry, exact
-  transferred effects for retained bases, compact floors and original commands.
-- Removed: Desktop Complete's checkpoint/action path and async button wrappers;
-  phone stream-owned displayed rows and unbound Task navigation links. Shared
-  intent, leases and outbox publications replace them; keep generic command
-  confirmation and creation recovery coverage.
-- Removed in this cut: Desktop Dashboard's temporary mutation of
-  `resolution.members` to obtain visible rows. Projected membership, arrangement,
-  attention and counts are derived together; retained confirmed DTOs stay immutable.
+Already removed (details in each commit and `6e944e73b5a`'s plan): `Selection::expand`'s
+snapshot interpreter; `.view(WorkViewPlan)` navigation, `replacePlan`, one-shot
+`openView`/`refreshSelectedView`; unbounded `WorkInteraction.reads`/`bases`; Desktop
+Complete's checkpoint path; phone stream-owned rows; Dashboard's `resolution.members`
+mutation; `sidebarTaskRows`' roadmap fallback; `ClientWorkStore.presented` deletion
+and `recover`'s separate reducer; newest-only delivery acknowledgment; Git discovery
+in `operation::admit`/`check_creation`; `waveRow`'s delayed selection;
+`CreationSubmissions` and `CreationRecovery`'s poll; Desktop `StartingTask`/
+`pendingTaskReconciliations`; mobile `MobileTaskOutcome`, draft-file submission
+writers, sheet-owned sends and the Open Task gate. `LegacyTaskDraft` reads released
+files only; SQLite commits precede rewrites.
 
-- Removed: `WorkModel.sidebarTaskRows`' roadmap-membership fallback. Sidebar
-  membership now comes only from the confirmed Work plan; retained entity facts
-  still supply details. Desktop restores stamped plans through the shared owner.
-- Removed: presentation-driven `ClientWorkStore.presented` deletion and its
-  exclusive race fixture. Mounted results now persist acknowledgment; observation
-  and inspection continue until domain resolution and persisted cache invalidation
-  permit retirement.
-- Removed: `ClientWorkStore.recover`'s separate receipt reducer. Recovery and
-  continued observation now share `receive`.
-- Removed in this cut: newest-only delivery selection/acknowledgment in
-  `task_state_delivery`/`observe_task_state`; exact attempted-delivery recovery
-  replaces it. Current-decision acquisition and its adoption coverage remain.
-- Already removed: Git discovery in `operation::admit`, `check_creation`, and
-  `WorkNavigator.waveRow`'s delayed selection. Remove view-owned mobile
-  `SessionLink` teardown on ordinary Task switching; keep explicit Close,
-  background policy and memory-pressure eviction under the retained owner.
-- Removed in the creation cut: Desktop `StartingTask` submission state and
-  `pendingTaskReconciliations`/checkpoint exceptions, mobile `MobileTaskOutcome`,
-  submitted/outcome/savedRequests draft writers, sheet-owned sends and Open Task
-  gate, with exclusive predecessor fixtures. Preserve native attachment/retry,
-  original identities/outcomes, unsent drafts, repository picker and protection.
-  `LegacyTaskDraft` reads released files only; SQLite commits precede rewrites.
-- Still remove Desktop `TaskRunDraft.phase`, `abandoningTaskIDs`, other mutation
-  refresh barriers and rename/bind replacement bookkeeping with their consumers.
-- Removed: creation-only `CreationSubmissions` and `CreationRecovery`'s status
-  poll. The shared SQLite outbox replaces the sender and saved-command owner.
-  Remaining: per-view presentation map. Generalize/migrate their exact
-  saved requests and receipt semantics into the operation store, without loss.
-- WorkCache/TaskFeed duplicate authoritative caches and Desktop/mobile duplicate
-  freshness reconciliation. Keep UI-only workspace/layout/draft persistence where
-  it represents retained local content, not server truth.
+Still remove, with their consumers:
+
+- Creation in `CreationRecovery` (`interactions`, delegated `retry`, receipt-less
+  item, Task presentation map), `WorkModel.pendingCreations`' filter and the hosts'
+  `failures`/`creations` cross-filters (next section).
+- Desktop `TaskRunDraft.phase`, `abandoningTaskIDs`, other mutation refresh
+  barriers and rename/bind replacement bookkeeping.
+- View-owned mobile `SessionLink` teardown on ordinary Task switching; keep
+  explicit Close, background policy and memory-pressure eviction.
+- WorkCache/TaskFeed duplicate authoritative caches and duplicate freshness
+  reconciliation. Keep UI-only workspace/layout/draft persistence.
 - Tests exclusively asserting old intermediate screens, local exception sets or
-  second-submit recovery. Preserve success, duplicate prevention, failure,
-  departure, ownership, layout and first-turn coverage on the shared path.
+  second-submit recovery; keep success, duplicate prevention, failure, departure,
+  ownership, layout and first-turn coverage on the shared path.
 
 ## Forbidden outcomes
 
@@ -599,83 +572,28 @@ remains unexercised.
 
 ### Start selects a conversation owned by the operation
 
-Headless concept-review at `14d5127895`, 2026-11-15. Next implement direction: extend the shared interaction owner to creation on both hosts. No new
-product choice is open. The existing launch timeline already requires immediate
-conversation selection, independent of receipt delivery and native readiness.
-
-Proposed usage text for both hosts: **Start** closes the editor and opens a
-conversation showing the submitted words immediately. Preparation updates that
-conversation in place. Leaving it does not cancel the request. A lost reply checks
-the same request on its original Machine; **Retry opening** attaches the recorded
-Session. A save failure retains editable words. Background recovery never changes
-the current selection. These are proposed launch semantics, not a claim about the
-current phone flow; keep existing usage docs accurate until the cutover.
-
-The mismatch is ownership, not another loading label. Desktop's `beginTask` already
-publishes `StartingTask` synchronously, but submission, receipt binding and
-checkpoint reconciliation still belong to `WorkModel`. On iOS, `MobileTaskCreation`
-keeps submission/outcome/savedRequests in its draft file; `MobileNewTaskView` owns
-the action's lifetime and requires **Open Task** after settlement. `TaskListView`
-then acknowledges presentation in the sheet callback before installing its route.
-The shared outbox already preserves admission and receipts; it must also own the
-operation's presentation facts, leaving only editor state and selection with hosts.
-
-Implement these consequences together:
-
-- Generalize the shared synchronous intent entry point used by Complete to accept
-  typed creation. Freeze payload, ID, submission time and original scope once;
-  publish the operation destination before discovery, disk or network. Do not
-  route creation through `ClientWorkStore.submit`'s finished-result wait before
-  publishing. Keep save-before-send and the existing receipt/recovery owner.
-- A route initially identifies the operation, not a fabricated Task/Session.
-  Receipt stages may bind exact identities while other stages remain unresolved.
-  Binding updates that destination's content; it cannot navigate after departure.
-  Preserve the existing distinction between filed identity, Graph admission and
-  native attachment. Missing or uncertain identity stays inspectable; current
-  Task selection or a query answer cannot substitute for the original result.
-- Build creation presentation from saved command plus current receipt/recovery
-  evidence in the shared owner. Hosts render it and attach through their native
-  owners. A mount acknowledges presentation only after the intended result is
-  displayed; a sheet dismissal or Open callback does not. That acknowledgment
-  neither enables input nor incorporates list/count effects.
-- Import phone submission/outcome/savedRequests into the existing SQLite owner
-  transactionally and idempotently before removing their draft-file writers.
-  Preserve every request's original Machine, ID, exact words and recoverable
-  result. When an outbox record already exists, validate the match and keep its
-  send epoch/receipt; never replace it with a newly unsent record. A legacy file
-  without send evidence follows the existing inspect/lookup policy, never blind
-  replay. Unsent editor text stays a draft; unreadable/conflicting saved data
-  stays recoverable rather than being overwritten. Keep sources until commit.
-- Replace Desktop `StartingTask` submission/checkpoint ownership and mobile
-  submitted/outcome/recovery lists plus sheet-owned actions in the same cut.
-  Keep host navigation generations, native surface ownership, explicit recovery,
-  device protection and independent per-query coverage. Extend creation's effect
-  declarations as needed; do not predict membership or counts without facts.
-  Existing skills need no additional rule; update host usage docs with the code.
-
-Show next: production-path Desktop and iOS tests hold save, admission and attachment
-independently. Immediately after Start the editor is closed and submitted words
-are selected, with input still governed by the native owner. Leave for B, then
-deliver A's receipt: B stays selected and A remains recoverable. Hold Graph admission
-after filing, fail attachment after admission, restart after uncertain send, and
-retry opening the same Session without creating again. Import legacy phone files
-beside matching and conflicting outbox records; crash around import commit and
-retain a newer unsent draft. Mount a result while another query is held, then
-restart: acknowledgment must not erase its coverage or unresolved recovery.
-Retain query-close, bounded-reuse, epoch and reordered-reply coverage. Native
-reaction/input measurements and the wider mutation/provenance migration remain
-required; this direction does not finish the cross-platform cut.
+Built at `5ccc4563bd`; the full direction, proposed usage text and acceptance list
+are at `6e944e73b5a:scratch/instant-task-session.md`. Creation enters the shared
+synchronous intent path: payload, ID, submission time and scope freeze before the
+selection callback; save precedes send; the route identifies the operation, and
+receipt stages bind exact Task/Session identities without navigating after
+departure. Phone draft-file submissions/outcomes import transactionally into the
+one SQLite owner (matching rows keep send epoch and receipt; conflicts and missing
+send evidence stay inspectable). Desktop `StartingTask` checkpoint ownership and
+the phone sheet-owned send/Open Task gate are deleted. Usage docs in
+`swift/README.md` and `swift/LoopflowiOS/README.md` still describe the
+host-specific labels the next section replaces.
 
 ### A submitted conversation is one thing on both hosts
 
-Headless concept-review of the uncommitted creation cut on `6e944e73b5`,
+Headless concept-review of the creation cut (committed at `5ccc4563bd`),
 2026-11-15. Next implement direction. No product choice is open: each item follows
 from "hosts render it" and "once its result is shown, remove the redundant
 recovery prompt" above. Synchronous publication, save-before-send, departure and
 import are built and stay as they are.
 
 The shared owner holds the operation but each host still decides what it means.
-Seen in the working tree:
+Seen at `5ccc4563bd`; every item rechecked in code during realign and still present:
 
 - **Which requests are listed.** Desktop `WorkModel.pendingCreations` hides a
   presented creation unless it needs inspection. `TaskListView` lists every
@@ -824,11 +742,8 @@ backend-stage baseline exists. Raw files and earlier detail: `8b42a874db`,
 
 Implementation owns a valid benchmark baseline; demo owns native usability.
 
-Checks before this cut: `d9bf1c21ae:scratch/instant-task-session.md` records focused
-Desktop/iOS query, receipt and recovery passes; Rust operations/schema/DTO passes;
-fmt/clippy and multiplatform checks. Archive/documentation checks remain gate-owned.
-
-Earlier checks: `6e944e73b5a:scratch/instant-task-session.md`. Creation checks
+Earlier checks: `6e944e73b5a:scratch/instant-task-session.md` and
+`d9bf1c21ae:scratch/instant-task-session.md`. Creation checks
 (2026-11-15; inherited `LF_*` cleared):
 - `swift build --build-tests --package-path swift --jobs 4 -Xswiftc -gnone` and `scripts/test_desktop.sh --skip-build --filter 'ClientWorkQueryTests|operationConversationUsesNativeReadiness|OperationRecoveryPresentationTests'`: build and 44 checks passed; gate owns wider suites.
 - `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/MobileTaskCreationTests -only-testing:LoopflowiOSTests/ClientWorkQueryTests`: 41 checks passed, including held admission/attachment, departure, restart, legacy conflict and newer-editor races; Simulator removed.
@@ -844,9 +759,8 @@ Machine request can finish. Completion removes its displayed occurrence and move
 to the next Task (the earlier quoted 1b); rejection restores membership without
 undoing a later selection. Successful domain changes survive later sync errors.
 
-Current inspected code: shared `WorkInteraction.complete` publishes before save
-and invokes origin selection synchronously. Shared creation publication is being
-implemented by the live worker. `assignTask`, `moveTask`, `reopenTask` still use
+Current inspected code: shared `WorkInteraction.complete` and `createTask` publish
+before save and invoke origin selection synchronously. `assignTask`, `moveTask`, `reopenTask` still use
 `performTaskAction` and confirmation waits; Abandon retains a separate local set.
 `OperationDeclaration` covers six kinds. These are unfinished cutover, not the
 final shared contract. The review changed no production code or execution state.
@@ -869,10 +783,6 @@ readiness retain their existing live-owner rules. This settles disconnected rout
 editing; implementation and recovery coverage remain required before shipped docs
 claim the behavior.
 
-Show next: the same four journeys (Start, Complete, recent Task, Wave expansion)
-on Desktop and mobile with held responses, failed save, lost answer, reconnect and
-rapid navigation. Measure visible response separately from Session input readiness.
-The twenty-pass run and the large protocol diff do not establish that experience;
-native baseline remains missing. Keep ADEMark/workflow coverage and the quiet-host
-constraint; do not trade away required recovery for smaller code. Existing skills
-need no new interaction rule.
+Show next: Start, Complete, recent Task and Wave expansion on Desktop and mobile
+with held responses, failed save, lost answer, reconnect and rapid navigation;
+visible response measured separately from Session input readiness, on a quiet host.

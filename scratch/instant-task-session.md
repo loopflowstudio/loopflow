@@ -1,13 +1,10 @@
 # LOO-906: immediate interactions across Desktop and mobile
 
-Conversation/Machine-link cut committed at `a2a0a0fb33` on origin/main
-`9cafc410ee`. Unreachable-Machine presentation and Desktop Session rename are
-committed at `35e2835de1`; SQLite fixture teardown at `5231746858`; observation
-source/capture at `86f99e3315`. Typed field support and strict Rust/Swift fixtures
-are built in the working cut. Next: persisted normalization and incorporation,
-derived-answer coverage, then dynamic membership with disconnected Move.
-Supersedes the Desktop-only delivery boundary. No shipping or merge decision is recorded. Placement remains this Task;
-no Wave is selected.
+Built on origin/main `9cafc410ee`: conversation/Machine link `a2a0a0fb33`,
+unreachable Machine and Desktop rename `35e2835de1`, fixture teardown `5231746858`,
+observation source `86f99e3315`, typed field support `f9a8da8ae9`. Next: persisted
+normalization and incorporation, derived-answer coverage, then dynamic membership
+with disconnected Move. No shipping or merge decision; no Wave selected.
 
 ## Direction
 
@@ -345,15 +342,12 @@ Claim, Wave/Dashboard rename and other mutations remain unmigrated.
 
 ### Why Move cannot use the current reducer
 
-2026-11-15 implementation findings; full account at
-`5d0187746f:scratch/instant-task-session.md`. `compile_membership` filters Wave
-descendants before emitting fixed `Members`/`State.members` leaves;
-`MembershipFacts` carries states, not parent Wave; `ClientWorkQuery.makeProjection`
-only changes states of facts already present. A cached destination that omitted
-Task A cannot acquire it. Separately, `WorkQueryEffect.covered` decides by the
-held query's own `ReadingStamp`, so Complete→Reopen seen through another query,
-or Move A→B→C, would reapply the older effect. No partial dynamic-program code
-remains. Acceptance is the Required counterexamples list below.
+Full account: `5d0187746f:scratch/instant-task-session.md`. `compile_membership`
+prefilters Wave descendants into fixed leaves; `ClientWorkQuery.makeProjection`
+only changes states of facts already present, so a destination that omitted Task
+A cannot acquire it. `WorkQueryEffect.covered` decides by the held query's own
+`ReadingStamp`, so Complete→Reopen seen elsewhere, or Move A→B→C, reapplies the
+older effect. Acceptance: Required counterexamples below.
 
 ### Next implement direction: facts absorb effects; queries prove their answers
 
@@ -467,9 +461,6 @@ equal-provenance conflict described above. Task ordering also consumes this
 activity (`TaskOrder::key`), so separating only the displayed activity badge is
 insufficient.
 
-Bare per-entry counters could repeat after `Cache` eviction; the source/capture
-cut below replaced them with an incarnation and non-reusing clock.
-
 The correction keeps SQLite-only parent/lifecycle facts separate from observed
 activity; its specified form is the Review direction below. Never promote
 observation evidence into native input readiness.
@@ -478,9 +469,8 @@ observation evidence into native input readiness.
 (`store/sqlite/selections.rs`) exercises that store boundary with a child process
 and no timing sleep.
 
-Fixture teardown and its focused Desktop/iOS/Rust checks are recorded at
-`5231746858:scratch/instant-task-session.md`. The joinable shutdown/close/removal
-order remains required.
+Fixture teardown checks: `5231746858:scratch/instant-task-session.md`; its
+shutdown/close/removal order remains required.
 
 ### Review direction: one observation source, independent facts · 2026-11-15
 
@@ -617,9 +607,7 @@ restart and source replacement must retain the same separation on both hosts.
 Next implement: persisted normalization and incorporation → derived-answer
 coverage → dynamic membership and disconnected
 Move with deletion of the old reducer. Keep the proposed Move usage above;
-no new product vocabulary or builtin rule is needed. The three unanswered product
-choices remain independent of this cut. Native latency is still unmeasured.
-Review outcome: design changed — iterate to implement.
+no new product vocabulary or builtin rule is needed.
 
 **Ingestion precedes query replacement.** The next client API must accept a
 reading as a source of independently supported fields, not only as a replacement
@@ -644,12 +632,11 @@ the other as a coherent Machine snapshot. Repeat reordered and after offline
 restart on both hosts. Receipt delivery remains unresolved until its own recovery
 answers; field incorporation never authorizes a resend or changes navigation.
 
-Typed-field cut · 2026-11-15: wire support, scoped capture and strict fixtures
-are built. Activity conservatively declares the repository Session read's consumed
-set; it can be narrowed without changing the contract. The transient union setter
-clears support and remains a deletion target with the state-only reducer. Persisted
-normalization, incorporation, derived-answer coverage and disconnected Move remain
-unbuilt; independent wire values alone do not complete their acceptance.
+Typed-field cut (`f9a8da8ae9`): activity conservatively declares the repository
+Session read's consumed set; narrowing it keeps the contract. The transient union setter
+(`WorkMembershipPlan.Facts.states`) clears support and repeats Rust's
+`SelectionState::is_activity` split as a literal Swift set; both go with the
+state-only reducer. Wire values alone do not complete normalization acceptance.
 
 Checks, `LF_*` cleared:
 - `cargo nextest run -p loopflow --lib -E 'test(fields_validate_only) | test(a_capture_reuses) | test(membership_fields_declare)'`: 3 pass after shared-answer optimization; typed fixture and plan roundtrip also passed unchanged.
@@ -735,10 +722,9 @@ only). 10k receipt lookup/admission P95 0.033 ms, all 20 receipt statements keye
 backend-stage baseline exists. Raw files and earlier detail: `8b42a874db`,
 `bb936ac371` (`scratch/instant-task-session.md`).
 
-Implementation owns a valid benchmark baseline; demo owns native usability.
+Implementation owns the baseline; demo owns native usability.
 
-Earlier checks: `57cb8a3a22`, `6e944e73b5a` (10k client-query), `85564c1f20`
-(healthy-change), each in `scratch/instant-task-session.md`.
+Earlier checks: `57cb8a3a22`, `6e944e73b5a` (10k query), `85564c1f20`.
 
 ## Conversation review retained
 

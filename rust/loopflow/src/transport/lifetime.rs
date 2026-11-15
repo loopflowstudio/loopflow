@@ -90,6 +90,7 @@ impl Client {
         // Keep the known move even if recording the exit later takes too long.
         state.departure = Some(Settled {
             code: 0,
+            moved: notice.is_some(),
             lines: notice.into_iter().collect(),
         });
         Ok(true)
@@ -380,6 +381,7 @@ mod tests {
         assert!(client.check(&store).unwrap());
         let moved = client.take_departure().unwrap();
         assert_eq!(moved.code, 0);
+        assert!(moved.moved);
         assert!(moved.lines[0].contains("moved to tmux %9"));
         assert!(!client.check(&store).unwrap());
         assert!(client.take_departure().is_none());

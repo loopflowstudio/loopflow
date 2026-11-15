@@ -16,11 +16,11 @@ use crate::id::TerminalId;
 
 use super::held::Source;
 use super::input::PendingInput;
-use super::wire::{Event, Incoming, Reply, Request, Tag};
+use super::wire::{CloseReason, Event, Incoming, Reply, Request, Tag};
 use super::{
-    deliver, dimensions, end_viewers, lifetime, native, output, place_events, provider_exit_code,
-    publish_reports, release_viewer_hold, selected_directory, snapshot, viewer_hold, Ownership,
-    Settling, Span, Viewer, HEARTBEAT_TIMEOUT, LIMIT,
+    close_viewers, deliver, dimensions, end_viewers, lifetime, native, output, place_events,
+    provider_exit_code, publish_reports, release_viewer_hold, selected_directory, snapshot,
+    viewer_hold, Ownership, Settling, Span, Viewer, HEARTBEAT_TIMEOUT, LIMIT,
 };
 use crate::store::sqlite::ViewerHold;
 
@@ -83,6 +83,7 @@ pub(super) struct Hosted {
     viewing: lifetime::Viewing,
     /// Task cleanup's notice: the viewer that asked, its request and the text.
     close_notice: Option<(String, u64, String)>,
+    close_reason: CloseReason,
     /// Wakes the host's descriptor wait from another thread.
     waker: UnixStream,
     settling: Option<Settling>,
@@ -154,6 +155,7 @@ impl Hosted {
             attached: false,
             viewing,
             close_notice: None,
+            close_reason: CloseReason::Finished,
             waker,
             settling: None,
             observed_hold: None,
@@ -632,6 +634,9 @@ impl Hosted {
         // client's end; an exec'd launcher leaves that announcement to our wait.
         let status = child.exited().map(|ended| ended.status());
         if let Some(moved) = self.attachment.take_departure() {
+            if moved.moved && self.close_reason != CloseReason::Retired {
+                self.close_reason = CloseReason::Replaced;
+            }
             self.departure = Some(moved);
             if status.is_none() {
                 // SAFETY: kill reads no memory. The child is the native client
@@ -681,6 +686,9 @@ impl Hosted {
             Some((settled, settling.process.clone()))
         });
         if let Some((settled, process)) = delivered {
+            if settled.moved && self.close_reason != CloseReason::Retired {
+                self.close_reason = CloseReason::Replaced;
+            }
             // Recorded, or past waiting for: a later server settles it no more.
             self.forget_kept(EXIT_RECORD);
             for line in &settled.lines {
@@ -732,6 +740,9 @@ impl Hosted {
                     || (self.attached
                         && self.viewers.iter().all(|viewer| viewer.output.is_empty())))
             {
+                if !child.outcome_unknown() {
+                    close_viewers(&mut self.viewers, self.close_reason);
+                }
                 release_viewer_hold(&self.id, self.observed_hold);
                 snapshot::leave(&self.id, &self.output);
                 return Ok(Pass::Ended(code, self.settling.take()));
@@ -747,12 +758,12 @@ impl Hosted {
             self.viewing.send(hold);
         }
         if let Some((requester, answers, text)) = self.close_notice.take() {
-            end_viewers(
-                &mut self.viewers,
-                Event::Control {
-                    held: false,
-                    notice: Some(text),
-                },
+            self.close_reason = CloseReason::Retired;
+            self.deliver(
+                1,
+                format!("\r\n{text}\r\n").as_bytes(),
+                answering,
+                Span::Aside { through: None },
             );
             snapshot::leave(&self.id, &self.output);
             if let Some(viewer) = self

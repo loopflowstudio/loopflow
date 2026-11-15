@@ -630,6 +630,17 @@ most); a PTY driver that answers only `ESC[6n` sees that pause. After a build
 swap, `lf monitor rollover --dry-run` should list the old holder and its views
 as staying; `lf ps` BINARIES names each build with its version.
 
+For final bridge reasons, attach through `session.attach` and consume the viewer
+frames described in `transport/README.md`. Check one final `0x07` Close before
+EOF: `replaced` after `session new --prepare`, `finished` after provider exit,
+and `retired` after shell Close or Task cleanup. Reattach by the same Session
+only after the replacement starts; assert no extra provider launch or input
+replay. Fault the server separately: absent a Close, EOF remains unknown and
+recovery retains the same held terminal. Use the existing heartbeat checks for
+quiet providers and a lost return path. Desktop status travels over its private
+`LF_SERVER_STATUS` Unix stream; inspect readings and actions there, never files.
+Mounted presentation still needs a display-capable check.
+
 ## Task conversation lifetime
 
 `cargo build -p loopflow --bin lf-world`, then `lf-world build one-task <dir>`

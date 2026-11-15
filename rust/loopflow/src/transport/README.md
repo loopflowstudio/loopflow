@@ -298,9 +298,9 @@ return, including detaching or moving to another view. Terminal traffic does
 not wait for store reads; the final record is read after relaying ends.
 `lf resume SESSION --prepare --json` returns the one command Desktop runs,
 without opening a socket or starting a provider. Desktop decides from the
-record's `state` whether showing a pane reattaches: a `detached` Session
-reattaches, an `active` one waits for **Move here**, and an ended one waits for
-an explicit open.
+record's actions whether showing a pane reattaches: a held Session offers
+reveal, attaching read-only if another viewer holds input. **Move here** takes
+input explicitly; an ended Session waits for an explicit open.
 
 `lf session rename SESSION 'Resume repair'` updates the attached terminal
 title, including Rex and other terminals that support OSC titles. Reattaching

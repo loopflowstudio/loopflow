@@ -167,7 +167,7 @@ struct ServerClientTests {
             guard message["type"] as? String == "subscribe" else { return true }
             respond(["type": "response", "id": message["id"]!, "trace_id": "trace", "result": NSNull()])
             // Lose this link before any baseline. The receipt watch still owns
-            // reconnection; an ordinary watch keeps its existing failure policy.
+            // recovery; the Machine connection owns reconnection.
             peer.serve { message, respond in
                 if message["type"] as? String == "subscribe" {
                     #expect(message["resume"] is NSNull)
@@ -180,7 +180,7 @@ struct ServerClientTests {
             }
             return false
         }
-        let watch = ServerLink.subscribe(.operationGet(requestID: "original"), reconnect: true, connect: {
+        let watch = ServerLink.subscribe(.operationGet(requestID: "original"), reconnect: true, connection: MachineConnection {
             if attempts.increment() <= 2 { throw ServerConnectionUnavailable(RegistryQueryError("Offline")) }
             return try await ServerLink.open(.unix(path: peer.location.path()))
         }) { update -> RawJSON? in
@@ -189,13 +189,53 @@ struct ServerClientTests {
         }
         defer { watch.cancel() }
         var connections = try #require(watch.connections).makeAsyncIterator()
-        _ = await connections.next()
+        while !watch.isWaiting() { _ = await connections.next() }
         #expect(watch.isWaiting())
         var frames = watch.updates.makeAsyncIterator()
         let frame = try #require(try await frames.next())
         #expect(try frame.fields()["body"]?.decode(String.self) == "reconnected")
         #expect(attempts.get() == 4)
         #expect(!watch.isWaiting())
+    }
+
+    @Test func threeHeldReceiptsShareOneMachineReconnectAndCancelIndependently() async throws {
+        let peer = try ServerPeer()
+        let attempts = Mutex(0)
+        let (opened, signal) = AsyncStream<Void>.makeStream()
+        let (release, allow) = AsyncStream<Void>.makeStream()
+        let connection = MachineConnection {
+            if attempts.increment() == 1 { throw ServerConnectionUnavailable(RegistryQueryError("Offline")) }
+            signal.yield(())
+            var gate = release.makeAsyncIterator()
+            _ = await gate.next()
+            return try await ServerLink.open(.unix(path: peer.location.path()))
+        }
+        peer.serve { message, respond in
+            if message["type"] as? String == "subscribe" {
+                respond(["type": "reading", "id": message["id"]!, "checkpoint": "current",
+                    "frame": ["answers": NSNull(), "stamp": NSNull(), "unavailable": NSNull(), "body": "recovered"]])
+            }
+            return true
+        }
+        let watches = (0..<3).map { index in
+            ServerLink.subscribe(.operationGet(requestID: "held-\(index)"), reconnect: true, connection: connection) { update -> RawJSON? in
+                guard case .reading(let frame) = update else { return nil }
+                return frame
+            }
+        }
+        defer { for watch in watches { watch.cancel() }; allow.finish(); signal.finish() }
+        var opens = opened.makeAsyncIterator()
+        _ = await opens.next()
+        #expect(watches.allSatisfy { $0.isWaiting() })
+        watches[0].cancel()
+        allow.yield(())
+        for watch in watches.dropFirst() {
+            var frames = watch.updates.makeAsyncIterator()
+            let frame = try #require(try await frames.next())
+            #expect(try frame.fields()["body"]?.decode(String.self) == "recovered")
+            #expect(!watch.isWaiting())
+        }
+        #expect(attempts.get() == 2)
     }
 
     @Test func disconnectedWatchResumesItsBaselineAndNewestConfirmation() async throws {

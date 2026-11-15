@@ -177,7 +177,7 @@ struct MobileCreationConversation: View {
             if operation.destination != client.savedMachine.machineID {
                 Text("Reconnect the original Machine to open this request")
             }
-            PendingOperationRow(operation: operation, interaction: client.interaction, edit: onEdit)
+            PendingOperationRow(operation: operation, interaction: client.interaction, edit: onEdit, context: .conversation)
         }
     }
 

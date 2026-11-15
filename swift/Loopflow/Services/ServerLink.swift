@@ -194,21 +194,20 @@ public actor ServerLink {
 
     /// `query`'s readings, and its events when `events`, mapped by `map`; nil
     /// skips an update. After a reading, connection loss resumes the same stream
-    /// on the link `connect` returns. `checkpoint(n)` asks for a reading whose
+    /// on the Machine’s next link. `checkpoint(n)` asks for a reading whose
     /// `answers` is `n`; `cancel` ends it.
     public nonisolated static func subscribe<Output: Sendable>(
         _ query: ServedRead, events: Bool = false, buffer: Int = 8,
         reconnect: Bool = false,
-        connect: @escaping @Sendable () async throws -> ServerLink,
+        connection: MachineConnection,
         map: @escaping @Sendable (ServerSubscriptionUpdate) throws -> Output?
     ) -> ServerWatch<Output> {
         let (updates, continuation) = AsyncThrowingStream<Output, any Error>.makeStream(bufferingPolicy: .bufferingOldest(buffer))
-        let (connections, connectionUpdates) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
         let subscription = ServerSubscription(continuation, query: query, events: events, reconnect: reconnect,
-            connectionUpdates: connectionUpdates, encode: map, connect: connect)
+            encode: map, connection: connection)
         subscription.begin()
         return ServerWatch(updates: updates, checkpoint: subscription.checkpoint, cancel: subscription.cancel,
-            connections: connections, isWaiting: { subscription.isWaiting })
+            connections: connection.changes(), isWaiting: { connection.isWaiting })
     }
 
     fileprivate func register(_ subscription: ServerSubscription, query: ServedRead, resume: String?) async throws {
@@ -423,28 +422,17 @@ final class ServerSubscription: @unchecked Sendable {
     private var recovery: Task<Void, Never>?
     private let query: ServedRead
     private let consumesEvents: Bool
-    private let connect: @Sendable () async throws -> ServerLink
+    private let connection: MachineConnection
     private var stopped = false
     private let reconnect: Bool
-    private let connectionUpdates: AsyncStream<Void>.Continuation
-    private var waiting = false
-    var isWaiting: Bool { lock.withLock { waiting } }
-
-    private func setWaiting(_ value: Bool) {
-        lock.withLock { waiting = value }
-        connectionUpdates.yield(())
-    }
-
     init<Output: Sendable>(_ continuation: AsyncThrowingStream<Output, any Error>.Continuation,
                            query: ServedRead, events: Bool, reconnect: Bool,
-                           connectionUpdates: AsyncStream<Void>.Continuation,
                            encode: @escaping @Sendable (ServerSubscriptionUpdate) throws -> Output?,
-                           connect: @escaping @Sendable () async throws -> ServerLink) {
+                           connection: MachineConnection) {
         self.query = query
         self.reconnect = reconnect
-        self.connectionUpdates = connectionUpdates
+        self.connection = connection
         self.consumesEvents = events
-        self.connect = connect
         self.deliver = { update in
             guard let output = try encode(update) else { return true }
             switch continuation.yield(output) {
@@ -469,24 +457,18 @@ final class ServerSubscription: @unchecked Sendable {
     }
 
     private func start() async throws {
-        var attempt = 0
         while !lock.withLock({ stopped }) {
-            do { try await open(); setWaiting(false); return }
+            do { try await open(); return }
             catch is ServerConnectionUnavailable where reconnect {
                 try Task.checkCancellation()
-                guard !lock.withLock({ stopped }) else { return }
-                setWaiting(true)
-                // Backoff belongs to opening the transport, never to submitting
-                // an operation. A new reading decides any subsequent admission.
-                attempt = min(attempt + 1, 6)
-                try await Task.sleep(for: .milliseconds(min(100 << (attempt - 1), 3200)))
             }
         }
     }
 
     private func open() async throws {
         try Task.checkCancellation()
-        let link = try await connect()
+        let retry = lock.withLock { reconnect || resumeToken != nil }
+        let link = try await connection.link(reconnect: retry)
         try Task.checkCancellation()
         let (stopped, resume) = lock.withLock { (self.stopped, consumesEvents ? nil : resumeToken) }
         guard !stopped else { return }
@@ -513,7 +495,6 @@ final class ServerSubscription: @unchecked Sendable {
             guard reconnect || resumeToken != nil else { return false }
             recovery = Task { [self] in
                 do {
-                    try await Task.sleep(for: .milliseconds(100))
                     try await start()
                 } catch is CancellationError { }
                 catch { finish(throwing: error) }
@@ -521,7 +502,6 @@ final class ServerSubscription: @unchecked Sendable {
             return true
         }
         guard let resume else { return }
-        if reconnect { setWaiting(true) }
         if !resume { finish(throwing: error) }
     }
 
@@ -590,7 +570,6 @@ final class ServerSubscription: @unchecked Sendable {
         }
         guard first else { return }
         if let link { Task { [id] in await link.unsubscribe(id) } }
-        connectionUpdates.finish()
         finishStream(error)
     }
 }

@@ -1,7 +1,8 @@
 # LOO-906: immediate interactions across Desktop and mobile
 
 Healthy-change/reconnect cut built at `c9b86d24f5` and concept-reviewed
-2026-11-15 on origin/main `9cafc410ee`; the rename-first direction is next. Supersedes the
+2026-11-15 on origin/main `9cafc410ee`; the conversation/Machine-link cut is in
+the working diff and its review's unreachable-Machine direction is next, then rename. Supersedes the
 Desktop-only delivery boundary. No shipping or merge decision is recorded. Placement remains this Task;
 no Wave is selected.
 
@@ -413,6 +414,105 @@ is listed, survives restart, delivers once on reconnect, and a refusal restores
 only that name. The starting conversation shows the words once with "Starting
 conversation…". Three held changes and one outage open one reconnect loop.
 
+### Conversation and Machine-link cut · 2026-11-15
+
+Items 2–5 above are built in the working diff: the shared row has list and
+conversation contexts, renders the request title only in lists, and reads progress
+words from the operation declaration. Both creation conversations keep submitted
+words once beside **Starting conversation…**. Phone Abandon uses Desktop's
+confirmation title, destructive action and explanation.
+
+`MachineConnection` now owns the control link, waiting fact, concurrent waiters and
+one reconnect backoff for each Machine endpoint. Both hosts use it; receipt watches
+no longer own waiting flags or backoff, and Desktop's `ServerLinks` and the phone's
+`opening` cache are deleted. Canceling one watch releases only its connection wait;
+the last waiter cancels opening. Receipt recovery still decides admission by the
+original ID after the new stamped reading. The phone feed retains its subscription
+through failed first opens and connection loss instead of adding a second outage
+card; a pending refresh checkpoint survives that reconnect. Protocol/identity
+failures terminate with attention rather than waiting indefinitely.
+
+Rename remains unimplemented. Read-path inspection: Desktop names come from
+`WorkModel.sessionReadings`, including paginated `readSessions` and stamped Work
+frames; phone `SessionLink.title` is the captured Task title, with no Session-name
+read or rename affordance. The next cut must ingest Session-name facts under the
+shared store with sessions-domain provenance, move both hosts' name consumers and
+add the domain rename fence/refusal contract before changing the write caller.
+An outbox declaration alone cannot settle names or reject old per-query values.
+Delete the direct-write/replace branch of `commitSessionRename` and its
+`SessionRenameDraft.submitting/error` delivery state in that cut; retain local
+editor text and the unrelated callers of `supersedeSessions`.
+
+Item 6 also remains: removing `changesMembership` alone would incorrectly scope
+reload floors for unmigrated `task.update` to a membership effect absent from the
+plan. Keep conservative invalidation until the shared effect/dependency cut can
+replace that policy as well.
+
+Checks of this working cut (2026-11-15, inherited `LF_*` cleared):
+- `swift build --build-tests --package-path swift --jobs 4 -Xswiftc -gnone`: passed; gate owns the Xcode fallback build.
+- `scripts/test_desktop.sh --skip-build --filter 'ServerClientTests|OperationRecoveryPresentationTests'`: 24 Swift Testing rows passed, including shared reconnect, failed first opens, independent cancellation, original-ID recovery and conversation copy.
+- `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/MobileTaskCreationTests -only-testing:LoopflowiOSTests/ClientWorkQueryTests/testPhoneAbandonPublishesBothFeedsAndReplacesOnlyTheOriginRouteBeforeDisk`: 10 passed; the two changed rows passed after adding the phone's one-request/progress assertion; its named row passed again with the final refresh-deadline repair compiled. Disposable Simulators removed.
+- `uv run python scripts/check_swift_multiplatform_boundaries.py`, `git diff --check`: passed; gate owns documented-command and archive checks. Native latency remains unmeasured.
+
+### Next implement direction: an unreachable Machine says so once
+
+Headless concept review of the working conversation/Machine-link cut,
+2026-11-15. Read in the code, nothing run; no code changed. Fix these before
+rename; they finish the cut rather than extend it.
+
+1. **The phone feed can no longer say the Machine is unreachable.** Its
+   subscription now holds through failed opens, so `feed.error` stays nil:
+   a first launch with no saved reading shows `ProgressView` until the Machine
+   answers, a saved reading shows stale Tasks with no word, and pull to refresh
+   spins for the whole outage (`RemoteTaskObservation.refresh` waits on
+   `connection.link(reconnect: true)`). The "Couldn’t update Tasks" card went
+   with the second outage report; nothing replaced it when no change is held.
+   The feed shows the Machine's waiting fact once, as one **Waiting for
+   connection** line above its Tasks, saved or none. Pull to refresh while
+   waiting returns at once; reconnect already delivers a fresh reading. The
+   card stays for refused, protocol and identity failures, with its Try again.
+2. **Held changes still take Waiting from their own watch.**
+   `ClientWorkStore.presentation` reads `watches[record.id]?.isWaiting()`, each
+   watch runs a task forwarding `connections` to `changed()`, and `ServerWatch`
+   carries both as pass-throughs. A saved change with no live watch (delivery
+   paused, between observations) shows nothing while its Machine is down. The
+   store takes its Machine's connection once: one `changes()` subscription, one
+   `isWaiting` read per presentation; `ServerWatch.connections`/`isWaiting` and
+   the two per-watch forwarding tasks go. Counterexamples to keep: an unsaved
+   failure keeps **Try again** (saving is local), and a change needing
+   attention keeps **Inspect** offline, so attention outranks waiting in
+   `PendingOperation.presentation` (today waiting returns first and hides both).
+   Another Machine's fact never marks this Machine's changes.
+3. **One line of status in the list.** With the Machine line shown, a held
+   change's row lists its title without repeating "Waiting for connection"; the
+   conversation context keeps the words. Headless reversible choice, noted in
+   `questions.md` beside the open rows-or-summary note.
+4. **Progress words nobody sees.** `OperationDeclaration.progress` has eight
+   strings; the conversation context renders only creation's. Both hosts print
+   their own "Completing…" (`TaskWorkView.lifecycleLabel`,
+   `TaskWorkspaceView`), and "Delivering request…" survives as
+   `Status.delivering.text` and a fallback, with `progress: ""` for waiting.
+   One phrase per kind, where that kind is shown: creation and new Session keep
+   "Starting conversation…", Complete is "Completing…" read by both Task views,
+   and a kind with no surface has none. `Status.delivering` has no text of its
+   own; the placeholder string and fallback go.
+5. **READMEs say what a person sees.** "Held changes share their Machine’s
+   connection and reconnect loop" (`swift/README.md`, phone README) describes
+   the mechanism. Replace with the feed's waiting line and that pull to refresh
+   needs no retry.
+6. **Rename is Desktop's.** The phone shows a Task title for a conversation
+   and offers no rename; the shared store ingests Session names for both, but
+   this Task adds no phone rename or Session-name display. The rename
+   acceptance above reads "on Desktop; the phone's lists are unchanged by it".
+   Whether the phone should show Session names is in `questions.md`.
+
+Acceptance: phone with its Machine unreachable — cold launch shows Waiting for
+connection, not a spinner; a saved feed shows the line above its Tasks; pull to
+refresh ends immediately; reconnect clears the line with no tap. Three held
+changes show three titles under one line. An unsaved failure and a
+needs-attention change keep their actions through the outage. A wrong-Machine
+address still shows the card with its explanation.
+
 ### Continuation correction: state-only candidates cannot project a Move
 
 2026-11-15, implementation finding. `compile_membership` filters Wave descendants
@@ -472,7 +572,7 @@ including without a network event. Retirement cancels its receipt observer and
 transfers lagging effects or scoped reload floors. The complete prior contracts and
 query checks remain at `6e944e73b5a:scratch/instant-task-session.md`.
 
-Remaining: the rename-first direction above, then disconnected Move
+Remaining: the unreachable-Machine direction above, offline Session rename on Desktop and the effect-policy duplication, then disconnected Move
 under the recorded 1a direction; cross-client closed-query convergence; exhaustive
 effect/dependency declarations and cross-query provenance; other mutation recovery
 and resource lanes; retained mobile `SessionLink`; projected inspection;

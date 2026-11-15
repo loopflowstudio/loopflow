@@ -25,6 +25,18 @@ struct OperationDeclaration {
         }
     }
 
+    var progress: String {
+        switch kind {
+        case .create, .newSession: "Starting conversation…"
+        case .complete: "Completing Task…"
+        case .reopen: "Reopening Task…"
+        case .update: "Updating Task…"
+        case .move: "Moving Task…"
+        case .abandon: "Abandoning Task…"
+        case .claim: "Claiming Task…"
+        }
+    }
+
     var changesMembership: Bool { kind == .complete || kind == .abandon }
 
     func effect(id: String, sequence: Int64, directory: String, issue: String, receipt: OperationReceipt?) -> WorkQueryEffect? {

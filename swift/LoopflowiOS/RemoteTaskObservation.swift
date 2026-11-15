@@ -36,13 +36,15 @@ final class RemoteTaskObservation {
     let readings: AsyncThrowingStream<Result<Void, RegistryQueryError>, any Error>
     private let continuation: AsyncThrowingStream<Result<Void, RegistryQueryError>, any Error>.Continuation
     private let watch: ServerWatch<RawJSON>
+    private let connection: MachineConnection
     private var reader: Task<Void, Never>?
     private var nextCheckpoint: UInt64 = 0
     private var refreshing: (id: UInt64, continuation: CheckedContinuation<Void, any Error>)?
     private var closed = false
 
-    init(query: ServedRead, interaction: WorkInteraction, connect: @escaping @Sendable () async throws -> ServerLink) {
-        watch = ServerLink.subscribe(query, connect: connect) { update -> RawJSON? in
+    init(query: ServedRead, interaction: WorkInteraction, connection: MachineConnection) {
+        self.connection = connection
+        watch = ServerLink.subscribe(query, reconnect: true, connection: connection) { update -> RawJSON? in
             guard case .reading(let frame) = update else { return nil }
             return frame
         }
@@ -76,9 +78,18 @@ final class RemoteTaskObservation {
         guard refreshing == nil else { return }
         nextCheckpoint += 1
         let checkpoint = nextCheckpoint
-        let timeout = Task { [weak self] in
-            do { try await Task.sleep(for: RemoteMobileClient.requestDeadline) } catch { return }
-            self?.close(error: RegistryQueryError("The Machine did not respond in time"))
+        let timeout = Task { [weak self, connection] in
+            do {
+                while !Task.isCancelled {
+                    try await Task.sleep(for: RemoteMobileClient.requestDeadline)
+                    // Keep its checkpoint through an outage, then give the new
+                    // connection its normal answer deadline.
+                    if connection.isWaiting { _ = try await connection.link(reconnect: true); continue }
+                    self?.close(error: RegistryQueryError("The Machine did not respond in time"))
+                    return
+                }
+            } catch is CancellationError { }
+            catch { self?.close(error: error) }
         }
         defer { timeout.cancel() }
         try await withTaskCancellationHandler {

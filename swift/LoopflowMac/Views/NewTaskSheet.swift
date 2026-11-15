@@ -312,7 +312,7 @@ struct StartingTaskView: View {
                 Button("Retry opening") { Task { await model.openCreatedTask(launch) } }
             }
             if let interaction = model.interaction {
-                PendingOperationRow(operation: launch, interaction: interaction, edit: { model.editCreation($0.id) })
+                PendingOperationRow(operation: launch, interaction: interaction, edit: { model.editCreation($0.id) }, context: .conversation)
             }
             Spacer(minLength: 0)
         }

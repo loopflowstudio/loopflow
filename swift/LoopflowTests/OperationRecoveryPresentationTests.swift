@@ -1,11 +1,33 @@
 #if os(macOS)
 import Foundation
 import Testing
+import ViewInspector
 @testable import Loopflow
 @testable import LoopflowMac
 
 @MainActor
 struct OperationRecoveryPresentationTests {
+    @Test func aConversationShowsTheRequestOnceAndProgressBelongsToItsKind() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = ClientWorkStore(directory: root, machine: { "machine" }, read: { _ in "null" },
+            observe: { _ in fatalError("No delivery in a view inspection") }, send: { _ in })
+        let owner = WorkInteraction(machine: "machine", store: store)
+        defer { owner.shutdown() }
+        let command = ServedWrite.taskCreate(directory: "/repo", requestID: "request", title: nil,
+            request: "Keep these words", wave: nil, graph: nil, session: nil, run: true)
+        let operation = PendingOperation(id: "request", payload: try JSONEncoder().encode(command), kind: "task.create",
+            request: "Keep these words", directory: "/repo", wave: nil, graph: nil, submittedAt: Date(), destination: "machine")
+        let conversation = try PendingOperationRow(operation: operation, interaction: owner, edit: { _ in }, context: .conversation).inspect()
+        #expect(throws: (any Error).self) { try conversation.find(text: "Keep these words") }
+        #expect(try conversation.find(text: "Starting conversation…").string() == "Starting conversation…")
+        let list = try PendingOperationRow(operation: operation, interaction: owner, edit: { _ in }).inspect()
+        #expect(try list.find(text: "Keep these words").string() == "Keep these words")
+        #expect(throws: (any Error).self) { try list.find(text: "Starting conversation…") }
+        #expect(OperationDeclaration(kind: "session.new")?.progress == "Starting conversation…")
+        #expect(OperationDeclaration(kind: "task.complete")?.progress == "Completing Task…")
+    }
+
     @Test func aPresentedResultKeepsObservingWhileItsPlanningConfirmationIsMissing() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

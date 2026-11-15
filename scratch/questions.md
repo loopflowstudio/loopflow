@@ -119,3 +119,12 @@
     already sent could not.
 - Headless reading of "rename" in the 1a answer: the renames the apps offer
   (Session, Wave, Dashboard). No command edits a Task title.
+
+- Headless reversible choices from the 2026-11-15 concept review of the
+  conversation/Machine-link cut; nobody has stated a preference on either:
+  - The phone feed shows one "Waiting for connection" line for its Machine, and
+    held changes list their titles under it without repeating the words. The
+    built cut shows the words per row and nothing when no change is held.
+  - Offline rename is built for Desktop only. The phone shows a Task title for
+    each conversation and has no rename; whether it should show Session names
+    or offer rename is undiscussed (question 3 in `scratch/concept-review.html`).

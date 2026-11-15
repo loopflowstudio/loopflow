@@ -30,8 +30,8 @@ with a conversation come first; started Tasks nobody has opened a conversation
 for fold under "N without a conversation". Search covers title and checkout
 path. Pull to refresh. **+** opens New Task: describe the work, pick a
 repository, **Create & start**. The editor closes immediately into the submitted
-conversation. Its words remain visible while the Machine prepares the Task and
-Session; native attachment controls input. Leaving for another Task keeps that
+conversation. Its words appear once beside **Starting conversation…** while the
+Machine prepares the Task and Session; native attachment controls input. Leaving for another Task keeps that
 selection when a receipt arrives. The recorded Session opens without waiting for
 its Task to appear in the feed. Opening the result, including from an ordinary
 Task row, clears the redundant request row; unresolved recovery stays visible.
@@ -41,8 +41,8 @@ result and **Inspect** shows its receipt when recovery needs attention.
 **Reconnect** reopens the same Session after attachment fails. Complete and Abandon
 show no extra request row while delivering. A disconnected request shows
 **Waiting for connection** without an action and resumes automatically on its
-original Machine, including after app restart. A request needing attention shows
-recovery controls; a creation also keeps its row until its result has been shown.
+original Machine, including after app restart. Held changes and the Task feed
+share one Machine reconnect loop. A request needing attention shows recovery controls; a creation also keeps its row until its result has been shown.
 
 The shared SQLite outbox saves the original request
 before `operation.submit` admits it. Receipt subscriptions observe preparation;
@@ -78,7 +78,8 @@ opens the whole file. A Task with no conversation opens on its Changes.
 replaces this route with the next visible Task or returns to the list. Other feeds
 keep their selections. The same command saves before sending; its request row's
 **Check request** recovers its original identity after an unanswered send. Save failure restores membership
-without changing your newer navigation. **Abandon** in Task actions follows the same removal and next-Task rule.
+without changing your newer navigation. **Abandon** in Task actions asks for
+confirmation before following the same removal and next-Task rule.
 A retained Task shows **Completing…** while
 its command remains pending. These local changes work while the network is waiting;
 provider readiness still comes from the Session connection.

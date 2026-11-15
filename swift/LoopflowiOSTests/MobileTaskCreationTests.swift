@@ -20,9 +20,11 @@ final class MobileTaskCreationTests: XCTestCase {
         client.journal = disk
         client.interaction = owner
         let operation = owner.createTask(request: "Keep these words", directory: "/repo") { _ in }
-        await owner.persistPending()
         var edited: PendingOperation?
         let view = MobileCreationConversation(client: client, operation: operation, theme: .light, onEdit: { edited = $0 })
+        XCTAssertEqual(try view.inspect().findAll(ViewType.Text.self).filter { (try? $0.string()) == "Keep these words" }.count, 1)
+        _ = try view.inspect().find(text: "Starting conversation…")
+        await owner.persistPending()
         try view.inspect().find(button: "Edit request").tap()
         XCTAssertTrue(edited === operation)
         XCTAssertEqual(owner.listedOperations.map(\.id), [operation.id])

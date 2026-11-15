@@ -82,7 +82,7 @@ until the request has text and a repository is resolved. Without one, the sheet
 says **Open a repository to start a Task.**
 
 The sheet closes immediately into the new conversation, with your request and
-**Delivering request…** visible while its workspace and provider prepare.
+**Starting conversation…** visible while its workspace and provider prepare.
 The live conversation replaces that status in place; typing becomes available
 when it is connected and ready. You can navigate elsewhere while it starts;
 completion leaves your newer selection alone. Filed identity, Graph admission,
@@ -92,7 +92,8 @@ cannot replace the operation's saved outcome.
 Complete and Abandon show their projected result while delivering, with no extra request
 row. A disconnected request shows **Waiting for connection** without an action;
 its saved identity resumes automatically when its original Machine reconnects,
-including after app restart. Requests needing attention show recovery controls.
+including after app restart. Held changes share their Machine’s connection and
+reconnect loop. Requests needing attention show recovery controls.
 Creations also keep a row until their result has been shown. Launch errors appear
 in the conversation. After a local save failure, **Try again** retries the
 same request ID; **Edit request** returns an unsaved creation's words to the editor.

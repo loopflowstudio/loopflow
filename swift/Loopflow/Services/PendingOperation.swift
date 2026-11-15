@@ -57,6 +57,8 @@ public final class PendingOperation: Identifiable {
     public struct Presentation {
         public let status: Status
         public let actions: [Action]
+        public let progress: String
+        public var text: String { status == .delivering ? progress : status.text }
         public let evidence: String?
     }
     private var needsInspection: Bool {
@@ -98,7 +100,7 @@ public final class PendingOperation: Identifiable {
     /// recovery vocabulary for the submitted command.
     public func presentation() -> Presentation {
         var actions: [Action] = []
-        if waitingForConnection { return Presentation(status: .waitingForConnection, actions: [], evidence: nil) }
+        if waitingForConnection { return Presentation(status: .waitingForConnection, actions: [], progress: "", evidence: nil) }
         if !saved, error != nil {
             actions.append(.tryAgain)
             if isCreation { actions.append(.edit) }
@@ -115,7 +117,7 @@ public final class PendingOperation: Identifiable {
         messages = messages.filter { seen.insert($0).inserted }
         if needsInspection && messages.isEmpty { messages = ["The original request needs inspection"] }
         return Presentation(status: needsInspection ? .needsAttention(messages) : .delivering,
-            actions: actions, evidence: evidence.map { String(decoding: $0, as: UTF8.self) })
+            actions: actions, progress: OperationDeclaration(kind: kind)?.progress ?? "Delivering request…", evidence: evidence.map { String(decoding: $0, as: UTF8.self) })
     }
 
     init(id: String, payload: Data, kind: String, request: String, directory: String, wave: String?, graph: String?, submittedAt: Date, destination: String?) {
@@ -163,23 +165,30 @@ public struct PendingOperationRow: View {
     public let interaction: WorkInteraction
     public let edit: (PendingOperation) -> Void
     public let select: ((PendingOperation) -> Void)?
+    public let context: Context
+    public enum Context { case list, conversation }
     @State private var inspecting = false
 
     public init(operation: PendingOperation, interaction: WorkInteraction,
-                edit: @escaping (PendingOperation) -> Void, select: ((PendingOperation) -> Void)? = nil) {
+                edit: @escaping (PendingOperation) -> Void, context: Context = .list, select: ((PendingOperation) -> Void)? = nil) {
         self.operation = operation
         self.interaction = interaction
         self.edit = edit
+        self.context = context
         self.select = select
     }
 
     public var body: some View {
         let presentation = operation.presentation()
         VStack(alignment: .leading, spacing: 4) {
-            if operation.isCreation, let select {
-                Button { select(operation) } label: { Text(operation.title).lineLimit(2) }
-            } else { Text(operation.title).lineLimit(2) }
-            Text(presentation.status.text).font(.caption).textSelection(.enabled)
+            if context == .list {
+                if operation.isCreation, let select {
+                    Button { select(operation) } label: { Text(operation.title).lineLimit(2) }
+                } else { Text(operation.title).lineLimit(2) }
+            }
+            if context == .conversation || presentation.status != .delivering {
+                Text(presentation.text).font(.caption).textSelection(.enabled)
+            }
             ForEach(presentation.actions) { action in
                 Button(action.rawValue) {
                     switch action {

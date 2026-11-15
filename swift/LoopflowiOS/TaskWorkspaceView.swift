@@ -17,6 +17,7 @@ struct TaskWorkspaceView: View {
         return client.interaction.isCompleting(issue: task.identifier ?? task.work.id, directory: completionDirectory)
     }
     @State private var showsChanges = false
+    @State private var confirmingAbandon = false
 
     var body: some View {
         Group {
@@ -46,9 +47,9 @@ struct TaskWorkspaceView: View {
             }
         }
         .toolbar {
-            if let abandon {
+            if abandon != nil {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Menu { Button("Abandon", role: .destructive, action: abandon) } label: {
+                    Menu { Button("Abandon", role: .destructive) { confirmingAbandon = true } } label: {
                         Image(systemName: "ellipsis")
                     }.accessibilityLabel("Task actions")
                 }
@@ -58,6 +59,11 @@ struct TaskWorkspaceView: View {
                     TaskCompleteButton(complete: complete, pending: completionPending)
                 }
             }
+        }
+        .confirmationDialog("Abandon \(task.identifier ?? task.work.id)?", isPresented: $confirmingAbandon) {
+            Button("Abandon Task", role: .destructive) { abandon?() }
+        } message: {
+            Text("Cancels the Task, closes its PRs and deletes its branches. Unassign it instead to keep its work for later.")
         }
         .task(id: client.interaction.creations.map { "\($0.id):\($0.taskID ?? "")" }) {
             try? await client.interaction.presented(.task(task.work.id))

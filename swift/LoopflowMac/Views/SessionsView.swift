@@ -1673,9 +1673,6 @@ struct SessionsContentView: View {
                     if let task = model.breadcrumb?.task?.task {
                         TaskWorkflowBar(model: model, task: task, work: model.taskWork[task.id])
                     }
-                    if let transition = model.visibleSessions.first(where: { $0.id == navigation.selectedSessionId })?.transition {
-                        ProviderTransitionRow(transition: transition)
-                    }
                     mainPane
                     CreationRecoveryView()
                 }
@@ -2202,18 +2199,5 @@ private extension WorkPaneIntent {
         case .shell: .shell
         case .browser: .browser
         }
-    }
-}
-
-struct ProviderTransitionRow: View {
-    let transition: ProviderTransition
-    var body: some View {
-        Text(transition.explanation)
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 4)
-            .help("Observed at " + Date(timeIntervalSince1970: TimeInterval(transition.observedAt)).formatted())
     }
 }

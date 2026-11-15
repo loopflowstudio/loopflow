@@ -1058,6 +1058,9 @@ remains unknown without replay.
 Terminal recovery must preserve the exact owner, draft and newer control claims.
 Opening shows **Opening… Input paused** through attachment and native readiness;
 **Reconnecting…** follows a previously acknowledged connection.
+Once input is ready, ordinary starts and resumes show no connection banner.
+Forking or leaving an earlier conversation behind remains visible in the affected
+terminal; the workspace adds no duplicate transition strip.
 Connection feedback overlays the terminal, so clearing it does not resize the
 provider or move its cursor. Both mount layout and pre-mount sizing keep the same
 viewport while status changes.

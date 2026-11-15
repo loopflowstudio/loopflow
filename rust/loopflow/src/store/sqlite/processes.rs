@@ -14,7 +14,7 @@ use crate::process::{
 use crate::store::{StoreError, StoreResult};
 use loopflow_model::id::{AgentProcessId, AgentSessionId, AttachmentToken, LfProcessId};
 
-use super::SqliteStore;
+use super::{SessionCaller, SqliteStore};
 
 /// Saved endpoint and native identity; liveness is observed by the caller.
 #[derive(Debug)]
@@ -66,8 +66,10 @@ impl SessionTransfer<'_> {
         process: &LfProcessId,
         previous: PreviousAgentDisposition,
         start: Option<&LfProcessStart>,
+        caller: &SessionCaller,
     ) -> StoreResult<SessionAttachment> {
         self.commit(previous, |tx| {
+            super::sessions::require_current_actor_in(tx, &self.session, caller)?;
             attach_in(
                 tx,
                 &self.session,
@@ -85,11 +87,13 @@ impl SessionTransfer<'_> {
         process: &LfProcessId,
         previous: PreviousAgentDisposition,
         start: Option<&LfProcessStart>,
+        caller: &SessionCaller,
     ) -> StoreResult<(crate::session::LfSession, SessionAttachment)> {
         if loopflow_model::id::canonical_session(&next.id) != self.session {
             return Err(attachment_changed());
         }
         self.commit(previous, |tx| {
+            super::sessions::require_current_actor_in(tx, &self.session, caller)?;
             super::sessions::claim_session_input_in(
                 tx,
                 next,
@@ -117,11 +121,13 @@ impl SessionTransfer<'_> {
         resume_thread: Option<&AgentSessionId>,
         reserved: bool,
         start: Option<&LfProcessStart>,
+        caller: &SessionCaller,
     ) -> StoreResult<SessionAttachment> {
         let session = self.session.as_str();
         let expected = self.expected.as_ref().ok_or_else(attachment_changed)?;
         let mut conn = self.store.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        super::sessions::require_current_actor_in(&tx, session, caller)?;
         require_attachment_in(&tx, session, expected)?;
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
         tx.execute(
@@ -1483,6 +1489,7 @@ impl SqliteStore {
         attachment_in(&conn, session)
     }
 
+    #[allow(clippy::too_many_arguments)] // Attachment and caller observations commit together.
     pub(crate) fn attach_session(
         &self,
         session: &str,
@@ -1490,12 +1497,14 @@ impl SqliteStore {
         process: &LfProcessId,
         replace_provider: bool,
         start: Option<&LfProcessStart>,
+        caller: &SessionCaller,
     ) -> StoreResult<SessionAttachment> {
         let canonical = loopflow_model::id::canonical_session(session);
         let session = canonical.as_str();
         let _dispatch = self.lock_session_attachment(session)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        super::sessions::require_current_actor_in(&tx, session, caller)?;
         let attachment = attach_in(&tx, session, expected, process, replace_provider, start)?;
         tx.commit()?;
         Ok(attachment)
@@ -2363,10 +2372,137 @@ mod attachment_tests {
     use crate::process::attachment;
 
     use super::discovery_tests::insert_process;
+    use super::SessionCaller;
     use crate::session::SessionActivity;
     use crate::store::sqlite::SqliteStore;
     use crate::store::StoreError;
     use loopflow_model::id::LfProcessId;
+
+    #[test]
+    fn replaced_callers_cannot_rename_bind_or_attach_either_title_source() {
+        use crate::process::AgentCaller;
+        use crate::session::TitleSource;
+        use loopflow_model::durable::TaskId;
+
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let process = insert_process(&store, 1, 1);
+        let replacement = insert_process(&store, 2, 2);
+        for source in [TitleSource::Generated, TitleSource::Human] {
+            let id = format!("conversation-{source:?}");
+            let session = store.test_session(&id, &crate::session_record::new_artifact_key());
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .execute(
+                    "UPDATE agent_sessions SET title_source=?2 WHERE id=?1",
+                    rusqlite::params![
+                        id,
+                        if source == TitleSource::Generated {
+                            "generated"
+                        } else {
+                            "human"
+                        }
+                    ],
+                )
+                .unwrap();
+            let absent = SessionCaller {
+                agent: None,
+                capture_key: None,
+            };
+            store
+                .rename_session_prepared(&id, "Original title", source, &absent)
+                .unwrap();
+            let first = store
+                .attach_session(&id, None, &process, true, None, &absent)
+                .unwrap();
+            let caller = SessionCaller {
+                agent: Some(AgentCaller {
+                    session_id: id.clone().into(),
+                    agent_process_id: Some(first.agent_process_id.clone()),
+                    origin_lf_process_id: process.clone(),
+                }),
+                capture_key: session.artifact_key.clone(),
+            };
+            // A current provider can act; the same observation loses authority
+            // when another provider takes over, even when it knows the new token.
+            store
+                .rename_session_prepared(&id, "Original title", source, &caller)
+                .unwrap();
+            let current = store
+                .attach_session(&id, Some(&first), &replacement, true, None, &absent)
+                .unwrap();
+            let before = store.session(&id).unwrap();
+            assert_eq!(before.as_ref().unwrap().title_source, source);
+            let history = store.session_history(&id, 0, 0).unwrap();
+            for result in [
+                store.rename_session_prepared(&id, "Changed", TitleSource::Human, &caller),
+                store
+                    .bind_session_prepared(
+                        &id,
+                        session.captured,
+                        &TaskId::new(),
+                        &session.cwd,
+                        &caller,
+                    )
+                    .map(|_| ()),
+                store
+                    .attach_session(&id, Some(&current), &process, true, None, &caller)
+                    .map(|_| ()),
+            ] {
+                assert!(
+                    matches!(result, Err(StoreError::InvalidAuthority(ref message)) if message == "Session provider was replaced"),
+                    "{result:?}"
+                );
+            }
+            assert_eq!(store.session(&id).unwrap(), before);
+            assert_eq!(store.session_history(&id, 0, 0).unwrap(), history);
+            assert_eq!(store.session_attachment(&id).unwrap(), Some(current));
+        }
+    }
+
+    #[test]
+    fn rename_refuses_a_capture_owned_by_another_callers_session() {
+        use crate::process::AgentCaller;
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let session =
+            store.test_session("conversation", &crate::session_record::new_artifact_key());
+        let other = store.test_session("other", &crate::session_record::new_artifact_key());
+        let process = insert_process(&store, 1, 1);
+        let first = store
+            .attach_session(
+                "conversation",
+                None,
+                &process,
+                true,
+                None,
+                &SessionCaller {
+                    agent: None,
+                    capture_key: None,
+                },
+            )
+            .unwrap();
+        let caller = SessionCaller {
+            agent: Some(AgentCaller {
+                session_id: session.id.clone(),
+                agent_process_id: Some(first.agent_process_id),
+                origin_lf_process_id: process,
+            }),
+            capture_key: other.artifact_key,
+        };
+        let result = store.rename_session_prepared(
+            "conversation",
+            "Changed",
+            crate::session::TitleSource::Human,
+            &caller,
+        );
+        assert!(
+            matches!(result, Err(StoreError::InvalidData(ref message)) if message == "capture belongs to another Session")
+        );
+        assert_eq!(store.session("conversation").unwrap(), Some(session));
+    }
 
     #[test]
     fn attaching_start_receipt_and_terminal_commit_only_with_the_agent() {
@@ -2392,7 +2528,17 @@ mod attachment_tests {
             )
             .unwrap();
         assert!(store
-            .attach_session("conversation", None, &start.process.id, true, Some(&start),)
+            .attach_session(
+                "conversation",
+                None,
+                &start.process.id,
+                true,
+                Some(&start),
+                &SessionCaller {
+                    agent: None,
+                    capture_key: None
+                }
+            )
             .is_err());
         assert_eq!(store.lf_process(&start.process.id).unwrap(), None);
         assert_eq!(store.session_attachment("conversation").unwrap(), None);
@@ -2403,7 +2549,17 @@ mod attachment_tests {
             .execute_batch("DROP TRIGGER reject_agent")
             .unwrap();
         let attached = store
-            .attach_session("conversation", None, &start.process.id, true, Some(&start))
+            .attach_session(
+                "conversation",
+                None,
+                &start.process.id,
+                true,
+                Some(&start),
+                &SessionCaller {
+                    agent: None,
+                    capture_key: None,
+                },
+            )
             .unwrap();
         assert_eq!(
             store.lf_process(&start.process.id).unwrap(),
@@ -2457,7 +2613,8 @@ mod attachment_tests {
                 fs2::FileExt::try_lock_exclusive(&lock).unwrap_err().kind(),
                 std::io::ErrorKind::WouldBlock
             );
-            store.rename_session(
+            crate::store::sessions::rename_session(
+                &store,
                 "unrelated",
                 "Saved during close",
                 crate::session::TitleSource::Human,

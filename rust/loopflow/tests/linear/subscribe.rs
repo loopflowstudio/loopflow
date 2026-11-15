@@ -690,13 +690,13 @@ fn task_view_keeps_workflow_checkout_and_conversations_after_live_updates() {
         assert!(!screen.contains("No workflow taken up"), "{screen}");
     };
     check(&screens.recv_timeout(Duration::from_secs(30)).unwrap());
-    home.store
-        .rename_session(
-            session.id.as_str(),
-            "Updated conversation",
-            crate::session::TitleSource::Human,
-        )
-        .unwrap();
+    crate::store::sessions::rename_session(
+        &home.store,
+        session.id.as_str(),
+        "Updated conversation",
+        crate::session::TitleSource::Human,
+    )
+    .unwrap();
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         let screen = screens

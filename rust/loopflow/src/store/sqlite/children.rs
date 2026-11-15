@@ -275,6 +275,7 @@ impl SqliteStore {
         destination: Option<&Path>,
         receipt: Option<&super::creation::CreationIdentity>,
         me: &super::task_ownership::OwnershipFacts,
+        caller: &super::SessionCaller,
     ) -> StoreResult<Option<Task>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -286,6 +287,9 @@ impl SqliteStore {
         };
         if !matches {
             return Ok(None);
+        }
+        if let Some(session) = session {
+            super::sessions::require_current_actor_in(&tx, &session.id, caller)?;
         }
         if let Some(input) = creation {
             if let Some(project) = &input.project_id {
@@ -2716,6 +2720,101 @@ mod local_planning_tests {
     }
 
     #[test]
+    fn task_identifier_repairs_all_generated_titles_from_a_replaced_editor_with_foreign_capture() {
+        use crate::process::{AgentCaller, AGENT_CALLER_ENV};
+        use crate::session::TitleSource;
+        use crate::store::sqlite::SessionCaller;
+        use crate::work::edit::{WorkEdit, WorkValue};
+
+        let ledger = crate::journal::TestLedgerGuard::new();
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        let path = ledger.home().join("loopflow.db");
+        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let task = store
+            .create_task(&NewTask {
+                repository_id: local_repository(&store),
+                id: TaskId::new(),
+                project_id: Some(local_project(&store)),
+                title: "Fix login".into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap();
+        let template = store.test_session("template", &crate::session_record::new_artifact_key());
+        for (id, source) in [
+            ("editor", TitleSource::Generated),
+            ("other", TitleSource::Generated),
+            ("human", TitleSource::Human),
+        ] {
+            crate::store::sessions::create_session(
+                &store,
+                crate::session::LfSession {
+                    id: id.into(),
+                    captured: None,
+                    artifact_key: Some(crate::session_record::new_artifact_key()),
+                    title: "Fix login".into(),
+                    title_source: source,
+                    task_id: Some(task.id.clone()),
+                    wave_id: task.wave_id.clone(),
+                    ..template.clone()
+                },
+                None,
+            )
+            .unwrap();
+        }
+        let process = loopflow_model::id::LfProcessId::new();
+        store.conn.lock().unwrap().execute(
+            "INSERT INTO processes(id,trace_id,started_at,command,cwd) VALUES(?1,'trace',1,'lf session resume','/fixture')", [&process]
+        ).unwrap();
+        let absent = SessionCaller {
+            agent: None,
+            capture_key: None,
+        };
+        let first = store
+            .attach_session("editor", None, &process, true, None, &absent)
+            .unwrap();
+        store
+            .attach_session("editor", Some(&first), &process, true, None, &absent)
+            .unwrap();
+        let caller = AgentCaller {
+            session_id: "editor".into(),
+            agent_process_id: Some(first.agent_process_id),
+            origin_lf_process_id: process,
+        };
+        std::env::set_var(AGENT_CALLER_ENV, serde_json::to_string(&caller).unwrap());
+        crate::journal::with_runtime(
+            ledger.home(),
+            &["lf".into(), "task".into(), "edit".into()],
+            || {
+                assert_eq!(crate::journal::agent_caller(), Some(caller));
+                std::env::set_var(
+                    crate::session_record::CAPTURE_KEY_ENV,
+                    crate::session_record::new_artifact_key(),
+                );
+                let mut conn = store.conn.lock().unwrap();
+                let tx = conn.transaction().unwrap();
+                super::planning_write::local(
+                    &tx,
+                    &WorkEdit::for_target(
+                        task.id.as_str(),
+                        &[WorkValue::TaskIdentifier("ENG-123".into())],
+                    ),
+                )?;
+                tx.commit()?;
+                Ok(())
+            },
+        )
+        .unwrap();
+        for id in ["editor", "other"] {
+            assert_eq!(
+                store.session(id).unwrap().unwrap().title,
+                "ENG-123 Fix login"
+            );
+        }
+        assert_eq!(store.session("human").unwrap().unwrap().title, "Fix login");
+    }
+
+    #[test]
     fn task_labels_and_generated_names_follow_local_identity_and_linear_mapping() {
         use crate::session::{SessionFilter, TitleSource, WorkSource};
         use crate::work::edit::{WorkEdit, WorkValue};
@@ -2841,9 +2940,13 @@ mod local_planning_tests {
             store.session("human").unwrap().unwrap().title,
             "My login notes"
         );
-        store
-            .rename_session("generated", "Review login", TitleSource::Generated)
-            .unwrap();
+        crate::store::sessions::rename_session(
+            &store,
+            "generated",
+            "Review login",
+            TitleSource::Generated,
+        )
+        .unwrap();
         assert_eq!(
             store.session("generated").unwrap().unwrap().title,
             "ENG-123 Review login"

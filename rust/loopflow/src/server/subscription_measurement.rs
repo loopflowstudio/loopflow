@@ -149,13 +149,13 @@ fn subscription_writer() {
             break;
         }
         if command == "title" {
-            store
-                .rename_session(
-                    "session-001",
-                    "Changed by fixture",
-                    crate::session::TitleSource::Human,
-                )
-                .unwrap();
+            crate::store::sessions::rename_session(
+                &store,
+                "session-001",
+                "Changed by fixture",
+                crate::session::TitleSource::Human,
+            )
+            .unwrap();
             println!("WRITER {}", json!({"title":true}));
             continue;
         }

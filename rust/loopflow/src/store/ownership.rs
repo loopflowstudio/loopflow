@@ -165,6 +165,14 @@ pub(crate) fn promote_task(
     destination: Option<&Path>,
     receipt: Option<&crate::store::sqlite::creation::CreationIdentity>,
 ) -> StoreResult<Task> {
+    let caller = if session.is_some() {
+        super::sessions::session_caller()?
+    } else {
+        super::sqlite::SessionCaller {
+            agent: None,
+            capture_key: None,
+        }
+    };
     loop {
         let scope = match creation {
             Some(input) => store.new_task_scope(&input.repository_id, input.project_id.as_ref())?,
@@ -179,6 +187,7 @@ pub(crate) fn promote_task(
             destination,
             receipt,
             &facts,
+            &caller,
         )? {
             return Ok(result);
         }

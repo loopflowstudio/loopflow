@@ -37,13 +37,14 @@ pub(crate) fn resume_session_attachment(
     process: &LfProcessId,
     close: impl FnOnce() -> StoreResult<bool>,
 ) -> StoreResult<SessionAttachment> {
+    let caller = crate::store::sessions::session_caller()?;
     let canonical = loopflow_model::id::canonical_session(session);
     let session = canonical.as_str();
     let resume = store.begin_session_transfer(session, expected)?;
     let beside = store.runs_in_its_terminal(session)?;
     let previous = prepare_resume(store, &resume, beside, close)?;
     let start = current_start(process);
-    resume.claim_attachment(process, previous, start.as_ref())
+    resume.claim_attachment(process, previous, start.as_ref(), &caller)
 }
 
 /// Input replacement and attachment admission commit together. Acquisition
@@ -55,11 +56,12 @@ pub(crate) fn claim_session_input(
     process: &LfProcessId,
     close: impl FnOnce() -> StoreResult<bool>,
 ) -> StoreResult<(LfSession, SessionAttachment)> {
+    let caller = crate::store::sessions::session_caller()?;
     let _admission = crate::store::admission::lock_session_checkouts(store, &next)?;
     let resume = store.begin_session_transfer(&next.id, expected)?;
     let previous = prepare_resume(store, &resume, false, close)?;
     let start = current_start(process);
-    resume.claim_input(next, process, previous, start.as_ref())
+    resume.claim_input(next, process, previous, start.as_ref(), &caller)
 }
 
 pub fn claim_session_attachment(
@@ -69,8 +71,16 @@ pub fn claim_session_attachment(
     process: &LfProcessId,
     replace_provider: bool,
 ) -> StoreResult<SessionAttachment> {
+    let caller = crate::store::sessions::session_caller()?;
     let start = current_start(process);
-    store.attach_session(session, expected, process, replace_provider, start.as_ref())
+    store.attach_session(
+        session,
+        expected,
+        process,
+        replace_provider,
+        start.as_ref(),
+        &caller,
+    )
 }
 
 pub(crate) fn prepare_session_agent_process(
@@ -89,6 +99,7 @@ pub(crate) fn replace_session_agent_process(
     resume_thread: Option<&AgentSessionId>,
     close: impl FnOnce() -> StoreResult<bool>,
 ) -> StoreResult<SessionAttachment> {
+    let caller = crate::store::sessions::session_caller()?;
     let transfer = store.begin_session_transfer(session, Some(expected))?;
     transfer.require_owner()?;
     let (ended, reserved) = transfer.previous_progress()?;
@@ -98,7 +109,7 @@ pub(crate) fn replace_session_agent_process(
         ));
     }
     let start = expected.lf_process_id.as_ref().and_then(current_start);
-    transfer.replace_agent(resume_thread, reserved, start.as_ref())
+    transfer.replace_agent(resume_thread, reserved, start.as_ref(), &caller)
 }
 
 pub(crate) fn release_unrecorded_ancestry(

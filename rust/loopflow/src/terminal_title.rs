@@ -652,14 +652,13 @@ mod tests {
             host: None,
             checked: std::time::Instant::now(),
         };
-        title
-            .store
-            .rename_session(
-                &title.session,
-                "Release notes",
-                crate::session::TitleSource::Human,
-            )
-            .unwrap();
+        crate::store::sessions::rename_session(
+            &title.store,
+            &title.session,
+            "Release notes",
+            crate::session::TitleSource::Human,
+        )
+        .unwrap();
         assert_eq!(
             title.read_names().unwrap().map(|names| names.terminal),
             Some("Release notes".to_string())

@@ -1,6 +1,6 @@
 use crate::session::{LfSession, PrimaryScope, TitleSource};
 use crate::store::session_projection;
-use crate::store::sqlite::SqliteStore;
+use crate::store::sqlite::{SessionCaller, SqliteStore};
 use loopflow_model::durable::TaskId;
 use loopflow_model::id::LfProcessId;
 
@@ -131,8 +131,9 @@ impl Store {
     ) -> StoreResult<()> {
         let id = id.to_string();
         let title = title.to_string();
+        let caller = session_caller()?;
         run_sqlite(&self.sqlite, move |store| {
-            store.rename_session(&id, &title, source)
+            store.rename_session_prepared(&id, &title, source, &caller)
         })
         .await
     }
@@ -166,6 +167,29 @@ impl Store {
         })
         .await
     }
+}
+
+pub(crate) fn session_caller() -> StoreResult<SessionCaller> {
+    let capture_key = std::env::var_os(crate::session_record::CAPTURE_KEY_ENV)
+        .map(|key| {
+            key.into_string().map_err(|_| {
+                super::StoreError::InvalidData("capture key is not valid UTF-8".into())
+            })
+        })
+        .transpose()?;
+    Ok(SessionCaller {
+        agent: crate::journal::agent_caller(),
+        capture_key,
+    })
+}
+
+pub fn rename_session(
+    store: &SqliteStore,
+    id: &str,
+    title: &str,
+    source: TitleSource,
+) -> StoreResult<()> {
+    store.rename_session_prepared(id, title, source, &session_caller()?)
 }
 
 /// Prepare repository identity before admitting a Session to synchronous storage.
@@ -226,7 +250,8 @@ pub fn bind_session(
 ) -> StoreResult<LfSession> {
     let saved = store.session(id)?.ok_or(super::StoreError::NotFound)?;
     let _admission = super::admission::lock_task_checkouts(store, &[&saved.cwd], Some(task))?;
-    store.bind_session_prepared(id, capture, task, &saved.cwd)
+    let caller = session_caller()?;
+    store.bind_session_prepared(id, capture, task, &saved.cwd, &caller)
 }
 
 #[cfg(test)]

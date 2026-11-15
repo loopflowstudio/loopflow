@@ -140,7 +140,11 @@ fn new_task_reacquires_placement_after_wave_ancestry_changes() {
             None,
             None,
             None,
-            &stale
+            &stale,
+            &crate::store::sqlite::SessionCaller {
+                agent: None,
+                capture_key: None
+            },
         )
         .unwrap()
         .is_none());

@@ -92,6 +92,7 @@ pub(crate) mod scope_defaults;
 pub(crate) mod selections;
 mod session_events;
 pub(crate) mod sessions;
+pub use sessions::SessionCaller;
 pub(crate) mod task_ownership;
 
 mod steers;

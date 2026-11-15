@@ -47,3 +47,6 @@
   editor), which needs the caller threaded through every planning write.
 - Acquisition modules under `store/` keep their paths until the storage
   measurement picks the next cut; renaming them now changes no rebuild closure.
+- November 15 disposable cutover probe shows a changed SQL export cannot retry
+  through the existing journal. The upgrade move returns to review; the draft
+  journal rollback/archive sequence and crash checks are in `loo-650.md`.

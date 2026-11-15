@@ -12,6 +12,13 @@ use loopflow_model::durable::TaskId;
 use super::SqliteStore;
 use loopflow_model::id::{LfProcessId, TerminalId};
 
+/// Caller observations acquired before a Session command enters storage.
+#[derive(Debug, Clone)]
+pub struct SessionCaller {
+    pub agent: Option<crate::process::AgentCaller>,
+    pub capture_key: Option<String>,
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct SessionProcessIdentity {
     pub id: String,
@@ -1635,6 +1642,7 @@ impl SqliteStore {
         expected_capture: Option<i64>,
         task: &TaskId,
         cwd: &Path,
+        caller: &SessionCaller,
     ) -> StoreResult<LfSession> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -1644,6 +1652,7 @@ impl SqliteStore {
                 "Session changed before binding".into(),
             ));
         }
+        require_current_actor_in(&tx, id, caller)?;
         bind_session_in(&tx, &current, task)?;
         let bound = session_in(&tx, id)?.ok_or(StoreError::NotFound)?;
         tx.commit()?;
@@ -1708,7 +1717,13 @@ impl SqliteStore {
             .collect()
     }
 
-    pub fn rename_session(&self, id: &str, title: &str, source: TitleSource) -> StoreResult<()> {
+    pub fn rename_session_prepared(
+        &self,
+        id: &str,
+        title: &str,
+        source: TitleSource,
+        caller: &SessionCaller,
+    ) -> StoreResult<()> {
         let canonical = loopflow_model::id::canonical_session(id);
         let id = canonical.as_str();
         if title.trim().is_empty() {
@@ -1717,6 +1732,7 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let session = session_in(&tx, id)?.ok_or(StoreError::NotFound)?;
+        require_current_actor_in(&tx, id, caller)?;
         rename_session_in(&tx, &session, title, source, None)?;
         tx.commit()?;
         Ok(())
@@ -1807,7 +1823,6 @@ fn rename_session_in(
     source: TitleSource,
     previous: Option<&str>,
 ) -> StoreResult<()> {
-    require_current_actor_in(conn, &session.id)?;
     let title = generated_title_in(conn, session, title, source, previous)?;
     conn.execute(
         "UPDATE agent_sessions SET title=?2,title_source=?3 WHERE id=?1 AND (title_source='generated' OR ?3='human')",
@@ -1863,10 +1878,7 @@ pub(super) fn repair_task_titles_in(
         .query_map([task.as_str()], |row| row.get::<_, String>(0))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     for id in sessions {
-        match repair_session_title_in(conn, &id, previous) {
-            Err(StoreError::InvalidAuthority(_)) => {} // A stale provider cannot repair its replaced conversation.
-            result => result?,
-        }
+        repair_session_title_in(conn, &id, previous)?;
     }
     Ok(())
 }
@@ -1940,8 +1952,16 @@ fn resolve_ancestry_in(conn: &Connection, session: &mut LfSession) -> StoreResul
 }
 
 /// A replaced provider keeps causal history, but cannot mutate its conversation.
-fn require_current_actor_in(conn: &Connection, id: &str) -> StoreResult<()> {
-    if let Some(caller) = crate::journal::agent_caller().filter(|caller| caller.session_id == id) {
+pub(super) fn require_current_actor_in(
+    conn: &Connection,
+    id: &str,
+    observed: &SessionCaller,
+) -> StoreResult<()> {
+    if let Some(caller) = observed
+        .agent
+        .as_ref()
+        .filter(|caller| caller.session_id == id)
+    {
         let current: bool = conn.query_row(
             "SELECT EXISTS(SELECT 1 FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?1
                 AND p.id=?2 AND p.parent_lf_process_id=?3
@@ -1955,11 +1975,8 @@ fn require_current_actor_in(conn: &Connection, id: &str) -> StoreResult<()> {
             ));
         }
     }
-    if let Some(key) = std::env::var_os(crate::session_record::CAPTURE_KEY_ENV) {
-        let key = key
-            .into_string()
-            .map_err(|_| invalid("capture key is not valid UTF-8"))?;
-        crate::session_record::parse_artifact_key(&key).map_err(invalid)?;
+    if let Some(key) = &observed.capture_key {
+        crate::session_record::parse_artifact_key(key).map_err(invalid)?;
         let (owner, current): (String, bool) = conn
             .query_row(
                 "SELECT s.id,e.seq IS s.current_capture FROM session_events e
@@ -1972,7 +1989,11 @@ fn require_current_actor_in(conn: &Connection, id: &str) -> StoreResult<()> {
             .ok_or_else(|| {
                 invalid("capture does not belong to a recorded Session in this Machine")
             })?;
-        if crate::journal::agent_caller().is_some_and(|caller| caller.session_id != owner) {
+        if observed
+            .agent
+            .as_ref()
+            .is_some_and(|caller| caller.session_id != owner)
+        {
             return Err(invalid("capture belongs to another Session"));
         }
         let stale = owner == id && !current;

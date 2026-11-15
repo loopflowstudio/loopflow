@@ -689,37 +689,37 @@ fn live_conversation(
     let store = loopflow::store::sqlite::SqliteStore::new(&home.join("loopflow.db")).unwrap();
     let input = format!("run_{}", uuid::Uuid::new_v4().simple());
     let id = format!("session_{input}");
-    store
-        .create_session(
-            loopflow::session::LfSession {
-                captured: None,
-                id: id.clone().into(),
-                artifact_key: Some(input),
-                caller_artifact_key: None,
-                input_published: false,
-                cwd: cwd.into(),
-                skill: None,
-                provider: Some("codex".into()),
-                model: None,
-                node: None,
-                iterations: None,
-                task_id: None,
-                wave_id: None,
-                graph_lf_process_id: None,
-                work_source: None,
-                bound_at: None,
-                interactive: true,
-                repo: Some(cwd.display().to_string()),
-                title: title.into(),
-                title_source: loopflow::session::TitleSource::Generated,
-                request: None,
-                ready_summary: None,
-                completed_at: None,
-                created_at: 1,
-            },
-            None,
-        )
-        .unwrap();
+    loopflow::store::sessions::create_session(
+        &store,
+        loopflow::session::LfSession {
+            captured: None,
+            id: id.clone().into(),
+            artifact_key: Some(input),
+            caller_artifact_key: None,
+            input_published: false,
+            cwd: cwd.into(),
+            skill: None,
+            provider: Some("codex".into()),
+            model: None,
+            node: None,
+            iterations: None,
+            task_id: None,
+            wave_id: None,
+            graph_lf_process_id: None,
+            work_source: None,
+            bound_at: None,
+            interactive: true,
+            repo: Some(cwd.display().to_string()),
+            title: title.into(),
+            title_source: loopflow::session::TitleSource::Generated,
+            request: None,
+            ready_summary: None,
+            completed_at: None,
+            created_at: 1,
+        },
+        None,
+    )
+    .unwrap();
     let db = rusqlite::Connection::open(home.join("loopflow.db")).unwrap();
     let parent = loopflow::id::LfProcessId::new();
     db.execute(

@@ -201,7 +201,8 @@ mod tests {
         let other_repo =
             crate::repository::location::ensure_repository(&store, home.path().to_str().unwrap())
                 .unwrap();
-        let project = store.ensure_wave_project(path, "product").unwrap();
+        let project =
+            crate::work::wave::bootstrap::ensure_wave_project(&store, path, "product").unwrap();
         let groups: Vec<Vec<_>> = [
             (repo.clone(), None),
             (repo, Some(project.id)),
@@ -276,11 +277,16 @@ mod tests {
         let canonical = repo.path().canonicalize().unwrap();
         let path = canonical.to_str().unwrap();
         let repository = crate::repository::location::ensure_repository(&store, path).unwrap();
-        let product = store.ensure_wave_project(path, "product").unwrap();
-        let other = store.ensure_wave_project(path, "other").unwrap();
-        let foreign = store
-            .ensure_wave_project(foreign_repo.path().to_str().unwrap(), "foreign")
-            .unwrap();
+        let product =
+            crate::work::wave::bootstrap::ensure_wave_project(&store, path, "product").unwrap();
+        let other =
+            crate::work::wave::bootstrap::ensure_wave_project(&store, path, "other").unwrap();
+        let foreign = crate::work::wave::bootstrap::ensure_wave_project(
+            &store,
+            foreign_repo.path().to_str().unwrap(),
+            "foreign",
+        )
+        .unwrap();
         let task = store
             .create_task(&NewTask {
                 id: TaskId::new(),

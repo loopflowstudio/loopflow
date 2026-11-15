@@ -78,9 +78,11 @@ pub async fn relocate_wave(
         waves_moved: moves.len(),
     };
     if let Some((parent, _)) = root.target.slug().rsplit_once('/') {
-        store
-            .sqlite
-            .ensure_wave(&root.target.repo().to_string(), parent)?;
+        crate::work::wave::bootstrap::ensure_wave(
+            &store.sqlite,
+            &root.target.repo().to_string(),
+            parent,
+        )?;
     }
     let mut copied = Vec::new();
     for planned in &moves {

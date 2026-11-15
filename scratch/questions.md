@@ -21,3 +21,12 @@
   provider's newest selection at commit, rather than adding a schema revision.
   Preferences are observed again on every retry. A current empty choice needs
   only a savepoint, so it does not take the Machine's write lock.
+- Direct ensure of a retired Wave address writes the fresh identity to authored
+  config; discovery still skips retired subtrees. Keeping the retired ID in that
+  file would mint another identity after a SQL rollback, so the fresh ID is retained.
+- Saved records are placed in the storage crate unless a storage-independent
+  crate needs them; the alternative (all saved records in `loopflow-model`)
+  widens every record edit's rebuild to the terminal. Steer markers count as
+  storage's own files and keep their touch inside the write transaction.
+- After the storage crate moves, measure before choosing the next cut: `ops` and
+  `lf` (about 123k of 331k lines) stay in the application either way.

@@ -2631,10 +2631,13 @@ mod local_planning_tests {
 
     fn local_project(store: &SqliteStore) -> ProjectId {
         local_repository(store);
-        store
-            .ensure_wave_project(store.home_dir().unwrap().to_str().unwrap(), "inbox")
-            .unwrap()
-            .id
+        crate::work::wave::bootstrap::ensure_wave_project(
+            store,
+            store.home_dir().unwrap().to_str().unwrap(),
+            "inbox",
+        )
+        .unwrap()
+        .id
     }
 
     #[test]

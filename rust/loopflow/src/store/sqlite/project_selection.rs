@@ -395,7 +395,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&dir.path().join("loopflow.db")).unwrap();
         let wave = Wave::new(WaveId::new(), "product".into(), "/repo".into());
-        store.create_wave(&wave).unwrap();
+        crate::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
         let reserved = "11111111-1111-4111-8111-111111111111";
         store
             .conn
@@ -441,7 +441,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&dir.path().join("loopflow.db")).unwrap();
         let wave = Wave::new(WaveId::new(), "a".into(), "/repo".into());
-        store.create_wave(&wave).unwrap();
+        crate::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
         let guard = PlanningLocks::new(tempfile::tempfile().unwrap());
         {
             let conn = store.conn.lock().unwrap();
@@ -515,7 +515,7 @@ mod activation_tests {
         let dir = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&dir.path().join("loopflow.db")).unwrap();
         let wave = Wave::new(WaveId::new(), "a".into(), "/repo".into());
-        store.create_wave(&wave).unwrap();
+        crate::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
         let process = LfProcessId::new();
         store
             .conn

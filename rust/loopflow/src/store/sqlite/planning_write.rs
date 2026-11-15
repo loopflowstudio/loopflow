@@ -572,7 +572,7 @@ mod tests {
 
     fn plan(store: &SqliteStore) -> TaskId {
         let wave = Wave::new(WaveId::new(), "planning".into(), "/repo".into());
-        store.create_wave(&wave).unwrap();
+        crate::work::wave::bootstrap::upsert_wave(store, &wave).unwrap();
         let project = ProjectId::new();
         {
             let mut conn = store.conn.lock().unwrap();
@@ -762,7 +762,8 @@ mod tests {
             ownership.owner.unwrap().machine.id,
             Some(a.local_machine().unwrap().id)
         );
-        let project = b.ensure_wave_project(path, "product").unwrap();
+        let project =
+            crate::work::wave::bootstrap::ensure_wave_project(&b, path, "product").unwrap();
         b.move_task(&task.id, None, Some(&project.id)).unwrap();
         let journal = b.export_peer_planning(path, &route.id()).unwrap();
         crate::store::planning_peers::import_peer_planning(

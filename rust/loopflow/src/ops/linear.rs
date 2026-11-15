@@ -1229,10 +1229,11 @@ async fn apply_or_plan_repository_reteam(
 
     if apply {
         // A clone's authored Waves join the store before the move; a removed one stays removed.
-        store
-            .sqlite
-            .register_authored_waves(&repo.to_string_lossy())
-            .map_err(|error| OpsError::Message(error.to_string()))?;
+        crate::work::wave::bootstrap::register_authored_waves(
+            &store.sqlite,
+            &repo.to_string_lossy(),
+        )
+        .map_err(|error| OpsError::Message(error.to_string()))?;
     }
     let mut registered = Vec::new();
     for wave in &waves {

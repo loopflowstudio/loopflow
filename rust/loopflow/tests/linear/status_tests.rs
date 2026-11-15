@@ -40,7 +40,7 @@ fn seed(home: &Path, wave_name: &str) -> Wave {
         wave_name.to_string(),
         repo.canonicalize().unwrap().display().to_string(),
     );
-    store.create_wave(&wave).expect("register wave");
+    loopflow::work::wave::bootstrap::upsert_wave(&store, &wave).expect("register wave");
     wave
 }
 
@@ -768,7 +768,7 @@ fn a_wave_with_no_runs_reports_an_empty_reading_not_a_missing_one() {
         "audit-c".to_string(),
         home.path().join("repo").display().to_string(),
     );
-    store.create_wave(&wave).expect("register wave");
+    loopflow::work::wave::bootstrap::upsert_wave(&store, &wave).expect("register wave");
 
     let status = status_json(home.path(), &["audit-c"], None);
 
@@ -1065,7 +1065,7 @@ fn exact_task_roadmap_scopes_duplicate_identifiers_to_registered_repositories() 
         "other".into(),
         other_repo.canonicalize().unwrap().display().to_string(),
     );
-    store.create_wave(&other).unwrap();
+    loopflow::work::wave::bootstrap::upsert_wave(&store, &other).unwrap();
     snapshot.snapshot.projects[0].id = "other-project".into();
     snapshot.snapshot.projects[0].initiative_ids = vec!["other-initiative".into()];
     snapshot.snapshot.items[0].id = "other-task".into();

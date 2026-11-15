@@ -1,5 +1,6 @@
 //! Durable Wave identity, authored context, and placement.
 
+pub mod bootstrap;
 pub mod config;
 pub mod context;
 pub mod metrics;
@@ -186,9 +187,11 @@ pub async fn ensure_wave_row(
 ) -> crate::store::StoreResult<Wave> {
     let locator = WaveLocator::discover(repo, name)
         .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))?;
-    let id = store
-        .sqlite
-        .ensure_wave(&repo.to_string_lossy(), locator.slug())?;
+    let id = crate::work::wave::bootstrap::ensure_wave(
+        &store.sqlite,
+        &repo.to_string_lossy(),
+        locator.slug(),
+    )?;
     store
         .get_wave(&id)
         .await?

@@ -77,7 +77,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         let wave = Wave::new(WaveId::new(), "product".into(), "/repo".into());
-        store.create_wave(&wave).unwrap();
+        crate::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
         let observed = serde_json::from_value(serde_json::json!({
             "id":"linear-project", "revision":"2026-10-10T12:00:00Z", "slug":"product", "name":"Product", "summary":"",
             "workflow":"", "krs":[], "metric_targets":[], "status":"started", "initiative_ids":["initiative"], "team_ids":["team"]
@@ -138,7 +138,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         let wave = Wave::new(WaveId::new(), "product".into(), "/repo".into());
-        store.create_wave(&wave).unwrap();
+        crate::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
         let mut observed: crate::linear::LinearProject = serde_json::from_value(serde_json::json!({
             "id":"linear-project", "revision":"2026-10-10T12:00:00Z", "slug":"product", "name":"Product", "summary":"",
             "workflow":"", "krs":[], "metric_targets":[], "status":"started", "initiative_ids":["initiative"], "team_ids":["team"]
@@ -195,7 +195,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         let wave = Wave::new(WaveId::new(), "product".into(), "/repo".into());
-        store.create_wave(&wave).unwrap();
+        crate::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
         let mut observed: crate::linear::LinearProject = serde_json::from_value(serde_json::json!({
             "id":"linear-project", "revision":"2026-10-10T12:00:00Z", "slug":"product", "name":"Product", "summary":"", "description":"Baseline",
             "workflow":"", "krs":[], "metric_targets":[], "status":"started", "initiative_ids":["initiative"], "team_ids":["team"]
@@ -272,7 +272,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         let wave = Wave::new(WaveId::new(), "product".into(), "/repo".into());
-        store.create_wave(&wave).unwrap();
+        crate::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
         let project = loopflow_model::durable::ProjectId::new();
         let conn = store.conn.lock().unwrap();
         conn.execute("INSERT INTO projects(id,wave_id,created_at,updated_at,project_slug,project_name,description)
@@ -301,7 +301,7 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&database).unwrap();
         for (name, mapping) in [("offline", None), ("connected", Some("linear-project"))] {
             let wave = Wave::new(WaveId::new(), name.into(), "/repo".into());
-            store.create_wave(&wave).unwrap();
+            crate::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
             let project = loopflow_model::durable::ProjectId::new();
             store
                 .conn

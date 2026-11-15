@@ -77,7 +77,7 @@ impl Machine {
             "product".into(),
             repo.canonicalize().unwrap().display().to_string(),
         );
-        store.create_wave(&wave).unwrap();
+        loopflow::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
         Self { dir, store, wave }
     }
 
@@ -826,13 +826,13 @@ fn planning_runs_git_per_repository_not_per_wave() {
             format!("gone-{index}"),
             gone.display().to_string(),
         );
-        home.store.create_wave(&wave).unwrap();
+        loopflow::work::wave::bootstrap::upsert_wave(&home.store, &wave).unwrap();
         let sibling = Wave::new(
             WaveId::new(),
             format!("sibling-{index}"),
             home.wave.repo().into(),
         );
-        home.store.create_wave(&sibling).unwrap();
+        loopflow::work::wave::bootstrap::upsert_wave(&home.store, &sibling).unwrap();
     }
     let grown = planning_git_commands(home.path());
 

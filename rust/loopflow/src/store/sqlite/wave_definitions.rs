@@ -1,183 +1,113 @@
-//! Wave registration.
+//! Saved Wave bootstrap inputs and atomic hierarchy registration.
 
-use crate::work::edit::WorkValue as Edit;
-use std::path::Path;
-
-use rusqlite::{params, OptionalExtension, TransactionBehavior};
-
-use crate::store::{StoreError, StoreResult};
-use crate::work::project::Project;
-use crate::work::wave::{Wave, WaveLocator};
-use loopflow_model::id::WaveId;
-
+use super::repositories::RepositoryRegistration;
 use super::{planning_write, SqliteStore};
+use crate::store::StoreResult;
+use crate::work::edit::WorkValue as Edit;
+use crate::work::wave::{Wave, WaveLocator};
+use loopflow_model::durable::RepositoryId;
+use loopflow_model::id::WaveId;
+use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct WaveBootstrapRow {
+    pub id: WaveId,
+    pub repo: String,
+    pub name: String,
+    pub parent: Option<WaveId>,
+    pub retired_at: Option<i64>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct WaveBootstrapInputs {
+    pub repository: RepositoryRegistration,
+    pub waves: Vec<WaveBootstrapRow>,
+}
+
+const WAVE_BOOTSTRAP_SELECT: &str =
+    "SELECT id,repo,name,parent_wave_id,retired_at FROM waves WHERE repo=?1 AND retired_at IS NULL
+     UNION SELECT id,repo,name,parent_wave_id,retired_at FROM waves
+     WHERE id IN (SELECT value FROM json_each(?2)) ORDER BY id";
+
+fn bootstrap_inputs_in(
+    conn: &Connection,
+    repo: &str,
+    authored: &[WaveId],
+) -> StoreResult<WaveBootstrapInputs> {
+    let mut query = conn.prepare(WAVE_BOOTSTRAP_SELECT)?;
+    let waves = query
+        .query_map(params![repo, serde_json::to_string(authored)?], |row| {
+            Ok(WaveBootstrapRow {
+                id: row.get(0)?,
+                repo: row.get(1)?,
+                name: row.get(2)?,
+                parent: row.get(3)?,
+                retired_at: row.get(4)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(WaveBootstrapInputs {
+        repository: super::repositories::registration_in(conn, repo)?,
+        waves,
+    })
+}
 
 impl SqliteStore {
-    /// Provision a Wave hierarchy without a provider, preserving existing authored files.
-    pub fn ensure_wave_project(&self, repo: &str, name: &str) -> StoreResult<Project> {
-        let wave = self.ensure_wave(repo, name)?;
-        let project = self.ensure_project(&wave, name)?;
-        self.project(&project)?.ok_or(StoreError::NotFound)
+    pub(crate) fn wave_bootstrap_inputs(
+        &self,
+        repo: &str,
+        authored: &[WaveId],
+    ) -> StoreResult<WaveBootstrapInputs> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let snapshot = conn.savepoint()?;
+        bootstrap_inputs_in(&snapshot, repo, authored)
     }
 
-    pub fn ensure_wave(&self, repo: &str, name: &str) -> StoreResult<WaveId> {
-        if name.split('/').any(|part| {
-            part.trim().is_empty() || part.contains([':', '\\']) || matches!(part, "." | "..")
-        }) {
-            return Err(StoreError::InvalidData("invalid Wave name".into()));
+    pub(crate) fn commit_wave_bootstrap(
+        &self,
+        repo: &str,
+        authored: &[WaveId],
+        inputs: &WaveBootstrapInputs,
+        registration: Option<(&RepositoryRegistration, &RepositoryId)>,
+        additions: &[WaveBootstrapRow],
+    ) -> StoreResult<bool> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if bootstrap_inputs_in(&tx, repo, authored)? != *inputs {
+            return Ok(false);
         }
-        let checkout = Path::new(repo);
-        let canonical = crate::repository::CanonicalRepo::discover(checkout)
-            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
-        let repo = canonical.to_string();
-        loop {
-            let registration = self
-                .repository_id(&repo)?
-                .is_none()
-                .then(|| {
-                    crate::repository::location::prepare_registration(self, &repo, None, false)
-                })
-                .transpose()?;
-            let mut conn = self.conn.lock().expect("store mutex poisoned");
-            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-            if let Some(registration) = &registration {
-                if !super::repositories::register_in(
-                    &tx,
-                    &repo,
-                    &registration.inputs,
-                    &registration.id,
-                    false,
-                )? {
-                    continue;
-                }
+        if let Some((saved, id)) = registration {
+            if !super::repositories::register_in(&tx, repo, saved, id, false)? {
+                return Ok(false);
             }
-            let mut parent: Option<WaveId> = None;
-            let mut prefix = String::new();
-            for part in name.split('/') {
-                if !prefix.is_empty() {
-                    prefix.push('/');
-                }
-                prefix.push_str(part);
-                let directory = checkout.join(".lf/wave").join(&prefix);
-                let mut authored_id =
-                    crate::work::wave::config::try_read_wave_config(checkout, &prefix)
-                        .map_err(|error| StoreError::InvalidData(error.to_string()))?
-                        .and_then(|config| config.id);
-                // Authored directories match by id first: a checkout that has not yet
-                // rebased past a rename or removal neither renames the Wave back nor
-                // resurrects a removed identity.
-                if let Some(id) = authored_id.clone() {
-                    let live: Option<bool> = tx
-                        .query_row(
-                            "SELECT retired_at IS NULL FROM waves WHERE id=?1",
-                            [&id],
-                            |row| row.get(0),
-                        )
-                        .optional()?;
-                    match live {
-                        Some(true) => {
-                            seed_wave_files(&directory, &id, &prefix)?;
-                            parent = Some(id);
-                            continue;
-                        }
-                        Some(false) => {
-                            tracing::info!(
-                                directory = %directory.display(),
-                                "skipping authored Wave directory whose Wave was removed"
-                            );
-                            authored_id = None;
-                        }
-                        None => {}
-                    }
-                }
-                let existing: Option<WaveId> = tx.query_row(
-                "SELECT id FROM waves WHERE repo=?1 AND name=?2 AND parent_wave_id IS ?3 AND retired_at IS NULL",
-                params![repo, part, parent], |row| row.get(0)).optional()?;
-                let wave = match existing {
-                    Some(wave) => {
-                        if authored_id.as_ref().is_some_and(|id| id != &wave) {
-                            return Err(StoreError::InvalidData(format!(
-                                "Wave {prefix} is already registered with another id"
-                            )));
-                        }
-                        wave
-                    }
-                    None => {
-                        let wave = authored_id.unwrap_or_default();
-                        planning_write::create(
-                            &tx,
-                            &repo,
-                            &crate::work::edit::WorkEdit::for_target(
-                                wave.as_str(),
-                                &[
-                                    Edit::WaveName(part.into()),
-                                    Edit::WaveParent(parent.as_ref().map(ToString::to_string)),
-                                ],
-                            ),
-                        )?;
-                        wave
-                    }
-                };
-                seed_wave_files(&directory, &wave, &prefix)?;
-                if crate::work::wave::config::try_read_wave_config(checkout, &prefix)
-                    .map_err(|error| StoreError::InvalidData(error.to_string()))?
-                    .and_then(|config| config.id)
-                    .is_none()
-                {
-                    crate::work::wave::config::update_wave_config(checkout, &prefix, |values| {
-                        values.insert("id".into(), wave.to_string().into());
-                        Ok(())
-                    })
-                    .map_err(StoreError::InvalidData)?;
-                }
-                parent = Some(wave);
-            }
-            tx.commit()?;
-            return Ok(parent.expect("validated Wave has at least one component"));
         }
-    }
-
-    /// Register every authored Wave directory under `<checkout>/.lf/wave/`, matching
-    /// by `config.yaml` id first. A directory whose id names a removed Wave is left
-    /// alone with its subtree, so a clone or a checkout behind the planning store
-    /// never brings a removed Wave back. A directory that cannot be read or
-    /// registered is logged and skipped with its subtree; the rest still register.
-    pub fn register_authored_waves(&self, repo: &str) -> StoreResult<()> {
-        let checkout = Path::new(repo);
-        let root = checkout.join(".lf/wave");
-        let mut pending = child_directories(&root, "");
-        while let Some(slug) = pending.pop() {
-            let directory = root.join(&slug);
-            if directory.join("GOAL.md").is_file() || directory.join("config.yaml").is_file() {
-                let authored = match crate::work::wave::config::try_read_wave_config(
-                    checkout, &slug,
-                ) {
-                    Ok(config) => config.and_then(|config| config.id),
-                    Err(error) => {
-                        tracing::warn!(slug, %error, "authored Wave directory was not registered");
-                        continue;
-                    }
-                };
-                let removed = authored
-                    .map(|id| self.get_wave(&id))
-                    .transpose()?
-                    .flatten()
-                    .is_some_and(|wave| wave.is_retired());
-                if removed {
-                    tracing::info!(
-                        slug,
-                        "skipping authored Wave directory whose Wave was removed"
-                    );
-                    continue;
-                }
-                if let Err(error) = self.ensure_wave(repo, &slug) {
-                    tracing::warn!(slug, %error, "authored Wave directory was not registered");
-                    continue;
-                }
+        if !additions.is_empty() {
+            let occupied: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM waves WHERE id IN (SELECT value FROM json_each(?1)))",
+                [serde_json::to_string(
+                    &additions.iter().map(|wave| &wave.id).collect::<Vec<_>>(),
+                )?],
+                |row| row.get(0),
+            )?;
+            if occupied {
+                return Ok(false);
             }
-            pending.extend(child_directories(&root, &slug));
         }
-        Ok(())
+        for wave in additions {
+            planning_write::create(
+                &tx,
+                repo,
+                &crate::work::edit::WorkEdit::for_target(
+                    wave.id.as_str(),
+                    &[
+                        Edit::WaveName(wave.name.clone()),
+                        Edit::WaveParent(wave.parent.as_ref().map(ToString::to_string)),
+                    ],
+                ),
+            )?;
+        }
+        tx.commit()?;
+        Ok(true)
     }
 
     /// Retire Waves together through the planning writer, so Git planning exchange
@@ -245,186 +175,8 @@ impl SqliteStore {
     }
 }
 
-/// The directories directly under `prefix`, as slugs. A directory without its own
-/// authored files still leads to nested Waves.
-fn child_directories(root: &Path, prefix: &str) -> Vec<String> {
-    let directory = if prefix.is_empty() {
-        root.to_path_buf()
-    } else {
-        root.join(prefix)
-    };
-    let Ok(entries) = std::fs::read_dir(directory) else {
-        return Vec::new();
-    };
-    let mut slugs: Vec<String> = entries
-        .flatten()
-        .filter(|entry| entry.path().is_dir())
-        .filter_map(|entry| entry.file_name().to_str().map(str::to_string))
-        .filter(|name| !name.starts_with('.'))
-        .map(|name| {
-            if prefix.is_empty() {
-                name
-            } else {
-                format!("{prefix}/{name}")
-            }
-        })
-        .collect();
-    slugs.sort();
-    slugs
-}
-
-fn seed_wave_files(directory: &Path, id: &WaveId, name: &str) -> StoreResult<()> {
-    use std::io::Write;
-    std::fs::create_dir_all(directory)
-        .map_err(|error| StoreError::InvalidData(format!("{}: {error}", directory.display())))?;
-    // A Wave authored before config.yaml keeps its id in GOAL.md frontmatter.
-    let config =
-        (!directory.join("GOAL.md").exists()).then(|| ("config.yaml", format!("id: {id}\n")));
-    for (file, content) in config.into_iter().chain([
-        ("GOAL.md", format!("## Objective\n\n{name}\n")),
-        ("MEMORY.md", format!("# {name} wave memory\n")),
-    ]) {
-        let path = directory.join(file);
-        match std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&path)
-        {
-            Ok(mut file) => file.write_all(content.as_bytes()),
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists && path.is_file() => {
-                continue
-            }
-            Err(error) => Err(error),
-        }
-        .map_err(|error| StoreError::InvalidData(format!("{}: {error}", path.display())))?;
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
-    use super::SqliteStore;
-    use crate::work::wave::{Wave, WaveLocator};
-    use loopflow_model::id::WaveId;
-
-    #[test]
-    fn wave_files_are_created_without_overwriting_authored_content() {
-        let repo = loopflow_test_support::TestRepo::new();
-        let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
-        let directory = repo.path().join(".lf/wave/tools/parser");
-        std::fs::create_dir_all(&directory).unwrap();
-        let id = WaveId::new();
-        let goal = format!("---\nid: {id}\n---\nKeep tokens λ.\n");
-        std::fs::write(directory.join("GOAL.md"), &goal).unwrap();
-        assert_eq!(
-            store
-                .ensure_wave(repo.path().to_str().unwrap(), "tools/parser")
-                .unwrap(),
-            id
-        );
-        let parent = crate::work::wave::config::read_wave_config(repo.path(), "tools").unwrap();
-        assert!(parent.id.is_some());
-        assert!(repo.path().join(".lf/wave/tools/GOAL.md").is_file());
-        assert!(!directory.join("config.yaml").exists());
-        assert!(directory.join("MEMORY.md").is_file());
-        std::fs::write(directory.join("MEMORY.md"), "Edited directly.\n").unwrap();
-        assert_eq!(
-            store
-                .ensure_wave(repo.path().to_str().unwrap(), "tools/parser")
-                .unwrap(),
-            id
-        );
-        assert_eq!(
-            std::fs::read_to_string(directory.join("GOAL.md")).unwrap(),
-            goal
-        );
-        assert_eq!(
-            std::fs::read_to_string(directory.join("MEMORY.md")).unwrap(),
-            "Edited directly.\n"
-        );
-    }
-
-    #[test]
-    fn stale_checkouts_match_by_id_and_never_resurrect_a_removed_wave() {
-        let repo = loopflow_test_support::TestRepo::new();
-        let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
-        let root = repo.path().to_str().unwrap();
-        let renamed = store.ensure_wave(root, "product").unwrap();
-        let removed = store.ensure_wave(root, "archive").unwrap();
-        // The store renames `product` and retires `archive`; this checkout still
-        // has both old directories.
-        {
-            let conn = store.conn.lock().unwrap();
-            super::super::planning_write::local(
-                &conn,
-                &crate::work::edit::WorkEdit::for_target(
-                    renamed.as_str(),
-                    &[crate::work::edit::WorkValue::WaveName("prod".into())],
-                ),
-            )
-            .unwrap();
-        }
-        store
-            .retire_waves(std::slice::from_ref(&removed), "removed")
-            .unwrap();
-
-        assert_eq!(store.ensure_wave(root, "product").unwrap(), renamed);
-        assert_eq!(store.get_wave(&renamed).unwrap().unwrap().name(), "prod");
-        let fresh = store.ensure_wave(root, "archive").unwrap();
-        assert_ne!(fresh, removed, "a removed identity is never re-created");
-        assert!(store.get_wave(&removed).unwrap().unwrap().is_retired());
-    }
-
-    #[test]
-    fn registering_a_clones_directories_lists_them_and_skips_a_removed_wave() {
-        let repo = loopflow_test_support::TestRepo::new();
-        let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
-        let root = repo.path().to_str().unwrap();
-        // The clone carries a removed Wave's directory and two nobody registered.
-        let removed = store.ensure_wave(root, "archive").unwrap();
-        store
-            .retire_waves(std::slice::from_ref(&removed), "removed")
-            .unwrap();
-        for slug in ["research", "tools/parser"] {
-            let directory = repo.path().join(".lf/wave").join(slug);
-            std::fs::create_dir_all(&directory).unwrap();
-            std::fs::write(
-                directory.join("GOAL.md"),
-                format!("## Objective\n\n{slug}\n"),
-            )
-            .unwrap();
-        }
-        std::fs::create_dir_all(repo.path().join(".lf/wave/research/metrics")).unwrap();
-
-        store.register_authored_waves(root).unwrap();
-        let canonical = crate::repository::CanonicalRepo::discover(repo.path())
-            .unwrap()
-            .to_string();
-        let mut live: Vec<String> = store
-            .list_waves(Some(&canonical))
-            .unwrap()
-            .into_iter()
-            .filter(|wave| !wave.is_retired())
-            .map(|wave| wave.slug().to_string())
-            .collect();
-        live.sort();
-        assert_eq!(
-            live,
-            ["research", "tools", "tools/parser"],
-            "tools registers through its child"
-        );
-        assert!(store.get_wave(&removed).unwrap().unwrap().is_retired());
-        store.register_authored_waves(root).unwrap();
-        assert_eq!(
-            store.list_waves(Some(&canonical)).unwrap().len(),
-            3,
-            "registering again changes nothing"
-        );
-    }
-
     #[test]
     fn released_waves_upgrade_and_removal_needs_no_successor() {
         use crate::store::migrations::{apply_before_migration, apply_pending_migrations};
@@ -466,61 +218,56 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn relocation_preserves_definitions_and_refuses_established_collisions_and_cycles() {
-        let repo = loopflow_test_support::TestRepo::new();
+    #[test]
+    fn bootstrap_reads_use_indexes_beside_ten_thousand_tasks_and_waves() {
+        use super::{SqliteStore, WAVE_BOOTSTRAP_SELECT};
+        use crate::store::query_plans::{growing_scans, statements};
+
         let home = tempfile::tempdir().unwrap();
-        let store = crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
-            home.path().join("store.db"),
-        ))
-        .await
-        .unwrap();
-        let canonical = crate::repository::CanonicalRepo::discover(repo.path()).unwrap();
-        let id = store
-            .sqlite
-            .ensure_wave(&canonical.to_string(), "tools/parser")
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let history = crate::repository::location::ensure_repository(&store, "/history").unwrap();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute_batch(&format!(
+                "WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<10000)
+                 INSERT INTO tasks(id,repository_id,issue_identifier,created_at)
+                 SELECT printf('task_%032x',x),'{history}',printf('H-%d',x),1 FROM n;
+                 INSERT INTO task_checkouts(task_id,worktree,branch)
+                 SELECT id,'/history/' || id,'main' FROM tasks;
+                 WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<10000)
+                 INSERT INTO waves(id,repo,name,created_at)
+                 SELECT printf('%08x-0000-4000-8000-000000000000',x),'/history',printf('w%d',x),1 FROM n;"
+            )).unwrap();
+        }
+        let traced = statements(&store, || {
+            assert!(store
+                .wave_bootstrap_inputs("/repo", &[])
+                .unwrap()
+                .waves
+                .is_empty());
+        });
+        let scans = growing_scans(&store, &traced);
+        assert!(scans.is_empty(), "{}", scans.join("\n"));
+        let conn = store.conn.lock().unwrap();
+        let mut query = conn
+            .prepare(&format!("EXPLAIN QUERY PLAN {WAVE_BOOTSTRAP_SELECT}"))
             .unwrap();
-        let root = store
-            .get_wave_at(&WaveLocator::new(canonical.clone(), "tools").unwrap())
-            .await
+        let plans = query
+            .query_map(rusqlite::params!["/repo", "[]"], |row| {
+                row.get::<_, String>(3)
+            })
             .unwrap()
+            .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        std::fs::write(
-            repo.path().join(".lf/wave/tools/parser/MEMORY.md"),
-            "Retained",
-        )
-        .unwrap();
-        let collision = Wave::new(WaveId::new(), "occupied".into(), canonical.to_string());
-        store.create_wave(&collision).await.unwrap();
-        store
-            .sqlite
-            .ensure_project(collision.id(), "Existing plan")
-            .unwrap();
-        assert!(crate::work::wave::relocate::relocate_wave(
-            &store,
-            root.id(),
-            repo.path(),
-            None,
-            Some("occupied")
-        )
-        .await
-        .is_err());
-        assert!(crate::work::wave::relocate::relocate_wave(
-            &store,
-            root.id(),
-            repo.path(),
-            None,
-            Some("tools/parser/loop")
-        )
-        .await
-        .is_err());
-        assert_eq!(
-            store.get_wave(&id).await.unwrap().unwrap().slug(),
-            "tools/parser"
+        assert!(
+            !plans.iter().any(|step| step.starts_with("SCAN waves")),
+            "{plans:?}"
         );
-        assert_eq!(
-            std::fs::read_to_string(repo.path().join(".lf/wave/tools/parser/MEMORY.md")).unwrap(),
-            "Retained"
+        assert!(
+            plans
+                .iter()
+                .any(|step| step.contains("idx_waves_active_locator")),
+            "{plans:?}"
         );
     }
 }

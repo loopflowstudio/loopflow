@@ -40,6 +40,11 @@ impl CanonicalRepo {
         Ok(Self(canonical))
     }
 
+    /// Decode an address already canonicalized when it was saved.
+    pub(crate) fn from_saved_path(path: PathBuf) -> Self {
+        Self(path)
+    }
+
     pub fn as_path(&self) -> &Path {
         &self.0
     }

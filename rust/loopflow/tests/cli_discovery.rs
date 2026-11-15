@@ -1090,12 +1090,12 @@ fn wave_catalog_reads_imported_definitions_and_keeps_empty_goals() {
     assert!(!home.path().join(".lf").exists());
     let store =
         loopflow::store::sqlite::SqliteStore::new(&home.path().join(".lf/loopflow.db")).unwrap();
-    store
-        .ensure_wave(
-            repo.path().canonicalize().unwrap().to_str().unwrap(),
-            "parent/child",
-        )
-        .unwrap();
+    loopflow::work::wave::bootstrap::ensure_wave(
+        &store,
+        repo.path().canonicalize().unwrap().to_str().unwrap(),
+        "parent/child",
+    )
+    .unwrap();
     let rows = json_entries(repo.path(), home.path(), &["list", "wave", "--json"]);
     assert_eq!(rows.len(), 2);
     assert_eq!(rows[0]["name"], "parent");

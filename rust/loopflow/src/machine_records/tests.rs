@@ -16,7 +16,7 @@ fn with_task(home: &Path) -> SqliteStore {
     let store = SqliteStore::open_ephemeral(&home.join("db")).unwrap();
     let repo = home.canonicalize().unwrap();
     let repo = repo.to_str().unwrap();
-    let project = store.ensure_wave_project(repo, "inbox").unwrap();
+    let project = crate::work::wave::bootstrap::ensure_wave_project(&store, repo, "inbox").unwrap();
     store
         .create_task(&NewTask {
             repository_id: crate::repository::location::ensure_repository(&store, repo).unwrap(),

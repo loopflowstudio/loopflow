@@ -186,10 +186,12 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
     fs::write(right.path().join("config.yaml"), "user:\n  name: Lee\n").unwrap();
     let fixture = support::register_task_with_pr(left.path(), &source, "main", &repo.head_sha());
     save_fixture_task(left.path(), &fixture.task);
-    loopflow::store::sqlite::SqliteStore::new(&left.path().join("loopflow.db"))
-        .unwrap()
-        .ensure_wave_project(source.to_str().unwrap(), "task-pr-tests")
-        .unwrap();
+    loopflow::work::wave::bootstrap::ensure_wave_project(
+        &loopflow::store::sqlite::SqliteStore::new(&left.path().join("loopflow.db")).unwrap(),
+        source.to_str().unwrap(),
+        "task-pr-tests",
+    )
+    .unwrap();
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let worker = runtime
         .block_on(open_ephemeral_store(&StorageConfig::sqlite(
@@ -699,10 +701,12 @@ fn public_wave_reads_imported_planning_without_placing_or_changing_execution() {
     let target = other.path().canonicalize().unwrap();
     let fixture = support::register_task_with_pr(left.path(), &source, "main", &repo.head_sha());
     save_fixture_task(left.path(), &fixture.task);
-    loopflow::store::sqlite::SqliteStore::new(&left.path().join("loopflow.db"))
-        .unwrap()
-        .ensure_wave_project(source.to_str().unwrap(), "task-pr-tests")
-        .unwrap();
+    loopflow::work::wave::bootstrap::ensure_wave_project(
+        &loopflow::store::sqlite::SqliteStore::new(&left.path().join("loopflow.db")).unwrap(),
+        source.to_str().unwrap(),
+        "task-pr-tests",
+    )
+    .unwrap();
     let source_store =
         loopflow::store::sqlite::SqliteStore::new(&left.path().join("loopflow.db")).unwrap();
     let retained = create(&target, right.path(), "");

@@ -132,15 +132,17 @@ elif os.path.basename(sys.argv[0]) == 'codex':
             &self.home.path().join("machine/loopflow.db"),
         )
         .unwrap();
-        store
-            .create_wave(&loopflow::work::wave::Wave::new(
+        loopflow::work::wave::bootstrap::upsert_wave(
+            &store,
+            &loopflow::work::wave::Wave::new(
                 loopflow::id::WaveId::new(),
                 "fixture".into(),
                 loopflow::repository::CanonicalRepo::discover(self.repo.path())
                     .unwrap()
                     .to_string(),
-            ))
-            .unwrap();
+            ),
+        )
+        .unwrap();
     }
 
     fn settings(&self, provider: &str, yolo: bool, chrome: bool) {

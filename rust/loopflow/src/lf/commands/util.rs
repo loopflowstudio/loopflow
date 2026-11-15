@@ -1243,7 +1243,11 @@ mod tests {
                     .unwrap(),
                 due_date: None,
                 id: TaskId::new(),
-                project_id: Some(store.ensure_wave_project(repo, "inbox").unwrap().id),
+                project_id: Some(
+                    crate::work::wave::bootstrap::ensure_wave_project(&store, repo, "inbox")
+                        .unwrap()
+                        .id,
+                ),
                 title: "Move it".into(),
                 description: String::new(),
             })

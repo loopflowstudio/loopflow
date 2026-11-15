@@ -1572,9 +1572,12 @@ impl SharedPlan {
         store: &loopflow::store::sqlite::SqliteStore,
         path: &Path,
     ) -> loopflow::durable::TaskId {
-        let project = store
-            .ensure_wave_project(path.to_str().unwrap(), "owners")
-            .unwrap();
+        let project = loopflow::work::wave::bootstrap::ensure_wave_project(
+            store,
+            path.to_str().unwrap(),
+            "owners",
+        )
+        .unwrap();
         store
             .create_task(&loopflow::work::task::NewTask {
                 repository_id: loopflow::repository::location::ensure_repository(
@@ -1677,11 +1680,13 @@ fn set_machine_changes_local_preferences_without_copying_or_moving_work() {
     plan.to_local();
     let mini = plan.remote.local_machine().unwrap().id;
     let laptop = plan.local.local_machine().unwrap().id;
-    let wave = plan
-        .local
-        .ensure_wave_project(plan.local_path.to_str().unwrap(), "owners")
-        .unwrap()
-        .wave_id;
+    let wave = loopflow::work::wave::bootstrap::ensure_wave_project(
+        &plan.local,
+        plan.local_path.to_str().unwrap(),
+        "owners",
+    )
+    .unwrap()
+    .wave_id;
     let output = fixture.run(&[
         "--repo-id",
         plan.repository.as_str(),

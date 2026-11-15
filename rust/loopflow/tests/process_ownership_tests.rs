@@ -875,37 +875,37 @@ fn recorded_lf_process(database: &Path) -> LfProcessId {
 
 fn reserve_session(store: &SqliteStore, session_id: &str, repo: &Path) {
     let run_id = uuid::Uuid::new_v4().simple().to_string();
-    store
-        .create_session(
-            LfSession {
-                captured: None,
-                task_id: None,
-                wave_id: None,
-                graph_lf_process_id: None,
-                work_source: None,
-                bound_at: None,
-                id: session_id.into(),
-                artifact_key: Some(run_id),
-                caller_artifact_key: None,
-                input_published: false,
-                cwd: repo.into(),
-                skill: None,
-                provider: Some("codex".into()),
-                model: None,
-                node: None,
-                iterations: None,
-                interactive: true,
-                repo: None,
-                title: "AgentProcess ownership".into(),
-                title_source: TitleSource::Generated,
-                request: None,
-                ready_summary: None,
-                completed_at: None,
-                created_at: 1,
-            },
-            None,
-        )
-        .unwrap();
+    loopflow::store::sessions::create_session(
+        store,
+        LfSession {
+            captured: None,
+            task_id: None,
+            wave_id: None,
+            graph_lf_process_id: None,
+            work_source: None,
+            bound_at: None,
+            id: session_id.into(),
+            artifact_key: Some(run_id),
+            caller_artifact_key: None,
+            input_published: false,
+            cwd: repo.into(),
+            skill: None,
+            provider: Some("codex".into()),
+            model: None,
+            node: None,
+            iterations: None,
+            interactive: true,
+            repo: None,
+            title: "AgentProcess ownership".into(),
+            title_source: TitleSource::Generated,
+            request: None,
+            ready_summary: None,
+            completed_at: None,
+            created_at: 1,
+        },
+        None,
+    )
+    .unwrap();
 }
 
 #[tokio::test]

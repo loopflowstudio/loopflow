@@ -643,10 +643,15 @@ async fn worktree_reads_its_checkout_wave_memory() {
     .unwrap();
 
     fs::write(worktree.join(".lf/wave/goals/GOAL.md"), "Checkout goal.").unwrap();
-    loopflow::store::sqlite::SqliteStore::new(&loopflow::store::database_path_from_env().unwrap())
-        .unwrap()
-        .ensure_wave(origin.canonicalize().unwrap().to_str().unwrap(), "goals")
-        .unwrap();
+    loopflow::work::wave::bootstrap::ensure_wave(
+        &loopflow::store::sqlite::SqliteStore::new(
+            &loopflow::store::database_path_from_env().unwrap(),
+        )
+        .unwrap(),
+        origin.canonicalize().unwrap().to_str().unwrap(),
+        "goals",
+    )
+    .unwrap();
     let store = Arc::new(
         open_ephemeral_store(&StorageConfig::sqlite(
             loopflow::store::database_path_from_env().unwrap(),

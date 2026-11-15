@@ -691,37 +691,37 @@ fn screen_reads_are_compact_passive_and_match_cli() {
             due_date: None,
         })
         .unwrap();
-    let session = store
-        .create_session(
-            loopflow::session::LfSession {
-                captured: None,
-                id: "session_11111111111141118111111111111111".into(),
-                artifact_key: None,
-                caller_artifact_key: None,
-                input_published: false,
-                cwd: repo.path().into(),
-                skill: None,
-                provider: None,
-                model: None,
-                node: None,
-                iterations: None,
-                task_id: None,
-                wave_id: None,
-                graph_lf_process_id: None,
-                work_source: None,
-                bound_at: None,
-                interactive: true,
-                repo: Some(repo.path().display().to_string()),
-                title: "Recorded conversation".into(),
-                title_source: loopflow::session::TitleSource::Generated,
-                request: None,
-                ready_summary: None,
-                completed_at: None,
-                created_at: 1,
-            },
-            None,
-        )
-        .unwrap();
+    let session = loopflow::store::sessions::create_session(
+        &store,
+        loopflow::session::LfSession {
+            captured: None,
+            id: "session_11111111111141118111111111111111".into(),
+            artifact_key: None,
+            caller_artifact_key: None,
+            input_published: false,
+            cwd: repo.path().into(),
+            skill: None,
+            provider: None,
+            model: None,
+            node: None,
+            iterations: None,
+            task_id: None,
+            wave_id: None,
+            graph_lf_process_id: None,
+            work_source: None,
+            bound_at: None,
+            interactive: true,
+            repo: Some(repo.path().display().to_string()),
+            title: "Recorded conversation".into(),
+            title_source: loopflow::session::TitleSource::Generated,
+            request: None,
+            ready_summary: None,
+            completed_at: None,
+            created_at: 1,
+        },
+        None,
+    )
+    .unwrap();
     let _server = Server::start(repo.path(), home.path());
     let mut connection = loopflow::server::client::Connection::open().unwrap();
     let directory = repo.path().to_owned();

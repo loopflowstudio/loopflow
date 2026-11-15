@@ -60,8 +60,7 @@ fn configuration_edits_reach_an_open_wave_watch_without_store_writes() {
     repo.create_file(".lf/wave/infra/GOAL.md", "Keep it boring.\n");
     repo.create_file(".git/info/exclude", "/lf.config.local.yaml\n");
     let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
-    store
-        .ensure_wave(repo.path().to_str().unwrap(), "infra")
+    loopflow::work::wave::bootstrap::ensure_wave(&store, repo.path().to_str().unwrap(), "infra")
         .unwrap();
     let mut subscription = Subscription(
         command(
@@ -280,9 +279,9 @@ fn each_wave_runs_its_own_setup_and_the_repository_is_the_default() {
 
     let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
     let checkout = repo.path().to_str().unwrap();
-    store.ensure_wave(checkout, "infra").unwrap();
-    store.ensure_wave(checkout, "research").unwrap();
-    store.ensure_wave(checkout, "plain").unwrap();
+    loopflow::work::wave::bootstrap::ensure_wave(&store, checkout, "infra").unwrap();
+    loopflow::work::wave::bootstrap::ensure_wave(&store, checkout, "research").unwrap();
+    loopflow::work::wave::bootstrap::ensure_wave(&store, checkout, "plain").unwrap();
     let here = store.local_machine().unwrap().id;
     loopflow::provider_account::catalog::upsert_provider_account(
         &store,
@@ -380,8 +379,7 @@ fn your_own_value_wins_for_you_until_you_unset_it() {
     repo.stage_all();
     repo.commit("Share the research agent");
     let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
-    store
-        .ensure_wave(repo.path().to_str().unwrap(), "research")
+    loopflow::work::wave::bootstrap::ensure_wave(&store, repo.path().to_str().unwrap(), "research")
         .unwrap();
     drop(store);
     let ok = |args: &[&str]| {
@@ -432,8 +430,7 @@ fn a_wave_file_skips_repository_settings_with_a_warning() {
     repo.stage_all();
     repo.commit("Misplace a repository setting");
     let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
-    store
-        .ensure_wave(repo.path().to_str().unwrap(), "infra")
+    loopflow::work::wave::bootstrap::ensure_wave(&store, repo.path().to_str().unwrap(), "infra")
         .unwrap();
     drop(store);
     let output = lf(
@@ -467,9 +464,12 @@ fn settings_scope_by_the_typed_wave_only() {
     repo.commit("Add a Wave");
     let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
     let checkout = repo.path().canonicalize().unwrap();
-    let wave = store
-        .ensure_wave(checkout.to_str().unwrap(), "research")
-        .unwrap();
+    let wave = loopflow::work::wave::bootstrap::ensure_wave(
+        &store,
+        checkout.to_str().unwrap(),
+        "research",
+    )
+    .unwrap();
     // An ambient Wave, as in its Task's worktree, does not scope `lf set`.
     let output = Command::new(env!("CARGO_BIN_EXE_lf"))
         .env_clear()

@@ -34,37 +34,37 @@ async fn codex_live_one_turn_smoke() {
         .await
         .expect("store");
     let store = SqliteStore::new(&database).expect("store");
-    store
-        .create_session(
-            LfSession {
-                captured: None,
-                task_id: None,
-                wave_id: None,
-                graph_lf_process_id: None,
-                work_source: None,
-                bound_at: None,
-                id: "smoke".into(),
-                artifact_key: Some(uuid::Uuid::new_v4().simple().to_string()),
-                caller_artifact_key: None,
-                input_published: false,
-                cwd: dir.path().into(),
-                skill: None,
-                provider: Some("codex".into()),
-                model: None,
-                node: None,
-                iterations: None,
-                interactive: false,
-                repo: None,
-                title: "Codex live smoke".into(),
-                title_source: TitleSource::Generated,
-                request: None,
-                ready_summary: None,
-                completed_at: None,
-                created_at: 1,
-            },
-            None,
-        )
-        .expect("session");
+    loopflow::store::sessions::create_session(
+        &store,
+        LfSession {
+            captured: None,
+            task_id: None,
+            wave_id: None,
+            graph_lf_process_id: None,
+            work_source: None,
+            bound_at: None,
+            id: "smoke".into(),
+            artifact_key: Some(uuid::Uuid::new_v4().simple().to_string()),
+            caller_artifact_key: None,
+            input_published: false,
+            cwd: dir.path().into(),
+            skill: None,
+            provider: Some("codex".into()),
+            model: None,
+            node: None,
+            iterations: None,
+            interactive: false,
+            repo: None,
+            title: "Codex live smoke".into(),
+            title_source: TitleSource::Generated,
+            request: None,
+            ready_summary: None,
+            completed_at: None,
+            created_at: 1,
+        },
+        None,
+    )
+    .expect("session");
     let parent = LfProcessId::new();
     rusqlite::Connection::open(&database)
         .expect("store")

@@ -108,10 +108,12 @@ impl Fixture {
             repo.to_string_lossy().into_owned(),
         );
         self.store.create_wave(&wave).await.unwrap();
-        self.store
-            .sqlite
-            .ensure_wave(repo.to_str().unwrap(), "product")
-            .unwrap();
+        crate::work::wave::bootstrap::ensure_wave(
+            &self.store.sqlite,
+            repo.to_str().unwrap(),
+            "product",
+        )
+        .unwrap();
         (repo, wave)
     }
 }

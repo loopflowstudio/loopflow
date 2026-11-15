@@ -469,37 +469,37 @@ fn prepare_conversation(
 ) -> (String, String, std::path::PathBuf) {
     let store = loopflow::store::sqlite::SqliteStore::new(&home.join("loopflow.db")).unwrap();
     let input = format!("run_{}", uuid::Uuid::new_v4().simple());
-    let session = store
-        .create_session(
-            loopflow::session::LfSession {
-                captured: None,
-                id: format!("session_{input}").into(),
-                artifact_key: Some(input.clone()),
-                caller_artifact_key: Some(CALLER.into()),
-                input_published: false,
-                cwd: cwd.into(),
-                skill: None,
-                provider: Some(harness.into()),
-                model: None,
-                node: None,
-                iterations: None,
-                task_id: None,
-                wave_id: None,
-                graph_lf_process_id: None,
-                work_source: None,
-                bound_at: None,
-                interactive: true,
-                repo: None,
-                title: title.into(),
-                title_source: loopflow::session::TitleSource::Generated,
-                request: Some(title.into()),
-                ready_summary: None,
-                completed_at: None,
-                created_at: 1,
-            },
-            None,
-        )
-        .unwrap();
+    let session = loopflow::store::sessions::create_session(
+        &store,
+        loopflow::session::LfSession {
+            captured: None,
+            id: format!("session_{input}").into(),
+            artifact_key: Some(input.clone()),
+            caller_artifact_key: Some(CALLER.into()),
+            input_published: false,
+            cwd: cwd.into(),
+            skill: None,
+            provider: Some(harness.into()),
+            model: None,
+            node: None,
+            iterations: None,
+            task_id: None,
+            wave_id: None,
+            graph_lf_process_id: None,
+            work_source: None,
+            bound_at: None,
+            interactive: true,
+            repo: None,
+            title: title.into(),
+            title_source: loopflow::session::TitleSource::Generated,
+            request: Some(title.into()),
+            ready_summary: None,
+            completed_at: None,
+            created_at: 1,
+        },
+        None,
+    )
+    .unwrap();
     let dir = home.join("runs").join(&input[4..6]).join(&input);
     std::fs::create_dir_all(&dir).unwrap();
     let manifest = serde_json::json!({
@@ -657,7 +657,7 @@ for line in sys.stdin:
         "caller-wave".into(),
         caller.to_str().unwrap().into(),
     );
-    store.create_wave(&wave).unwrap();
+    loopflow::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
     std::fs::create_dir_all(saved.join(".lf/wave/caller-wave")).unwrap();
     std::fs::write(
         saved.join(".lf/wave/caller-wave/GOAL.md"),

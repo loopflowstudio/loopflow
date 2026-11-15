@@ -56,9 +56,7 @@ pub async fn add(repo: &Path, name: &str, objective: Option<&str>) -> OpsResult<
     let locator = WaveLocator::discover(&main, name).map_err(lifecycle_error)?;
     let store = super::planning_sync::planning_store().await?;
     // A clone's authored Waves join the store with the first explicit write here.
-    store
-        .sqlite
-        .register_authored_waves(&main.to_string_lossy())
+    crate::work::wave::bootstrap::register_authored_waves(&store.sqlite, &main.to_string_lossy())
         .map_err(lifecycle_error)?;
     let created = store
         .get_wave_at(&locator)
@@ -148,9 +146,7 @@ async fn ensure_first_project(store: &Store, wave: &crate::work::wave::Wave) -> 
 pub async fn register_authored(repo: &Path) -> OpsResult<()> {
     let main = crate::repository::CanonicalRepo::discover(repo).map_err(lifecycle_error)?;
     let store = super::planning_sync::planning_store().await?;
-    store
-        .sqlite
-        .register_authored_waves(&main.to_string())
+    crate::work::wave::bootstrap::register_authored_waves(&store.sqlite, &main.to_string())
         .map_err(lifecycle_error)
 }
 

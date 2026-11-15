@@ -35,7 +35,7 @@ mod repositories;
 pub mod rows;
 pub(crate) mod selections;
 pub(crate) mod session_projection;
-mod sessions;
+pub mod sessions;
 pub mod sqlite;
 mod token_crypto;
 
@@ -462,12 +462,18 @@ impl Store {
 
     pub async fn create_wave(&self, wave: &Wave) -> StoreResult<()> {
         let wave = wave.clone();
-        run_sqlite(&self.sqlite, move |store| store.create_wave(&wave)).await
+        run_sqlite(&self.sqlite, move |store| {
+            crate::work::wave::bootstrap::upsert_wave(&store, &wave)
+        })
+        .await
     }
 
     pub async fn update_wave(&self, wave: &Wave) -> StoreResult<()> {
         let wave = wave.clone();
-        run_sqlite(&self.sqlite, move |store| store.update_wave(&wave)).await
+        run_sqlite(&self.sqlite, move |store| {
+            crate::work::wave::bootstrap::upsert_wave(&store, &wave)
+        })
+        .await
     }
 
     pub(crate) async fn relocate_waves(&self, updates: Vec<WaveLocatorUpdate>) -> StoreResult<()> {
@@ -1922,10 +1928,12 @@ mod tests {
                     .unwrap()
                     .unwrap()
             } else {
-                let project = store
-                    .sqlite
-                    .ensure_wave_project(directory.path().to_str().unwrap(), "inbox")
-                    .unwrap();
+                let project = crate::work::wave::bootstrap::ensure_wave_project(
+                    &store.sqlite,
+                    directory.path().to_str().unwrap(),
+                    "inbox",
+                )
+                .unwrap();
                 store
                     .sqlite
                     .create_task(&crate::work::task::NewTask {

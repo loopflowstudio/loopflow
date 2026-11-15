@@ -44,6 +44,12 @@ dependencies, not additional target product objects.
 Every top-level CLI family, live SQLite table, process entrypoint, HTTP route,
 provider, and literal subprocess edge must appear exactly once.
 
+`work::wave::bootstrap` reads authored Wave IDs and seeds missing files before
+SQL compares saved repository and hierarchy inputs and commits them together.
+Prepared files survive a rolled-back write so retries retain IDs and later edits.
+Session admission discovers its repository in `store::sessions`; primary-scope
+reads decode the saved canonical address even after the checkout is gone.
+
 Canonical Work readers in `store/sqlite/children.rs` serve Task status,
 planning selection and Wave/Desktop lists. They read Task/planning
 fields independently of graph position and provider inventory, retaining known

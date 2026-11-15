@@ -18,9 +18,12 @@ fn edit(revision: &str, title: &str, description: &str) -> LinearIssueObservatio
 fn linear_edits_and_comments_stream_into_task_control_exactly_once() {
     let home = tempfile::tempdir().unwrap();
     let store = SqliteStore::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
-    let project = store
-        .ensure_wave_project(&home.path().to_string_lossy(), "inbox")
-        .unwrap();
+    let project = crate::work::wave::bootstrap::ensure_wave_project(
+        &store,
+        &home.path().to_string_lossy(),
+        "inbox",
+    )
+    .unwrap();
     let task = store
         .create_task(&NewTask {
             repository_id: crate::repository::location::ensure_repository(

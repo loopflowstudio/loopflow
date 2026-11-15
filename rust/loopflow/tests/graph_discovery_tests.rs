@@ -237,12 +237,12 @@ fn graph_catalog_and_wave_selection_read_the_same_graphs() {
     assert!(customized.status.success());
     let store =
         loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
-    store
-        .ensure_wave_project(
-            repo.path().canonicalize().unwrap().to_str().unwrap(),
-            "proof",
-        )
-        .unwrap();
+    loopflow::work::wave::bootstrap::ensure_wave_project(
+        &store,
+        repo.path().canonicalize().unwrap().to_str().unwrap(),
+        "proof",
+    )
+    .unwrap();
     // A Wave selects a graph by name; its definition is the committed graph.
     let definition = repo.path().join(".lf/graphs/feature.yaml");
     let selected = run(&["--wave", "proof", "set", "graph", "feature"]);

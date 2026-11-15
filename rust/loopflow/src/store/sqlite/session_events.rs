@@ -1612,13 +1612,11 @@ mod tests {
             "both unlinked turns and the reserved capture retain independent evidence"
         );
         let wave = loopflow_model::id::WaveId::new();
-        store
-            .create_wave(&crate::work::wave::Wave::new(
-                wave.clone(),
-                "proof".into(),
-                "/repo".into(),
-            ))
-            .unwrap();
+        crate::work::wave::bootstrap::upsert_wave(
+            &store,
+            &crate::work::wave::Wave::new(wave.clone(), "proof".into(), "/repo".into()),
+        )
+        .unwrap();
         // Imported native history can establish Work without a capture. That
         // turn cannot lend its attribution to another unlinked receipt.
         store.conn.lock().unwrap().execute(

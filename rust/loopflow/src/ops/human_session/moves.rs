@@ -927,10 +927,7 @@ async fn admit(
         (Some(MovedPrimary::Repository), None) => PrimaryScope::Repository(repo.clone()),
         (Some(MovedPrimary::Wave { wave_id }), None) => PrimaryScope::Wave(wave_id.clone()),
     };
-    let caller = crate::journal::current_lf_process_id();
-    let admitted = store
-        .sqlite
-        .ensure_primary_session(&scope, session, caller.as_ref())?;
+    let admitted = store.ensure_primary_session(&scope, session).await?;
     anyhow::ensure!(
         admitted.id == moved.id,
         "this Machine already runs its own Session {} for that scope; complete it, then move again",

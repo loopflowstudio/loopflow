@@ -310,7 +310,7 @@ mod tests {
             "product".to_string(),
             directory.path().display().to_string(),
         );
-        store.create_wave(&wave).unwrap();
+        crate::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
         let identity = MetricIdentity::new(wave.id().as_str(), "task-loop-trust".to_string());
         let contract = contract(identity.clone());
         let received_at = OffsetDateTime::from_unix_timestamp(2_000_000).unwrap();
@@ -361,7 +361,7 @@ mod tests {
             "product".to_string(),
             directory.path().display().to_string(),
         );
-        setup.create_wave(&wave).unwrap();
+        crate::work::wave::bootstrap::upsert_wave(&setup, &wave).unwrap();
         let identity = MetricIdentity::new(wave.id().as_str(), "task-loop-trust".to_string());
         let contract = contract(identity.clone());
         let received_at = OffsetDateTime::from_unix_timestamp(2_000_000).unwrap();
@@ -420,7 +420,7 @@ mod tests {
             "product".to_string(),
             directory.path().display().to_string(),
         );
-        store.create_wave(&wave).unwrap();
+        crate::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
         let identity = MetricIdentity::new(wave.id().as_str(), "task-loop-trust".to_string());
         let contract = contract(identity.clone());
         let received_at = OffsetDateTime::from_unix_timestamp(3_000_000).unwrap();
@@ -461,7 +461,7 @@ mod tests {
             "product".to_string(),
             directory.path().display().to_string(),
         );
-        setup.create_wave(&wave).unwrap();
+        crate::work::wave::bootstrap::upsert_wave(&setup, &wave).unwrap();
         let received_at = OffsetDateTime::from_unix_timestamp(3_000_000).unwrap();
         let contracts = (0..64)
             .map(|index| {
@@ -523,7 +523,7 @@ mod tests {
             "product".to_string(),
             directory.path().display().to_string(),
         );
-        store.create_wave(&wave).unwrap();
+        crate::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
         let identity = MetricIdentity::new(wave.id().as_str(), "task-loop-trust".to_string());
         let contract = contract(identity.clone());
         let format = &time::format_description::well_known::Rfc3339;
@@ -566,7 +566,7 @@ mod tests {
             "product".to_string(),
             directory.path().display().to_string(),
         );
-        store.create_wave(&wave).unwrap();
+        crate::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
         let identity = MetricIdentity::new(wave.id().as_str(), "task-loop-trust".to_string());
         let contract = contract(identity.clone());
         let format = &time::format_description::well_known::Rfc3339;
@@ -609,7 +609,7 @@ mod tests {
             "product".to_string(),
             directory.path().display().to_string(),
         );
-        store.create_wave(&wave).unwrap();
+        crate::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
         let identity = MetricIdentity::new(wave.id().as_str(), "task-loop-trust".to_string());
         let contract = contract(identity.clone());
         let received_at = OffsetDateTime::from_unix_timestamp(2_000_000).unwrap();
@@ -636,7 +636,7 @@ mod tests {
             "product".to_string(),
             directory.path().display().to_string(),
         );
-        store.create_wave(&wave).unwrap();
+        crate::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
         let identity = MetricIdentity::new(wave.id().as_str(), "task-loop-trust".to_string());
         let registered_at = OffsetDateTime::from_unix_timestamp(2_000_000).unwrap();
 

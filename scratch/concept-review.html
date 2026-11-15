@@ -15,67 +15,96 @@ aside { border-left: 3px solid light-dark(#944218, #edb58b); padding-left: 1rem;
 table { border-collapse: collapse; width: 100%; font-size: .86rem; }
 th, td { text-align: left; vertical-align: top; padding: .5rem .3rem; border-bottom: 1px solid light-dark(#ccc, #4b5159); overflow-wrap: anywhere; }
 li { margin: .4rem 0; }
+.new { border-left: 3px solid light-dark(#1f6f4a, #7fd1a6); padding-left: .5rem; }
 @media (max-width: 520px) { body { margin-top: 1rem; } table { font-size: .76rem; } }
 </style>
-<header>LOO-650 · concept-review · November 15, 2026 · HEAD 3c67932eb7 + workspace changes<br>
-Built from <code>scratch/{loo-650,publishing-discussion}.md</code>,
-<code>scripts/dev-lf</code>, <code>scripts/benchmarks/crate-rebuild/README.md</code>,
-<code>store/{session_projection,selections,planning_peers}.rs</code>, <code>store/sqlite/{sessions,selections,task_ownership,planning_peers,scope_defaults,repositories,wave_definitions}.rs</code>,
-<code>repository/location.rs</code> and <code>config/placement.rs</code>.</header>
+<header>LOO-650 · concept-review · November 15, 2026 · HEAD 330b485f83 + workspace changes<br>
+Built from <code>scratch/{loo-650,publishing-discussion,questions}.md</code> and
+<code>rust/loopflow/src/store/sqlite/{steers,task_work,sessions,graph_inventory,admission,children,planning_export,scope_defaults,rentals,durable,task_ownership}.rs</code>,
+<code>store/sqlite.rs</code>, <code>performance.rs</code>, <code>naming.rs</code>.</header>
 <main>
-<h1>Iterate to implement: finish ownership and Wave preparation above SQL, then extract storage.</h1>
-<aside><strong>Biggest mismatch.</strong> Shipping, SQL, configuration and runtime still
-compile together. Returning saved scope addresses lets configuration stop depending
-on a SQL connection. Leaf-library hits alone do not deliver the intended edit closure.</aside>
-<p>No open product choice. The substantial private-crate split and isolated debugging
-path remain the direction. This review changes implementation guidance only.</p>
-<h2>Actions → concepts → APIs</h2>
+<h1>Iterate to implement: the storage boundary has three kinds of code, and its inventory missed nine sites.</h1>
+<aside><strong>Biggest mismatch.</strong> The working rule was “SQL returns saved facts;
+everything else moves above”. The steer marker breaks it: it is a file touched
+inside the write transaction on purpose, so a hook that checks afterwards waits
+for the commit. Moving it above SQL reopens that race.</aside>
+<p>No open product choice. No command, Work record, schema or wire shape changes.
+Lines marked with a green bar are proposed; the rest is what the code does now.</p>
+
+<h2>What lives in the storage crate</h2>
 <table>
-<thead><tr><th>Action</th><th>Existing behavior</th><th>Proposed ownership</th></tr></thead>
+<thead><tr><th>Kind</th><th>Examples</th><th>Where</th></tr></thead>
 <tbody>
-<tr><td><code>scripts/dev-lf --version</code><br>after a shipping edit</td><td>Separate model, content and terminal crates; application still owns SQL and runtime.</td><td>Same command → changed owner and its downstream crates rebuild. Storage moves with migrations and schema generation.</td></tr>
-<tr><td>Claim or move a Task</td><td>Ownership facts and placement resolution still load configuration using a SQL connection.</td><td><strong>Proposed:</strong> saved scope/address reading → application observes Git/files → SQL checks scope and commits current ownership atomically.</td></tr>
-<tr><td>Import peer planning</td><td><strong>Implemented preparation:</strong> repository discovery and locator publication in <code>repository::location</code>; peer configuration in the application facade.</td><td>Carry <code>import_peer_planning → import_prepared_peer_planning</code> into extraction. SQL retains scope comparison, destination checks and revision replanning.</td></tr>
-<tr><td>Ensure a Wave hierarchy</td><td>Repository discovery runs above SQL; <code>ensure_wave</code> still reads and seeds authored files inside its transaction.</td><td><strong>Proposed:</strong> application prepares authored inputs/files → synchronous command compares saved inputs and commits repository/hierarchy together. Retry retains written IDs and bytes.</td></tr>
-<tr><td>List available Sessions;<br>watch Task activity</td><td><strong>Implemented preparation:</strong> batched identity/deadline acquisition outside the mutex; SQL compares saved inputs and filters before pagination. Quiet/death checks are recorded passing.</td><td><strong>Implemented facade:</strong> application entry loops; SQL consumes projection values and compares saved inputs. Retain deadline recomputation during extraction.</td></tr>
-<tr><td>Edit Dashboard or Task order</td><td><strong>Implemented facade:</strong> application acquires projections and prepares edits; SQL compares revisions/orders and commits. Race checks are recorded passing.</td><td>Carry that split into extraction; keep read-only reads and repair of ambiguous queries.</td></tr>
-<tr><td>Build a fresh worktree;<br>debug locally</td><td>Private cache probe hits; shared root upkeep remains unbuilt. <code>scripts/dev-lf --isolated-build</code> is implemented.</td><td>Git root inventory → coordinated idle daemon refresh. Until safe, allow misses. Isolated debugging stays checkout-local.</td></tr>
+<tr><td>Saved facts, atomic SQL effects</td><td>rows, receipts, conditional commits, guards</td><td>storage</td></tr>
+<tr><td class="new">Storage’s own files beside the database</td><td>retention cursor, Session lock files, admission leases, steer marker and its path syntax</td><td>storage (proposed rule; the files are there today)</td></tr>
+<tr><td>Observation of things storage does not own</td><td>configuration, Git, OS process identity, caller environment, provider state</td><td>application, passed in as values</td></tr>
 </tbody>
 </table>
+
+<h2>Production sites the inventory did not list</h2>
+<table>
+<thead><tr><th>Site</th><th>Reads today</th><th>Proposed</th></tr></thead>
+<tbody>
+<tr><td><code>steers.rs</code> idle conversations</td><td>OS process identity, once per row</td><td class="new">return saved pid/start; evidence supplied like <code>SessionProjection</code></td></tr>
+<tr><td><code>task_work.rs</code> <code>process_may_run</code></td><td><code>journal::lf_evidence</code></td><td class="new">application function over a saved process; unknown stays “may run”</td></tr>
+<tr><td><code>sessions.rs</code> input replacement, current-actor and capture checks</td><td>caller identity from the environment</td><td class="new">caller passed as a value; SQL still compares it with the saved current provider</td></tr>
+<tr><td><code>graph_inventory.rs</code></td><td>builds journal receipt paths</td><td class="new">return saved locators; path built above</td></tr>
+<tr><td><code>admission.rs</code></td><td><code>git::worktree_root</code></td><td class="new">caller supplies roots; lease files stay</td></tr>
+<tr><td><code>children.rs</code></td><td><code>engine::creation::TaskCreateReceipt</code></td><td class="new">a saved record: moves down, <code>engine</code> re-exports</td></tr>
+<tr><td><code>sessions.rs</code></td><td><code>naming::task_session_title</code></td><td class="new">pure; moves down or arrives as a value</td></tr>
+<tr><td>planning export, changes, state delivery</td><td>Linear slug, document rendering, revision ordering</td><td class="new">pure operations; move with the Linear records</td></tr>
+<tr><td><code>sqlite.rs</code> connection open</td><td><code>performance::observe_sqlite</code></td><td class="new">SQLite tracing moves down; subscription measurement reads its counters from above</td></tr>
+</tbody>
+</table>
+
+<h2>Where a saved record lives</h2>
+<p class="new">In the storage crate, unless a crate that does not depend on storage
+needs it; only then in <code>loopflow-model</code>. The model is 1,671 lines and the
+terminal depends on it, so each record added there rebuilds the terminal and
+everything else on every edit. This places <code>TaskGraphPosition</code> in storage.
+The Graph compiler and runner do not move down: storage keeps the serialized
+captured Graph and cursor it saves.</p>
+
+<h2>What storage extraction can buy</h2>
+<table>
+<thead><tr><th>Module</th><th>Lines, inline tests included</th></tr></thead>
+<tbody>
+<tr><td>application total</td><td>331,503</td></tr>
+<tr><td><code>ops</code></td><td>62,478</td></tr>
+<tr><td><code>lf</code></td><td>60,873</td></tr>
+<tr><td><code>store</code> (<code>store/sqlite</code> without test files: 35,921)</td><td>59,107</td></tr>
+<tr><td><code>harness</code></td><td>17,661</td></tr>
+<tr><td><code>server</code></td><td>12,817</td></tr>
+</tbody>
+</table>
+<p>An edit under <code>ops/task/</code> still recompiles <code>ops</code>, <code>lf</code>,
+<code>server</code> and the rest of the application after storage moves. Lines are
+not compile cost. <span class="new">Run the benchmark right after the storage crate
+moves; its number decides whether definitions, providers and runtime are the right
+next order, or whether the cost sits in the application itself. Report the
+fresh-worktree win and the edit win separately.</span></p>
+
 <h2>Normal → failure → recovery</h2>
-<p>A claim reads its repository and scope, observes that scope’s preferences, then
-commits. New-Task creation compares the supplied repository/Project scope; bulk
-hand-back batches held Tasks and observes each repository once. A changed held
-set that needs new configuration returns to acquisition. If Project membership, Wave ancestry or the repository address changes
-during acquisition, reacquire for the new scope before writing. Existing claims
-remain independent of changed preferences. No SQL mutex spans Git or file reads.</p>
-<p>A dead or unknown first Session cannot hide a live available second row at
-<code>limit=1</code>. Quiet deadlines update list and Task selection without a
-store write. The implemented short-read → observe → compare approach retains the
-enclosing Work snapshot without lending a shared connection during observation.</p>
-<p><strong>Implemented:</strong> disconnected peer imports retain conflicts and routing;
-repository registration acquires Git/locator facts above SQL. A locator left
-by a failed import is reused on retry. <strong>Proposed Wave preparation:</strong>
-a file failure registers no partial hierarchy; a SQL rollback retains prepared
-IDs for retry. Authored bytes survive. A stale checkout cannot rename a Wave back
-or resurrect a retired identity; file authoring uses the requested checkout.
-Concurrent Dashboard
-edits retain stale-write checks. Cached debug paths may name a deleted checkout:
-use the isolated build. An unknown root may miss while another build runs; it
-cannot restart that build’s daemon.</p>
-<h2>Next demonstration</h2>
-<p>After the substantial cuts, show representative rebuild closures, fresh-worktree
-hits, correct-checkout execution and isolated debugging recovery. Compare elapsed
-time, CPU and RSS. Shared-daemon integration and whole-build savings remain unproved;
-interactive demo and review remain before merge.</p>
-<h2>Questions for the next review</h2>
-<p>Implementation checks; <strong>loop-or-next: design changed → iterate to implement.</strong></p>
+<p>A steer is saved and its marker touched under the write lock; the next hook
+check sees it. A reconnecting viewer whose recorded PID was reused stays unknown:
+never dead, never idle, never permission to close. A replaced provider still
+cannot change its conversation, and a capture from another Session is still
+refused, when the caller arrives as a value. Add focused regressions for the
+steer-marker ordering and the replaced-actor refusal before those files move.</p>
+
+<h2>Order</h2>
 <ol>
-<li>Do claims, new Tasks and changed bulk hand-back sets acquire configuration for the scope they commit?</li>
-<li>Are observation and edit preparation above SQL, with pagination, pinned reads and atomic comparisons intact?</li>
-<li>Do Wave file/SQL failures retry with the same IDs and bytes, without undoing concurrent hierarchy changes?</li>
-<li>Do linked-worktree preferences and authoring, disconnected peer history, locator retry and stale Dashboard/order edits retain their behavior?</li>
-<li>Do measured rebuild closures and whole-build costs establish the Task outcome?</li>
+<li>Ownership/placement, rental hand-back and Machine declarations: saved scope → observed configuration → SQL command (already specified).</li>
+<li>The nine sites above.</li>
+<li>Move synchronous storage with its records, its own files, migrations and schema generation in one cut. Before moving, classify every remaining <code>crate::</code> name under <code>store/sqlite</code> as stays, record moving down, or supplied by caller.</li>
+<li>Measure, then choose the next cut.</li>
+</ol>
+
+<h2>Questions</h2>
+<p>None blocks this pass. These would change the direction if answered differently:</p>
+<ol>
+<li>If the measurement after storage shows most of an <code>ops/task</code> edit’s cost is <code>ops</code> + <code>lf</code> themselves: (a) split the application next, ahead of providers and runtime; (b) keep the planned order.</li>
+<li>Records beside their SQL in the storage crate: (a) as proposed; (b) all saved records in <code>loopflow-model</code>, accepting a wider rebuild on each record edit.</li>
 </ol>
 </main>
 </html>

@@ -798,7 +798,7 @@ mod tests {
         let path = home.path().join("db");
         let store = SqliteStore::open_ephemeral(&path).unwrap();
         let wave = Wave::new(WaveId::new(), "original".into(), "/repo".into());
-        store.create_wave(&wave).unwrap();
+        crate::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
         let first = destination(&store, "/repo", "first");
         let original = store.export_peer_planning("/repo", &first).unwrap();
         assert!(!original.changes.is_empty());
@@ -892,13 +892,13 @@ mod tests {
         let author = SqliteStore::open_ephemeral(&home.path().join("author")).unwrap();
         let peer = SqliteStore::open_ephemeral(&home.path().join("peer")).unwrap();
         let wave = Wave::new(WaveId::new(), "shared".into(), "/repo".into());
-        author.create_wave(&wave).unwrap();
+        crate::work::wave::bootstrap::upsert_wave(&author, &wave).unwrap();
         let project = author.ensure_project(wave.id(), wave.slug()).unwrap();
         let author_route = destination(&author, "/repo", "shared");
         let original = author.export_peer_planning("/repo", &author_route).unwrap();
 
         // The clone registers the authored identity before fetching planning.
-        peer.create_wave(&wave).unwrap();
+        crate::work::wave::bootstrap::upsert_wave(&peer, &wave).unwrap();
         let peer_route = destination(&peer, "/repo", "shared");
         crate::store::planning_peers::import_peer_planning(
             &peer,
@@ -934,8 +934,8 @@ mod tests {
         let peer = SqliteStore::open_ephemeral(&home.path().join("peer")).unwrap();
         let live = Wave::new(WaveId::new(), "live".into(), "/repo".into());
         let removed = Wave::new(WaveId::new(), "removed".into(), "/repo".into());
-        author.create_wave(&live).unwrap();
-        author.create_wave(&removed).unwrap();
+        crate::work::wave::bootstrap::upsert_wave(&author, &live).unwrap();
+        crate::work::wave::bootstrap::upsert_wave(&author, &removed).unwrap();
         let route = destination(&author, "/repo", "shared");
         let before = author.export_peer_planning("/repo", &route).unwrap();
         crate::store::planning_peers::import_peer_planning(
@@ -1087,7 +1087,7 @@ mod tests {
         let wave = Wave::new(WaveId::new(), "shared".into(), "/repo".into());
         let peer = |name: &str| {
             let store = SqliteStore::open_ephemeral(&home.path().join(name)).unwrap();
-            store.create_wave(&wave).unwrap();
+            crate::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
             let route = destination(&store, "/repo", "shared");
             (store, route)
         };
@@ -1134,7 +1134,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
         let wave = Wave::new(WaveId::new(), "shared".into(), "/repo".into());
-        store.create_wave(&wave).unwrap();
+        crate::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
         let route = destination(&store, "/repo", "shared");
         let history = store.export_peer_planning("/repo", &route).unwrap();
         crate::store::planning_peers::import_peer_planning(
@@ -1158,7 +1158,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
         let wave = Wave::new(WaveId::new(), "shared".into(), "/repo".into());
-        store.create_wave(&wave).unwrap();
+        crate::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
         let route = destination(&store, "/repo", "shared");
         let incoming = renamed(&store, &route, &wave, "remote");
         let traced = statements(&store, || {

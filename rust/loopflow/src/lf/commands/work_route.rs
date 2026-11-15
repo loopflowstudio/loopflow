@@ -761,7 +761,8 @@ mod tests {
             (selected_repo, &first),
             (other_path.to_str().unwrap(), &second),
         ] {
-            let project = store.ensure_wave_project(repo, "inbox").unwrap();
+            let project =
+                crate::work::wave::bootstrap::ensure_wave_project(&store, repo, "inbox").unwrap();
             store
                 .create_task(&NewTask {
                     repository_id: crate::repository::location::ensure_repository(&store, repo)

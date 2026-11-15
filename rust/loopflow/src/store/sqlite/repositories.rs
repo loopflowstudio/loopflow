@@ -435,7 +435,8 @@ mod tests {
         let repo = home.path().canonicalize().unwrap();
         let repo = repo.to_str().unwrap();
         let (mini, worker) = (MachineId::new(), MachineId::new());
-        let project = store.ensure_wave_project(repo, "work").unwrap();
+        let project =
+            crate::work::wave::bootstrap::ensure_wave_project(&store, repo, "work").unwrap();
         let wave = project.wave_id.clone();
         let repository = crate::repository::location::ensure_repository(&store, repo).unwrap();
         let new_task = |title: &str| {
@@ -519,7 +520,9 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
         let repo = home.path().canonicalize().unwrap();
         let repo = repo.to_str().unwrap();
-        let project = store.ensure_wave_project(repo, "infrastructure").unwrap();
+        let project =
+            crate::work::wave::bootstrap::ensure_wave_project(&store, repo, "infrastructure")
+                .unwrap();
         let wave = DefaultScope::Wave(project.wave_id.clone());
         let repository = crate::repository::location::ensure_repository(&store, repo).unwrap();
         let task = store

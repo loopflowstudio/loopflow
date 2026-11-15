@@ -73,13 +73,12 @@ fn context_targets_measure_checkout_wave_and_refresh_local_edits() {
     )
     .unwrap();
     fs::write(&scratch, "Pending work. ".repeat(500)).unwrap();
-    SqliteStore::new(&home.path().join(".lf/loopflow.db"))
-        .unwrap()
-        .ensure_wave(
-            repo.path().canonicalize().unwrap().to_str().unwrap(),
-            "local",
-        )
-        .unwrap();
+    loopflow::work::wave::bootstrap::ensure_wave(
+        &SqliteStore::new(&home.path().join(".lf/loopflow.db")).unwrap(),
+        repo.path().canonicalize().unwrap().to_str().unwrap(),
+        "local",
+    )
+    .unwrap();
     let query = || -> serde_json::Value {
         serde_json::from_str(&success(
             command(
@@ -389,13 +388,11 @@ fn global_wave_listing_and_repository_catalog_use_real_checkout_scope() {
     fs::create_dir_all(home.path().join(".lf")).unwrap();
     let store = SqliteStore::new(&home.path().join(".lf/loopflow.db")).unwrap();
     for (name, root) in [("first", repo.path()), ("second", other.path())] {
-        store
-            .create_wave(&Wave::new(
-                WaveId::new(),
-                name.into(),
-                root.display().to_string(),
-            ))
-            .unwrap();
+        loopflow::work::wave::bootstrap::upsert_wave(
+            &store,
+            &Wave::new(WaveId::new(), name.into(), root.display().to_string()),
+        )
+        .unwrap();
     }
     for (cwd, count, local_catalog) in [
         (outside.path(), 2, false),
@@ -1261,37 +1258,37 @@ fn task_run_explain_explicit_and_checkout_inferred_actions_preserve_all_state() 
 
 fn connection_session(home: &Path, cwd: &Path) -> loopflow::session::LfSession {
     let store = SqliteStore::new(&home.join(".lf/loopflow.db")).unwrap();
-    store
-        .create_session(
-            loopflow::session::LfSession {
-                captured: None,
-                caller_artifact_key: None,
-                task_id: None,
-                wave_id: None,
-                graph_lf_process_id: None,
-                work_source: None,
-                bound_at: None,
-                id: "connection-proof".into(),
-                artifact_key: Some(uuid::Uuid::new_v4().simple().to_string()),
-                input_published: true,
-                cwd: cwd.to_path_buf(),
-                skill: None,
-                provider: Some("opencode".into()),
-                model: None,
-                node: None,
-                iterations: None,
-                interactive: true,
-                repo: None,
-                title: "Connection proof".into(),
-                title_source: loopflow::session::TitleSource::Human,
-                request: None,
-                ready_summary: None,
-                completed_at: None,
-                created_at: 1,
-            },
-            None,
-        )
-        .unwrap()
+    loopflow::store::sessions::create_session(
+        &store,
+        loopflow::session::LfSession {
+            captured: None,
+            caller_artifact_key: None,
+            task_id: None,
+            wave_id: None,
+            graph_lf_process_id: None,
+            work_source: None,
+            bound_at: None,
+            id: "connection-proof".into(),
+            artifact_key: Some(uuid::Uuid::new_v4().simple().to_string()),
+            input_published: true,
+            cwd: cwd.to_path_buf(),
+            skill: None,
+            provider: Some("opencode".into()),
+            model: None,
+            node: None,
+            iterations: None,
+            interactive: true,
+            repo: None,
+            title: "Connection proof".into(),
+            title_source: loopflow::session::TitleSource::Human,
+            request: None,
+            ready_summary: None,
+            completed_at: None,
+            created_at: 1,
+        },
+        None,
+    )
+    .unwrap()
 }
 
 fn connection_history(db: &rusqlite::Connection, session: &loopflow::session::LfSession) {
@@ -1656,9 +1653,9 @@ fn repository_move_keeps_identity_work_and_sibling_checkouts() {
     let home = tempfile::tempdir().unwrap();
     let _env = support::EnvGuard::with_home(&[], Some(home.path()));
     let store = SqliteStore::new(&home.path().join(".lf/loopflow.db")).unwrap();
-    let wave = store
-        .ensure_wave(old.to_str().unwrap(), "retained")
-        .unwrap();
+    let wave =
+        loopflow::work::wave::bootstrap::ensure_wave(&store, old.to_str().unwrap(), "retained")
+            .unwrap();
     let identity = |path: &Path| -> serde_json::Value {
         serde_json::from_str(&success(
             command(home.path(), path, &["config", "repository", "--json"])
@@ -2266,12 +2263,18 @@ fn task_planning_explain_creation_provenance_follows_resolved_selection() {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     let store = SqliteStore::new(&path).unwrap();
     let canonical = repo.path().canonicalize().unwrap();
-    let selected = store
-        .ensure_wave_project(canonical.to_str().unwrap(), "selected")
-        .unwrap();
-    store
-        .ensure_wave_project(canonical.to_str().unwrap(), "inbox")
-        .unwrap();
+    let selected = loopflow::work::wave::bootstrap::ensure_wave_project(
+        &store,
+        canonical.to_str().unwrap(),
+        "selected",
+    )
+    .unwrap();
+    loopflow::work::wave::bootstrap::ensure_wave_project(
+        &store,
+        canonical.to_str().unwrap(),
+        "inbox",
+    )
+    .unwrap();
     let db = rusqlite::Connection::open(&path).unwrap();
     db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
     let before = fs::read(&path).unwrap();

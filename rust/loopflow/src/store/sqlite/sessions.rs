@@ -1478,11 +1478,10 @@ impl SqliteStore {
     /// Admit the conversation and its captured input before provider effects.
     pub fn create_session(
         &self,
-        mut session: LfSession,
+        session: LfSession,
         caller_process: Option<&loopflow_model::id::LfProcessId>,
     ) -> StoreResult<LfSession> {
         let _admission = self.lock_session_checkouts(&session)?;
-        discover_session_repo(&mut session)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if let Some(existing) = session_in(&tx, &session.id)? {
@@ -1498,18 +1497,17 @@ impl SqliteStore {
         primary_session_in(&conn, scope)
     }
 
-    /// Find the scope's uncompleted primary, or admit `session` as it. When the
+    /// Find the scope's uncompleted primary, or admit the prepared `session` as it.
     pub fn ensure_primary_session(
         &self,
         scope: &PrimaryScope,
-        mut session: LfSession,
+        session: LfSession,
         caller_process: Option<&loopflow_model::id::LfProcessId>,
     ) -> StoreResult<LfSession> {
         // Nearly every call finds the primary it asks for; that takes no write lock.
         if let Some(current) = self.primary_session(scope)? {
             return Ok(current);
         }
-        discover_session_repo(&mut session)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let session = ensure_primary_session_in(&tx, scope, session, caller_process)?;
@@ -1544,7 +1542,8 @@ impl SqliteStore {
     /// The Task a Session is primary for, else the repository or Wave it is or
     /// was primary for.
     pub fn primary_scope(&self, id: &str) -> StoreResult<Option<PrimaryScope>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut connection = self.conn.lock().expect("store mutex poisoned");
+        let conn = connection.savepoint()?;
         let task: Option<String> = conn
             .query_row(
                 "SELECT task_id FROM task_primary_sessions WHERE session_id=?1",
@@ -1570,8 +1569,7 @@ impl SqliteStore {
             ))),
             Some((Some(kind), _, Some(repo))) if kind == "repository" => {
                 Ok(Some(PrimaryScope::Repository(
-                    crate::repository::CanonicalRepo::discover(Path::new(&repo))
-                        .map_err(invalid)?,
+                    crate::repository::CanonicalRepo::from_saved_path(repo.into()),
                 )))
             }
             Some((Some(kind), _, _)) => Err(invalid(format!(
@@ -1949,21 +1947,6 @@ fn resolve_ancestry_in(conn: &Connection, session: &mut LfSession) -> StoreResul
             return Err(invalid("Session Task and Wave disagree"));
         }
         session.wave_id = wave;
-    }
-    Ok(())
-}
-
-/// Name the repository holding the Session's cwd. This runs Git, so callers
-/// do it before taking the write lock every other writer waits on.
-fn discover_session_repo(session: &mut LfSession) -> StoreResult<()> {
-    if session.repo.is_none() && session.cwd.is_dir() {
-        session.repo = crate::repo::discover_repo_root(&session.cwd)
-            .map_err(invalid)?
-            .map(|root| {
-                crate::repository::CanonicalRepo::discover(&root).map(|repo| repo.to_string())
-            })
-            .transpose()
-            .map_err(invalid)?;
     }
     Ok(())
 }

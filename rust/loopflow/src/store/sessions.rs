@@ -1,6 +1,8 @@
-use crate::session::{LfSession, TitleSource};
+use crate::session::{LfSession, PrimaryScope, TitleSource};
 use crate::store::session_projection;
+use crate::store::sqlite::SqliteStore;
 use loopflow_model::durable::TaskId;
+use loopflow_model::id::LfProcessId;
 
 use super::{run_sqlite, Store, StoreResult};
 
@@ -33,7 +35,7 @@ impl Store {
     pub async fn create_session(&self, session: LfSession) -> StoreResult<LfSession> {
         let caller = crate::journal::current_lf_process_id();
         run_sqlite(&self.sqlite, move |store| {
-            store.create_session(session, caller.as_ref())
+            create_session(&store, session, caller.as_ref())
         })
         .await
     }
@@ -74,7 +76,7 @@ impl Store {
         let scope = scope.clone();
         let caller = crate::journal::current_lf_process_id();
         run_sqlite(&self.sqlite, move |store| {
-            store.ensure_primary_session(&scope, session, caller.as_ref())
+            ensure_primary_session(&store, &scope, session, caller.as_ref())
         })
         .await
     }
@@ -163,5 +165,130 @@ impl Store {
                 .map(|(graph, entry)| graph.detail(entry)))
         })
         .await
+    }
+}
+
+/// Prepare repository identity before admitting a Session to synchronous storage.
+pub fn create_session(
+    store: &SqliteStore,
+    mut session: LfSession,
+    caller: Option<&LfProcessId>,
+) -> StoreResult<LfSession> {
+    discover_session_repo(&mut session)?;
+    store.create_session(session, caller)
+}
+
+pub fn ensure_primary_session(
+    store: &SqliteStore,
+    scope: &PrimaryScope,
+    mut session: LfSession,
+    caller: Option<&LfProcessId>,
+) -> StoreResult<LfSession> {
+    if let Some(current) = store.primary_session(scope)? {
+        return Ok(current);
+    }
+    discover_session_repo(&mut session)?;
+    store.ensure_primary_session(scope, session, caller)
+}
+
+/// Name the repository holding the Session's cwd. This runs Git, so callers
+/// do it before taking the write lock every other writer waits on.
+fn discover_session_repo(session: &mut LfSession) -> StoreResult<()> {
+    if session.repo.is_none() && session.cwd.is_dir() {
+        session.repo = crate::repository::CanonicalRepo::containing(&session.cwd)
+            .map_err(|error| super::StoreError::InvalidData(error.to_string()))?
+            .map(|repo| repo.to_string());
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::repository::CanonicalRepo;
+    use crate::session::{LfSession, PrimaryScope, TitleSource};
+    use crate::store::sqlite::SqliteStore;
+
+    fn candidate(cwd: &std::path::Path) -> LfSession {
+        LfSession {
+            captured: None,
+            id: format!("session_{}", uuid::Uuid::new_v4().simple()).into(),
+            artifact_key: None,
+            caller_artifact_key: None,
+            input_published: true,
+            cwd: cwd.into(),
+            skill: None,
+            provider: None,
+            model: None,
+            node: None,
+            iterations: None,
+            task_id: None,
+            wave_id: None,
+            graph_lf_process_id: None,
+            work_source: None,
+            bound_at: None,
+            interactive: true,
+            repo: None,
+            title: "Conversation".into(),
+            title_source: TitleSource::Human,
+            request: None,
+            ready_summary: None,
+            completed_at: None,
+            created_at: 1,
+        }
+    }
+
+    #[test]
+    fn session_admission_discovers_the_repository_from_a_nested_directory() {
+        let directory = tempfile::tempdir().unwrap();
+        let repo = directory.path().join("repository");
+        let output = std::process::Command::new("git")
+            .args(["init", "--quiet"])
+            .arg(&repo)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let cwd = repo.join("src/nested");
+        std::fs::create_dir_all(&cwd).unwrap();
+        let store = SqliteStore::open_ephemeral(&directory.path().join("registry.db")).unwrap();
+        let session = super::create_session(&store, candidate(&cwd), None).unwrap();
+        assert_eq!(
+            session.repo,
+            Some(CanonicalRepo::discover(&repo).unwrap().to_string())
+        );
+        assert_eq!(session.cwd, cwd);
+        assert_eq!(store.session(&session.id).unwrap(), Some(session));
+    }
+
+    #[test]
+    fn repository_primary_resolves_after_its_checkout_is_deleted() {
+        let directory = tempfile::tempdir().unwrap();
+        let checkout = directory.path().join("repository");
+        std::fs::create_dir(&checkout).unwrap();
+        let repo = CanonicalRepo::discover(&checkout).unwrap();
+        let scope = PrimaryScope::Repository(repo.clone());
+        let store = SqliteStore::open_ephemeral(&directory.path().join("registry.db")).unwrap();
+        let session = super::ensure_primary_session(
+            &store,
+            &scope,
+            LfSession {
+                repo: Some(repo.to_string()),
+                ..candidate(&checkout)
+            },
+            None,
+        )
+        .unwrap();
+        std::fs::remove_dir(&checkout).unwrap();
+        assert_eq!(
+            store.primary_scope(&session.id).unwrap(),
+            Some(scope.clone())
+        );
+        assert_eq!(
+            super::ensure_primary_session(&store, &scope, candidate(&checkout), None).unwrap(),
+            session
+        );
     }
 }

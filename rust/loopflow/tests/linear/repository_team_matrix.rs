@@ -177,18 +177,20 @@ fn repository_team_matrix() {
         "intelligence".to_string(),
         repo_locator.repo().to_string(),
     );
-    store.create_wave(&survival).unwrap();
-    store.create_wave(&infrastructure).unwrap();
-    store.create_wave(&intelligence).unwrap();
+    loopflow::work::wave::bootstrap::upsert_wave(&store, &survival).unwrap();
+    loopflow::work::wave::bootstrap::upsert_wave(&store, &infrastructure).unwrap();
+    loopflow::work::wave::bootstrap::upsert_wave(&store, &intelligence).unwrap();
     let foreign_repo = tempfile::tempdir().unwrap();
     let foreign_locator = WaveLocator::discover(foreign_repo.path(), "intelligence").unwrap();
-    store
-        .create_wave(&Wave::new(
+    loopflow::work::wave::bootstrap::upsert_wave(
+        &store,
+        &Wave::new(
             WaveId::new(),
             "intelligence".to_string(),
             foreign_locator.repo().to_string(),
-        ))
-        .unwrap();
+        ),
+    )
+    .unwrap();
     let survival_snapshot = snapshot(
         "initiative-survival",
         "project-survival",

@@ -160,7 +160,7 @@ fn seed(home: &Path, repo: &Path, wave_name: &str) -> Wave {
         wave_name.to_string(),
         repo.display().to_string(),
     );
-    store.create_wave(&wave).expect("register wave");
+    loopflow::work::wave::bootstrap::upsert_wave(&store, &wave).expect("register wave");
     store
         .seed_inventory(&InventoryFixture {
             wave_id: wave.id().clone(),

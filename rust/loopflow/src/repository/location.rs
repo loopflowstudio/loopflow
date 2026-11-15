@@ -398,15 +398,17 @@ mod tests {
         let path = path.to_str().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         let invalid = Wave::new(WaveId::new(), "invalid/name".into(), path.into());
-        assert!(store.create_wave(&invalid).is_err());
+        assert!(crate::work::wave::bootstrap::upsert_wave(&store, &invalid).is_err());
         assert!(store.repository_id(path).unwrap().is_none());
         let directory = git_locator(path, &store.repository_registration(path).unwrap().machine)
             .unwrap()
             .unwrap();
         let original = read_locator(&directory).unwrap().unwrap();
-        store
-            .create_wave(&Wave::new(WaveId::new(), "valid".into(), path.into()))
-            .unwrap();
+        crate::work::wave::bootstrap::upsert_wave(
+            &store,
+            &Wave::new(WaveId::new(), "valid".into(), path.into()),
+        )
+        .unwrap();
         assert_eq!(store.repository_id(path).unwrap(), Some(original));
     }
 

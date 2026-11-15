@@ -899,7 +899,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         let wave = crate::work::wave::Wave::new(WaveId::new(), "product".into(), "/repo".into());
-        store.create_wave(&wave).unwrap();
+        crate::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
         let mut snapshot: crate::test_linear_input::Inventory = serde_json::from_str(include_str!(
             "../../../../tests/fixtures/dto/task_history_planning.json"
         ))
@@ -1068,7 +1068,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         let wave = crate::work::wave::Wave::new(WaveId::new(), "product".into(), "/repo".into());
-        store.create_wave(&wave).unwrap();
+        crate::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
         let mut snapshot: crate::test_linear_input::Inventory = serde_json::from_str(include_str!(
             "../../../../tests/fixtures/dto/task_history_planning.json"
         ))
@@ -1169,7 +1169,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         let wave = crate::work::wave::Wave::new(WaveId::new(), "product".into(), "/repo".into());
-        store.create_wave(&wave).unwrap();
+        crate::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
         let mut snapshot: crate::test_linear_input::Inventory = serde_json::from_str(include_str!(
             "../../../../tests/fixtures/dto/task_history_planning.json"
         ))
@@ -1277,7 +1277,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         let wave = crate::work::wave::Wave::new(WaveId::new(), "product".into(), "/repo".into());
-        store.create_wave(&wave).unwrap();
+        crate::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
         let mut snapshot: crate::test_linear_input::Inventory = serde_json::from_str(include_str!(
             "../../../../tests/fixtures/dto/task_history_planning.json"
         ))

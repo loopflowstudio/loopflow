@@ -1023,7 +1023,7 @@ fn project_creation_binding_and_activation_save_offline() {
             "product".into(),
             canonical.to_string(),
         );
-        store.create_wave(&wave).unwrap();
+        loopflow::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
         let args = ["wave", "add", "product", "--json"];
         let mut first = command(repo.path(), home.path(), &args)
             .stdout(std::process::Stdio::null())
@@ -1230,7 +1230,7 @@ fn project_reads_keep_canonical_identity_and_authored_order_after_edits() {
             "product".into(),
             canonical.to_string(),
         );
-        store.create_wave(&wave).unwrap();
+        loopflow::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
         let projects = ["first", "second"]
             .into_iter()
             .map(|name| {
@@ -1396,7 +1396,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
             "product".into(),
             canonical.to_string(),
         );
-        store.create_wave(&wave).unwrap();
+        loopflow::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
         let project = loopflow::linear::LinearProject {
             description: None,
             id: "provider-project".into(),
@@ -1669,7 +1669,7 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
             "product".into(),
             canonical.to_string(),
         );
-        store.create_wave(&wave).unwrap();
+        loopflow::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
         let project = loopflow::linear::LinearProject {
             description: None,
             id: "provider-project".into(),
@@ -2027,7 +2027,7 @@ fn moving_saves_membership_offline_and_retains_inbound_changes() {
                 name.into(),
                 canonical.to_string(),
             );
-            store.create_wave(&wave).unwrap();
+            loopflow::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
             lf(repo.path(), home.path(), &["wave", "add", name, "--json"]);
             let mut project = store.list_projects(Some(wave.id())).unwrap().remove(0);
             if mapped {

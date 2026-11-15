@@ -590,14 +590,10 @@ that case launches no children. Gate owns it; no retry was taken as a fix.
 
 ### Concept review: fields carry their own support · 2026-11-15
 
-Review against `86f99e3315`. The source/capture prerequisite is built; the next
-cut must export typed field support from Rust before clients normalize values.
-The current `stamp.observations` validates the whole invocation, while
-`WorkMembershipPlan.Facts` still combines selection states without per-field
-support. A query-wide dependency bag cannot tell Swift which inputs produced a
-parent, lifecycle or activity value. Do not infer that mapping from opaque fact
-IDs, trim the bag on the client, or treat null observation evidence as an empty
-validated set.
+Review against `f9a8da8ae9`. Producer-declared parent, lifecycle and activity
+support and strict cross-platform fixtures are built. The next cut consumes
+those independent values; it does not infer support from an invocation-wide bag
+or treat null evidence as a validated empty set.
 
 The producer declares each field's complete SQLite and observation inputs,
 including the field's derivation identity so changed rules cannot share an old
@@ -618,12 +614,35 @@ counts cannot claim freshness. A later complete activity capture repairs those
 answers without reapplying Move or changing selection. Reordered old fields,
 restart and source replacement must retain the same separation on both hosts.
 
-Next implement: typed field wire support and fixtures → persisted normalization
-and incorporation → derived-answer coverage → dynamic membership and disconnected
+Next implement: persisted normalization and incorporation → derived-answer
+coverage → dynamic membership and disconnected
 Move with deletion of the old reducer. Keep the proposed Move usage above;
 no new product vocabulary or builtin rule is needed. The three unanswered product
 choices remain independent of this cut. Native latency is still unmeasured.
 Review outcome: design changed — iterate to implement.
+
+**Ingestion precedes query replacement.** The next client API must accept a
+reading as a source of independently supported fields, not only as a replacement
+complete query. In the existing SQLite transaction owner: validate the connection's
+Machine/epoch/schema and negotiated observation source; join each comparable typed
+field; incorporate covered field effects; then evaluate whether the exact query
+body can replace its prior base and derive affected answers. Rejecting an older,
+incomplete or incomparable query as a whole must not discard a newer independently
+supported parent or lifecycle field within it. Conversely, an accepted query body
+does not validate unavailable activity. Preserve the original stamp/body unchanged.
+Field support must match the containing resource's Machine/epoch/schema; captured
+support also requires the current connection's source. A reading cannot elect a
+source or restore a departed epoch. SQLite-only fields need no live observation
+capture. Persisted external values still require reconnect revalidation.
+
+Add the boundary counterexample: the held query has newer activity but an older
+parent; another reading has a newer parent but older/unavailable activity, or is
+incomplete because content is missing. Keep the newer parent and prior last-known
+activity independently, absorb only the parent's committed effect, and retain
+incompleteness for answers consuming the missing inputs. Neither query replaces
+the other as a coherent Machine snapshot. Repeat reordered and after offline
+restart on both hosts. Receipt delivery remains unresolved until its own recovery
+answers; field incorporation never authorizes a resend or changes navigation.
 
 Typed-field cut · 2026-11-15: wire support, scoped capture and strict fixtures
 are built. Activity conservatively declares the repository Session read's consumed

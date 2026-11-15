@@ -9,19 +9,20 @@
 <main>
 <header>LOO-906 · concept-review · 2026-11-15 · headless Graph step<br>
 Sources: scratch/{instant-task-session,questions,desktop-reactivity-feedback}.md;
-Reviewed HEAD 86f99e3315; ReadingStamp.swift, WorkMembership.swift, ClientWorkQuery.swift;
+Reviewed HEAD f9a8da8ae9; ReadingStamp.swift, WorkMembership.swift, ClientWorkQuery.swift, ClientWorkDatabase.swift;
 Rust observe.rs, server/{service,wire,subscriptions}.rs,
 store/sqlite/selections.rs; both client READMEs.
 Source review; no new runtime measurements.</header>
-<h1>Next implement: carry support with each field.</h1>
-<p><strong>Review direction · proposed:</strong> export typed fields with their complete producer-declared inputs, persist their incorporation separately from query completeness, then build dynamic membership and disconnected Move. The three product questions below remain independent.</p>
-<p><strong>Built:</strong> source negotiation, coherent invocation capture, non-reusing observation tokens and wire fixtures are committed at <code>86f99e3315</code>. Typed field support, normalized persistence and disconnected Move remain unbuilt.</p>
-<p><strong>Biggest mismatch:</strong> the source contract now distinguishes process exit from unchanged SQLite, but its dependency bag describes a whole invocation. It cannot tell clients which inputs support a parent or activity value. One unavailable activity must not prevent a confirmed parent from replacing old Move intent.</p>
-<pre>Move A → B commits; an activity dependency changes during capture.
+<h1>Next implement: absorb fields before replacing answers.</h1>
+<p><strong>Review direction · proposed:</strong> persist independently supported fields and their incorporation before deciding whether an exact query can replace its prior base. Then derive answer coverage, dynamic membership and disconnected Move. The three product questions below remain independent.</p>
+<p><strong>Built:</strong> source negotiation and coherent observation capture at <code>86f99e3315</code>; typed parent, lifecycle and activity support with strict Rust/Desktop/iOS fixtures at <code>f9a8da8ae9</code>. Normalized persistence and disconnected Move remain unbuilt.</p>
+<p><strong>Biggest mismatch:</strong> the producer now separates field support, but the client still accepts or rejects a whole complete query before incorporation. An incomplete query or one with older activity can carry a newer confirmed parent. That parent must replace old Move intent independently.</p>
+<pre>Move A → B commits; a later reading supplies parent C.
+Its activity is unavailable, or its query lacks content.
 
-Before · built: query-local effects; invocation-level evidence
+Before · built: typed field evidence; query-local incorporation
 After · proposed:
-  parent B incorporates Move once
+  parent C incorporates Move once; B intent never returns
   real cached Task appears in the unfiltered destination
   Busy/order/count answers that need activity stay incomplete
   a later valid activity capture repairs them without navigation</pre>
@@ -30,15 +31,15 @@ After · proposed:
 <thead><tr><th>Action</th><th>Before · built</th><th>After · proposed</th></tr></thead>
 <tbody>
 <tr><td>Move offline</td><td>Desktop waits in <code>performTaskAction</code>; destination candidates omit arrivals</td><td>Shared intent changes parent facts; dynamic programs update supported lists/counts from real cached content before disk</td></tr>
-<tr><td>Receive later state</td><td><code>WorkQueryEffect.covered</code> checks the exact-query stamp</td><td>Producer-declared field support absorbs only the committed field effect; a later Reopen or Move wins independently of activity</td></tr>
+<tr><td>Receive later state</td><td><code>ClientWorkDatabase.cache</code> gates the whole base; <code>WorkQueryEffect.covered</code> checks its stamp</td><td>Join supported fields in the existing transaction first; absorb covered effects; replace the query base only when its own coverage allows</td></tr>
 <tr><td>Open destination</td><td>Fixed candidates and query-local content</td><td>Definition + candidate coverage + consumed facts/content determine completeness; no invented DTO or exact count</td></tr>
 <tr><td>Restart / reconnect</td><td>Saved IDs, original-Machine recovery and <code>welcome.observations</code> source negotiation exist</td><td>Persisted activity stays last-known until revalidated; parent incorporation survives independently. Recover <code>task.membership_changed</code> by original ID</td></tr>
 </tbody></table>
 <p><strong>Proposed usage:</strong> Move to a Wave or No Wave. Cached lists update immediately; the conversation and drafts stay open. Offline changes wait for their original Machine. Refusal restores only the refused change and leaves later edits and navigation alone.</p>
-<p>The existing cache and invocation capture remain the owners. Rust declares each typed field’s SQLite domains, consumed observations and derivation identity. Clients never split opaque dependency bags or interpret null evidence as a validated empty set. A field with invalid observed support remains last-known; independently supported stored fields can still incorporate. No second observer ledger or input-readiness owner.</p>
+<p>The existing cache, capture and client SQLite transaction remain the owners. Rust declares each typed field’s SQLite domains, consumed observations and derivation identity. Clients validate the resource’s Machine/epoch/schema and the connection’s negotiated source, then compare each field independently. A reading never elects its own source; null evidence never means a validated empty set. A field with invalid observed support remains last-known; independently supported stored fields can still incorporate. No second observer ledger or input-readiness owner.</p>
 <p>Field incorporation and answer completeness stay separate. Fresh parent data cannot prove fresh activity or content. Client-derived answers never become Machine <code>ReadingStamp</code>s. Complete → Reopen, A → B → C, process exit without a write, cache eviction, source replacement and offline restart must pass on both clients before Move migrates.</p>
 <h2>Questions for the next conversation</h2>
-<p>No answer is inferred here; numbering is unchanged. These choices do not block the supplied engineering direction. Review outcome for loop-or-next: <strong>design changed — iterate to implement</strong>. Typed field support and the partial-validation recovery case are specified in the working design.</p>
+<p>No answer is inferred here; numbering is unchanged. These choices do not block the supplied engineering direction. Review outcome for loop-or-next: <strong>design changed — iterate to implement</strong>. The working design now specifies field ingestion before query replacement and the crossed-freshness recovery case.</p>
 <ol>
 <li><strong>Abandon while disconnected.</strong> It closes PRs and removes branches; the recorded “1a” named Complete, rename and move.<br>1a — Save Abandon and deliver on reconnect (built provisionally).<br>1b — Require a reachable Machine and keep the Task until then.</li>
 <li><strong>Take back a change before it was sent.</strong> A mistaken offline removal currently has no cancellation action.<br>2a — Keep that behavior; Reopen afterwards.<br>2b — Offer Cancel only before first send, removing the request and its projection.</li>

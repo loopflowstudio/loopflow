@@ -1,5 +1,11 @@
 # Working assumptions
 
+- Headless engineering clarification, 2026-11-15: normalize supported fields
+  before deciding whether to replace an exact-query base. A rejected/incomplete
+  query can still supply an independently newer parent; it cannot certify missing
+  activity or settle delivery. This follows the existing field/answer separation,
+  not a new product preference (`instant-task-session.md`, Concept review).
+
 - Headless engineering clarification, 2026-11-15: typed fields carry producer-declared
   support; clients cannot split the invocation's opaque dependency bag. Invalid
   observed activity must not stop incorporation of a separately supported parent

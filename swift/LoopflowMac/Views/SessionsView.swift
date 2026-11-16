@@ -1707,7 +1707,6 @@ struct SessionsContentView: View {
                         ProviderTransitionRow(transition: transition)
                     }
                     mainPane
-                    CreationRecoveryView()
                 }
             }
         }

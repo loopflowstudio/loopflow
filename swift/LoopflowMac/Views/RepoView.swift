@@ -69,6 +69,7 @@ struct RepoView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .overlay(alignment: .bottom) { NoticeView(center: model.navigation.notices).zIndex(ZIndex.toast) }
+        .modifier(CreationNotices(notices: model.navigation.notices))
         .background(palette.background)
         .accessibilityElement(children: .contain)
         .navigationTitle(model.repoPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Work")

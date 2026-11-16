@@ -298,7 +298,12 @@ def main() -> None:
                     f"wrapper  {result['wrapper']} "
                     f"({'pinned' if result['pinned'] else 'not pinned'})"
                 )
-                print(f"daemon   {daemon if daemon else 'not running; next build loads the list'}")
+                print(
+                    f"daemon   pid {daemon['pid']}, same executable, up {daemon['uptime']}; "
+                    "idle time unmeasured"
+                    if daemon
+                    else "daemon   not running; next build loads the list"
+                )
                 print(
                     f"roots    {len(result['loaded_roots'])} "
                     f"of {len(result['listed_roots'])} loaded; "

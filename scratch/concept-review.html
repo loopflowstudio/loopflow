@@ -2,7 +2,7 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-650 · shared operations</title>
+<title>LOO-650 · execution ownership</title>
 <style>
 :root{color-scheme:light dark;font:16px/1.45 system-ui,sans-serif}
 body{max-width:760px;margin:2rem auto;padding:0 1rem 2rem}
@@ -16,57 +16,60 @@ li{margin:.4rem 0}
 @media(max-width:520px){body{margin-top:1rem}table{font-size:.76rem}}
 </style>
 <header>LOO-650 · concept-review · November 15, 2026<br>
-Checkout reviewed: <code>d529e8a24a</code>. Sources: <code>scratch/loo-650.md</code>,
+Reviewed checkout: <code>e3a159b6ee</code>. Built from <code>scratch/loo-650.md</code>,
 <code>scratch/publishing-discussion.md</code>, <code>scratch/measure.html</code>,
-<code>engine/{mod,task,skill,repo,session}.rs</code>,
-<code>lf/commands/{util,list,subscribe}.rs</code>, <code>harness/{context,agent_process}.rs</code>,
-<code>server/mod.rs</code>, <code>scripts/build_cache.py</code> and rebuild-probe README.</header>
+<code>Cargo.toml</code>, <code>engine/{skill,task}.rs</code>,
+<code>task_graph.rs</code>, <code>lf/commands/list.rs</code>,
+<code>read_stream.rs</code>, <code>server/events.rs</code>,
+<code>linear/request_log.rs</code>, <code>ops/recovery.rs</code>,
+<code>build_info.rs</code> and rebuild-probe README.</header>
 <main>
-<h1>Finish the execution crate below both adapters.</h1>
-<aside><strong>Biggest mismatch.</strong> Shared operations moved below CLI handlers,
-but command presentation and execution still compile as one library. Native resume,
-shared readings and Machine-client calls still reach adapter-owned code.</aside>
-<p><strong>Built:</strong> four private crates; shared account, sync and launch
-operations; automatic developer-entry root upkeep; clean-to-dirty provenance check.
-<strong>Proposed:</strong> the independent execution compiler unit.
-<strong>Measured:</strong> cross-root reuse, with whole-build timing inconclusive.</p>
+<h1>Iterate to implement the execution compiler unit.</h1>
+<aside><strong>Biggest mismatch.</strong> Edit command help → rebuild the same
+library that owns execution. Native and Machine code now have domain owners,
+but remain in that compiler unit. The next pass must create the independent crate.</aside>
+<p><strong>Built:</strong> foundation and storage crates, shared operations,
+native/Machine module separation, root upkeep and dirty provenance verification.
+<strong>Proposed:</strong> <code>loopflow-execution</code> below CLI/server adapters.
+<strong>Measured:</strong> cross-root library reuse; whole-build timing inconclusive.</p>
 <h2>Actions → concepts → APIs</h2>
 <table>
-<tr><th>Action / concept</th><th>Existing</th><th>Proposed ownership</th></tr>
-<tr><td>Edit command help / adapter</td><td>Recompiles the application and execution together</td><td>CLI parsing/rendering → shared engine operations → execution; unchanged execution reused</td></tr>
-<tr><td>Resume work / native conversation</td><td>Runtime calls CLI util/open helpers</td><td>Session/process/host operations own resume; adapters retain argv and presentation</td></tr>
-<tr><td>Watch or route a Task / reading</td><td>Engine calls CLI subscription and routing code</td><td>Shared reading and routing below adapters; stdin/NDJSON and socket framing at edges</td></tr>
-<tr><td>List skills / catalogue</td><td>Shared listing reads Clap navigation</td><td>Adapter supplies typed command catalogue; shared composition retains complete listing</td></tr>
-<tr><td>Start managed work / Machine connection</td><td>Harness imports server client/address/wire</td><td>Client and protocol below service dispatch; managed readiness unchanged</td></tr>
+<tr><th>Action / concept</th><th>Existing</th><th>Proposed</th></tr>
+<tr><td>Edit help / command adapter</td><td>Application and execution compile together</td><td>CLI → typed engine operation → execution crate; unchanged execution reused</td></tr>
+<tr><td>List skills / command catalogue</td><td><code>engine::skill::list</code> calls CLI listing</td><td>Clap supplies typed catalogue and invocation values; shared listing composes definitions</td></tr>
+<tr><td>Resume a saved Graph / landing semantics</td><td><code>landing_name</code> parses argv with Clap</td><td>Canonical parser supplies semantic answer; saved Graph and cursor stay unchanged</td></tr>
+<tr><td>Claim remote work / ownership route</td><td><code>engine::task</code> calls CLI routing</td><td>Domain routing and SSH preparation below adapters; uncertain replies keep receipts</td></tr>
+<tr><td>Watch a Task / reading occurrences</td><td>Shared reader imports server observer and wire events</td><td>Observer/event values beside readings; server keeps envelope and framing</td></tr>
+<tr><td>Run cached code / build identity</td><td>Consumers read embedded application build constants</td><td>Acquisition supplies running-build values; reused library cannot substitute another root</td></tr>
 </table>
-<h2>Keep one operation and one receipt</h2>
-<p>A terminal or Desktop starts the same Task and retains its cursor, native thread
-and input. A lost launch reply keeps the creation key and receipt; retry cannot
-launch twice. Ending a request or watch cannot stop its detached execution.
-Preserve request-local directory and I/O, uncertain outcomes, once-only usage and
-waited landing. No new Work record or execution dispatcher.</p>
-<p>Keep CLI/server fixtures above the cut and compile the execution owner alone.
-Move implementations to their owners and delete old bodies. Keep wire results
-shared; render them at the terminal edge. A Machine recording gap must still leave
-the provider conversation running.</p>
+<h2>One start, one receipt, the same conversation</h2>
+<p>Terminal or Desktop starts the same Task. Lose the reply after registration:
+the Process, creation key, native thread and pending input survive. Ending the
+request cannot end or repeat detached work. Resume retains the captured Graph;
+aliases, abbreviations and global flags still identify landing commands.</p>
+<p>A watch that falls behind requests a fresh reading. An unavailable scope keeps
+its previous membership. Rental recovery retains its effects and warnings;
+command labels follow invocation attribution. No new dispatcher, saved identity,
+Graph field or application-services framework.</p>
 <h2>Build and recover</h2>
-<p><code>scripts/dev-lf --version</code> refreshes derived roots before building.
-A new root can miss until the daemon exits naturally; the next daemon reads the
-updated configuration. Bare Cargo does not refresh roots. No restart, shared
-target or new scheduler. Cache failure permits direct compilation;
-<code>scripts/dev-lf --isolated-build --version</code> supplies local debug sources.</p>
-<p>The verified experimental cache remains a prerequisite for demonstrated reuse.
-Root upkeep alone does not establish a production cache installation or speedup.</p>
+<p><code>scripts/dev-lf --version</code> refreshes roots before building. The
+existing daemon reloads on natural idle exit; bare Cargo does not refresh roots.
+Cache failure permits direct compilation. For local debug sources:
+<code>scripts/dev-lf --isolated-build --version</code>.</p>
+<p>The experimental cache remains a prerequisite for demonstrated cross-root
+reuse. Root upkeep alone validates neither production cache selection nor speedup.</p>
 <h2>Show next</h2>
-<p>Independent execution build and terminal/served recovery checks; actual compiler
-and cache closures after command, execution and saved-record edits. Validate the
-chosen cache, then run five alternating baseline/candidate cohorts and report
-median/range including link cost. Demo and review remain before merge.</p>
+<p>Build execution alone with no application test dependency. Keep parser/help and
+served dispatch fixtures above it. Compare real command-help, execution and
+saved-record edit closures, including linking; then validate the selected cache
+and run five alternating matched baseline/candidate cohorts. Report median/range,
+CPU, RSS and cache receipts. Technical demo/review and merged verification remain.</p>
 <h2>Review questions</h2>
 <ol>
-<li>Does a product choice remain? No: commands, saved data and recovery keep their behavior.</li>
-<li>What follows? <strong>Design changed: iterate to implement</strong> the execution cut,
-including shared readings/routing, native resume and the Machine client.</li>
+<li>Is a product choice open? <strong>No.</strong> Existing commands, saved data,
+protocol and recovery define the cut.</li>
+<li>What should loop-or-next do? <strong>Iterate to implement.</strong> The design
+now names the crate and its remaining adapter inputs; no code changed in this review.</li>
 </ol>
 </main>
 </html>

@@ -1,5 +1,11 @@
 # Open choices
 
+- November 15 resumed concept review: name the lower compiler unit
+  `loopflow-execution`; keep command semantics and running-build identity as
+  application inputs, with no saved Graph format change or generic adapter
+  service framework. This reversible implementation choice follows the existing
+  behavior-preserving cut. No product question is open; iterate to implement.
+
 - November 15 concept review: complete the existing engine/domain operation
   closure below CLI and server dispatch. Move native resume and the Machine
   client with their execution owners; keep Clap catalogue acquisition above and

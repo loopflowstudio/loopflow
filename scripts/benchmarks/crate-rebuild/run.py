@@ -444,7 +444,7 @@ def main() -> None:
                                 for c in compilers
                                 if c["crate_type"] == "lib" and c["cache_misses"]
                             }
-                            if actual != expected:
+                            if actual != expected or receipt["rust_cache_misses"] != len(expected):
                                 raise RuntimeError(
                                     f"wrong compiler closure: expected {expected}, got {actual}"
                                 )

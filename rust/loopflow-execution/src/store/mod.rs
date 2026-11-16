@@ -1646,6 +1646,40 @@ mod tests {
             .is_none());
     }
 
+    // An observed removal stamps the Task itself, so placement refuses it even
+    // without the acquisition's change log. That log stays: it guards
+    // re-acceptance, tracks revisions and carries removals released stores
+    // recorded without stamping the Task.
+    #[tokio::test]
+    async fn a_tracker_removal_withdraws_new_launches() {
+        let (directory, store, wave) = planning_store().await;
+        let project = make_project(&wave);
+        store.create_project(&project).await.unwrap();
+        select_project(&store, &project);
+        let mut task = make_task(&store, &wave, &project);
+        task.worktree = Some(directory.path().join("checkout"));
+        store.sqlite.seed_unplaced_task(&task);
+        store
+            .observe_pm_issue_change(task.linear_id.as_ref().unwrap().as_str(), None, true)
+            .await
+            .unwrap();
+        rusqlite::Connection::open(directory.path().join("registry.db"))
+            .unwrap()
+            .execute("DELETE FROM pm_issue_changes", [])
+            .unwrap();
+        let result = store
+            .place_task(
+                &task.id,
+                task.worktree.as_ref().unwrap(),
+                &task.workspace_slug,
+                &make_task_pr(&task),
+                None,
+            )
+            .await;
+        assert!(result.unwrap_err().to_string().contains("was deleted"));
+        assert!(store.task_prs(&task.id).await.unwrap().is_empty());
+    }
+
     #[tokio::test]
     async fn placement_retries_retain_the_first_checkout_pr_and_planning() {
         for mapped in [false, true] {

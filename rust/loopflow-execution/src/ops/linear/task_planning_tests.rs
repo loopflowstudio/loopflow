@@ -624,6 +624,9 @@ fn task_sync_publishes_saved_task_and_reuses_its_identity() {
 #[path = "planning_order_tests.rs"]
 mod planning_order_tests;
 
+#[path = "planning_effect_tests.rs"]
+mod planning_effect_tests;
+
 async fn seed_finished_tasks(
     fixture: &Fixture,
     repo: &Path,

@@ -14,7 +14,11 @@
           "truncated": false
         }
       },
-      "work": null
+      "work": null,
+      "read_at": {
+        "planning": 12,
+        "sessions": 41
+      }
     }
   },
   {
@@ -202,7 +206,11 @@
           "pinned": false
         }
       ],
-      "work": null
+      "work": null,
+      "read_at": {
+        "planning": 12,
+        "sessions": 41
+      }
     }
   },
   {
@@ -212,7 +220,11 @@
       "answers": 7,
       "unavailable": null,
       "body": [],
-      "work": null
+      "work": null,
+      "read_at": {
+        "planning": 12,
+        "sessions": 41
+      }
     }
   },
   {
@@ -222,7 +234,11 @@
       "answers": 7,
       "unavailable": "Task LOO-1 is not registered",
       "body": null,
-      "work": null
+      "work": null,
+      "read_at": {
+        "planning": 12,
+        "sessions": 41
+      }
     }
   },
   {
@@ -235,7 +251,11 @@
         "truncated": false,
         "items": []
       },
-      "work": null
+      "work": null,
+      "read_at": {
+        "planning": 12,
+        "sessions": 41
+      }
     }
   },
   {
@@ -247,7 +267,11 @@
       "body": {
         "nodes": []
       },
-      "work": null
+      "work": null,
+      "read_at": {
+        "planning": 12,
+        "sessions": 41
+      }
     }
   },
   {
@@ -281,7 +305,11 @@
         },
         "row": null
       },
-      "work": null
+      "work": null,
+      "read_at": {
+        "planning": 12,
+        "sessions": 41
+      }
     }
   },
   {
@@ -294,7 +322,11 @@
         "transport": "git",
         "destinations": []
       },
-      "work": null
+      "work": null,
+      "read_at": {
+        "planning": 12,
+        "sessions": 41
+      }
     }
   }
 ]

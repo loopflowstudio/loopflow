@@ -1,4 +1,4 @@
-//! Carrier-independent server protocol, revision 6: one connection per client,
+//! Carrier-independent server protocol, revision 7: one connection per client,
 //! negotiated revision, requests multiplexed by id. Local admission is
 //! same-user only; the remote carrier admits the Machine owner's other
 //! Tailscale devices. Each carrier delimits messages its own way: the Unix
@@ -6,13 +6,15 @@
 use super::schema::Untyped;
 use crate::engine::{Error, ErrorCode};
 use crate::read_stream::SubscriptionFrame;
+pub use loopflow_storage::sqlite::Revisions;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// The newest revision this build speaks.
-pub const REVISION: u32 = 6;
-/// The oldest revision this build speaks.
-pub const MIN_REVISION: u32 = 5;
+pub const REVISION: u32 = 7;
+/// The oldest revision this build speaks. Revision 7 answers writes with the
+/// revisions they advanced and remembers request IDs; clients rely on both.
+pub const MIN_REVISION: u32 = 7;
 /// The largest message a control connection carries, so a reading never waits
 /// behind a large body. Larger messages travel on a ticketed connection.
 pub const MAX_MESSAGE: usize = 1024 * 1024;
@@ -45,6 +47,12 @@ pub enum ClientMessage<O = serde_json::Value, R = serde_json::Value> {
         id: String,
         operation: O,
         select: Option<Vec<String>>,
+        /// Names one write across connections and restarts: for a day, a
+        /// repeat under the same ID gets the first answer and runs nothing; a
+        /// different operation under it is `invalid`. Null for reads and for
+        /// writes the client never repeats.
+        #[serde(deserialize_with = "Option::deserialize")]
+        request_id: Option<String>,
     },
     /// A read with a subscription; answers a null `response`, then `reading` messages
     /// until cancelled. The id follows the same rules as a request's. `select`
@@ -261,6 +269,11 @@ pub enum ServerMessage {
         id: String,
         trace_id: loopflow_model::id::TraceId,
         result: serde_json::Value,
+        /// For a write, each store domain it advanced, at its value after the
+        /// commit: a reading at or past every one shows the write. Null for
+        /// reads and server operations.
+        #[serde(deserialize_with = "Option::deserialize")]
+        revisions: Option<Revisions>,
     },
     /// The answer to `attach`: the connection now speaks the viewer protocol
     /// with this held terminal, and nothing more arrives from the server.
@@ -302,6 +315,10 @@ pub enum ServerMessage {
         message: String,
         /// Structured detail a client can act on, such as the missing resource.
         data: Option<serde_json::Value>,
+        /// The domains a failed write advanced before it failed (Abandon whose
+        /// cleanup failed after its save); null when it changed nothing.
+        #[serde(deserialize_with = "Option::deserialize")]
+        revisions: Option<Revisions>,
     },
 }
 
@@ -361,11 +378,17 @@ pub struct Limits {
 impl ServerMessage {
     /// The `error` message that answers request `id` (null: the connection) with `error`.
     pub fn error(id: Option<String>, error: Error) -> Self {
+        Self::written_error(id, error, None)
+    }
+
+    /// The `error` that answers a write which advanced `revisions` first.
+    pub fn written_error(id: Option<String>, error: Error, revisions: Option<Revisions>) -> Self {
         Self::Error {
             id,
             code: error.code,
             message: error.message,
             data: error.data,
+            revisions,
         }
     }
 }
@@ -395,6 +418,7 @@ mod tests {
             include_str!("../../tests/fixtures/dto/server/event_steer.json"),
             include_str!("../../tests/fixtures/dto/server/event_step_finished.json"),
             include_str!("../../tests/fixtures/dto/server/error.json"),
+            include_str!("../../tests/fixtures/dto/server/error_written.json"),
             include_str!("../../tests/fixtures/dto/server/not_found.json"),
             include_str!("../../tests/fixtures/dto/server/remote.json"),
             include_str!("../../tests/fixtures/dto/server/mobile_status.json"),

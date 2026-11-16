@@ -369,3 +369,68 @@ native threads and sending no message. Full inventory then verified all 15
 active on `jack-42d1021d3f2d`, each with a new process and unchanged native
 thread; zero unfinished Codex Sessions remained on `manabot-eng`. MTG-347 is
 Task-associated, not bare.
+
+## Authentication concept review — 2026-11-16
+
+New direction: review every included provider's terms and make supported login
+easier. See `scratch/authentication-review.md` and `scratch/concept-review.html`.
+The service/native split is insufficient for grant ownership and remote setup.
+Official Codex docs support destination device login and SSH auth-file copying
+as fallback; Claude documents setup-token for scripts. Blanket prohibition of
+helping remote setup is not justified by those sources. Subscription pooling
+remains out. Unified connection UX, optional hosted OAuth and destination grants
+are proposed, not decided. Notion full current Developer Terms and OpenCode
+hosted-plan automation conditions remain unverified. Main sync paused mid-merge;
+do not publish the partial resolution.
+
+## Manual reset — 2026-11-16
+
+Jack Heart: “i just redeemed a reset for claude but it still says jackstah@ is cooling. can you clear that, and make sure that we ahve a clearer way to reset / recheck all usage limits post a manual reset in my subscription setting”.
+
+Installed lf: `lf account set claude=jackstah@gmail.com --clear-cooldown`, then
+`lf account claude=jackstah@gmail.com --json`. Provider poll returned seven_day
+35%, seven_day_fable 0%; no account or window holds, all models eligible. This
+was inspection after an external reset, not spending another reset. Private
+switcher gains `refresh [provider] --login <email> --after-reset` to release
+cached holds and immediately fetch current usage without choosing/installing a
+login. No account-management functionality is added back to removal branch.
+
+## Usage-limit backoff — 2026-11-16 (next implement step)
+
+Supersedes “Exhaustion stops … there is no account-reset wait loop” above.
+Jack Heart: “one kind of failover is an exponential backoff on the same
+provider. I think that would probably be the unit of last resort”, then: “For now
+I'm imagining 5/5 day or 5 minutes, then 15 minutes, then 30 minutes, then an
+hour, and then probably fail”. Also: “SSW should not be starting any runs … we
+can't have Loopflow know about SSW”.
+
+First finish the paused merge of main `470da475a1` (57 unmerged paths). The
+worktree holds an unverified resolution with no conflict markers;
+`cargo check -p loopflow-execution --all-targets` stops at
+`rust/loopflow-storage/src/session.rs:372` (`crate::store::ProviderAccountId`).
+Main's crate extraction re-adds `rust/loopflow-execution/src/provider_account/`
+(`routing`, `capacity`, `catalog`, `operations`, `account_status`) and their
+tests; the removal deletes them again. Keep the removal's behavior everywhere.
+
+Then, in `agent/mod.rs::_run_with_retries`:
+
+- Headless only (`process.auto`). Interactive still dispatches once.
+- Last resort: on `AgentFailure::UsageLimit` with no rung left, wait 5 min, then
+  15, 30, 60, retrying after each; a fifth refusal stops with the provider's
+  message and today's pin/fallback advice. A pinned agent goes straight here.
+- Each retry reads native auth fresh and restarts the configured order at its
+  first rung. Resend a continuation on a known native thread, the original
+  input when there is none (existing rule).
+- No account state, usage polling, reset parsing or knowledge of any other tool.
+- Long waits use `SystemTime`; tests inject the wait closure and never sleep.
+- The Session shows that it is waiting and when it next tries, with the refusal
+  text kept, through existing Session records. `CapacityWait` at base
+  `9cafc410` is reference only; restore no account fields.
+- Extend `native_retry_policy_matrix`: schedule order, stop after the fourth
+  wait, success after a wait, interactive unchanged. Update
+  `docs/subscriptions.md` and the retry text in config/troubleshooting docs.
+
+Open, noted for review: whether `CredentialInvalidated` also waits (currently
+stops), and restart-at-first-rung versus retrying only the last rung.
+
+Do not publish, merge or land. Auto-Ship is on hold for this run.

@@ -1,69 +1,11 @@
-<!doctype html>
-<html lang="en">
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-913 — Provider refusal and recovery</title>
-<style>
-:root{color-scheme:light dark;font:17px/1.5 system-ui,sans-serif;background:light-dark(#faf8f3,#191b1e);color:light-dark(#242a30,#e7e6e1)}
-body{max-width:760px;margin:32px auto;padding:0 20px 40px}h1{font-size:1.8rem;line-height:1.2}h2{font-size:1.12rem;margin-top:28px}header{font-size:.8rem;color:light-dark(#59616b,#abb3bb)}
-pre{padding:14px;background:light-dark(#efeee8,#23272c);white-space:pre-wrap;overflow-wrap:anywhere;border-left:3px solid #998060}code,pre{font:.86rem/1.5 ui-monospace,monospace}
-table{border-collapse:collapse;width:100%;font-size:.87rem}th,td{text-align:left;vertical-align:top;padding:9px 6px;border-bottom:1px solid light-dark(#d5d3cd,#41464d)}li{margin:10px 0}@media(max-width:540px){body{padding-inline:12px}table{font-size:.75rem}}
-</style>
-<header>LOO-913 · concept-review · 2026-11-15<br>
-Built from scratch/subscription-removal.md, scratch/qa.html, docs/subscriptions.md,
-agent/mod.rs, harness/claude.rs, harness/claude_decode.rs,
-lf/commands/run.rs and tests/session_launch_contract.rs.</header>
-<h1>Advance to gate.</h1>
-<p>No open product choice. The existing repair meets the design: an exhausted
-headless run shows the provider's refusal and reset instructions, followed by a
-way to change its pin or configured fallbacks. No further implementation is proposed.</p>
-<h2>The mismatch, before and after</h2>
-<p><strong>QA observation before the repair:</strong> the final error named
-“provider usage limit” and a run directory; the provider's reset information
-remained in that directory.</p>
-<pre>lf -b -a claude:opus : 'say done'
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LOO-913 · Connecting Loopflow</title><style>:root{color-scheme:light dark;font-family:system-ui,sans-serif;line-height:1.55}body{max-width:850px;margin:40px auto;padding:0 22px}h1{font-size:2rem;line-height:1.15}h2{font-size:1.2rem;margin-top:2rem}small{opacity:.7}pre{padding:16px;background:light-dark(#f1f3f5,#22262c);overflow:auto}table{border-collapse:collapse;width:100%;font-size:.92rem}td,th{text-align:left;vertical-align:top;padding:10px 8px;border-bottom:1px solid #8885}.decision{border-left:4px solid #be8542;padding-left:16px}a{color:light-dark(#245b9a,#91bfff)}li{margin:.6rem 0}</style><header><small>LOO-913 · concept-review · 2026-11-16<br>Based on authentication-review.md, subscriptions.md, provider_auth, engine/account and Machine credential paths; public provider sources linked in the review.</small><h1>Help people connect.<br>Let providers own their grants.</h1></header><div class="decision"><strong>Decision needed:</strong> keep setup local-first with an optional OAuth helper, or require entirely local registration? The current account/service split does not answer which credentials Loopflow should own or move.</div><h2>Before → proposed experience</h2><p><strong>Existing removal branch:</strong> native Claude/Codex login outside lf; <code>lf account</code> manages six other providers; selected credentials can still be installed remotely. Some read-only status checks also persist CLI tokens.</p><p><strong>Proposed, unbuilt:</strong> one setup entry shows the connections needed for the selected work. Existing native logins work immediately; optional planning and secrets access is requested only when needed. Command spelling remains open.</p><pre>lf connect
+  Coding     Claude ready here · Codex ready here
+  Source     GitHub ready for this repository
+  Planning   Connect Linear when you use Tasks
+  Secrets    Doppler available · optional
 
-Final error now includes:
-agent stopped after provider usage limit.
-… You've hit your limit.
-Resets 3pm (America/Los_Angeles).
-No fallback remains. Change an `agent` or `-a` pin …</pre>
-<p><strong>Implemented and checked:</strong> the isolated stand-in emits a rejection
-event followed by a multiline error result. The focused CLI test passes and
-asserts the refusal, reset time and pin advice in the final error, with exactly
-one input dispatch. This is fixture output, not a live quota observation.</p>
-<h2>Actions → concepts → APIs</h2>
-<table>
-<tr><th>Action</th><th>Concept</th><th>Implemented path</th></tr>
-<tr><td>Sign in and launch</td><td>Native login owns authentication</td><td>Claude/Codex start with native configuration; no account selection</td></tr>
-<tr><td>Receive a refusal</td><td>Rejection classifies; result or exit completes</td><td><code>TurnRejected</code> → provider error; Claude reader retains the pending result and its instructions</td></tr>
-<tr><td>Exhaust a headless order</td><td>Stop with the provider's explanation</td><td><code>_run_with_retries</code> → stop record + advice → <code>run_headless_prompt</code> final error</td></tr>
-<tr><td>Recover deliberately</td><td>Authentication and continuation remain separate</td><td>Change native login/capacity or agent configuration, then retry; Task status retains the stop reason</td></tr>
-<tr><td>Resume older work</td><td>Session history survives login changes</td><td>Transcript-only adoption; retained attribution displays as “historical account”</td></tr>
-</table>
-<h2>Normal, failed and recovered</h2>
-<p>A normal answer completes once. A quota snapshot or answer prose mentioning
-limits does not authorize fallback. A classified headless refusal traverses only
-the configured model/harness order; a model pin stops. A bare harness pin keeps
-that harness and its existing model fallthrough.</p>
-<p>Interactive refusal keeps the thread and provider visible and sends no automatic
-follow-up input, with or without a Task. After native authentication or capacity
-recovers, retry deliberately. A stopped Task is inspected with
-<code>lf task status &lt;ID&gt;</code> and continued with
-<code>lf task run &lt;ID&gt;</code>. Earlier receipts and conversation history survive.</p>
-<h2>Counterexample retained</h2>
-<p>A rejection event can arrive before the provider explains its reset time.
-Completing the turn on that event loses the explanation. The repair waits for
-the result or native exit. It adds no reset timer, quota polling, account lifecycle
-or extra dispatch. Existing provider-error and receipt records carry the information.</p>
-<h2>Review questions, resolved by the working design</h2>
-<ol>
-<li>Does refusal recovery require another product concept? <strong>No.</strong>
-Keep the provider message on the existing error and stop-record paths.</li>
-<li>Does Task membership authorize interactive replay? <strong>No.</strong>
-Headless policy controls automatic continuation.</li>
-<li>What goes next? <strong>Advance to gate.</strong> Broader suites and final
-review remain there; publication is a later delivery step. No code changed in
-this concept review.</li>
-</ol>
-</html>
+lf connect linear
+  Approve Loopflow and its workspace permissions in your browser
+
+lf connect codex --machine mini
+  Start native device-code login on mini; approve in your browser</pre><p>Denied consent leaves prior access intact. Expired access offers reauthorization for that grant. A capacity refusal never chooses another account. Connecting must not send an inference request just to prove readiness.</p><h2>Actions → concepts → API ownership</h2><table><thead><tr><th>Action</th><th>Concept</th><th>Operation and owner</th></tr></thead><tbody><tr><td>Sign into a coding tool</td><td>Native-client login</td><td>lf starts the documented provider flow; native client owns storage, refresh and logout</td></tr><tr><td>Let lf read/update planning</td><td>Grant to the Loopflow integration</td><td>Begin OAuth → consent → completion; lf stores and renews only its own authorized grant</td></tr><tr><td>Run on mini or a rental</td><td>Access for a destination runtime</td><td>Native remote login, supported headless setup or a scoped automation grant; no automatic broad credential copying</td></tr><tr><td>See what works</td><td>Observed readiness</td><td>List identity/workspace, purpose, permissions and destination; do not infer quota from login</td></tr><tr><td>Disconnect lf</td><td>Revoke lf access</td><td>Remove/revoke the selected grant without silently logging independent tools out</td></tr></tbody></table><h2>What provider review changes</h2><table><thead><tr><th>Provider</th><th>Supported direction / constraint</th></tr></thead><tbody><tr><td>GitHub</td><td>CLI/device OAuth locally; evaluate repository-scoped App tokens remotely. Terms prohibit sharing tokens to exceed rate limits.</td></tr><tr><td>Linear</td><td>Local PKCE OAuth is supported; rotating refresh grants need coordinated ownership. API limits and workspace policy still apply.</td></tr><tr><td>Asana</td><td>Registered app OAuth; protect the confidential client secret. Explicit consent and privacy disclosures also cover sending Task content to coding providers.</td></tr><tr><td>Notion</td><td>Official OAuth with workspace/page selection. Avoid soliciting arbitrary end-user/bot tokens. Full current Developer Terms could not be fetched; older indexed wording is provisional.</td></tr><tr><td>Doppler</td><td>Native CLI for local development; config-scoped service tokens/accounts for unattended work. Avoid duplicating a broad personal CLI token.</td></tr><tr><td>OpenCode</td><td>Separate local harness, hosted pay-as-you-go Models, Go subscription and third-party provider auth. Hosted terms prohibit account-limit evasion; plan-specific automation wording needs confirmation.</td></tr><tr><td>Claude</td><td>Unmodified native client; documented setup-token for CI/scripts. Hosting and individual-use conditions still apply; no subscription pool.</td></tr><tr><td>Codex</td><td>Native headless device login; official docs also describe SSH auth-file copying as fallback. That does not authorize pooling or rotation to evade limits.</td></tr></tbody></table><p><strong>Correction to the PR:</strong> “authenticate beforehand” is too restrictive as the complete experience. lf can help complete supported authentication on a destination while removing catalog-driven subscription transfer and renewal.</p><p>This is a public-policy/design review, not a blanket legal clearance. Separate customer agreements and selected model-provider terms can add conditions. The full source ledger and uncertainties are in <code>scratch/authentication-review.md</code>.</p><h2>Questions</h2><ol><li>OAuth setup: <strong>a</strong> local-first with optional hosted helper; <strong>b</strong> entirely local with self-managed registrations; <strong>c</strong> hosted helper by default?</li><li>Scope: <strong>a</strong> correct native remote guidance in this PR and design unified connections next; <strong>b</strong> expand this PR to the connection UX?</li></ol><small>The sync is paused mid-merge. No policy-driven code rewrite, publication or merge in this review.</small></html>

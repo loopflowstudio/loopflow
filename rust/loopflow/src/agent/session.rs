@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Result};
 
 use super::AgentConfig;
-use crate::id::AgentSessionId;
+use loopflow_model::id::AgentSessionId;
 
 #[derive(Debug)]
 pub(crate) enum ProviderInvocation<'a> {

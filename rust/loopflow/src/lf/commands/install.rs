@@ -3027,8 +3027,8 @@ fn rollback_from_store(cli_target: &Path, candidate: &Path, bin_dir: &Path) -> R
 #[cfg(test)]
 mod settle_tests {
     use super::settle_migration_backups;
-    use crate::id::LfProcessId;
     use crate::lf::commands::binaries::{BinaryInventory, RunningBinary, RunningLfProcess};
+    use loopflow_model::id::LfProcessId;
     use std::path::PathBuf;
 
     fn inventory(binaries: Vec<RunningBinary>) -> BinaryInventory {

@@ -11,12 +11,12 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-pub use crate::durable::TaskId;
-use crate::id::prefixed_uuid_id;
-use crate::id::WaveId;
 use crate::linear::{LinearBindingError, LinearIssueId};
 use crate::pr_landing::PrLandingId;
 use crate::work::project::ProjectId;
+pub use loopflow_model::durable::TaskId;
+use loopflow_model::id::prefixed_uuid_id;
+use loopflow_model::id::WaveId;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct TaskUpdate {
@@ -31,9 +31,9 @@ pub struct TaskUpdate {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewTask {
     pub due_date: Option<String>,
-    pub id: crate::durable::TaskId,
-    pub repository_id: crate::durable::RepositoryId,
-    pub project_id: Option<crate::durable::ProjectId>,
+    pub id: loopflow_model::durable::TaskId,
+    pub repository_id: loopflow_model::durable::RepositoryId,
+    pub project_id: Option<loopflow_model::durable::ProjectId>,
     pub title: String,
     pub description: String,
 }
@@ -274,11 +274,11 @@ pub struct TaskPr {
     /// Id of the first-class Linear attachment linking this PR on its owning
     /// issue. `None` until the PR is first published; carried forward so later
     /// publishes update the same attachment in place.
-    #[serde(deserialize_with = "crate::id::deserialize_uuid_option")]
+    #[serde(deserialize_with = "loopflow_model::id::deserialize_uuid_option")]
     pub linear_attachment_id: Option<String>,
     /// Id of the loopflow-managed Linear comment carrying the PR URL and state.
     /// Its presence switches the writeback from `commentCreate` to `commentUpdate`.
-    #[serde(deserialize_with = "crate::id::deserialize_uuid_option")]
+    #[serde(deserialize_with = "loopflow_model::id::deserialize_uuid_option")]
     pub linear_comment_id: Option<String>,
     /// `None` when the last Linear linkage writeback succeeded; the last error
     /// string when it degraded. The GitHub publication still succeeded — this only
@@ -522,7 +522,7 @@ pub struct Task {
     pub wave_id: Option<WaveId>,
     /// Stable repository identity, independent of planning membership.
     #[serde(rename = "repo_id")]
-    pub repository_id: crate::durable::RepositoryId,
+    pub repository_id: loopflow_model::durable::RepositoryId,
     pub project_id: Option<ProjectId>,
     pub worktree: Option<PathBuf>,
     pub workspace_slug: String,
@@ -586,11 +586,11 @@ pub enum TaskEventKind {
         link: serde_json::Value,
     },
     FollowThroughRelationConfirmed {
-        #[serde(deserialize_with = "crate::id::deserialize_uuid")]
+        #[serde(deserialize_with = "loopflow_model::id::deserialize_uuid")]
         relation_id: String,
-        #[serde(deserialize_with = "crate::id::deserialize_task_or_uuid")]
+        #[serde(deserialize_with = "loopflow_model::id::deserialize_task_or_uuid")]
         source_issue_id: String,
-        #[serde(deserialize_with = "crate::id::deserialize_task_or_uuid")]
+        #[serde(deserialize_with = "loopflow_model::id::deserialize_task_or_uuid")]
         target_issue_id: String,
     },
     FollowThroughDisposition {
@@ -630,13 +630,13 @@ pub enum TaskEventKind {
     // Retained for reading recorded decisions; no current writer.
     HistoricalUncertaintyAccepted {
         #[serde(alias = "exec_ids")] // Append-only decisions keep their original bytes.
-        lf_process_ids: Vec<crate::id::LfProcessId>,
+        lf_process_ids: Vec<loopflow_model::id::LfProcessId>,
         reason: String,
     },
     // The rename migration rewrote `task_events`; Project `TaskObserved` copies keep their bytes.
     #[serde(alias = "flow_finished")]
     GraphFinished {
-        #[serde(deserialize_with = "crate::id::deserialize_uuid")]
+        #[serde(deserialize_with = "loopflow_model::id::deserialize_uuid")]
         invocation_id: String,
         #[serde(alias = "flow")]
         graph: String,
@@ -644,7 +644,7 @@ pub enum TaskEventKind {
     },
     /// Historical authored direction; the immutable publication owns its text.
     Steer {
-        steer_id: crate::id::SteerId,
+        steer_id: loopflow_model::id::SteerId,
     },
     /// A request to end the Task's current turn so the next one re-reads its
     /// direction immediately. A live run acts on interrupts issued after it
@@ -758,7 +758,7 @@ mod tests {
     fn task() -> Task {
         let now = time::OffsetDateTime::now_utc();
         Task {
-            repository_id: crate::durable::RepositoryId::new(),
+            repository_id: loopflow_model::durable::RepositoryId::new(),
             id: TaskId::new(),
 
             revision: 0,
@@ -769,7 +769,7 @@ mod tests {
             pm_snapshot_synced_at: Some(1),
 
             pm_writeback: LinearWritebackState::Current,
-            wave_id: Some(crate::id::WaveId::new()),
+            wave_id: Some(loopflow_model::id::WaveId::new()),
             project_id: Some(crate::work::project::ProjectId::new()),
             worktree: Some("/tmp/task".into()),
             workspace_slug: "ship-it".to_string(),

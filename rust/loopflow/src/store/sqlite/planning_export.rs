@@ -5,10 +5,10 @@ use serde_json::{json, Value};
 
 use super::planning_changes::PlanningChanges;
 use super::SqliteStore;
-use crate::durable::{ProjectId, TaskId, WorkRef};
 use crate::store::planning_sync::PlanningBaseline;
 use crate::store::{StoreError, StoreResult};
 use crate::work::edit::WorkValue;
+use loopflow_model::durable::{ProjectId, TaskId, WorkRef};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct PlanningExport {
@@ -430,13 +430,13 @@ mod tests {
     use serde_json::{json, Value};
 
     use super::{attach_in, retain_filing_export_in, PlanningExport};
-    use crate::durable::{ProjectId, TaskId};
     use crate::store::migrations::{
         apply_before_migration, convert_released_data, migration_section_sql,
     };
     use crate::store::sqlite::planning_changes::PlanningChanges;
     use crate::store::sqlite::task_history::RetainedFiling;
     use crate::work::edit::WorkValue;
+    use loopflow_model::durable::{ProjectId, TaskId};
 
     #[test]
     fn historical_creation_keeps_intent_values_after_local_edits() {

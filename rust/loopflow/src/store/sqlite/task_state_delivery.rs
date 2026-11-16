@@ -4,9 +4,9 @@ use super::planning_write;
 use crate::work::edit::WorkValue as Edit;
 use rusqlite::{params, Connection, OptionalExtension};
 
-use crate::durable::TaskId;
 use crate::linear::StateHistory;
 use crate::store::{StoreError, StoreResult};
+use loopflow_model::durable::TaskId;
 
 use super::SqliteStore;
 

@@ -169,7 +169,7 @@ fn metadata(value: &Value) -> Result<Value> {
 fn parse(text: &str, kind: DefinitionKind) -> Result<Value> {
     let yaml = match kind {
         DefinitionKind::Skill => {
-            crate::graph::split_frontmatter(text).map_or("{}", |(yaml, _)| yaml)
+            loopflow_definitions::text::split_frontmatter(text).map_or("{}", |(yaml, _)| yaml)
         }
         DefinitionKind::Graph => text,
     };
@@ -347,8 +347,8 @@ pub(super) fn update<T>(
         replace(&mut document, kind, &current)?;
         let text = match kind {
             DefinitionKind::Skill => {
-                let (frontmatter, body) =
-                    crate::graph::split_frontmatter(original).unwrap_or(("", original));
+                let (frontmatter, body) = loopflow_definitions::text::split_frontmatter(original)
+                    .unwrap_or(("", original));
                 format!(
                     "---\n{}---\n{body}",
                     super::files::edited_text(frontmatter, &document)?.trim_start_matches('\n')

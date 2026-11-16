@@ -6,9 +6,7 @@
 mod support;
 
 // Decode a terminal's persisted screen with the same pinned Ghostty library.
-#[allow(dead_code)]
-#[path = "../src/ghostty_vt.rs"]
-mod ghostty_vt;
+use loopflow_terminal::ghostty_vt;
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd};
@@ -18,7 +16,6 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
-use loopflow::program_status;
 use loopflow_test_support::{MachineServer, TestRepo};
 use rusqlite::OptionalExtension;
 use serde_json::{json, Value};

@@ -7,9 +7,9 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::durable::ProjectId;
 use crate::store::StoreResult;
 use crate::work::task::Task;
+use loopflow_model::durable::ProjectId;
 
 use super::SqliteStore;
 

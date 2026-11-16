@@ -3,7 +3,7 @@
 //! Registration is automatic: drop a file into the right builtins/
 //! subdirectory and build.rs generates the HashMap entries.
 
-use crate::definition::name::portable_name;
+use crate::name::portable_name;
 
 /// Launcher guidance shared by all agents; work APIs add the `work` skill body.
 pub const LOOPFLOW_DOC: &str = include_str!("builtins/LOOPFLOW.md");
@@ -30,7 +30,7 @@ pub fn builtin_skill_description(name: &str) -> String {
     let Some(content) = get_builtin_skill(name) else {
         return String::new();
     };
-    crate::skills::skill_description(content).unwrap_or_default()
+    crate::text::skill_description(content).unwrap_or_default()
 }
 
 /// Returns the content of a built-in graph, if it exists.
@@ -87,7 +87,10 @@ include!(concat!(env!("OUT_DIR"), "/builtin_skill_categories.rs"));
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{
+        builtin_skill_description, builtin_skill_names, get_builtin_graph, get_builtin_skill,
+        resolve_builtin_skill, BUILTIN_SKILLS, LOOPFLOW_DOC,
+    };
 
     /// Builtins run in repositories without this one's files; `docs:` belongs
     /// to repository skills.
@@ -95,7 +98,7 @@ mod tests {
     fn builtin_skills_include_no_repository_docs() {
         for name in builtin_skill_names() {
             let source = get_builtin_skill(name).expect("listed builtin");
-            let frontmatter = crate::graph::split_frontmatter(source)
+            let frontmatter = crate::text::split_frontmatter(source)
                 .map(|(frontmatter, _)| frontmatter)
                 .unwrap_or_default();
             assert!(

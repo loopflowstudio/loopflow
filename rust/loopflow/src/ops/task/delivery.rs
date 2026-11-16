@@ -80,7 +80,9 @@ pub(super) async fn resolve_managed_task(repo: &Path) -> OpsResult<ManagedTask> 
     };
     let binding = crate::ops::resolve_execution_binding(&store, repo).await?;
     let task = match binding.map(|binding| binding.work) {
-        Some(crate::durable::WorkRef::Task(id)) => store.get_task(&id).await.map_err(task_error)?,
+        Some(loopflow_model::durable::WorkRef::Task(id)) => {
+            store.get_task(&id).await.map_err(task_error)?
+        }
         _ => None,
     };
     match task {

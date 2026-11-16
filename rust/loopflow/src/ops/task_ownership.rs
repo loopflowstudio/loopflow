@@ -2,11 +2,11 @@
 //! writer: entry dispatch forwards them over `lf --machine` before they arrive.
 use std::path::Path;
 
-use crate::durable::{MachineId, TaskId, TaskOwnership};
 use crate::ops::{OpsError, OpsResult};
 use crate::store::sqlite::task_moves::{MoveInFlight, MoveStage};
 use crate::store::sqlite::SqliteStore;
 use crate::store::StoreResult;
+use loopflow_model::durable::{MachineId, TaskId, TaskOwnership};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OwnershipChange {
@@ -259,7 +259,7 @@ pub fn render(ownership: &TaskOwnership) -> String {
 #[cfg(test)]
 mod tests {
     use super::render;
-    use crate::durable::{
+    use loopflow_model::durable::{
         MachineId, OwnershipEntryId, OwnershipKind, TaskId, TaskOwnership, TaskOwnershipEntry,
     };
 

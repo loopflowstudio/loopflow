@@ -1491,7 +1491,7 @@ mod tests {
             ("interactive", Some(20)),
             ("already-completed", Some(20)),
         ] {
-            let process = crate::id::AgentProcessId::new();
+            let process = loopflow_model::id::AgentProcessId::new();
             conn.execute(
                 "INSERT INTO processes(id,trace_id,started_at,kind,agent_session_id,completed_at)
                  VALUES(?1,?1,10,'agent',?2,?3)",
@@ -1507,7 +1507,7 @@ mod tests {
         // Any unfinished agent keeps its Session open, even when it is no longer
         // current. Unassociated processes must not poison the NOT IN query.
         for session in [Some("older-live"), None] {
-            let process = crate::id::AgentProcessId::new();
+            let process = loopflow_model::id::AgentProcessId::new();
             conn.execute(
                 "INSERT INTO processes(id,trace_id,started_at,kind,agent_session_id)
                  VALUES(?1,?1,10,'agent',?2)",
@@ -2209,7 +2209,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        crate::durable::RepositoryId::parse(&repository).unwrap();
+        loopflow_model::durable::RepositoryId::parse(&repository).unwrap();
         assert_eq!(history(), before);
         validate_foreign_keys(&conn).unwrap();
     }
@@ -3904,7 +3904,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(retained, (id.clone(), 8));
-        assert!(crate::durable::MachineId::parse(&id).is_ok());
+        assert!(loopflow_model::durable::MachineId::parse(&id).is_ok());
         let remote: (String, i64, i64) = conn.query_row(
             "SELECT route, created_at, observed_at FROM machines WHERE id='home_00000000000000000000000000000001'",
             [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).unwrap();

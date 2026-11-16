@@ -1,5 +1,5 @@
 //! Task run legality, independent of Workflow selection and execution history.
-use crate::durable::WorkStatus;
+use loopflow_model::durable::WorkStatus;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -34,7 +34,7 @@ pub(crate) fn task_run_control(evidence: &TaskRunEvidence) -> TaskRunControl {
 #[cfg(test)]
 mod tests {
     use super::{task_run_control, TaskRunEvidence};
-    use crate::durable::WorkStatus;
+    use loopflow_model::durable::WorkStatus;
 
     #[test]
     fn run_legality_preserves_terminal_checkout_and_process_refusals() {

@@ -11,10 +11,10 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use serde_yaml_ng::Value;
 
-use crate::definition::name::{portable_name, resolve_name};
 use crate::definition::{resolve_definition, DefinitionKind, Target};
 use crate::error::LoadError;
 use crate::skills::catalog::{SkillCatalog, SkillOrigin};
+use loopflow_definitions::name::{portable_name, resolve_name};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Skill {
@@ -355,9 +355,9 @@ pub fn customize(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
     if let Some(path) = find_graph_source_path(name, repo)? {
         return Ok(path);
     }
-    let name = crate::builtins::resolve_builtin_graph(name)
+    let name = loopflow_definitions::builtins::resolve_builtin_graph(name)
         .ok_or_else(|| LoadError::GraphNotFound(name.to_string()))?;
-    let content = crate::builtins::get_builtin_graph(name)
+    let content = loopflow_definitions::builtins::get_builtin_graph(name)
         .ok_or_else(|| LoadError::GraphNotFound(name.to_string()))?;
     let path = repo.join(format!(".lf/graphs/{name}.yaml"));
     std::fs::create_dir_all(path.parent().expect("definition has a parent"))?;
@@ -366,7 +366,7 @@ pub fn customize(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
 }
 
 pub fn available_graph_names(repo: &Path) -> Result<Vec<String>, LoadError> {
-    let mut names: Vec<String> = crate::builtins::builtin_graph_names()
+    let mut names: Vec<String> = loopflow_definitions::builtins::builtin_graph_names()
         .into_iter()
         .map(ToOwned::to_owned)
         .collect();
@@ -412,7 +412,7 @@ impl<'a> DefinitionLoader<'a> {
             let catalog = self.catalog;
             let graphs = match self.repo {
                 Some(repo) => available_graph_names(repo)?,
-                None => crate::builtins::builtin_graph_names()
+                None => loopflow_definitions::builtins::builtin_graph_names()
                     .into_iter()
                     .map(str::to_string)
                     .collect(),
@@ -469,10 +469,10 @@ impl<'a> DefinitionLoader<'a> {
                 Some(path),
             ),
             None => {
-                let key = crate::builtins::resolve_builtin_graph(name)
+                let key = loopflow_definitions::builtins::resolve_builtin_graph(name)
                     .ok_or_else(|| LoadError::GraphNotFound(name.to_string()))?;
-                let content =
-                    crate::builtins::get_builtin_graph(key).expect("resolved builtin graph exists");
+                let content = loopflow_definitions::builtins::get_builtin_graph(key)
+                    .expect("resolved builtin graph exists");
                 (
                     key.to_string(),
                     content.to_string(),
@@ -711,18 +711,6 @@ pub fn load_skill(name: &str, repo: &Path) -> Result<Skill, LoadError> {
     SkillCatalog::discover(Some(repo))?.load_skill(name)
 }
 
-pub(crate) fn split_frontmatter(content: &str) -> Option<(&str, &str)> {
-    if !content.starts_with("---") {
-        return None;
-    }
-    let mut parts = content.splitn(3, "---");
-    let _ = parts.next();
-    let frontmatter = parts.next()?;
-    let rest = parts.next()?;
-    let body = rest.strip_prefix('\n').unwrap_or(rest);
-    Some((frontmatter, body))
-}
-
 pub(crate) fn graph_sources_in(repo: &Path) -> Result<BTreeMap<String, PathBuf>, LoadError> {
     let root = repo.join(".lf/graphs");
     let mut sources = BTreeMap::<String, PathBuf>::new();
@@ -840,13 +828,15 @@ fn resolve_graph_source(name: &str, repo: &Path) -> Result<Option<(String, PathB
     let names = sources
         .keys()
         .map(String::as_str)
-        .chain(crate::builtins::builtin_graph_names());
+        .chain(loopflow_definitions::builtins::builtin_graph_names());
     let selected = resolve_name(name, names)
         .map_err(|names| {
             LoadError::InvalidGraph(format!("ambiguous graph {name:?}: {}", names.join(", ")))
         })?
         .map(str::to_string)
-        .or_else(|| crate::builtins::resolve_builtin_graph(name).map(str::to_string));
+        .or_else(|| {
+            loopflow_definitions::builtins::resolve_builtin_graph(name).map(str::to_string)
+        });
     Ok(selected.and_then(|name| sources.remove_entry(&name)))
 }
 
@@ -1756,7 +1746,7 @@ mod tests {
     #[test]
     fn load_skill_finds_all_builtins() {
         let tmp = TempDir::new().unwrap();
-        for name in crate::builtins::builtin_skill_names() {
+        for name in loopflow_definitions::builtins::builtin_skill_names() {
             let result = load_skill(name, tmp.path());
             assert!(
                 result.is_ok(),
@@ -1930,7 +1920,7 @@ Design the feature.
     #[test]
     fn load_graph_compiles_all_builtin_graphs() {
         let tmp = TempDir::new().unwrap();
-        for name in crate::builtins::builtin_graph_names() {
+        for name in loopflow_definitions::builtins::builtin_graph_names() {
             let graph = load_graph(name, tmp.path());
             assert!(
                 graph.is_ok(),

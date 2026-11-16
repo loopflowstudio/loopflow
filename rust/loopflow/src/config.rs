@@ -374,7 +374,10 @@ enum RawPlanningConfig {
     },
     /// The Linear Team's ID; `lf wave plan connect` finds or creates it.
     Linear {
-        #[serde(default, deserialize_with = "crate::id::deserialize_uuid_option")]
+        #[serde(
+            default,
+            deserialize_with = "loopflow_model::id::deserialize_uuid_option"
+        )]
         team: Option<String>,
     },
     /// The Asana team's gid or URL. Tasks live in the team project named

@@ -119,10 +119,10 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
             .unwrap_or_else(|| path.clone())
     });
     let completion_pending = completion_pending(store, &task)?;
-    let starter = |process: Option<&crate::id::LfProcessId>| {
+    let starter = |process: Option<&loopflow_model::id::LfProcessId>| {
         super::ship::starter(&store.sqlite, &repo, process).map_err(task_error)
     };
-    let mark = |at, by: Option<&crate::id::LfProcessId>| {
+    let mark = |at, by: Option<&loopflow_model::id::LfProcessId>| {
         Ok::<_, OpsError>(super::ShipMark {
             at,
             by: starter(by)?,

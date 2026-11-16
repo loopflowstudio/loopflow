@@ -10,7 +10,7 @@
 use std::ffi::c_void;
 use std::fmt;
 
-use crate::program_status::{Kind, Records, Report, State};
+use loopflow_model::program_status::{Kind, Records, Report, State};
 
 /// The Ghostty revision the linked library was built from.
 pub const REVISION: &str = env!("LOOPFLOW_GHOSTTY_REVISION");
@@ -318,7 +318,7 @@ impl Terminal {
         (cols, rows)
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn cursor(&self) -> (u16, u16) {
         let x = self
             .data::<u16>(ffi::DATA_CURSOR_X, "cursor_x")
@@ -367,13 +367,13 @@ impl Terminal {
     }
 
     /// The active screen's visible rows as plain text, one line per row.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn text(&self) -> Result<String, Error> {
         let bytes = self.format(ffi::FORMAT_PLAIN, Range::Active, false)?;
         Ok(String::from_utf8_lossy(&bytes).into_owned())
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn set_theme(&mut self, rgb: [u8; 3]) {
         let palette = [rgb; 256];
         // SAFETY: options 11..=13 take RGB triples; 14 takes 256 RGB triples.
@@ -386,7 +386,7 @@ impl Terminal {
     }
 
     /// Resolve a rendered HTML cell's foreground against its emitted palette.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn foreground(&self, x: u16, y: u32) -> [u8; 3] {
         let html = self.format(2, Range::Cell { x, y }, false).unwrap();
         let html = String::from_utf8(html).unwrap();
@@ -437,7 +437,7 @@ impl Terminal {
     fn format(&self, emit: i32, range: Range, restore: bool) -> Result<Vec<u8>, Error> {
         let (cols, rows) = self.size();
         let (start, end) = match range {
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-support"))]
             Range::Cell { x, y } => (
                 self.grid_ref(ffi::POINT_TAG_ACTIVE, x, y)?,
                 self.grid_ref(ffi::POINT_TAG_ACTIVE, x, y)?,
@@ -624,7 +624,7 @@ unsafe fn take_allocation(ptr: *mut u8, len: usize) -> Vec<u8> {
 
 #[derive(Debug, Clone, Copy)]
 enum Range {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     Cell {
         x: u16,
         y: u32,
@@ -681,9 +681,9 @@ mod ffi {
     pub const DATA_COLS: i32 = 1;
     pub const DATA_TITLE: i32 = 12;
     pub const DATA_ROWS: i32 = 2;
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub const DATA_CURSOR_X: i32 = 3;
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub const DATA_CURSOR_Y: i32 = 4;
     pub const DATA_ACTIVE_SCREEN: i32 = 6;
     pub const DATA_SCROLLBACK_ROWS: i32 = 15;
@@ -694,7 +694,7 @@ mod ffi {
     pub const DECODER_OPT_MAX_CONTINUATION_BYTES: i32 = 0;
     pub const DECODER_OPT_RETAIN_CONTINUATION: i32 = 1;
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub const FORMAT_PLAIN: i32 = 0;
     pub const FORMAT_VT: i32 = 1;
 

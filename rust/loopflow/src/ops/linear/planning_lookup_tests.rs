@@ -11,8 +11,8 @@ use tokio::sync::Barrier;
 use super::test_fixture::refresh_task_input;
 use super::test_fixture::{now, Fixture, PlanningEnvironment};
 use super::{inspect_task_planning_async, LinearRefresh, LINEAR_TEST_CONTEXT};
-use crate::id::WaveId;
 use crate::linear::test_server::{json_response, spawn, QueuedResponse};
+use loopflow_model::id::WaveId;
 
 fn issue(project: serde_json::Value) -> serde_json::Value {
     json!({"data":{"issue":{

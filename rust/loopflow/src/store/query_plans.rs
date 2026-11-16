@@ -327,9 +327,9 @@ mod tests {
     use super::{
         assert_no_empty_writes, foreign_key_lookups, growing_scans, statements, GROWING, MEASURED,
     };
-    use crate::durable::TaskId;
     use crate::store::contention::empty_writes;
     use crate::store::sqlite::{SqliteStore, ViewerHold};
+    use loopflow_model::durable::TaskId;
     use rusqlite::params;
 
     fn take_the_lock_for_nothing(store: &SqliteStore) {
@@ -382,14 +382,14 @@ mod tests {
         tempfile::TempDir,
         SqliteStore,
         TaskId,
-        crate::id::TerminalId,
+        loopflow_model::id::TerminalId,
     ) {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("loopflow.db");
         let store = SqliteStore::open_ephemeral(&path).unwrap();
         let repo = store.ensure_repository("/repo").unwrap();
         let task = TaskId::new();
-        let viewer = crate::id::TerminalId::new();
+        let viewer = loopflow_model::id::TerminalId::new();
         store.create_terminal(&viewer, "build").unwrap();
         store.test_session("viewed", &crate::session_record::new_artifact_key());
         {
@@ -511,7 +511,7 @@ mod tests {
         let traced = assert_no_empty_writes(&store, || {
             statements(&store, || {
                 store
-                    .sessions_for_agent_session(&crate::id::AgentSessionId::from("thread"))
+                    .sessions_for_agent_session(&loopflow_model::id::AgentSessionId::from("thread"))
                     .unwrap();
                 assert!(matches!(
                     store.resolve_history_input("missing-capture"),
@@ -544,11 +544,11 @@ mod tests {
             .unwrap();
         let traced = statements(&store, || {
             store
-                .ship_task(&task, &crate::id::LfProcessId::new(), "ship")
+                .ship_task(&task, &loopflow_model::id::LfProcessId::new(), "ship")
                 .unwrap();
             store.count_ship_restart(&task).unwrap();
             store
-                .ship_task(&task, &crate::id::LfProcessId::new(), "ship")
+                .ship_task(&task, &loopflow_model::id::LfProcessId::new(), "ship")
                 .unwrap();
             store.task_shipping(&task).unwrap();
             store.reset_ship_restarts(&task).unwrap();
@@ -560,7 +560,7 @@ mod tests {
     #[test]
     fn a_move_in_flight_reads_its_row_and_the_ownership_log_by_index() {
         let (_home, store, task, _viewer) = fixture();
-        let mini = crate::durable::MachineId::new();
+        let mini = loopflow_model::durable::MachineId::new();
         store.begin_task_move(&task, &mini).unwrap();
         store.record_move_sent(&task, "{}").unwrap();
         let traced = statements(&store, || {

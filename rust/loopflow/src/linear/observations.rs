@@ -1,8 +1,8 @@
 //! Retained Linear acquisition evidence, independent of accepted Work and delivery.
-use crate::id::WaveId;
 use crate::store::sqlite::{planning_write, SqliteStore};
 use crate::store::{PlanningState, StoreError, StoreResult};
 use crate::work::edit::WorkValue as Edit;
+use loopflow_model::id::WaveId;
 use rusqlite::{params, OptionalExtension};
 
 impl SqliteStore {

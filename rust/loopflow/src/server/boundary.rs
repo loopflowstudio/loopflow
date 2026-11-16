@@ -29,7 +29,7 @@ pub(super) struct AfterStop {
     repo: PathBuf,
     session: Option<String>,
     /// A Codex Session's app-server and the conversation whose turn ended.
-    codex: Option<(PathBuf, crate::id::AgentSessionId)>,
+    codex: Option<(PathBuf, loopflow_model::id::AgentSessionId)>,
 }
 
 /// Record the boundary; blocking.
@@ -199,7 +199,7 @@ pub(super) fn after_stop(after: AfterStop) {
 async fn record_codex_turns(
     store: &SqliteStore,
     session: &str,
-    thread: &crate::id::AgentSessionId,
+    thread: &loopflow_model::id::AgentSessionId,
     endpoint: &std::path::Path,
 ) {
     let read = tokio::time::timeout(
@@ -326,7 +326,7 @@ mod tests {
             .create_task(&crate::work::task::NewTask {
                 repository_id: store.ensure_repository("/repo").unwrap(),
                 due_date: None,
-                id: crate::durable::TaskId::new(),
+                id: loopflow_model::durable::TaskId::new(),
                 project_id: None,
                 title: "Keep \"$native\" <text>".into(),
                 description: String::new(),
@@ -473,7 +473,7 @@ mod tests {
     fn a_turn_end_settles_only_once_no_watch_or_wakeup_remains() {
         use crate::store::sqlite::sessions::TerminalRetention::LiveTurn;
         let (_home, store, adapter, delivery) = fixture();
-        let terminal = crate::id::TerminalId::new();
+        let terminal = loopflow_model::id::TerminalId::new();
         store.create_terminal(&terminal, "build").unwrap();
         store
             .conn

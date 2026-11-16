@@ -14,13 +14,13 @@ use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
 use super::{connection, Clients, Tickets};
-use crate::durable::TaskId;
-use crate::id::LfProcessId;
 use crate::performance::subscription_measurement as meter;
 use crate::process::SessionAttachment;
 use crate::server::subscriptions::Subscriptions;
 use crate::server::wire::MAX_CONNECTIONS;
 use crate::store::sqlite::SqliteStore;
+use loopflow_model::durable::TaskId;
+use loopflow_model::id::LfProcessId;
 
 struct ChildGuard(Child);
 impl Drop for ChildGuard {

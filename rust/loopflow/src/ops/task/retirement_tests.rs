@@ -7,11 +7,11 @@ use loopflow_test_support::TestRepo;
 use rusqlite::params;
 
 use super::{advance, now, sweep};
-use crate::durable::TaskId;
-use crate::id::{LfProcessId, TerminalId};
 use crate::store::sqlite::ViewerHold;
 use crate::store::{SharedStore, StorageConfig};
 use crate::work::task::Task;
+use loopflow_model::durable::TaskId;
+use loopflow_model::id::{LfProcessId, TerminalId};
 
 struct Workspace {
     repo: TestRepo,
@@ -136,7 +136,7 @@ fn retirement_waits_for_final_work_and_shell_job_settlement() {
     let _ledger = crate::journal::TestLedgerGuard::new();
     tokio::runtime::Runtime::new().unwrap().block_on(async {
         let fixture = Workspace::new().await;
-        let shell = crate::id::TerminalId::new();
+        let shell = loopflow_model::id::TerminalId::new();
         fixture.store.sqlite.create_terminal(&shell, "build").unwrap();
         fixture
             .store
@@ -197,7 +197,7 @@ fn cleanup_ends_a_done_tasks_held_conversation() {
     tokio::runtime::Runtime::new().unwrap().block_on(async {
         let fixture = Workspace::new().await;
         fixture.due();
-        let terminal = crate::id::TerminalId::new();
+        let terminal = loopflow_model::id::TerminalId::new();
         fixture
             .sql()
             .execute(
@@ -224,7 +224,7 @@ fn cleanup_ends_a_done_tasks_held_conversation() {
             id: LfProcessId::new(),
             pid: Some(live.pid),
             os_started_at: Some(live.started_at),
-            trace_id: crate::id::TraceId::new(),
+            trace_id: loopflow_model::id::TraceId::new(),
             parent_lf_process_id: None,
             via_agent: Some(false),
             caller_session_id: None,
@@ -245,7 +245,7 @@ fn cleanup_ends_a_done_tasks_held_conversation() {
             .record_process_within(&conversation, Some(&terminal), std::time::Duration::ZERO)
             .unwrap();
         // Its provider, attached to it, binds the conversation to the Task.
-        let agent = crate::id::AgentProcessId::new();
+        let agent = loopflow_model::id::AgentProcessId::new();
         fixture.sql().execute(
             "INSERT INTO processes(id,kind,trace_id,parent_lf_process_id,started_at,pid,os_started_at,
                 agent_session_id,agent_provider,agent_interactive,attached_lf_process_id)

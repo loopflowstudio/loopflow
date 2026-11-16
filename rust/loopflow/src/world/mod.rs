@@ -20,10 +20,8 @@ use std::process::Command;
 use anyhow::{anyhow, bail, Context, Result};
 use serde::Serialize;
 
-use crate::durable::TaskId;
 use crate::graph::compiled::CompiledGraph;
 use crate::graph::ConcreteStep;
-use crate::id::{LfProcessId, TraceId};
 use crate::ops::human_session::provider_conversation;
 use crate::ops::task::TaskRunSelection;
 use crate::portfolio::{self, PortfolioCommand};
@@ -37,6 +35,8 @@ use crate::work::project::ProjectKR;
 use crate::work::task::{Task, TaskEventKind};
 use crate::work::wave::metrics::MetricTarget;
 pub use crate::work::wave::metrics::Threshold;
+use loopflow_model::durable::TaskId;
+use loopflow_model::id::{LfProcessId, TraceId};
 
 const DAY: i64 = 24 * 60 * 60;
 const GITHUB_REPO: &str = "https://github.com/demo/project";

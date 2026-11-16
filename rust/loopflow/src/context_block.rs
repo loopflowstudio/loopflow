@@ -42,7 +42,7 @@ pub struct ContextDelivery {
     /// Captured before launch; managed start/compact boundaries refresh it.
     pub identity: Option<SessionIdentity>,
     /// Durable identity and canonical main-checkout address captured at launch.
-    pub repository: Option<(crate::durable::RepositoryId, PathBuf)>,
+    pub repository: Option<(loopflow_model::durable::RepositoryId, PathBuf)>,
     pub repo: PathBuf,
     pub wave: Option<String>,
     pub skill_file: Option<PathBuf>,

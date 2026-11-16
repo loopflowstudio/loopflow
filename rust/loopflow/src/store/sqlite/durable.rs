@@ -3,15 +3,16 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBe
 use time::OffsetDateTime;
 
 use crate::child::ChildRef;
-use crate::durable::{
-    AbandonReceipt, Author, Machine, MachineId, ProjectId, TaskId, TaskState, ToolResponseId,
-    ToolResponseReceipt, ToolResponseWrite, WorkRef, WorkStatus,
-};
-use crate::id::WaveId;
+use crate::durable::{AbandonReceipt, TaskState};
 use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
 use crate::work::project::ProjectEventKind;
 use crate::work::task::TaskEventKind;
+use loopflow_model::durable::{
+    Author, Machine, MachineId, ProjectId, TaskId, ToolResponseId, ToolResponseReceipt,
+    ToolResponseWrite, WorkRef, WorkStatus,
+};
+use loopflow_model::id::WaveId;
 
 use super::SqliteStore;
 
@@ -678,12 +679,12 @@ mod durable_store_tests {
     use std::thread;
 
     use super::super::sessions::reserve_session_in;
-    use crate::durable::{ProjectId, TaskId};
+    use loopflow_model::durable::{ProjectId, TaskId};
 
-    use crate::id::WaveId;
     use crate::linear::{LinearIssueId, LinearProjectId};
     use crate::session::{LfSession, TitleSource, WorkSource};
     use crate::store::sqlite::SqliteStore;
+    use loopflow_model::id::WaveId;
 
     use crate::work::project::Project;
     use crate::work::task::{LinearWritebackState, Task, TaskEventKind, TaskPr, TaskPrId};
@@ -1791,7 +1792,7 @@ mod durable_store_tests {
             )
             .unwrap();
         // Attribution freezes when the attached LfProcess sends the request.
-        let process = crate::id::LfProcessId::new();
+        let process = loopflow_model::id::LfProcessId::new();
         store
             .conn
             .lock()

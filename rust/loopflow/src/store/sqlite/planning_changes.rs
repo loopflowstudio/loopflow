@@ -5,16 +5,16 @@ use crate::work::edit::WorkValue as Edit;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use super::SqliteStore;
-use crate::durable::{ProjectId, TaskId};
 use crate::store::planning_sync::{PlanningBaseline, PlanningChange, TaskDeletion};
 use crate::store::{StoreError, StoreResult};
+use loopflow_model::durable::{ProjectId, TaskId};
 
 impl SqliteStore {
     /// Delivery requires the fetched revision to have reached this Task's Work row.
     /// Retaining an observation (including a foreign or rejected one) is insufficient.
     pub(crate) fn accepted_task_revision(
         &self,
-        task: &crate::durable::TaskId,
+        task: &loopflow_model::durable::TaskId,
         issue: &str,
         revision: Option<&str>,
     ) -> StoreResult<bool> {
@@ -50,7 +50,7 @@ impl SqliteStore {
     pub(crate) fn planning_field_owners(
         &self,
         repo: &str,
-    ) -> StoreResult<Vec<crate::durable::WorkRef>> {
+    ) -> StoreResult<Vec<loopflow_model::durable::WorkRef>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(
             "SELECT 'task',t.id FROM tasks t JOIN repository_plans w ON w.id=t.repository_id
@@ -70,9 +70,9 @@ impl SqliteStore {
             let kind: String = row.get(0)?;
             let id: String = row.get(1)?;
             Ok(if kind == "task" {
-                crate::durable::WorkRef::Task(TaskId::from_raw(id))
+                loopflow_model::durable::WorkRef::Task(TaskId::from_raw(id))
             } else {
-                crate::durable::WorkRef::Project(ProjectId::from_raw(id))
+                loopflow_model::durable::WorkRef::Project(ProjectId::from_raw(id))
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
@@ -518,11 +518,11 @@ mod tests {
     use serde_json::json;
 
     use super::PlanningChanges;
-    use crate::durable::TaskId;
     use crate::store::migrations::{
         apply_before_migration, migration_section_sql, upgrade_from_migration,
     };
     use crate::work::edit::WorkValue;
+    use loopflow_model::durable::TaskId;
 
     #[test]
     fn released_attempt_acknowledgment_rebases_without_clearing_later_save() {

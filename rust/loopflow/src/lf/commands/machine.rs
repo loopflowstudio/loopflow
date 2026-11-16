@@ -6,9 +6,9 @@ use std::io::{self, IsTerminal, Write};
 use std::process::Stdio;
 use std::time::Duration;
 
-use crate::durable::{DefaultScope, Machine, MachineDefault, MachineId, MachineSetting};
 use crate::lf::MachineCommand;
 use crate::store::Store;
+use loopflow_model::durable::{DefaultScope, Machine, MachineDefault, MachineId, MachineSetting};
 
 pub fn run(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
     // Rentals own their runtimes, so they dispatch before this one opens.
@@ -331,7 +331,7 @@ pub struct MachineListing {
 
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 struct HeldTask {
-    id: crate::durable::TaskId,
+    id: loopflow_model::durable::TaskId,
     identifier: String,
     /// Unix seconds when the Task's claim reached the Machine.
     since: i64,
@@ -581,11 +581,11 @@ fn default_label(target: &str) -> String {
     host.to_string()
 }
 
-fn validate_expected_machine(local: &crate::durable::MachineId) -> anyhow::Result<()> {
+fn validate_expected_machine(local: &loopflow_model::durable::MachineId) -> anyhow::Result<()> {
     let Ok(raw) = std::env::var(crate::lf::commands::ssh::EXPECTED_MACHINE_ID_ENV) else {
         return Ok(());
     };
-    let expected = crate::durable::MachineId::parse(&raw)
+    let expected = loopflow_model::durable::MachineId::parse(&raw)
         .map_err(|error| anyhow!("invalid expected Machine id: {error}"))?;
     if expected != *local {
         return Err(anyhow!(

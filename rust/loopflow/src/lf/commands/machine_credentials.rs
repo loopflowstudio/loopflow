@@ -8,10 +8,10 @@ use anyhow::{anyhow, bail, Context, Result};
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 
-use crate::durable::Machine;
 use crate::lf::MachineCredentialCommand;
 use crate::provider_auth::Provider;
 use crate::store::{CredentialType, ProviderToken, SharedStore};
+use loopflow_model::durable::Machine;
 
 // Deliberately no Debug: native credential JSON and tokens must never be logged.
 #[derive(Serialize, Deserialize)]

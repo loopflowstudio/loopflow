@@ -1,13 +1,13 @@
 //! Task decisions commit locally; PR and checkout cleanup retain separate authority.
 use std::path::Path;
 
-use crate::durable::{WorkRef, WorkStatus};
 use crate::git::current_branch;
 use crate::git::worktrees::main_repo_root;
 use crate::ops::wt::BranchDeletion;
 use crate::ops::{NullProgress, OpsResult, Progress};
 use crate::store::SharedStore;
 use crate::work::task::{Task, TaskPr};
+use loopflow_model::durable::{WorkRef, WorkStatus};
 
 use super::{block_on_task, repository_for_task, task_error, task_store};
 

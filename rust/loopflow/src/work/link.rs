@@ -8,7 +8,7 @@
 
 use anyhow::{bail, ensure, Result};
 
-use crate::durable::RepositoryId;
+use loopflow_model::durable::RepositoryId;
 
 const SCHEME: &str = "loopflow";
 

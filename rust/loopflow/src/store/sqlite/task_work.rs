@@ -3,13 +3,13 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::durable::TaskId;
 use crate::graph::runner::ExecutionCursor;
-use crate::id::LfProcessId;
 use crate::process::LfProcess;
 use crate::store::StoreResult;
 use crate::task_graph::{CapturedGraph, TaskGraph, TaskGraphPosition, END, START};
 use crate::task_work::{TaskSession, TaskWork};
+use loopflow_model::durable::TaskId;
+use loopflow_model::id::LfProcessId;
 
 use super::SqliteStore;
 
@@ -700,7 +700,7 @@ impl SqliteStore {
     pub(crate) fn task_session_terminals(
         &self,
         task: &TaskId,
-    ) -> StoreResult<Vec<crate::id::TerminalId>> {
+    ) -> StoreResult<Vec<loopflow_model::id::TerminalId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(&format!(
             "SELECT DISTINCT s.held_terminal_id FROM agent_sessions s
@@ -715,7 +715,7 @@ impl SqliteStore {
 
     pub(crate) fn task_ids_in_wave(
         &self,
-        wave: &crate::id::WaveId,
+        wave: &loopflow_model::id::WaveId,
     ) -> StoreResult<std::collections::HashSet<TaskId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare(
@@ -1223,11 +1223,12 @@ mod tests {
 
     use rusqlite::params;
 
-    use crate::durable::{GraphProcessFilter, ProjectId, TaskId};
-    use crate::id::{LfProcessId, TraceId, WaveId};
+    use crate::durable::GraphProcessFilter;
     use crate::process::{ProcessFilter, ProcessWorkFilter};
     use crate::session::SessionFilter;
     use crate::store::sqlite::SqliteStore;
+    use loopflow_model::durable::{ProjectId, TaskId};
+    use loopflow_model::id::{LfProcessId, TraceId, WaveId};
 
     #[test]
     fn process_membership_upgrade_probes_cwd_and_session_indexes() {
@@ -1612,7 +1613,7 @@ mod tests {
             let conn = store.conn.lock().unwrap();
             conn.execute(
                 "INSERT INTO processes(id,trace_id,cwd,started_at) VALUES(?1,?2,'/repo/task',1)",
-                params![by, crate::id::TraceId::new()],
+                params![by, loopflow_model::id::TraceId::new()],
             )
             .unwrap();
             conn.execute(
@@ -2191,7 +2192,7 @@ mod tests {
                 );
             }
         }
-        let remote = crate::durable::MachineId::new();
+        let remote = loopflow_model::durable::MachineId::new();
         store
             .sqlite
             .add_machine(&remote, "worker", "worker")

@@ -6,8 +6,8 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::id::prefixed_uuid_id;
 use crate::work::task::TaskId;
+use loopflow_model::id::prefixed_uuid_id;
 
 pub(crate) const SUPERVISOR_STALE_AFTER: time::Duration = time::Duration::minutes(2);
 

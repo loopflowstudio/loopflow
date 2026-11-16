@@ -3,7 +3,7 @@ use super::selection::{
     SelectionError, SelectionExpression, SelectionId, SelectionResolution, SelectionState,
     SelectionWork, WorkWorkspaceKey, WorkWorkspaceKind,
 };
-use crate::id::WaveId;
+use loopflow_model::id::WaveId;
 use std::collections::{BTreeMap, BTreeSet};
 
 fn key(id: &str, kind: WorkWorkspaceKind) -> WorkWorkspaceKey {

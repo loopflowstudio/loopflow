@@ -7,8 +7,8 @@
 //! Registry resolution uses the canonical repository. Authored Wave files are
 //! gathered by prompt assembly from the executing checkout.
 
-use crate::id::WaveId;
 use crate::work::wave::{Wave, WaveLocator};
+use loopflow_model::id::WaveId;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};

@@ -4,12 +4,12 @@ use super::planning_write;
 use crate::work::edit::WorkValue as Edit;
 use rusqlite::TransactionBehavior;
 
-use crate::durable::{ProjectId, TaskId};
 use crate::store::planning_sync::PlanningChange;
 use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
 use crate::work::task::Task;
 use crate::work::task::TaskUpdate;
+use loopflow_model::durable::{ProjectId, TaskId};
 
 use super::planning_changes::PlanningChanges;
 use super::SqliteStore;
@@ -185,10 +185,10 @@ fn validate_move(
 
 #[cfg(test)]
 mod tests {
-    use crate::durable::TaskId;
     use crate::session_record::new_artifact_key;
     use crate::store::sqlite::SqliteStore;
     use crate::work::task::{NewTask, TaskUpdate};
+    use loopflow_model::durable::TaskId;
 
     #[test]
     fn rank_edits_stay_within_repository_and_project_membership() {

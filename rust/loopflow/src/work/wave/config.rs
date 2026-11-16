@@ -20,7 +20,10 @@ pub(crate) enum WaveConfigError {
 /// The Linear Initiative linked to this Wave.
 #[derive(Debug, Clone, Deserialize, Serialize, Default, PartialEq, Eq)]
 pub struct WaveLinearConfig {
-    #[serde(deserialize_with = "crate::id::deserialize_uuid_option", default)]
+    #[serde(
+        deserialize_with = "loopflow_model::id::deserialize_uuid_option",
+        default
+    )]
     pub initiative: Option<String>,
 }
 
@@ -43,7 +46,7 @@ const WAVE_ONLY_KEYS: [&str; 3] = ["id", "linear", "chat"];
 /// The Wave's own identity and bindings from its `config.yaml`.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct WaveConfig {
-    pub id: Option<crate::id::WaveId>,
+    pub id: Option<loopflow_model::id::WaveId>,
     pub linear: Option<WaveLinearConfig>,
     /// One external presentation binding. Discord is the only supported
     /// provider and remains a concrete variant rather than a registry.

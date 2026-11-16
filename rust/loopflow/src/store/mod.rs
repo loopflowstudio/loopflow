@@ -3,10 +3,10 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::id::{AgentSessionId, WaveId};
 use crate::profile::{AccessProfile, AuthBrowserBinding, EmailAddress, ProfileId};
 use crate::provider_auth::Provider;
 use crate::work::wave::{Wave, WaveLocator};
+use loopflow_model::id::{AgentSessionId, WaveId};
 mod canonical_ids;
 pub(crate) mod changes;
 mod children;
@@ -831,8 +831,6 @@ pub type SharedStore = Arc<Store>;
 mod tests {
     use super::{may_apply_migrations, read_nonterminal_task_worktrees, StorageConfig};
     use crate::child::ChildRef;
-    use crate::durable::{Author, WorkRef};
-    use crate::id::WaveId;
     use crate::linear::{LinearIssueId, LinearProjectId};
     use crate::test_linear_input::{InventoryFixture, SeedLinear};
     use crate::work::project::{Project, ProjectId};
@@ -841,6 +839,8 @@ mod tests {
         TaskEventKind, TaskId, TaskPr, TaskPrId,
     };
     use crate::work::wave::Wave;
+    use loopflow_model::durable::{Author, WorkRef};
+    use loopflow_model::id::WaveId;
     use std::env;
     use std::path::PathBuf;
     use time::OffsetDateTime;
@@ -1215,10 +1215,10 @@ mod tests {
                 snapshot.snapshot.projects[1].krs
             );
             assert_eq!(record.pm_snapshot_synced_at, Some(17));
-            let process = crate::id::LfProcessId::new();
+            let process = loopflow_model::id::LfProcessId::new();
             rusqlite::Connection::open(directory.path().join("registry.db")).unwrap().execute(
                 "INSERT INTO processes(id,trace_id,started_at,completed_at,outcome) VALUES(?1,?2,1,2,'succeeded')",
-                rusqlite::params![process,crate::id::TraceId::new()],
+                rusqlite::params![process,loopflow_model::id::TraceId::new()],
             ).unwrap();
             let definition = crate::task_graph::CapturedGraph {
                 name: "review".into(),
@@ -1838,7 +1838,11 @@ mod tests {
         let database = _directory.path().join("registry.db");
         let before: crate::test_linear_input::IssueFixture =
             loopflow_test_support::retained_task_input(&database, wave.repo(), &task.identifier);
-        let other = Wave::new(crate::id::WaveId::new(), "other".into(), "/repo".into());
+        let other = Wave::new(
+            loopflow_model::id::WaveId::new(),
+            "other".into(),
+            "/repo".into(),
+        );
         store.create_wave(&other).await.unwrap();
         let mut foreign = make_project(&other);
         foreign.linear_id = Some(crate::linear::LinearProjectId::new("foreign-project").unwrap());
@@ -2406,7 +2410,7 @@ mod tests {
         async fn stop(&mut self) -> anyhow::Result<()> {
             Ok(())
         }
-        fn agent_session(&self) -> Option<crate::id::AgentSessionId> {
+        fn agent_session(&self) -> Option<loopflow_model::id::AgentSessionId> {
             None
         }
     }

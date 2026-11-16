@@ -44,7 +44,7 @@ pub(crate) fn generated_session_title(
 /// Keep generated names on the same Task label as every other projection.
 pub(crate) fn task_session_title(
     title: &str,
-    id: &crate::durable::TaskId,
+    id: &loopflow_model::durable::TaskId,
     label: &str,
     previous: Option<&str>,
 ) -> String {
@@ -199,7 +199,8 @@ mod tests {
 
     #[test]
     fn generated_task_title_repairs_tokens_and_bounds_unicode_purpose() {
-        let task = crate::durable::TaskId::from_raw("task_abcdef10000000000000000000000001");
+        let task =
+            loopflow_model::durable::TaskId::from_raw("task_abcdef10000000000000000000000001");
         for title in [
             "abcdef Fix login",
             "lf-abcdef1 Fix login",

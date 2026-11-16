@@ -186,7 +186,6 @@ def test_host_publisher_owns_credentialed_release_steps():
     for proof in (
         "check_release_host()",
         "_stage_github_release(artifacts)",
-        "_publish_crate()",
         '"versioned_dmg_uploaded"',
         '"scripts/deploy_website.py"',
         '"--finalize"',

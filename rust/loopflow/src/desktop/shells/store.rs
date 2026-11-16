@@ -3,10 +3,10 @@
 //! that owner ends itself on Close and is never viewed again.
 use rusqlite::{params, OptionalExtension};
 
-use crate::durable::TaskId;
-use crate::id::{LfProcessId, TerminalId};
 use crate::store::sqlite::SqliteStore;
 use crate::store::{StoreError, StoreResult};
+use loopflow_model::durable::TaskId;
+use loopflow_model::id::{LfProcessId, TerminalId};
 
 #[derive(Debug, Clone)]
 pub(crate) struct DesktopShell {
@@ -135,9 +135,9 @@ pub(crate) fn hosts(
 
 #[cfg(test)]
 mod tests {
-    use crate::durable::TaskId;
-    use crate::id::TerminalId;
     use crate::store::sqlite::SqliteStore;
+    use loopflow_model::durable::TaskId;
+    use loopflow_model::id::TerminalId;
 
     #[test]
     fn desktop_shell_creation_is_once_even_after_lost_acknowledgement_or_exit() {

@@ -6,10 +6,10 @@ use std::time::Duration;
 
 use serde_json::json;
 
-use crate::durable::WorkRef;
 use crate::store::sqlite::planning_changes::PlanningChanges;
 use crate::store::sqlite::planning_export::{ExportAttempts, PlanningExport};
 use crate::store::Store;
+use loopflow_model::durable::WorkRef;
 
 use super::planning_client::{PlanningClient, StateScope};
 use super::{OpsError, OpsResult};
@@ -63,7 +63,7 @@ pub(crate) async fn export(
 
 /// What the store knows before the provider is asked.
 struct PreparedExport {
-    wave_id: Option<crate::id::WaveId>,
+    wave_id: Option<loopflow_model::id::WaveId>,
     team: String,
     export: PlanningExport,
     attempts: ExportAttempts,
@@ -316,7 +316,7 @@ async fn observe(
     owner: PlanningChanges<'_>,
     client: &PlanningClient,
     export: &PlanningExport,
-    wave: Option<&crate::id::WaveId>,
+    wave: Option<&loopflow_model::id::WaveId>,
     attempted: bool,
 ) -> OpsResult<bool> {
     if attempted {
@@ -387,7 +387,7 @@ async fn attach_project(
     owner: PlanningChanges<'_>,
     client: &PlanningClient,
     export: &PlanningExport,
-    wave: &crate::id::WaveId,
+    wave: &loopflow_model::id::WaveId,
     mut project: crate::linear::LinearProject,
 ) -> OpsResult<()> {
     let initiative = export

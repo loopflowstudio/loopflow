@@ -16,14 +16,14 @@ use anyhow::Result;
 use serde_json::json;
 
 use super::fact::{Decoded, ProviderFact, ProviderTurn, Signal};
-use crate::chat::types::{ConversationEvent, ConversationItem};
-use crate::id::AgentSessionId;
 use crate::process::SessionAttachment;
 use crate::session::{
     SessionActivity, SessionEventKind, SessionPreview, SessionTurnOrigin, TurnContext,
 };
 use crate::store::sqlite::SqliteStore;
 use crate::store::{RecordingGap, StoreResult};
+use loopflow_model::chat::types::{ConversationEvent, ConversationItem};
+use loopflow_model::id::AgentSessionId;
 
 /// Origins frozen when Loopflow sent each request, keyed by request id. The
 /// sending side fills it; the reader's writer takes each one once.
@@ -229,7 +229,7 @@ impl TurnContext {
                 output.as_deref()
             }
             ConversationItem::File { .. } => None,
-            ConversationItem::Message { .. } | ConversationItem::Thought { .. } => return,
+            _ => return,
         };
         self.tool_results += 1;
         if let Some(output) = output {
@@ -242,13 +242,13 @@ impl TurnContext {
 /// turn that ended without yielding.
 fn report(reading: &SessionActivity, failed: bool) {
     let state = if reading.pending_input > 0 {
-        crate::program_status::State::Blocked
+        loopflow_model::program_status::State::Blocked
     } else if reading.yielded {
-        crate::program_status::State::Idle
+        loopflow_model::program_status::State::Idle
     } else if failed {
-        crate::program_status::State::Error
+        loopflow_model::program_status::State::Error
     } else {
-        crate::program_status::State::Working
+        loopflow_model::program_status::State::Working
     };
     crate::transport::report(state, false, None);
 }
@@ -393,15 +393,15 @@ mod tests {
     use serde_json::{json, Value};
 
     use super::{FactWriter, SessionActivityTracker};
-    use crate::chat::types::Lifecycle;
     use crate::harness::claude_decode::ClaudeDecoder;
     use crate::harness::codex_decode::{turn_request, CodexDecoder};
     use crate::harness::fact::{trace, Decoded, ProviderFact, ProviderTurn, Signal};
     use crate::harness::opencode_decode::OpenCodeDecoder;
-    use crate::id::LfProcessId;
     use crate::process::SessionAttachment;
     use crate::session::SessionEventKind;
     use crate::store::sqlite::SqliteStore;
+    use loopflow_model::chat::types::Lifecycle;
+    use loopflow_model::id::LfProcessId;
 
     const START: i64 = 1_000;
     const QUIET: i64 = crate::session::AVAILABILITY_QUIET_SECONDS;

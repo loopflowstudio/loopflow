@@ -55,7 +55,7 @@ use std::sync::Arc;
 
 use crate::agent::checkout_execution_boundary;
 use crate::child::ChildRef;
-use crate::durable::{TaskState, WorkStatus};
+use crate::durable::TaskState;
 use crate::git::worktree_name::WorktreeName;
 use crate::git::worktrees::{
     plan_branch_placement, PlacementPlan, PlacementStrategy, WorktreeSegment,
@@ -71,6 +71,7 @@ use crate::work::task::{
     TaskPrId,
 };
 use crate::work::wave::Wave;
+use loopflow_model::durable::WorkStatus;
 use time::format_description::well_known::Rfc3339;
 
 /// What `lf task wait --until` waits for.
@@ -158,7 +159,7 @@ pub struct TaskControlResult {
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct TaskSnapshot {
-    pub machine_id: Option<crate::durable::MachineId>,
+    pub machine_id: Option<loopflow_model::durable::MachineId>,
     pub issue_id: Option<String>,
     pub issue_identifier: String,
     pub task_id: String,
@@ -1522,7 +1523,7 @@ struct TaskPlacement {
 }
 
 impl TaskPlacement {
-    fn pr(&self, task_id: &crate::durable::TaskId) -> TaskPr {
+    fn pr(&self, task_id: &loopflow_model::durable::TaskId) -> TaskPr {
         let now = time::OffsetDateTime::now_utc();
         TaskPr {
             id: TaskPrId::new(),
@@ -1693,7 +1694,7 @@ fn prepare_placement(
 
 async fn place_prepared_task(
     store: &SharedStore,
-    task_id: &crate::durable::TaskId,
+    task_id: &loopflow_model::durable::TaskId,
     prepared: TaskPlacement,
     options: &TaskProcessOptions,
 ) -> OpsResult<Task> {
@@ -1854,7 +1855,7 @@ pub fn task_create(
             .map_err(task_error)?;
         let creation = crate::work::task::NewTask {
             due_date: None,
-            id: crate::durable::TaskId::new(),
+            id: loopflow_model::durable::TaskId::new(),
             repository_id,
             project_id: creation_project,
             title: input.title,
@@ -2061,7 +2062,7 @@ pub(crate) async fn task_for_checkout(store: &SharedStore, repo: &Path) -> OpsRe
 pub(crate) fn counted_task(
     store: &SqliteStore,
     cwd: &Path,
-) -> OpsResult<Option<crate::durable::TaskId>> {
+) -> OpsResult<Option<loopflow_model::durable::TaskId>> {
     // Branch names are not checkout identity: another clone can use the same
     // branch.
     let Ok(root) = crate::git::worktree_root(cwd) else {
@@ -2092,7 +2093,7 @@ pub struct TaskStatus {
     #[serde(rename = "plan_state")]
     pub planning_state: crate::store::PlanningState,
     pub execution: Option<TaskSnapshot>,
-    pub ownership: Option<crate::durable::TaskOwnership>,
+    pub ownership: Option<loopflow_model::durable::TaskOwnership>,
     /// Its Sessions, Graphs and Workflow; `null` for an unregistered Task.
     pub overview: Option<crate::task_work::TaskOverview>,
     /// `lf graph show --processes` for each of `overview`'s Graphs, in order.
@@ -2236,7 +2237,7 @@ fn planning_stale(status: &TaskStatus) -> bool {
 
 /// Sessions copied here from rented Machines this Task ran on.
 pub fn task_copied_sessions(
-    task: &crate::durable::TaskId,
+    task: &loopflow_model::durable::TaskId,
 ) -> OpsResult<Vec<crate::machine_records::CopiedSession>> {
     block_on_task(async {
         let store = task_store().await?;
@@ -2315,8 +2316,8 @@ pub fn task_sync(issue: &str, retry_updates: bool) -> OpsResult<String> {
             let project = task
                 .project_id
                 .clone()
-                .map(crate::durable::WorkRef::Project);
-            let work = crate::durable::WorkRef::Task(task.id.clone());
+                .map(loopflow_model::durable::WorkRef::Project);
+            let work = loopflow_model::durable::WorkRef::Task(task.id.clone());
             // The person's explicit look: ahead of the pass window if need be.
             for work in project.iter().chain([&work]) {
                 super::planning_export::export(&store, repo, work, true).await?;
@@ -2336,7 +2337,7 @@ pub fn task_sync(issue: &str, retry_updates: bool) -> OpsResult<String> {
         // state attempt first so our own field acknowledgement cannot make its
         // ownership read stale or look like an intervening reopening. Retain
         // each result: a failed state attempt still permits the other effects.
-        let work = crate::durable::WorkRef::Task(task.id.clone());
+        let work = loopflow_model::durable::WorkRef::Task(task.id.clone());
         let state = super::linear_observe::deliver_task_state(&store, &task, retry_updates).await;
         let (comments, fields) = tokio::join!(
             super::linear_observe::sync_task_comments(&store, &task),
@@ -2804,7 +2805,7 @@ pub fn task_interrupt(issue: &str) -> OpsResult<TaskControlResult> {
             .await
             .map_err(|error| task_error(format!("failed to resolve task: {error}")))?
             .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
-        let work = crate::durable::WorkRef::Task(task.id.clone());
+        let work = loopflow_model::durable::WorkRef::Task(task.id.clone());
         let receipt = match live_execution(&store, &task).await? {
             Some(target) => {
                 store.append_interrupt(&work).await.map_err(task_error)?;

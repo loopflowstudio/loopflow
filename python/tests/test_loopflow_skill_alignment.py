@@ -5,8 +5,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SKILL = ROOT / "skills/loopflow/SKILL.md"
-LOOPFLOW = ROOT / "rust/loopflow/src/builtins/LOOPFLOW.md"
-WORK = ROOT / "rust/loopflow/src/builtins/ops/skill/work.md"
+LOOPFLOW = ROOT / "rust/loopflow-definitions/src/builtins/LOOPFLOW.md"
+WORK = ROOT / "rust/loopflow-definitions/src/builtins/ops/skill/work.md"
 
 
 def test_skill_frontmatter_is_valid() -> None:

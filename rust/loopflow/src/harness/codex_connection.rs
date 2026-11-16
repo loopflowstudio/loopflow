@@ -19,8 +19,8 @@ use tokio_tungstenite::{
 
 use super::codex::CodexStream;
 use super::fact_writer::FactWriter;
-use crate::id::AgentSessionId;
 use crate::store::sqlite::SqliteStore;
+use loopflow_model::id::AgentSessionId;
 
 type Upstream = WebSocketStream<UnixStream>;
 

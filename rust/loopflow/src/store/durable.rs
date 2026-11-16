@@ -1,9 +1,9 @@
 use crate::child::ChildRef;
-use crate::durable::{
-    AbandonReceipt, Machine, MachineId, TaskId, ToolResponseReceipt, ToolResponseWrite, WorkRef,
-    WorkStatus,
-};
+use crate::durable::AbandonReceipt;
 use crate::steer::Steer;
+use loopflow_model::durable::{
+    Machine, MachineId, TaskId, ToolResponseReceipt, ToolResponseWrite, WorkRef, WorkStatus,
+};
 
 use super::{run_sqlite, Store, StoreResult};
 
@@ -61,8 +61,8 @@ impl Store {
 
     pub async fn wave_owning_machine(
         &self,
-        wave: &crate::id::WaveId,
-        setting: crate::durable::MachineSetting,
+        wave: &loopflow_model::id::WaveId,
+        setting: loopflow_model::durable::MachineSetting,
     ) -> StoreResult<(MachineId, crate::durable::OwningMachineSource)> {
         let wave = wave.clone();
         run_sqlite(&self.sqlite, move |store| {
@@ -111,7 +111,7 @@ impl Store {
     pub(crate) async fn save_steer(
         &self,
         work: &WorkRef,
-        author: crate::durable::Author,
+        author: loopflow_model::durable::Author,
         text: &str,
     ) -> StoreResult<Steer> {
         let work = work.clone();
@@ -150,10 +150,10 @@ impl Store {
 
 #[cfg(test)]
 mod tests {
-    use crate::durable::WorkRef;
-    use crate::id::WaveId;
     use crate::store::{StorageConfig, StoreError};
     use crate::work::wave::Wave;
+    use loopflow_model::durable::WorkRef;
+    use loopflow_model::id::WaveId;
 
     async fn wave_work() -> (super::Store, WorkRef) {
         let directory = tempfile::tempdir().unwrap().keep();
@@ -174,10 +174,14 @@ mod tests {
     #[tokio::test]
     async fn removing_connection_preserves_identity() {
         let (store, _) = wave_work().await;
-        let id = crate::durable::MachineId::new();
+        let id = loopflow_model::durable::MachineId::new();
         let added = store.add_machine(&id, "mini", "builder").await.unwrap();
         assert!(store
-            .add_machine(&crate::durable::MachineId::new(), "other", "builder")
+            .add_machine(
+                &loopflow_model::durable::MachineId::new(),
+                "other",
+                "builder"
+            )
             .await
             .is_err());
         store.rename_machine("builder", "mini").await.unwrap();

@@ -13,10 +13,10 @@ use tokio_tungstenite::{tungstenite::protocol::Role, tungstenite::Message, WebSo
 
 use super::codex::CodexStream;
 use super::fact_writer::FactWriter;
-use crate::id::LfProcessId;
 use crate::session::SessionEventKind;
 use crate::store::sqlite::SqliteStore;
 use crate::store::StoreError;
+use loopflow_model::id::LfProcessId;
 
 #[test]
 fn history_and_other_writers_progress_during_stalled_dispatch() {

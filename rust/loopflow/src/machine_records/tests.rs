@@ -3,9 +3,9 @@ use std::path::Path;
 use rusqlite::params;
 
 use super::{copies_home, export, import, CopyCounts};
-use crate::durable::{MachineId, TaskId};
 use crate::store::sqlite::SqliteStore;
 use crate::work::task::NewTask;
+use loopflow_model::durable::{MachineId, TaskId};
 
 const TASK: &str = "task_abcd1234400080000000000000000001";
 const SESSION: &str = "8f0e2b7c4d1a4e3f9b6c5a4d3e2f1a0b";

@@ -35,7 +35,7 @@ pub(crate) fn session_marker(home: &Path, session: &str) -> PathBuf {
     home.join("steers").join("session").join(session)
 }
 
-pub(crate) fn seen_marker(home: &Path, process: &crate::id::AgentProcessId) -> PathBuf {
+pub(crate) fn seen_marker(home: &Path, process: &loopflow_model::id::AgentProcessId) -> PathBuf {
     home.join("steers").join("seen").join(process.as_str())
 }
 
@@ -54,7 +54,7 @@ pub(crate) fn touch(path: &Path) -> std::io::Result<()> {
 #[serde(deny_unknown_fields)]
 pub struct SteerAdapter {
     pub session: String,
-    pub agent_process_id: crate::id::AgentProcessId,
+    pub agent_process_id: loopflow_model::id::AgentProcessId,
     pub capability: String,
 }
 
@@ -106,11 +106,11 @@ impl std::fmt::Debug for SteerAdapter {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Steer {
-    pub id: crate::id::SteerId,
+    pub id: loopflow_model::id::SteerId,
     pub sequence: i64,
     pub source: String,
     pub revision: String,
-    pub author: crate::durable::Author,
+    pub author: loopflow_model::durable::Author,
     pub text: String,
 }
 
@@ -135,7 +135,7 @@ pub struct SessionSteerPage {
 /// Steers claimed for one conversation and rendered for its provider.
 #[derive(Debug)]
 pub(crate) struct ClaimedSteers {
-    pub steers: Vec<crate::id::SteerId>,
+    pub steers: Vec<loopflow_model::id::SteerId>,
     pub text: String,
 }
 

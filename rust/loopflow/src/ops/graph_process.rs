@@ -4,8 +4,8 @@
 //! it. Each step is an ordinary command that knows nothing of its Graph; whether
 //! the Graph or a step is running, finished or failed is read from their Processes.
 use crate::graph::compiled::CompiledGraph;
-use crate::id::LfProcessId;
 use crate::process::LfProcess;
+use loopflow_model::id::LfProcessId;
 
 /// A step's agent sees which Graph started it: the Graph process's id. Steps of
 /// one Graph can share notes under it. It configures nothing in lf.

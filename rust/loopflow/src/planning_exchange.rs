@@ -40,10 +40,10 @@ impl PlanningSnapshot {
     pub(crate) fn canonicalized(&self) -> Result<Self, PlanningExchangeError> {
         let mut changes = BTreeMap::new();
         for (id, change) in &self.changes {
-            let canonical = crate::id::canonical_uuid(id);
+            let canonical = loopflow_model::id::canonical_uuid(id);
             let mut parents = BTreeSet::new();
             for parent in &change.parents {
-                if !parents.insert(crate::id::canonical_uuid(parent)) {
+                if !parents.insert(loopflow_model::id::canonical_uuid(parent)) {
                     return Err(PlanningExchangeError::Invalid(
                         "canonical identity collision: planning predecessors",
                     ));
@@ -78,7 +78,9 @@ impl PlanningSnapshot {
                 .edit
                 .canonicalized()
                 .map_err(|_| PlanningExchangeError::Invalid("invalid Work value"))?;
-            if winners.get(&edit.key()).copied() != Some(crate::id::canonical_uuid(id).as_str()) {
+            if winners.get(&edit.key()).copied()
+                != Some(loopflow_model::id::canonical_uuid(id).as_str())
+            {
                 return Err(PlanningExchangeError::Invalid(
                     "canonical identity collision: planning winner would change",
                 ));

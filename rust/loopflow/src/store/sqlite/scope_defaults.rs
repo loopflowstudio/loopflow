@@ -11,12 +11,12 @@
 
 use rusqlite::{Connection, OptionalExtension};
 
-use crate::durable::{
-    CapacityDefault, DefaultScope, MachineDefault, MachineId, MachineSetting, OwningMachineSource,
-    RepositoryId, TaskId,
-};
-use crate::id::WaveId;
+use crate::durable::OwningMachineSource;
 use crate::store::{StoreError, StoreResult};
+use loopflow_model::durable::{
+    CapacityDefault, DefaultScope, MachineDefault, MachineId, MachineSetting, RepositoryId, TaskId,
+};
+use loopflow_model::id::WaveId;
 
 use super::SqliteStore;
 

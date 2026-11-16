@@ -122,9 +122,10 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
                 .await?
                 .context("Session not found")?;
             if let Some(source) = source {
-                let steer = store
-                    .sqlite
-                    .session_steer_source(&session.id, &crate::id::SteerId::parse(source)?)?;
+                let steer = store.sqlite.session_steer_source(
+                    &session.id,
+                    &loopflow_model::id::SteerId::parse(source)?,
+                )?;
                 println!("{}", serde_json::to_string_pretty(&steer)?);
                 return Ok(());
             }
@@ -306,7 +307,7 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             if let Some(key) = planning_key {
                 crate::ops::planning_sync::adopt_personal_key(&store, &main, key).await?;
             }
-            let id = crate::durable::TaskId::parse(task)?;
+            let id = loopflow_model::durable::TaskId::parse(task)?;
             crate::ops::human_session::moves::arriving_task(&store, &main, &id, issue).await?;
             if let Some(from) = from {
                 store.sqlite.record_move_checked(&id, from)?;
@@ -364,7 +365,7 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
 /// One Session's own facts; `lf task status` lists its Task's Sessions with them.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionFacts {
-    pub id: crate::id::LfSessionId,
+    pub id: loopflow_model::id::LfSessionId,
     pub title: String,
     /// The provider its current input launched with; `null` before a first launch.
     pub provider: Option<String>,
@@ -376,7 +377,7 @@ pub struct SessionFacts {
     pub available: bool,
     pub cwd: String,
     /// The provider's current AgentProcess, as `lf ps` lists it.
-    pub agent_process_id: Option<crate::id::AgentProcessId>,
+    pub agent_process_id: Option<loopflow_model::id::AgentProcessId>,
 }
 
 impl SessionFacts {
@@ -523,11 +524,11 @@ pub(crate) async fn status_recorded(
     agent_process: Option<&str>,
     stream: &str,
     sequence: i64,
-    records: &crate::program_status::Records,
+    records: &loopflow_model::program_status::Records,
 ) -> anyhow::Result<StatusRecorded> {
     let store = open_shared_store().await?;
     let agent_process = agent_process
-        .map(crate::id::AgentProcessId::parse)
+        .map(loopflow_model::id::AgentProcessId::parse)
         .transpose()?;
     crate::ops::human_session::record_program_status(
         &store,

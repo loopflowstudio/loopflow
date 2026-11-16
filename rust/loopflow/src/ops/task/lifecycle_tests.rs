@@ -10,7 +10,6 @@ use std::time::{Duration, Instant};
 use axum::{extract::State, routing::post, Json, Router};
 use serde_json::{json, Value};
 
-use crate::id::WaveId;
 use crate::linear::{LinearIssueId, LinearProjectId};
 use crate::ops::linear::{LinearRefresh, LinearTestContext, LINEAR_TEST_CONTEXT};
 use crate::store::{open_ephemeral_store, CredentialType, ProviderToken, StorageConfig};
@@ -19,6 +18,7 @@ use crate::work::task::{
     GithubPr, LinearWritebackState, Observation, PrPublication, Task, TaskId, TaskPr, TaskPrId,
 };
 use crate::work::wave::Wave;
+use loopflow_model::id::WaveId;
 
 struct Running {
     child: Child,

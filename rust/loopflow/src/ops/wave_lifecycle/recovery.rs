@@ -9,10 +9,10 @@ use std::process::Command;
 use serde::{Deserialize, Serialize};
 
 use super::{authored_path, lifecycle_error, resolve_wave, AuthoredFiles};
-use crate::id::WaveId;
 use crate::ops::OpsResult;
 use crate::store::Store;
 use crate::work::wave::Wave;
+use loopflow_model::id::WaveId;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct Identity {

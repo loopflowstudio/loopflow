@@ -220,8 +220,8 @@ pub(crate) fn is_user_input(row: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chat::types::{ConversationItem, Lifecycle};
     use crate::transcript::TurnItem;
+    use loopflow_model::chat::types::{ConversationItem, Lifecycle};
 
     fn user(uuid: &str, at: &str, content: Value) -> Value {
         serde_json::json!({"type":"user","userType":"external","uuid":uuid,

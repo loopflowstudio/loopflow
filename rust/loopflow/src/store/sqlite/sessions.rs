@@ -1,17 +1,17 @@
 //! Session transactions share the invocation's SQLite transaction and fences.
 
-use crate::id::AgentSessionId;
+use loopflow_model::id::AgentSessionId;
 use std::fs::File;
 use std::path::Path;
 
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 
-use crate::durable::TaskId;
 use crate::session::{LfSession, PrimaryScope, TitleSource};
 use crate::store::{StoreError, StoreResult};
+use loopflow_model::durable::TaskId;
 
 use super::SqliteStore;
-use crate::id::{LfProcessId, TerminalId};
+use loopflow_model::id::{LfProcessId, TerminalId};
 
 /// Why a held terminal cannot retire without losing work.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -97,7 +97,7 @@ fn read_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<LfSessi
                 .map_err(invalid)?,
             wave_id: row
                 .get::<_, Option<String>>(11)?
-                .map(|id| crate::id::WaveId::parse(&id))
+                .map(|id| loopflow_model::id::WaveId::parse(&id))
                 .transpose()
                 .map_err(invalid)?,
             graph_lf_process_id: row.get(12)?,
@@ -132,7 +132,7 @@ fn title_source(source: TitleSource) -> &'static str {
 }
 
 pub(super) fn session_in(conn: &Connection, id: &str) -> StoreResult<Option<LfSession>> {
-    let canonical = crate::id::canonical_session(id);
+    let canonical = loopflow_model::id::canonical_session(id);
     let id = canonical.as_str();
     conn.query_row(
         &format!("{SESSION_SELECT} WHERE s.id=?1"),
@@ -307,7 +307,7 @@ fn read_summary(
             .map_err(invalid)?;
         let wave_id = row
             .get::<_, Option<String>>(8)?
-            .map(|id| crate::id::WaveId::parse(&id))
+            .map(|id| loopflow_model::id::WaveId::parse(&id))
             .transpose()
             .map_err(invalid)?;
         let graph = match row.get::<_, Option<String>>(17)? {
@@ -331,7 +331,7 @@ fn read_summary(
             }
             None => None,
         };
-        let agent_process_id: Option<crate::id::AgentProcessId> = row.get(31)?;
+        let agent_process_id: Option<loopflow_model::id::AgentProcessId> = row.get(31)?;
         let agent_process_evidence = crate::journal::agent_process_evidence(
             row.get(32)?,
             row.get(33)?,
@@ -496,7 +496,7 @@ fn ensure_primary_session_in(
     conn: &Connection,
     scope: &PrimaryScope,
     session: LfSession,
-    caller_process: Option<&crate::id::LfProcessId>,
+    caller_process: Option<&loopflow_model::id::LfProcessId>,
 ) -> StoreResult<LfSession> {
     if let Some(current) = primary_session_in(conn, scope)? {
         return Ok(current);
@@ -586,7 +586,7 @@ pub(super) fn bind_session_in(
         }
         conn.execute(
                 "UPDATE agent_sessions SET task_id=?2,wave_id=?3,work_source='bound',bound_at=?4 WHERE id=?1",
-                params![id, task.as_str(), wave.as_ref().map(crate::id::WaveId::as_str), crate::store::rows::now_unix()],
+                params![id, task.as_str(), wave.as_ref().map(loopflow_model::id::WaveId::as_str), crate::store::rows::now_unix()],
             )?;
     }
     repair_session_title_in(conn, id, None)
@@ -624,7 +624,7 @@ impl SqliteStore {
         attachment: &crate::process::SessionAttachment,
         terminal: &TerminalId,
     ) -> StoreResult<()> {
-        let canonical = crate::id::canonical_session(session);
+        let canonical = loopflow_model::id::canonical_session(session);
         let session = canonical.as_str();
         self.with_session_attachment(session, attachment, || {
             let conn = self.conn.lock().expect("store mutex poisoned");
@@ -638,7 +638,7 @@ impl SqliteStore {
 
     /// The running held terminal that hosts the Session's running agent.
     pub(crate) fn session_terminal(&self, session: &str) -> StoreResult<Option<TerminalId>> {
-        let canonical = crate::id::canonical_session(session);
+        let canonical = loopflow_model::id::canonical_session(session);
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
             .query_row(
@@ -656,7 +656,7 @@ impl SqliteStore {
     /// Session, while that owner's row says it runs. Only `lf resume` reads
     /// it, to end the owner before resuming the conversation held.
     pub(crate) fn session_owner(&self, session: &str) -> StoreResult<Option<LfProcessId>> {
-        let canonical = crate::id::canonical_session(session);
+        let canonical = loopflow_model::id::canonical_session(session);
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
             .query_row(
@@ -880,7 +880,7 @@ impl SqliteStore {
         id: &str,
         now: i64,
     ) -> StoreResult<Option<crate::session::SessionSummary>> {
-        let canonical = crate::id::canonical_session(id);
+        let canonical = loopflow_model::id::canonical_session(id);
         let id = canonical.as_str();
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let conn = conn.savepoint()?;
@@ -897,7 +897,7 @@ impl SqliteStore {
 
     /// Resolve a conversation or captured-input selector from its SQLite owner.
     pub(crate) fn resolve_history_input(&self, selector: &str) -> StoreResult<String> {
-        let canonical = crate::id::canonical_session(selector);
+        let canonical = loopflow_model::id::canonical_session(selector);
         let conn = self.conn.lock().expect("store mutex poisoned");
         if conn.query_row(
             "SELECT EXISTS(SELECT 1 FROM agent_sessions WHERE id=?1)",
@@ -1209,10 +1209,10 @@ impl SqliteStore {
                 window.1,
                 input,
                 window.2.map(|n| n as i64),
-                wave.map(crate::id::canonical_uuid),
-                project.map(|project| crate::id::canonical_prefixed(project, "proj_")),
-                project.map(crate::id::canonical_uuid),
-                caller.map(crate::id::canonical_session),
+                wave.map(loopflow_model::id::canonical_uuid),
+                project.map(|project| loopflow_model::id::canonical_prefixed(project, "proj_")),
+                project.map(loopflow_model::id::canonical_uuid),
+                caller.map(loopflow_model::id::canonical_session),
             ])?;
             let mut inputs = Vec::new();
             let mut labels = std::collections::HashMap::new();
@@ -1319,7 +1319,7 @@ impl SqliteStore {
                 .map_err(invalid)?,
             wave_id: wave
                 .as_deref()
-                .map(crate::id::WaveId::parse)
+                .map(loopflow_model::id::WaveId::parse)
                 .transpose()
                 .map_err(invalid)?,
             observed_at: started,
@@ -1390,7 +1390,7 @@ impl SqliteStore {
     pub fn create_session(
         &self,
         mut session: LfSession,
-        caller_process: Option<&crate::id::LfProcessId>,
+        caller_process: Option<&loopflow_model::id::LfProcessId>,
     ) -> StoreResult<LfSession> {
         let _admission = self.lock_session_checkouts(&session)?;
         discover_session_repo(&mut session)?;
@@ -1414,7 +1414,7 @@ impl SqliteStore {
         &self,
         scope: &PrimaryScope,
         mut session: LfSession,
-        caller_process: Option<&crate::id::LfProcessId>,
+        caller_process: Option<&loopflow_model::id::LfProcessId>,
     ) -> StoreResult<LfSession> {
         // Nearly every call finds the primary it asks for; that takes no write lock.
         if let Some(current) = self.primary_session(scope)? {
@@ -1477,7 +1477,7 @@ impl SqliteStore {
             .optional()?;
         match row {
             Some((Some(kind), Some(wave), _)) if kind == "wave" => Ok(Some(PrimaryScope::Wave(
-                crate::id::WaveId::parse(&wave).map_err(invalid)?,
+                loopflow_model::id::WaveId::parse(&wave).map_err(invalid)?,
             ))),
             Some((Some(kind), _, Some(repo))) if kind == "repository" => {
                 Ok(Some(PrimaryScope::Repository(
@@ -1558,7 +1558,7 @@ impl SqliteStore {
         &self,
         mut next: LfSession,
         expected: Option<&crate::process::SessionAttachment>,
-        process: &crate::id::LfProcessId,
+        process: &loopflow_model::id::LfProcessId,
         close: impl FnOnce() -> StoreResult<bool>,
     ) -> StoreResult<(LfSession, crate::process::SessionAttachment)> {
         let _admission = self.lock_session_checkouts(&next)?;
@@ -1645,7 +1645,7 @@ impl SqliteStore {
     }
 
     pub fn session_inputs(&self, id: &str) -> StoreResult<Vec<String>> {
-        let canonical = crate::id::canonical_session(id);
+        let canonical = loopflow_model::id::canonical_session(id);
         let id = canonical.as_str();
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(
@@ -1657,7 +1657,7 @@ impl SqliteStore {
     }
 
     pub fn rename_session(&self, id: &str, title: &str, source: TitleSource) -> StoreResult<()> {
-        let canonical = crate::id::canonical_session(id);
+        let canonical = loopflow_model::id::canonical_session(id);
         let id = canonical.as_str();
         if title.trim().is_empty() {
             return Err(invalid("Session title cannot be empty"));
@@ -1674,7 +1674,7 @@ impl SqliteStore {
     pub(crate) fn complete_moved_session(
         &self,
         id: &str,
-        machine: &crate::durable::MachineId,
+        machine: &loopflow_model::durable::MachineId,
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let updated = conn.execute(
@@ -1707,8 +1707,11 @@ impl SqliteStore {
     }
 
     /// The Machine a Session here moved to; `None` when it never left.
-    pub fn session_moved_to(&self, id: &str) -> StoreResult<Option<crate::durable::MachineId>> {
-        let canonical = crate::id::canonical_session(id);
+    pub fn session_moved_to(
+        &self,
+        id: &str,
+    ) -> StoreResult<Option<loopflow_model::durable::MachineId>> {
+        let canonical = loopflow_model::id::canonical_session(id);
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.query_row(
             "SELECT moved_to_machine_id FROM agent_sessions WHERE id=?1",
@@ -1717,7 +1720,7 @@ impl SqliteStore {
         )
         .optional()?
         .flatten()
-        .map(|machine| crate::durable::MachineId::parse(&machine).map_err(invalid))
+        .map(|machine| loopflow_model::durable::MachineId::parse(&machine).map_err(invalid))
         .transpose()
     }
 
@@ -1852,7 +1855,7 @@ pub(super) fn retain_history_in(
         conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,task_id,wave_id,observed_at,payload,captured_event)
             VALUES(?1,'observed',?2,?3,?4,?5,?6,?7)",
             params![session.id,key,observation.task_id.as_ref().map(TaskId::as_str),
-                observation.wave_id.as_ref().map(crate::id::WaveId::as_str),observation.observed_at,payload,captured])?;
+                observation.wave_id.as_ref().map(loopflow_model::id::WaveId::as_str),observation.observed_at,payload,captured])?;
         changed = true;
     }
     Ok(changed)
@@ -1862,7 +1865,7 @@ pub(super) fn retain_history_in(
 pub(super) fn reserve_session_in(
     conn: &Connection,
     mut session: LfSession,
-    caller: Option<&crate::id::LfProcessId>,
+    caller: Option<&loopflow_model::id::LfProcessId>,
 ) -> StoreResult<LfSession> {
     resolve_ancestry_in(conn, &mut session)?;
     insert_session_in(conn, &mut session, caller)?;
@@ -1951,7 +1954,7 @@ fn capture_in(
     conn: &Connection,
     session: &LfSession,
     observed_at: i64,
-    process: Option<&crate::id::LfProcessId>,
+    process: Option<&loopflow_model::id::LfProcessId>,
 ) -> StoreResult<i64> {
     let key = session.input_key().map_err(invalid)?;
     let saved: Option<(i64, String, Option<String>)> = conn
@@ -1980,14 +1983,14 @@ fn capture_in(
     conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,lf_process_id,task_id,wave_id,observed_at,payload)
         VALUES(?1,'captured',?2,?3,?4,?5,?6,?7)",
         params![session.id,session.artifact_key,process,session.task_id.as_ref().map(TaskId::as_str),
-            wave.as_ref().map(crate::id::WaveId::as_str),observed_at,serde_json::to_string(&payload)?])?;
+            wave.as_ref().map(loopflow_model::id::WaveId::as_str),observed_at,serde_json::to_string(&payload)?])?;
     Ok(conn.last_insert_rowid())
 }
 
 fn insert_session_in(
     conn: &Connection,
     session: &mut LfSession,
-    process: Option<&crate::id::LfProcessId>,
+    process: Option<&loopflow_model::id::LfProcessId>,
 ) -> StoreResult<()> {
     session.title = generated_title_in(conn, session, &session.title, session.title_source, None)?;
     conn.execute(
@@ -2005,7 +2008,10 @@ fn insert_session_in(
             session.interactive,
             session.repo,
             session.task_id.as_ref().map(TaskId::as_str),
-            session.wave_id.as_ref().map(crate::id::WaveId::as_str),
+            session
+                .wave_id
+                .as_ref()
+                .map(loopflow_model::id::WaveId::as_str),
             session
                 .work_source
                 .map(serde_json::to_value)
@@ -2033,7 +2039,7 @@ fn insert_session_in(
         conn.execute(
             "INSERT INTO session_events(session_id,kind,receipt_key,task_id,wave_id,observed_at,payload,captured_event)
              VALUES(?1,'observed','legacy_review_feedback',?2,?3,?4,?5,?6)",
-            params![session.id,session.task_id.as_ref().map(TaskId::as_str),session.wave_id.as_ref().map(crate::id::WaveId::as_str),crate::store::rows::now_unix(),
+            params![session.id,session.task_id.as_ref().map(TaskId::as_str),session.wave_id.as_ref().map(loopflow_model::id::WaveId::as_str),crate::store::rows::now_unix(),
                 serde_json::to_string(&serde_json::json!({"type":"legacy_review_feedback","summary":summary}))?,session.captured],
         )?;
     }
@@ -2043,7 +2049,7 @@ fn insert_session_in(
 pub(super) fn replace_input_in(
     conn: &Transaction<'_>,
     session: &mut LfSession,
-    process: Option<&crate::id::LfProcessId>,
+    process: Option<&loopflow_model::id::LfProcessId>,
 ) -> StoreResult<()> {
     // Workspace admission owns location; replacing input cannot move Task membership.
     session.cwd = conn
@@ -2180,7 +2186,7 @@ mod metadata_tests {
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("primary", &crate::session_record::new_artifact_key());
         store.test_session("other", &crate::session_record::new_artifact_key());
-        let repository = crate::durable::RepositoryId::new();
+        let repository = loopflow_model::durable::RepositoryId::new();
         {
             let conn = store.conn.lock().unwrap();
             conn.execute(
@@ -2189,7 +2195,7 @@ mod metadata_tests {
             )
             .unwrap();
             for primary in [Some("primary"), None] {
-                let task = crate::durable::TaskId::new();
+                let task = loopflow_model::durable::TaskId::new();
                 conn.execute(
                     "INSERT INTO tasks(repository_id,id,created_at,issue_identifier)
                      VALUES(?1,?2,1,?2)",
@@ -2219,9 +2225,9 @@ mod metadata_tests {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         let session = store.test_session("moving", &crate::session_record::new_artifact_key());
-        let wave = crate::id::WaveId::new();
+        let wave = loopflow_model::id::WaveId::new();
         let project = crate::work::project::ProjectId::new();
-        let task = crate::durable::TaskId::new();
+        let task = loopflow_model::durable::TaskId::new();
         {
             let conn = store.conn.lock().unwrap();
             conn.execute(
@@ -2267,7 +2273,7 @@ mod metadata_tests {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("retained", &crate::session_record::new_artifact_key());
-        let wave = crate::id::WaveId::new();
+        let wave = loopflow_model::id::WaveId::new();
         {
             let conn = store.conn.lock().unwrap();
             conn.execute(
@@ -2592,7 +2598,7 @@ mod metadata_tests {
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         let repository = store.ensure_repository("/repo").unwrap();
         let [task, other] = [0, 1].map(|_| {
-            let id = crate::durable::TaskId::new();
+            let id = loopflow_model::durable::TaskId::new();
             store
                 .create_task(&crate::work::task::NewTask {
                     repository_id: repository.clone(),

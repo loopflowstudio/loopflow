@@ -491,7 +491,7 @@ fn checkout_restores_a_missing_checkout_unless_occupied_terminal_or_remote() {
 
     // A handoff is append-only, so the remote owner comes last.
     reset();
-    let peer = crate::durable::MachineId::new();
+    let peer = loopflow_model::durable::MachineId::new();
     sqlite
         .add_machine(&peer, "must-not-contact.invalid", "peer")
         .unwrap();

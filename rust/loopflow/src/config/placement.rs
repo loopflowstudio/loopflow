@@ -1,6 +1,6 @@
 //! File locations for domain operations that name a retained repository or Wave.
-use crate::durable::DefaultScope;
 use anyhow::{Context, Result};
+use loopflow_model::durable::DefaultScope;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use serde_yaml_ng::Value;
@@ -56,7 +56,7 @@ pub(crate) fn expand_shorthand(value: &mut Value) -> Result<()> {
 #[derive(schemars::JsonSchema, Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MachineDeclaration {
-    pub id: crate::durable::MachineId,
+    pub id: loopflow_model::durable::MachineId,
 }
 
 pub(crate) fn home(conn: &Connection) -> Result<PathBuf> {
@@ -148,7 +148,7 @@ pub(crate) fn scopes(conn: &Connection) -> Result<Vec<(DefaultScope, String)>> {
     })? {
         let (id, repo) = row?;
         out.push((
-            DefaultScope::Repository(crate::durable::RepositoryId::from_raw(id)),
+            DefaultScope::Repository(loopflow_model::durable::RepositoryId::from_raw(id)),
             repo,
         ));
     }
@@ -158,7 +158,7 @@ pub(crate) fn scopes(conn: &Connection) -> Result<Vec<(DefaultScope, String)>> {
     })? {
         let (id, slug) = row?;
         out.push((
-            DefaultScope::Wave(crate::id::WaveId::parse(&id).map_err(anyhow::Error::msg)?),
+            DefaultScope::Wave(loopflow_model::id::WaveId::parse(&id).map_err(anyhow::Error::msg)?),
             slug,
         ));
     }

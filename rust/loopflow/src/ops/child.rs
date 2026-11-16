@@ -1,7 +1,7 @@
 //! Shared recovery and execution helpers for Project and Task Work.
 
-use crate::durable::WorkRef;
 use crate::store::SharedStore;
+use loopflow_model::durable::WorkRef;
 
 #[derive(
     Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,

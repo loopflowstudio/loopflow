@@ -1776,7 +1776,8 @@ fn task_ownership() -> Result<WorktreeOwnership> {
                     .map_err(|error| anyhow!("cannot read Task Work status: {error}"))?;
                 let open = !matches!(
                     status,
-                    crate::durable::WorkStatus::Done | crate::durable::WorkStatus::Abandoned
+                    loopflow_model::durable::WorkStatus::Done
+                        | loopflow_model::durable::WorkStatus::Abandoned
                 );
                 let prs = runtime
                     .block_on(store.task_prs(&task.id))

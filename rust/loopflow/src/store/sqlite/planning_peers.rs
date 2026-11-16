@@ -338,7 +338,7 @@ struct Import<'a> {
     revision: &'a str,
     incoming: &'a PlanningSnapshot,
     planning_connected: bool,
-    machine_names: std::collections::HashMap<crate::durable::MachineId, String>,
+    machine_names: std::collections::HashMap<loopflow_model::durable::MachineId, String>,
 }
 
 /// What an import writes, read from one snapshot of the store at `revision`.
@@ -560,7 +560,7 @@ impl Import<'_> {
                     [target],
                     |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
                 )?;
-            let task = crate::durable::TaskId::from_raw(task);
+            let task = loopflow_model::durable::TaskId::from_raw(task);
             super::task_ownership::ingest_marker_in(
                 &tx,
                 &task,
@@ -788,13 +788,13 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::Import;
-    use crate::id::WaveId;
     use crate::planning_exchange::{PlanningMutation, PlanningSnapshot};
     use crate::planning_git::PlanningDestination;
     use crate::store::query_plans::{assert_no_empty_writes, growing_scans, statements};
     use crate::store::sqlite::{planning_write, SqliteStore};
     use crate::work::edit::{WorkEdit, WorkValue};
     use crate::work::wave::Wave;
+    use loopflow_model::id::WaveId;
 
     fn destination(store: &SqliteStore, repo: &str, name: &str) -> String {
         let route = PlanningDestination::new(

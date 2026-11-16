@@ -90,9 +90,9 @@ pub(super) fn off_reactor<T>(work: impl FnOnce() -> T) -> T {
 #[cfg(test)]
 mod tests {
     use super::{off_reactor, within};
-    use crate::id::LfProcessId;
     use crate::process::SessionAttachment;
     use crate::store::sqlite::SqliteStore;
+    use loopflow_model::id::LfProcessId;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{mpsc, Arc};
     use std::time::Duration;

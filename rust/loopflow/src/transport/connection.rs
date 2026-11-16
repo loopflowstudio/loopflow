@@ -232,8 +232,8 @@ impl Status {
     /// intent to replace claims. Recovery may only ask for free claims.
     pub(super) fn connect(
         &mut self,
-        terminal: &crate::id::TerminalId,
-        session: &crate::id::LfSessionId,
+        terminal: &loopflow_model::id::TerminalId,
+        session: &loopflow_model::id::LfSessionId,
         initial: bool,
         paste: &mut super::input::Paste,
     ) -> Result<Option<(UnixStream, bool)>> {

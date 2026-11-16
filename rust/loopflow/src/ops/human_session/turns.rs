@@ -8,11 +8,11 @@ use std::path::Path;
 use anyhow::Result;
 
 use super::{SessionAvailability, SessionGraphMembership, SessionRecord, SessionState};
-use crate::durable::TaskId;
 use crate::harness::HarnessKind;
 use crate::session_record::SessionTitleSource;
 use crate::store::sqlite::SqliteStore;
 use crate::transcript::live::SessionTurn;
+use loopflow_model::durable::TaskId;
 
 /// Read the current turn of each live Session among `sessions`. A Session
 /// whose agent reports no status is available once its turn hands back.
@@ -54,7 +54,7 @@ fn current(store: &SqliteStore, session: &str, cwd: &Path) -> Result<Option<Sess
 fn close(
     store: &SqliteStore,
     session: &str,
-    thread: &crate::id::AgentSessionId,
+    thread: &loopflow_model::id::AgentSessionId,
     mut turn: SessionTurn,
 ) -> Result<SessionTurn> {
     if let (false, Some(id)) = (turn.handed_back(), &turn.id) {
@@ -232,7 +232,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("conversation", &crate::session_record::new_artifact_key());
-        let thread = crate::id::AgentSessionId::from("thread");
+        let thread = loopflow_model::id::AgentSessionId::from("thread");
         let detail = serde_json::json!({"status":"interrupted"});
         store
             .record_turn_completion("conversation", &thread, "u1", 1_794_328_071, &detail)

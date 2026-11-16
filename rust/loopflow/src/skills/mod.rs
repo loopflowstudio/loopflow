@@ -7,11 +7,12 @@ use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 
-use crate::definition::name::portable_name;
 use crate::error::LoadError;
 use crate::graph::instructions::render_graph_instructions;
-use crate::graph::{compile_graph_with_catalog, split_frontmatter, DefinitionLoader};
+use crate::graph::{compile_graph_with_catalog, DefinitionLoader};
 use crate::skills::catalog::{is_generated, SkillCatalog, SkillDialect, SkillSource};
+use loopflow_definitions::name::portable_name;
+use loopflow_definitions::text::{skill_description, split_frontmatter};
 
 const SKILL_FILE_NAME: &str = "SKILL.md";
 const LOOPFLOW_MARKER: &str = "loopflow: true";
@@ -58,9 +59,9 @@ pub fn customize(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
     if let Some(path) = local.resolve(name)?.and_then(|source| source.path.clone()) {
         return Ok(path);
     }
-    let name = crate::builtins::resolve_builtin_skill(name)
+    let name = loopflow_definitions::builtins::resolve_builtin_skill(name)
         .ok_or_else(|| LoadError::SkillNotFound(name.to_string()))?;
-    let content = crate::builtins::get_builtin_skill(name)
+    let content = loopflow_definitions::builtins::get_builtin_skill(name)
         .ok_or_else(|| LoadError::SkillNotFound(name.to_string()))?;
     let path = repo.join(format!(".lf/skills/{name}.md"));
     fs::create_dir_all(path.parent().expect("definition has a parent"))?;
@@ -83,7 +84,7 @@ pub fn sync_skills(options: &SkillSyncOptions) -> Result<SkillSyncReport, LoadEr
     )?;
     let graphs = match &options.repo {
         Some(repo) => crate::graph::repo_graph_names(repo)?,
-        None => crate::builtins::builtin_graph_names()
+        None => loopflow_definitions::builtins::builtin_graph_names()
             .into_iter()
             .map(str::to_string)
             .collect(),
@@ -487,36 +488,6 @@ fn render_skill(skill: &SkillSource, name: &str, vendor: Vendor) -> Result<Strin
     ))
 }
 
-pub(crate) fn skill_description(content: &str) -> Option<String> {
-    let Some((frontmatter, body)) = split_frontmatter(content) else {
-        return first_prose_line(content);
-    };
-    serde_yaml_ng::from_str::<serde_yaml_ng::Value>(frontmatter)
-        .ok()
-        .and_then(|value| {
-            value
-                .get("description")?
-                .as_str()?
-                .lines()
-                .next()
-                .map(str::trim)
-                .filter(|line| !line.is_empty())
-                .map(str::to_string)
-        })
-        .or_else(|| first_prose_line(body))
-}
-
-pub(crate) fn first_prose_line(body: &str) -> Option<String> {
-    for raw in body.lines() {
-        let line = raw.trim();
-        if line.is_empty() || line.starts_with('#') || line.starts_with("```") {
-            continue;
-        }
-        return Some(line.to_string());
-    }
-    None
-}
-
 fn yaml_string(value: &str) -> String {
     serde_yaml_ng::to_string(value)
         .unwrap_or_else(|_| format!("\"{}\"", value.replace('"', "\\\"")))
@@ -593,8 +564,8 @@ fn prune_empty_skill_dir(skill_file: &Path, target_root: &Path) -> Result<(), Lo
 #[cfg(test)]
 mod tests {
     use super::{customize, sync_skills, SkillSyncOptions, SKILL_FILE_NAME};
-    use crate::builtins;
-    use crate::graph::split_frontmatter;
+    use loopflow_definitions::builtins;
+    use loopflow_definitions::text::split_frontmatter;
     use std::fs;
     use tempfile::TempDir;
 

@@ -1,5 +1,5 @@
-use crate::durable::TaskId;
 use crate::session::{LfSession, TitleSource};
+use loopflow_model::durable::TaskId;
 
 use super::{run_sqlite, Store, StoreResult};
 
@@ -39,7 +39,7 @@ impl Store {
 
     pub(crate) async fn task_conversations(
         &self,
-        task: &crate::durable::TaskId,
+        task: &loopflow_model::durable::TaskId,
     ) -> StoreResult<Vec<(LfSession, Option<i64>)>> {
         let task = task.clone();
         run_sqlite(&self.sqlite, move |store| store.task_conversations(&task)).await
@@ -47,7 +47,7 @@ impl Store {
 
     pub(crate) async fn task_primary(
         &self,
-        task: &crate::durable::TaskId,
+        task: &loopflow_model::durable::TaskId,
     ) -> StoreResult<Option<LfSession>> {
         let task = task.clone();
         run_sqlite(&self.sqlite, move |store| store.task_primary(&task)).await
@@ -55,7 +55,7 @@ impl Store {
 
     pub(crate) async fn choose_task_primary(
         &self,
-        task: &crate::durable::TaskId,
+        task: &loopflow_model::durable::TaskId,
         session: &str,
     ) -> StoreResult<LfSession> {
         let (task, session) = (task.clone(), session.to_string());

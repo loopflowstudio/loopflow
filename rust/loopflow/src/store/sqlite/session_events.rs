@@ -1,10 +1,10 @@
 use rusqlite::{params, OptionalExtension, TransactionBehavior};
 use serde_json::Value;
 
-use crate::id::AgentSessionId;
 use crate::session::{SessionEvent, SessionEventKind};
 use crate::session_record::ProviderSessionRef;
 use crate::store::{ProviderAccountId, StoreError, StoreResult};
+use loopflow_model::id::AgentSessionId;
 
 use super::SqliteStore;
 
@@ -700,7 +700,7 @@ impl SqliteStore {
         scope: (Option<&str>, Option<&str>, Option<&str>),
         orphaned: Option<(Option<&AgentSessionId>, Option<&str>)>,
     ) -> StoreResult<Vec<SessionEvent>> {
-        let task = scope.2.map(crate::id::TaskSelector::parse);
+        let task = scope.2.map(loopflow_model::id::TaskSelector::parse);
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(
             "SELECT e.seq,e.session_id,e.provider_thread,e.provider_turn,e.kind,
@@ -738,12 +738,12 @@ impl SqliteStore {
                 orphaned.is_some(),
                 orphaned.and_then(|(thread, _)| thread),
                 orphaned.and_then(|(_, turn)| turn),
-                crate::id::canonical_session(session),
-                scope.0.map(crate::id::canonical_uuid),
+                loopflow_model::id::canonical_session(session),
+                scope.0.map(loopflow_model::id::canonical_uuid),
                 scope
                     .1
-                    .map(|project| crate::id::canonical_prefixed(project, "proj_")),
-                scope.1.map(crate::id::canonical_uuid),
+                    .map(|project| loopflow_model::id::canonical_prefixed(project, "proj_")),
+                scope.1.map(loopflow_model::id::canonical_uuid),
                 task.as_ref().map(|task| &task.id),
                 task.as_ref().map(|task| &task.label),
                 task.as_ref().map(|task| &task.external),
@@ -1026,7 +1026,7 @@ mod tests {
             .session_attachment(session)
             .unwrap()
             .unwrap_or_else(|| {
-                let process = crate::id::LfProcessId::new();
+                let process = loopflow_model::id::LfProcessId::new();
                 store
                     .conn
                     .lock()
@@ -1052,10 +1052,10 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         let session =
             store.test_session("conversation", &crate::session_record::new_artifact_key());
-        let process = crate::id::LfProcessId::new();
-        let wave = crate::id::WaveId::new();
+        let process = loopflow_model::id::LfProcessId::new();
+        let wave = loopflow_model::id::WaveId::new();
         let project = crate::work::project::ProjectId::new();
-        let task = crate::durable::TaskId::new();
+        let task = loopflow_model::durable::TaskId::new();
         {
             let conn = store.conn.lock().unwrap();
             conn.execute(
@@ -1327,7 +1327,7 @@ mod tests {
         let mut template = store.test_session("seed", "run_000000000000000000000000000000ff");
         template.captured = None;
         template.caller_artifact_key = Some(template.input_key().unwrap().clone());
-        let attached = crate::id::LfProcessId::new();
+        let attached = loopflow_model::id::LfProcessId::new();
         store
             .conn
             .lock()
@@ -1454,8 +1454,8 @@ mod tests {
             session.id = "conversation".into();
             session.captured = None;
             session.artifact_key = Some(crate::session_record::new_artifact_key());
-            let process = crate::id::LfProcessId::new();
-            let creator = crate::id::LfProcessId::new();
+            let process = loopflow_model::id::LfProcessId::new();
+            let creator = loopflow_model::id::LfProcessId::new();
             {
                 let conn = store.conn.lock().unwrap();
                 conn.execute(
@@ -1611,7 +1611,7 @@ mod tests {
             3,
             "both unlinked turns and the reserved capture retain independent evidence"
         );
-        let wave = crate::id::WaveId::new();
+        let wave = loopflow_model::id::WaveId::new();
         store
             .create_wave(&crate::work::wave::Wave::new(
                 wave.clone(),
@@ -1644,15 +1644,15 @@ mod tests {
             let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
             let session =
                 store.test_session("conversation", &crate::session_record::new_artifact_key());
-            let first = crate::id::LfProcessId::new();
-            let second = crate::id::LfProcessId::new();
+            let first = loopflow_model::id::LfProcessId::new();
+            let second = loopflow_model::id::LfProcessId::new();
             {
                 let conn = store.conn.lock().unwrap();
                 for process in [&first, &second] {
                     // The AgentProcess inherits this trace; the inventory reads it typed.
                     conn.execute(
                         "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?2,1)",
-                        rusqlite::params![process, crate::id::TraceId::new()],
+                        rusqlite::params![process, loopflow_model::id::TraceId::new()],
                     )
                     .unwrap();
                 }
@@ -1731,7 +1731,7 @@ mod tests {
     {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
-        let wave = crate::id::WaveId::new();
+        let wave = loopflow_model::id::WaveId::new();
         let project = crate::work::project::ProjectId::new();
         let task = crate::work::task::TaskId::new();
         {
@@ -1759,7 +1759,7 @@ mod tests {
             ("task-failed-run", None, "failed", true),
         ] {
             let session = store.test_session(id, &crate::session_record::new_artifact_key());
-            let process = crate::id::LfProcessId::new();
+            let process = loopflow_model::id::LfProcessId::new();
             {
                 let conn = store.conn.lock().unwrap();
                 conn.execute(
@@ -1805,7 +1805,7 @@ mod tests {
             .any(|session| session.id == "orphan"));
 
         // Another turn on the finished run reopens it until that turn exits.
-        let process = crate::id::LfProcessId::new();
+        let process = loopflow_model::id::LfProcessId::new();
         store
             .conn
             .lock()
@@ -1947,8 +1947,8 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         let session =
             store.test_session("conversation", &crate::session_record::new_artifact_key());
-        let first = crate::id::LfProcessId::new();
-        let second = crate::id::LfProcessId::new();
+        let first = loopflow_model::id::LfProcessId::new();
+        let second = loopflow_model::id::LfProcessId::new();
         for process in [&first, &second] {
             store
                 .conn
@@ -2015,8 +2015,8 @@ mod tests {
             crate::session_record::parse_artifact_key("run_00000000000000000000000000000001")
                 .unwrap();
         let session = store.session("conversation").unwrap().unwrap();
-        let first = crate::id::LfProcessId::new();
-        let second = crate::id::LfProcessId::new();
+        let first = loopflow_model::id::LfProcessId::new();
+        let second = loopflow_model::id::LfProcessId::new();
         for process in [&first, &second] {
             store
                 .conn
@@ -2303,8 +2303,8 @@ mod tests {
             .unwrap()
             .is_empty());
 
-        let first = crate::id::LfProcessId::new();
-        let second = crate::id::LfProcessId::new();
+        let first = loopflow_model::id::LfProcessId::new();
+        let second = loopflow_model::id::LfProcessId::new();
         for process in [&first, &second] {
             store
                 .conn

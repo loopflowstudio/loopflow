@@ -10,8 +10,9 @@ use std::collections::BTreeSet;
 
 use serde_json::Value;
 
-use crate::chat::types::{ConversationEvent, Lifecycle};
-use crate::id::AgentSessionId;
+use loopflow_model::chat::types::{ConversationEvent, Lifecycle};
+use loopflow_model::id::AgentSessionId;
+
 /// One provider turn in its native conversation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ProviderTurn {

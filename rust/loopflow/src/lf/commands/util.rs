@@ -10,10 +10,10 @@ use crate::agent::{
     build_session_command, session_environment, AgentConfig, ProviderInvocation, SessionCommand,
 };
 use crate::harness::native_exit::{attachment_lost, departure};
-use crate::id::AgentSessionId;
 use crate::process::LfProcessRuntime;
 use crate::provider_auth::Provider;
 use crate::store::sqlite::SqliteStore;
+use loopflow_model::id::AgentSessionId;
 
 pub fn find_repo_root() -> Result<PathBuf> {
     crate::repo::find_repo_root()
@@ -854,7 +854,7 @@ fn run_opencode_native(
                     tokio::select! {
                         _ = &mut closed_rx => break,
                         event = rx.recv() => {
-                            if let Some(crate::chat::types::ConversationEvent::Error { message, .. }) = event {
+                            if let Some(loopflow_model::chat::types::ConversationEvent::Error { message, .. }) = event {
                                 if let Some(path) = observer_diagnostics {
                                     use std::io::Write;
                                     if let Ok(mut log) = OpenOptions::new().append(true).open(path) {
@@ -1130,8 +1130,8 @@ mod tests {
 
     #[test]
     fn a_machine_move_names_the_task_that_went_with_it() {
-        use crate::durable::{MachineId, TaskId};
         use crate::process::Departure;
+        use loopflow_model::durable::{MachineId, TaskId};
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
         let repo = home.path().canonicalize().unwrap();

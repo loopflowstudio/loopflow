@@ -4,8 +4,6 @@ use std::time::Duration;
 
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 
-use crate::durable::{ProjectId, TaskId, WorkRef};
-use crate::id::{AgentSessionId, WaveId};
 use crate::profile::{AccessProfile, AuthBrowserBinding, EmailAddress, ProfileId};
 use crate::provider_auth::Provider;
 use crate::store::rows::{map_wave_row, now_unix};
@@ -15,6 +13,8 @@ use crate::store::{
     StoreResult, WaveLocatorUpdate,
 };
 use crate::work::wave::{Wave, WaveLocator};
+use loopflow_model::durable::{ProjectId, TaskId, WorkRef};
+use loopflow_model::id::{AgentSessionId, WaveId};
 
 mod admission;
 mod children;
@@ -1531,7 +1531,7 @@ impl SqliteStore {
     fn record_hosted_process(
         &self,
         process: &crate::process::LfProcess,
-        held_terminal: Option<&crate::id::TerminalId>,
+        held_terminal: Option<&loopflow_model::id::TerminalId>,
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         record_process_in(&conn, process, held_terminal)?;
@@ -1558,7 +1558,7 @@ impl SqliteStore {
     pub(crate) fn record_process_within(
         &self,
         process: &crate::process::LfProcess,
-        held_terminal: Option<&crate::id::TerminalId>,
+        held_terminal: Option<&loopflow_model::id::TerminalId>,
         wait: Duration,
     ) -> StoreResult<()> {
         let previous: u32 = {
@@ -1588,7 +1588,7 @@ impl SqliteStore {
 pub(super) fn record_process_in(
     conn: &rusqlite::Connection,
     process: &crate::process::LfProcess,
-    held_terminal: Option<&crate::id::TerminalId>,
+    held_terminal: Option<&loopflow_model::id::TerminalId>,
 ) -> StoreResult<()> {
     conn.execute(
         "INSERT INTO processes(id,trace_id,parent_lf_process_id,command,repo,cwd,started_at,
@@ -1609,14 +1609,14 @@ pub(super) fn record_process_in(
 #[cfg(test)]
 mod frontier_tests {
     use super::SqliteStore;
-    use crate::durable::{WorkRef, WorkStatus};
-    use crate::id::WaveId;
     use crate::store::migrations::{
         apply_all_but_head, apply_newer_migration, latest_applied_version_sqlite,
         latest_known_version, prior_known_version,
     };
     use crate::store::FrontierAdvance::{self, Authorized, Forbidden};
     use crate::work::wave::Wave;
+    use loopflow_model::durable::{WorkRef, WorkStatus};
+    use loopflow_model::id::WaveId;
     use std::path::{Path, PathBuf};
 
     #[test]

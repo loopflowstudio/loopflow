@@ -5,8 +5,8 @@ mod capture;
 #[cfg(test)]
 mod capture_tests;
 
-use crate::id::AgentSessionId;
 pub(crate) use capture::CaptureHandoff;
+use loopflow_model::id::AgentSessionId;
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs::{self, File, OpenOptions};
@@ -21,8 +21,8 @@ use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
-use crate::chat::types::{ConversationEvent, TurnUsage};
 use crate::store::{StoreError, StoreResult};
+use loopflow_model::chat::types::{ConversationEvent, TurnUsage};
 
 /// An opaque artifact directory key; it grants no conversation or Graph authority.
 pub(crate) fn new_artifact_key() -> String {
@@ -30,9 +30,11 @@ pub(crate) fn new_artifact_key() -> String {
 }
 
 /// Historical run-prefixed paths retain their spelling as imported evidence.
-pub(crate) fn parse_artifact_key(value: &str) -> Result<String, crate::durable::DurableDataError> {
+pub(crate) fn parse_artifact_key(
+    value: &str,
+) -> Result<String, loopflow_model::durable::DurableDataError> {
     Uuid::parse_str(value.strip_prefix("run_").unwrap_or(value))
-        .map_err(|error| crate::durable::DurableDataError::InvalidId(error.to_string()))?;
+        .map_err(|error| loopflow_model::durable::DurableDataError::InvalidId(error.to_string()))?;
     Ok(value.to_owned())
 }
 
@@ -261,13 +263,13 @@ pub(crate) enum CaptureFact {
 pub(crate) enum TurnEnd {
     TurnCompleted {
         turn_id: String,
-        status: crate::chat::types::Lifecycle,
+        status: loopflow_model::chat::types::Lifecycle,
     },
     Error {
         code: String,
         message: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        evidence: Option<Box<crate::chat::types::FailureEvidence>>,
+        evidence: Option<Box<loopflow_model::chat::types::FailureEvidence>>,
     },
 }
 
@@ -335,15 +337,15 @@ pub struct SessionUsage {
 /// recorder completion is historical evidence, never native success or process exit.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 pub struct SessionHistory {
-    pub session_id: crate::id::LfSessionId,
+    pub session_id: loopflow_model::id::LfSessionId,
     pub captured: Option<i64>,
     pub artifact_key: Option<String>,
     pub caller_artifact_key: Option<String>,
     pub task_pr_id: Option<crate::work::task::TaskPrId>,
     pub repo: Option<String>,
     pub worktree: Option<String>,
-    pub task_id: Option<crate::durable::TaskId>,
-    pub wave_id: Option<crate::id::WaveId>,
+    pub task_id: Option<loopflow_model::durable::TaskId>,
+    pub wave_id: Option<loopflow_model::id::WaveId>,
     pub task_identifier: Option<String>,
     pub work_source: Option<crate::session::WorkSource>,
     pub wave_name: Option<String>,
@@ -365,9 +367,9 @@ pub struct SessionHistory {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 pub struct ProviderHistory {
     pub reference: ProviderHistoryReference,
-    pub lf_process_id: Option<crate::id::LfProcessId>,
-    pub task_id: Option<crate::durable::TaskId>,
-    pub wave_id: Option<crate::id::WaveId>,
+    pub lf_process_id: Option<loopflow_model::id::LfProcessId>,
+    pub task_id: Option<loopflow_model::durable::TaskId>,
+    pub wave_id: Option<loopflow_model::id::WaveId>,
     pub started_at: Option<i64>,
     pub completed_at: Option<i64>,
     pub outcome: Option<String>,
@@ -736,17 +738,17 @@ fn project_provider_history(
             },
             lf_process_id: start
                 .and_then(|event| event.lf_process_id.as_deref())
-                .map(crate::id::LfProcessId::parse)
+                .map(loopflow_model::id::LfProcessId::parse)
                 .transpose()
                 .map_err(std::io::Error::other)?,
             task_id: start
                 .and_then(|event| event.task_id.as_deref())
-                .map(crate::durable::TaskId::parse)
+                .map(loopflow_model::durable::TaskId::parse)
                 .transpose()
                 .map_err(std::io::Error::other)?,
             wave_id: start
                 .and_then(|event| event.wave_id.as_deref())
-                .map(crate::id::WaveId::parse)
+                .map(loopflow_model::id::WaveId::parse)
                 .transpose()
                 .map_err(std::io::Error::other)?,
             started_at: start.map(|event| event.observed_at),
@@ -798,12 +800,12 @@ fn project_provider_history(
             lf_process_id: None,
             task_id: origin
                 .and_then(|event| event.task_id.as_deref())
-                .map(crate::durable::TaskId::parse)
+                .map(loopflow_model::durable::TaskId::parse)
                 .transpose()
                 .map_err(std::io::Error::other)?,
             wave_id: origin
                 .and_then(|event| event.wave_id.as_deref())
-                .map(crate::id::WaveId::parse)
+                .map(loopflow_model::id::WaveId::parse)
                 .transpose()
                 .map_err(std::io::Error::other)?,
             started_at: start.map(|event| event.observed_at.unix_timestamp()),
@@ -955,7 +957,7 @@ pub(crate) fn resolve_manifest(
         })?;
     let session = store.session(&artifact).map_err(std::io::Error::other)?;
     let artifact = session
-        .filter(|session| session.id.as_str() == crate::id::canonical_session(&artifact))
+        .filter(|session| session.id.as_str() == loopflow_model::id::canonical_session(&artifact))
         .and_then(|session| session.artifact_key)
         .unwrap_or(artifact);
     let dir = record_dir(lf_home, &artifact).ok_or_else(|| {
@@ -1651,7 +1653,7 @@ pub(crate) fn inherited_capture_key() -> StoreResult<Option<String>> {
         .map_err(|_| record_error(std::io::Error::other("capture key is not valid UTF-8")))?;
     let (_, owner) = resolve_capture(&key)?;
     if let Some(caller) = crate::journal::agent_caller() {
-        if owner.id.as_str() != crate::id::canonical_session(&caller.session_id) {
+        if owner.id.as_str() != loopflow_model::id::canonical_session(&caller.session_id) {
             return Err(record_error(std::io::Error::other(
                 "capture belongs to another Session",
             )));

@@ -342,7 +342,7 @@ pub(super) fn save_in(
     owner: (&str, &str),
     source: &str,
     revision: &str,
-    author: &crate::durable::Author,
+    author: &loopflow_model::durable::Author,
     text: &str,
 ) -> StoreResult<Steer> {
     if text.trim().is_empty() {
@@ -457,7 +457,7 @@ fn pending_count(conn: &Connection, session: &str) -> StoreResult<i64> {
 impl SqliteStore {
     pub fn save_wave_steer(
         &self,
-        wave: &crate::id::WaveId,
+        wave: &loopflow_model::id::WaveId,
         author: &str,
         text: &str,
     ) -> StoreResult<Steer> {
@@ -507,7 +507,7 @@ impl SqliteStore {
             owner,
             &uuid::Uuid::new_v4().to_string(),
             "1",
-            &crate::durable::Author::Named(author.into()),
+            &loopflow_model::durable::Author::Named(author.into()),
             text,
         )?;
         // Reads and callbacks reconcile their own Session, including steers
@@ -579,7 +579,7 @@ impl SqliteStore {
     pub fn session_steer_source(
         &self,
         session: &str,
-        id: &crate::id::SteerId,
+        id: &loopflow_model::id::SteerId,
     ) -> StoreResult<Steer> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.query_row(
@@ -598,7 +598,7 @@ impl SqliteStore {
     /// What the Task looked like when its updates were last written.
     pub(crate) fn task_update_reading(
         &self,
-        task: &crate::durable::TaskId,
+        task: &loopflow_model::durable::TaskId,
     ) -> StoreResult<Option<String>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
@@ -615,7 +615,7 @@ impl SqliteStore {
     /// reader wrote first: its steers already say it.
     pub(crate) fn save_task_update(
         &self,
-        task: &crate::durable::TaskId,
+        task: &loopflow_model::durable::TaskId,
         expected: Option<&str>,
         observation: &str,
         updates: &[(String, String)],
@@ -643,7 +643,7 @@ impl SqliteStore {
                 ("task", task.as_str()),
                 source,
                 "1",
-                &crate::durable::Author::Named("Loopflow".into()),
+                &loopflow_model::durable::Author::Named("Loopflow".into()),
                 text,
             )?;
         }
@@ -717,7 +717,7 @@ impl SqliteStore {
     pub(crate) fn deliver_session_steers(
         &self,
         session: &str,
-        steers: &[crate::id::SteerId],
+        steers: &[loopflow_model::id::SteerId],
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;

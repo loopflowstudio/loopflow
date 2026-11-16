@@ -11,15 +11,15 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use crate::agent::{build_session_command, AgentConfig, ProviderInvocation};
-use crate::chat::types::{ConversationEvent, Lifecycle};
 use crate::harness::agent_process::AttachmentOwner;
 use crate::harness::claude_decode::ClaudeDecoder;
 use crate::harness::common::TurnInProgressGuard;
 use crate::harness::fact::{Decoded, ProviderFact};
 use crate::harness::fact_writer::{FactWriter, RequestOrigins};
 use crate::harness::{Harness, HarnessError, SendCurrentOutcome};
-use crate::id::AgentSessionId;
 use crate::provider_auth::Provider;
+use loopflow_model::chat::types::{ConversationEvent, Lifecycle};
+use loopflow_model::id::AgentSessionId;
 
 /// Launch settings and the admitted owner used for every turn and respawn.
 #[derive(Debug)]
@@ -678,7 +678,7 @@ mod tests {
         std::env::set_var("LF_HOME", home.path());
         let store = crate::store::sqlite::SqliteStore::open_ephemeral(&database).unwrap();
         let conn = rusqlite::Connection::open(&database).unwrap();
-        let process = crate::id::LfProcessId::new();
+        let process = loopflow_model::id::LfProcessId::new();
         conn.execute(
             "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?1,1)",
             [&process],
@@ -973,7 +973,7 @@ mod tests {
         home: tempfile::TempDir,
         store: crate::store::sqlite::SqliteStore,
         database: std::path::PathBuf,
-        process: crate::id::LfProcessId,
+        process: loopflow_model::id::LfProcessId,
         _environment: crate::test_ambient::EnvGuard,
         _ambient: crate::test_ambient::EnvGuard,
         _lock: std::sync::MutexGuard<'static, ()>,
@@ -1002,7 +1002,7 @@ mod tests {
             std::fs::set_permissions(&claude, std::fs::Permissions::from_mode(0o755)).unwrap();
             let database = home.path().join("loopflow.db");
             let store = crate::store::sqlite::SqliteStore::open_ephemeral(&database).unwrap();
-            let process = crate::id::LfProcessId::new();
+            let process = loopflow_model::id::LfProcessId::new();
             rusqlite::Connection::open(&database)
                 .unwrap()
                 .execute(
@@ -1206,7 +1206,7 @@ cat > /dev/null
             match tokio::time::timeout(Duration::from_secs(180), rx.recv()).await {
                 Ok(Some(ConversationEvent::TextDelta { content, .. })) => text.push_str(&content),
                 Ok(Some(ConversationEvent::ItemCompleted {
-                    item: crate::chat::types::ConversationItem::Message { text: t, .. },
+                    item: loopflow_model::chat::types::ConversationItem::Message { text: t, .. },
                     ..
                 })) => text.push_str(&t),
                 Ok(Some(ConversationEvent::TurnCompleted { status, .. })) => {

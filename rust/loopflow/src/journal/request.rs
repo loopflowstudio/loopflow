@@ -6,7 +6,7 @@ use std::time::Instant;
 
 use anyhow::Result;
 
-use crate::id::TraceId;
+use loopflow_model::id::TraceId;
 
 thread_local! {
     static ACTIVE: Cell<bool> = const { Cell::new(false) };
@@ -113,7 +113,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::{active, diagnostic, diagnostics, run, spawn_blocking};
-    use crate::id::TraceId;
+    use loopflow_model::id::TraceId;
 
     #[test]
     fn observations_follow_nested_workers_without_leaking_into_writes() {

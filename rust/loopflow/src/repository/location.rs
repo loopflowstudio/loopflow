@@ -8,9 +8,9 @@ use std::process::Command;
 
 use anyhow::{anyhow, Context, Result};
 
-use crate::durable::{MachineId, RepositoryId};
 use crate::repository::CanonicalRepo;
 use crate::store::sqlite::SqliteStore;
+use loopflow_model::durable::{MachineId, RepositoryId};
 
 const LOCATOR: &str = "loopflow-repository";
 

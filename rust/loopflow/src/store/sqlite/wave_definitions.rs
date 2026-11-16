@@ -5,10 +5,10 @@ use std::path::Path;
 
 use rusqlite::{params, OptionalExtension, TransactionBehavior};
 
-use crate::id::WaveId;
 use crate::store::{StoreError, StoreResult};
 use crate::work::project::Project;
 use crate::work::wave::{Wave, WaveLocator};
+use loopflow_model::id::WaveId;
 
 use super::{planning_write, SqliteStore};
 
@@ -284,8 +284,8 @@ fn seed_wave_files(directory: &Path, id: &WaveId, name: &str) -> StoreResult<()>
 #[cfg(test)]
 mod tests {
     use super::SqliteStore;
-    use crate::id::WaveId;
     use crate::work::wave::{Wave, WaveLocator};
+    use loopflow_model::id::WaveId;
 
     #[test]
     fn wave_files_are_created_without_overwriting_authored_content() {

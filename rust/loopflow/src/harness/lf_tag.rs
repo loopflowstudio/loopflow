@@ -1,4 +1,4 @@
-use crate::chat::types::{ConversationEvent, SuggestedActionPayload};
+use loopflow_model::chat::types::{ConversationEvent, SuggestedActionPayload};
 
 const SUGGEST_ACTIONS_OPEN: &str = "<lf:suggest_actions>";
 const SUGGEST_ACTIONS_CLOSE: &str = "</lf:suggest_actions>";

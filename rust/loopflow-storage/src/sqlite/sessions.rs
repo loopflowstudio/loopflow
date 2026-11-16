@@ -881,11 +881,8 @@ impl SqliteStore {
     pub fn task_conversations(&self, task: &TaskId) -> StoreResult<Vec<(LfSession, Option<i64>)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(&format!(
-            "SELECT candidates.id,candidates.artifact_key,candidates.title,candidates.title_source,candidates.feedback_summary,candidates.completed_at,candidates.created_at,candidates.request,candidates.interactive,candidates.repo,candidates.task_id,candidates.wave_id,candidates.graph_lf_process_id,candidates.work_source,candidates.bound_at,candidates.input_published,candidates.cwd,candidates.skill,candidates.provider,candidates.model,candidates.node,candidates.iterations,candidates.caller_artifact_key,candidates.current_capture, (
-                SELECT MAX(json_extract(payload,'$.opened_at_ms'))
-                FROM session_events WHERE session_id=candidates.id AND kind='observed'
-                AND json_extract(payload,'$.type')='interactive_opened'
-            ) AS opened_at FROM ({SESSION_SELECT}
+            "SELECT candidates.id,candidates.artifact_key,candidates.title,candidates.title_source,candidates.feedback_summary,candidates.completed_at,candidates.created_at,candidates.request,candidates.interactive,candidates.repo,candidates.task_id,candidates.wave_id,candidates.graph_lf_process_id,candidates.work_source,candidates.bound_at,candidates.input_published,candidates.cwd,candidates.skill,candidates.provider,candidates.model,candidates.node,candidates.iterations,candidates.caller_artifact_key,candidates.current_capture,
+                (SELECT opened_at FROM agent_sessions WHERE id=candidates.id) AS opened_at FROM ({SESSION_SELECT}
             WHERE s.interactive=1 AND s.completed_at IS NULL
             AND s.id IN ({})) AS candidates",
             super::task_work::session_ids("?1")
@@ -909,17 +906,23 @@ impl SqliteStore {
                 "{SESSION_SELECT}
                 WHERE s.interactive=1 AND s.completed_at IS NULL
                 AND (s.cwd=?1 OR substr(s.cwd,1,length(?1)+1)=?1||'/')
-                ORDER BY COALESCE((
-                    SELECT MAX(json_extract(payload,'$.opened_at_ms'))
-                    FROM session_events WHERE session_id=s.id AND kind='observed'
-                    AND json_extract(payload,'$.type')='interactive_opened'
-                ), s.created_at*1000) DESC, s.id DESC LIMIT 1"
+                ORDER BY COALESCE(s.opened_at, s.created_at*1000) DESC, s.id DESC LIMIT 1"
             ),
             [root.as_ref()],
             read_session,
         )
         .optional()?
         .transpose()
+    }
+
+    /// A person opened the interactive conversation `session` at `at_ms`.
+    pub fn record_session_opened(&self, session: &str, at_ms: i64) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "UPDATE agent_sessions SET opened_at=?2 WHERE id=?1 AND interactive=1",
+            params![session, at_ms],
+        )?;
+        Ok(())
     }
 
     /// The conversation a Task's primary pointer names, while it is unfinished.
@@ -2121,6 +2124,58 @@ impl SqliteStore {
 
 #[cfg(test)]
 mod metadata_tests {
+
+    #[test]
+    fn resume_reopens_the_conversation_last_opened_in_a_checkout() {
+        let home = tempfile::tempdir().unwrap();
+        let store = crate::test_fixture::open(&home.path().join("loopflow.db")).unwrap();
+        for id in ["first", "second"] {
+            store.test_session(id, &crate::session_record::new_artifact_key());
+        }
+        let reopened = |store: &crate::sqlite::SqliteStore| {
+            store
+                .checkout_conversation(std::path::Path::new("/fixture"))
+                .unwrap()
+                .unwrap()
+                .id
+        };
+        store.record_session_opened("first", 5_000).unwrap();
+        store.record_session_opened("second", 3_000).unwrap();
+        assert_eq!(reopened(&store).as_str(), "first");
+        store.record_session_opened("second", 9_000).unwrap();
+        assert_eq!(reopened(&store).as_str(), "second");
+    }
+
+    #[test]
+    fn an_upgrade_keeps_each_conversations_last_opening() {
+        use crate::migration_runner::{apply_before_migration, migration_section_sql};
+
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        apply_before_migration(
+            &crate::test_fixture::observers(),
+            &crate::test_fixture::build(),
+            &conn,
+            "history_apart_from_state",
+        );
+        conn.execute_batch(
+            "INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd)
+             VALUES('opened','Opened','human',1,0,'/repo'),('never','Never','human',1,0,'/repo');
+             INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES
+             ('opened','observed','a',1,'{\"type\":\"interactive_opened\",\"opened_at_ms\":4000}'),
+             ('opened','observed','b',2,'{\"type\":\"interactive_opened\",\"opened_at_ms\":7000}');",
+        )
+        .unwrap();
+        conn.execute_batch(&migration_section_sql("history_apart_from_state"))
+            .unwrap();
+        let opened: Vec<Option<i64>> = conn
+            .prepare("SELECT opened_at FROM agent_sessions ORDER BY id DESC")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(opened, [Some(7_000), None]);
+    }
 
     #[test]
     fn a_released_tasks_primary_session_stays_its_conversation_here() {

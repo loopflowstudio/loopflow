@@ -299,25 +299,12 @@ fn record_interactive_opened(environment: &BTreeMap<String, String>) -> Result<(
     let Some(input) = environment.get(crate::session_record::CAPTURE_KEY_ENV) else {
         return Ok(());
     };
-    let Some(process) = crate::journal::current_lf_process_id() else {
-        return Ok(());
-    };
     let store = crate::store::open_sqlite(&crate::store::database_path_from_env()?)?;
     let session = store
         .session_for_artifact(input)?
         .ok_or_else(|| anyhow!("Session input {input} is not recorded"))?;
-    if !session.interactive {
-        return Ok(());
-    }
     let now = time::OffsetDateTime::now_utc();
-    store.retain_session_observation(&session, &crate::session::SessionObservation {
-        artifact_key: crate::session_record::parse_artifact_key(input)?,
-        source: format!("interactive_opened:{process}:{}", session.id),
-        observed_at: now.unix_timestamp(),
-        task_id: session.task_id.clone(),
-        wave_id: session.wave_id.clone(),
-        payload: serde_json::json!({"type":"interactive_opened", "opened_at_ms": now.unix_timestamp_nanos() / 1_000_000}),
-    })?;
+    store.record_session_opened(&session.id, (now.unix_timestamp_nanos() / 1_000_000) as i64)?;
     Ok(())
 }
 
@@ -1809,22 +1796,14 @@ mod tests {
             )
             .map(crate::process::LfProcessRuntime::new)?;
             capture.claim_session_attachment()?;
-            let (session, attachment) = capture.session_attachment().unwrap();
+            let (_, attachment) = capture.session_attachment().unwrap();
             let store = crate::store::open_sqlite(&home.join("loopflow.db"))?;
-            let process = crate::journal::current_lf_process_id().unwrap();
-            store.retain_session_observation(
-                &store.session(&session)?.unwrap(),
-                &crate::session::SessionObservation {
-                    artifact_key: crate::session_record::parse_artifact_key(
-                        &capture.artifact_key(),
-                    )?,
-                    source: format!("interactive_opened:{process}:{session}"),
-                    observed_at: 1,
-                    task_id: None,
-                    wave_id: None,
-                    payload: serde_json::json!({"type": "fixture conflict"}),
-                },
-            )?;
+            // The launch names an input the store never recorded.
+            let mut environment = capture.environment();
+            environment.insert(
+                crate::session_record::CAPTURE_KEY_ENV.into(),
+                crate::session_record::new_artifact_key(),
+            );
             let command = SessionCommand {
                 launch: None,
                 holder: crate::session::Holder::Caller,
@@ -1836,24 +1815,20 @@ mod tests {
                 args: vec!["60".into()],
                 cwd: home.into(),
             };
-            let error = session_command_status_with_env(
-                &command,
-                &capture.environment(),
-                None,
-                None,
-                None,
-                None,
-            )
-            .unwrap_err();
+            let error =
+                session_command_status_with_env(&command, &environment, None, None, None, None)
+                    .unwrap_err();
             assert!(
-                error.to_string().contains("conflicting interactive_opened"),
+                error
+                    .to_string()
+                    .contains("capture does not belong to a recorded Session"),
                 "{error:#}"
             );
-            // The conflict is found before any provider runs.
+            // The error is found before any provider runs.
             let agent = store.agent_process(&attachment.agent_process_id)?;
             assert!(
                 agent.as_ref().and_then(|process| process.pid).is_none(),
-                "a provider was launched despite the conflict: {agent:?}"
+                "a provider was launched despite the error: {agent:?}"
             );
             Ok(())
         })

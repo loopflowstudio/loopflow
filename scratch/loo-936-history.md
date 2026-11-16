@@ -49,7 +49,7 @@ product needs it now; "log" = diagnostics for `logs/lf.log`.
 | `store-gap` (212) | none typed; `lf session history` prints it | history: AGENTS.md requires the gap in Session history | **history file** |
 | `agent_process_replaced`, `agent_process_ancestry_repaired` (42) | none outside tests | log | **`tracing::info!` to `lf.log`**, stop writing rows |
 | `started` (1,248), `completed` (1,760) | `pending_inputs`, `recorded_turn_end` (Session list running/finished, `human_session/turns.rs:62`), `input_turn_context` (Task context report), origin attribution | history; "is the turn running" is state | **history file**; turn running/finished is read from `session_activity`, which already wakes the list (verify in slice 3; if not, a `last_turn_ended_at` column) |
-| `output` (1,203, ~1 KB) | `input_final_answer`: Graph routing (`graph.rs:975`), `lf run` (`run.rs:836`), ci-fix conclusion (`pr_landing.rs:481`), Task view | copy of the provider's last message, with four named readers | **history file**; kept because reading provider transcripts at route time would tie Graph routing to each provider's format |
+| `output` (1,203, ~1 KB) | `input_final_answer`: Graph routing (`graph.rs:975`), `lf run` (`run.rs:836`), ci-fix conclusion (`pr_landing.rs:481`), Task view | copy of the provider's last message | **stop writing**; readers read the provider transcript through one function, one reader per provider; a parse failure fails the step naming the transcript path (decided 2026-11-16, see questions.md); old rows deleted by retention, never moved |
 | `usage` (1,872) | `native_usage` → Telemetry, Task history, `lf usage` | history (copied from the transcript, one row per turn) | **history file** |
 
 `lf session history <id>` and the rental export (`machine_records.rs:104`)
@@ -155,9 +155,9 @@ that silently returns nothing because it still names `session_events` for a
 history kind (every moved kind gets one reader test through the history file);
 a history file that grows without bound because the prune never runs on a
 Machine (the Machine server runs the prune on its clock, slice 5; `lf doctor` reports the
-file's size and oldest row); a Graph step that cannot find its `output` row
-because the write was a recording gap (the step already fails with "no
-recorded conclusion" today; unchanged).
+file's size and oldest row); a Graph step whose transcript was compacted,
+moved or reformatted (the step fails naming the transcript path, and
+`lf.log` says why; it never passes on an empty answer).
 
 ## Demo
 
@@ -208,8 +208,11 @@ lf history list --caller <session>                  # agent-issued commands as b
 4. Move finished Processes; `FORGETTABLE` widened; `lf history`, Task Work
    list, `lf doctor`, PR-landing blockers read `process_history`.
 5. Retention on the Machine server's clock, move pass for existing rows, `history` revision for Session
-   History subscriptions, `data.md` (it says "Loopflow keeps no copy of the
-   stream"; `output` is a copy with four readers — fix the doc).
+   History subscriptions, `data.md` ("Loopflow keeps no copy of the
+   stream" becomes true again once `output` is gone; check the doc).
+6. (In slice 3) `output`: stop writing it; `last_assistant_message(provider,
+   transcript)` in one place with a Claude and a Codex reader; its six readers
+   call it and fail loudly on a parse failure.
 
 ## Delete — do not maintain
 

@@ -1276,6 +1276,7 @@ fn released_work_upgrades_to_saved_intent_without_rewriting_work() {
         conn: std::sync::Arc::new(std::sync::Mutex::new(
             rusqlite::Connection::open(&path).unwrap(),
         )),
+        history: Default::default(),
     };
     let repo = RepositoryId::parse("repo_11111111111111111111111111111111").unwrap();
     let selection = selection();

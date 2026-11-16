@@ -37,3 +37,13 @@ WHEN EXISTS(SELECT 1 FROM graph_processes WHERE lf_process_id=OLD.lf_process_id)
 BEGIN
     UPDATE store_revisions SET revision=revision+1 WHERE domain='task_updates';
 END;
+
+-- Which conversation `lf resume` reopens is state: the latest time a person
+-- opened it, in milliseconds. It was an `interactive_opened` observation per
+-- opening; the history file keeps no copy.
+ALTER TABLE agent_sessions ADD COLUMN opened_at INTEGER;
+UPDATE agent_sessions SET opened_at=(
+    SELECT MAX(json_extract(payload,'$.opened_at_ms')) FROM session_events
+    WHERE session_id=agent_sessions.id AND kind='observed'
+      AND json_valid(payload) AND json_extract(payload,'$.type')='interactive_opened')
+WHERE interactive=1;

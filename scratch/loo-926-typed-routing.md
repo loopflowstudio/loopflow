@@ -216,7 +216,8 @@ Still argv in PR 1:
   `dispatch` arms);
 - detached `launch::start`;
 - `transport::delegate_current`;
-- Swift `onMachine`.
+- Swift `onMachine`;
+- `machine::ssh::request` (Session move, Task location, workspace arrival).
 
 Each one goes in a named PR below.
 
@@ -250,6 +251,9 @@ Each one goes in a named PR below.
 - The detached launch passes the typed operation on the child's stdin
   (`lf server stdio`, carried with `LF_LAUNCH_REPORT`). Deleted: `spell_run`,
   `spell_task` and the `launch::start(directory, &[String])` argv form.
+- `session send`/`receive`, `task location` and workspace arrival get
+  Read/Write kinds and go through `machine::ssh::call`; `ssh::request` is
+  deleted.
 - `aliases.rs` is deleted (52 moved spellings, "delete after 0.15").
   `transport::delegate_current` sends the operation, not `std::env::args()`.
 - Snapshot-test the Clap → `Invocation` table, one line per command, in the
@@ -311,6 +315,30 @@ Remaining for PR 1: a served `task.run` to a `preview_machines()` peer test
 (needs a Graph run on mini); hold, claim/unassign and resume cover
 `Remote::call`.
 
+## Concept review (2026-11-16): next implement direction
+
+Two things the design already implies, read off the built PR 1:
+
+- **One `Remote` for every forwarded write.** Task writes route through
+  `Write::remote` → `Remote::call`; `session.resume` routes inline in
+  `Write::prepare_session` (`write.rs:1214`), building its own Write,
+  environment and `ssh::call`. Same concept ("this write belongs to Machine
+  M, addressed as the destination names it"), two shapes. Fold
+  `session.resume` into `Write::remote`: it returns a `Remote` whose `write`
+  carries the forward's Task and Wave. `prepare_session` keeps only the
+  `move_session` step before `call` and `prepared_remotely` after. The
+  `work_route::forward(&cli, &args)` lookup and `session_spelling` stay
+  until PR 2. Drop `remote`'s `routed` parameter: `execute` asks only when
+  routed.
+- **A fourth lf-to-lf channel the inventory missed.** `machine::ssh::request`
+  (`ssh.rs:45`) launches `lf <argv>` with its own preamble, beside the new
+  `ssh::call` in the same file. Callers: `session_move.rs` (`session send`,
+  `session receive` with a stdin body, `--planning-key`), `task_location.rs`
+  (`task location --request --json`) and `open/workspace.rs`
+  (`--arrive-task`, `--into`). None has an `Operation` kind, so typing them
+  changes the wire and belongs to PR 2: each becomes a Read/Write sent with
+  `ssh::call`, and `ssh::request` is deleted. PR 1 changes nothing here.
+
 ## Done when
 
 - A Task write whose Task runs on another Machine (run, ship, hold, claim,
@@ -319,7 +347,8 @@ Remaining for PR 1: a served `task.run` to a `preview_machines()` peer test
 - An older destination fails with its version and the update command.
 - `rg 'fn run_remote|fn remote_on|RemoteTaskOperation|\.cli\(\)' rust/*/src`
   finds nothing (`fn cli(` also matches unrelated cmux and Rex helpers).
-- (PR 2/3) `rg 'fn argv|mutation::|aliases::' rust/loopflow/src` and
+- (PR 2/3) `rg 'ssh::request' rust` finds nothing, and
+  `rg 'fn argv|mutation::|aliases::' rust/loopflow/src` and
   `rg 'argv' swift/Loopflow/Services/RegistryQuery.swift` find nothing.
 
 ## Docs (PR 1, written)

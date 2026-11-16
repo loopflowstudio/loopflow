@@ -442,7 +442,8 @@ struct TaskWorkflowBar: View {
             return task.graphName.map { "Takes up \($0) when it starts" } ?? "No workflow selected"
         }
         switch workflow.position {
-        case .at(TaskGraph.start): return "Not started"
+        // A Task that took up its Graph and is waiting for setup to start it.
+        case .at(TaskGraph.start): return task.awaitsStart ? "Not started" : "Starting \(workflow.name)"
         case .at(TaskGraph.end): return "At its end"
         case .at(let step): return "At \(step) · yours"
         case .run(let from, let at, let process, let running):

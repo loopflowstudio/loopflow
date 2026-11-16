@@ -223,13 +223,29 @@ builds the `TaskCreationRecord` for both the adopted and new branches of
 `file_task_in`. `Receipt`/`Admit` stay as the caller's input (graph name,
 request); `TaskCreationRecord`/`TaskAdmission` are the resolved rows.
 
+Slice 2, Desktop half built. Start closes the sheet in the click into
+`StartingTaskView` (`navigation.startingTask`, keyed by request ID; a failure
+before filing shows there with Try again). `WorkModel.openCreatedTask` seeds
+`taskWork` from `TaskCreated.overview`, starts the workspace's layout without a
+`desktop.layout` read (`SessionsWorkspace.startNewLayout`) and installs
+`TaskCreated.session` as prepared (`installConversation`, `preparedIntent:
+.start`). When the row is not yet in planning it waits for the Work
+subscription checkpoint, never `plan.list`. The position line says
+"Starting <graph>" for a claimed Task at `start`. `WorkDestinationTests` checks
+the request log after Start holds only `task.create`.
+
 Remaining, in order:
-1. Slice 2 (Desktop, phone): consume `TaskCreated.session`/`.overview`; Swift
-   `TaskCreated` decodes them, nothing reads them yet.
-2. Checkout without network for a new branch: `fetch_task_refs`, the base
+1. Phone: `RemoteMobileClient.createTask` answers from `journal.reconcile`'s
+   lookup, whose stored receipt holds no Session or overview; `openTask` then
+   reads `task:<id>` (`createdTask`). Carry the live `TaskCreated` answer
+   through the journal, push `TaskWorkspaceView` from it, `session.attach` at
+   once, and delete `createdTask`'s view-plan read.
+2. `Perf.retarget(.startTask, from: "new-task", …)`: key by request ID from the
+   click (slice 5).
+3. Checkout without network for a new branch: `fetch_task_refs`, the base
    fetch and `assert_assignee` still run inside setup (off the answer path,
    on the typing path); with slice 3.
-3. Slices 3–5.
+4. Slices 3–5.
 
 ## Slices
 
@@ -258,7 +274,7 @@ Remaining, in order:
 ## Checks
 
 - `cargo test -p loopflow --test integration task_create_` — slices 1, 3, 4; gate.
-- `swift test --package-path swift --filter 'WorkDestinationTests|NewTaskTests|MobileTaskCreationTests'` — slice 2; gate.
+- `swift test --package-path swift --filter 'WorkDestinationTests|NewTaskTests|MobileTaskCreationTests'` — 73 passed (Mac; Mobile suite is iOS-only: `uv run python scripts/test_ios.py`, gate).
 - `uv run pytest python/tests/test_desktop_timings.py` — slice 5; gate.
 - Live Start → typing, local and remote Machine — qa (remote needs a rented or
   tailnet Machine; not a gate requirement).

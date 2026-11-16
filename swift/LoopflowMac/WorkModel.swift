@@ -91,6 +91,15 @@ struct TaskReadings<Value> {
 }
 
 /// One resolved opening: its companion must never outlive or drift from the Session.
+/// A New Task submission from the click until its conversation is installed.
+struct StartingTask: Equatable {
+    let id: String
+    let request: String
+    let wave: WaveSnapshot?
+    let graph: String?
+    var error: String?
+}
+
 struct LinkedSession {
     let generation: Int
     let record: SessionRecord
@@ -2280,7 +2289,11 @@ final class WorkModel {
 
     private func select(_ requested: WorkReference?, preservingOpening: Bool, recordingHistory: Bool = true) {
         if navigation.palette == .search || navigation.palette == .sidebarSearch { navigation.palette = nil }
-        if !preservingOpening { dismissTaskLink() }
+        if !preservingOpening {
+            dismissTaskLink()
+            // Going elsewhere leaves a submitted New Task to its row and recovery.
+            if navigation.startingTask != nil { navigation.startingTask = nil }
+        }
         historyLookup?.cancel()
         historyLookup = nil
         if let requested, requested.kind == .task {
@@ -2538,32 +2551,75 @@ final class WorkModel {
     }
 
     /// New Task: one `lf task create REQUEST --run` files it in `wave` (nil: the
-    /// repository), starts its workflow and admits its conversation with the
-    /// request as the first turn; this window then shows that conversation.
-    /// Storage failure keeps the sheet; a submitted request hands uncertainty to recovery.
+    /// repository) with its conversation admitted. The sheet closes in the click
+    /// and the words stand in until the answer's Session is installed; nothing
+    /// else is read or prepared for it. A submitted request whose answer is lost
+    /// hands uncertainty to recovery.
     func createTask(request: String, wave: WaveSnapshot?, graph: String?) async throws {
         let requestID = InteractionTrace.current?.id.uuidString ?? UUID().uuidString
         let owner = navigation
+        let starting = StartingTask(id: requestID, request: request, wave: wave, graph: graph)
+        owner.startingTask = starting
+        if owner.palette == .newTask { owner.palette = nil }
         let presentation = owner.paletteGeneration
         let destination = destinationGeneration
         do {
-            let receipt = try await query.createTask(request: request, wave: wave?.name, graph: graph, cwd: repoPath, requestID: requestID).receipt
+            let created = try await query.createTask(request: request, wave: wave?.name, graph: graph, cwd: repoPath, requestID: requestID)
+            let receipt = created.receipt
             Perf.retarget(.startTask, from: "new-task", to: receipt.sessionId ?? receipt.task.id,
                           owner: owner.performanceOwner)
             CreationRecovery.shared.awaitingPresentation(requestID, of: .task(receipt.task.id))
-            if owner.paletteGeneration == presentation {
-                owner.palette = nil
-                if navigation === owner, destinationGeneration == destination {
-                    await openTaskConversation(receipt.task.id)
-                }
+            if owner.startingTask?.id == requestID, owner.paletteGeneration == presentation,
+               navigation === owner, destinationGeneration == destination {
+                try await openCreatedTask(created, generation: destination)
             }
-            try? await confirmWorkUpdate()
+            if owner.startingTask?.id == requestID { owner.startingTask = nil }
         } catch is SubmittedCreationError {
             Perf.finish(.startTask, id: "new-task", owner: owner.performanceOwner, outcome: .unmeasured)
             // The saved submission owns recovery. Keeping a submit button here
             // would turn a lost answer into another creation identity.
-            if owner.paletteGeneration == presentation { owner.palette = nil }
+            if owner.startingTask?.id == requestID { owner.startingTask = nil }
+        } catch {
+            if owner.startingTask?.id == requestID { owner.startingTask?.error = error.localizedDescription }
+            throw error
         }
+    }
+
+    /// Install a created Task's conversation from the answer: its overview seeds
+    /// the Task's reading and its Session opens as prepared. Nothing saved can
+    /// exist for a new Task, so its layout starts empty instead of being read.
+    private func openCreatedTask(_ created: TaskCreated, generation: Int) async throws {
+        let id = created.receipt.task.id
+        if task(id: id) == nil {
+            // The answer follows the commit; the Work subscription carries the row.
+            try await confirmWorkUpdate()
+            guard !Task.isCancelled, destinationGeneration == generation else { return }
+        }
+        guard let found = task(id: id) else {
+            throw RegistryQueryError("Task \(created.receipt.task.identifier) was created; this window's planning does not show it yet.")
+        }
+        if taskWork[found.task.id].value == nil { taskWork.values[found.task.id] = .available(created.overview) }
+        guard let record = created.session, let registry = workspaceRegistry, let repository = workspaceRepository else {
+            openTaskDestination(wave: found.wave, task: found.task)
+            return
+        }
+        let key = workspaceKey(for: .task(id: found.task.id), repository: repository)
+        let workspace = registry.workspace(for: key, title: found.task.task.name, location: record.workspace?.identity)
+        workspace.startNewLayout(query: query, repoPath: repoPath)
+        workspace.conversationIntent = .start
+        workspace.conversationError = nil
+        let request = UUID()
+        workspace.conversationRequest = request
+        defer { if workspace.conversationRequest == request { workspace.conversationRequest = nil } }
+        let records = [record] + (sessions.value ?? []).filter { $0.id != record.id }
+        sessions = sessions.errorMessage.map { .unavailable(lastGood: records, reason: $0) } ?? .available(records)
+        let link = TaskLink(issue: found.task.task.identifier, repo: found.task.task.repo, conversation: true)
+        taskOpening = DesktopOpening(revision: UUID().uuidString, url: link.address, status: .opening, reason: nil)
+        openTaskDestination(wave: found.wave, task: found.task, preservingOpening: true)
+        navigation.content = .terminals
+        let destination = LinkedSession(generation: destinationGeneration, record: record, task: found.task,
+                                        showsChanges: false, location: nil, preparedIntent: .start)
+        try await installConversation(destination, repository: found.task.task.repo)
     }
 
     /// Ship the Task, then confirm its subscription update; it moves to Shipping

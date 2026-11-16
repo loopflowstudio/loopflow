@@ -314,6 +314,10 @@ final class WorkNavigation {
     /// What the last Auto-Ship or Stop Auto-Ship on the window heading did.
     var shipNotice: ShipNotice?
     var startingTaskSessions: Set<String> = []
+    /// The New Task request this window submitted and has not opened yet. Its
+    /// words stand in for the Task's conversation from the click until the
+    /// answer installs it.
+    var startingTask: StartingTask?
     var taskSessionErrors: [String: String] = [:]
     /// Successful `task prepare` receipts, available before the next roadmap read.
     var preparedTaskWorktrees: [String: WorkspaceIdentity] = [:]

@@ -6,7 +6,9 @@ pub fn run(command: &ServerCommand) -> anyhow::Result<()> {
         ServerCommand::Receipt { request_id, .. } => {
             println!(
                 "{}",
-                serde_json::to_string_pretty(&crate::engine::creation::lookup(request_id)?)?
+                serde_json::to_string_pretty(&loopflow_execution::engine::creation::lookup(
+                    request_id
+                )?)?
             );
             Ok(())
         }
@@ -14,7 +16,7 @@ pub fn run(command: &ServerCommand) -> anyhow::Result<()> {
         ServerCommand::Status => {
             println!(
                 "{}",
-                serde_json::to_string(&crate::machine::client::status()?)?
+                serde_json::to_string(&loopflow_execution::machine::client::status()?)?
             );
             Ok(())
         }

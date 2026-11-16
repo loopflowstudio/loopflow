@@ -4,9 +4,9 @@ use std::path::Path;
 
 use anyhow::{bail, Result};
 
-use crate::command::CommandIo;
-use crate::engine::creation::{self, TaskCreation};
 use crate::lf::TaskCommand;
+use loopflow_execution::command::CommandIo;
+use loopflow_execution::engine::creation::{self, TaskCreation};
 
 pub fn create(
     repo: &Path,
@@ -64,7 +64,7 @@ pub fn create(
             return Err(error);
         }
     };
-    if let Some(provider) = crate::config::load_config_or_default(Some(repo))
+    if let Some(provider) = loopflow_execution::config::load_config_or_default(Some(repo))
         .planning_transport()
         .remote_name()
         .filter(|_| receipt.task.linear_id.is_none())
@@ -88,10 +88,10 @@ pub fn create(
         // The first Graph attempt identifies this launch's carrier. Batch callers
         // wait for that run, including its retries, not just its first attempt.
         if let Some(launch) = creation::lookup(&id)?.and_then(|r| r.launch) {
-            if let crate::engine::task::TaskRun::Running { graph_process, .. } =
+            if let loopflow_execution::engine::task::TaskRun::Running { graph_process, .. } =
                 serde_json::from_value(launch)?
             {
-                let store = crate::store::read_existing_registry()?
+                let store = loopflow_execution::store::read_existing_registry()?
                     .ok_or_else(|| anyhow::anyhow!("Machine registry is unavailable"))?;
                 let carrier = store
                     .sqlite

@@ -3,7 +3,7 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use loopflow::context_block::{ContextDelivery, SessionIdentity};
+use loopflow_execution::context_block::{ContextDelivery, SessionIdentity};
 use loopflow_test_support::{env_lock, TestRepo};
 use serde_json::Value;
 

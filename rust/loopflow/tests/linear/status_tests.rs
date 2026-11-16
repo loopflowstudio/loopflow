@@ -9,19 +9,19 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::Command;
 
-use loopflow::child::ChildRef;
-use loopflow::id::WaveId;
-use loopflow::linear::{LinearIssueId, LinearProjectId};
-use loopflow::store::migrations;
-use loopflow::store::StorageConfig;
-use loopflow::work::project::{Project, ProjectEventKind, ProjectId};
-use loopflow::work::task::{
+use loopflow_execution::child::ChildRef;
+use loopflow_execution::linear::{LinearIssueId, LinearProjectId};
+use loopflow_execution::store::migrations;
+use loopflow_execution::store::StorageConfig;
+use loopflow_execution::work::project::{Project, ProjectEventKind, ProjectId};
+use loopflow_execution::work::task::{
     LinearWritebackState, Observation, PrMergeMode, Task, TaskId, TaskPr, TaskPrId,
 };
-use loopflow::work::wave::metrics::{
+use loopflow_execution::work::wave::metrics::{
     load_metric_contract, MetricObservation, ObservationAcceptance,
 };
-use loopflow::work::wave::Wave;
+use loopflow_execution::work::wave::Wave;
+use loopflow_model::id::WaveId;
 use time::OffsetDateTime;
 
 const PREVIOUS_RELEASE_TASK_PR_FIXTURE: &str = include_str!("../fixtures/store_0_12_8_task_pr.sql");
@@ -33,13 +33,13 @@ fn seed(home: &Path, wave_name: &str) -> Wave {
     let repo = home.join("repo");
     std::fs::create_dir_all(&repo).expect("repo");
     let db = home.join("loopflow.db");
-    let store = loopflow::store::open_sqlite(&db).expect("open store");
+    let store = loopflow_execution::store::open_sqlite(&db).expect("open store");
     let wave = Wave::new(
         WaveId::new(),
         wave_name.to_string(),
         repo.canonicalize().unwrap().display().to_string(),
     );
-    loopflow::work::wave::bootstrap::upsert_wave(&store, &wave).expect("register wave");
+    loopflow_execution::work::wave::bootstrap::upsert_wave(&store, &wave).expect("register wave");
     wave
 }
 
@@ -48,7 +48,7 @@ fn test_project(wave: &Wave, slug: &str, updated_at: OffsetDateTime) -> Project 
         id: ProjectId::new(),
 
         summary: String::new(),
-        status: loopflow::work::project::ProjectStatus::Started,
+        status: loopflow_execution::work::project::ProjectStatus::Started,
         linear_id: Some(
             LinearProjectId::new(uuid::Uuid::new_v4().to_string()).expect("Linear Project id"),
         ),
@@ -93,7 +93,8 @@ fn put_project_snapshot(home: &Path, wave: &Wave, project: &Project) {
         }],
         "items": []
     });
-    let store = loopflow::store::open_sqlite(&home.join("loopflow.db")).expect("open status store");
+    let store = loopflow_execution::store::open_sqlite(&home.join("loopflow.db"))
+        .expect("open status store");
     select_project(home, wave, project.linear_id.as_ref().unwrap().as_str());
     store
         .seed_inventory(&InventoryFixture {
@@ -108,7 +109,8 @@ fn put_project_snapshot(home: &Path, wave: &Wave, project: &Project) {
 
 fn seed_credential_history(home: &Path) -> Project {
     let wave = seed(home, "infrastructure");
-    let store = loopflow::store::open_sqlite(&home.join("loopflow.db")).expect("open status store");
+    let store = loopflow_execution::store::open_sqlite(&home.join("loopflow.db"))
+        .expect("open status store");
     let now = OffsetDateTime::now_utc();
     let project = test_project(&wave, "stability-security", now);
     store.insert_project(&project).expect("seed Project");
@@ -224,13 +226,14 @@ fn seed_stale_project_work(
     let wave = seed(home, "product");
     let repo = home.join("repo");
     std::fs::create_dir_all(&repo).expect("repo");
-    let store = loopflow::store::open_sqlite(&home.join("loopflow.db")).expect("open store");
+    let store =
+        loopflow_execution::store::open_sqlite(&home.join("loopflow.db")).expect("open store");
     let now = OffsetDateTime::now_utc();
     let stale = Project {
         id: ProjectId::parse(STALE_WORK_ID).expect("recorded Project Work id"),
 
         summary: String::new(),
-        status: loopflow::work::project::ProjectStatus::Started,
+        status: loopflow_execution::work::project::ProjectStatus::Started,
         linear_id: Some(LinearProjectId::new(STALE_PROJECT_ID).expect("recorded PM Project id")),
         slug: "technical-architecture".to_string(),
         name: "Technical Architecture".to_string(),
@@ -246,7 +249,11 @@ fn seed_stale_project_work(
     store.insert_project(&stale).expect("seed stale Project");
     select_project(home, &wave, stale.linear_id.as_ref().unwrap().as_str());
     let stale_task = Task {
-        repository_id: crate::repository::location::ensure_repository(&store, wave.repo()).unwrap(),
+        repository_id: loopflow_execution::repository::location::ensure_repository(
+            &store,
+            wave.repo(),
+        )
+        .unwrap(),
         id: TaskId::parse(STALE_TASK_WORK_ID).expect("recorded Task Work id"),
 
         revision: 0,
@@ -300,7 +307,7 @@ fn seed_stale_project_work(
         updated_at: now,
     };
     planning::seed_unplaced_task(&home.join("loopflow.db"), &stale_task);
-    loopflow::store::ownership::place_task(
+    loopflow_execution::store::ownership::place_task(
         &store,
         &stale_task.id,
         stale_task.worktree.as_ref().unwrap(),
@@ -324,7 +331,7 @@ fn seed_stale_project_work(
         id: ProjectId::new(),
 
         summary: String::new(),
-        status: loopflow::work::project::ProjectStatus::Started,
+        status: loopflow_execution::work::project::ProjectStatus::Started,
         linear_id: Some(
             LinearProjectId::new("95159066-9098-4d0b-8903-01459dc7ec14")
                 .expect("current PM Project id"),
@@ -453,8 +460,8 @@ fn seed_previous_release_task_pr(home: &Path) {
     migrations::apply_sqlite(&connection).expect("apply migrations to historical fixture");
     drop(connection);
 
-    let store =
-        loopflow::store::open_sqlite(&database).expect("open migrated previous release store");
+    let store = loopflow_execution::store::open_sqlite(&database)
+        .expect("open migrated previous release store");
     let task_id = TaskId::parse(PERSISTED_TASK_ID).expect("recorded Task id");
     let pr = store
         .active_task_pr(&task_id)
@@ -479,7 +486,7 @@ fn seed_previous_release_task_pr(home: &Path) {
         .expect("read current migration frontier");
     assert_eq!(
         frontier,
-        loopflow::store::migrations::latest_known_version()
+        loopflow_execution::store::migrations::latest_known_version()
     );
     drop(connection);
 }
@@ -515,7 +522,7 @@ fn project_operator_failures_remain_historical_without_reappearing_on_the_wave()
     }
     let human = status_human(home.path(), "infrastructure");
     assert!(!human.contains("credential"));
-    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow_execution::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     assert_eq!(
         store
             .latest_project_failure(&project.id)
@@ -575,8 +582,8 @@ fn wave_list_keeps_abandoned_registrations_until_they_are_removed() {
     let home = tempfile::tempdir().unwrap();
     let current = seed(home.path(), "current");
     let abandoned = seed(home.path(), "accidental");
-    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
-    let work = loopflow::durable::WorkRef::Wave(abandoned.id().clone());
+    let store = loopflow_execution::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
+    let work = loopflow_execution::durable::WorkRef::Wave(abandoned.id().clone());
     store.abandon(&work, "accidental registration").unwrap();
     let run = |args: &[&str]| {
         Command::new(loopflow_test_support::lf_binary())
@@ -651,8 +658,8 @@ Count dispatched Task loops that settle without rescue.
         }],
         "items": []
     });
-    let sqlite =
-        loopflow::store::open_sqlite(&home.path().join("loopflow.db")).expect("open store");
+    let sqlite = loopflow_execution::store::open_sqlite(&home.path().join("loopflow.db"))
+        .expect("open store");
     let now = OffsetDateTime::now_utc();
     sqlite
         .seed_inventory(&InventoryFixture {
@@ -686,7 +693,7 @@ Count dispatched Task loops that settle without rescue.
     *observation_id = id;
     let runtime = tokio::runtime::Runtime::new().expect("metric runtime");
     runtime.block_on(async {
-        let store = loopflow::store::open_ephemeral_store(&StorageConfig::sqlite(
+        let store = loopflow_execution::store::open_ephemeral_store(&StorageConfig::sqlite(
             home.path().join("loopflow.db"),
         ))
         .await
@@ -721,7 +728,7 @@ Count dispatched Task loops that settle without rescue.
     assert_eq!(status["projects"]["state"], "ok");
     let projects = status["projects"]["items"].as_array().unwrap();
     assert_eq!(projects.len(), 1);
-    let owned = loopflow::store::open_sqlite(&home.path().join("loopflow.db"))
+    let owned = loopflow_execution::store::open_sqlite(&home.path().join("loopflow.db"))
         .unwrap()
         .list_projects(Some(wave.id()))
         .unwrap()
@@ -762,14 +769,14 @@ fn a_wave_with_no_runs_reports_an_empty_reading_not_a_missing_one() {
     let home = tempfile::tempdir().expect("tempdir");
     std::fs::create_dir_all(home.path()).expect("home");
     let database = home.path().join("loopflow.db");
-    let store = loopflow::store::open_sqlite(&database).expect("open store");
+    let store = loopflow_execution::store::open_sqlite(&database).expect("open store");
     std::fs::create_dir_all(home.path().join("repo")).expect("repo");
     let wave = Wave::new(
         WaveId::new(),
         "audit-c".to_string(),
         home.path().join("repo").display().to_string(),
     );
-    loopflow::work::wave::bootstrap::upsert_wave(&store, &wave).expect("register wave");
+    loopflow_execution::work::wave::bootstrap::upsert_wave(&store, &wave).expect("register wave");
 
     let status = status_json(home.path(), &["audit-c"], None);
 
@@ -1056,7 +1063,7 @@ fn exact_task_roadmap_retains_history_without_starting_work() {
 fn exact_task_roadmap_scopes_duplicate_identifiers_to_registered_repositories() {
     let home = tempfile::tempdir().unwrap();
     let mut snapshot = seed_stale_project_work(home.path(), false, false);
-    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow_execution::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     let original = store.list_waves(None).unwrap().remove(0);
     let other_repo = home.path().join("other-repo");
     std::fs::create_dir_all(&other_repo).unwrap();
@@ -1066,7 +1073,7 @@ fn exact_task_roadmap_scopes_duplicate_identifiers_to_registered_repositories() 
         "other".into(),
         other_repo.canonicalize().unwrap().display().to_string(),
     );
-    loopflow::work::wave::bootstrap::upsert_wave(&store, &other).unwrap();
+    loopflow_execution::work::wave::bootstrap::upsert_wave(&store, &other).unwrap();
     snapshot.snapshot.projects[0].id = "other-project".into();
     snapshot.snapshot.projects[0].initiative_ids = vec!["other-initiative".into()];
     snapshot.snapshot.items[0].id = "other-task".into();
@@ -1126,7 +1133,7 @@ fn exact_task_roadmap_scopes_duplicate_identifiers_to_registered_repositories() 
 fn ordinary_task_due_date_is_visible_before_checkout() {
     let home = tempfile::tempdir().unwrap();
     let mut planning = seed_stale_project_work(home.path(), false, false);
-    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow_execution::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     let mut child = planning.snapshot.items[0].clone();
     child.id = "follow-up-issue".into();
     child.identifier = "W2-FOLLOW".into();

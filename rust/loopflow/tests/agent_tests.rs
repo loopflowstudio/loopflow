@@ -4,11 +4,13 @@ use base64::prelude::*;
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use loopflow::agent::{run_agent, AgentConfig, AgentFailure, AgentProcessResult, ProcessConfig};
-use loopflow::error::CoreError;
-use loopflow::profile::{ProviderRoute, RouteScope};
-use loopflow::provider_auth::Provider;
-use loopflow::store::{
+use loopflow_execution::agent::{
+    run_agent, AgentConfig, AgentFailure, AgentProcessResult, ProcessConfig,
+};
+use loopflow_execution::error::CoreError;
+use loopflow_execution::profile::{ProviderRoute, RouteScope};
+use loopflow_execution::provider_auth::Provider;
+use loopflow_execution::store::{
     CredentialState, ProviderAccount, ProviderAccountId, RoutingState, StorageConfig,
 };
 use support::EnvGuard;
@@ -92,13 +94,14 @@ fn library_launch_records_each_provider_under_its_invocation() {
             .trim()
             .parse()
             .unwrap_or_else(|error| panic!("{error}: fixture output {:?}", result.stdout));
-        let store =
-            loopflow::store::open_sqlite(&loopflow::store::database_path_from_env().unwrap())
-                .unwrap();
+        let store = loopflow_execution::store::open_sqlite(
+            &loopflow_execution::store::database_path_from_env().unwrap(),
+        )
+        .unwrap();
         let rows = store.processes_since(0).unwrap();
         let agent = rows
             .iter()
-            .filter_map(loopflow::process::ProcessEntry::as_agent)
+            .filter_map(loopflow_execution::process::ProcessEntry::as_agent)
             .find(|row| row.pid == Some(pid))
             .unwrap();
         assert!(agent.os_started_at.is_some());
@@ -111,13 +114,15 @@ fn library_launch_records_each_provider_under_its_invocation() {
         assert!(parent.completed_at.is_some());
         assert!(agent.agent_session_id.is_some());
     }
-    let store =
-        loopflow::store::open_sqlite(&loopflow::store::database_path_from_env().unwrap()).unwrap();
+    let store = loopflow_execution::store::open_sqlite(
+        &loopflow_execution::store::database_path_from_env().unwrap(),
+    )
+    .unwrap();
     let rows = store.processes_since(0).unwrap();
     assert_eq!(rows.len(), 4);
     assert_eq!(
         rows.iter()
-            .filter_map(loopflow::process::ProcessEntry::as_agent)
+            .filter_map(loopflow_execution::process::ProcessEntry::as_agent)
             .count(),
         2
     );
@@ -131,22 +136,24 @@ fn library_launch_reuses_the_enclosing_invocation() {
         cwd: Some(directory.path().to_path_buf()),
         ..base_launch()
     };
-    loopflow::journal::with_runtime(directory.path(), &["fixture".into()], || {
+    loopflow_execution::journal::with_runtime(directory.path(), &["fixture".into()], || {
         for _ in 0..2 {
             let result = run_agent(&launch, &base_process())?;
             assert_eq!(result.exit_code, 0);
         }
-        let store = loopflow::store::open_sqlite(&loopflow::store::database_path_from_env()?)?;
+        let store = loopflow_execution::store::open_sqlite(
+            &loopflow_execution::store::database_path_from_env()?,
+        )?;
         let rows = store.processes_since(0)?;
         let parents = rows
             .iter()
-            .filter_map(loopflow::process::ProcessEntry::as_lf)
+            .filter_map(loopflow_execution::process::ProcessEntry::as_lf)
             .collect::<Vec<_>>();
         assert_eq!(parents.len(), 1);
         assert!(parents[0].completed_at.is_none());
         let agents = rows
             .iter()
-            .filter_map(loopflow::process::ProcessEntry::as_agent)
+            .filter_map(loopflow_execution::process::ProcessEntry::as_agent)
             .collect::<Vec<_>>();
         assert_eq!(agents.len(), 2);
         for agent in agents {
@@ -251,7 +258,8 @@ text = 'Fable 5 is currently unavailable. Switch to another model.' if failed el
             assert_eq!(result.stdout, "finished on opus");
             assert!(reason.contains("continuing on claude:opus"), "{reason}");
         }
-        let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
+        let store =
+            loopflow_execution::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
         assert!(store
             .provider_account_limit_rows(Some("claude"))
             .unwrap()
@@ -295,7 +303,7 @@ fn two_codex_accounts(
     second: &str,
 ) -> (
     tokio::runtime::Runtime,
-    loopflow::store::Store,
+    loopflow_execution::store::Store,
     ProviderAccountId,
 ) {
     let first_id = ProviderAccountId::parse(first).expect("first id");
@@ -314,7 +322,7 @@ fn two_codex_accounts(
             provider: "codex".to_string(),
             account_id,
             home: Some(path),
-            login_email: Some(loopflow::profile::EmailAddress::parse(&email).unwrap()),
+            login_email: Some(loopflow_execution::profile::EmailAddress::parse(&email).unwrap()),
             observed_email: None,
             observed_subject: None,
             observed_credential_digest: None,
@@ -333,7 +341,7 @@ fn two_codex_accounts(
     };
     let runtime = tokio::runtime::Runtime::new().expect("store runtime");
     let store = runtime
-        .block_on(loopflow::store::open_ephemeral_store(
+        .block_on(loopflow_execution::store::open_ephemeral_store(
             &StorageConfig::sqlite(home.join("loopflow.db")),
         ))
         .expect("account store");
@@ -425,10 +433,10 @@ fn pre_spawn_account_refusal_falls_through_to_codex() {
     let _lf = branch_lf();
     let _directory = support::InDirectory::enter(home.path());
     let (_runtime, _accounts, _) = two_codex_accounts(home.path(), "primary", "backup");
-    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow_execution::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     for name in ["first", "second"] {
         support::register_claude_login(home.path(), name);
-        let mut account = loopflow::provider_account::catalog::get_provider_account(
+        let mut account = loopflow_execution::provider_account::catalog::get_provider_account(
             &store,
             "claude",
             &ProviderAccountId::parse(name).unwrap(),
@@ -437,7 +445,8 @@ fn pre_spawn_account_refusal_falls_through_to_codex() {
         .unwrap();
         account.cooldown_until = Some(time::OffsetDateTime::now_utc().unix_timestamp() + 3_600);
         account.cooldown_reason = Some("rate_limit_reached".into());
-        loopflow::provider_account::catalog::upsert_provider_account(&store, &account).unwrap();
+        loopflow_execution::provider_account::catalog::upsert_provider_account(&store, &account)
+            .unwrap();
     }
     let launches = home.path().join("launches");
     let result = run_agent(
@@ -463,7 +472,7 @@ fn pre_spawn_account_refusal_falls_through_to_codex() {
     let rows = store.processes_since(0).unwrap();
     let agents: Vec<_> = rows
         .iter()
-        .filter_map(loopflow::process::ProcessEntry::as_agent)
+        .filter_map(loopflow_execution::process::ProcessEntry::as_agent)
         .collect();
     assert_eq!(agents.len(), 2);
     assert!(agents.iter().all(|agent| agent.completed_at.is_some()));
@@ -576,7 +585,7 @@ fn a_limit_wait_records_the_explicit_agent() {
     let _env = EnvGuard::with_lf_home(&[("codex", &codex)], home.path());
     let _lf = branch_lf();
     let (_runtime, _store, _) = two_codex_accounts(home.path(), "primary", "backup");
-    let _selected = loopflow::config::settings::select_invocation(
+    let _selected = loopflow_execution::config::settings::select_invocation(
         serde_yaml_ng::from_str("agent: codex").unwrap(),
     );
 
@@ -802,7 +811,7 @@ fn direct_native_codex_launch_preserves_account_policy_and_literal_input() {
         cwd: Some(home.path().into()),
         skip_permissions: true,
         provider_account_id: Some(ProviderAccountId::parse("fixture").unwrap()),
-        holder: loopflow::session::Holder::Server,
+        holder: loopflow_execution::session::Holder::Server,
         ..Default::default()
     };
     let result = run_agent(&launch, &ProcessConfig::default()).unwrap();

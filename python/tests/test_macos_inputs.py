@@ -9,8 +9,8 @@ from scripts.macos_inputs import (
 )
 
 _FILES = {
-    "rust/loopflow/src/ops/task.rs": "pub fn run() {}\n",
-    "rust/loopflow/src/app_process.rs": '#[cfg(target_os = "macos")]\nfn ps() {}\n',
+    "rust/loopflow-execution/src/ops/task.rs": "pub fn run() {}\n",
+    "rust/loopflow-execution/src/app_process.rs": '#[cfg(target_os = "macos")]\nfn ps() {}\n',
 }
 
 
@@ -19,7 +19,7 @@ def _jobs(*paths: str) -> set[str]:
 
 
 def test_rust_only_change_runs_no_macos_job() -> None:
-    assert _jobs("rust/loopflow/src/ops/task.rs", "Cargo.lock", "docs/config.md") == set()
+    assert _jobs("rust/loopflow-execution/src/ops/task.rs", "Cargo.lock", "docs/config.md") == set()
 
 
 @pytest.mark.parametrize(
@@ -71,8 +71,8 @@ def test_shared_protocol_changes_reach_desktop_and_ios(path: str) -> None:
 @pytest.mark.parametrize(
     "path",
     [
-        "rust/loopflow/src/app_process.rs",
-        "rust/loopflow/src/store/copy.rs",
+        "rust/loopflow-execution/src/app_process.rs",
+        "rust/loopflow-execution/src/store/copy.rs",
         "rust/loopflow/src/lf/commands/install/published.rs",
     ],
 )
@@ -81,7 +81,7 @@ def test_macos_rust_runs_the_process_test(path: str) -> None:
 
 
 def test_deleted_rust_file_without_text_skips_the_process_test() -> None:
-    assert _jobs("rust/loopflow/src/gone.rs") == set()
+    assert _jobs("rust/loopflow-execution/src/gone.rs") == set()
 
 
 @pytest.mark.parametrize("path", [".github/workflows/ci.yml", "scripts/macos_inputs.py"])

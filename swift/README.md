@@ -1323,7 +1323,7 @@ detects silent loss with viewer heartbeats. Reconnecting before cleanup cancels
 it; a longer outage can leave a completed Task without its checkout. Failed Quit
 delivery follows that same bounded absence policy.
 Conversation history remains; a deleted checkout is not recreated. See the
-[shared transport contract](../rust/loopflow/src/transport/README.md#task-shells-and-completed-workspaces).
+[shared transport contract](../rust/loopflow-execution/src/transport/README.md#task-shells-and-completed-workspaces).
 
 ## iOS client
 

@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 
 use loopflow_storage::work::selection::SplitAxis;
 
-use crate::terminal_host::HerdrLocation;
+use loopflow_execution::terminal_host::HerdrLocation;
 
 pub(super) struct Herdr {
     socket: String,

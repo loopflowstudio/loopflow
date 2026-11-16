@@ -26,9 +26,9 @@ use super::wire::{
     ServerOperation, SessionAttached, SessionStarted, Status, Welcome, MAX_BULK, MAX_CONNECTIONS,
     MAX_MESSAGE, MIN_REVISION, REVISION, TICKET_LIFETIME,
 };
-use crate::engine::{Error, ErrorCode};
 use crate::lf::commands::read::Read;
-use crate::transport::registry::Registry;
+use loopflow_execution::engine::{Error, ErrorCode};
+use loopflow_execution::transport::registry::Registry;
 
 /// How long a connection has to send its first message.
 pub(super) const FIRST_MESSAGE: Duration = Duration::from_secs(5);
@@ -144,8 +144,8 @@ fn connected(clients: &Clients) -> Vec<ConnectedClient> {
 }
 
 pub(super) async fn run() -> Result<()> {
-    let observations = crate::observe::Cache::shared();
-    let _transcripts = crate::transcript::watch::watch(&observations);
+    let observations = loopflow_execution::observe::Cache::shared();
+    let _transcripts = loopflow_execution::transcript::watch::watch(&observations);
     let path = super::socket_path()?;
     let lock = OpenOptions::new()
         .create(true)
@@ -162,8 +162,8 @@ pub(super) async fn run() -> Result<()> {
     let listener = UnixListener::bind(&path)?;
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
     let executable_sha256 = Arc::new(
-        crate::installation::ArtifactIdentity::capture(
-            crate::installation::ArtifactRole::Cli,
+        loopflow_execution::installation::ArtifactIdentity::capture(
+            loopflow_execution::installation::ArtifactRole::Cli,
             &std::env::current_exe()?,
         )?
         .sha256,
@@ -439,7 +439,7 @@ pub(super) async fn welcome<C: Carrier>(
     // A Machine registry that is unavailable or uninitialized leaves `machine`
     // null; file settings stay reachable through the same connection.
     let machine = tokio::task::spawn_blocking(|| {
-        crate::journal::request::isolate(|| Read::MachineSelf.read())
+        loopflow_execution::journal::request::isolate(|| Read::MachineSelf.read())
     })
     .await?;
     let machine = match machine {
@@ -691,7 +691,7 @@ pub(super) async fn session<C: Carrier>(
                 }),
                 None,
             ) => {
-                let start = crate::transport::registry::Start {
+                let start = loopflow_execution::transport::registry::Start {
                     session,
                     request,
                     argv,
@@ -750,7 +750,7 @@ pub(super) async fn session<C: Carrier>(
                         }
                     }
                     // Nothing ended; asking again later attaches.
-                    (_, _, Some(pending)) => ServerMessage::error(Some(id), crate::transport::registry::waiting(&pending)),
+                    (_, _, Some(pending)) => ServerMessage::error(Some(id), loopflow_execution::transport::registry::waiting(&pending)),
                     (None, None, None) => ServerMessage::error(Some(id), Error::new(
                         ErrorCode::NotFound,
                         format!("Session {} has no running terminal; nothing was started", session.as_str()),
@@ -870,7 +870,7 @@ pub(super) async fn session<C: Carrier>(
 async fn start_held(
     id: String,
     terminals: Option<Arc<Registry>>,
-    start: Result<crate::transport::registry::Start, Error>,
+    start: Result<loopflow_execution::transport::registry::Start, Error>,
 ) -> ServerMessage {
     let Some(terminals) = terminals else {
         return ServerMessage::error(Some(id), Error::new(ErrorCode::Unavailable,
@@ -909,8 +909,8 @@ fn continuing(
     request: String,
     rows: u16,
     cols: u16,
-) -> Result<crate::transport::registry::Start, Error> {
-    let registry = crate::store::read_existing_registry()
+) -> Result<loopflow_execution::transport::registry::Start, Error> {
+    let registry = loopflow_execution::store::read_existing_registry()
         .map_err(unavailable)?
         .ok_or_else(|| {
             Error::new(ErrorCode::Unavailable, "Machine registry is unavailable")
@@ -925,11 +925,12 @@ fn continuing(
                 .with(serde_json::json!({ "session": session }))
         })?;
     if let Some(reason) =
-        crate::ops::human_session::run_refusal(&registry.sqlite, &record).map_err(unavailable)?
+        loopflow_execution::ops::human_session::run_refusal(&registry.sqlite, &record)
+            .map_err(unavailable)?
     {
         return Err(Error::new(ErrorCode::Conflict, reason));
     }
-    let context = crate::os_process::execution_context().map_err(unavailable)?;
+    let context = loopflow_execution::os_process::execution_context().map_err(unavailable)?;
     // This exact Session owns its child, not the service's launcher.
     let mut env: Vec<(String, String)> = std::env::vars()
         .filter(|(name, _)| !name.starts_with("LF_"))
@@ -942,7 +943,7 @@ fn continuing(
         "LF_BIN".into(),
         context.lf_bin.to_string_lossy().into_owned(),
     ));
-    Ok(crate::transport::registry::Start {
+    Ok(loopflow_execution::transport::registry::Start {
         argv: vec![
             context.lf_bin.to_string_lossy().into_owned(),
             "session".into(),
@@ -996,9 +997,9 @@ pub(super) async fn ticketed<C: Carrier>(
     match purpose {
         Purpose::Terminal(terminal) => {
             let mut destination =
-                UnixStream::connect(crate::transport::registry::entrance()?).await?;
+                UnixStream::connect(loopflow_execution::transport::registry::entrance()?).await?;
             destination
-                .write_all(&crate::transport::registry::named(&terminal))
+                .write_all(&loopflow_execution::transport::registry::named(&terminal))
                 .await?;
             // The entrance says whether the viewer protocol follows; a
             // terminal that ended or whose holder has not answered since the
@@ -1014,7 +1015,9 @@ pub(super) async fn ticketed<C: Carrier>(
             })
             .await
             .context("held terminal entrance did not answer")??;
-            if let Some(refusal) = crate::transport::registry::refusal(&answer, &terminal)? {
+            if let Some(refusal) =
+                loopflow_execution::transport::registry::refusal(&answer, &terminal)?
+            {
                 send(carrier, &ServerMessage::error(None, refusal)).await?;
                 return Ok(None);
             }
@@ -1214,7 +1217,7 @@ async fn request(
             id: id.clone(),
             trace_id,
             result: match &select {
-                Some(paths) => crate::engine::select::select(&result, paths),
+                Some(paths) => loopflow_execution::engine::select::select(&result, paths),
                 None => result,
             },
         },
@@ -1281,8 +1284,10 @@ async fn operate(
 
         Operation::Read(query) => tokio::task::spawn_blocking(move || {
             let _held = reservation;
-            crate::journal::request::isolate(|| {
-                crate::observe::Cache::shared().capture(|| query.read()).0
+            loopflow_execution::journal::request::isolate(|| {
+                loopflow_execution::observe::Cache::shared()
+                    .capture(|| query.read())
+                    .0
             })
         })
         .await
@@ -1308,7 +1313,7 @@ async fn operate(
             }
             effect(target, id, instance, trace_id, move || {
                 let _held = reservation;
-                crate::provider_account::operations::served(|| {
+                loopflow_execution::provider_account::operations::served(|| {
                     Ok(serde_json::to_value(change.run()?)?)
                 })
             })
@@ -1355,10 +1360,10 @@ async fn session_boundary(
 ) -> Result<serde_json::Value, Error> {
     let (answer, after) = tokio::task::spawn_blocking(move || {
         let _held = reservation;
-        crate::journal::request::isolate(|| {
-            let path = crate::store::default_db_path();
+        loopflow_execution::journal::request::isolate(|| {
+            let path = loopflow_execution::store::default_db_path();
             anyhow::ensure!(path.exists(), "Machine registry is absent");
-            let store = crate::store::open_sqlite(&path)?;
+            let store = loopflow_execution::store::open_sqlite(&path)?;
             super::boundary::answer(&store, &boundary)
         })
     })
@@ -1367,7 +1372,7 @@ async fn session_boundary(
     .map_err(unavailable)?;
     if let Some(after) = after {
         tokio::task::spawn_blocking(move || {
-            crate::journal::request::isolate(|| super::boundary::after_stop(after))
+            loopflow_execution::journal::request::isolate(|| super::boundary::after_stop(after))
         });
     }
     serde_json::to_value(answer).map_err(unavailable)
@@ -1386,8 +1391,8 @@ async fn effect(
     let (id, instance, trace_id) = (id.to_owned(), instance.to_owned(), trace_id.clone());
     tokio::task::spawn_blocking(move || {
         let mut diagnostics = Vec::new();
-        let result = crate::journal::request::run(&trace_id, &target, || {
-            crate::journal::request::diagnostics(&mut diagnostics, run)
+        let result = loopflow_execution::journal::request::run(&trace_id, &target, || {
+            loopflow_execution::journal::request::diagnostics(&mut diagnostics, run)
         });
         for line in String::from_utf8_lossy(&diagnostics).lines() {
             tracing::info!(request = %id, %trace_id, diagnostic = line, "Server command diagnostic");
@@ -1411,7 +1416,10 @@ fn busy(id: &str, limit: &str, max: usize) -> ServerMessage {
 /// Recomputing it needs no retained payloads or disconnected subscriptions.
 pub(super) fn reading_checkpoint(scope: &[u8], frame: &serde_json::Value) -> Result<String> {
     use sha2::{Digest, Sha256};
-    let reading = crate::read_stream::identity(frame["unavailable"].as_str(), frame.get("body"))?;
+    let reading = loopflow_execution::read_stream::identity(
+        frame["unavailable"].as_str(),
+        frame.get("body"),
+    )?;
     let mut hash = Sha256::new();
     hash.update(scope);
     hash.update(reading);
@@ -1464,7 +1472,6 @@ mod tests {
     use std::time::Duration;
 
     use super::{connection, deliver_or_spill, Clients};
-    use crate::engine::ErrorCode;
     use crate::lf::commands::read::Read;
     use crate::server::subscriptions::Subscriptions;
     use crate::server::ticket::{Admission, Purpose, Tickets};
@@ -1473,6 +1480,7 @@ mod tests {
         ClientIdentity, ClientMessage, Hello, Operation, ServerMessage, ServerOperation, MAX_BULK,
         MAX_MESSAGE, REVISION,
     };
+    use loopflow_execution::engine::ErrorCode;
     use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
     use tokio::net::UnixStream;
     use tokio::sync::Semaphore;
@@ -1624,8 +1632,10 @@ mod tests {
     fn with_empty_home(body: impl std::future::Future<Output = ()>) {
         let _env = loopflow_test_support::env_lock().lock().unwrap();
         let home = tempfile::tempdir().unwrap();
-        let _home =
-            crate::config::environment::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+        let _home = loopflow_execution::config::environment::EnvVarGuard::set(
+            "LF_HOME",
+            home.path().to_str().unwrap(),
+        );
         // block_on is synchronous, so the env guard never spans an await point.
         tokio::runtime::Builder::new_multi_thread()
             .enable_all()
@@ -1745,7 +1755,7 @@ mod tests {
         held.write_all(
             format!(
                 "{{\"answer\":\"{answer}\",\"revision\":{}}}\n",
-                crate::transport::registry::REVISION
+                loopflow_execution::transport::registry::REVISION
             )
             .as_bytes(),
         )
@@ -1761,8 +1771,10 @@ mod tests {
             let clients = Clients::default();
             let terminal = loopflow_model::id::TerminalId::new();
             let listener = Arc::new(
-                tokio::net::UnixListener::bind(crate::transport::registry::entrance().unwrap())
-                    .unwrap(),
+                tokio::net::UnixListener::bind(
+                    loopflow_execution::transport::registry::entrance().unwrap(),
+                )
+                .unwrap(),
             );
             let mut client = Client::connect_with(&clients, tickets.clone());
             client.hello(REVISION, REVISION).await;
@@ -2501,12 +2513,12 @@ mod tests {
         with_empty_home(async {
             use loopflow_model::durable::{Author, WorkRef};
             use loopflow_storage::work::task::TaskId;
-            let path = crate::store::database_path_from_env().unwrap();
-            let store = crate::store::opening::open_ephemeral(&path).unwrap();
+            let path = loopflow_execution::store::database_path_from_env().unwrap();
+            let store = loopflow_execution::store::opening::open_ephemeral(&path).unwrap();
             rusqlite::Connection::open(&path)
                 .unwrap()
                 .execute_batch(include_str!(
-                    "../../tests/fixtures/saved_selection_work.sql"
+                    "../../../loopflow-execution/tests/fixtures/saved_selection_work.sql"
                 ))
                 .unwrap();
             rusqlite::Connection::open(&path)
@@ -2530,7 +2542,7 @@ mod tests {
                         id: id.into(),
                         operation: Read::TaskWait {
                             issue: "FIX-1".into(),
-                            until: crate::ops::task::TaskWaitUntil::Terminal,
+                            until: loopflow_execution::ops::task::TaskWaitUntil::Terminal,
                         },
                         select: Some(vec!["reached".into()]),
                         resume: None,
@@ -2744,12 +2756,12 @@ mod tests {
         with_empty_home(async {
             let path =
                 std::path::PathBuf::from(std::env::var_os("LF_HOME").unwrap()).join("loopflow.db");
-            let store = crate::store::opening::open_ephemeral(&path).unwrap();
+            let store = loopflow_execution::store::opening::open_ephemeral(&path).unwrap();
             let repo = loopflow_test_support::TestRepo::new();
             let task = loopflow_model::durable::TaskId::new();
             store
                 .create_task(&loopflow_storage::work::task::NewTask {
-                    repository_id: crate::repository::location::ensure_repository(
+                    repository_id: loopflow_execution::repository::location::ensure_repository(
                         &store,
                         repo.path().to_str().unwrap(),
                     )
@@ -2779,7 +2791,7 @@ mod tests {
                     id: "terminal".into(),
                     operation: Read::TaskWait {
                         issue: task.to_string(),
-                        until: crate::ops::task::TaskWaitUntil::Terminal,
+                        until: loopflow_execution::ops::task::TaskWaitUntil::Terminal,
                     },
                     select: None,
                 })
@@ -2913,7 +2925,7 @@ mod tests {
 
     #[test]
     fn identical_subscriptions_share_one_reader_across_connections() {
-        use crate::performance::subscription_measurement as meter;
+        use loopflow_execution::performance::subscription_measurement as meter;
         with_empty_home(async {
             let registry = Arc::new(Subscriptions::default());
             let clients = Clients::default();
@@ -3002,15 +3014,17 @@ mod tests {
     fn queued_subscription_cancellation_skips_construction() {
         let _env = loopflow_test_support::env_lock().lock().unwrap();
         let home = tempfile::tempdir().unwrap();
-        let _home =
-            crate::config::environment::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+        let _home = loopflow_execution::config::environment::EnvVarGuard::set(
+            "LF_HOME",
+            home.path().to_str().unwrap(),
+        );
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(1)
             .max_blocking_threads(2)
             .enable_all()
             .build()
             .unwrap();
-        use crate::performance::subscription_measurement as meter;
+        use loopflow_execution::performance::subscription_measurement as meter;
         meter::ENABLED.store(true, std::sync::atomic::Ordering::Relaxed);
         let before = meter::snapshot();
         runtime.block_on(async {
@@ -3109,8 +3123,10 @@ mod tests {
 
     /// The Machine store under the test's `LF_HOME`.
     fn home_store() -> loopflow_storage::sqlite::SqliteStore {
-        crate::store::opening::open_ephemeral(&crate::store::lf_home_dir().join("loopflow.db"))
-            .unwrap()
+        loopflow_execution::store::opening::open_ephemeral(
+            &loopflow_execution::store::lf_home_dir().join("loopflow.db"),
+        )
+        .unwrap()
     }
 
     /// A started (owned) Task in `repo`, so `state:open` selects it.
@@ -3122,7 +3138,7 @@ mod tests {
         let path = repo.path().canonicalize().unwrap();
         let task = store
             .create_task(&loopflow_storage::work::task::NewTask {
-                repository_id: crate::repository::location::ensure_repository(
+                repository_id: loopflow_execution::repository::location::ensure_repository(
                     store,
                     path.to_str().unwrap(),
                 )
@@ -3229,11 +3245,15 @@ mod tests {
         with_empty_home(async {
             // Only the launch request is built; no CLI is executed.
             let binary = std::env::current_exe().unwrap();
-            let _binary =
-                crate::config::environment::EnvVarGuard::set("LF_BIN", binary.to_str().unwrap());
+            let _binary = loopflow_execution::config::environment::EnvVarGuard::set(
+                "LF_BIN",
+                binary.to_str().unwrap(),
+            );
             let store = home_store();
-            let session =
-                store.test_session("continued", &crate::session_record::new_artifact_key());
+            let session = store.test_session(
+                "continued",
+                &loopflow_execution::session_record::new_artifact_key(),
+            );
             let id = session.id.clone();
             let start = tokio::task::spawn_blocking(move || {
                 super::continuing(id, "phone-continue".into(), 40, 60)
@@ -3253,7 +3273,7 @@ mod tests {
                 ("phone-continue", 40, 60)
             );
             assert!(start.env.iter().any(|(name, value)| name == "LF_HOME"
-                && std::path::Path::new(value) == crate::store::lf_home_dir()));
+                && std::path::Path::new(value) == loopflow_execution::store::lf_home_dir()));
             assert!(start
                 .env
                 .iter()
@@ -3283,7 +3303,10 @@ mod tests {
             let store = home_store();
             let repo = loopflow_test_support::TestRepo::new();
             let task = create_task(&store, &repo, "Subscribed");
-            let session = store.test_session("primary", &crate::session_record::new_artifact_key());
+            let session = store.test_session(
+                "primary",
+                &loopflow_execution::session_record::new_artifact_key(),
+            );
             let mut client = Client::connect();
             client.hello(REVISION, REVISION).await;
             let plans = Read::PlanList {
@@ -3344,11 +3367,14 @@ mod tests {
     #[test]
     fn a_task_watch_follows_renames_and_the_portfolio_across_repositories() {
         with_empty_home(async {
-            use crate::portfolio::PortfolioCommand;
+            use loopflow_execution::portfolio::PortfolioCommand;
             // Portfolio changes run their own runtime.
             let change = |command: PortfolioCommand| async move {
                 tokio::task::spawn_blocking(move || {
-                    crate::portfolio::change(&command, &crate::store::lf_home_dir())
+                    loopflow_execution::portfolio::change(
+                        &command,
+                        &loopflow_execution::store::lf_home_dir(),
+                    )
                 })
                 .await
                 .unwrap()

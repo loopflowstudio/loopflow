@@ -21,6 +21,7 @@ enum Command {
 }
 
 fn main() -> Result<()> {
+    loopflow::build_info::initialize();
     match Args::parse().command {
         Command::Build { recipe, dir } => {
             let recipe = recipes::find(&recipe)
@@ -42,4 +43,11 @@ fn main() -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+#[ctor::ctor(unsafe)]
+fn initialize_test_build() {
+    loopflow_execution::test_support::isolate_from_the_developers_machine();
+    loopflow::build_info::initialize();
 }

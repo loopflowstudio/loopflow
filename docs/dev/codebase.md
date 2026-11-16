@@ -38,20 +38,20 @@ subprocess edge to one concept.
 | Behavior | Begin at | Main object passed onward |
 | --- | --- | --- |
 | command parsing | [`lf/mod.rs`](../../rust/loopflow/src/lf/mod.rs) | command args and launch context |
-| Skill/Graph discovery | [`definition/mod.rs`](../../rust/loopflow/src/definition/mod.rs) | selected Skill or Graph |
-| prompt assembly | [`prompt/mod.rs`](../../rust/loopflow/src/prompt/mod.rs) | system/task prompt pair |
-| provider routing | [`provider_account.rs`](../../rust/loopflow/src/provider_account.rs) | selected account route |
-| invocation resources | [`process/runtime.rs`](../../rust/loopflow/src/process/runtime.rs) | current attachment, retry state and cleanup under the existing `LfProcess` |
-| provider streams | [`harness/`](../../rust/loopflow/src/harness) | normalized conversation and usage |
-| Session capture evidence | [`session_record.rs`](../../rust/loopflow/src/session_record.rs) | manifest, append events, terminal receipt |
-| shared Work types | [`durable.rs`](../../rust/loopflow/src/durable.rs) and [`work/`](../../rust/loopflow/src/work) | `WorkRef`, status, inputs, Task ownership, Wave/Task facts |
-| Wave operation | [`ops/project.rs`](../../rust/loopflow/src/ops/project.rs) | finite attributed `wave-operate` conversation |
+| Skill/Graph discovery | [`definition/mod.rs`](../../rust/loopflow-execution/src/definition/mod.rs) | selected Skill or Graph |
+| prompt assembly | [`prompt/mod.rs`](../../rust/loopflow-execution/src/prompt/mod.rs) | system/task prompt pair |
+| provider routing | [`provider_account.rs`](../../rust/loopflow-execution/src/provider_account.rs) | selected account route |
+| invocation resources | [`process/runtime.rs`](../../rust/loopflow-execution/src/process/runtime.rs) | current attachment, retry state and cleanup under the existing `LfProcess` |
+| provider streams | [`harness/`](../../rust/loopflow-execution/src/harness) | normalized conversation and usage |
+| Session capture evidence | [`session_record.rs`](../../rust/loopflow-execution/src/session_record.rs) | manifest, append events, terminal receipt |
+| shared Work types | [`durable.rs`](../../rust/loopflow-execution/src/durable.rs) and [`work/`](../../rust/loopflow-execution/src/work) | `WorkRef`, status, inputs, Task ownership, Wave/Task facts |
+| Wave operation | [`ops/project.rs`](../../rust/loopflow-execution/src/ops/project.rs) | finite attributed `wave-operate` conversation |
 | Graph process | [`lf/commands/graph.rs`](../../rust/loopflow/src/lf/commands/graph.rs) | one lf process holding the graph and cursor, starting each step as a child Process |
-| Wave facts and authored context | [`work/wave/`](../../rust/loopflow/src/work/wave) | identity, config, memory, repository scope |
-| store abstraction | [`store/`](../../rust/loopflow/src/store) | domain rows and transactions |
-| installation | [`installation.rs`](../../rust/loopflow/src/installation.rs) | artifact set and switch receipt |
+| Wave facts and authored context | [`work/wave/`](../../rust/loopflow-execution/src/work/wave) | identity, config, memory, repository scope |
+| store abstraction | [`store/`](../../rust/loopflow-execution/src/store) | domain rows and transactions |
+| installation | [`installation.rs`](../../rust/loopflow-execution/src/installation.rs) | artifact set and switch receipt |
 | Client server | [`server/`](../../rust/loopflow/src/server) | Typed requests and responses shared with CLI operations |
-| Creation recovery | [`engine/creation.rs`](../../rust/loopflow/src/engine/creation.rs) | Exact submitted request and server-owned receipt |
+| Creation recovery | [`engine/creation.rs`](../../rust/loopflow-execution/src/engine/creation.rs) | Exact submitted request and server-owned receipt |
 | Mac Work surfaces | [`swift/Loopflow/`](../../swift/Loopflow) | Required-field DTOs over the shared server protocol |
 
 ## Public process surfaces

@@ -33,7 +33,8 @@ impl Fixture {
         for harness in ["claude", "codex", "opencode"] {
             let script = fixture.home.path().join("bin").join(harness);
             let source = if harness == "opencode" {
-                include_str!("support/opencode_server.py").replace("__WAIT__", "False")
+                include_str!("../../loopflow-execution/tests/support/opencode_server.py")
+                    .replace("__WAIT__", "False")
             } else {
                 r#"#!/usr/bin/python3
 import json, os, sys, runpy
@@ -129,13 +130,14 @@ elif os.path.basename(sys.argv[0]) == 'codex':
 
     fn create_wave(&self) {
         let store =
-            loopflow::store::open_sqlite(&self.home.path().join("machine/loopflow.db")).unwrap();
-        loopflow::work::wave::bootstrap::upsert_wave(
+            loopflow_execution::store::open_sqlite(&self.home.path().join("machine/loopflow.db"))
+                .unwrap();
+        loopflow_execution::work::wave::bootstrap::upsert_wave(
             &store,
-            &loopflow::work::wave::Wave::new(
-                loopflow::id::WaveId::new(),
+            &loopflow_execution::work::wave::Wave::new(
+                loopflow_model::id::WaveId::new(),
                 "fixture".into(),
-                loopflow::repository::discover(self.repo.path())
+                loopflow_execution::repository::discover(self.repo.path())
                     .unwrap()
                     .to_string(),
             ),
@@ -225,7 +227,7 @@ fn opencode_diagnostics_stay_off_the_terminal_on_launch_and_resume() {
     let fixture = Fixture::new("opencode");
     fs::write(
         fixture.home.path().join("bin/opencode"),
-        include_str!("support/opencode_server.py").replace("__WAIT__", "False")
+        include_str!("../../loopflow-execution/tests/support/opencode_server.py").replace("__WAIT__", "False")
             .replace("    _record_launch()\n    if False:", r#"    _record_launch()
     mode = 'resume' if (HOME / 'opened').exists() else 'launch'
     (HOME / 'opened').touch()
@@ -308,7 +310,7 @@ fn opencode_failure_before_session_creation_keeps_diagnostics() {
 #[test]
 fn opencode_terminal_setup_failure_stops_the_private_server() {
     let fixture = Fixture::new("opencode");
-    let source = include_str!("support/opencode_server.py")
+    let source = include_str!("../../loopflow-execution/tests/support/opencode_server.py")
         .replace("__WAIT__", "False")
         .replace(
             "        if self.path == \"/api/event\":",
@@ -1163,7 +1165,7 @@ fn live_taskless_provider_switch_preserves_identity_and_accepts_terminal_input()
     .unwrap();
     let machine = fixture.home.path().join("machine");
     support::register_codex_account(&machine);
-    let store = loopflow::store::open_sqlite(&machine.join("loopflow.db")).unwrap();
+    let store = loopflow_execution::store::open_sqlite(&machine.join("loopflow.db")).unwrap();
     let before = store.session(&session).unwrap().unwrap();
     assert!(before.completed_at.is_none());
     assert!(before.task_id.is_none() && before.wave_id.is_none());
@@ -1268,7 +1270,7 @@ fn opencode_headless_start_selects_the_model_and_permissions() {
         if managed {
             fixture.create_wave();
         }
-        let script = include_str!("support/opencode_server.py").replace("__WAIT__", "False").replace(
+        let script = include_str!("../../loopflow-execution/tests/support/opencode_server.py").replace("__WAIT__", "False").replace(
         "            if evidence := os.environ.get(\"LF_TEST_REPLAY_EVIDENCE\"):",
         "            (HOME / 'received.json').write_text(json.dumps({'session':self.path.split('/')[3], 'request':body, 'config':json.loads(os.environ['OPENCODE_CONFIG_CONTENT'])}))\n            if evidence := os.environ.get(\"LF_TEST_REPLAY_EVIDENCE\"):"
     );
@@ -1377,7 +1379,8 @@ fn wave_targets_prepare_reuse_and_open_in_the_selected_checkout_in_both_formats(
     fixture.create_wave();
     let other = TestRepo::new();
     let store =
-        loopflow::store::open_sqlite(&fixture.home.path().join("machine/loopflow.db")).unwrap();
+        loopflow_execution::store::open_sqlite(&fixture.home.path().join("machine/loopflow.db"))
+            .unwrap();
     let wave = store.list_waves(None).unwrap().into_iter().next().unwrap();
     let wave_id = wave.id().as_str();
     let alias = fixture
@@ -1512,7 +1515,8 @@ fn contextual_resume_uses_scope_and_recovers_unassociated_checkouts() {
     };
     let first = prepare(fixture.repo.path(), &["resume"]);
     let store =
-        loopflow::store::open_sqlite(&fixture.home.path().join("machine/loopflow.db")).unwrap();
+        loopflow_execution::store::open_sqlite(&fixture.home.path().join("machine/loopflow.db"))
+            .unwrap();
     assert_eq!(
         store
             .session(first["id"].as_str().unwrap())
@@ -1625,7 +1629,8 @@ fn missing_native_history_fails_without_replacing_the_selected_conversation() {
     fixture.run(&["-i", ":", "existing history"]);
     let id = fixture.session();
     let store =
-        loopflow::store::open_sqlite(&fixture.home.path().join("machine/loopflow.db")).unwrap();
+        loopflow_execution::store::open_sqlite(&fixture.home.path().join("machine/loopflow.db"))
+            .unwrap();
     let saved = store.session(&id).unwrap().unwrap();
     let received = fixture.received();
     let native = args(&received)
@@ -1721,7 +1726,7 @@ fn pi_fixture() -> Fixture {
         &script,
         format!(
             "#!/usr/bin/python3 -I\n{}",
-            include_str!("../src/harness/testdata/pi_rpc.py")
+            include_str!("../../loopflow-execution/src/harness/testdata/pi_rpc.py")
         ),
     )
     .unwrap();

@@ -4,9 +4,9 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use loopflow::durable::TaskId;
-use loopflow::ops::resolve_work_binding;
-use loopflow::store::{open_ephemeral_store, StorageConfig};
+use loopflow_execution::durable::TaskId;
+use loopflow_execution::ops::resolve_work_binding;
+use loopflow_execution::store::{open_ephemeral_store, StorageConfig};
 use loopflow_test_support::TestRepo;
 use serde_json::json;
 
@@ -47,9 +47,10 @@ fn missing_remote_branch_or_commit_is_named_without_creating_a_task() {
     repo.create_branch(branch);
     let initial = repo.head_sha();
     std::env::set_var("LF_TASK_SOURCE", source(branch, &initial));
-    let missing = loopflow::ops::task::task_checkout(repo.path(), "fix-1", Default::default())
-        .unwrap_err()
-        .to_string();
+    let missing =
+        loopflow_execution::ops::task::task_checkout(repo.path(), "fix-1", Default::default())
+            .unwrap_err()
+            .to_string();
     assert!(
         missing.contains(branch) && missing.contains("push"),
         "{missing}"
@@ -60,23 +61,24 @@ fn missing_remote_branch_or_commit_is_named_without_creating_a_task() {
     repo.commit("Unpushed work");
     let unpublished = repo.head_sha();
     std::env::set_var("LF_TASK_SOURCE", source(branch, &unpublished));
-    let missing = loopflow::ops::task::task_checkout(repo.path(), "Fix-1", Default::default())
-        .unwrap_err()
-        .to_string();
+    let missing =
+        loopflow_execution::ops::task::task_checkout(repo.path(), "Fix-1", Default::default())
+            .unwrap_err()
+            .to_string();
     assert!(
         missing.contains(branch) && missing.contains(&unpublished) && missing.contains("push"),
         "{missing}"
     );
     assert!(runtime.block_on(store.list_tasks(None)).unwrap().is_empty());
     assert_eq!(
-        loopflow::git::worktrees::list_worktrees(repo.path())
+        loopflow_execution::git::worktrees::list_worktrees(repo.path())
             .unwrap()
             .len(),
         1
     );
     assert_eq!(repo.head_sha(), unpublished);
     assert_eq!(
-        loopflow::git::rev_parse(repo.path(), &format!("origin/{branch}")).unwrap(),
+        loopflow_execution::git::rev_parse(repo.path(), &format!("origin/{branch}")).unwrap(),
         initial
     );
     assert_eq!(

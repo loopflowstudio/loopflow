@@ -1,12 +1,12 @@
 //! Command ownership, shorthand, and read-only inspection share Clap metadata.
-use crate::skills::listing::{definition_source, format_written_steps};
+use loopflow_execution::skills::listing::{definition_source, format_written_steps};
 use std::path::Path;
 
 use anyhow::Result;
 use clap::{Command, CommandFactory, Parser};
 
-use crate::definition::{resolve_definition, DefinitionKind, Target};
 use crate::lf::{Cli, Commands, GraphCommand, SkillCommand};
+use loopflow_execution::definition::{resolve_definition, DefinitionKind, Target};
 
 pub fn command_tree() -> Command {
     let mut command = Cli::command();
@@ -353,7 +353,8 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
     }
     Some((|| {
         let cwd = std::env::current_dir()?;
-        let repo = crate::repo::discover_repo_root(&cwd)?.unwrap_or_else(|| cwd.clone());
+        let repo =
+            loopflow_execution::repo::discover_repo_root(&cwd)?.unwrap_or_else(|| cwd.clone());
         match command {
             Commands::Help { path, all, json } => {
                 if *json || cli.json {
@@ -379,7 +380,8 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
                 cmd: GraphCommand::Show { name, json },
             } => {
                 if *json {
-                    let entry = crate::graph::compiled::graph_catalog_entry(name, &repo)?;
+                    let entry =
+                        loopflow_execution::graph::compiled::graph_catalog_entry(name, &repo)?;
                     println!("{}", serde_json::to_string(&entry)?);
                 } else {
                     crate::lf::commands::graph::show(name, &repo)?;
@@ -392,7 +394,7 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
                     cli,
                     &std::env::args().collect::<Vec<_>>(),
                     &cwd,
-                    &mut crate::command::CommandIo {
+                    &mut loopflow_execution::command::CommandIo {
                         input: &mut std::io::stdin(),
                         output: &mut std::io::stdout(),
                         error: &mut std::io::stderr(),
@@ -401,7 +403,10 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
             }
             Commands::Skill {
                 cmd: SkillCommand::Customize { name },
-            } => println!("{}", crate::skills::customize(name, &repo)?.display()),
+            } => println!(
+                "{}",
+                loopflow_execution::skills::customize(name, &repo)?.display()
+            ),
             _ => unreachable!("inspection command selected above"),
         }
         Ok(())
@@ -641,13 +646,13 @@ fn definition_help(
             skill.source.as_ref().map(|source| source.path.clone()),
         ),
         Target::Graph(graph) => {
-            crate::graph::compile_graph(graph, repo)?;
+            loopflow_execution::graph::compile_graph(graph, repo)?;
             let description = format_written_steps(&graph.items);
             (
                 graph.name.as_str(),
                 DefinitionKind::Graph,
                 description,
-                crate::graph::find_graph_source_path(&graph.name, repo)?,
+                loopflow_execution::graph::find_graph_source_path(&graph.name, repo)?,
             )
         }
     };
@@ -677,9 +682,68 @@ fn definition_help(
                 definition_invocation(tree, &skill.name, DefinitionKind::Skill)
             )),
             Ok(_) => unreachable!("typed skill lookup returns a skill"),
-            Err(crate::error::LoadError::SkillNotFound(_)) => {}
+            Err(loopflow_execution::error::LoadError::SkillNotFound(_)) => {}
             Err(error) => output.push_str(&format!("\nSame-named skill unavailable: {error}\n")),
         }
     }
     Ok(output)
+}
+
+/// Whether the actual argv names a command that can merge a PR.
+pub fn command_merges(argv: &[String]) -> bool {
+    normalize_args(argv.to_vec())
+        .and_then(Cli::try_parse_from)
+        .is_ok_and(|cli| cli.merges())
+}
+
+#[cfg(test)]
+mod landing_tests {
+    use super::command_merges;
+    use loopflow_execution::task_graph::CapturedGraph;
+
+    fn write(repo: &std::path::Path, path: &str, content: &str) {
+        let path = repo.join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, content).unwrap();
+    }
+    #[test]
+    fn a_step_that_merges_is_a_landing_step_however_it_is_spelled() {
+        let repo = tempfile::tempdir().unwrap();
+        write(
+            repo.path(),
+            ".lf/graphs/landings.yaml",
+            "- cmd: pr publish\n- cmd: land --wait-and-fix\n- cmd: task pr land\n- cmd: pr arm\n",
+        );
+        let graph = CapturedGraph::load("landings", repo.path())
+            .unwrap()
+            .unwrap();
+        assert!(graph.landing_step("pr publish", command_merges).is_none());
+        for step in ["land --wait-and-fix", "pr land", "pr arm"] {
+            assert!(graph.landing_step(step, command_merges).is_some(), "{step}");
+        }
+        let deliver = CapturedGraph::load("deliver", repo.path())
+            .unwrap()
+            .unwrap();
+        assert!(deliver
+            .landing_step("land --wait-and-fix", command_merges)
+            .is_some());
+    }
+
+    #[test]
+    fn landing_semantics_keep_shortcuts_flags_and_explicit_definition_kinds() {
+        for (words, merges) in [
+            ("lf land --wait-and-fix", true),
+            ("lf task pr land", false),
+            ("lf pr arm", true),
+            ("lf pr lan", true),
+            ("lf --batch pr land", true),
+            ("lf pr land --batch", false),
+            ("lf skill -- land", false),
+            ("lf skill -- pr-land", false),
+            ("lf pr publish", false),
+        ] {
+            let argv = shlex::split(words).unwrap();
+            assert_eq!(command_merges(&argv), merges, "{words}");
+        }
+    }
 }

@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 
 use super::{run_host, viewed_placement, OpenHost, Resolved};
 
-use crate::terminal_host::TmuxLocation;
+use loopflow_execution::terminal_host::TmuxLocation;
 
 fn host_command(location: &TmuxLocation) -> Command {
     let mut command = Command::new("tmux");

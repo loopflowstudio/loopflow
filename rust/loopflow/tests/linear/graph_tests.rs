@@ -5,9 +5,9 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use loopflow::graph::compile_graph;
-use loopflow::graph::load_graph;
-use loopflow::graph::{ConcreteStep, Step};
+use loopflow_execution::graph::compile_graph;
+use loopflow_execution::graph::load_graph;
+use loopflow_execution::graph::{ConcreteStep, Step};
 use support::{codex_app_server_script, register_codex_account};
 use tempfile::TempDir;
 
@@ -75,7 +75,7 @@ fn step_fields(graph: &serde_json::Value, field: &str) -> Vec<serde_json::Value>
 }
 
 fn kill_recorded_graph(home: &Path, id: &str) {
-    let store = loopflow::store::open_sqlite(&home.join("loopflow.db")).unwrap();
+    let store = loopflow_execution::store::open_sqlite(&home.join("loopflow.db")).unwrap();
     let pid = store
         .lf_process(&id.parse().unwrap())
         .unwrap()
@@ -352,16 +352,16 @@ fn observe_planning(task: &support::RegisteredTask, checkout: &Path) {
 
 fn publish_stack_fixture_pr(
     runtime: &tokio::runtime::Runtime,
-    store: &loopflow::store::Store,
-    task: &loopflow::work::task::TaskId,
-) -> loopflow::work::task::TaskPr {
+    store: &loopflow_execution::store::Store,
+    task: &loopflow_execution::work::task::TaskId,
+) -> loopflow_execution::work::task::TaskPr {
     let mut pr = runtime
         .block_on(store.active_task_pr(task))
         .unwrap()
         .unwrap_or_else(|| {
             let task = runtime.block_on(store.get_task(task)).unwrap().unwrap();
-            let pr = loopflow::work::task::TaskPr {
-                id: loopflow::work::task::TaskPrId::new(),
+            let pr = loopflow_execution::work::task::TaskPr {
+                id: loopflow_execution::work::task::TaskPrId::new(),
                 task_id: task.id,
                 sequence: 1,
                 slug: task.workspace_slug,
@@ -382,10 +382,10 @@ fn publish_stack_fixture_pr(
             runtime.block_on(store.insert_task_pr(&pr)).unwrap();
             pr
         });
-    pr.publication = Some(loopflow::work::task::PrPublication {
+    pr.publication = Some(loopflow_execution::work::task::PrPublication {
         requested_at: pr.created_at,
         presentation: None,
-        github: Some(loopflow::work::task::GithubPr {
+        github: Some(loopflow_execution::work::task::GithubPr {
             number: 41,
             url: "https://github.com/fixture/repo/pull/41".into(),
             head_sha: Some(pr.base_commit.clone()),
@@ -396,7 +396,7 @@ fn publish_stack_fixture_pr(
     runtime
         .block_on(store.append_task_event(
             task,
-            &loopflow::work::task::TaskEventKind::PrStarted {
+            &loopflow_execution::work::task::TaskEventKind::PrStarted {
                 pr_id: pr.id.clone(),
                 sequence: pr.sequence,
                 branch: pr.branch.clone(),
@@ -720,9 +720,9 @@ fn graph_parsing_parity() {
     assert_eq!(graph.name, "sample");
     assert_eq!(graph.items.len(), 2);
     assert!(
-        matches!(&graph.items[0].target, loopflow::definition::Target::Skill(skill) if skill.name == "implement")
+        matches!(&graph.items[0].target, loopflow_execution::definition::Target::Skill(skill) if skill.name == "implement")
     );
-    let loopflow::definition::Target::Skill(skill) = &graph.items[1].target else {
+    let loopflow_execution::definition::Target::Skill(skill) = &graph.items[1].target else {
         panic!("expected review skill");
     };
     assert_eq!(skill.name, "review");
@@ -1122,7 +1122,7 @@ fn observing_and_preparing_a_task_are_not_execution() {
     let runtime = tokio::runtime::Runtime::new().unwrap();
     // Allocating the checkout claimed the Task; nothing after it adds an entry.
     let entries = || {
-        loopflow::store::ownership::task_ownership(&task.store.sqlite, &task.task.id)
+        loopflow_execution::store::ownership::task_ownership(&task.store.sqlite, &task.task.id)
             .unwrap()
             .log
             .len()
@@ -1176,13 +1176,14 @@ fn task_run_history_reads_only_that_tasks_runs_without_starting_it() {
 
     // A Task without Runs: an empty list, and asking prepares and claims nothing.
     let before = events();
-    let claims = loopflow::store::ownership::task_ownership(&task.store.sqlite, &task.task.id)
-        .unwrap()
-        .log;
+    let claims =
+        loopflow_execution::store::ownership::task_ownership(&task.store.sqlite, &task.task.id)
+            .unwrap()
+            .log;
     assert!(read("INF-123").is_empty());
     assert_eq!(events(), before, "reading Run history writes no Task event");
     assert_eq!(
-        loopflow::store::ownership::task_ownership(&task.store.sqlite, &task.task.id)
+        loopflow_execution::store::ownership::task_ownership(&task.store.sqlite, &task.task.id)
             .unwrap()
             .log,
         claims
@@ -1266,7 +1267,7 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
         support::register_sibling_task(&task, "INF-124", "task-sibling", &sibling_worktree);
     let runtime = tokio::runtime::Runtime::new().unwrap();
     // The checkout's claim is the only ownership entry; launches add none.
-    let starts = |id: &loopflow::work::task::TaskId| {
+    let starts = |id: &loopflow_execution::work::task::TaskId| {
         rusqlite::Connection::open(home.path().join("loopflow.db"))
             .unwrap()
             .query_row(
@@ -1396,10 +1397,10 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
 
     // Landing preserves the checkout's Task context and historical attribution.
     let mut landed = task.pr.clone();
-    landed.publication = Some(loopflow::work::task::PrPublication {
+    landed.publication = Some(loopflow_execution::work::task::PrPublication {
         requested_at: time::OffsetDateTime::now_utc(),
         presentation: None,
-        github: Some(loopflow::work::task::GithubPr {
+        github: Some(loopflow_execution::work::task::GithubPr {
             number: 912,
             url: "https://example.com/pr/912".to_string(),
             head_sha: None,
@@ -1645,12 +1646,12 @@ fn graph_names_load_into_targets() {
     assert_eq!(graph.items.len(), 2);
     assert!(matches!(
         &graph.items[0].target,
-        loopflow::definition::Target::Graph(_)
+        loopflow_execution::definition::Target::Graph(_)
     ));
     assert!(matches!(
         graph.items[1],
         Step {
-            target: loopflow::definition::Target::Skill(_),
+            target: loopflow_execution::definition::Target::Skill(_),
             ..
         }
     ));
@@ -1673,7 +1674,7 @@ fn command_item_parses_and_expands() {
     assert_eq!(graph.items.len(), 2);
     match &graph.items[1] {
         Step {
-            target: loopflow::definition::Target::Command(item),
+            target: loopflow_execution::definition::Target::Command(item),
             ..
         } => {
             assert_eq!(item.command, "pr");
@@ -2247,7 +2248,7 @@ fn the_research_graph_stops_at_its_findings_then_reaches_end() {
 #[test]
 fn mixed_provider_graph_keeps_launch_accounts_across_steps() {
     use base64::prelude::*;
-    use loopflow::store::{
+    use loopflow_execution::store::{
         CredentialState, ProviderAccount, ProviderAccountId, RoutingState, StorageConfig,
     };
     use sha2::{Digest, Sha256};
@@ -2257,7 +2258,7 @@ fn mixed_provider_graph_keeps_launch_accounts_across_steps() {
     let _env = support::EnvGuard::with_lf_home(&[], home.path());
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let store = runtime
-        .block_on(loopflow::store::open_ephemeral_store(
+        .block_on(loopflow_execution::store::open_ephemeral_store(
             &StorageConfig::sqlite(home.path().join("loopflow.db")),
         ))
         .unwrap();
@@ -2290,7 +2291,9 @@ fn mixed_provider_graph_keeps_launch_accounts_across_steps() {
                         provider: provider.into(),
                         account_id: ProviderAccountId::parse(&id).unwrap(),
                         home: Some(account_home),
-                        login_email: Some(loopflow::profile::EmailAddress::parse(&email).unwrap()),
+                        login_email: Some(
+                            loopflow_execution::profile::EmailAddress::parse(&email).unwrap(),
+                        ),
                         observed_email: Some(email),
                         observed_subject: Some(id),
                         observed_credential_digest: (provider == "claude")
@@ -2389,8 +2392,8 @@ printf 'codex:%s\n' "$(grep -o 'fixture-codex-[a-z]*' "$CODEX_HOME/auth.json")" 
 
 #[test]
 fn wave_context_keeps_task_location_and_rejects_another_owner() {
-    use loopflow::id::WaveId;
-    use loopflow::work::wave::Wave;
+    use loopflow_execution::work::wave::Wave;
+    use loopflow_model::id::WaveId;
     use loopflow_test_support::TestRepo;
 
     let repo = TestRepo::new();

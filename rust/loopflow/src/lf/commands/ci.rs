@@ -1,11 +1,11 @@
 //! `lf ci` — machine-wide evidence for failed-CI recovery.
 
-use crate::ops::ci::CiReportDto;
-use crate::output::truncate;
 use anyhow::Result;
+use loopflow_execution::ops::ci::CiReportDto;
+use loopflow_execution::output::truncate;
 
 pub fn run(since: &str, wave: Option<&str>, repo: Option<&str>, json: bool) -> Result<()> {
-    let report = crate::engine::repo::ci(since, wave, repo)?;
+    let report = loopflow_execution::engine::repo::ci(since, wave, repo)?;
     if json {
         println!("{}", serde_json::to_string(&report)?);
     } else {

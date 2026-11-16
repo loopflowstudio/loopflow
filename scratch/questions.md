@@ -17,9 +17,8 @@
   exit; no shared-daemon restart or new schedule. Ordinary Cargo does not refresh
   inventory, explicit `SCCACHE_CONF` remains caller-owned, and isolated builds
   bypass it. This reversible placement does not install Machine configuration.
-- The shared-operation preparation is implemented, but an execution crate and
-  distinct command-only/runtime rebuilds are still required. Do not count moving
-  files within `loopflow` as a smaller compiler unit or time it as a completed cut.
+- The execution crate is extracted; independent fixture/behavior verification
+  and distinct command/execution/saved-record rebuild receipts remain required.
 
 - Use two disposable source roots for the initial cache comparison and one
   sequential late-root fixture for refresh; one build at a time. Admission/job budgets and shared-cache
@@ -132,3 +131,13 @@
   waits, then assert its recorded command process exits and a new ship starts.
 
 - November 15: a broad compiler-process inspection accidentally printed an unrelated Cursor API credential from process arguments. The value was not used or copied; it needs rotation. Further inspection is restricted to known PIDs.
+
+- November 15 measurement: five fresh targets per revision, caches seeded once,
+  paired order alternates candidate/base then base/candidate. Keep each semantic
+  edit unique to its cohort; report instrumented client CPU/RSS and include links.
+  Root-probe cache stays private; no Machine configuration change.
+
+- November 15 fixture revision: dev-feature unification must not turn a compiled
+  CLI into a unit-test runtime. Keep unit-test defaults at `cfg(test)`; the
+  inspection feature exposes explicit hooks only. The remote recovery run
+  showed a Process/Session ledger split before movement, recorded in the plan.

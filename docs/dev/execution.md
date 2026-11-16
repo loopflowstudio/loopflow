@@ -118,7 +118,7 @@ Native exit instead adopts a plain recorder through `CaptureHandoff`, with
 attachment cleanup owned separately by the process owner. Its recording failures
 are logged without changing the provider's exit result.
 
-The [harness guide](../../rust/loopflow/src/harness/README.md) maps these
+The [harness guide](../../rust/loopflow-execution/src/harness/README.md) maps these
 responsibilities to source files.
 
 ## Publish before spawn

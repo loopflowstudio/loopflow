@@ -12,7 +12,7 @@ the server delivering Task updates and recording Codex turns itself
 ([Waking an idle conversation](../../rust/loopflow/src/server/README.md#waking-an-idle-conversation)),
 Desktop's `session.status` and transcript telemetry (LOO-822) are built.
 [What runs on a Machine](index.md#what-runs-on-a-machine) is the model, and
-the [transport README](../../rust/loopflow/src/transport/README.md) describes
+the [transport README](../../rust/loopflow-execution/src/transport/README.md) describes
 the held terminals and headless launches behind it. This page keeps the
 telemetry design, the pieces not yet built and the open questions. Delete it
 when the last piece lands.

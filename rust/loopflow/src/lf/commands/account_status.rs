@@ -1,12 +1,12 @@
+use anyhow::Result;
 #[cfg(test)]
-use crate::provider_account::operations::account_status::login_browser;
-use crate::provider_account::operations::account_status::{
+use loopflow_execution::provider_account::operations::account_status::login_browser;
+use loopflow_execution::provider_account::operations::account_status::{
     local_time, newest_reading, project, route_notes, AccountReport, AccountRow, RouteNote, Scope,
     Verification, STALE_READING_SECS,
 };
-use crate::provider_account::operations::format_relative_delta;
-use crate::provider_auth::Provider;
-use anyhow::Result;
+use loopflow_execution::provider_account::operations::format_relative_delta;
+use loopflow_execution::provider_auth::Provider;
 use time::OffsetDateTime;
 
 /// `lf account` and `lf account <login|provider>`.
@@ -382,7 +382,7 @@ fn render_table(report: &AccountReport, notes: &[RouteNote], now: i64) -> String
     let mut lines = Vec::new();
     let mut fixes = Vec::new();
     for (row, name) in rows.iter().zip(&names) {
-        let weekly = crate::provider_account::tightest_weekly(&row.windows, now);
+        let weekly = loopflow_execution::provider_account::tightest_weekly(&row.windows, now);
         let (bar, left) = match weekly {
             Some(window) => {
                 let left = 100u8.saturating_sub(window.used_percent);
@@ -437,14 +437,14 @@ fn render_table(report: &AccountReport, notes: &[RouteNote], now: i64) -> String
     for note in notes {
         let provider = note.provider.as_str();
         let (scope, command) = match &note.scope {
-            crate::profile::RouteScope::Default => (
+            loopflow_execution::profile::RouteScope::Default => (
                 "default order",
                 format!("lf unset account.{provider} --global"),
             ),
-            crate::profile::RouteScope::Repo(_) => {
+            loopflow_execution::profile::RouteScope::Repo(_) => {
                 ("order here", format!("lf unset account.{provider}"))
             }
-            crate::profile::RouteScope::Wave(wave) => (
+            loopflow_execution::profile::RouteScope::Wave(wave) => (
                 "Wave order",
                 format!("lf --wave {wave} unset account.{provider}"),
             ),
@@ -542,16 +542,16 @@ fn wrap_line(line: &str, width: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::{login_browser, render, render_login, render_table, AccountReport, RouteNote};
-    use crate::provider_account::operations::account_status::report as project_report;
+    use loopflow_execution::provider_account::operations::account_status::report as project_report;
     #[tokio::test]
     #[allow(clippy::await_holding_lock)]
     async fn claude_usage_reconciliation_account_handlers_refresh_both_logins() {
-        use crate::provider_account::{
+        use loopflow_execution::provider_account::{
             account_held_until, new_account, resolve_provider_account_exact,
         };
-        use crate::provider_auth::Provider;
-        use crate::store::{AccountLimitWindow, ProviderAccountId, StorageConfig};
-        let _env = crate::journal::test_env_lock();
+        use loopflow_execution::provider_auth::Provider;
+        use loopflow_execution::store::{AccountLimitWindow, ProviderAccountId, StorageConfig};
+        let _env = loopflow_execution::journal::test_env_lock();
         let root = tempfile::tempdir().unwrap();
         let _homes = crate::test_ambient::EnvGuard::clear(&[
             "LF_HOME",
@@ -564,7 +564,7 @@ mod tests {
         std::env::set_var("LF_HOME", root.path().join("machine"));
         std::env::set_var("CLAUDE_CONFIG_DIR", &native);
         let store = std::sync::Arc::new(
-            crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+            loopflow_execution::store::open_ephemeral_store(&StorageConfig::sqlite(
                 root.path().join("machine/loopflow.db"),
             ))
             .await
@@ -589,12 +589,12 @@ mod tests {
                 Provider::Claude,
                 ProviderAccountId::parse(id).unwrap(),
                 home,
-                Some(crate::profile::EmailAddress::parse(login).unwrap()),
+                Some(loopflow_execution::profile::EmailAddress::parse(login).unwrap()),
             );
             account.observed_email = Some(login.into());
             account.observed_subject = Some(id.into());
             account.observed_credential_digest = Some(
-                crate::provider_account::identity::credential_digest(&credential),
+                loopflow_execution::provider_account::identity::credential_digest(&credential),
             );
             store.upsert_provider_account(&account).await.unwrap();
             // Historical stream alias, before normalized writes.
@@ -630,9 +630,11 @@ mod tests {
             accounts.push(account);
         }
         let cached = project_report(
-            Some(crate::provider_account::operations::Target::Provider(
-                Provider::Claude,
-            )),
+            Some(
+                loopflow_execution::provider_account::operations::Target::Provider(
+                    Provider::Claude,
+                ),
+            ),
             true,
         )
         .await
@@ -645,25 +647,28 @@ mod tests {
                 .launches
                 .iter()
                 .any(|launch| launch.model.as_deref() == Some("fable") && !launch.eligible)));
-        let blocked = crate::provider_account::routing::next(None, Some("claude:fable"))
-            .await
-            .unwrap();
+        let blocked =
+            loopflow_execution::provider_account::routing::next(None, Some("claude:fable"))
+                .await
+                .unwrap();
         assert_eq!(
             blocked[0].outcome,
-            crate::provider_account::routing::NextOutcome::Blocked
+            loopflow_execution::provider_account::routing::NextOutcome::Blocked
         );
         assert!(blocked[0].reason.contains("for fable until"));
         for account in &accounts {
             assert!(blocked[0]
                 .reason
-                .contains(crate::provider_account::account_login(account)));
+                .contains(loopflow_execution::provider_account::account_login(account)));
         }
         let (_endpoints, server) =
-            crate::subscription::observation_tests::serve(responses.clone(), |_| {}).await;
+            loopflow_execution::test_support::subscription::serve(responses.clone(), |_| {}).await;
         let report = project_report(
-            Some(crate::provider_account::operations::Target::Provider(
-                Provider::Claude,
-            )),
+            Some(
+                loopflow_execution::provider_account::operations::Target::Provider(
+                    Provider::Claude,
+                ),
+            ),
             false,
         )
         .await
@@ -704,18 +709,19 @@ mod tests {
         }
         let json = serde_json::to_value(&report).unwrap();
         assert!(json.to_string().contains("seven_day_fable"));
-        let next = crate::provider_account::routing::next(None, Some("claude:fable"))
+        let next = loopflow_execution::provider_account::routing::next(None, Some("claude:fable"))
             .await
             .unwrap();
         assert_eq!(next[0].model.as_deref(), Some("fable"));
         assert_eq!(next[0].account_id.as_ref(), Some(&accounts[0].account_id));
         assert_eq!(next[1].model, None);
-        let unknown = crate::provider_account::routing::next(None, Some("claude:future-sonnet"))
-            .await
-            .unwrap();
+        let unknown =
+            loopflow_execution::provider_account::routing::next(None, Some("claude:future-sonnet"))
+                .await
+                .unwrap();
         assert_eq!(
             unknown[0].outcome,
-            crate::provider_account::routing::NextOutcome::Ready
+            loopflow_execution::provider_account::routing::NextOutcome::Ready
         );
         assert_eq!(unknown[0].model.as_deref(), Some("future-sonnet"));
         let text = super::render(&report, 100, now);
@@ -737,24 +743,28 @@ mod tests {
         }
         // Exercise the real account output handlers with the committed cached result.
         super::run(
-            Some(crate::provider_account::operations::Target::Provider(
-                Provider::Claude,
-            )),
+            Some(
+                loopflow_execution::provider_account::operations::Target::Provider(
+                    Provider::Claude,
+                ),
+            ),
             true,
             true,
         )
         .await
         .unwrap();
         super::run(
-            Some(crate::provider_account::operations::Target::Provider(
-                Provider::Claude,
-            )),
+            Some(
+                loopflow_execution::provider_account::operations::Target::Provider(
+                    Provider::Claude,
+                ),
+            ),
             true,
             false,
         )
         .await
         .unwrap();
-        let next = crate::provider_account::routing::next(None, None)
+        let next = loopflow_execution::provider_account::routing::next(None, None)
             .await
             .unwrap();
         assert_eq!(next[0].account_id.as_ref(), Some(&accounts[0].account_id));
@@ -808,14 +818,14 @@ mod tests {
         let writer = store.clone();
         let first = accounts[0].account_id.clone();
         let (_endpoints, server) =
-            crate::subscription::observation_tests::serve(responses, move |index| {
+            loopflow_execution::test_support::subscription::serve(responses, move |index| {
                 if index == 0 {
                     writer
                         .sqlite
                         .record_provider_account_capacity(
                             "claude",
                             &first,
-                            &crate::store::AccountCapacity {
+                            &loopflow_execution::store::AccountCapacity {
                                 utilization_percent: Some(100),
                                 cooldown_until: Some(reset + 5),
                                 cooldown_reason: Some("rejected: seven_day".into()),
@@ -834,9 +844,11 @@ mod tests {
             })
             .await;
         let raced = project_report(
-            Some(crate::provider_account::operations::Target::Provider(
-                Provider::Claude,
-            )),
+            Some(
+                loopflow_execution::provider_account::operations::Target::Provider(
+                    Provider::Claude,
+                ),
+            ),
             false,
         )
         .await
@@ -860,7 +872,7 @@ mod tests {
                 .used_percent,
             100
         );
-        let next = crate::provider_account::routing::next(None, None)
+        let next = loopflow_execution::provider_account::routing::next(None, None)
             .await
             .unwrap();
         assert!(next[0].reason.contains("fable"), "{:?}", next[0]);
@@ -1076,9 +1088,9 @@ mod tests {
         let now = 1_800_000_000;
         report.accounts[0]
             .windows
-            .push(crate::store::AccountLimitRow {
+            .push(loopflow_execution::store::AccountLimitRow {
                 provider: "claude".into(),
-                account_id: crate::store::ProviderAccountId::parse("primary").unwrap(),
+                account_id: loopflow_execution::store::ProviderAccountId::parse("primary").unwrap(),
                 window: "seven_day".into(),
                 used_percent: 69,
                 resets_at: Some(now + 86_400),
@@ -1088,7 +1100,7 @@ mod tests {
                 model: None,
                 limited_until: None,
             });
-        let fable = crate::store::AccountLimitRow {
+        let fable = loopflow_execution::store::AccountLimitRow {
             window: "seven_day_fable".into(),
             used_percent: 100,
             model: Some("fable".into()),
@@ -1105,8 +1117,8 @@ mod tests {
         launch.out_until = Some(now + 86_400);
         launch.blockers = vec!["cooling for fable".into()];
         let notes = [RouteNote {
-            provider: crate::provider_auth::Provider::Codex,
-            scope: crate::profile::RouteScope::Default,
+            provider: loopflow_execution::provider_auth::Provider::Codex,
+            scope: loopflow_execution::profile::RouteScope::Default,
             named: 1,
             rotating: 4,
         }];

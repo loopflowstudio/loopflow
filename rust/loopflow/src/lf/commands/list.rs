@@ -3,13 +3,13 @@ use std::path::Path;
 
 use anyhow::Result;
 
-use crate::definition::DefinitionKind;
 use crate::lf::navigation::{command_tree, definition_invocation, resolve_path};
-use crate::skills::listing::Entry;
+use loopflow_execution::definition::DefinitionKind;
+use loopflow_execution::skills::listing::Entry;
 
 pub fn list_children(path: &[String], repo: &Path) -> Result<Vec<Entry>> {
     let tree = command_tree();
-    let mut entries = crate::skills::listing::discover(path, repo)?;
+    let mut entries = loopflow_execution::skills::listing::discover(path, repo)?;
     for entry in &mut entries {
         let kind = match entry.kind.as_str() {
             "skill" => Some(DefinitionKind::Skill),
@@ -45,7 +45,7 @@ pub fn list_children(path: &[String], repo: &Path) -> Result<Vec<Entry>> {
             });
         }
     }
-    Ok(crate::engine::skill::list(entries, commands))
+    Ok(loopflow_execution::engine::skill::list(entries, commands))
 }
 
 pub fn show(path: &[String], repo: &Path, json: bool) -> Result<()> {

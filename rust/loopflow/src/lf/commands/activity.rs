@@ -7,8 +7,8 @@ use time::OffsetDateTime;
 
 use crate::lf::commands::work_catalog::{WorkCatalog, WorkOwner};
 use crate::lf::commands::WorkFilter;
-use crate::output::parse_since;
-use crate::session_record::SessionHistory;
+use loopflow_execution::output::parse_since;
+use loopflow_execution::session_record::SessionHistory;
 use loopflow_model::durable::WorkRef;
 use loopflow_storage::rows::unix_to_datetime;
 use loopflow_storage::sqlite::SqliteStore;
@@ -50,7 +50,7 @@ pub enum WorkActivityFact {
     ProviderHistoryRecorded {
         session_id: loopflow_model::id::LfSessionId,
         captured: Option<i64>,
-        reference: crate::session_record::ProviderHistoryReference,
+        reference: loopflow_execution::session_record::ProviderHistoryReference,
         lf_process_id: Option<loopflow_model::id::LfProcessId>,
         status: Option<String>,
     },
@@ -96,9 +96,9 @@ impl HistoryWindow {
 /// the window.
 pub(crate) fn subscribe(
     window: HistoryWindow,
-    transport: crate::read_stream::Transport,
-) -> Result<Option<crate::read_stream::Subscription>> {
-    crate::read_stream::start(
+    transport: loopflow_execution::read_stream::Transport,
+) -> Result<Option<loopflow_execution::read_stream::Subscription>> {
+    loopflow_execution::read_stream::start(
         window,
         |store, window| async move { read(store.as_ref().map(|store| &store.sqlite), &window) },
         transport,
@@ -114,13 +114,15 @@ pub fn run(options: &super::history::HistoryFeed) -> Result<()> {
         task: options.task.clone(),
     };
     if options.subscribe {
-        return subscribe(window, crate::read_stream::Transport::Stdio).map(drop);
+        return subscribe(window, loopflow_execution::read_stream::Transport::Stdio).map(drop);
     }
     let snapshot = snapshot(&window)?;
     if options.json {
         println!(
             "{}",
-            serde_json::to_string(&crate::read_stream::selected_answer(&snapshot)?)?
+            serde_json::to_string(&loopflow_execution::read_stream::selected_answer(
+                &snapshot
+            )?)?
         );
     } else {
         print_snapshot(&snapshot);
@@ -130,17 +132,17 @@ pub fn run(options: &super::history::HistoryFeed) -> Result<()> {
 
 /// What `lf history --json` prints for `window`.
 pub(crate) fn snapshot(window: &HistoryWindow) -> Result<WorkActivitySnapshot> {
-    let path = crate::store::database_path_from_env()?;
+    let path = loopflow_execution::store::database_path_from_env()?;
     let store = path
         .exists()
-        .then(|| crate::store::open_sqlite(&path))
+        .then(|| loopflow_execution::store::open_sqlite(&path))
         .transpose()?;
     read(store.as_ref(), window)
 }
 
 fn read(store: Option<&SqliteStore>, window: &HistoryWindow) -> Result<WorkActivitySnapshot> {
     let limit = window.limit;
-    let since = parse_since(&window.since, crate::observe::now())?.unix_timestamp();
+    let since = parse_since(&window.since, loopflow_execution::observe::now())?.unix_timestamp();
     if limit == 0 || limit > MAX_LIMIT {
         return Err(anyhow!(
             "--limit must be between 1 and {MAX_LIMIT}; got {}",
@@ -187,7 +189,8 @@ pub(crate) fn build_snapshot(
         if settled(&entries, limit, input.latest) {
             break;
         }
-        let snapshot = crate::store::sessions::project_history_input(store, &pending, input)?;
+        let snapshot =
+            loopflow_execution::store::sessions::project_history_input(store, &pending, input)?;
         let mut found = Vec::new();
         let work = snapshot
             .task_id
@@ -482,13 +485,17 @@ mod tests {
     #[test]
     fn settled_activity_does_not_read_invalid_metadata_below_its_bound() {
         let home = tempfile::tempdir().unwrap();
-        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
-        std::fs::create_dir(home.path().join(".git")).unwrap();
-        let repository =
-            crate::repository::location::ensure_repository(&store, home.path().to_str().unwrap())
+        let store =
+            loopflow_execution::store::opening::open_ephemeral(&home.path().join("store.db"))
                 .unwrap();
+        std::fs::create_dir(home.path().join(".git")).unwrap();
+        let repository = loopflow_execution::repository::location::ensure_repository(
+            &store,
+            home.path().to_str().unwrap(),
+        )
+        .unwrap();
         let task = store
-            .create_task(&crate::work::task::NewTask {
+            .create_task(&loopflow_execution::work::task::NewTask {
                 repository_id: repository,
                 id: loopflow_model::durable::TaskId::new(),
                 project_id: None,
@@ -498,14 +505,14 @@ mod tests {
             })
             .unwrap();
         for at in [10, 20, 30] {
-            let input = crate::session_record::new_artifact_key();
+            let input = loopflow_execution::session_record::new_artifact_key();
             let template = store.test_session(
                 &format!("seed-{at}"),
-                &crate::session_record::new_artifact_key(),
+                &loopflow_execution::session_record::new_artifact_key(),
             );
-            crate::store::sessions::create_session(
+            loopflow_execution::store::sessions::create_session(
                 &store,
-                crate::session::LfSession {
+                loopflow_execution::session::LfSession {
                     id: format!("input-{at}").into(),
                     captured: None,
                     artifact_key: Some(input),
@@ -525,7 +532,7 @@ mod tests {
         assert!(snapshot.truncated);
         assert_eq!(snapshot.items.len(), 1);
         assert!(snapshot.items[0].id.contains("input-30"));
-        assert!(crate::store::sessions::input_history(&store, "input-10").is_err());
+        assert!(loopflow_execution::store::sessions::input_history(&store, "input-10").is_err());
     }
 
     #[test]

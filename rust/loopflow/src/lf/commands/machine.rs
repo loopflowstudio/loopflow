@@ -4,16 +4,15 @@ use anyhow::{anyhow, Context};
 use serde::Serialize;
 use std::io::{self, IsTerminal, Write};
 use std::process::Stdio;
-use std::time::Duration;
 
 use crate::lf::MachineCommand;
-use crate::machine::connection::{
-    connection_failure, install_command, transport_failure, ConnectionFailure, FailureKind,
-    INSTALL_COMMAND,
+use loopflow_execution::machine::connection::{
+    find_machine, install_command, local_machine, probe, report_version, update_command,
+    ConnectionFailure, FailureKind, INSTALL_COMMAND,
 };
-use crate::machine::ssh::REMOTE_PATH;
-use crate::store::Store;
-use loopflow_model::durable::{DefaultScope, Machine, MachineDefault, MachineId, MachineSetting};
+use loopflow_execution::machine::ssh::REMOTE_PATH;
+use loopflow_execution::store::Store;
+use loopflow_model::durable::{DefaultScope, Machine, MachineDefault, MachineSetting};
 
 pub fn run(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
     // Rentals own their runtimes, so they dispatch before this one opens.
@@ -27,14 +26,9 @@ pub fn run(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
 }
 
 async fn existing_store() -> anyhow::Result<Store> {
-    crate::store::open_existing_store()
+    loopflow_execution::store::open_existing_store()
         .await?
         .ok_or_else(|| anyhow!("machine commands need an initialized local store"))
-}
-
-/// `lf machine id`: this Machine's durable identity.
-pub async fn local_machine() -> anyhow::Result<Machine> {
-    Ok(existing_store().await?.local_machine().await?)
 }
 
 /// `lf machine list`: your registered Machines with the defaults naming them.
@@ -47,7 +41,7 @@ async fn listings(store: &Store, label: Option<&str>) -> anyhow::Result<Vec<Mach
         Some(label) => vec![find_machine(store, label).await?],
         None => store.machines().await?,
     };
-    let defaults = crate::store::placement::machine_defaults(&store.sqlite)?;
+    let defaults = loopflow_execution::store::placement::machine_defaults(&store.sqlite)?;
     // This Machine is listed only when one of your defaults names it.
     let local = store.local_machine().await?;
     if label.is_none() && defaults.iter().any(|d| d.machine_id == local.id) {
@@ -87,8 +81,9 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             chrome_profile,
             owned,
         } => {
-            let machine = super::ssh::resolve_target(target, false).await?;
-            return super::machine_credentials::connect(
+            let machine =
+                loopflow_execution::machine::connection::resolve_target(target, false).await?;
+            return loopflow_execution::machine::credentials::connect(
                 &machine,
                 *provider,
                 email.as_deref(),
@@ -149,7 +144,7 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
                     .transpose()?,
             };
             if let Some(pool) = pool {
-                if crate::store::rentals::pool(&store.sqlite, pool)?.is_none() {
+                if loopflow_execution::store::rentals::pool(&store.sqlite, pool)?.is_none() {
                     return Err(anyhow!("no pool {pool}; `lf pool add {pool}` creates it"));
                 }
             }
@@ -179,7 +174,7 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             };
             let machine = store.add_machine(&probe.id?, route, &label).await?;
             if pool.is_some() || cost_usd.is_some() || expires_at.is_some() {
-                crate::store::rentals::set_machine_ownership(
+                loopflow_execution::store::rentals::set_machine_ownership(
                     &store.sqlite,
                     &machine.id,
                     &ownership,
@@ -207,10 +202,16 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
                     }
                     for task in &listing.tasks {
                         // A move that has not arrived reads as that, as in `lf task status`.
-                        let place = crate::ops::task_ownership::move_line(&store.sqlite, &task.id)?
-                            .unwrap_or_else(|| {
-                                format!("since {}", crate::output::format_time(task.since))
-                            });
+                        let place = loopflow_execution::ops::task_ownership::move_line(
+                            &store.sqlite,
+                            &task.id,
+                        )?
+                        .unwrap_or_else(|| {
+                            format!(
+                                "since {}",
+                                loopflow_execution::output::format_time(task.since)
+                            )
+                        });
                         println!("  {} {place}", task.identifier);
                     }
                 }
@@ -304,25 +305,15 @@ fn print_machine(machine: &Machine, json: bool) -> anyhow::Result<()> {
     } else {
         let label = match (&machine.label, machine.route.as_str()) {
             (Some(label), _) => label.clone(),
-            (None, "local") => format!("{} (this Machine)", crate::store::ownership::local_label()),
+            (None, "local") => format!(
+                "{} (this Machine)",
+                loopflow_execution::store::ownership::local_label()
+            ),
             (None, _) => String::new(),
         };
         println!("{label}  {}  {}", machine.route, machine.id);
     }
     Ok(())
-}
-
-pub(super) async fn find_machine(store: &Store, selector: &str) -> anyhow::Result<Machine> {
-    store
-        .machines()
-        .await?
-        .into_iter()
-        .find(|machine| {
-            machine.label.as_deref() == Some(selector) || machine.id.as_str() == selector
-        })
-        .ok_or_else(|| {
-            anyhow!("machine {selector:?} is not added; run `lf machine add {selector}` first")
-        })
 }
 
 /// A Machine with your Wave and repository defaults that name it.
@@ -352,80 +343,6 @@ struct MachineStatus {
     update_command: String,
 }
 
-#[derive(Debug)]
-pub(super) struct Probe {
-    pub id: anyhow::Result<MachineId>,
-    pub version: String,
-}
-
-pub(super) async fn probe(target: &str, forward_agent: bool) -> anyhow::Result<Probe> {
-    if target.is_empty() || target.contains('\0') {
-        return Err(anyhow!("SSH destination cannot be empty or contain NUL"));
-    }
-    let command = format!(
-        "{REMOTE_PATH}; command -v lf >/dev/null 2>&1 || {{ echo lf-not-installed; exit 127; }}; lf --version && lf machine id"
-    );
-    let mut child = tokio::process::Command::new("ssh");
-    child
-        .env("LC_ALL", "C")
-        .args(crate::machine_route::bounded_ssh_args(
-            target,
-            forward_agent,
-        )?)
-        .arg(command)
-        .stdin(Stdio::null())
-        .kill_on_drop(true);
-    let output = tokio::time::timeout(Duration::from_secs(20), child.output())
-        .await
-        .map_err(|_| {
-            connection_failure(
-                target,
-                FailureKind::Unreachable,
-                "did not answer within 20 seconds",
-            )
-        })?
-        .context("could not run ssh")?;
-    let detail = String::from_utf8_lossy(&output.stderr);
-    if output.status.code() == Some(255) || output.status.code().is_none() {
-        return Err(transport_failure(target, detail.trim()));
-    }
-    let text = String::from_utf8(output.stdout)?;
-    let mut lines = text.lines();
-    // `lf --version` prints the build version, then a label such as
-    // `(build 3f3153d95 on v0.15.3)`; only the version compares.
-    let version = lines
-        .next()
-        .and_then(|line| line.strip_prefix("lf "))
-        .and_then(|line| line.split_whitespace().next());
-    if text.trim() == "lf-not-installed" && output.status.code() == Some(127) {
-        return Err(connection_failure(
-            target,
-            FailureKind::MissingLf,
-            detail.trim(),
-        ));
-    }
-    let version = version
-        .ok_or_else(|| {
-            anyhow!(
-                "machine {target:?} did not return its lf version: {}; update with `{}`",
-                detail.trim(),
-                update_command(target)
-            )
-        })?
-        .to_string();
-    let id = if output.status.success() {
-        MachineId::parse(lines.next().unwrap_or_default())
-            .map_err(|error| anyhow!("machine {target:?} did not return its identity: {error}"))
-    } else {
-        Err(anyhow!(
-            "machine {target:?} identity probe failed: {}; update with `{}`",
-            detail.trim(),
-            update_command(target)
-        ))
-    };
-    Ok(Probe { id, version })
-}
-
 fn confirm_install(target: &str) -> anyhow::Result<bool> {
     eprint!("No lf on {target}. Install it with the published installer? [Y/n]: ");
     io::stderr().flush()?;
@@ -444,7 +361,9 @@ async fn install_remote(target: &str) -> anyhow::Result<()> {
     let command =
         format!("{REMOTE_PATH}; if ! command -v lf >/dev/null 2>&1; then {INSTALL_COMMAND}; fi");
     let status = tokio::process::Command::new("ssh")
-        .args(crate::machine_route::bounded_ssh_args(target, false)?)
+        .args(loopflow_execution::machine_route::bounded_ssh_args(
+            target, false,
+        )?)
         .arg(command)
         .stdin(Stdio::null())
         .stdout(Stdio::inherit())
@@ -460,37 +379,6 @@ async fn install_remote(target: &str) -> anyhow::Result<()> {
         ));
     }
     Ok(())
-}
-
-pub(super) fn report_version(target: &str, remote: &str) {
-    let local = crate::build_info::BUILD_VERSION;
-    if remote == local {
-        return;
-    }
-    let update = if release_number(remote) > release_number(local) {
-        "Update this one with `lf install`".to_string()
-    } else {
-        format!("Update the remote with `{}`", update_command(target))
-    };
-    eprintln!("lf versions differ: remote {remote}, local {local}. {update}");
-}
-
-/// Numeric release components; build metadata and suffixes do not order.
-fn release_number(version: &str) -> Vec<u64> {
-    version
-        .split(['-', '+'])
-        .next()
-        .unwrap_or_default()
-        .split('.')
-        .map(|part| part.parse().unwrap_or(0))
-        .collect()
-}
-
-fn update_command(target: &str) -> String {
-    format!(
-        "ssh -- {} 'lf install'",
-        crate::machine::ssh::sh_quote(target)
-    )
 }
 
 fn default_label(target: &str) -> String {
@@ -510,7 +398,7 @@ fn default_label(target: &str) -> String {
 }
 
 fn validate_expected_machine(local: &loopflow_model::durable::MachineId) -> anyhow::Result<()> {
-    let Ok(raw) = std::env::var(crate::machine::ssh::EXPECTED_MACHINE_ID_ENV) else {
+    let Ok(raw) = std::env::var(loopflow_execution::machine::ssh::EXPECTED_MACHINE_ID_ENV) else {
         return Ok(());
     };
     let expected = loopflow_model::durable::MachineId::parse(&raw)
@@ -524,26 +412,19 @@ fn validate_expected_machine(local: &loopflow_model::durable::MachineId) -> anyh
 }
 
 pub fn validate_expected_machine_process() -> anyhow::Result<()> {
-    if std::env::var_os(crate::machine::ssh::EXPECTED_MACHINE_ID_ENV).is_none() {
+    if std::env::var_os(loopflow_execution::machine::ssh::EXPECTED_MACHINE_ID_ENV).is_none() {
         return Ok(());
     }
-    let store = crate::store::read_existing_registry()
+    let store = loopflow_execution::store::read_existing_registry()
         .context("Machine identity unavailable")?
         .ok_or_else(|| anyhow!("Machine identity unavailable: local registry is absent"))?;
-    let local = crate::store::machines::local_machine(&store.sqlite)?;
+    let local = loopflow_execution::store::machines::local_machine(&store.sqlite)?;
     validate_expected_machine(&local.id)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{default_label, release_number};
-
-    #[test]
-    fn release_numbers_order_by_component() {
-        assert!(release_number("0.14.14") > release_number("0.14.12"));
-        assert!(release_number("0.14.10") > release_number("0.14.9"));
-        assert_eq!(release_number("0.14.14-dev+abc"), release_number("0.14.14"));
-    }
+    use super::default_label;
 
     #[test]
     fn labels_follow_ssh_hosts_without_restricting_destinations() {

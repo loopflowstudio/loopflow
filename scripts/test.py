@@ -689,8 +689,8 @@ SUITES: list[Suite] = [
             _touches(
                 c,
                 "swift/",
-                "rust/loopflow/src/store/sqlite/sessions.rs",
-                "rust/loopflow/src/naming.rs",
+                "rust/loopflow-execution/src/store/sqlite/sessions.rs",
+                "rust/loopflow-execution/src/naming.rs",
                 "rust/loopflow-terminal/ghostty-vt",
             )
             or _touches_exact(
@@ -720,8 +720,8 @@ SUITES: list[Suite] = [
         trigger_desc="store, worktrees, or tests/e2e/",
         match=lambda c: _touches(
             c,
-            "rust/loopflow/src/store",
-            "rust/loopflow/src/git/worktrees",
+            "rust/loopflow-execution/src/store",
+            "rust/loopflow-execution/src/git/worktrees",
             "tests/e2e/",
         ),
         build=_e2e_commands,

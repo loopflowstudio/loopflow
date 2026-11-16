@@ -2,7 +2,7 @@
 //! `workspace` applies layouts and follows Task arrivals. Both use the shared
 //! non-replacing Session connection; explicit resume owns input takeover.
 
-use crate::store::session_projection;
+use loopflow_execution::store::session_projection;
 mod cmux;
 mod conversation;
 mod files;
@@ -21,10 +21,10 @@ use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 use sha2::Digest as _;
 
-use crate::ops::context::{ContextExplanation, ContextFact};
-use crate::session::PrimaryScope;
-use crate::store::Store;
-use crate::work::link::{WorkTarget, WorkUrl};
+use loopflow_execution::ops::context::{ContextExplanation, ContextFact};
+use loopflow_execution::session::PrimaryScope;
+use loopflow_execution::store::Store;
+use loopflow_execution::work::link::{WorkTarget, WorkUrl};
 use loopflow_storage::work::selection::WorkWorkspaceKind;
 
 pub(crate) const DESKTOP_BUNDLE: &str = "com.loopflow.mac";
@@ -183,7 +183,9 @@ impl Resolved {
     /// otherwise the label. Destinations are found by their IDs, never this name.
     fn destination_name(&self) -> String {
         match &self.task {
-            Some(task) => crate::terminal_title::workspace_name(&task.identifier, &task.title),
+            Some(task) => {
+                loopflow_execution::terminal_title::workspace_name(&task.identifier, &task.title)
+            }
             None => self.label.clone(),
         }
     }
@@ -250,7 +252,7 @@ impl Resolved {
         WorkLink {
             label: self.label.clone(),
             url: self.url.to_string(),
-            markdown: crate::work::link::markdown(&self.label, &self.url),
+            markdown: loopflow_execution::work::link::markdown(&self.label, &self.url),
             fallback_argv: self.fallback_argv(),
             target: WorkLinkTarget {
                 kind: match self.url.target {
@@ -276,7 +278,7 @@ impl Resolved {
     /// Compare the calling conversation with this Work's selected destination.
     /// Same Work is not enough: a Graph step and the primary can share a Task.
     fn relation(&self) -> (ConversationRelation, Option<String>) {
-        let Some(caller) = crate::journal::agent_caller() else {
+        let Some(caller) = loopflow_execution::journal::agent_caller() else {
             return (
                 ConversationRelation::Unknown,
                 Some("No calling conversation identity was supplied".into()),
@@ -314,8 +316,8 @@ pub(crate) fn selected_context(
     if cli.selects_repository() {
         if let ContextFact::Bound { value, .. } = &resolution.repository_path {
             anyhow::ensure!(
-                crate::repository::current()?.as_ref()
-                    == Some(&crate::repository::discover(Path::new(value))?),
+                loopflow_execution::repository::current()?.as_ref()
+                    == Some(&loopflow_execution::repository::discover(Path::new(value))?),
                 "Work does not belong to the selected repository. Nothing was opened."
             );
         }
@@ -339,9 +341,9 @@ fn work_context(
     if task.is_none()
         && wave.is_none()
         && session.is_none()
-        && crate::store::read_existing_registry()?.is_none()
+        && loopflow_execution::store::read_existing_registry()?.is_none()
     {
-        let repo = crate::repository::containing(directory)?
+        let repo = loopflow_execution::repository::containing(directory)?
             .context("select a Git repository with --repo before opening it")?;
         let mut resolution = ContextExplanation::empty();
         resolution.repository_path = ContextFact::bound(repo, "local_locator");
@@ -365,10 +367,14 @@ fn work_context(
     };
     if let ContextFact::Bound { value, .. } = &resolution.task {
         let task = loopflow_model::durable::TaskId::parse(value)?;
-        if let Some(store) = crate::store::read_existing_registry()? {
+        if let Some(store) = loopflow_execution::store::read_existing_registry()? {
             // The shared reader retains failures in the explanation; opening
             // refuses unavailable execution without losing the other Work facts.
-            let _ = crate::ops::task_location::explain(&store.sqlite, &task, &mut resolution);
+            let _ = loopflow_execution::ops::task_location::explain(
+                &store.sqlite,
+                &task,
+                &mut resolution,
+            );
         }
     }
     if let Some(session) = session.filter(|_| task.is_some()) {
@@ -488,22 +494,29 @@ fn describe(
                 (None, ContextFact::Bound { value, .. }) => {
                     PrimaryScope::Wave(loopflow_model::id::WaveId::parse(value)?)
                 }
-                _ => PrimaryScope::Repository(crate::repository::discover(&repository_path)?),
+                _ => PrimaryScope::Repository(loopflow_execution::repository::discover(
+                    &repository_path,
+                )?),
             };
             // A Task's primary follows its claim; a Wave's or repository's
             // follows your Session Machine for it.
             let setting = loopflow_model::durable::MachineSetting::Session;
-            let local = crate::store::machines::local_machine(&store.sqlite)?.id;
+            let local = loopflow_execution::store::machines::local_machine(&store.sqlite)?.id;
             let remote = |machine: loopflow_model::durable::MachineId| {
                 (machine != local).then(|| machine.to_string())
             };
             let machine = match (&scope, &repository_id) {
                 (PrimaryScope::Task(_), _) => execution_machine.clone(),
                 (PrimaryScope::Wave(wave), _) => remote(
-                    crate::store::placement::wave_owning_machine(&store.sqlite, wave, setting)?.0,
+                    loopflow_execution::store::placement::wave_owning_machine(
+                        &store.sqlite,
+                        wave,
+                        setting,
+                    )?
+                    .0,
                 ),
                 (PrimaryScope::Repository(_), Some(repository)) => remote(
-                    crate::store::placement::repository_owning_machine(
+                    loopflow_execution::store::placement::repository_owning_machine(
                         &store.sqlite,
                         &loopflow_model::durable::RepositoryId::from_raw(repository.clone()),
                         setting,
@@ -527,7 +540,9 @@ fn describe(
         None => (None, None),
     };
     let label = match (&task, &wave) {
-        (Some(task), _) => crate::terminal_title::workspace_name(&task.identifier, &task.title),
+        (Some(task), _) => {
+            loopflow_execution::terminal_title::workspace_name(&task.identifier, &task.title)
+        }
         (None, Some(wave)) => format!("{short_name} · {wave} Wave"),
         (None, None) => short_name,
     };
@@ -613,7 +628,7 @@ fn repository_for(store: Option<&Store>, url: &WorkUrl, directory: &Path) -> Res
         [repo] => Ok(repo.path.clone()),
         [] => {
             // The current checkout locates a plain repository before it has a plan.
-            let current = crate::repository::containing(directory)
+            let current = loopflow_execution::repository::containing(directory)
                 .ok()
                 .flatten()
                 .map(|repo| repo.as_path().to_path_buf())
@@ -659,8 +674,9 @@ fn qualifier_for(
 /// where they are a Work's primary and exact Sessions otherwise.
 fn available(cli: &crate::lf::Cli) -> Result<(Vec<Resolved>, Vec<String>)> {
     let runtime = tokio::runtime::Runtime::new()?;
-    let store = runtime.block_on(crate::store::open_store(
-        &crate::store::storage_config_from_env().context("resolve the shared Loopflow store")?,
+    let store = runtime.block_on(loopflow_execution::store::open_store(
+        &loopflow_execution::store::storage_config_from_env()
+            .context("resolve the shared Loopflow store")?,
     ))?;
     let store = std::sync::Arc::new(store);
     let scoped = cli.selects_repository();
@@ -673,14 +689,14 @@ fn available(cli: &crate::lf::Cli) -> Result<(Vec<Resolved>, Vec<String>)> {
             ContextFact::Bound { value, .. } => Some(value),
             _ => None,
         });
-    let records = runtime.block_on(crate::ops::human_session::list(
+    let records = runtime.block_on(loopflow_execution::ops::human_session::list(
         &store,
-        &crate::session::SessionFilter {
+        &loopflow_execution::session::SessionFilter {
             blocked: false,
             on: None,
             orphan: false,
             repo: if scoped {
-                crate::repository::current()?.map(|repo| repo.to_string())
+                loopflow_execution::repository::current()?.map(|repo| repo.to_string())
             } else {
                 None
             },
@@ -695,7 +711,7 @@ fn available(cli: &crate::lf::Cli) -> Result<(Vec<Resolved>, Vec<String>)> {
             after: None,
         },
     ))?;
-    let caller = crate::journal::agent_caller().map(|caller| caller.session_id);
+    let caller = loopflow_execution::journal::agent_caller().map(|caller| caller.session_id);
     let mut targets: Vec<Resolved> = Vec::new();
     let mut unknown = Vec::new();
     for record in records {
@@ -723,7 +739,7 @@ fn available(cli: &crate::lf::Cli) -> Result<(Vec<Resolved>, Vec<String>)> {
 
 fn available_target(
     store: &Store,
-    record: &crate::ops::human_session::SessionRecord,
+    record: &loopflow_execution::ops::human_session::SessionRecord,
 ) -> Result<Resolved> {
     let session = store
         .sqlite
@@ -733,7 +749,7 @@ fn available_target(
         .repo
         .clone()
         .or_else(|| {
-            crate::repository::discover(&session.cwd)
+            loopflow_execution::repository::discover(&session.cwd)
                 .ok()
                 .map(|repo| repo.to_string())
         })
@@ -813,7 +829,9 @@ fn route(requested: OpenHost) -> OpenRoute {
 
 const DESKTOP: &str = "LF_DESKTOP";
 
-use crate::terminal_host::{in_cmux, in_herdr, in_rex, in_tmux, run_host, HOST_TIMEOUT};
+use loopflow_execution::terminal_host::{
+    in_cmux, in_herdr, in_rex, in_tmux, run_host, HOST_TIMEOUT,
+};
 
 /// The Desktop a caller runs in, else the installed app.
 pub(crate) fn desktop_bundle() -> String {
@@ -841,7 +859,7 @@ impl DesktopApp {
     pub(crate) fn current() -> Option<Self> {
         Self::select(
             std::env::var(DESKTOP).ok().as_deref(),
-            crate::installation::installed_app(),
+            loopflow_execution::installation::installed_app(),
         )
     }
 
@@ -868,8 +886,10 @@ impl DesktopApp {
 /// Where an agent caller's own conversation is viewed now. Its environment
 /// names the terminal it launched in, which may since be closed or left.
 fn viewed_placement() -> Option<(OpenHost, String)> {
-    let caller = crate::journal::agent_caller()?;
-    let store = crate::store::read_existing_registry().ok().flatten()?;
+    let caller = loopflow_execution::journal::agent_caller()?;
+    let store = loopflow_execution::store::read_existing_registry()
+        .ok()
+        .flatten()?;
     let placement = session_projection::session_summary(
         &store.sqlite,
         caller.session_id.as_str(),
@@ -902,7 +922,7 @@ struct Opening {
 impl Opening {
     fn lock(target: &Resolved) -> Result<Self> {
         use fs2::FileExt;
-        let directory = crate::store::lf_home_dir().join("open");
+        let directory = loopflow_execution::store::lf_home_dir().join("open");
         std::fs::create_dir_all(&directory).context("create the opening directory")?;
         let key = target
             .conversation()
@@ -986,7 +1006,7 @@ fn conversation_view(target: &Resolved) -> Result<Option<ConversationView>> {
     {
         return Ok(desktop);
     }
-    let Some(store) = crate::store::read_existing_registry()? else {
+    let Some(store) = loopflow_execution::store::read_existing_registry()? else {
         return Ok(desktop);
     };
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
@@ -996,11 +1016,13 @@ fn conversation_view(target: &Resolved) -> Result<Option<ConversationView>> {
     // The terminal's stored viewer flag can lag the attachment handshake.
     // Ask the live terminal before using that flag to decide whether to attach.
     let (viewed, ready) = if let Some(terminal) = store.sqlite.session_terminal(id)? {
-        crate::transport::attachment(&terminal).context("read conversation attachment")?
+        loopflow_execution::transport::attachment(&terminal)
+            .context("read conversation attachment")?
     } else {
         (
             !summary.unviewed
-                && summary.agent_process_evidence == crate::journal::ProcessIdentityEvidence::Live,
+                && summary.agent_process_evidence
+                    == loopflow_execution::journal::ProcessIdentityEvidence::Live,
             true,
         )
     };
@@ -1129,7 +1151,7 @@ pub struct WorkspaceArgs {
 
 /// The one conversation named by an address, root selectors or checkout.
 fn target(cli: &crate::lf::Cli, args: &OpenSelection) -> Result<Resolved> {
-    let store = crate::store::read_existing_registry()?;
+    let store = loopflow_execution::store::read_existing_registry()?;
     let store = store.as_ref();
     let session = args.session.clone();
     let resolved = match &args.url {
@@ -1176,9 +1198,9 @@ fn url_target(
 
 /// What `lf --cwd <directory> open <url> --link --json` prints.
 pub fn url_links(directory: &Path, url: &str) -> Result<Vec<WorkLink>> {
-    let store = crate::store::read_existing_registry()?;
+    let store = loopflow_execution::store::read_existing_registry()?;
     let target = url_target(store.as_ref(), directory, url, None, false)?;
-    let presentation = if crate::journal::agent_caller().is_some() {
+    let presentation = if loopflow_execution::journal::agent_caller().is_some() {
         route(OpenHost::Auto)
     } else {
         conversation::here_route()
@@ -1351,7 +1373,7 @@ fn print_links(
                 LinkFormat::Markdown => println!("{}", link.markdown),
                 LinkFormat::Text => {
                     let label = if std::io::stdout().is_terminal() {
-                        crate::work::link::osc8(&link.label, &link.url)
+                        loopflow_execution::work::link::osc8(&link.label, &link.url)
                     } else {
                         link.label.clone()
                     };
@@ -1393,7 +1415,7 @@ fn print_report(report: OpenReport, json: bool) -> Result<()> {
         .iter()
         .any(|receipt| receipt.status == OpenStatus::Failed)
     {
-        return Err(crate::process::CommandExit(1).into());
+        return Err(loopflow_execution::process::CommandExit(1).into());
     }
     Ok(())
 }

@@ -33,7 +33,6 @@ pub mod screens;
 pub mod server;
 pub mod session;
 pub mod session_history;
-pub mod session_move;
 pub mod setting;
 pub mod ship;
 pub mod ssh;

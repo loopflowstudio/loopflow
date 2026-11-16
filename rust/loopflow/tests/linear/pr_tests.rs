@@ -5,13 +5,13 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::process::Command;
 
-use loopflow::durable::WorkStatus;
-use loopflow::ops::task::{task_complete, task_snapshot, task_status};
-use loopflow::ops::{
+use loopflow_execution::durable::WorkStatus;
+use loopflow_execution::ops::task::{task_complete, task_snapshot, task_status};
+use loopflow_execution::ops::{
     commit_workflow, current_pr, present_pr_review, CommitOptions, NullProgress, OpsError,
     PrOptions,
 };
-use loopflow::work::task::{
+use loopflow_execution::work::task::{
     GithubPr, PrMergeMode, PrMergeRequest, PrPhase, PrPresentation, PrPublication,
 };
 use loopflow_test_support::TestRepo;
@@ -25,12 +25,13 @@ use support::{
 fn create_or_update_pr(
     repo: &std::path::Path,
     options: &PrOptions,
-    progress: &impl loopflow::ops::Progress,
-) -> Result<loopflow::ops::PrResult, OpsError> {
+    progress: &impl loopflow_execution::ops::Progress,
+) -> Result<loopflow_execution::ops::PrResult, OpsError> {
     let home = std::env::var_os("LF_HOME").expect("fixture selects a disposable Machine");
-    crate::journal::with_test_ledger(std::path::PathBuf::from(home).join("loopflow.db"), || {
-        loopflow::ops::create_or_update_pr(repo, options, progress)
-    })
+    loopflow_execution::journal::with_test_ledger(
+        std::path::PathBuf::from(home).join("loopflow.db"),
+        || loopflow_execution::ops::create_or_update_pr(repo, options, progress),
+    )
 }
 
 fn write_gh_script(pr_list: &str, pr_diff: Option<&str>) -> String {
@@ -152,9 +153,9 @@ fn task_delivery_works_on_an_ordinary_branch_without_registration() {
     assert!(String::from_utf8_lossy(&remote.stdout).starts_with(&repo.head_sha()));
     let runtime = tokio::runtime::Runtime::new().unwrap();
     runtime.block_on(async {
-        let store = loopflow::store::open_ephemeral_store(&loopflow::store::StorageConfig::sqlite(
-            home.path().join("loopflow.db"),
-        ))
+        let store = loopflow_execution::store::open_ephemeral_store(
+            &loopflow_execution::store::StorageConfig::sqlite(home.path().join("loopflow.db")),
+        )
         .await
         .unwrap();
         assert!(store.list_tasks(None).await.unwrap().is_empty());
@@ -1010,7 +1011,7 @@ fn manual_merge_observation_preserves_the_task_and_sole_pr() {
         .block_on(task.store.update_task_pr(&pr))
         .expect("mark PR as published");
 
-    let report = loopflow::ops::pr_landing::reconcile_repository(repo.path()).unwrap();
+    let report = loopflow_execution::ops::pr_landing::reconcile_repository(repo.path()).unwrap();
     assert!(report.errors.is_empty(), "{:?}", report.errors);
     let persisted_task = task_status(repo.path(), Some("INF-123"))
         .expect("reconcile Task PR")
@@ -1020,7 +1021,7 @@ fn manual_merge_observation_preserves_the_task_and_sole_pr() {
     assert!(
         matches!(
             persisted_task.observation,
-            loopflow::work::task::Observation::NotRequired
+            loopflow_execution::work::task::Observation::NotRequired
         ),
         "status must not repeat merge reconciliation: {persisted_task:?}"
     );
@@ -1031,7 +1032,7 @@ fn manual_merge_observation_preserves_the_task_and_sole_pr() {
     assert!(
         matches!(
             cached_task.observation,
-            loopflow::work::task::Observation::NotRequired
+            loopflow_execution::work::task::Observation::NotRequired
         ),
         "partial timing evidence must not degrade Task correctness: {cached_task:?}"
     );
@@ -1046,7 +1047,9 @@ fn manual_merge_observation_preserves_the_task_and_sole_pr() {
     let work = runtime
         .block_on(
             task.store
-                .work_for_child(&loopflow::child::ChildRef::Task(task.task.id.clone())),
+                .work_for_child(&loopflow_execution::child::ChildRef::Task(
+                    task.task.id.clone(),
+                )),
         )
         .expect("resolve reconciled Task Work");
     assert!(!matches!(
@@ -1088,7 +1091,7 @@ fn changed_head_revokes_auto_merge_and_clears_the_stale_request() {
         .block_on(task.store.update_task_pr(&pr))
         .expect("store auto-merge request");
 
-    let report = loopflow::ops::pr_landing::reconcile_repository(repo.path()).unwrap();
+    let report = loopflow_execution::ops::pr_landing::reconcile_repository(repo.path()).unwrap();
     assert!(report.errors.is_empty(), "{:?}", report.errors);
     task_status(repo.path(), Some("INF-123"))
         .expect("reconcile changed head")
@@ -1216,7 +1219,7 @@ fn observed_merge_does_not_complete_a_task_from_status() {
         .block_on(task.store.update_task_pr(&pr))
         .expect("mark PR as completing");
 
-    let report = loopflow::ops::pr_landing::reconcile_repository(repo.path()).unwrap();
+    let report = loopflow_execution::ops::pr_landing::reconcile_repository(repo.path()).unwrap();
     assert!(report.errors.is_empty(), "{:?}", report.errors);
     let persisted_task = task_status(repo.path(), Some("INF-123"))
         .expect("reconcile completing PR")
@@ -1225,7 +1228,7 @@ fn observed_merge_does_not_complete_a_task_from_status() {
     assert!(
         matches!(
             persisted_task.observation,
-            loopflow::work::task::Observation::NotRequired
+            loopflow_execution::work::task::Observation::NotRequired
         ),
         "status must only read the observed merge: {persisted_task:?}"
     );
@@ -1269,7 +1272,7 @@ fn observed_auto_merge_waits_for_an_explicit_completion_request() {
         .block_on(task.store.update_task_pr(&pr))
         .expect("mark PR as completing");
 
-    let report = loopflow::ops::pr_landing::reconcile_repository(repo.path()).unwrap();
+    let report = loopflow_execution::ops::pr_landing::reconcile_repository(repo.path()).unwrap();
     assert!(report.errors.is_empty(), "{:?}", report.errors);
     let persisted_task = task_status(repo.path(), Some("INF-123"))
         .expect("reconcile watched PR merge")
@@ -1356,7 +1359,7 @@ fn repeated_status_of_merged_task_never_completes_work() {
         .filter(|event| {
             matches!(
                 event.kind,
-                loopflow::work::task::TaskEventKind::Completed { .. }
+                loopflow_execution::work::task::TaskEventKind::Completed { .. }
             )
         })
         .count();
@@ -1407,7 +1410,9 @@ fn end_is_refused_while_a_published_pr_is_unmerged() {
     let work = runtime
         .block_on(
             task.store
-                .work_for_child(&loopflow::child::ChildRef::Task(task.task.id.clone())),
+                .work_for_child(&loopflow_execution::child::ChildRef::Task(
+                    task.task.id.clone(),
+                )),
         )
         .expect("resolve Task Work");
     assert!(!matches!(
@@ -1656,16 +1661,20 @@ fn persistent_publication_pushes_committed_docs_and_preserves_local_files() {
     let gh = draft_pr_script(&state);
     let _env = EnvGuard::with_lf_home(&[("gh", &gh)], home.path());
     let repo = TestRepo::new();
-    let persistent = loopflow::git::worktrees::ensure_agent_worktree(
+    let persistent = loopflow_execution::git::worktrees::ensure_agent_worktree(
         repo.path(),
-        loopflow::git::worktrees::WorktreeSegment::parse("repo").unwrap(),
+        loopflow_execution::git::worktrees::WorktreeSegment::parse("repo").unwrap(),
     )
     .unwrap();
     fs::create_dir_all(persistent.path.join("scratch")).unwrap();
     fs::write(persistent.path.join("scratch/design.md"), "private\n").unwrap();
     fs::write(persistent.path.join("memory.md"), "accepted\n").unwrap();
-    loopflow::ops::commit_selected(&persistent.path, &["memory.md".into()], Some("Save memory"))
-        .unwrap();
+    loopflow_execution::ops::commit_selected(
+        &persistent.path,
+        &["memory.md".into()],
+        Some("Save memory"),
+    )
+    .unwrap();
     fs::write(persistent.path.join("memory.md"), "next decision\n").unwrap();
     fs::write(persistent.path.join("unrelated.md"), "unpublished\n").unwrap();
     let options = PrOptions {

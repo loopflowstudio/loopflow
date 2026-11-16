@@ -17,14 +17,16 @@ use std::path::Path;
 
 use clap::Parser;
 
-use crate::agent::{
+use crate::lf::Cli;
+use loopflow_execution::agent::{
     build_session_command, resolve_session_config, AgentConfig, ProviderInvocation,
 };
-use crate::lf::Cli;
-use crate::ops::human_session::tests::SessionHome;
-use crate::session::LfSession;
-use crate::session_record::{SessionCaptureSpec, SessionGraphMembership, SessionRecorder};
-use crate::store::SharedStore;
+use loopflow_execution::session::LfSession;
+use loopflow_execution::session_record::{
+    SessionCaptureSpec, SessionGraphMembership, SessionRecorder,
+};
+use loopflow_execution::store::SharedStore;
+use loopflow_execution::test_support::human_session::SessionHome;
 
 struct Table {
     repo: loopflow_test_support::TestRepo,
@@ -62,7 +64,7 @@ impl Launch {
 
 impl Table {
     fn new() -> Self {
-        let lock = crate::journal::test_env_lock();
+        let lock = loopflow_execution::journal::test_env_lock();
         let home = SessionHome::new();
         let store = tokio::runtime::Runtime::new()
             .unwrap()
@@ -132,7 +134,8 @@ impl Table {
     /// `lf FLAGS session resume ID`.
     fn resume(&self, session: &LfSession, flags: &[&str]) -> anyhow::Result<Launch> {
         let cli = Cli::try_parse_from(std::iter::once("lf").chain(flags.iter().copied()))?;
-        let _settings = crate::config::settings::select_invocation(cli.setting_values()?);
+        let _settings =
+            loopflow_execution::config::settings::select_invocation(cli.setting_values()?);
         let config = resolve_session_config(session, serde_yaml_ng::Value::Null, None, false)?;
         let command = build_session_command(
             &config,

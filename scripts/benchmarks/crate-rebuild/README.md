@@ -18,14 +18,22 @@ can retain their earlier path hashes. It does not build the application. Use scc
 environment-dependency tracking; 0.19.0 lacks these features. The first verified
 upstream revision is `ca81ec2a2566efc623692741440d99c710268841`.
 
-The full comparison clones the committed baseline and candidate into disposable
-copies. It runs serial cold A, fresh-target warm B, and a real shipping-message
-edit in B, then a Task-record error-message edit on top of it. The Task edit
-follows its source across crate moves; each receipt names the edited file. Each
-case measures only its latest edit, with one Cargo job unless selected otherwise.
-After timing, the candidate also checks Cargo catalogue refresh across origin/main-only
-advancement, packed references, a new loose reference and a source package without Git.
-Those checks are separate from the timing receipts.
+The full comparison clones committed baseline and candidate revisions into
+independent source/target roots. Each label has its own cold-seeded private
+cache. Five paired cohorts alternate candidate/base and base/candidate order.
+Each starts with a fresh-target warm-cache build, then a command-help edit,
+a shipping-message edit, and a Task-record error-message edit. Each edit is
+unique to its cohort; it cannot retrieve an earlier edited artifact. Receipts
+name edited files and actual workspace compiler hit/miss results, alongside
+Cargo artifact freshness, aggregate cache statistics and executable link cost.
+One serial Cargo job keeps per-invocation cache attribution unambiguous.
+
+`summary.json` reports median/range elapsed seconds, client CPU and largest
+process RSS over five samples per case and revision. Cold seeds are calibration,
+not cohort samples. The wrapper adds two cache-stat RPCs per workspace compiler;
+that overhead is included. Runtime root/revision is checked in every source copy
+outside timing. After the candidate seed, catalogue checks exercise origin/main
+advancement, packed/loose refs and packaging without Git, outside timing.
 
 Both revisions retain their own profiles and dependencies; inspect differences before attributing a
 timing change to crate layout. It needs the source repository's `origin/main`

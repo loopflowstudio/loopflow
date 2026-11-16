@@ -6,7 +6,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
 use std::time::Duration;
 
-use loopflow::store::ProviderAccountId;
+use loopflow_execution::store::ProviderAccountId;
 use loopflow_test_support::TestRepo;
 use serde_json::Value;
 
@@ -58,9 +58,13 @@ fn configuration_edits_reach_an_open_wave_watch_without_store_writes() {
     repo.create_file(".lf/config.yaml", "agent: claude\n");
     repo.create_file(".lf/wave/infra/GOAL.md", "Keep it boring.\n");
     repo.create_file(".git/info/exclude", "/lf.config.local.yaml\n");
-    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
-    loopflow::work::wave::bootstrap::ensure_wave(&store, repo.path().to_str().unwrap(), "infra")
-        .unwrap();
+    let store = loopflow_execution::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
+    loopflow_execution::work::wave::bootstrap::ensure_wave(
+        &store,
+        repo.path().to_str().unwrap(),
+        "infra",
+    )
+    .unwrap();
     let mut subscription = Subscription(
         command(
             repo.path(),
@@ -141,7 +145,7 @@ fn launch_agent(repo: &Path, home: &Path, wave: Option<&str>) -> String {
 fn documented_recipes_share_file_cli_and_inspection_without_a_database() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
-    let wave = loopflow::id::WaveId::new();
+    let wave = loopflow_model::id::WaveId::new();
     repo.create_file(
         ".lf/skills/design/SKILL.md",
         "---\ndefault_agent: claude\n---\nDesign.",
@@ -276,15 +280,17 @@ fn each_wave_runs_its_own_setup_and_the_repository_is_the_default() {
     repo.stage_all();
     repo.commit("Set up three areas of work");
 
-    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow_execution::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     let checkout = repo.path().to_str().unwrap();
-    loopflow::work::wave::bootstrap::ensure_wave(&store, checkout, "infra").unwrap();
-    loopflow::work::wave::bootstrap::ensure_wave(&store, checkout, "research").unwrap();
-    loopflow::work::wave::bootstrap::ensure_wave(&store, checkout, "plain").unwrap();
-    let here = loopflow::store::machines::local_machine(&store).unwrap().id;
-    loopflow::provider_account::catalog::upsert_provider_account(
+    loopflow_execution::work::wave::bootstrap::ensure_wave(&store, checkout, "infra").unwrap();
+    loopflow_execution::work::wave::bootstrap::ensure_wave(&store, checkout, "research").unwrap();
+    loopflow_execution::work::wave::bootstrap::ensure_wave(&store, checkout, "plain").unwrap();
+    let here = loopflow_execution::store::machines::local_machine(&store)
+        .unwrap()
+        .id;
+    loopflow_execution::provider_account::catalog::upsert_provider_account(
         &store,
-        &loopflow::store::ProviderAccount {
+        &loopflow_execution::store::ProviderAccount {
             provider: "codex".into(),
             account_id: ProviderAccountId::parse("work").unwrap(),
             home: None,
@@ -293,8 +299,8 @@ fn each_wave_runs_its_own_setup_and_the_repository_is_the_default() {
             observed_subject: None,
             observed_credential_digest: None,
             observed_plan: None,
-            credential_state: loopflow::store::CredentialState::Connected,
-            routing_state: loopflow::store::RoutingState::Automatic,
+            credential_state: loopflow_execution::store::CredentialState::Connected,
+            routing_state: loopflow_execution::store::RoutingState::Automatic,
             plan: None,
             paid_through: None,
             utilization_percent: None,
@@ -377,9 +383,13 @@ fn your_own_value_wins_for_you_until_you_unset_it() {
     repo.create_file(".lf/wave/research/config.yaml", "agent: codex:o3\n");
     repo.stage_all();
     repo.commit("Share the research agent");
-    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
-    loopflow::work::wave::bootstrap::ensure_wave(&store, repo.path().to_str().unwrap(), "research")
-        .unwrap();
+    let store = loopflow_execution::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
+    loopflow_execution::work::wave::bootstrap::ensure_wave(
+        &store,
+        repo.path().to_str().unwrap(),
+        "research",
+    )
+    .unwrap();
     drop(store);
     let ok = |args: &[&str]| {
         let output = lf(repo.path(), home.path(), args);
@@ -428,9 +438,13 @@ fn a_wave_file_skips_repository_settings_with_a_warning() {
     );
     repo.stage_all();
     repo.commit("Misplace a repository setting");
-    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
-    loopflow::work::wave::bootstrap::ensure_wave(&store, repo.path().to_str().unwrap(), "infra")
-        .unwrap();
+    let store = loopflow_execution::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
+    loopflow_execution::work::wave::bootstrap::ensure_wave(
+        &store,
+        repo.path().to_str().unwrap(),
+        "infra",
+    )
+    .unwrap();
     drop(store);
     let output = lf(
         repo.path(),
@@ -461,9 +475,9 @@ fn settings_scope_by_the_typed_wave_only() {
     repo.create_file(".lf/wave/research/GOAL.md", "Find out.\n");
     repo.stage_all();
     repo.commit("Add a Wave");
-    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow_execution::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     let checkout = repo.path().canonicalize().unwrap();
-    let wave = loopflow::work::wave::bootstrap::ensure_wave(
+    let wave = loopflow_execution::work::wave::bootstrap::ensure_wave(
         &store,
         checkout.to_str().unwrap(),
         "research",
@@ -493,8 +507,10 @@ fn settings_scope_by_the_typed_wave_only() {
     );
     assert!(typed.status.success());
     let settings: serde_yaml_ng::Value = serde_yaml_ng::from_str(
-        &std::fs::read_to_string(loopflow::config::files::private_path(&checkout).unwrap())
-            .unwrap(),
+        &std::fs::read_to_string(
+            loopflow_execution::config::files::private_path(&checkout).unwrap(),
+        )
+        .unwrap(),
     )
     .unwrap();
     assert_eq!(settings["agent"].as_str(), Some("claude:haiku"));

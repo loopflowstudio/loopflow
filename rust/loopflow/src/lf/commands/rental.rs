@@ -12,9 +12,11 @@ use serde::Serialize;
 use time::OffsetDateTime;
 
 use crate::lf::{OndemandCommand, PoolCommand};
-use crate::machine_records::CopyCounts;
-use crate::rental::recovery::{delete_sandbox, give_back, held_ids, now, open_store, refresh_all};
-use crate::rental::sandbox::Sandboxes;
+use loopflow_execution::machine_records::CopyCounts;
+use loopflow_execution::rental::recovery::{
+    delete_sandbox, give_back, held_ids, now, open_store, refresh_all,
+};
+use loopflow_execution::rental::sandbox::Sandboxes;
 use loopflow_model::durable::{CapacityDefault, Machine, RepositoryId};
 use loopflow_storage::rental::{
     self, Hardware, OnDemand, Pool, PoolMachine, Provider, Rental, RentalState, Usd,
@@ -47,7 +49,7 @@ struct PoolListing {
 
 /// The scopes whose new Tasks go to this pool or on-demand.
 fn defaults_for(sqlite: &SqliteStore, capacity: &str) -> anyhow::Result<Vec<CapacityDefault>> {
-    let mut defaults = crate::store::placement::capacity_defaults(sqlite)?;
+    let mut defaults = loopflow_execution::store::placement::capacity_defaults(sqlite)?;
     defaults.retain(|default| default.capacity == capacity);
     Ok(defaults)
 }
@@ -68,14 +70,15 @@ pub fn run_pool(cmd: &PoolCommand) -> anyhow::Result<()> {
     let sqlite = &store.sqlite;
     match cmd {
         PoolCommand::Add { name } => {
-            crate::store::rentals::add_pool(sqlite, name)?;
+            loopflow_execution::store::rentals::add_pool(sqlite, name)?;
             println!("Added pool {name}; `lf machine add <dest> --pool {name}` adds a machine");
         }
         PoolCommand::List { json } => {
-            let listings = crate::store::rentals::pools(sqlite)?
+            let listings = loopflow_execution::store::rentals::pools(sqlite)?
                 .into_iter()
                 .map(|pool| {
-                    let machines = crate::store::machines::pool_machines(sqlite, &pool.name)?;
+                    let machines =
+                        loopflow_execution::store::machines::pool_machines(sqlite, &pool.name)?;
                     let defaults = defaults_for(sqlite, &pool.name)?;
                     Ok(PoolListing {
                         pool,
@@ -114,15 +117,15 @@ pub fn run_pool(cmd: &PoolCommand) -> anyhow::Result<()> {
             }
         }
         PoolCommand::Off { name } => {
-            crate::store::rentals::set_pool_off(sqlite, name, true)?;
+            loopflow_execution::store::rentals::set_pool_off(sqlite, name, true)?;
             println!("Pool {name} takes no new work; what it holds stays");
         }
         PoolCommand::On { name } => {
-            crate::store::rentals::set_pool_off(sqlite, name, false)?;
+            loopflow_execution::store::rentals::set_pool_off(sqlite, name, false)?;
             println!("Pool {name} takes new work");
         }
         PoolCommand::Remove { name } => {
-            crate::store::rentals::remove_pool(sqlite, name)?;
+            loopflow_execution::store::rentals::remove_pool(sqlite, name)?;
             println!("Removed pool {name}; its machines stay added");
         }
     }
@@ -185,7 +188,7 @@ pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
                 created_at: now(),
             };
             let price = ondemand.usd_per_hour().map_err(|reason| anyhow!(reason))?;
-            crate::store::rentals::add_ondemand(sqlite, &ondemand)?;
+            loopflow_execution::store::rentals::add_ondemand(sqlite, &ondemand)?;
             println!(
                 "Added on-demand {name}: {} on {} at {price}/h; at most {max} at once, {}h each",
                 ondemand.hardware,
@@ -207,7 +210,7 @@ pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
         OndemandCommand::List { json } => {
             // A listing, even one a client polls, never ends a paid machine.
             let unreached = refresh_all(sqlite);
-            let listings = crate::store::rentals::ondemands(sqlite)?
+            let listings = loopflow_execution::store::rentals::ondemands(sqlite)?
                 .into_iter()
                 .map(|ondemand| {
                     let rentals = sqlite
@@ -235,7 +238,7 @@ pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
             }
         }
         OndemandCommand::Max { name, max } => {
-            crate::store::rentals::set_ondemand_max(sqlite, name, *max)?;
+            loopflow_execution::store::rentals::set_ondemand_max(sqlite, name, *max)?;
             println!("{name} rents at most {max} at once; current machines stay");
         }
         OndemandCommand::Rent {
@@ -265,7 +268,7 @@ pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
             }
         }
         OndemandCommand::Remove { name } => {
-            crate::store::rentals::remove_ondemand(sqlite, name)?;
+            loopflow_execution::store::rentals::remove_ondemand(sqlite, name)?;
             println!("Removed on-demand {name}; its rentals' history stays");
         }
     }
@@ -281,7 +284,7 @@ fn where_rented(provider: Provider) -> String {
 }
 
 fn require_ondemand(sqlite: &SqliteStore, name: &str) -> anyhow::Result<OnDemand> {
-    crate::store::rentals::ondemand(sqlite, name)?.ok_or_else(|| {
+    loopflow_execution::store::rentals::ondemand(sqlite, name)?.ok_or_else(|| {
         anyhow!("no on-demand {name}; `lf ondemand add {name} --provider daytona …` names one")
     })
 }
@@ -289,7 +292,8 @@ fn require_ondemand(sqlite: &SqliteStore, name: &str) -> anyhow::Result<OnDemand
 fn listing(sqlite: &SqliteStore, rental: Rental) -> anyhow::Result<RentalListing> {
     let (machine, tasks, copied) = match &rental.machine_id {
         Some(id) => (
-            crate::store::machines::machine_by_id(sqlite, id)?.and_then(|machine| machine.label),
+            loopflow_execution::store::machines::machine_by_id(sqlite, id)?
+                .and_then(|machine| machine.label),
             held_ids(sqlite, id)?,
             Some(sqlite.copy_counts(id)?).filter(|counts| counts.sessions + counts.processes > 0),
         ),
@@ -370,7 +374,8 @@ pub(crate) fn rent(
     let api = Sandboxes::from_env(ondemand.provider)?;
     let public_key = public_key()?;
     let linux_lf = linux_lf()?;
-    let rental = crate::store::rentals::admit_rental(sqlite, name, hours, max_usd, by_hand)?;
+    let rental =
+        loopflow_execution::store::rentals::admit_rental(sqlite, name, hours, max_usd, by_hand)?;
     eprintln!(
         "Renting {} on {} at {}/h until {}",
         rental.hardware,
@@ -381,7 +386,7 @@ pub(crate) fn rent(
     let sandbox = match api.create(&rental, &public_key) {
         Ok(sandbox) => sandbox,
         Err(error) => {
-            crate::store::ownership::set_rental_state(
+            loopflow_execution::store::ownership::set_rental_state(
                 sqlite,
                 &rental.id,
                 RentalState::Unconfirmed,
@@ -501,7 +506,7 @@ fn attach(
         }
         None => first_contact(
             route,
-            crate::machine::connection::INSTALL_COMMAND,
+            loopflow_execution::machine::connection::INSTALL_COMMAND,
             Stdio::null(),
         )?,
     };
@@ -512,16 +517,17 @@ fn attach(
             clock(rental.deadline)
         ));
     }
-    let probe = runtime.block_on(super::machine::probe(route, false))?;
+    let probe = runtime.block_on(loopflow_execution::machine::connection::probe(route, false))?;
     let label = next_label(sqlite, &rental.ondemand)?;
-    let machine = crate::store::machines::add_machine(sqlite, &probe.id?, route, &label)?;
+    let machine =
+        loopflow_execution::store::machines::add_machine(sqlite, &probe.id?, route, &label)?;
     sqlite.attach_rental(&rental.id, &machine.id)?;
     Ok(machine)
 }
 
 /// `code-1`, `code-2`, …: the first label no machine carries.
 fn next_label(sqlite: &SqliteStore, ondemand: &str) -> anyhow::Result<String> {
-    let taken = crate::store::machines::machines(sqlite)?
+    let taken = loopflow_execution::store::machines::machines(sqlite)?
         .into_iter()
         .filter_map(|machine| machine.label)
         .collect::<std::collections::HashSet<_>>();
@@ -575,9 +581,9 @@ pub fn place(
     let store = open_store(&runtime)?;
     let sqlite = &store.sqlite;
     if let Some(pool) = placement.pool {
-        let record = crate::store::rentals::pool(sqlite, pool)?
+        let record = loopflow_execution::store::rentals::pool(sqlite, pool)?
             .ok_or_else(|| anyhow!("no pool {pool}; `lf pool add {pool}` creates it"))?;
-        let machines = crate::store::machines::pool_machines(sqlite, pool)?;
+        let machines = loopflow_execution::store::machines::pool_machines(sqlite, pool)?;
         match rental::free_machine(&record, &machines, now()) {
             Ok(free) if placement.quote => {
                 println!(
@@ -611,12 +617,14 @@ pub fn place(
     }
     if batch {
         runtime.block_on(async {
-            let accounts = crate::provider_account::open_account_store().await?;
-            super::machine_credentials::require_unattended_logins(&accounts).await
+            let accounts = loopflow_execution::provider_account::open_account_store().await?;
+            loopflow_execution::machine::credentials::require_unattended_logins(&accounts).await
         })?;
     }
     // The Task's own repository, wherever this checkout was first recorded.
-    let (_, task) = runtime.block_on(crate::ops::task::resolve_saved_task(repo, None, issue))?;
+    let (_, task) = runtime.block_on(loopflow_execution::ops::task::resolve_saved_task(
+        repo, None, issue,
+    ))?;
     let (rental, machine) = rent(&runtime, sqlite, name, None, None, false)?;
     let label = machine.name();
     if let Err(error) = prepare(&runtime, &label, repo, &task.repository_id, batch) {
@@ -649,23 +657,24 @@ fn git_config(repo: &std::path::Path, key: &str) -> Option<String> {
 pub fn place_by_default(repo: &std::path::Path, issue: &str, batch: bool) -> anyhow::Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
     // A Task not saved yet has no scope; the run itself reports why.
-    let Ok((store, task)) =
-        runtime.block_on(crate::ops::task::resolve_saved_task(repo, None, issue))
-    else {
+    let Ok((store, task)) = runtime.block_on(loopflow_execution::ops::task::resolve_saved_task(
+        repo, None, issue,
+    )) else {
         return Ok(());
     };
     let sqlite = &store.sqlite;
-    if crate::store::ownership::task_ownership(sqlite, &task.id)?
+    if loopflow_execution::store::ownership::task_ownership(sqlite, &task.id)?
         .owner
         .is_some()
     {
         return Ok(());
     }
-    let Some(capacity) = crate::store::placement::task_capacity(sqlite, &task.id)? else {
+    let Some(capacity) = loopflow_execution::store::placement::task_capacity(sqlite, &task.id)?
+    else {
         return Ok(());
     };
-    let is_pool = crate::store::rentals::pool(sqlite, &capacity)?.is_some();
-    if !is_pool && crate::store::rentals::ondemand(sqlite, &capacity)?.is_none() {
+    let is_pool = loopflow_execution::store::rentals::pool(sqlite, &capacity)?.is_some();
+    if !is_pool && loopflow_execution::store::rentals::ondemand(sqlite, &capacity)?.is_none() {
         return Err(anyhow!(
             "{issue}'s default capacity {capacity} is no pool or on-demand here; \
              `lf set machine <machine>` replaces it"
@@ -687,10 +696,11 @@ fn hand_off(
     issue: &str,
     label: &str,
 ) -> anyhow::Result<()> {
-    use crate::ops::task_ownership::{change, OwnershipChange};
-    let (store, task) =
-        runtime.block_on(crate::ops::task::resolve_saved_task(repo, None, issue))?;
-    if crate::store::ownership::task_ownership(&store.sqlite, &task.id)?
+    use loopflow_execution::ops::task_ownership::{change, OwnershipChange};
+    let (store, task) = runtime.block_on(loopflow_execution::ops::task::resolve_saved_task(
+        repo, None, issue,
+    ))?;
+    if loopflow_execution::store::ownership::task_ownership(&store.sqlite, &task.id)?
         .owner
         .is_none()
     {
@@ -699,7 +709,7 @@ fn hand_off(
     let ownership = change(repo, issue, OwnershipChange::Move(label.to_string()))?;
     eprintln!(
         "{}",
-        crate::ops::task_ownership::render(&ownership)
+        loopflow_execution::ops::task_ownership::render(&ownership)
             .lines()
             .next()
             .unwrap_or("")
@@ -717,9 +727,11 @@ fn prepare(
     repository: &RepositoryId,
     batch: bool,
 ) -> anyhow::Result<()> {
-    use crate::provider_auth::Provider as Login;
-    let machine = runtime.block_on(super::ssh::resolve_target(label, false))?;
-    runtime.block_on(super::machine_credentials::connect(
+    use loopflow_execution::provider_auth::Provider as Login;
+    let machine = runtime.block_on(loopflow_execution::machine::connection::resolve_target(
+        label, false,
+    ))?;
+    runtime.block_on(loopflow_execution::machine::credentials::connect(
         &machine,
         Login::GitHub,
         None,
@@ -727,14 +739,17 @@ fn prepare(
         false,
         batch,
     ))?;
-    runtime.block_on(super::machine_credentials::connect_claude_accounts(
-        &machine, batch,
-    ))?;
-    let planning = crate::config::load_config(Some(repo))?
+    runtime.block_on(
+        loopflow_execution::machine::credentials::connect_claude_accounts(&machine, batch),
+    )?;
+    let planning = loopflow_execution::config::load_config(Some(repo))?
         .unwrap_or_default()
         .planning_transport();
-    if matches!(planning, crate::config::PlanningConfig::Linear { .. }) {
-        runtime.block_on(super::machine_credentials::connect(
+    if matches!(
+        planning,
+        loopflow_execution::config::PlanningConfig::Linear { .. }
+    ) {
+        runtime.block_on(loopflow_execution::machine::credentials::connect(
             &machine,
             Login::Linear,
             None,
@@ -745,7 +760,7 @@ fn prepare(
     }
     let (origin, script) = checkout_script(repo, repository)?;
     let status = Command::new("ssh")
-        .args(crate::machine_route::bounded_ssh_args(
+        .args(loopflow_execution::machine_route::bounded_ssh_args(
             &machine.route,
             false,
         )?)
@@ -770,10 +785,10 @@ fn checkout_script(
         .file_name()
         .and_then(|name| name.to_str())
         .ok_or_else(|| anyhow!("{} has no directory name", repo.display()))?;
-    let q = crate::machine::ssh::sh_quote;
+    let q = loopflow_execution::machine::ssh::sh_quote;
     // gh clones `owner/name` over HTTPS with the GitHub login just connected;
     // handed an SSH origin it would use SSH, which a fresh machine cannot verify.
-    let clone = match crate::git::worktrees::github_nwo(&origin) {
+    let clone = match loopflow_execution::git::worktrees::github_nwo(&origin) {
         Some((owner, name)) => format!("gh repo clone {}", q(&format!("{owner}/{name}"))),
         None => format!("git clone {}", q(&origin)),
     };
@@ -789,7 +804,7 @@ fn checkout_script(
         .collect();
     let script = format!(
         "{} && {identity}mkdir -p ~/src && cd ~/src && {{ [ -d {dir} ] || {clone} {dir}; }} && cd {dir} && lf config repo --bind {repository}",
-        crate::machine::ssh::REMOTE_PATH,
+        loopflow_execution::machine::ssh::REMOTE_PATH,
         dir = q(directory),
     );
     Ok((origin, script))
@@ -803,7 +818,9 @@ fn checkout_script(
 pub fn end(label: &str, force: bool) -> anyhow::Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
     let store = open_store(&runtime)?;
-    let machine = runtime.block_on(super::machine::find_machine(&store, label))?;
+    let machine = runtime.block_on(loopflow_execution::machine::connection::find_machine(
+        &store, label,
+    ))?;
     let sqlite = &store.sqlite;
     let rental = sqlite.rental_for_machine(&machine.id)?.ok_or_else(|| {
         anyhow!("{label} is owned, and owned machines are never deleted; `lf machine remove {label}` forgets it")
@@ -821,7 +838,7 @@ mod tests {
     use super::checkout_script;
     #[test]
     fn a_worktree_checkout_binds_its_tasks_repository_on_a_fresh_home() {
-        let _env = crate::journal::test_env_lock();
+        let _env = loopflow_execution::journal::test_env_lock();
         let dir = tempfile::tempdir().unwrap();
         let main = dir.path().join("loopflow");
         let git = |cwd: &std::path::Path, args: &[&str]| {

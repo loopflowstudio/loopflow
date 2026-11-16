@@ -1,23 +1,25 @@
-use crate::agent::check_cli_available;
-use crate::agent::missing_agent_message;
-use crate::agent::run_agent;
-use crate::agent::AgentConfig;
-use crate::agent::ProcessConfig;
-use crate::config::parse_agent;
-use crate::graph::Skill;
-use crate::harness::native_session::{launch_session, SessionCommandOutcome};
 use crate::lf::commands::context::preview::PromptPreview;
 use crate::lf::Cli;
-use crate::output::{format_context_header, format_reproducible_command, Colors};
-use crate::process::LfProcessRuntime;
-use crate::prompt::attribution::attributed_context;
-use crate::prompt::process::prepare_process_prompt;
-use crate::prompt::process::ContextSourceOverrides;
-use crate::prompt::process::ProcessPromptInput;
-use crate::prompt::PromptComponents;
-use crate::prompt::Surface;
-use crate::session_record::{AgentProcessRequest, SessionCaptureSpec, SubjectAttribution};
 use anyhow::{anyhow, bail, Result};
+use loopflow_execution::agent::check_cli_available;
+use loopflow_execution::agent::missing_agent_message;
+use loopflow_execution::agent::run_agent;
+use loopflow_execution::agent::AgentConfig;
+use loopflow_execution::agent::ProcessConfig;
+use loopflow_execution::config::parse_agent;
+use loopflow_execution::graph::Skill;
+use loopflow_execution::harness::native_session::{launch_session, SessionCommandOutcome};
+use loopflow_execution::output::{format_context_header, format_reproducible_command, Colors};
+use loopflow_execution::process::LfProcessRuntime;
+use loopflow_execution::prompt::attribution::attributed_context;
+use loopflow_execution::prompt::process::prepare_process_prompt;
+use loopflow_execution::prompt::process::ContextSourceOverrides;
+use loopflow_execution::prompt::process::ProcessPromptInput;
+use loopflow_execution::prompt::PromptComponents;
+use loopflow_execution::prompt::Surface;
+use loopflow_execution::session_record::{
+    AgentProcessRequest, SessionCaptureSpec, SubjectAttribution,
+};
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -40,14 +42,14 @@ pub fn run(repo_root: &Path, skill: Option<&str>, message: Option<&str>, cli: &C
     built.subjects = cli.work_subject_selector().into_iter().collect();
     // `--wave` resolved its Wave once for this process.
     built.work = cli.wave.as_ref().and_then(|_| {
-        let id = std::env::var(crate::work::wave::context::WAVE_ID_ENV).ok()?;
-        Some(crate::session::SessionWork {
+        let id = std::env::var(loopflow_execution::work::wave::context::WAVE_ID_ENV).ok()?;
+        Some(loopflow_execution::session::SessionWork {
             task_id: None,
             wave_id: Some(loopflow_model::id::WaveId::parse(&id).ok()?),
-            source: crate::session::WorkSource::Declared,
+            source: loopflow_execution::session::WorkSource::Declared,
         })
     });
-    built.agent_config.holder = crate::session::Holder::of(
+    built.agent_config.holder = loopflow_execution::session::Holder::of(
         built
             .work
             .as_ref()
@@ -63,7 +65,7 @@ pub(crate) fn preview_prompt(
     skill: Option<&str>,
     message: Option<&str>,
     cli: &Cli,
-    binding: Option<&crate::ops::WorkBinding>,
+    binding: Option<&loopflow_execution::ops::WorkBinding>,
     captured: bool,
 ) -> Result<PromptPreview> {
     anyhow::ensure!(
@@ -84,7 +86,9 @@ pub(crate) fn preview_prompt(
     };
     Ok(PromptPreview {
         checkout: built.repo_root,
-        system_prompt: crate::agent::system_prompt_with_structured_replies(&built.agent_config),
+        system_prompt: loopflow_execution::agent::system_prompt_with_structured_replies(
+            &built.agent_config,
+        ),
         task_prompt: built.agent_config.task_prompt,
         skill_invocation: built.agent_config.skill_invocation,
         references: built
@@ -92,7 +96,7 @@ pub(crate) fn preview_prompt(
             .docs
             .iter()
             .chain(&built.components.summaries)
-            .filter(|doc| doc.source != crate::prompt::DocumentSource::Docs)
+            .filter(|doc| doc.source != loopflow_execution::prompt::DocumentSource::Docs)
             .map(
                 |doc| crate::lf::commands::context::preview::ContextReference {
                     path: doc.path.clone(),
@@ -107,16 +111,18 @@ pub(crate) fn preview_prompt(
 /// using `message` and the provider's own history without re-executing its skill.
 /// `named_work` when the resume command named a Task or Wave.
 pub fn resume(id: &str, message: &str, cli: &Cli, named_work: bool) -> Result<()> {
-    if crate::transport::delegate_current(true, named_work)? {
+    if loopflow_execution::transport::delegate_current(true, named_work)? {
         return Ok(());
     }
-    let store = crate::store::open_sqlite(&crate::store::database_path_from_env()?)?;
+    let store = loopflow_execution::store::open_sqlite(
+        &loopflow_execution::store::database_path_from_env()?,
+    )?;
     let session = store
         .session(id)?
         .ok_or_else(|| anyhow!("session {id:?} was not found"))?;
     // A Graph corrects its own step's answer in that step's Run; nobody else
     // continues a Run.
-    let caller_graph = crate::journal::current_lf_process_id()
+    let caller_graph = loopflow_execution::journal::current_lf_process_id()
         .map(|process| store.lf_process(&process))
         .transpose()?
         .flatten()
@@ -124,11 +130,13 @@ pub fn resume(id: &str, message: &str, cli: &Cli, named_work: bool) -> Result<()
     let own_step = caller_graph
         .is_some_and(|graph| session.graph_lf_process_id.as_deref() == Some(graph.as_str()));
     if !own_step {
-        if let Some(refusal) = crate::ops::human_session::run_refusal(&store, &session)? {
+        if let Some(refusal) =
+            loopflow_execution::ops::human_session::run_refusal(&store, &session)?
+        {
             bail!(refusal);
         }
     }
-    let mut resolved = crate::agent::resolve_session_config(
+    let mut resolved = loopflow_execution::agent::resolve_session_config(
         &session,
         cli.setting_values()?,
         cli.output_schema.as_ref(),
@@ -138,9 +146,14 @@ pub fn resume(id: &str, message: &str, cli: &Cli, named_work: bool) -> Result<()
     turn.agent = resolved.agent.clone();
     let message = if session.captured.is_some()
         && session.provider.as_deref()
-            != Some(crate::config::parse_agent(resolved.agent()?).0.as_str())
-    {
-        let request = crate::ops::human_session::conversation_log::continuation(&store, &session)?;
+            != Some(
+                loopflow_execution::config::parse_agent(resolved.agent()?)
+                    .0
+                    .as_str(),
+            ) {
+        let request = loopflow_execution::ops::human_session::conversation_log::continuation(
+            &store, &session,
+        )?;
         format!("{request}\n\n{message}")
     } else {
         message.to_owned()
@@ -189,7 +202,7 @@ pub fn resume(id: &str, message: &str, cli: &Cli, named_work: bool) -> Result<()
         task_prompt: prepared.task_prompt,
         structured_replies: prepared.structured_replies,
         env: prepared.env,
-        holder: crate::session::Holder::of(named_work),
+        holder: loopflow_execution::session::Holder::of(named_work),
         ..resolved
     };
     (built.harness, built.model) = parse_agent(&built.agent_config.resolved_agent()?);
@@ -202,7 +215,7 @@ pub fn run_bound(
     skill: Option<&str>,
     message: Option<&str>,
     cli: &Cli,
-    binding: &crate::ops::WorkBinding,
+    binding: &loopflow_execution::ops::WorkBinding,
 ) -> Result<()> {
     run_bound_prompt(skill, message, cli, binding).map(|_| ())
 }
@@ -211,7 +224,7 @@ pub fn run_bound(
 pub(crate) fn answer_bound(
     message: &str,
     cli: &Cli,
-    binding: &crate::ops::WorkBinding,
+    binding: &loopflow_execution::ops::WorkBinding,
 ) -> Result<Option<String>> {
     run_bound_prompt(None, Some(message), cli, binding)
 }
@@ -220,12 +233,14 @@ fn run_bound_prompt(
     skill: Option<&str>,
     message: Option<&str>,
     cli: &Cli,
-    binding: &crate::ops::WorkBinding,
+    binding: &loopflow_execution::ops::WorkBinding,
 ) -> Result<Option<String>> {
     let mut scoped;
     let binding = if let Some(scope) = operator_scope(skill, cli, &binding.cwd, Some(binding))? {
         scoped = binding.clone();
-        scoped.cwd = crate::ops::human_session::ensure_scope_worktree(&binding.cwd, &scope)?.path;
+        scoped.cwd =
+            loopflow_execution::ops::human_session::ensure_scope_worktree(&binding.cwd, &scope)?
+                .path;
         &scoped
     } else {
         binding
@@ -240,7 +255,7 @@ fn build_bound_prompt(
     skill: Option<&str>,
     message: Option<&str>,
     cli: &Cli,
-    binding: &crate::ops::WorkBinding,
+    binding: &loopflow_execution::ops::WorkBinding,
 ) -> Result<PromptBuild> {
     let mut launch = cli.process_options();
     launch.wave = binding.wave_name.clone();
@@ -256,18 +271,19 @@ fn build_bound_prompt(
     built.agent_config.cwd = Some(binding.cwd.clone());
     if let Some(wave) = &binding.wave_id {
         built.agent_config.env.insert(
-            crate::work::wave::context::WAVE_ID_ENV.to_string(),
+            loopflow_execution::work::wave::context::WAVE_ID_ENV.to_string(),
             wave.to_string(),
         );
     } else {
         built
             .agent_config
             .env
-            .remove(crate::work::wave::context::WAVE_ID_ENV);
+            .remove(loopflow_execution::work::wave::context::WAVE_ID_ENV);
     }
     built.subjects = binding.subjects.clone();
-    built.agent_config.holder = crate::session::Holder::of(binding.source.is_managed());
-    built.work = Some(crate::session::SessionWork {
+    built.agent_config.holder =
+        loopflow_execution::session::Holder::of(binding.source.is_managed());
+    built.work = Some(loopflow_execution::session::SessionWork {
         task_id: match &binding.work {
             loopflow_model::durable::WorkRef::Task(id) => Some(id.clone()),
             loopflow_model::durable::WorkRef::Wave(_)
@@ -284,23 +300,26 @@ fn build_bound_prompt(
 /// the caller selected Work explicitly. Otherwise checkout ownership wins over
 /// an ancestor's explicit declaration. An unavailable registry leaves context
 /// unresolved; it never reconstructs Task identity from process ancestry.
-pub fn implicit_binding(cli: &Cli) -> Result<Option<crate::ops::WorkBinding>> {
+pub fn implicit_binding(cli: &Cli) -> Result<Option<loopflow_execution::ops::WorkBinding>> {
     if cli.work_subject_selector().is_some() {
         return Ok(None);
     }
     let repo = std::env::current_dir()?;
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
-        let Some(store) = crate::store::open_existing_store().await? else {
+        let Some(store) = loopflow_execution::store::open_existing_store().await? else {
             return Ok(None);
         };
-        crate::ops::resolve_execution_binding(&std::sync::Arc::new(store), &repo)
+        loopflow_execution::ops::resolve_execution_binding(&std::sync::Arc::new(store), &repo)
             .await
             .map_err(anyhow::Error::from)
     })
 }
 
-pub(crate) fn bound_message(binding: &crate::ops::WorkBinding, message: Option<&str>) -> String {
+pub(crate) fn bound_message(
+    binding: &loopflow_execution::ops::WorkBinding,
+    message: Option<&str>,
+) -> String {
     let mut context = format!(
         "<lf:work kind=\"{}\" id=\"{}\">\n{}\n</lf:work>",
         binding.work.kind(),
@@ -319,13 +338,13 @@ struct PromptBuild {
     agent_config: AgentConfig,
     process: ProcessConfig,
     components: PromptComponents,
-    context: crate::trace::PreparedTurnContext,
+    context: loopflow_execution::trace::PreparedTurnContext,
     harness: String,
     model: Option<String>,
     skill_name: Option<String>,
     log_name: String,
     subjects: Vec<String>,
-    work: Option<crate::session::SessionWork>,
+    work: Option<loopflow_execution::session::SessionWork>,
 }
 
 fn build_prompt(
@@ -336,7 +355,9 @@ fn build_prompt(
 ) -> Result<PromptBuild> {
     let start = Instant::now();
     let repo_root = match operator_scope(skill, cli, repo_root, None)? {
-        Some(scope) => crate::ops::human_session::ensure_scope_worktree(repo_root, &scope)?.path,
+        Some(scope) => {
+            loopflow_execution::ops::human_session::ensure_scope_worktree(repo_root, &scope)?.path
+        }
         None => repo_root.to_path_buf(),
     };
     debug!(elapsed_ms = start.elapsed().as_millis(), "found repo root");
@@ -357,9 +378,9 @@ fn operator_scope(
     skill: Option<&str>,
     cli: &Cli,
     cwd: &Path,
-    binding: Option<&crate::ops::WorkBinding>,
-) -> Result<Option<crate::session::PrimaryScope>> {
-    use crate::session::PrimaryScope;
+    binding: Option<&loopflow_execution::ops::WorkBinding>,
+) -> Result<Option<loopflow_execution::session::PrimaryScope>> {
+    use loopflow_execution::session::PrimaryScope;
     use loopflow_model::durable::WorkRef;
 
     if cli.cwd.is_some() || cli.task.is_some() || cli.wt.is_some() {
@@ -367,14 +388,19 @@ fn operator_scope(
     }
     let skill = resolve_skill(skill, cli, cwd)?;
     let scope = match (skill.as_ref().map(|skill| skill.name.as_str()), binding) {
-        (Some("repo-operate"), None) => PrimaryScope::Repository(crate::repository::discover(cwd)?),
+        (Some("repo-operate"), None) => {
+            PrimaryScope::Repository(loopflow_execution::repository::discover(cwd)?)
+        }
         (Some("wave-operate"), Some(binding)) => match &binding.work {
             WorkRef::Wave(id) => PrimaryScope::Wave(id.clone()),
             _ => return Ok(None),
         },
         _ => return Ok(None),
     };
-    Ok((crate::repository::discover(cwd)?.as_path() == cwd.canonicalize()?).then_some(scope))
+    Ok(
+        (loopflow_execution::repository::discover(cwd)?.as_path() == cwd.canonicalize()?)
+            .then_some(scope),
+    )
 }
 
 /// Captured identity and body take precedence, including during scope selection.
@@ -382,7 +408,7 @@ fn resolve_skill(name: Option<&str>, cli: &Cli, repo: &Path) -> Result<Option<Sk
     match &cli.resolved_invocation {
         Some(invocation) => Ok(Some(invocation.skill.clone())),
         None => Ok(name
-            .map(|name| crate::graph::load_skill(name, repo))
+            .map(|name| loopflow_execution::graph::load_skill(name, repo))
             .transpose()?),
     }
 }
@@ -401,23 +427,31 @@ fn build_bound_prompt_at(
         cli,
         repo_root.to_path_buf(),
         Some((
-            crate::trace::ContextAssetKind::Goal,
-            crate::trace::ContextScope::Task,
+            loopflow_execution::trace::ContextAssetKind::Goal,
+            loopflow_execution::trace::ContextScope::Task,
         )),
         cli.skill_input.is_some(),
     )?;
     if message != arguments && !cli.context {
-        let path = crate::prompt::write_prompt_log(repo_root, message, "work-direction", None)?;
+        let path = loopflow_execution::prompt::write_prompt_log(
+            repo_root,
+            message,
+            "work-direction",
+            None,
+        )?;
         if let Some(context) = &mut built.agent_config.conversation_context {
             context.references.push(path);
         }
     }
     if message != arguments && cli.context {
-        built.components.summaries.push(crate::prompt::Document {
-            path: "work-direction (saved at launch)".into(),
-            content: message.into(),
-            source: crate::prompt::DocumentSource::Summary,
-        });
+        built
+            .components
+            .summaries
+            .push(loopflow_execution::prompt::Document {
+                path: "work-direction (saved at launch)".into(),
+                content: message.into(),
+                source: loopflow_execution::prompt::DocumentSource::Summary,
+            });
     }
     Ok(built)
 }
@@ -431,15 +465,23 @@ fn confine_checkout_agent(task_checkout: bool, interactive: bool) -> bool {
 
 fn prepare_task_input(
     cli: &Cli,
-) -> Result<Option<(crate::store::SharedStore, crate::ops::task_input::TaskSeed)>> {
+) -> Result<
+    Option<(
+        loopflow_execution::store::SharedStore,
+        loopflow_execution::ops::task_input::TaskSeed,
+    )>,
+> {
     let Some(id) = &cli.task else { return Ok(None) };
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
         let store = std::sync::Arc::new(if cli.context {
-            crate::store::read_existing_registry()?
+            loopflow_execution::store::read_existing_registry()?
                 .ok_or_else(|| anyhow!("Task input unavailable: no local registry"))?
         } else {
-            crate::store::open_store(&crate::store::storage_config_from_env()?).await?
+            loopflow_execution::store::open_store(
+                &loopflow_execution::store::storage_config_from_env()?,
+            )
+            .await?
         });
         // The launch reads local state; each turn end's planning refresh
         // syncs this Task with its tracker.
@@ -451,9 +493,12 @@ fn prepare_task_input(
             Some(id) => store.get_wave(id).await?,
             None => None,
         };
-        let seed =
-            crate::ops::task_input::read_seed(&store, &task, wave.as_ref().map(|w| w.slug()))
-                .await?;
+        let seed = loopflow_execution::ops::task_input::read_seed(
+            &store,
+            &task,
+            wave.as_ref().map(|w| w.slug()),
+        )
+        .await?;
         Ok(Some((store, seed)))
     })
 }
@@ -464,13 +509,16 @@ fn build_prompt_at(
     arguments: &str,
     cli: &Cli,
     repo_root: PathBuf,
-    message_context: Option<(crate::trace::ContextAssetKind, crate::trace::ContextScope)>,
+    message_context: Option<(
+        loopflow_execution::trace::ContextAssetKind,
+        loopflow_execution::trace::ContextScope,
+    )>,
     captured: bool,
 ) -> Result<PromptBuild> {
-    let _settings = crate::config::settings::select_invocation(cli.setting_values()?);
+    let _settings = loopflow_execution::config::settings::select_invocation(cli.setting_values()?);
     let is_interactive = is_interactive_run(cli, skill, message);
     let subject = cli.task.as_deref().unwrap_or_default();
-    crate::agent_input_timing::record("prompt_begin", subject);
+    loopflow_execution::agent_input_timing::record("prompt_begin", subject);
     let task_input = prepare_task_input(cli)?;
     let task_checkout = match &task_input {
         Some((_, seed)) => {
@@ -483,12 +531,12 @@ fn build_prompt_at(
     let wave = cli.wave.clone().or_else(|| {
         cli.resume
             .is_none()
-            .then(crate::work::wave::context::resolve_ambient_wave_name)
+            .then(loopflow_execution::work::wave::context::resolve_ambient_wave_name)
             .flatten()
     });
     let config_start = Instant::now();
-    let config =
-        crate::config::load_wave_config(Some(&repo_root), wave.as_deref())?.unwrap_or_default();
+    let config = loopflow_execution::config::load_wave_config(Some(&repo_root), wave.as_deref())?
+        .unwrap_or_default();
     debug!(
         elapsed_ms = config_start.elapsed().as_millis(),
         "loaded config"
@@ -536,11 +584,11 @@ fn build_prompt_at(
         && message_context.is_none()
         && discovered_skill.as_ref().is_some_and(|skill| {
             skill.source.as_ref().is_some_and(|source| {
-                source.dialect != crate::skills::catalog::SkillDialect::Loopflow
+                source.dialect != loopflow_execution::skills::catalog::SkillDialect::Loopflow
             })
         });
     let prepare = if cli.context {
-        crate::prompt::process::preview_process_prompt
+        loopflow_execution::prompt::process::preview_process_prompt
     } else {
         prepare_process_prompt
     };
@@ -556,7 +604,10 @@ fn build_prompt_at(
             message: message.map(|value| value.to_string()),
             skill_arguments: arguments.to_string(),
             no_loopflow: standalone_native,
-            work: cli.task.clone().map(crate::prompt::WorkContext::Task),
+            work: cli
+                .task
+                .clone()
+                .map(loopflow_execution::prompt::WorkContext::Task),
             source_overrides: ContextSourceOverrides::default(),
             summary: None,
             references: task_message
@@ -571,7 +622,7 @@ fn build_prompt_at(
         elapsed_ms = prepare_start.elapsed().as_millis(),
         "prepared launch prompt"
     );
-    crate::agent_input_timing::record("prompt_end", subject);
+    loopflow_execution::agent_input_timing::record("prompt_end", subject);
     let agent = prepared.config.resolved_agent()?;
     let (harness, model) = parse_agent(&agent);
 
@@ -585,20 +636,21 @@ fn build_prompt_at(
         .to_string();
     let process = ProcessConfig {
         task_input: task_input
-            .map(|(store, seed)| crate::ops::task_input::TaskInput::new(store, seed)),
+            .map(|(store, seed)| loopflow_execution::ops::task_input::TaskInput::new(store, seed)),
         auto: !is_interactive,
         stream: !is_interactive,
-        wait_for_capacity: !is_interactive && crate::ops::graph_process::in_graph(),
+        wait_for_capacity: !is_interactive && loopflow_execution::ops::graph_process::in_graph(),
         ..Default::default()
     };
     let mut agent_config = prepared.config;
     agent_config.output_schema = cli.output_schema.clone();
     if confine && !cli.context {
-        agent_config.write_scope = crate::agent::AgentWriteScope::Worktree;
-        agent_config.execution_boundary = Some(crate::agent::checkout_execution_boundary(
-            &repo_root,
-            agent_config.agent()?,
-        )?);
+        agent_config.write_scope = loopflow_execution::agent::AgentWriteScope::Worktree;
+        agent_config.execution_boundary =
+            Some(loopflow_execution::agent::checkout_execution_boundary(
+                &repo_root,
+                agent_config.agent()?,
+            )?);
         agent_config.skip_permissions = true;
     }
 
@@ -606,13 +658,14 @@ fn build_prompt_at(
     components.message_context = message_context.or_else(|| {
         task_message.as_ref().map(|_| {
             (
-                crate::trace::ContextAssetKind::Goal,
-                crate::trace::ContextScope::Task,
+                loopflow_execution::trace::ContextAssetKind::Goal,
+                loopflow_execution::trace::ContextScope::Task,
             )
         })
     });
     let deduplication_decisions = prepared.deduplication_decisions;
-    let effective_system = crate::agent::system_prompt_with_structured_replies(&agent_config);
+    let effective_system =
+        loopflow_execution::agent::system_prompt_with_structured_replies(&agent_config);
     let context = attributed_context(
         &components,
         &effective_system,
@@ -686,7 +739,7 @@ fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<String>> {
         // reports its file through its extension.
         let names_thread = built.harness == "claude"
             || (built.harness == "pi"
-                && built.agent_config.holder == crate::session::Holder::Caller);
+                && built.agent_config.holder == loopflow_execution::session::Holder::Caller);
         let agent_session: Option<loopflow_model::id::AgentSessionId> = if names_thread {
             let artifact_key = runtime.artifact_key();
             let raw_id = artifact_key
@@ -707,7 +760,8 @@ fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<String>> {
         let result = (|| {
             let mut config = built.agent_config.clone();
             config.env = environment.clone();
-            let context_file = crate::agent::write_system_prompt_file(&config, &built.log_name)?;
+            let context_file =
+                loopflow_execution::agent::write_system_prompt_file(&config, &built.log_name)?;
             config.session_attachment = runtime.session_attachment();
             launch_session(
                 &config,
@@ -717,7 +771,7 @@ fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<String>> {
             )
         })();
         if let Some(provider_session) =
-            crate::session_record::read_provider_session(&runtime.artifact_dir())
+            loopflow_execution::session_record::read_provider_session(&runtime.artifact_dir())
                 .map_err(|error| anyhow!("failed to read provider session: {error}"))?
         {
             runtime.observe_provider(
@@ -743,7 +797,11 @@ fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<String>> {
 
     // Native terminals own their turn status. A separate lf record would remain
     // Working at their idle prompt until the provider process exits.
-    crate::transport::report(loopflow_model::program_status::State::Working, false, None);
+    loopflow_execution::transport::report(
+        loopflow_model::program_status::State::Working,
+        false,
+        None,
+    );
     let cli_check_start = Instant::now();
     if !check_cli_available(&built.harness) {
         return Err(anyhow!(missing_agent_message(&built.harness)));
@@ -761,7 +819,7 @@ fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<String>> {
     // Settle our capture as interrupted; a failed Graph step would replay it.
     if runtime.attachment_replaced()? {
         runtime.finish("interrupted")?;
-        return Err(crate::process::CommandExit(130).into());
+        return Err(loopflow_execution::process::CommandExit(130).into());
     }
     let outcome = if result.is_ok() {
         "completed"
@@ -785,7 +843,8 @@ fn run_headless_prompt(
     prepared_config: &AgentConfig,
 ) -> Result<()> {
     let context_file_start = Instant::now();
-    let context_file = crate::agent::write_system_prompt_file(prepared_config, &built.log_name)?;
+    let context_file =
+        loopflow_execution::agent::write_system_prompt_file(prepared_config, &built.log_name)?;
     debug!(
         elapsed_ms = context_file_start.elapsed().as_millis(),
         "wrote context log"
@@ -825,20 +884,23 @@ fn run_headless_prompt(
     debug!(exit_code = result.exit_code, "agent completed");
     if result.exit_code == 0 {
         Ok(())
-    } else if !process.auto && agent_config.holder == crate::session::Holder::Caller {
+    } else if !process.auto && agent_config.holder == loopflow_execution::session::Holder::Caller {
         // A bare terminal launch exits as its provider did; lf already said
         // whether the provider failed.
-        Err(crate::process::CommandExit(u8::try_from(result.exit_code).unwrap_or(1)).into())
+        Err(
+            loopflow_execution::process::CommandExit(u8::try_from(result.exit_code).unwrap_or(1))
+                .into(),
+        )
     } else if result.exit_code == 130 {
         eprintln!("The agent's turn was interrupted.");
-        Err(crate::process::CommandExit(130).into())
+        Err(loopflow_execution::process::CommandExit(130).into())
     } else if let Some(failure) = &result.failure {
         Err(anyhow!(
             "agent stopped after {failure}. Check {} for details.",
             runtime.artifact_dir().display()
         ))
     } else {
-        let reason = crate::os_process::exit_reason(&result.stderr);
+        let reason = loopflow_execution::os_process::exit_reason(&result.stderr);
         Err(anyhow!(
             "agent exited with code {}{reason}. Check {} for details.",
             result.exit_code,
@@ -874,7 +936,7 @@ fn begin_process_runtime(
         worktree: Some(built.repo_root.clone()),
         skill: built.skill_name.clone(),
         subjects,
-        graph: crate::session_record::SessionGraphMembership::Independent,
+        graph: loopflow_execution::session_record::SessionGraphMembership::Independent,
         work: built.work.clone(),
     };
     let runtime = if let Some(session) = resume {
@@ -884,19 +946,23 @@ fn begin_process_runtime(
             &built.context,
             AgentProcessRequest::from_prepared(prepared_config)?,
         )
-    } else if let Some(id) = crate::ops::human_session::prepared_artifact_key()? {
-        crate::session_record::SessionRecorder::start_prepared(
-            &crate::store::lf_home_dir(),
+    } else if let Some(id) = loopflow_execution::ops::human_session::prepared_artifact_key()? {
+        loopflow_execution::session_record::SessionRecorder::start_prepared(
+            &loopflow_execution::store::lf_home_dir(),
             &id,
             spec,
             &built.context,
             Some(AgentProcessRequest::from_prepared(prepared_config)?),
         )
-        .map(crate::process::LfProcessRuntime::new)
+        .map(loopflow_execution::process::LfProcessRuntime::new)
     } else {
         let launch = Some(AgentProcessRequest::from_prepared(prepared_config)?);
-        crate::session_record::SessionRecorder::begin_with_context(spec, &built.context, launch)
-            .map(crate::process::LfProcessRuntime::new)
+        loopflow_execution::session_record::SessionRecorder::begin_with_context(
+            spec,
+            &built.context,
+            launch,
+        )
+        .map(loopflow_execution::process::LfProcessRuntime::new)
     }
     .map_err(|error| {
         anyhow!("failed to publish Session capture manifest before agent launch: {error}")
@@ -947,19 +1013,19 @@ mod tests {
         run_prompt, PromptBuild,
     };
 
-    use crate::agent::{run_agent, AgentConfig, ProcessConfig};
     use crate::lf::Cli;
-    use crate::prompt::PromptComponents;
-    use crate::skills::catalog::SkillCatalog;
     use crate::test_ambient::EnvGuard;
-    use crate::trace::ContextAssetKind;
     use clap::Parser;
+    use loopflow_execution::agent::{run_agent, AgentConfig, ProcessConfig};
+    use loopflow_execution::prompt::PromptComponents;
+    use loopflow_execution::skills::catalog::SkillCatalog;
+    use loopflow_execution::trace::ContextAssetKind;
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
 
     #[test]
     fn context_choices_override_config_and_omission_inherits() {
-        let _lock = crate::journal::test_env_lock();
+        let _lock = loopflow_execution::journal::test_env_lock();
         let _restore = EnvGuard::clear(&["LF_HOME"]);
         let home = tempfile::tempdir().unwrap();
         std::env::set_var("LF_HOME", home.path());
@@ -1022,7 +1088,7 @@ mod tests {
 
     #[test]
     fn preferred_name_survives_fresh_launches_and_corrections() {
-        let _lock = crate::journal::test_env_lock();
+        let _lock = loopflow_execution::journal::test_env_lock();
         let _restore = EnvGuard::clear(&[
             "LF_HOME",
             "LF_USER_NAME",
@@ -1061,10 +1127,11 @@ mod tests {
                         Some(name)
                     }
                 );
-                let context =
-                    crate::prompt::render_user_context(built.components.user_name.as_deref());
+                let context = loopflow_execution::prompt::render_user_context(
+                    built.components.user_name.as_deref(),
+                );
                 assert_eq!(
-                    crate::prompt::format_prompt(&built.components)
+                    loopflow_execution::prompt::format_prompt(&built.components)
                         .matches("<lf:user>")
                         .count(),
                     usize::from(!context.is_empty())
@@ -1083,7 +1150,7 @@ mod tests {
 
     #[test]
     fn preferred_name_uses_remote_caller_and_leaves_background_work_unattributed() {
-        let _lock = crate::journal::test_env_lock();
+        let _lock = loopflow_execution::journal::test_env_lock();
         let _restore = EnvGuard::clear(&["LF_HOME", "LF_USER_NAME"]);
         let home = tempfile::tempdir().unwrap();
         std::env::set_var("LF_HOME", home.path());
@@ -1111,7 +1178,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn ad_hoc_batch_launch_captures_session_without_planning_registry() {
-        let _lock = crate::journal::test_env_lock();
+        let _lock = loopflow_execution::journal::test_env_lock();
         let home = tempfile::tempdir().unwrap();
         let bin = home.path().join("bin");
         std::fs::create_dir(&bin).unwrap();
@@ -1147,9 +1214,9 @@ for line in sys.stdin:
             "PATH",
             "LF_BIN",
             "LF_HOME",
-            crate::journal::LF_TRACE_ID_ENV,
-            crate::journal::LF_PROCESS_ID_ENV,
-            crate::session_record::CAPTURE_KEY_ENV,
+            loopflow_execution::journal::LF_TRACE_ID_ENV,
+            loopflow_execution::journal::LF_PROCESS_ID_ENV,
+            loopflow_execution::session_record::CAPTURE_KEY_ENV,
             "LF_RUN_DIR",
         ];
         let path = format!(
@@ -1162,12 +1229,15 @@ for line in sys.stdin:
         std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
         std::env::set_var("LF_HOME", home.path());
         let registry = home.path().join("loopflow.db");
-        std::env::set_var(crate::journal::LF_TRACE_ID_ENV, "trace_stale");
-        std::env::set_var(crate::journal::LF_PROCESS_ID_ENV, "process_stale");
+        std::env::set_var(loopflow_execution::journal::LF_TRACE_ID_ENV, "trace_stale");
+        std::env::set_var(
+            loopflow_execution::journal::LF_PROCESS_ID_ENV,
+            "process_stale",
+        );
         std::env::set_var("LF_RUN_DIR", home.path().join("stale-run"));
 
         let task = "prove the captured Session launch";
-        let context = crate::trace::PreparedTurnContext::from_prompts("", task);
+        let context = loopflow_execution::trace::PreparedTurnContext::from_prompts("", task);
         let mut env = std::collections::BTreeMap::new();
         env.insert(
             "LF_TEST_RUN_EVIDENCE".to_string(),
@@ -1199,7 +1269,7 @@ for line in sys.stdin:
         // Capture admission attaches the recorded lf invocation, as the CLI does.
         let command = vec!["lf".to_string(), "implement".to_string()];
         let admitted = || {
-            crate::journal::with_runtime(home.path(), &command, || {
+            loopflow_execution::journal::with_runtime(home.path(), &command, || {
                 let runtime = begin_process_runtime(&built, "headless", &built.agent_config, None)?;
                 let artifact_key = runtime.artifact_key();
                 let run_dir = runtime.artifact_dir();
@@ -1220,7 +1290,7 @@ for line in sys.stdin:
         };
         // The invocation and its capture share this fixture's store.
         let (artifact_key, run_dir) =
-            crate::journal::with_test_ledger(registry.clone(), admitted).unwrap();
+            loopflow_execution::journal::with_test_ledger(registry.clone(), admitted).unwrap();
 
         let provider_identity = std::fs::read_to_string(evidence).unwrap();
         assert_eq!(
@@ -1239,7 +1309,7 @@ for line in sys.stdin:
             "LF_TEST_ATTEMPT_FILE".to_string(),
             home.path().join("implicit-attempt").display().to_string(),
         );
-        let result = crate::journal::with_test_ledger(registry.clone(), || {
+        let result = loopflow_execution::journal::with_test_ledger(registry.clone(), || {
             run_agent(&implicit_launch, &built.process)
         })
         .unwrap();
@@ -1253,10 +1323,11 @@ for line in sys.stdin:
         );
         let fields = identities[0].split('|').collect::<Vec<_>>();
         assert_eq!(&fields[2..], ["unset", "unset"]);
-        let implicit_run_id = crate::session_record::parse_artifact_key(fields[0]).unwrap();
+        let implicit_run_id =
+            loopflow_execution::session_record::parse_artifact_key(fields[0]).unwrap();
         assert_eq!(fields[1], "unset");
         let implicit_run_dir =
-            crate::session_record::record_dir(home.path(), &implicit_run_id).unwrap();
+            loopflow_execution::session_record::record_dir(home.path(), &implicit_run_id).unwrap();
         assert_eq!(
             implicit_run_dir.file_name().and_then(|name| name.to_str()),
             Some(implicit_run_id.as_str())
@@ -1310,7 +1381,7 @@ for line in sys.stdin:
                     ..ProcessConfig::default()
                 },
                 components: PromptComponents::default(),
-                context: crate::trace::PreparedTurnContext::from_prompts("", task),
+                context: loopflow_execution::trace::PreparedTurnContext::from_prompts("", task),
                 harness: "claude".to_string(),
                 model: None,
                 skill_name: Some("research".to_string()),
@@ -1320,7 +1391,7 @@ for line in sys.stdin:
             }
         }
 
-        let _lock = crate::journal::test_env_lock();
+        let _lock = loopflow_execution::journal::test_env_lock();
         let home = tempfile::tempdir().unwrap();
         let bin = home.path().join("bin");
         std::fs::create_dir(&bin).unwrap();
@@ -1371,7 +1442,7 @@ for line in sys.stdin:
         repo.create_file(".lf/skills/proof.md", "inspect every research artifact");
         repo.stage_all();
         repo.commit("test basis");
-        let head = crate::git::rev_parse(repo.path(), "HEAD").unwrap();
+        let head = loopflow_execution::git::rev_parse(repo.path(), "HEAD").unwrap();
         let runtime = repo.path().join("scratch/research-runtime-model.md");
         let handoff = repo.path().join("scratch/research-design-handoff.md");
         let first = research_build(
@@ -1392,10 +1463,12 @@ for line in sys.stdin:
 
         // Each run is its own recorded lf invocation, as from the CLI.
         let command = vec!["lf".to_string(), "research".to_string()];
-        let ledger = crate::store::database_path_from_env().unwrap();
+        let ledger = loopflow_execution::store::database_path_from_env().unwrap();
         let admitted = |built: &PromptBuild| {
-            crate::journal::with_test_ledger(ledger.clone(), || {
-                crate::journal::with_runtime(repo.path(), &command, || run_prompt(built, &cli))
+            loopflow_execution::journal::with_test_ledger(ledger.clone(), || {
+                loopflow_execution::journal::with_runtime(repo.path(), &command, || {
+                    run_prompt(built, &cli)
+                })
             })
         };
         std::thread::scope(|scope| {
@@ -1413,7 +1486,10 @@ for line in sys.stdin:
             std::fs::read_to_string(&handoff).unwrap(),
             "handoff evidence bytes\n"
         );
-        assert_eq!(crate::git::rev_parse(repo.path(), "HEAD").unwrap(), head);
+        assert_eq!(
+            loopflow_execution::git::rev_parse(repo.path(), "HEAD").unwrap(),
+            head
+        );
         assert!(std::process::Command::new("git")
             .args(["diff", "--cached", "--quiet"])
             .current_dir(repo.path())
@@ -1428,7 +1504,7 @@ for line in sys.stdin:
             .conversation_context
             .as_ref()
             .unwrap()
-            .block(crate::context_block::ContextMoment::Start)
+            .block(loopflow_execution::context_block::ContextMoment::Start)
             .unwrap()
             .text;
         assert!(context.contains("runtime evidence bytes"));
@@ -1437,7 +1513,7 @@ for line in sys.stdin:
 
     #[test]
     fn worktree_harness_preloads_committed_and_untracked_scratch_with_provenance() {
-        let _lock = crate::journal::test_env_lock();
+        let _lock = loopflow_execution::journal::test_env_lock();
         let _env = EnvGuard::clear(&["LF_HOME"]);
         let home = tempfile::tempdir().unwrap();
         std::env::set_var("LF_HOME", home.path());
@@ -1448,9 +1524,14 @@ for line in sys.stdin:
         repo.commit("committed basis");
         repo.create_file("scratch/z-untracked.md", "untracked evidence bytes");
         let store =
-            crate::store::opening::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
-        crate::work::wave::bootstrap::ensure_wave(&store, repo.path().to_str().unwrap(), "ship")
-            .unwrap();
+            loopflow_execution::store::opening::open_ephemeral(&home.path().join("loopflow.db"))
+                .unwrap();
+        loopflow_execution::work::wave::bootstrap::ensure_wave(
+            &store,
+            repo.path().to_str().unwrap(),
+            "ship",
+        )
+        .unwrap();
 
         let cli = Cli {
             batch: true,
@@ -1465,7 +1546,7 @@ for line in sys.stdin:
             .conversation_context
             .as_ref()
             .unwrap()
-            .block(crate::context_block::ContextMoment::Start)
+            .block(loopflow_execution::context_block::ContextMoment::Start)
             .unwrap()
             .text;
         assert!(context.contains("committed evidence bytes"));
@@ -1482,7 +1563,7 @@ for line in sys.stdin:
 
     #[test]
     fn retained_skill_context_keeps_its_source_after_catalog_selection_changes() {
-        let _lock = crate::journal::test_env_lock();
+        let _lock = loopflow_execution::journal::test_env_lock();
         let _ambient = EnvGuard::new();
         let _home = EnvGuard::clear(&["LF_HOME", "HOME"]);
         let home = tempfile::tempdir().unwrap();
@@ -1495,7 +1576,7 @@ for line in sys.stdin:
         let catalog = SkillCatalog::load(Some(repo.path()), None, false).unwrap();
         let skill = catalog.resolve("audit").unwrap().unwrap().load().unwrap();
         std::fs::remove_file(&native).unwrap();
-        let invocation = crate::skills::invocation::SkillInvocation {
+        let invocation = loopflow_execution::skills::invocation::SkillInvocation {
             skill,
             arguments: "  exact \"arguments\"  ".into(),
         };
@@ -1577,7 +1658,7 @@ for line in sys.stdin:
 
         let delivery = built.agent_config.conversation_context.as_ref().unwrap();
         let context = delivery
-            .block(crate::context_block::ContextMoment::Start)
+            .block(loopflow_execution::context_block::ContextMoment::Start)
             .unwrap()
             .text;
         assert!(!context.contains("runtime evidence bytes"));
@@ -1647,14 +1728,19 @@ for line in sys.stdin:
             .agent_config
             .task_prompt
             .contains("Instructions that must reach the provider."));
-        assert!(crate::prompt::format_prompt(&built.components).contains("verify the result"));
-        assert!(!crate::prompt::format_prompt(&built.components).starts_with("/proof"));
-        assert!(!crate::prompt::format_prompt(&built.components).starts_with("$proof"));
+        assert!(loopflow_execution::prompt::format_prompt(&built.components)
+            .contains("verify the result"));
+        assert!(
+            !loopflow_execution::prompt::format_prompt(&built.components).starts_with("/proof")
+        );
+        assert!(
+            !loopflow_execution::prompt::format_prompt(&built.components).starts_with("$proof")
+        );
     }
 
     #[test]
     fn terminal_wave_skill_launch_delivers_the_authored_goal() {
-        let _lock = crate::journal::test_env_lock();
+        let _lock = loopflow_execution::journal::test_env_lock();
         let _restore = EnvGuard::clear(&["HOME", "LF_HOME"]);
         let home = tempfile::tempdir().unwrap();
         std::env::set_var("HOME", home.path());
@@ -1667,9 +1753,11 @@ for line in sys.stdin:
         let goal =
             "## Objective\nShip a reliable release.\n\n## Bounds\nKeep rollback available.\n";
         repo.create_file(".lf/wave/release/GOAL.md", goal);
-        let store =
-            crate::store::opening::open_ephemeral(&home.path().join(".lf/loopflow.db")).unwrap();
-        crate::work::wave::bootstrap::ensure_wave(
+        let store = loopflow_execution::store::opening::open_ephemeral(
+            &home.path().join(".lf/loopflow.db"),
+        )
+        .unwrap();
+        loopflow_execution::work::wave::bootstrap::ensure_wave(
             &store,
             repo.path().canonicalize().unwrap().to_str().unwrap(),
             "release",
@@ -1704,7 +1792,7 @@ for line in sys.stdin:
             .conversation_context
             .as_ref()
             .unwrap()
-            .block(crate::context_block::ContextMoment::Start)
+            .block(loopflow_execution::context_block::ContextMoment::Start)
             .unwrap()
             .text;
         assert_eq!(context.matches(goal).count(), 1);

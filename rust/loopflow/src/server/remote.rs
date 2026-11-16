@@ -13,9 +13,9 @@ use super::service::{self, Carrier, Clients, Greeting};
 use super::subscriptions::Subscriptions;
 use super::ticket::{Admission, Tickets};
 use super::wire::MAX_BULK;
-use crate::transport::registry::Registry;
 use anyhow::{Context, Result};
 use futures_util::{Sink, SinkExt, Stream, StreamExt};
+use loopflow_execution::transport::registry::Registry;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, UnixStream};
 use tokio::sync::{mpsc, oneshot, Semaphore};
@@ -510,7 +510,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::{bridge, connection};
-    use crate::engine::ErrorCode;
     use crate::server::service::Clients;
     use crate::server::ticket::{Admission, Purpose, Tickets};
     use crate::server::wire::{
@@ -518,6 +517,7 @@ mod tests {
         MAX_MESSAGE, MIN_REVISION, REVISION,
     };
     use futures_util::{SinkExt, StreamExt};
+    use loopflow_execution::engine::ErrorCode;
     use std::sync::Arc;
     use std::time::Duration;
     use tokio::io::AsyncWriteExt;
@@ -789,8 +789,10 @@ mod tests {
     fn ticket_endpoint_bridges_one_terminal_and_any_foreign_attempt_spends_it() {
         let _env = loopflow_test_support::env_lock().lock().unwrap();
         let home = tempfile::tempdir().unwrap();
-        let _home =
-            crate::config::environment::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+        let _home = loopflow_execution::config::environment::EnvVarGuard::set(
+            "LF_HOME",
+            home.path().to_str().unwrap(),
+        );
         tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
@@ -802,16 +804,17 @@ mod tests {
                     user: 1,
                 };
                 let held = loopflow_model::id::TerminalId::new();
-                let listener =
-                    tokio::net::UnixListener::bind(crate::transport::registry::entrance().unwrap())
-                        .unwrap();
+                let listener = tokio::net::UnixListener::bind(
+                    loopflow_execution::transport::registry::entrance().unwrap(),
+                )
+                .unwrap();
                 let entrance = tokio::spawn(async move {
                     use tokio::io::{AsyncReadExt, AsyncWriteExt};
                     let (mut stream, _) = listener.accept().await.unwrap();
                     while stream.read_u8().await.unwrap() != b'\n' {}
                     let answer = format!(
                         "{{\"answer\":\"hosted\",\"revision\":{}}}\n",
-                        crate::transport::registry::REVISION
+                        loopflow_execution::transport::registry::REVISION
                     );
                     stream.write_all(answer.as_bytes()).await.unwrap();
                     stream

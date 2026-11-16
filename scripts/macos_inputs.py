@@ -36,7 +36,7 @@ IOS_INPUTS = (
     "scripts/test_ios.py",
     "tests/fixtures/dto/",
     "rust/loopflow/src/server/",
-    "rust/loopflow/src/transport/wire.rs",
+    "rust/loopflow-execution/src/transport/wire.rs",
     "rust/loopflow/src/lf/commands/read.rs",
     "rust/loopflow/src/lf/commands/write.rs",
 )
@@ -66,8 +66,8 @@ _SWIFT_TEST_INPUTS = (
     "python/tests/conftest.py",
 )
 _PROCESS_INPUTS = (
-    "rust/loopflow/src/store/copy.rs",
-    "rust/loopflow/src/journal/os_process.rs",
+    "rust/loopflow-execution/src/store/copy.rs",
+    "rust/loopflow-execution/src/journal/os_process.rs",
     "rust/loopflow/src/lf/commands/install",
 )
 _MACOS_CFG = re.compile(r'target_os\s*=\s*"macos"')

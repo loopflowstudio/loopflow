@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use loopflow::planning_exchange::{PlanningMutation, PlanningSnapshot};
-use loopflow::work::edit::{Disposition, WorkEdit, WorkValue};
+use loopflow_execution::planning_exchange::{PlanningMutation, PlanningSnapshot};
+use loopflow_execution::work::edit::{Disposition, WorkEdit, WorkValue};
 use serde_json::json;
 
 fn edit(field: &str, value: &str) -> WorkEdit {

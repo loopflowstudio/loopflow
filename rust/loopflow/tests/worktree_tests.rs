@@ -3,13 +3,15 @@ use std::process::Command;
 use std::time::{Duration, SystemTime};
 use std::{fs, path::PathBuf};
 
-use loopflow::git::worktrees::{
+use loopflow_execution::git::worktrees::{
     create_named_worktree, list_worktrees, main_repo_root, plan_placement, prune_worktrees,
     push_branch_with_upstream, schedule_upstream_sync, sibling_worktree_name_with_main,
     PlacementStrategy, WorktreeKeepReason, WorktreeOwnership, WorktreePruneReason,
     WorktreePruneReport, WorktreePruneTarget, WorktreeSegment,
 };
-use loopflow::git::{is_clean, origin_branch, worktree_add, worktree_remove, WorktreeBranch};
+use loopflow_execution::git::{
+    is_clean, origin_branch, worktree_add, worktree_remove, WorktreeBranch,
+};
 use loopflow_test_support::TestRepo;
 
 #[test]

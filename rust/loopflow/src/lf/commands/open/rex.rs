@@ -6,10 +6,10 @@ use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 
 use super::OpenHost;
-use crate::transport::local_directory_report;
+use loopflow_execution::transport::local_directory_report;
 use loopflow_storage::work::selection::SplitAxis;
 
-use crate::terminal_host::{rex_endpoint, RexLocation};
+use loopflow_execution::terminal_host::{rex_endpoint, RexLocation};
 
 #[derive(Debug, Clone)]
 pub(super) struct Rex {
@@ -61,7 +61,7 @@ impl Rex {
                     .resolve()?,
             ),
             Some(_) => None,
-            None if super::in_rex() && crate::journal::agent_caller().is_none() => {
+            None if super::in_rex() && loopflow_execution::journal::agent_caller().is_none() => {
                 Some(RexLocation::current()?)
             }
             None => None,

@@ -1,6 +1,6 @@
-use crate::provider_account::routing::NextOutcome;
-use crate::repository::CanonicalRepo;
 use anyhow::Result;
+use loopflow_execution::provider_account::routing::NextOutcome;
+use loopflow_execution::repository::CanonicalRepo;
 
 pub(crate) async fn show_next(
     repo: Option<&str>,
@@ -13,7 +13,8 @@ pub(crate) async fn show_next(
     } else {
         resolve_repo_id(repo)?
     };
-    let launches = crate::provider_account::routing::next(repo_id.as_ref(), agent).await?;
+    let launches =
+        loopflow_execution::provider_account::routing::next(repo_id.as_ref(), agent).await?;
     if json {
         println!("{}", serde_json::to_string_pretty(&launches)?);
     } else {
@@ -40,23 +41,25 @@ pub(crate) async fn show_next(
         .iter()
         .filter_map(|launch| match launch.outcome {
             NextOutcome::LoginNeeded => {
-                Some(crate::provider_account::operations::EXIT_LOGIN_NEEDED)
+                Some(loopflow_execution::provider_account::operations::EXIT_LOGIN_NEEDED)
             }
-            NextOutcome::Blocked => Some(crate::provider_account::operations::EXIT_BLOCKED),
+            NextOutcome::Blocked => {
+                Some(loopflow_execution::provider_account::operations::EXIT_BLOCKED)
+            }
             NextOutcome::Ready | NextOutcome::Ambient => None,
         })
         .max();
     match exit {
-        Some(code) => Err(crate::process::CommandExit(code).into()),
+        Some(code) => Err(loopflow_execution::process::CommandExit(code).into()),
         None => Ok(()),
     }
 }
 
 fn resolve_repo_id(raw_repo: Option<&str>) -> Result<Option<CanonicalRepo>> {
     match raw_repo {
-        Some(repo) => Ok(Some(crate::repository::discover(std::path::Path::new(
-            repo,
-        ))?)),
-        None => crate::repository::current(),
+        Some(repo) => Ok(Some(loopflow_execution::repository::discover(
+            std::path::Path::new(repo),
+        )?)),
+        None => loopflow_execution::repository::current(),
     }
 }

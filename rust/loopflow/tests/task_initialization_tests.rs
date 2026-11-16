@@ -4,9 +4,9 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use loopflow::ops::task::task_status;
-use loopflow::ops::task_actions::TaskAction;
-use loopflow::work::task::{GithubPr, PrPublication, TaskEventKind};
+use loopflow_execution::ops::task::task_status;
+use loopflow_execution::ops::task_actions::TaskAction;
+use loopflow_execution::work::task::{GithubPr, PrPublication, TaskEventKind};
 use loopflow_test_support::TestRepo;
 use support::{register_task_with_pr, EnvGuard};
 
@@ -65,10 +65,10 @@ fn stacked_checkout_preserves_inherited_scratch_and_edits() {
         .unwrap();
 
     let checkout = || {
-        loopflow::ops::task::task_checkout(
+        loopflow_execution::ops::task::task_checkout(
             repo.path(),
             "INF-124",
-            loopflow::ops::task::TaskCheckoutOptions::default(),
+            loopflow_execution::ops::task::TaskCheckoutOptions::default(),
         )
         .unwrap()
     };
@@ -82,13 +82,13 @@ fn stacked_checkout_preserves_inherited_scratch_and_edits() {
         .unwrap()
         .is_none());
     assert_eq!(
-        loopflow::git::rev_parse(worktree, "HEAD").unwrap(),
+        loopflow_execution::git::rev_parse(worktree, "HEAD").unwrap(),
         parent_head
     );
     fs::write(worktree.join("scratch/design.md"), "child design").unwrap();
     checkout();
     assert_eq!(
-        loopflow::git::rev_parse(worktree, "HEAD").unwrap(),
+        loopflow_execution::git::rev_parse(worktree, "HEAD").unwrap(),
         parent_head
     );
     assert_eq!(
@@ -110,7 +110,10 @@ fn stacked_checkout_preserves_inherited_scratch_and_edits() {
             .unwrap()
             .success());
     }
-    assert_eq!(loopflow::ops::scratch::clear(worktree).unwrap(), 1);
+    assert_eq!(
+        loopflow_execution::ops::scratch::clear(worktree).unwrap(),
+        1
+    );
     assert_eq!(
         fs::read_to_string(worktree.join("scratch/design.md")).unwrap(),
         "child design"
@@ -171,7 +174,7 @@ fn checkout_restores_exact_task_history_from_a_dirty_checkout() {
         String::from_utf8_lossy(&first.stderr)
     );
     assert_eq!(
-        loopflow::git::rev_parse(worktree, "HEAD").unwrap(),
+        loopflow_execution::git::rev_parse(worktree, "HEAD").unwrap(),
         fixture.pr.base_commit
     );
     fs::write(worktree.join("work.txt"), "committed Task work").unwrap();
@@ -187,7 +190,7 @@ fn checkout_restores_exact_task_history_from_a_dirty_checkout() {
             .status
             .success());
     }
-    let head = loopflow::git::rev_parse(worktree, "HEAD").unwrap();
+    let head = loopflow_execution::git::rev_parse(worktree, "HEAD").unwrap();
     fs::remove_dir_all(worktree).unwrap();
     let restored = checkout();
     assert!(
@@ -195,7 +198,10 @@ fn checkout_restores_exact_task_history_from_a_dirty_checkout() {
         "{}",
         String::from_utf8_lossy(&restored.stderr)
     );
-    assert_eq!(loopflow::git::rev_parse(worktree, "HEAD").unwrap(), head);
+    assert_eq!(
+        loopflow_execution::git::rev_parse(worktree, "HEAD").unwrap(),
+        head
+    );
     assert_eq!(
         fs::read_to_string(worktree.join("work.txt")).unwrap(),
         "committed Task work"
@@ -236,14 +242,20 @@ fn checkout_restores_exact_task_history_from_a_dirty_checkout() {
         "{}",
         String::from_utf8_lossy(&recovered.stderr)
     );
-    assert_eq!(loopflow::git::rev_parse(worktree, "HEAD").unwrap(), head);
+    assert_eq!(
+        loopflow_execution::git::rev_parse(worktree, "HEAD").unwrap(),
+        head
+    );
     assert_eq!(
         fs::read_to_string(worktree.join("work.txt")).unwrap(),
         "committed Task work"
     );
     assert!(recover(&head).status.success());
     assert!(!recover(&fixture.pr.base_commit).status.success());
-    assert_eq!(loopflow::git::rev_parse(worktree, "HEAD").unwrap(), head);
+    assert_eq!(
+        loopflow_execution::git::rev_parse(worktree, "HEAD").unwrap(),
+        head
+    );
     let persisted = runtime
         .block_on(fixture.store.get_task(&fixture.task.id))
         .unwrap()
@@ -490,10 +502,10 @@ fn research_checkout_restores_and_reads_files_without_a_pull_request() {
     );
     let worktree = research.worktree.as_ref().unwrap();
 
-    let restored = loopflow::ops::task::task_checkout(
+    let restored = loopflow_execution::ops::task::task_checkout(
         repo.path(),
         "INF-124",
-        loopflow::ops::task::TaskCheckoutOptions::default(),
+        loopflow_execution::ops::task::TaskCheckoutOptions::default(),
     )
     .unwrap();
     assert_eq!(restored.id, research.id);
@@ -511,7 +523,7 @@ fn research_checkout_restores_and_reads_files_without_a_pull_request() {
         .unwrap();
     assert!(result.success());
     fs::write(worktree.join("draft.md"), "Keep this draft.\n").unwrap();
-    let changes = loopflow::ops::task::task_changes("INF-124", "parent", None).unwrap();
+    let changes = loopflow_execution::ops::task::task_changes("INF-124", "parent", None).unwrap();
     assert!(changes
         .files
         .iter()
@@ -520,7 +532,7 @@ fn research_checkout_restores_and_reads_files_without_a_pull_request() {
         .files
         .iter()
         .any(|file| file.path == "draft.md" && file.untracked));
-    let snapshot = loopflow::ops::task::task_snapshot(&restored).unwrap();
+    let snapshot = loopflow_execution::ops::task::task_snapshot(&restored).unwrap();
     assert!(snapshot.pr.is_none());
     assert_eq!(snapshot.branch.as_deref(), Some("research"));
     assert!(runtime
@@ -532,7 +544,7 @@ fn research_checkout_restores_and_reads_files_without_a_pull_request() {
     assert!(json.get("prs").is_none());
     assert!(json.get("active_pr").is_none());
     let binding = runtime
-        .block_on(loopflow::ops::resolve_work_binding(
+        .block_on(loopflow_execution::ops::resolve_work_binding(
             &std::sync::Arc::new(parent.store),
             worktree,
             "task:INF-124",

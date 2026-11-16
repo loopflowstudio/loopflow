@@ -4,11 +4,11 @@ use anyhow::Context;
 use clap::Subcommand;
 
 use crate::lf::commands::session_history::SessionView;
-use crate::output::print_process;
-use crate::process::{
+use loopflow_execution::output::print_process;
+use loopflow_execution::process::{
     ProcessCursor, ProcessEntry, ProcessFilter, ProcessOutcomeFilter, ProcessWorkFilter,
 };
-use crate::store::{open_store, storage_config_from_env};
+use loopflow_execution::store::{open_store, storage_config_from_env};
 
 #[derive(Debug, clap::Args)]
 pub struct HistoryFeed {
@@ -183,14 +183,14 @@ impl HistoryCommand {
 }
 
 fn export(since: &str) -> anyhow::Result<()> {
-    let since = crate::output::parse_since(since, time::OffsetDateTime::now_utc())?;
+    let since = loopflow_execution::output::parse_since(since, time::OffsetDateTime::now_utc())?;
     let runtime = tokio::runtime::Runtime::new()?;
     let store = runtime.block_on(open_store(&storage_config_from_env()?))?;
     let stdout = std::io::stdout();
     let mut out = std::io::BufWriter::new(stdout.lock());
-    crate::machine_records::export(
+    loopflow_execution::machine_records::export(
         &store.sqlite,
-        &crate::store::lf_home_dir(),
+        &loopflow_execution::store::lf_home_dir(),
         since.unix_timestamp(),
         &mut out,
     )?;
@@ -305,12 +305,16 @@ pub fn run(command: &HistoryCommand) -> anyhow::Result<()> {
             let repo = if *all {
                 None
             } else {
-                crate::repository::current()?.map(|repo| repo.to_string())
+                loopflow_execution::repository::current()?.map(|repo| repo.to_string())
             };
             let performed_work = match (task, wave) {
                 (Some(task), _) => Some(ProcessWorkFilter::Task(
-                    crate::store::children::resolve_task_id(&store.sqlite, task, repo.as_deref())?
-                        .context("Task was not found")?,
+                    loopflow_execution::store::children::resolve_task_id(
+                        &store.sqlite,
+                        task,
+                        repo.as_deref(),
+                    )?
+                    .context("Task was not found")?,
                 )),
                 (_, Some(wave)) => Some(ProcessWorkFilter::Wave(
                     store
@@ -369,8 +373,8 @@ pub fn run(command: &HistoryCommand) -> anyhow::Result<()> {
 /// What `lf history show` found: this Machine's own record, or a copy.
 #[derive(Debug)]
 enum Shown {
-    Local(Option<crate::process::ProcessEntry>),
-    Copied(crate::machine_records::CopiedHistory),
+    Local(Option<loopflow_execution::process::ProcessEntry>),
+    Copied(loopflow_execution::machine_records::CopiedHistory),
 }
 
 fn show(id: &str, json: bool, input: Option<&str>, view: SessionView) -> anyhow::Result<()> {
@@ -394,14 +398,15 @@ pub(crate) fn render(
         );
         if process.is_none() && session.is_none() {
             // A Session copied from a given-back Machine, when nothing here is it.
-            let copied = crate::store::machines::copied_history(&store.sqlite, id)?;
+            let copied = loopflow_execution::store::machines::copied_history(&store.sqlite, id)?;
             let copied =
                 copied.with_context(|| format!("Process or Session {id} was not found"))?;
             return Ok(Shown::Copied(copied));
         }
         if let Some(input) = input {
             anyhow::ensure!(session.is_some(), "--input requires a Session identity");
-            let captured = crate::store::sessions::input_history(&store.sqlite, input)?;
+            let captured =
+                loopflow_execution::store::sessions::input_history(&store.sqlite, input)?;
             anyhow::ensure!(
                 captured.session_id == id,
                 "Input does not belong to Session {id}"
@@ -419,7 +424,10 @@ pub(crate) fn render(
             );
             return Ok(format!(
                 "{}\n",
-                crate::machine_records::render(&copied, &crate::store::lf_home_dir())
+                loopflow_execution::machine_records::render(
+                    &copied,
+                    &loopflow_execution::store::lf_home_dir()
+                )
             ));
         }
     };
@@ -432,7 +440,7 @@ pub(crate) fn render(
             let summary = if json {
                 String::new()
             } else {
-                format!("{}\n", crate::output::render_process(&process))
+                format!("{}\n", loopflow_execution::output::render_process(&process))
             };
             Ok(format!(
                 "{summary}{}\n",

@@ -13,7 +13,7 @@ use loopflow_storage::work::selection::SplitAxis;
 /// The app bundles its CLI without adding it to PATH.
 const BUNDLED: &str = "/Applications/cmux.app/Contents/Resources/bin/cmux";
 
-use crate::terminal_host::CmuxLocation;
+use loopflow_execution::terminal_host::CmuxLocation;
 
 pub(super) struct Cmux {
     cli: PathBuf,

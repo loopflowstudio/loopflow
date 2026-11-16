@@ -9,12 +9,12 @@ use std::path::Path;
 
 use anyhow::Result;
 
-use crate::engine::task::TaskShip;
 use crate::lf::Cli;
-use crate::ops::task::ship::{
+use loopflow_execution::engine::task::TaskShip;
+use loopflow_execution::ops::task::ship::{
     ship_begin, ship_next, ship_progressed, ship_settle_merge, ShipMerge, ShipStart, ShipStep,
 };
-use crate::ops::task::{TaskProcessOptions, TaskRunStart};
+use loopflow_execution::ops::task::{TaskProcessOptions, TaskRunStart};
 
 /// `lf ship`: approve Auto-Ship and ship the Task here, reporting what it set
 /// going once, as `task.ship` returns it.
@@ -34,11 +34,13 @@ pub fn run(
         ShipStart::AtEnd { issue } => return announce(&TaskShip::AtEnd { issue }, json),
     };
     let issue = task.identifier.clone();
-    let process = crate::journal::current_lf_process_id()
+    let process = loopflow_execution::journal::current_lf_process_id()
         .expect("a ship that began has a registered Process");
     let letting_go = super::graph::lets_launcher_go(cli);
     let log = letting_go
-        .then(|| crate::process::launch_log::PendingLog::open(&format!("ship-{issue}")))
+        .then(|| {
+            loopflow_execution::process::launch_log::PendingLog::open(&format!("ship-{issue}"))
+        })
         .transpose()?;
     let shipping = TaskShip::Shipping {
         issue: issue.clone(),
@@ -47,7 +49,7 @@ pub fn run(
     };
     announce(&shipping, json)?;
     if let Some(log) = &log {
-        crate::process::launch_log::release_launcher(&log.file)?;
+        loopflow_execution::process::launch_log::release_launcher(&log.file)?;
     }
     // Every run is `lf -b task run`: straight through, interactive steps headless.
     let mut headless = cli.process_options();
@@ -64,7 +66,7 @@ pub fn run(
         if let Some(step) = &from {
             eprintln!("{issue}: standing in at {step}");
         }
-        let (task, start) = crate::ops::task::task_place(
+        let (task, start) = loopflow_execution::ops::task::task_place(
             repo,
             &issue,
             TaskProcessOptions {
@@ -73,14 +75,15 @@ pub fn run(
                 reason: None,
                 ..TaskProcessOptions::default()
             },
-            crate::ops::task::TaskRunMode::Headless,
+            loopflow_execution::ops::task::TaskRunMode::Headless,
+            crate::lf::navigation::command_merges,
         )?;
         // A Task that already has a conversation keeps it; this starts one only once.
-        crate::ops::task::start_conversation_beside(&task);
+        loopflow_execution::ops::task::start_conversation_beside(&task);
         if let TaskRunStart::Run { step, .. } = start {
             // This ship has already let its launcher go, or keeps it to the end.
             super::graph::run_task_graph_for(&headless, &task, &step, false, &mut |_, _| Ok(()))?;
-            crate::ops::task::task_run_finished(&task)?;
+            loopflow_execution::ops::task::task_run_finished(&task)?;
             ship_progressed(&task.id)?;
         }
     }
@@ -122,7 +125,7 @@ fn halt(issue: &str, step: &ShipStep) -> Result<()> {
 
 /// Report what this ship set going to its launcher and print it.
 fn announce(shipping: &TaskShip, json: bool) -> Result<()> {
-    crate::engine::launch::report(Ok(shipping));
+    loopflow_execution::engine::launch::report(Ok(shipping));
     if json {
         println!("{}", serde_json::to_string(shipping)?);
     } else if let Some(text) = shipping.render() {

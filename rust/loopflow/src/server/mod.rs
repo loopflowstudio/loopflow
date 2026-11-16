@@ -11,7 +11,7 @@ mod ticket;
 mod wake;
 pub mod wire;
 
-pub use crate::machine::socket_path;
+pub use loopflow_execution::machine::socket_path;
 
 /// `PATH` with the directories a GUI-started process lacks: an OS supervisor
 /// gives this service the same minimal `PATH` it gives the app, and everything

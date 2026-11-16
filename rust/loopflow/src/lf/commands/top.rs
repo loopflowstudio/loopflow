@@ -10,11 +10,11 @@ use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::journal::{
+use loopflow_execution::journal::{
     prune_process_receipts_at, read_process_receipts_at, recorded_process_evidence,
     recorded_process_receipt, OsProcess, ProcessIdentityEvidence, ProcessReceipt,
 };
-use crate::output::truncate;
+use loopflow_execution::output::truncate;
 use loopflow_model::id::LfProcessId;
 use loopflow_storage::rows::unix_to_datetime;
 use loopflow_storage::sqlite::SqliteStore;
@@ -82,7 +82,7 @@ pub struct ProcessPruneReport {
     pub removed_process_receipts: u32,
     pub orphaned_agent_process_groups: Vec<u32>,
     pub reaped_agent_process_groups: u32,
-    pub agent_process_records: Vec<crate::harness::agent_process::AgentProcessCleanup>,
+    pub agent_process_records: Vec<loopflow_execution::harness::agent_process::AgentProcessCleanup>,
     /// Store retention; absent on a dry run or before the store exists.
     pub store: Option<loopflow_storage::sqlite::retention::RetentionReport>,
     pub errors: u32,
@@ -91,7 +91,7 @@ pub struct ProcessPruneReport {
 /// Missing identity and failed sampling remain visible without granting control.
 /// Only affirmative death removes a recorded process from the activity view.
 fn activity_state(
-    record: &crate::process::ProcessEntry,
+    record: &loopflow_execution::process::ProcessEntry,
     receipt: &std::io::Result<Option<ProcessReceipt>>,
     processes: Option<&[OsProcess]>,
 ) -> Option<ActivityState> {
@@ -141,9 +141,9 @@ pub fn run_top() -> Result<()> {
 
 /// Stream the call trees as stored Process rows or observed OS states change.
 pub fn subscribe_ps(
-    transport: crate::read_stream::Transport,
-) -> Result<Option<crate::read_stream::Subscription>> {
-    crate::read_stream::start(
+    transport: loopflow_execution::read_stream::Transport,
+) -> Result<Option<loopflow_execution::read_stream::Subscription>> {
+    loopflow_execution::read_stream::start(
         (),
         {
             let mut reader = ActivityReader::default();
@@ -158,13 +158,13 @@ pub fn subscribe_ps(
 
 pub fn run_prune(json: bool, dry_run: bool) -> Result<()> {
     let now = OffsetDateTime::now_utc().unix_timestamp();
-    let lf_home = crate::store::lf_home_dir();
+    let lf_home = loopflow_execution::store::lf_home_dir();
     let processes = OsProcess::sample(now)?;
     let receipts =
         read_process_receipts_at(&lf_home).context("failed to read live Process receipts")?;
     // Attached LfProcess death is proven from Process receipts, so reap before
     // pruning them.
-    let agents = crate::harness::agent_process::prune_agent_processes(dry_run)?;
+    let agents = loopflow_execution::harness::agent_process::prune_agent_processes(dry_run)?;
     for error in &agents.errors {
         tracing::warn!(%error, "failed to clean up AgentProcess");
     }
@@ -183,9 +183,9 @@ pub fn run_prune(json: bool, dry_run: bool) -> Result<()> {
     if !dry_run {
         // Retention closes rows from receipt evidence, so it runs before
         // their receipts go.
-        let database = crate::store::database_path_from_env()?;
+        let database = loopflow_execution::store::database_path_from_env()?;
         if database.exists() {
-            match crate::store::retention::prune(&database, now) {
+            match loopflow_execution::store::retention::prune(&database, now) {
                 Ok(store) => report.store = Some(store),
                 Err(error) => {
                     tracing::warn!(%error, "failed to apply store retention");
@@ -245,7 +245,7 @@ pub(crate) struct ActivityReader {
     store: Option<SqliteStore>,
     dead: HashSet<String>,
     /// The rows not yet proven dead, read at this `processes` revision.
-    rows: Option<(i64, Vec<crate::process::ProcessEntry>)>,
+    rows: Option<(i64, Vec<loopflow_execution::process::ProcessEntry>)>,
 }
 
 impl ActivityReader {
@@ -253,13 +253,13 @@ impl ActivityReader {
         let store = match &self.store {
             Some(store) => store,
             None => {
-                let path = crate::store::database_path_from_env()?;
+                let path = loopflow_execution::store::database_path_from_env()?;
                 if !path.exists() {
                     return Ok(ActivitySnapshot { nodes: Vec::new() });
                 }
                 self.store.insert(SqliteStore::open_processes_read_only(
                     &path,
-                    crate::store::token_key::encryption_key,
+                    loopflow_execution::store::token_key::encryption_key,
                 )?)
             }
         };
@@ -272,7 +272,7 @@ impl ActivityReader {
         };
         let snapshot = read_activity(store, records.clone())?;
         let shown: HashSet<&str> = snapshot.nodes.iter().map(|node| node.id.as_str()).collect();
-        let current = crate::journal::current_lf_process_id();
+        let current = loopflow_execution::journal::current_lf_process_id();
         let (dead, alive) = records.into_iter().partition::<Vec<_>, _>(|row| {
             !shown.contains(row.id()) && current.as_ref().map(LfProcessId::as_str) != Some(row.id())
         });
@@ -285,19 +285,19 @@ impl ActivityReader {
 
 fn read_activity(
     store: &SqliteStore,
-    records: Vec<crate::process::ProcessEntry>,
+    records: Vec<loopflow_execution::process::ProcessEntry>,
 ) -> Result<ActivitySnapshot> {
     let now = OffsetDateTime::now_utc().unix_timestamp();
     // Each unfinished row reads its own receipt and its own OS processes, so
     // cost follows live work, not history or the rest of the Machine.
     let mut receipts: HashMap<_, _> = records
         .iter()
-        .filter_map(crate::process::ProcessEntry::as_lf)
+        .filter_map(loopflow_execution::process::ProcessEntry::as_lf)
         .map(|record| (record.id.clone(), recorded_process_receipt(store, record)))
         .collect();
     let mut pids: Vec<u32> = records
         .iter()
-        .filter_map(crate::process::ProcessEntry::pid)
+        .filter_map(loopflow_execution::process::ProcessEntry::pid)
         .collect();
     pids.extend(
         receipts
@@ -316,12 +316,14 @@ fn read_activity(
 }
 
 fn collect_activity(
-    records: Vec<crate::process::ProcessEntry>,
+    records: Vec<loopflow_execution::process::ProcessEntry>,
     processes: Option<&[OsProcess]>,
-    mut receipt: impl FnMut(&crate::process::LfProcess) -> std::io::Result<Option<ProcessReceipt>>,
+    mut receipt: impl FnMut(
+        &loopflow_execution::process::LfProcess,
+    ) -> std::io::Result<Option<ProcessReceipt>>,
 ) -> Result<ActivitySnapshot> {
-    use crate::process::ProcessEntry;
-    let current = crate::journal::current_lf_process_id();
+    use loopflow_execution::process::ProcessEntry;
+    let current = loopflow_execution::journal::current_lf_process_id();
     let mut nodes = Vec::new();
     for record in records {
         if current.as_ref().map(LfProcessId::as_str) == Some(record.id()) {
@@ -355,12 +357,12 @@ fn collect_activity(
     Ok(ActivitySnapshot { nodes })
 }
 
-pub(crate) fn command_label(record: &crate::process::ProcessEntry) -> String {
+pub(crate) fn command_label(record: &loopflow_execution::process::ProcessEntry) -> String {
     match record {
-        crate::process::ProcessEntry::Lf(process) => {
-            crate::command::lf_command_label(process.command.as_deref())
+        loopflow_execution::process::ProcessEntry::Lf(process) => {
+            loopflow_execution::command::lf_command_label(process.command.as_deref())
         }
-        crate::process::ProcessEntry::Agent(process) => {
+        loopflow_execution::process::ProcessEntry::Agent(process) => {
             agent_command_label(process.command.as_deref())
         }
     }
@@ -375,12 +377,12 @@ fn agent_command_label(command: Option<&str>) -> String {
         .or(command)
         .and_then(|value| Path::new(value).file_name())
         .and_then(|value| value.to_str())
-        .filter(|value| crate::command::safe_command_word(value))
+        .filter(|value| loopflow_execution::command::safe_command_word(value))
         .unwrap_or("AgentProcess");
     let subcommand = argv
         .as_ref()
         .and_then(|argv| argv.get(1))
-        .filter(|value| crate::command::safe_command_word(value));
+        .filter(|value| loopflow_execution::command::safe_command_word(value));
     match subcommand {
         Some(subcommand) => format!("{program} {subcommand}"),
         None => program.to_owned(),
@@ -475,7 +477,9 @@ fn print_snapshot(snapshot: &ActivitySnapshot, json: bool) -> Result<()> {
     if json {
         println!(
             "{}",
-            serde_json::to_string_pretty(&crate::read_stream::selected_answer(snapshot)?)?
+            serde_json::to_string_pretty(&loopflow_execution::read_stream::selected_answer(
+                snapshot
+            )?)?
         );
     } else {
         print!("{}", render_snapshot(snapshot));
@@ -639,7 +643,7 @@ fn format_duration(seconds: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::{collect_activity, ActivityNodeKind, OsProcess};
-    use crate::process::{AgentProcess, ProcessEntry};
+    use loopflow_execution::process::{AgentProcess, ProcessEntry};
     use loopflow_model::id::{AgentProcessId, LfProcessId, TraceId};
 
     #[test]
@@ -697,15 +701,15 @@ mod tests {
     #[test]
     fn uncertain_records_stay_visible_and_share_the_gate_judgment() {
         use super::{activity_state, fold_process_state, load_snapshot, ActivityState};
-        use crate::journal::{recorded_process_evidence, ProcessIdentityEvidence};
+        use loopflow_execution::journal::{recorded_process_evidence, ProcessIdentityEvidence};
 
-        let _lock = crate::journal::test_env_lock();
+        let _lock = loopflow_execution::journal::test_env_lock();
         let _ambient = crate::test_ambient::EnvGuard::new();
         let _home = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
         let home = tempfile::tempdir().unwrap();
         std::env::set_var("LF_HOME", home.path());
         let path = home.path().join("loopflow.db");
-        let store = crate::store::opening::open_ephemeral(&path).unwrap();
+        let store = loopflow_execution::store::opening::open_ephemeral(&path).unwrap();
         let sql = rusqlite::Connection::open(path).unwrap();
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
         let parent = LfProcessId::new();
@@ -757,7 +761,9 @@ mod tests {
             .nodes
             .iter()
             .all(|node| node.state == ActivityState::Unknown));
-        let blockers = crate::ops::task_execution::task_execution_blockers(&store, &task).unwrap();
+        let blockers =
+            loopflow_execution::ops::task_execution::task_execution_blockers(&store, &task)
+                .unwrap();
         assert_eq!(blockers.len(), 2);
         for node in &snapshot.nodes {
             let id = node.id.as_str();
@@ -810,7 +816,7 @@ mod tests {
             assert_eq!(actual, expected);
         }
         let lf = ProcessEntry::Lf(store.lf_process(&parent).unwrap().unwrap());
-        let receipt = crate::journal::ProcessReceipt {
+        let receipt = loopflow_execution::journal::ProcessReceipt {
             schema_version: 1,
             lf_process_id: parent.to_string(),
             trace_id: lf.trace_id().to_string(),
@@ -844,23 +850,27 @@ mod tests {
 
         use std::os::unix::fs::PermissionsExt;
 
-        let _lock = crate::journal::test_env_lock();
+        let _lock = loopflow_execution::journal::test_env_lock();
         let _ambient = crate::test_ambient::EnvGuard::new();
         let _home = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
         let home = tempfile::tempdir().unwrap();
         std::env::set_var("LF_HOME", home.path());
         let path = home.path().join("loopflow.db");
-        crate::store::opening::open_ephemeral(&path).unwrap();
+        loopflow_execution::store::opening::open_ephemeral(&path).unwrap();
         let sql = rusqlite::Connection::open(path).unwrap();
         let live = LfProcessId::new();
         let pid = std::process::id();
-        let started_at = crate::journal::process_started_at(pid).unwrap().unwrap();
+        let started_at = loopflow_execution::journal::process_started_at(pid)
+            .unwrap()
+            .unwrap();
         sql.execute(
             "INSERT INTO processes(id,trace_id,started_at,pid) VALUES(?1,?1,?2,?3)",
             rusqlite::params![live, started_at, pid],
         )
         .unwrap();
-        let root = home.path().join(crate::journal::PROCESS_RECEIPT_ROOT);
+        let root = home
+            .path()
+            .join(loopflow_execution::journal::PROCESS_RECEIPT_ROOT);
         std::fs::create_dir_all(&root).unwrap();
         let receipt = |id: &str| ProcessReceipt {
             schema_version: 1,
@@ -907,16 +917,18 @@ mod tests {
     fn a_watch_reads_each_dead_row_once() {
         use super::ActivityReader;
 
-        let _lock = crate::journal::test_env_lock();
+        let _lock = loopflow_execution::journal::test_env_lock();
         let _ambient = crate::test_ambient::EnvGuard::new();
         let _home = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
         let home = tempfile::tempdir().unwrap();
         std::env::set_var("LF_HOME", home.path());
         let path = home.path().join("loopflow.db");
-        crate::store::opening::open_ephemeral(&path).unwrap();
+        loopflow_execution::store::opening::open_ephemeral(&path).unwrap();
         let sql = rusqlite::Connection::open(path).unwrap();
         let pid = std::process::id();
-        let started = crate::journal::process_started_at(pid).unwrap().unwrap();
+        let started = loopflow_execution::journal::process_started_at(pid)
+            .unwrap()
+            .unwrap();
         let insert = |start: i64| {
             let id = LfProcessId::new();
             sql.execute(

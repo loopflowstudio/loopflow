@@ -133,7 +133,7 @@ so compilation cannot outlast its process-liveness fixtures.
 ## Implement: one focused test
 
 ```bash
-cargo test -p loopflow --lib skills::catalog::          # one library module
+cargo test -p loopflow-execution --lib skills::catalog::          # one library module
 cargo test -p loopflow --test integration context_tests:: # one integration module
 cargo test -p loopflow --test golden_prompt              # one standalone binary
 uv run pytest python/tests/test_gate_bounded.py          # one Python file
@@ -146,7 +146,7 @@ resume settings (`test(run::launch_policy_tests::)`), Task run and checkout
 previews (`test(ops::task::explain::tests::)`) and Machine dispatch and
 ownership (`test(ssh::dispatch_tests::) | test(task_ownership::tests::) | test(store::ownership_lifecycle_tests::)`) run
 as library rows
-(`cargo nextest run -p loopflow --lib -E '<filter>'`); run those before the
+(`cargo nextest run -p loopflow -p loopflow-execution --lib -E '<filter>'`); run those before the
 surface's full-Machine tests. The lists are in
 [the Rust tests README](../rust/loopflow/tests/README.md#decision-rows-and-full-machine-tests).
 
@@ -273,11 +273,17 @@ without `test-support`, then `cargo test -p loopflow --lib --no-run` with its
 dev dependency. Application acquisition and lifecycle tests stay above storage;
 prepared SQL invariants and migration checks stay in the storage crate.
 
-Cargo rebuilds changed libraries and their dependents. An edit to Task shipping
-rebuilds the application; unchanged lower-level libraries can be reused. Changes
-to a shared library also rebuild its callers. Binaries and test executables
-still require compilation and linking even when library compilations hit the
-cache. Use debug builds for local verification; never build `--release` to test.
+Cargo rebuilds changed libraries and their dependents. Command help or rendering
+rebuilds `loopflow`; execution and Task shipping edits rebuild `loopflow-execution`
+and `loopflow`; saved-record edits rebuild storage and both callers. Unchanged
+lower libraries can be reused. Binaries and test executables still compile and
+link even when library compilations hit the cache. Use debug builds for local
+verification; never build `--release` to test.
+
+Execution fixtures first compile with `cargo test -p loopflow-execution --lib --no-run`
+independently of the application. Its dev-only `test-support` feature exposes
+shared fixtures and inspection hooks to application tests. CLI parsing, server
+dispatch, help and presentation tests remain in `loopflow`.
 
 Each worktree keeps its own target directory. Cargo serializes commands sharing
 one target directory, so run one Cargo command at a time in each worktree. Do

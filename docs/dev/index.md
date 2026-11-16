@@ -61,11 +61,11 @@ The implementation follows the same order as the diagram:
 | Stage | Concrete owner | Produces |
 | --- | --- | --- |
 | Parse and dispatch | [`lf/mod.rs`](../../rust/loopflow/src/lf/mod.rs) | One command and launch context |
-| Find the Skill | [`skills/catalog.rs`](../../rust/loopflow/src/skills/catalog.rs) | One selected Skill source |
-| Assemble context | [`prompt/mod.rs`](../../rust/loopflow/src/prompt/mod.rs) | System and task prompts |
-| Select credentials and route | [`provider_account.rs`](../../rust/loopflow/src/provider_account.rs) | Harness, account, model, credential |
-| Launch and normalize | [`harness/`](../../rust/loopflow/src/harness) | Provider output and usage events |
-| Record command and conversation evidence | [`journal/`](../../rust/loopflow/src/journal) and the store | Process completion, LfSession history and immutable payloads |
+| Find the Skill | [`skills/catalog.rs`](../../rust/loopflow-execution/src/skills/catalog.rs) | One selected Skill source |
+| Assemble context | [`prompt/mod.rs`](../../rust/loopflow-execution/src/prompt/mod.rs) | System and task prompts |
+| Select credentials and route | [`provider_account.rs`](../../rust/loopflow-execution/src/provider_account.rs) | Harness, account, model, credential |
+| Launch and normalize | [`harness/`](../../rust/loopflow-execution/src/harness) | Provider output and usage events |
+| Record command and conversation evidence | [`journal/`](../../rust/loopflow-execution/src/journal) and the store | Process completion, LfSession history and immutable payloads |
 
 [Follow the complete execution path →](execution.md)
 
@@ -98,7 +98,7 @@ one Skill run
 | Planning | Graph composition, Wave/Task Work, Steer, questions, review GraphSteps | [Planning](planning.md) |
 | Delivery | Managed worktrees, commits, one active Task branch/PR, CI repair, merge | [Delivery](delivery.md) |
 | Machines | Execution destinations, Task ownership and SSH routing | [Machines and processes](machines.md) |
-| Terminals | Where an agent runs, held terminals, views, headless work | [Transport](../../rust/loopflow/src/transport/README.md) |
+| Terminals | Where an agent runs, held terminals, views, headless work | [Transport](../../rust/loopflow-execution/src/transport/README.md) |
 | Client access and installation | Server admission, registration/update and continuity across replacement | [Client API server](server.md) |
 | Data | Truth owners, SQLite, files, external systems, projections, consistency | [Data and persistence](data.md) |
 | Codebase | Source territories, public surfaces, processes, extension points | [Codebase map](codebase.md) |
@@ -232,7 +232,7 @@ resume of it would run: held for Work or a Desktop pane, in the terminal for a
 bare `lf resume`. One it cannot verify, or that does not exit, keeps running
 and the message names its pid.
 
-The [transport README](../../rust/loopflow/src/transport/README.md) owns the
+The [transport README](../../rust/loopflow-execution/src/transport/README.md) owns the
 holder and view protocols; the
 [server README](../../rust/loopflow/src/server/README.md) owns client
 operations and hook boundaries.
@@ -430,7 +430,7 @@ the behavior.
 | Graph semantics, Work state, Steer, questions, review GraphSteps and Task advancement | [Planning](planning.md) |
 | worktrees, commits, PR ranges, checks, or landing | [Delivery](delivery.md) |
 | remote execution, Task ownership, process control, promotion | [Machines and processes](machines.md) |
-| where an agent runs, held terminals, views, headless launches | [Transport](../../rust/loopflow/src/transport/README.md) |
+| where an agent runs, held terminals, views, headless launches | [Transport](../../rust/loopflow-execution/src/transport/README.md) |
 | client operations, hook boundaries, subscriptions | [Server](../../rust/loopflow/src/server/README.md) |
 | schema, files, projections, DTOs, or consistency | [Data and persistence](data.md) |
 | module ownership, APIs, binaries, routes, or code size | [Codebase map](codebase.md) |

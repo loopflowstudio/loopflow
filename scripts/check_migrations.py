@@ -146,7 +146,7 @@ def _check_runtime_sql() -> None:
     wildcard = re.compile(r"\bSELECT\s+(?:\w+\.)?\*", re.IGNORECASE)
     sources = (
         path
-        for crate in ("loopflow", "loopflow-storage")
+        for crate in ("loopflow", "loopflow-execution", "loopflow-storage")
         for path in (REPO_ROOT / "rust" / crate / "src").rglob("*.rs")
     )
     for path in sorted(sources):

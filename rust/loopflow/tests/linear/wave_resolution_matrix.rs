@@ -12,10 +12,10 @@ use std::path::Path;
 use std::process::Command;
 
 use clap::{ArgAction, CommandFactory};
-use loopflow::id::WaveId;
 use loopflow::lf::Cli;
-use loopflow::store::sqlite::SqliteStore;
-use loopflow::work::wave::Wave;
+use loopflow_execution::store::sqlite::SqliteStore;
+use loopflow_execution::work::wave::Wave;
+use loopflow_model::id::WaveId;
 
 // ─── Command registry ───────────────────────────────────────────────────
 
@@ -299,7 +299,7 @@ fn classify(output: &std::process::Output) -> Outcome {
 // ─── Helpers ────────────────────────────────────────────────────────────
 
 fn open_test_store(path: &Path) -> SqliteStore {
-    loopflow::store::open_sqlite(path).expect("open store")
+    loopflow_execution::store::open_sqlite(path).expect("open store")
 }
 
 /// Seed a machine home with one registered wave ("product"), a PM snapshot,
@@ -339,7 +339,7 @@ fn seed(home: &Path, repo: &Path) -> Wave {
         "product".to_string(),
         repo.display().to_string(),
     );
-    loopflow::work::wave::bootstrap::upsert_wave(&store, &wave).expect("register wave");
+    loopflow_execution::work::wave::bootstrap::upsert_wave(&store, &wave).expect("register wave");
     store
         .seed_inventory(&InventoryFixture {
             wave_id: wave.id().clone(),

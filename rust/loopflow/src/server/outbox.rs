@@ -48,8 +48,8 @@ impl Materializing {
             .clone()
             .try_acquire_many_owned(bytes as u32)
             .map_err(|_| {
-                crate::engine::Error::new(
-                    crate::engine::ErrorCode::Busy,
+                loopflow_execution::engine::Error::new(
+                    loopflow_execution::engine::ErrorCode::Busy,
                     "shared subscription retained capacity reached; retry shortly",
                 )
             })?;

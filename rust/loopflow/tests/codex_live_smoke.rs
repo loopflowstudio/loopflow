@@ -7,16 +7,16 @@
 //! cargo test -p loopflow --test codex_live_smoke -- --ignored
 //! ```
 
-use loopflow::process::attachment;
+use loopflow_execution::process::attachment;
 use std::time::Duration;
 
-use loopflow::agent::AgentConfig;
-use loopflow::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
-use loopflow::harness::codex::CodexHarness;
-use loopflow::harness::{ApprovalPolicy, Harness};
-use loopflow::id::LfProcessId;
-use loopflow::session::{LfSession, TitleSource};
-use loopflow::store::{open_ephemeral_store, StorageConfig};
+use loopflow_execution::agent::AgentConfig;
+use loopflow_execution::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
+use loopflow_execution::harness::codex::CodexHarness;
+use loopflow_execution::harness::{ApprovalPolicy, Harness};
+use loopflow_execution::session::{LfSession, TitleSource};
+use loopflow_execution::store::{open_ephemeral_store, StorageConfig};
+use loopflow_model::id::LfProcessId;
 use tokio::sync::mpsc;
 
 #[tokio::test]
@@ -32,8 +32,8 @@ async fn codex_live_one_turn_smoke() {
     let _store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
         .await
         .expect("store");
-    let store = loopflow::store::open_sqlite(&database).expect("store");
-    loopflow::store::sessions::create_session(
+    let store = loopflow_execution::store::open_sqlite(&database).expect("store");
+    loopflow_execution::store::sessions::create_session(
         &store,
         LfSession {
             captured: None,

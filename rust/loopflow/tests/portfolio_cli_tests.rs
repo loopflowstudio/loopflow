@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-use loopflow::portfolio::{Portfolio, PortfolioMode};
+use loopflow_execution::portfolio::{Portfolio, PortfolioMode};
 
 fn portfolio(home: &Path, args: &[&str]) -> Portfolio {
     let output = Command::new(env!("CARGO_BIN_EXE_lf"))

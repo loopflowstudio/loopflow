@@ -11,9 +11,9 @@ use time::OffsetDateTime;
 
 use super::session::SessionFacts;
 use super::waves::RoadmapTask;
-use crate::durable::{GraphProcessDetail, TaskState};
-use crate::session::GraphProcessSummaryState;
-use crate::store::SharedStore;
+use loopflow_execution::durable::{GraphProcessDetail, TaskState};
+use loopflow_execution::session::GraphProcessSummaryState;
+use loopflow_execution::store::SharedStore;
 use loopflow_model::comment::{TaskComment, TaskComments};
 use loopflow_storage::rows::unix_to_datetime;
 use loopflow_storage::work::task::PrPhase;

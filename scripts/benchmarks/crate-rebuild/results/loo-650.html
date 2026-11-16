@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<title>LOO-650 rebuild measurements</title>
+<style>
+body {font:16px/1.5 system-ui,sans-serif;max-width:1050px;margin:48px auto;
+padding:0 24px;color:#20252b}
+h1 {font-size:32px;letter-spacing:-.03em} h2 {margin-top:40px;font-size:22px}
+code,td {font-variant-numeric:tabular-nums} code {font-size:.9em}
+table {width:100%;border-collapse:collapse;margin:16px 0 28px}
+th,td {padding:10px;border-bottom:1px solid #ddd;text-align:left}
+thead {background:#f4f5f6} small {color:#626970;white-space:nowrap} a {color:#145b90}
+</style>
+<h1>Rebuild only affected code</h1>
+<p>Five alternating paired cohorts; each sample includes the executable link.
+Values are <strong>median [minimum–maximum]</strong>. Lower is better.</p>
+<p>Command-help elapsed fell 57.3%,
+execution elapsed fell 9.9%, and fresh-worktree
+elapsed fell 7.8%.
+Saved-record edits cost 2.6% more elapsed
+and 2.8% more client CPU, while largest RSS
+fell 38.7%. The cut improves feedback and peak
+memory with a small saved-record cost increase.</p>
+<p>Baseline <code>3fbf3d2ca31e41d3a8d548f0ffa0feaff78d82a7</code><br>Candidate <code>6b9878ffd869ec49f0e1a1f25b7fd102254c18b5</code></p>
+<h2>Elapsed seconds</h2><table><thead><tr><th>Case</th><th>Baseline</th><th>Candidate</th></tr></thead><tbody><tr><th>Fresh worktree, warm cache</th><td>479.90 <small>[477.40–489.79]</small></td><td>442.64 <small>[441.76–447.75]</small></td></tr><tr><th>Command help edit</th><td>64.17 <small>[63.61–64.47]</small></td><td>27.41 <small>[27.30–29.64]</small></td></tr><tr><th>Execution edit</th><td>63.80 <small>[63.67–64.16]</small></td><td>57.49 <small>[56.65–57.98]</small></td></tr><tr><th>Saved Task record edit</th><td>63.78 <small>[63.50–63.83]</small></td><td>65.47 <small>[65.12–70.86]</small></td></tr></tbody></table>
+<h2>Client CPU seconds</h2><table><thead><tr><th>Case</th><th>Baseline</th><th>Candidate</th></tr></thead><tbody><tr><th>Fresh worktree, warm cache</th><td>467.36 <small>[465.59–474.54]</small></td><td>409.62 <small>[409.35–412.70]</small></td></tr><tr><th>Command help edit</th><td>98.25 <small>[98.22–98.43]</small></td><td>42.28 <small>[42.06–44.72]</small></td></tr><tr><th>Execution edit</th><td>98.42 <small>[98.19–98.71]</small></td><td>88.82 <small>[88.38–89.66]</small></td></tr><tr><th>Saved Task record edit</th><td>98.42 <small>[98.29–98.48]</small></td><td>101.15 <small>[101.02–104.89]</small></td></tr></tbody></table>
+<h2>Largest process RSS, GiB</h2><table><thead><tr><th>Case</th><th>Baseline</th><th>Candidate</th></tr></thead><tbody><tr><th>Fresh worktree, warm cache</th><td>5.55 <small>[5.54–5.56]</small></td><td>2.10 <small>[2.10–2.11]</small></td></tr><tr><th>Command help edit</th><td>5.53 <small>[5.53–5.55]</small></td><td>2.10 <small>[2.09–2.12]</small></td></tr><tr><th>Execution edit</th><td>5.54 <small>[5.54–5.55]</small></td><td>3.39 <small>[3.39–3.40]</small></td></tr><tr><th>Saved Task record edit</th><td>5.53 <small>[5.53–5.54]</small></td><td>3.39 <small>[3.38–3.39]</small></td></tr></tbody></table>
+<h2>Workspace compiler closure</h2>
+<table><tr><th>Edit</th><th>Baseline misses</th><th>Candidate misses</th></tr>
+<tr><th>Command help</th><td>application</td><td>application</td></tr>
+<tr><th>Execution</th><td>application</td><td>execution + application</td></tr>
+<tr><th>Saved record</th><td>application</td><td>storage + execution + application</td></tr></table>
+<p>Every fresh candidate worktree retrieves model, definitions, terminal, storage
+and execution from its cache. The application compiles its own checkout identity.
+Subsequent edit cases reuse unchanged libraries as Cargo-fresh artifacts or cache
+hits. Receipts distinguish both from compiler misses. Non-cacheable
+third-party build steps and links remain in the whole-build costs above.</p>
+<h2>Method and limits</h2>
+<p>Independent targets and cold-seeded caches; one Cargo job. Cohort order alternates
+candidate/base, base/candidate. Edits have unique cohort suffixes. Two cold seeds
+are calibration and are excluded from the medians. Profiles match. The registry dependency delta is
+8 removed and
+0 added version/checksum tuples.
+Machine: 16 logical CPUs, arm64,
+Darwin 25.0.0.
+Compiler: rustc 1.98.1 (48a229cea 2026-09-01) (Homebrew).</p>
+<p>The selected experimental sccache binary is pinned by SHA-256
+<code>9d864b14017a948388011bd36e4ca445ec986d85846aced6d293c8bfd8e4ef67</code>. Installed sccache 0.19.0 lacks the
+required Rust basedir and verbatim environment-dependency support. Root upkeep
+passed through an observed natural idle exit; no Machine cache configuration or
+shared daemon was changed.</p>
+<p>The wrapper adds two statistics RPCs per workspace compiler; that overhead is
+included. CPU covers the timed client process tree, excluding the cache daemon.
+RSS is its largest process, not concurrent Machine memory. These observations do
+not establish total Machine CPU savings or a safe concurrency budget. The validator
+was resumed after recognizing Cargo’s rlib spelling; completed samples were retained.</p>
+<p>All twelve source copies passed runtime root/revision checks. Catalogue checks
+retained the canonical schema through Git reference and source-package changes.
+Retrieved execution and storage rlibs can retain the seed checkout’s debug-source
+paths; use <code>scripts/dev-lf --isolated-build</code> when those paths no longer resolve.</p>
+<p><a href="loo-650.json">Compiler, resource and correctness receipts</a> ·
+<a href="loo-650-raw.json.gz">Full cache/resource receipts (compressed JSON)</a> ·
+<a href="../README.md">Reproduce the comparison</a></p></html>

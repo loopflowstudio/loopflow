@@ -1,7 +1,7 @@
 //! Isolated server for scripts/benchmarks/subscription_baseline.py. Run only
 //! through that driver; the control socket is fixture-only, never a wire API.
 
-use crate::process::attachment;
+use loopflow_execution::process::attachment;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixListener as ControlListener;
 use std::path::Path;
@@ -16,10 +16,10 @@ use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
 use super::{connection, Clients, Tickets};
-use crate::performance::subscription_measurement as meter;
-use crate::process::SessionAttachment;
 use crate::server::subscriptions::Subscriptions;
 use crate::server::wire::MAX_CONNECTIONS;
+use loopflow_execution::performance::subscription_measurement as meter;
+use loopflow_execution::process::SessionAttachment;
 use loopflow_model::durable::TaskId;
 use loopflow_model::id::LfProcessId;
 use loopflow_storage::sqlite::SqliteStore;
@@ -45,7 +45,9 @@ fn attach(store: &SqliteStore, session: &str, pid: u32) -> SessionAttachment {
         .unwrap();
     let attachment =
         attachment::claim_session_attachment(store, session, None, &owner, true).unwrap();
-    let born = crate::journal::process_started_at(pid).unwrap().unwrap();
+    let born = loopflow_execution::journal::process_started_at(pid)
+        .unwrap()
+        .unwrap();
     store
         .conn
         .lock()
@@ -68,9 +70,11 @@ fn seed(home: &Path, pid: u32) {
         .unwrap()
         .success());
     let repo = repo.canonicalize().unwrap();
-    let store = crate::store::opening::open_ephemeral(&home.join("loopflow.db")).unwrap();
+    let store =
+        loopflow_execution::store::opening::open_ephemeral(&home.join("loopflow.db")).unwrap();
     let repository_id =
-        crate::repository::location::ensure_repository(&store, repo.to_str().unwrap()).unwrap();
+        loopflow_execution::repository::location::ensure_repository(&store, repo.to_str().unwrap())
+            .unwrap();
     for i in 0..64 {
         store
             .create_task(&loopflow_storage::work::task::NewTask {
@@ -93,7 +97,7 @@ fn seed(home: &Path, pid: u32) {
     }
     for i in 0..128 {
         let id = format!("session-{i:03}");
-        store.test_session(&id, &crate::session_record::new_artifact_key());
+        store.test_session(&id, &loopflow_execution::session_record::new_artifact_key());
         store
             .conn
             .lock()
@@ -136,7 +140,8 @@ fn subscription_writer() {
     let home = std::env::var("SUBSCRIPTION_HOME").unwrap();
     std::env::set_var("LF_HOME", &home);
     let home = Path::new(&home);
-    let store = crate::store::opening::open_ephemeral(&home.join("loopflow.db")).unwrap();
+    let store =
+        loopflow_execution::store::opening::open_ephemeral(&home.join("loopflow.db")).unwrap();
     let attachments: Vec<SessionAttachment> =
         serde_json::from_slice(&std::fs::read(home.join("attachments.json")).unwrap()).unwrap();
     let session = store.session("session-127").unwrap().unwrap();
@@ -149,11 +154,11 @@ fn subscription_writer() {
             break;
         }
         if command == "title" {
-            crate::store::sessions::rename_session(
+            loopflow_execution::store::sessions::rename_session(
                 &store,
                 "session-001",
                 "Changed by fixture",
-                crate::session::TitleSource::Human,
+                loopflow_execution::session::TitleSource::Human,
             )
             .unwrap();
             println!("WRITER {}", json!({"title":true}));
@@ -168,7 +173,7 @@ fn subscription_writer() {
                 session.artifact_key.as_ref().unwrap(),
                 count,
                 now,
-                &crate::session_record::CaptureFact::ProviderAttemptStarted {
+                &loopflow_execution::session_record::CaptureFact::ProviderAttemptStarted {
                     provider: "fixture".into(),
                     model: None,
                     account_id: None,
@@ -180,7 +185,7 @@ fn subscription_writer() {
             .record_session_activity(
                 &session.id,
                 &attachments[1],
-                &crate::session::SessionActivity {
+                &loopflow_execution::session::SessionActivity {
                     observed_at: now.unix_timestamp(),
                     open_tools: count as usize % 2,
                     pending_input: 0,

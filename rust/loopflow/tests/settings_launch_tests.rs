@@ -1,5 +1,7 @@
 use crate::support;
-use loopflow::store::{CredentialState, ProviderAccount, ProviderAccountId, RoutingState};
+use loopflow_execution::store::{
+    CredentialState, ProviderAccount, ProviderAccountId, RoutingState,
+};
 use loopflow_test_support::TestRepo;
 use sha2::{Digest, Sha256};
 use std::fs;
@@ -41,7 +43,7 @@ fn command(repo: &Path, home: &Path, args: &[&str]) -> Command {
 const CODEX_NATIVE: &str = concat!(
     "#!/bin/sh\nexec /usr/bin/python3 '",
     env!("CARGO_MANIFEST_DIR"),
-    "/tests/support/native_codex.py' \"$@\"\n"
+    "/../loopflow-execution/tests/support/native_codex.py' \"$@\"\n"
 );
 
 #[test]
@@ -220,7 +222,7 @@ for line in sys.stdin:
     }
     repo.stage_all();
     repo.commit("Define agent selection fixtures");
-    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow_execution::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     support::select_wave_graph(
         repo.path(),
         &store,
@@ -351,7 +353,7 @@ for line in sys.stdin:
     assert_eq!(models, ["haiku", "sonnet"]);
 }
 
-fn connect_fixture_claude(home: &Path, store: &loopflow::store::Store) {
+fn connect_fixture_claude(home: &Path, store: &loopflow_execution::store::Store) {
     let name = "fixture";
     let account_home = home.join("accounts/claude").join(name);
     fs::create_dir_all(&account_home).unwrap();
@@ -361,31 +363,36 @@ fn connect_fixture_claude(home: &Path, store: &loopflow::store::Store) {
     fs::write(account_home.join(".credentials.json"), credential).unwrap();
     tokio::runtime::Runtime::new()
         .unwrap()
-        .block_on(store.upsert_provider_account(&ProviderAccount {
-            provider: "claude".into(),
-            account_id: ProviderAccountId::parse(name).unwrap(),
-            home: Some(account_home),
-            login_email: Some(
-                loopflow::profile::EmailAddress::parse(&format!("{name}@example.com")).unwrap(),
-            ),
-            observed_email: Some(format!("{name}@example.com")),
-            observed_subject: Some(name.into()),
-            observed_credential_digest: Some(format!(
-                "{:x}",
-                Sha256::digest(credential.as_bytes())
-            )),
-            observed_plan: None,
-            credential_state: CredentialState::Connected,
-            routing_state: RoutingState::Automatic,
-            plan: None,
-            paid_through: None,
-            utilization_percent: None,
-            cooldown_until: None,
-            cooldown_reason: None,
-            last_selected_at: None,
-            created_at: 1,
-            updated_at: 1,
-        }))
+        .block_on(
+            store.upsert_provider_account(&ProviderAccount {
+                provider: "claude".into(),
+                account_id: ProviderAccountId::parse(name).unwrap(),
+                home: Some(account_home),
+                login_email: Some(
+                    loopflow_execution::profile::EmailAddress::parse(&format!(
+                        "{name}@example.com"
+                    ))
+                    .unwrap(),
+                ),
+                observed_email: Some(format!("{name}@example.com")),
+                observed_subject: Some(name.into()),
+                observed_credential_digest: Some(format!(
+                    "{:x}",
+                    Sha256::digest(credential.as_bytes())
+                )),
+                observed_plan: None,
+                credential_state: CredentialState::Connected,
+                routing_state: RoutingState::Automatic,
+                plan: None,
+                paid_through: None,
+                utilization_percent: None,
+                cooldown_until: None,
+                cooldown_reason: None,
+                last_selected_at: None,
+                created_at: 1,
+                updated_at: 1,
+            }),
+        )
         .unwrap();
 }
 
@@ -509,8 +516,8 @@ fn exercise_live_occurrence_preferences(overrides: bool) {
     );
     let store = tokio::runtime::Runtime::new()
         .unwrap()
-        .block_on(loopflow::store::open_ephemeral_store(
-            &loopflow::store::StorageConfig::sqlite(home.path().join("loopflow.db")),
+        .block_on(loopflow_execution::store::open_ephemeral_store(
+            &loopflow_execution::store::StorageConfig::sqlite(home.path().join("loopflow.db")),
         ))
         .unwrap();
     connect_fixture_claude(home.path(), &store);
@@ -668,8 +675,8 @@ graphs:
         launch_pair(&[], None, false)[0]["settings"]["agent"]["value"],
         "claude:edited-repo"
     );
-    let wave = loopflow::work::wave::Wave::new(
-        loopflow::id::WaveId::new(),
+    let wave = loopflow_execution::work::wave::Wave::new(
+        loopflow_model::id::WaveId::new(),
         "settings".into(),
         repo.path().canonicalize().unwrap().display().to_string(),
     );
@@ -749,8 +756,8 @@ fn choices_and_fallbacks_agree_in_inspection_runtime_and_exported_recipes() {
     );
     let store = tokio::runtime::Runtime::new()
         .unwrap()
-        .block_on(loopflow::store::open_ephemeral_store(
-            &loopflow::store::StorageConfig::sqlite(home.path().join("loopflow.db")),
+        .block_on(loopflow_execution::store::open_ephemeral_store(
+            &loopflow_execution::store::StorageConfig::sqlite(home.path().join("loopflow.db")),
         ))
         .unwrap();
     connect_fixture_claude(home.path(), &store);
@@ -958,8 +965,8 @@ with (home / 'session-children.jsonl').open('a') as output:
     assert!(pushed.status.success());
     let store = tokio::runtime::Runtime::new()
         .unwrap()
-        .block_on(loopflow::store::open_ephemeral_store(
-            &loopflow::store::StorageConfig::sqlite(home.path().join("loopflow.db")),
+        .block_on(loopflow_execution::store::open_ephemeral_store(
+            &loopflow_execution::store::StorageConfig::sqlite(home.path().join("loopflow.db")),
         ))
         .unwrap();
     let _checkouts = TaskCheckouts {
@@ -1077,8 +1084,8 @@ fn explicit_graph_agent_reaches_composed_routers_and_repeated_steps() {
     );
     let store = tokio::runtime::Runtime::new()
         .unwrap()
-        .block_on(loopflow::store::open_ephemeral_store(
-            &loopflow::store::StorageConfig::sqlite(home.path().join("loopflow.db")),
+        .block_on(loopflow_execution::store::open_ephemeral_store(
+            &loopflow_execution::store::StorageConfig::sqlite(home.path().join("loopflow.db")),
         ))
         .unwrap();
     connect_fixture_claude(home.path(), &store);
@@ -1177,12 +1184,12 @@ fn cli_destinations_save_the_declaration_used_by_preparation_and_unset() {
         }
         args.extend(["config", "show", "--skill", "probe", "--json"]);
         let inspection: serde_json::Value = serde_json::from_slice(&run(&args).stdout).unwrap();
-        let config = loopflow::config::load_wave_config(Some(&child), wave)
+        let config = loopflow_execution::config::load_wave_config(Some(&child), wave)
             .unwrap()
             .unwrap();
-        let prepared = loopflow::prompt::process::prepare_process_prompt(
+        let prepared = loopflow_execution::prompt::process::prepare_process_prompt(
             &config,
-            loopflow::prompt::process::ProcessPromptInput {
+            loopflow_execution::prompt::process::ProcessPromptInput {
                 repo_root: child.clone(),
                 skill: Some("probe".into()),
                 wave: wave.map(str::to_owned),
@@ -1259,14 +1266,14 @@ fn context_namespace_agrees_across_files_flags_and_preparation() {
         args.extend(["config", "show", "--skill", "context-proof", "--json"]);
         serde_json::from_slice::<serde_json::Value>(&run(&args).stdout).unwrap()
     };
-    let config = loopflow::config::load_config(Some(repo.path()))
+    let config = loopflow_execution::config::load_config(Some(repo.path()))
         .unwrap()
         .unwrap();
-    let skill = loopflow::graph::load_skill("context-proof", repo.path()).unwrap();
-    let resolved = loopflow::config::settings::resolve(&config, Some(&skill)).unwrap();
-    let prepared = loopflow::prompt::process::prepare_process_prompt(
+    let skill = loopflow_execution::graph::load_skill("context-proof", repo.path()).unwrap();
+    let resolved = loopflow_execution::config::settings::resolve(&config, Some(&skill)).unwrap();
+    let prepared = loopflow_execution::prompt::process::prepare_process_prompt(
         &config,
-        loopflow::prompt::process::ProcessPromptInput {
+        loopflow_execution::prompt::process::ProcessPromptInput {
             repo_root: repo.path().into(),
             skill: Some("context-proof".into()),
             ..Default::default()

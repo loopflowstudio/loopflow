@@ -3,7 +3,7 @@
 
 mod support;
 
-use loopflow::store::{CredentialType, ProviderToken};
+use loopflow_execution::store::{CredentialType, ProviderToken};
 use loopflow_test_support::TestRepo;
 use std::process::Command;
 use support::{register_task_without_pr, EnvGuard};

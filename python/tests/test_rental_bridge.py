@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-BRIDGE = Path(__file__).parents[2] / "rust/loopflow/src/rental/sandbox.py"
+BRIDGE = Path(__file__).parents[2] / "rust/loopflow-execution/src/rental/sandbox.py"
 _spec = importlib.util.spec_from_file_location("sandbox", BRIDGE)
 bridge = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(bridge)

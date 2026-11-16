@@ -1,6 +1,3 @@
-/// Explicit Work declaration inherited by descendants; checkout inference never writes it.
-pub const WORK_DECLARATION_ENV: &str = "LF_AS";
-
 /// The caller's prompt and provider flags for the Task Graph it launches.
 #[doc(hidden)]
 use std::path::PathBuf;
@@ -8,9 +5,10 @@ use std::path::PathBuf;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 pub mod aliases;
+mod desktop_inputs;
+pub use desktop_inputs::{PortfolioArgs, ShellArgs};
 pub mod commands;
 pub mod navigation;
-pub mod output;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum BrowserMode {
@@ -92,7 +90,7 @@ pub struct Cli {
     #[arg(long, value_name = "JSON", value_parser = |text: &str| serde_json::from_str::<serde_json::Value>(text))]
     pub output_schema: Option<serde_json::Value>,
     #[arg(skip)]
-    pub resolved_invocation: Option<crate::skills::invocation::SkillInvocation>,
+    pub resolved_invocation: Option<loopflow_execution::skills::invocation::SkillInvocation>,
 
     /// Prefer this managed provider login before the normal route. Repeat to
     /// select provider-qualified preferences such as `claude=jack@`.
@@ -184,9 +182,9 @@ impl Cli {
             let (key, text) = setting
                 .split_once('=')
                 .ok_or_else(|| anyhow::anyhow!("--setting expects KEY=YAML"))?;
-            let parsed = crate::config::settings::parse_value(key, text)?;
-            let typed = crate::config::keys::typed_key(key);
-            crate::config::settings::insert(
+            let parsed = loopflow_execution::config::settings::parse_value(key, text)?;
+            let typed = loopflow_execution::config::keys::typed_key(key);
+            loopflow_execution::config::settings::insert(
                 &mut value,
                 &typed.split('.').collect::<Vec<_>>(),
                 parsed,
@@ -208,7 +206,7 @@ impl Cli {
             ),
         ] {
             if let Some(enabled) = enabled {
-                crate::config::settings::insert(
+                loopflow_execution::config::settings::insert(
                     &mut value,
                     &key.split('.').collect::<Vec<_>>(),
                     enabled.into(),
@@ -216,10 +214,14 @@ impl Cli {
             }
         }
         if let Some(agent) = &self.agent {
-            crate::config::settings::insert(&mut value, &["agent"], agent.clone().into());
+            loopflow_execution::config::settings::insert(
+                &mut value,
+                &["agent"],
+                agent.clone().into(),
+            );
         }
         if !self.docs.is_empty() {
-            crate::config::settings::insert(
+            loopflow_execution::config::settings::insert(
                 &mut value,
                 &["context", "docs"],
                 serde_yaml_ng::to_value(&self.docs)?,
@@ -688,7 +690,7 @@ pub enum Commands {
         #[arg(long)]
         delivery: Option<std::path::PathBuf>,
         #[arg(long, value_enum, default_value = "stop")]
-        moment: crate::context_block::ContextMoment,
+        moment: loopflow_execution::context_block::ContextMoment,
     },
     /// External: skill/graph name (when no subcommand matches)
     #[command(external_subcommand)]
@@ -757,7 +759,7 @@ pub enum DesktopCommand {
     #[command(hide = true)]
     Shell {
         #[command(flatten)]
-        args: crate::desktop::shells::ShellArgs,
+        args: ShellArgs,
     },
     /// Show a Work selection; `list` and `show` read what views show without opening Desktop
     #[command(args_conflicts_with_subcommands = true)]
@@ -778,7 +780,7 @@ pub enum DesktopCommand {
     /// Select repositories for the Machine-local portfolio
     Portfolio {
         #[command(subcommand)]
-        cmd: Option<crate::portfolio::PortfolioCommand>,
+        cmd: Option<PortfolioArgs>,
         #[arg(long, global = true, id = "portfolio_json")]
         json: bool,
     },
@@ -821,7 +823,7 @@ pub enum DesktopCommand {
     )]
     Wait {
         /// Longest wait, e.g. 30s, 5m (default: no limit)
-        #[arg(long = "for", value_name = "DURATION", value_parser = crate::config::parse_duration)]
+        #[arg(long = "for", value_name = "DURATION", value_parser = loopflow_execution::config::parse_duration)]
         timeout: Option<std::time::Duration>,
         #[command(flatten)]
         target: DesktopTargetArgs,
@@ -1581,10 +1583,10 @@ pub struct WavePlanTarget {
 }
 
 impl WavePlanTarget {
-    pub fn as_plan_target(&self) -> crate::ops::project::PlanTarget<'_> {
+    pub fn as_plan_target(&self) -> loopflow_execution::ops::project::PlanTarget<'_> {
         match self.project.as_deref() {
-            Some(project) => crate::ops::project::PlanTarget::Project(project),
-            None => crate::ops::project::PlanTarget::Wave(self.wave.as_deref()),
+            Some(project) => loopflow_execution::ops::project::PlanTarget::Project(project),
+            None => loopflow_execution::ops::project::PlanTarget::Wave(self.wave.as_deref()),
         }
     }
 }
@@ -1665,8 +1667,8 @@ pub struct SessionConnectionArgs {
 }
 
 impl SessionConnectionArgs {
-    pub fn intent(&self) -> crate::lf::commands::write::SessionOpenIntent {
-        use crate::lf::commands::write::SessionOpenIntent;
+    pub fn intent(&self) -> loopflow_execution::session::SessionOpenIntent {
+        use loopflow_execution::session::SessionOpenIntent;
         if self.reveal_existing {
             SessionOpenIntent::Reveal
         } else if self.start_if_free {
@@ -1690,7 +1692,7 @@ impl SessionConnectionArgs {
         &'a self,
         cli: &'a Cli,
         id: Option<&'a str>,
-    ) -> anyhow::Result<crate::ops::human_session::SessionTarget<'a>> {
+    ) -> anyhow::Result<loopflow_execution::ops::human_session::SessionTarget<'a>> {
         anyhow::ensure!(
             self.task.is_none() || cli.task.is_none(),
             "select a Task only once"
@@ -1699,7 +1701,7 @@ impl SessionConnectionArgs {
             self.wave.is_none() || cli.wave.is_none(),
             "select a Wave only once"
         );
-        use crate::ops::human_session::SessionTarget;
+        use loopflow_execution::ops::human_session::SessionTarget;
         let target = SessionTarget::from_selectors(
             id,
             self.task.as_deref().or(cli.task.as_deref()),
@@ -1750,7 +1752,7 @@ pub struct SessionListArgs {
     pub wave: Option<String>,
     /// Current primary conversations; omit the value to include all three scopes
     #[arg(long, value_enum, num_args = 0..=1, default_missing_value = "all", value_name = "task|wave|repository")]
-    pub primary: Option<crate::session::SessionPrimary>,
+    pub primary: Option<loopflow_execution::session::SessionPrimary>,
     /// Outside the work model: no Task association and no Wave
     #[arg(long, conflicts_with = "task")]
     pub orphan: bool,
@@ -3046,7 +3048,7 @@ pub enum MachineCommand {
     Connect {
         target: String,
         /// github, claude, codex, opencode or linear
-        provider: crate::provider_auth::Provider,
+        provider: loopflow_execution::provider_auth::Provider,
         email: Option<String>,
         #[arg(long)]
         chrome_profile: Option<String>,
@@ -3205,7 +3207,7 @@ pub enum OndemandCommand {
 pub enum MachineCredentialCommand {
     /// Report whether this account is installed, without logging in.
     Inspect {
-        provider: crate::provider_auth::Provider,
+        provider: loopflow_execution::provider_auth::Provider,
         login: String,
         /// Count only a Claude login this Machine refreshes itself
         #[arg(long)]
@@ -3322,7 +3324,9 @@ fn parse_account_target(raw: &str) -> Result<String, String> {
     let named = raw.contains('@')
         || raw.contains('=')
         || raw == "auto"
-        || raw.parse::<crate::provider_auth::Provider>().is_ok();
+        || raw
+            .parse::<loopflow_execution::provider_auth::Provider>()
+            .is_ok();
     if named {
         Ok(raw.to_string())
     } else {
@@ -3342,7 +3346,9 @@ impl AccountCommand {
             let spelling = match cmd.login() {
                 Some(login)
                     if !login.contains('=')
-                        && target.parse::<crate::provider_auth::Provider>().is_ok() =>
+                        && target
+                            .parse::<loopflow_execution::provider_auth::Provider>()
+                            .is_ok() =>
                 {
                     format!("lf account {} {target}={login}", cmd.verb())
                 }
@@ -3663,7 +3669,7 @@ mod tests {
 
     #[test]
     fn session_list_selects_wave_and_optional_primary_without_changing_launch_wave() {
-        use crate::session::SessionPrimary;
+        use loopflow_execution::session::SessionPrimary;
         for (words, expected) in [
             (vec!["--primary"], SessionPrimary::All),
             (vec!["--primary", "task"], SessionPrimary::Task),
@@ -3733,11 +3739,13 @@ mod tests {
     fn account_commands_printed_by_errors_parse() {
         let sources = [
             include_str!("commands/account.rs"),
+            include_str!("../../../loopflow-execution/src/provider_account/operations.rs"),
+            include_str!("../../../loopflow-execution/src/provider_account/account_status.rs"),
             include_str!("commands/account_status.rs"),
-            include_str!("commands/machine_credentials.rs"),
-            include_str!("../provider_account.rs"),
-            include_str!("../provider_account/activation.rs"),
-            include_str!("../provider_account/identity.rs"),
+            include_str!("../../../loopflow-execution/src/machine/credentials.rs"),
+            include_str!("../../../loopflow-execution/src/provider_account.rs"),
+            include_str!("../../../loopflow-execution/src/provider_account/activation.rs"),
+            include_str!("../../../loopflow-execution/src/provider_account/identity.rs"),
         ];
         let printed =
             regex::Regex::new(r#"lf account (?:connect|disconnect|set|use) [^`"\n;(),…]+"#)
@@ -4095,7 +4103,7 @@ mod tests {
             cli.command,
             Some(Commands::ContextBlock {
                 delivery: None,
-                moment: crate::context_block::ContextMoment::Stop,
+                moment: loopflow_execution::context_block::ContextMoment::Stop,
             })
         ));
     }
@@ -4648,7 +4656,7 @@ mod tests {
             };
             assert!(matches!(
                 connection.target(&cli, id.as_deref()).unwrap(),
-                crate::ops::human_session::SessionTarget::Session("session-id")
+                loopflow_execution::ops::human_session::SessionTarget::Session("session-id")
             ));
             assert!(connection.work_flag(&cli).is_some());
         }
@@ -4861,6 +4869,3 @@ pub enum DiscordCommand {
     /// Poll a configured channel and post each Session's final answer
     Serve { wave: String },
 }
-
-/// Pushed code requirements for one remote Task invocation.
-pub const TASK_SOURCE_ENV: &str = "LF_TASK_SOURCE";

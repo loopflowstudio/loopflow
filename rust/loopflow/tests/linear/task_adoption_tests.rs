@@ -6,11 +6,11 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::Command;
 
-use loopflow::id::WaveId;
-use loopflow::linear::LinearProjectId;
-use loopflow::store::{open_ephemeral_store, StorageConfig};
-use loopflow::work::project::{Project, ProjectId};
-use loopflow::work::wave::Wave;
+use loopflow_execution::linear::LinearProjectId;
+use loopflow_execution::store::{open_ephemeral_store, StorageConfig};
+use loopflow_execution::work::project::{Project, ProjectId};
+use loopflow_execution::work::wave::Wave;
+use loopflow_model::id::WaveId;
 use loopflow_test_support::TestRepo;
 use serde_json::json;
 
@@ -65,7 +65,7 @@ fn task_adopts_linear_checkout_and_preserves_graph_history() {
             .output()
             .unwrap()
             .stdout;
-        let head = loopflow::git::rev_parse(&checkout, "HEAD").unwrap();
+        let head = loopflow_execution::git::rev_parse(&checkout, "HEAD").unwrap();
         if remote_only {
             for args in [
                 vec!["worktree", "remove", checkout.to_str().unwrap()],
@@ -101,7 +101,7 @@ fn task_adopts_linear_checkout_and_preserves_graph_history() {
             linear_id: Some(LinearProjectId::new("project-1").unwrap()),
             slug: "chapter".into(),
             name: "Chapter".into(),
-            status: loopflow::work::project::ProjectStatus::Started,
+            status: loopflow_execution::work::project::ProjectStatus::Started,
             description: "Adopt existing work".into(),
             krs: Vec::new(),
             metric_targets: Vec::new(),
@@ -220,9 +220,12 @@ fn task_adopts_linear_checkout_and_preserves_graph_history() {
             assert_eq!(task.worktree.as_ref(), Some(&checkout));
         }
         checkout = task.worktree.as_ref().unwrap().clone();
-        assert!(loopflow::git::is_ancestor(&checkout, &head, "HEAD").unwrap());
+        assert!(loopflow_execution::git::is_ancestor(&checkout, &head, "HEAD").unwrap());
         if operation == "checkout" {
-            assert_eq!(loopflow::git::rev_parse(&checkout, "HEAD").unwrap(), head);
+            assert_eq!(
+                loopflow_execution::git::rev_parse(&checkout, "HEAD").unwrap(),
+                head
+            );
             let status = Command::new("git")
                 .args(["status", "--porcelain=v1"])
                 .current_dir(&checkout)
@@ -232,7 +235,9 @@ fn task_adopts_linear_checkout_and_preserves_graph_history() {
             assert_eq!(status, before);
         }
         assert_eq!(
-            loopflow::git::current_branch(&checkout).unwrap().as_deref(),
+            loopflow_execution::git::current_branch(&checkout)
+                .unwrap()
+                .as_deref(),
             Some(branch)
         );
         let pr = runtime
@@ -287,7 +292,7 @@ fn task_adopts_linear_checkout_and_preserves_graph_history() {
             assert_eq!(status, before);
         }
         assert_eq!(
-            loopflow::git::worktrees::list_worktrees(repo.path())
+            loopflow_execution::git::worktrees::list_worktrees(repo.path())
                 .unwrap()
                 .len(),
             2

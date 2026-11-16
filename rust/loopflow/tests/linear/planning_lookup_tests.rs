@@ -1,8 +1,8 @@
 use crate::test_linear_input::{IssueFixture, SeedLinear};
 use std::process::Command;
 
-use loopflow::ops::task::TaskStatus;
-use loopflow::store::{open_ephemeral_store, PlanningState, StorageConfig};
+use loopflow_execution::ops::task::TaskStatus;
+use loopflow_execution::store::{open_ephemeral_store, PlanningState, StorageConfig};
 use loopflow_test_support::TestRepo;
 use serde_json::json;
 
@@ -166,7 +166,7 @@ fn task_status_reads_projectless_planning_without_allocating_execution() {
         .unwrap()
         .is_empty());
     assert_eq!(
-        loopflow::git::worktrees::list_worktrees(repo.path())
+        loopflow_execution::git::worktrees::list_worktrees(repo.path())
             .unwrap()
             .len(),
         1

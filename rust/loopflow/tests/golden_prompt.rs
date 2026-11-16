@@ -3,11 +3,11 @@ mod support;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use loopflow::prompt::format_prompt;
-use loopflow::prompt::gather_context;
-use loopflow::prompt::ClipboardContext;
-use loopflow::prompt::GatherContextOpts;
-use loopflow::prompt::Surface;
+use loopflow_execution::prompt::format_prompt;
+use loopflow_execution::prompt::gather_context;
+use loopflow_execution::prompt::ClipboardContext;
+use loopflow_execution::prompt::GatherContextOpts;
+use loopflow_execution::prompt::Surface;
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]

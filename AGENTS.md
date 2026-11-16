@@ -170,7 +170,7 @@ Use `uv` for Python. Never use pip directly.
 
 ```bash
 uv run python scripts/test.py --list                     # suites this branch reaches
-cargo test -p loopflow --lib skills::catalog::           # one focused Rust module
+cargo test -p loopflow-execution --lib skills::catalog::           # one focused Rust module
 uv run pytest python/tests/test_gate_bounded.py          # one focused Python file
 uv run python scripts/test.py --reuse-passing --rust-filter 'test(skills::catalog::)'  # gate: a few named tests; CI runs the suites
 cargo fmt
@@ -274,7 +274,7 @@ recorded Tasks and every steer, turn and event they wrote. Every agent shares
 one SQLite write lock. Check new queries with `EXPLAIN QUERY PLAN` against a
 store that size.
 
-**Harness, transport and hook code (`rust/loopflow/src/harness/**`, `transport*`):**
+**Harness, transport and hook code (`rust/loopflow-execution/src/harness/**`, `transport*`):**
 lf is a session manager, context adder and hook interjector on top of a
 harness, never a middleman that can break the conversation. It is never in the
 byte path between a person and their provider except as a pass-through that
@@ -322,15 +322,21 @@ them.
 - `unwrap()` is fine. Unit tests live in the same file; integration tests in `tests/`.
 - Register standalone test binaries in `rust/loopflow/Cargo.toml` (`autotests = false`); ordinary suites join `tests/integration.rs`. `tests/linear/` compiles into the library's test binary: `cargo test -p loopflow --lib task_graph_launch_tests::`.
 - Mock through closures or `#[cfg(test)]`, not factory traits.
+- After moving fixtures between crates, run one application launch/resume test and
+  one moved fixture. Compilation misses runtime script paths and child initializer
+  changes; prompt-only fixtures select their harness explicitly.
 - Cross-crate fixtures enable existing inspection helpers through a `test-support`
-  dev-dependency feature; release builds omit them. Do not include library source
-  again in application fixtures.
+  dev-dependency feature; release builds omit them. The feature exposes inspection
+  and explicit overrides; unit-test defaults stay behind `cfg(test)` so feature
+  unification cannot change the CLI runtime. Execution fixtures live under
+  `loopflow_execution::test_support`; parser and presentation assertions stay in
+  the application. Do not include library source again in application fixtures.
 - Bare `task run` returns once the Graph registers; `lf -b task run` waits but runs interactive steps headless. A test reading state a stopping run writes waits for that run. `lf ship` and `-b` share one path. Changing when a command returns means updating its test callers (`grep -rn '"task", "run"' rust/loopflow/tests/`).
 - Pin fixture `LF_BIN` inside the network boundary; the runner clears inherited `LF_*`. Never let an installed provider outrank a stand-in.
 - From an lf-launched shell, run `cargo test` with `LF_*` unset and `< /dev/null`: fixtures follow `LF_HOME`, and `lf task create` reads open stdin. In zsh: `env $(env | grep '^LF_' | cut -d= -f1 | sed 's/^/-u /') cargo test …`. A leftover `LF_CAPTURE_KEY` fails store writes with CannotOpen or "capture does not belong to a recorded Session".
 - Account routing fixtures read personal preferences scoped to this checkout's repository, so on a Machine with its own routes they fail with "has no resident login". Run the built test binary from an empty directory with `HOME` pointed at another, keeping `CARGO_HOME` for fixtures that build `lf`.
-- Every test binary runs with `HOME` under the temp directory (`support`'s ctor), so an inherited `lf` cannot reach `~/.codex` or `~/.claude`. A fixture that calls `env_clear` sets its own `HOME`: with none, `lf` asks the OS for the account's real one.
-- Claude's stand-in endpoints (`LF_TEST_CLAUDE_*`) exist only under `cfg(test)`: a real `lf` calls the provider. A detached child that must reach them is the test binary re-executed behind an `LF_BIN` script; its ctor drops `CLAUDE_CONFIG_DIR`, so pass the home in a fixture variable.
+- Every test binary runs with `HOME` and `LF_HOME` under the temp directory (`support`'s ctor), so an inherited `lf` cannot reach `~/.codex` or `~/.claude`. A fixture that calls `env_clear` sets its own `HOME`: with none, `lf` asks the OS for the account's real one.
+- Claude's stand-in endpoints (`LF_TEST_CLAUDE_*`) exist only in execution's `cfg(test)`: a real `lf` calls the provider. A detached child that must reach them is the test binary re-executed behind an `LF_BIN` script; its ctor drops `CLAUDE_CONFIG_DIR`, so pass the home in a fixture variable.
 - With `LF_HOME` unset, `lf_home_dir` finds the account's real `~/.lf` even under an isolated `HOME`, so a fixture changing `LF_HOME` holds the env lock.
 - A fixture that launches an agent for a Task or a Wave holds a `loopflow_test_support::MachineServer` for its `LF_HOME`. Without one the launch runs `lf install server`, which registers a launchd or systemd job for the temporary home.
 - A headless fixture that expects turn hooks or `LF_PROVIDER_CONTEXT` launches managed: its command names the Task (`--task`), with a connected fixture account and a `MachineServer`. Plain `lf -b <skill>` in a Task's checkout is bare: two context hooks, a steer check that reads the store (`LF_BARE_STEER`), no turn hooks, no server. A managed interactive launch, held by the server, keeps every hook; a bare one has the same hooks as `-b`, at a terminal or held in a Desktop pane.

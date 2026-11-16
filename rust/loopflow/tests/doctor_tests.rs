@@ -2,8 +2,8 @@ use std::fs;
 use std::path::Path;
 use std::process::{Command, Output};
 
-use loopflow::process::LfProcess;
-use loopflow::store::sqlite::SqliteStore;
+use loopflow_execution::process::LfProcess;
+use loopflow_execution::store::sqlite::SqliteStore;
 use time::OffsetDateTime;
 
 use loopflow_test_support::TestRepo;
@@ -43,9 +43,9 @@ fn insert_process(store: &SqliteStore, _id: &str, ts: i64) {
     store
         .record_process(&LfProcess {
             os_started_at: None,
-            id: loopflow::id::LfProcessId::new(),
+            id: loopflow_model::id::LfProcessId::new(),
             pid: None,
-            trace_id: loopflow::id::TraceId::new(),
+            trace_id: loopflow_model::id::TraceId::new(),
             parent_lf_process_id: None,
             // A finished root nothing references is forgotten at exit; agent-issued
             // history is what a copied store retains.
@@ -68,7 +68,7 @@ fn insert_process(store: &SqliteStore, _id: &str, ts: i64) {
 #[test]
 fn doctor_json_reports_the_build_revision_and_freshness_check() {
     let home = TestRepo::new();
-    loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
+    loopflow_execution::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     let fetch_head = home.path().join(".git/FETCH_HEAD");
     let before = fs::read(&fetch_head).ok();
     let output = run_lf(home.path(), &["self", "doctor", "--json"]);
@@ -94,7 +94,7 @@ fn doctor_json_reports_the_build_revision_and_freshness_check() {
 #[test]
 fn copied_production_history_does_not_block_the_telemetry_cron() {
     let home = TestRepo::new();
-    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow_execution::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     insert_process(
         &store,
         "august-03",
@@ -150,18 +150,18 @@ fn copied_production_history_does_not_block_the_telemetry_cron() {
 #[test]
 fn doctor_accepts_machine_commands_without_a_repository() {
     let home = TestRepo::new();
-    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow_execution::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     insert_process(
         &store,
         "machine-command",
         OffsetDateTime::now_utc().unix_timestamp(),
     );
-    let loopflow::process::ProcessEntry::Lf(mut event) =
+    let loopflow_execution::process::ProcessEntry::Lf(mut event) =
         store.processes_since(0).unwrap().pop().unwrap()
     else {
         panic!("the fixture records an lf Process")
     };
-    event.id = loopflow::id::LfProcessId::new();
+    event.id = loopflow_model::id::LfProcessId::new();
     event.repo = None;
     event.command = Some("lf help".to_string());
     store.record_process(&event).unwrap();
@@ -211,7 +211,7 @@ fn doctor_does_not_initialize_a_missing_database() {
 fn reads_answer_from_a_store_a_newer_build_migrated() {
     let home = TestRepo::new();
     let path = home.path().join("loopflow.db");
-    let store = loopflow::store::open_sqlite(&path).unwrap();
+    let store = loopflow_execution::store::open_sqlite(&path).unwrap();
     insert_process(&store, "recent", OffsetDateTime::now_utc().unix_timestamp());
     let connection = rusqlite::Connection::open(&path).unwrap();
     connection.execute("INSERT INTO schema_migrations (version, applied_at) VALUES ('9.0.001_future', unixepoch() + 1)", []).unwrap();

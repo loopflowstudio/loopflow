@@ -6,7 +6,9 @@ import json
 import os
 import re
 import shutil
+import statistics
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -105,21 +107,106 @@ def _verify_catalog_refresh(
         raise RuntimeError("a no-op migration or source move changed the product schema")
 
 
-def _edit_task_record(tree: Path) -> Path:
-    sources = [
-        path
-        for path in (tree / "rust").glob("*/src/**/task/mod.rs")
-        if "pub enum TaskDataError" in path.read_text()
-    ]
-    if len(sources) != 1:
-        raise RuntimeError("cannot locate the Task record edit anchor")
-    source = sources[0]
+def _edit(tree: Path, case: str, cohort: int) -> Path:
+    if case == "command_help":
+        paths = [tree / "rust/loopflow/src/lf/mod.rs"]
+        old = 'about = "Open Loopflow or run its CLI"'
+    elif case == "execution":
+        paths = [
+            p
+            for p in (tree / "rust").glob("*/src/ops/task/**/*.rs")
+            if "pub enum ShipStart" in p.read_text()
+        ]
+        old = '"no Task exists for {issue:?}"'
+    else:
+        paths = [
+            p
+            for p in (tree / "rust").glob("*/src/**/task/mod.rs")
+            if "pub enum TaskDataError" in p.read_text()
+        ]
+        old = '#[error("invalid Task: {0}")]'
+    if len(paths) != 1 or paths[0].read_text().count(old) != 1:
+        raise RuntimeError(f"cannot locate {case} semantic edit")
+    source = paths[0]
     text = source.read_text()
-    old = '#[error("invalid Task: {0}")]'
-    if text.count(old) != 1:
-        raise RuntimeError("Task record message anchor changed")
-    source.write_text(text.replace(old, '#[error("invalid Task: {0} (rebuild probe)")]'))
+    # Distinct edits across cohorts prevent retrieval of an earlier edited rlib.
+    position = old.rfind('"')
+    replacement = old[:position] + f" (rebuild cohort {cohort})" + old[position:]
+    source.write_text(text.replace(old, replacement))
     return source
+
+
+def _timing(log: str) -> dict:
+    if os.uname().sysname == "Darwin":
+        cpu = re.search(r"([\d.]+) real\s+([\d.]+) user\s+([\d.]+) sys", log)
+        rss = re.search(r"(\d+)\s+maximum resident set size", log)
+        return {"cpu_seconds": float(cpu[2]) + float(cpu[3]), "rss_bytes": int(rss[1])}
+    user = re.search(r"User time \(seconds\): ([\d.]+)", log)
+    system = re.search(r"System time \(seconds\): ([\d.]+)", log)
+    rss = re.search(r"Maximum resident set size \(kbytes\): (\d+)", log)
+    return {"cpu_seconds": float(user[1]) + float(system[1]), "rss_bytes": int(rss[1]) * 1024}
+
+
+def _summarize(receipts: list[dict]) -> list[dict]:
+    rows = []
+    for label in ("base", "candidate"):
+        for case in ("warm_root", "command_help", "execution", "task_record"):
+            samples = [r for r in receipts if r["label"] == label and r["case"] == case]
+            if not samples:
+                continue
+            row = {"label": label, "case": case, "n": len(samples)}
+            for metric in ("wall_seconds", "cpu_seconds", "rss_bytes"):
+                values = [r[metric] for r in samples]
+                row[metric] = {
+                    "median": statistics.median(values),
+                    "min": min(values),
+                    "max": max(values),
+                }
+            rows.append(row)
+    return rows
+
+
+def _validate_closure(receipt: dict) -> None:
+    case = receipt["case"]
+    if case == "cold_seed":
+        return
+    expected = {"loopflow"}
+    if receipt["label"] == "candidate":
+        if case in ("execution", "task_record"):
+            expected.add("loopflow_execution")
+        if case == "task_record":
+            expected.add("loopflow_storage")
+    actual = {
+        c["crate"]
+        for c in receipt["workspace_compilers"]
+        if c["crate_type"] in ("lib", "rlib") and c["cache_misses"]
+    }
+    if case == "warm_root" and receipt["label"] == "candidate":
+        expected_hits = {
+            "loopflow_model",
+            "loopflow_definitions",
+            "loopflow_terminal",
+            "loopflow_storage",
+            "loopflow_execution",
+        }
+        hits = {c["crate"] for c in receipt["workspace_compilers"] if c["cache_hits"]}
+        if hits != expected_hits:
+            raise RuntimeError(f"wrong reusable library closure: {hits}")
+    if actual != expected or receipt["rust_cache_misses"] != len(expected):
+        raise RuntimeError(f"wrong compiler closure: expected {expected}, got {actual}")
+
+
+def _catalog_complete(output: Path) -> bool:
+    path = output / "catalog-refresh.json"
+    if not path.exists():
+        return False
+    rows = json.loads(path.read_text())
+    return (
+        [row["case"] for row in rows]
+        == ["before", "unmerged", "main_advanced", "packed", "loose_after_packed", "source_package"]
+        and len({row["schema_sha256"] for row in rows}) == 1
+        and rows[-1]["catalog"] == rows[2]["catalog"]
+    )
 
 
 def main() -> None:
@@ -128,25 +215,29 @@ def main() -> None:
     parser.add_argument("--candidate", default="HEAD")
     parser.add_argument("--sccache", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--jobs", type=int, default=1)
+    parser.add_argument("--jobs", type=int, default=1, choices=[1])
+    parser.add_argument("--cohorts", type=int, default=5)
+    parser.add_argument(
+        "--resume", action="store_true", help="Continue retained sources and receipts"
+    )
     args = parser.parse_args()
-    if args.jobs < 1:
-        parser.error("--jobs must be positive")
+    if args.cohorts < 1:
+        parser.error("--cohorts must be positive")
     cache = args.sccache.resolve()
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
+    if (output / "receipts.json").exists() and not args.resume:
+        parser.error("output already has receipts; choose a fresh directory")
     env = {
         key: value
         for key, value in os.environ.items()
-        if not key.startswith(("LF_", "SCCACHE_", "CARGO_"))
+        if not key.startswith(("LF_", "SCCACHE_", "CARGO_", "LOOPFLOW_BUILD_"))
         and key
         not in (
             "RUSTC_WRAPPER",
             "RUSTC_WORKSPACE_WRAPPER",
             "RUSTFLAGS",
-            "LOOPFLOW_BUILD_PROVENANCE",
             "LOOPFLOW_RELEASE_TAG",
-            "LOOPFLOW_BUILD_SOURCE_ROOT",
             "LOOPFLOW_MIGRATION_ORDER",
         )
     }
@@ -154,15 +245,18 @@ def main() -> None:
         CARGO_INCREMENTAL="0",
         SCCACHE_CLIENT_SIDE="1",
         SCCACHE_MAX_FRAME_LENGTH=str(1024 * 1024 * 1024),
-        RUSTC_WRAPPER=str(cache),
-        SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=(
-            "CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH,LOOPFLOW_BUILD_SOURCE_ROOT"
-        ),
+        SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS="CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH,LOOPFLOW_BUILD_SOURCE_ROOT",
+        LOOPFLOW_REBUILD_CACHE=str(cache),
     )
-    receipts = []
+    receipts = json.loads((output / "receipts.json").read_text()) if args.resume else []
+
+    for receipt in receipts:
+        _validate_closure(receipt)
 
     def run(argv: list[str], cwd: Path = ROOT) -> str:
-        result = subprocess.run(argv, cwd=cwd, env=env, capture_output=True, text=True)
+        result = subprocess.run(
+            argv, cwd=cwd, env=env, capture_output=True, text=True, stdin=subprocess.DEVNULL
+        )
         if result.returncode:
             raise RuntimeError(f"{argv!r} failed:\n{result.stdout}\n{result.stderr}")
         return result.stdout
@@ -170,199 +264,348 @@ def main() -> None:
     def stats() -> dict:
         return json.loads(run([str(cache), "--show-stats", "--stats-format", "json"]))["stats"]
 
-    (output / "configuration.json").write_text(
-        json.dumps(
-            {
-                "cache_binary": str(cache),
-                "cache_sha256": hashlib.sha256(cache.read_bytes()).hexdigest(),
-                "cache_version": run([str(cache), "--version"]).strip(),
-                "rustc": run(["rustc", "--version"]).strip(),
-                "machine": list(os.uname()),
-                "cpus": os.cpu_count(),
-                "client_side": env["SCCACHE_CLIENT_SIDE"],
-                "max_frame_length": env["SCCACHE_MAX_FRAME_LENGTH"],
-            },
-            indent=2,
+    if not args.resume:
+        (output / "configuration.json").write_text(
+            json.dumps(
+                {
+                    "cache_binary": str(cache),
+                    "cache_sha256": hashlib.sha256(cache.read_bytes()).hexdigest(),
+                    "cache_version": run([str(cache), "--version"]).strip(),
+                    "rustc": run(["rustc", "--version"]).strip(),
+                    "machine": list(os.uname()),
+                    "cpus": os.cpu_count(),
+                    "jobs": args.jobs,
+                    "cohorts": args.cohorts,
+                    "client_side": True,
+                    "max_frame_length": env["SCCACHE_MAX_FRAME_LENGTH"],
+                    "instrumentation": (
+                        "two cache-stat RPCs per workspace rustc invocation; "
+                        "included in elapsed/client CPU"
+                    ),
+                    "memory": "largest timed process RSS; cache daemon excluded from CPU/RSS",
+                },
+                indent=2,
+            )
+            + "\n"
         )
-        + "\n"
+    retained = json.loads((output / "frontiers.json").read_text()) if args.resume else []
+    if args.resume:
+        prior = json.loads((output / "configuration.json").read_text())
+        if prior["rustc"] != run(["rustc", "--version"]).strip():
+            raise RuntimeError("resume requires the same Rust compiler")
+        if prior["cache_sha256"] != hashlib.sha256(cache.read_bytes()).hexdigest():
+            raise RuntimeError("resume requires the same cache binary")
+    temporary = (
+        str(Path(retained[0]["tree"]).parent)
+        if retained
+        else tempfile.mkdtemp(prefix="lf650-build-", dir="/tmp")
     )
-
-    temporary = tempfile.mkdtemp(prefix="lf650-build-", dir="/tmp")
+    root = Path(temporary).resolve()
     try:
-        root = Path(temporary).resolve()
+        wrapper = root / "sccache"
+        wrapper.write_text(
+            f"#!{sys.executable}\n" + (Path(__file__).with_name("compiler_receipt.py")).read_text()
+        )
+        wrapper.chmod(0o755)
+        env.update(
+            RUSTC_WRAPPER=str(wrapper),
+            SCCACHE_SERVER_UDS=str(root / "cache.sock"),
+            SCCACHE_CONF=str(root / "sccache.toml"),
+        )
+        (root / "sccache.toml").write_text("")
         snapshots = {}
         for label, revision in (("base", args.base), ("candidate", args.candidate)):
             sha = run(["git", "rev-parse", "--verify", revision + "^{commit}"]).strip()
-            trees = [root / f"{label}-{suffix}" for suffix in ("a", "b")]
-            for tree in trees:
-                run(["git", "clone", "--shared", "--no-checkout", "--quiet", str(ROOT), str(tree)])
-                run(["git", "checkout", "--quiet", "--detach", sha], tree)
-                # The build uses the source repository's real merged migration frontier.
-                run(
-                    [
-                        "git",
-                        "fetch",
-                        "--quiet",
-                        str(ROOT),
-                        "refs/remotes/origin/main:refs/remotes/origin/main",
-                    ],
-                    tree,
-                )
-            snapshots[label] = (sha, trees)
-        env["SCCACHE_BASEDIRS"] = os.pathsep.join(
-            str(tree) for _, trees in snapshots.values() for tree in trees
-        )
-        env["SCCACHE_SERVER_UDS"] = str(root / "cache.sock")
-        env["SCCACHE_CONF"] = str(root / "sccache.toml")
-        (root / "sccache.toml").write_text("")
-        for label, (sha, trees) in snapshots.items():
-            # Separate cold caches prevent the candidate borrowing from the baseline.
-            env["SCCACHE_DIR"] = str(root / f"{label}-cache")
-            try:
-                run(["nice", "-n", "10", str(cache), "--start-server"])
-                for case, tree in (
-                    ("cold_a", trees[0]),
-                    ("warm_b", trees[1]),
-                    ("shipping_b", trees[1]),
-                    ("task_record_b", trees[1]),
-                ):
-                    edited_source = None
-                    if case == "task_record_b":
-                        edited_source = _edit_task_record(tree)
-                    if case == "shipping_b":
-                        # A real string-value change in shipping logic, not a touched comment.
-                        sources = [
-                            p
-                            for p in (tree / "rust/loopflow/src/ops/task").rglob("*.rs")
-                            if "async fn task_by_issue(" in p.read_text()
-                            and "pub enum ShipStart" in p.read_text()
+            trees = [root / f"{label}-{i}" for i in range(args.cohorts + 1)]
+            if args.resume:
+                rows = [row for row in retained if Path(row["tree"]).name.startswith(label + "-")]
+                if len(rows) != len(trees) or any(row["revision"] != sha for row in rows):
+                    raise RuntimeError("resume revisions or cohort count differ")
+            else:
+                for tree in trees:
+                    run(
+                        [
+                            "git",
+                            "clone",
+                            "--shared",
+                            "--no-checkout",
+                            "--quiet",
+                            str(ROOT),
+                            str(tree),
                         ]
-                        if len(sources) != 1:
-                            raise RuntimeError("cannot locate the shipping edit anchor")
-                        source = sources[0]
-                        edited_source = source
-                        old = '"no Task exists for {issue:?}"'
-                        text = source.read_text()
-                        if text.count(old) != 1:
-                            raise RuntimeError("shipping message anchor changed")
-                        source.write_text(
-                            text.replace(old, '"no Task exists for {issue:?} (rebuild probe)"')
-                        )
-                    before = stats()
-                    load_before = os.getloadavg()
-                    start = time.monotonic()
-                    stem = f"{label}_{case}"
-                    with (
-                        (output / f"{stem}.jsonl").open("w") as stdout,
-                        (output / f"{stem}.log").open("w") as stderr,
-                    ):
-                        result = subprocess.run(
-                            [
-                                "/usr/bin/time",
-                                "-l" if os.uname().sysname == "Darwin" else "-v",
-                                "nice",
-                                "-n",
-                                "10",
-                                "cargo",
-                                "build",
-                                "--locked",
-                                "-p",
-                                "loopflow",
-                                "--bin",
-                                "lf",
-                                "--jobs",
-                                str(args.jobs),
-                                "--message-format=json",
-                            ],
-                            cwd=tree,
-                            env=env,
-                            stdout=stdout,
-                            stderr=stderr,
-                        )
-                    after = stats()
-                    artifacts = [
-                        json.loads(line)
-                        for line in (output / f"{stem}.jsonl").read_text().splitlines()
-                        if line.startswith("{")
-                    ]
-                    log = (output / f"{stem}.log").read_text()
-                    receipt = {
-                        "revision": sha,
-                        "case": stem,
-                        "exit_code": result.returncode,
-                        "wall_seconds": round(time.monotonic() - start, 3),
-                        "jobs": args.jobs,
-                        "load_before": load_before,
-                        "load_after": os.getloadavg(),
-                        "edited_source": (
-                            str(edited_source.relative_to(tree)) if edited_source else None
-                        ),
-                        "nonfresh_artifacts": sorted(
-                            {
-                                item["target"]["name"]
-                                for item in artifacts
-                                if item.get("reason") == "compiler-artifact" and not item["fresh"]
-                            }
-                        ),
-                        "nonfresh_libraries": sorted(
-                            {
-                                item["target"]["name"]
-                                for item in artifacts
-                                if item.get("reason") == "compiler-artifact"
-                                and not item["fresh"]
-                                and set(item["target"]["kind"])
-                                & {"lib", "rlib", "dylib", "cdylib", "staticlib"}
-                            }
-                        ),
-                        "stats_before": before,
-                        "stats_after": after,
-                        "rust_cache_hits": after["cache_hits"]["counts"].get("Rust", 0)
-                        - before["cache_hits"]["counts"].get("Rust", 0),
-                        "rust_cache_misses": after["cache_misses"]["counts"].get("Rust", 0)
-                        - before["cache_misses"]["counts"].get("Rust", 0),
-                        "timing": [
-                            line.strip()
-                            for line in log.splitlines()
-                            if re.search(
-                                r"real.*user.*sys|User time|System time|[Mm]aximum resident",
-                                line,
-                            )
+                    )
+                    run(["git", "checkout", "--quiet", "--detach", sha], tree)
+                    run(
+                        [
+                            "git",
+                            "fetch",
+                            "--quiet",
+                            str(ROOT),
+                            "refs/remotes/origin/main:refs/remotes/origin/main",
                         ],
-                    }
-                    receipts.append(receipt)
-                    (output / "receipts.json").write_text(json.dumps(receipts, indent=2) + "\n")
-                    print(
+                        tree,
+                    )
+            snapshots[label] = (sha, trees)
+        if not args.resume:
+            (output / "frontiers.json").write_text(
+                json.dumps(
+                    [
+                        {
+                            "tree": str(t),
+                            "revision": sha,
+                            "origin_main": run(["git", "rev-parse", "origin/main"], t).strip(),
+                        }
+                        for sha, trees in snapshots.values()
+                        for t in trees
+                    ],
+                    indent=2,
+                )
+                + "\n"
+            )
+        inputs = {}
+        for label, (_, trees) in snapshots.items():
+            tree = trees[0]
+            lock = (tree / "Cargo.lock").read_text()
+            inputs[label] = {
+                "registry_packages": sorted(
+                    re.findall(
+                        r'name = "([^\"]+)"\nversion = "([^\"]+)"\n'
+                        r'source = "registry[^\n]+\nchecksum = "([^\"]+)"',
+                        lock,
+                    )
+                ),
+                "profiles": re.findall(
+                    r"\[profile\.[^\]]+\]\n(.*?)(?=\n\[|\Z)",
+                    (tree / "Cargo.toml").read_text(),
+                    re.S,
+                ),
+            }
+        (output / "inputs.json").write_text(json.dumps(inputs, indent=2) + "\n")
+        if inputs["base"]["profiles"] != inputs["candidate"]["profiles"]:
+            raise RuntimeError("baseline and candidate profiles differ")
+        env["SCCACHE_BASEDIRS"] = os.pathsep.join(
+            str(t) for _, trees in snapshots.values() for t in trees
+        )
+        # Seed each independent cache once; these calibration builds are not cohort samples.
+        for cohort in range(args.cohorts + 1):
+            order = ("base", "candidate") if cohort % 2 == 0 else ("candidate", "base")
+            for label in order:
+                sha, trees = snapshots[label]
+                tree = trees[cohort]
+                cases = (
+                    ("cold_seed",)
+                    if cohort == 0
+                    else ("warm_root", "command_help", "execution", "task_record")
+                )
+                completed = {
+                    r["case"] for r in receipts if r["label"] == label and r["cohort"] == cohort
+                }
+                identity_path = output / f"{cohort}_{label}_identity.json"
+                if set(cases) <= completed and identity_path.exists():
+                    if cohort != 0 or label != "candidate" or _catalog_complete(output):
+                        continue
+                env["SCCACHE_DIR"] = str(root / f"{label}-cache")
+                try:
+                    run(["nice", "-n", "10", str(cache), "--start-server"])
+                    for case in cases:
+                        receipt = next(
+                            (
+                                r
+                                for r in receipts
+                                if r["label"] == label
+                                and r["cohort"] == cohort
+                                and r["case"] == case
+                            ),
+                            None,
+                        )
+                        if receipt is None:
+                            source = (
+                                _edit(tree, case, cohort)
+                                if case not in ("cold_seed", "warm_root")
+                                else None
+                            )
+                            stem = f"{cohort}_{label}_{case}"
+                            compiler_path = output / f"{stem}_compilers.jsonl"
+                            env["LOOPFLOW_REBUILD_RECEIPTS"] = str(compiler_path)
+                            before, load = stats(), os.getloadavg()
+                            start = time.monotonic()
+                            with (
+                                (output / f"{stem}.jsonl").open("w") as stdout,
+                                (output / f"{stem}.log").open("w") as stderr,
+                            ):
+                                result = subprocess.run(
+                                    [
+                                        "/usr/bin/time",
+                                        "-l" if os.uname().sysname == "Darwin" else "-v",
+                                        "nice",
+                                        "-n",
+                                        "10",
+                                        "cargo",
+                                        "build",
+                                        "--locked",
+                                        "-p",
+                                        "loopflow",
+                                        "--bin",
+                                        "lf",
+                                        "--jobs",
+                                        "1",
+                                        "--message-format=json",
+                                    ],
+                                    cwd=tree,
+                                    env=env,
+                                    stdout=stdout,
+                                    stderr=stderr,
+                                    stdin=subprocess.DEVNULL,
+                                )
+                            elapsed = time.monotonic() - start
+                            env.pop("LOOPFLOW_REBUILD_RECEIPTS")
+                            after = stats()
+                            log = (output / f"{stem}.log").read_text()
+                            if result.returncode:
+                                raise RuntimeError(f"build failed: see {output / (stem + '.log')}")
+                            artifacts = [
+                                json.loads(line)
+                                for line in (output / f"{stem}.jsonl").read_text().splitlines()
+                                if line.startswith("{")
+                            ]
+                            compilers = [
+                                json.loads(line) for line in compiler_path.read_text().splitlines()
+                            ]
+                            receipt = {
+                                "label": label,
+                                "revision": sha,
+                                "cohort": cohort,
+                                "case": case,
+                                "exit_code": result.returncode,
+                                "wall_seconds": round(elapsed, 3),
+                                **_timing(log),
+                                "load_before": load,
+                                "load_after": os.getloadavg(),
+                                "edited_source": str(source.relative_to(tree)) if source else None,
+                                "workspace_compilers": compilers,
+                                "nonfresh_libraries": sorted(
+                                    {
+                                        a["target"]["name"]
+                                        for a in artifacts
+                                        if a.get("reason") == "compiler-artifact"
+                                        and not a["fresh"]
+                                        and set(a["target"]["kind"])
+                                        & {"lib", "rlib", "dylib", "cdylib", "staticlib"}
+                                    }
+                                ),
+                                "stats_before": before,
+                                "stats_after": after,
+                            }
+                            for key in ("cache_hits", "cache_misses"):
+                                receipt["rust_" + key] = after[key]["counts"].get(
+                                    "Rust", 0
+                                ) - before[key]["counts"].get("Rust", 0)
+                            for counter in (
+                                "cache_write_errors",
+                                "cache_read_errors",
+                                "cache_timeouts",
+                            ):
+                                if after[counter] != before[counter]:
+                                    raise RuntimeError(f"cache failure in {stem}: {counter}")
+                            receipts.append(receipt)
+                            (output / "receipts.json").write_text(
+                                json.dumps(receipts, indent=2) + "\n"
+                            )
+                            (output / "summary.json").write_text(
+                                json.dumps(_summarize(receipts), indent=2) + "\n"
+                            )
+                            print(
+                                json.dumps(
+                                    {
+                                        k: receipt[k]
+                                        for k in (
+                                            "label",
+                                            "cohort",
+                                            "case",
+                                            "wall_seconds",
+                                            "workspace_compilers",
+                                        )
+                                    }
+                                ),
+                                flush=True,
+                            )
+                        _validate_closure(receipt)
+                        run([str(tree / "target/debug/lf"), "--version"], tree)
+                        if case == "warm_root":
+                            paths = []
+                            for crate in ("loopflow", "loopflow_execution", "loopflow_storage"):
+                                for artifact in (tree / "target/debug/deps").glob(
+                                    f"lib{crate}-*.rlib"
+                                ):
+                                    data = artifact.read_bytes()
+                                    paths.append(
+                                        {
+                                            "crate": crate,
+                                            "seed_root_bytes": str(trees[0]).encode() in data,
+                                            "current_root_bytes": str(tree).encode() in data,
+                                        }
+                                    )
+                                    del data
+                            (output / f"{cohort}_{label}_source_paths.json").write_text(
+                                json.dumps(paths, indent=2) + "\n"
+                            )
+
+                    # Correct-checkout identity is checked after timing, without opening a store.
+                    probe = tree / "rust/loopflow/src/bin/loo650_identity.rs"
+                    initialize = (
+                        "loopflow::build_info::initialize();"
+                        if (tree / "rust/loopflow-execution").is_dir()
+                        else ""
+                    )
+                    probe.write_text(
+                        "fn main() { " + initialize + ' println!("{}|{}", '
+                        "loopflow::build_info::source_root().unwrap().display(), "
+                        "loopflow::build_info::source_revision()); }"
+                    )
+                    manifest = tree / "rust/loopflow/Cargo.toml"
+                    original_manifest = run(
+                        ["git", "show", sha + ":rust/loopflow/Cargo.toml"], ROOT
+                    )
+                    with manifest.open("a") as stream:
+                        stream.write(
+                            '\n[[bin]]\nname="loo650-identity"\npath="src/bin/loo650_identity.rs"\n'
+                        )
+                    identity = run(
+                        [
+                            "cargo",
+                            "run",
+                            "--locked",
+                            "--quiet",
+                            "-p",
+                            "loopflow",
+                            "--bin",
+                            "loo650-identity",
+                            "--jobs",
+                            "1",
+                        ],
+                        tree,
+                    ).strip()
+                    if identity != f"{tree}|{sha}-dirty":
+                        raise RuntimeError(f"wrong runtime identity: {identity}")
+                    (output / f"{cohort}_{label}_identity.json").write_text(
                         json.dumps(
                             {
-                                key: receipt[key]
-                                for key in (
-                                    "case",
-                                    "wall_seconds",
-                                    "exit_code",
-                                    "nonfresh_artifacts",
-                                )
+                                "root": str(tree),
+                                "revision": sha,
+                                "observed": identity,
+                                "dirty": True,
                             }
-                        ),
-                        flush=True,
+                        )
+                        + "\n"
                     )
-                    if result.returncode:
-                        raise RuntimeError(f"build failed: see {output / (stem + '.log')}")
-                    if case in ("shipping_b", "task_record_b"):
-                        expected = ["loopflow"]
-                        if case == "task_record_b" and (tree / "rust/loopflow-storage").is_dir():
-                            expected.append("loopflow_storage")
-                        actual = set(receipt["nonfresh_libraries"])
-                        if (
-                            not set(expected).issubset(actual)
-                            or receipt["rust_cache_misses"] != len(expected)
-                            or receipt["rust_cache_hits"] != len(actual) - len(expected)
-                        ):
-                            raise RuntimeError(f"unexpected rebuild closure: {receipt}")
-                    run([str(tree / "target/debug/lf"), "--version"], tree)
-                if label == "candidate" and (trees[0] / "rust/loopflow-storage").is_dir():
-                    _verify_catalog_refresh(trees[0], output, run)
-            finally:
-                run([str(cache), "--stop-server"])
+                    probe.unlink()
+                    manifest.write_text(original_manifest)
+                    if cohort == 0 and label == "candidate":
+                        _verify_catalog_refresh(tree, output, run)
+                    # Recover disk between cohorts; every target belongs to exactly one source root.
+                    shutil.rmtree(tree / "target")
+                finally:
+                    run([str(cache), "--stop-server"])
     except BaseException:
         print(f"Build sources, targets and caches retained at {temporary}", flush=True)
         raise

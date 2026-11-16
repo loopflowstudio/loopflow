@@ -1330,7 +1330,7 @@ def _run(
                     "tests/fixtures/dto/graph_catalog.json",
                     "scripts/desktop_performance.py",
                     "scripts/desktop-performance.sb",
-                    "rust/loopflow/src/performance.rs",
+                    "rust/loopflow-execution/src/performance.rs",
                     "scripts/benchmarks/desktop-performance/record_live.py",
                 ]
             )

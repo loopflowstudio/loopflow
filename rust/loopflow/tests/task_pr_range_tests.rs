@@ -7,11 +7,13 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::process::{Command, Stdio};
 
-use loopflow::ops::{
+use loopflow_execution::ops::{
     arm as land, create_or_update_pr, submit, sync_with_recovery, LandOptions, NullProgress,
     PrOptions, SyncOptions,
 };
-use loopflow::work::task::{GithubPr, PrMergeMode, PrMergeRequest, PrPresentation, PrPublication};
+use loopflow_execution::work::task::{
+    GithubPr, PrMergeMode, PrMergeRequest, PrPresentation, PrPublication,
+};
 use loopflow_test_support::TestRepo;
 use support::{register_task_with_pr, EnvGuard};
 use time::OffsetDateTime;
@@ -246,7 +248,7 @@ fn failed_sync_push_does_not_advance_the_recorded_task_base() {
         "expected the push failure, got: {error}"
     );
     assert!(
-        loopflow::git::is_ancestor(repo.path(), &target, &repo.head_sha()).unwrap(),
+        loopflow_execution::git::is_ancestor(repo.path(), &target, &repo.head_sha()).unwrap(),
         "the local sync must complete before the rejected push"
     );
 
@@ -348,7 +350,7 @@ fn sync_onto_main_recovers_a_base_recorded_at_the_prs_own_remote_tip() {
 
     assert_eq!(recorded_base(&task), advanced);
     assert!(
-        loopflow::git::is_ancestor(repo.path(), &head_before, &repo.head_sha()).unwrap(),
+        loopflow_execution::git::is_ancestor(repo.path(), &head_before, &repo.head_sha()).unwrap(),
         "recovery must keep every commit the branch had"
     );
     let files = git_out(
@@ -1135,12 +1137,12 @@ exit 0
             runtime.block_on(task.store.settle_task_pr(&pr)).unwrap();
         }
         if scenario == "completed" {
-            loopflow::ops::task::task_complete(repo.path(), "INF-123", None).unwrap();
+            loopflow_execution::ops::task::task_complete(repo.path(), "INF-123", None).unwrap();
             assert_eq!(
                 runtime
                     .block_on(task.store.task_state(&task.task.id))
                     .unwrap(),
-                loopflow::durable::TaskState::Done
+                loopflow_execution::durable::TaskState::Done
             );
         }
     }
@@ -1274,7 +1276,7 @@ exit 0
                 runtime
                     .block_on(task.store.task_state(&task.task.id))
                     .unwrap(),
-                loopflow::durable::TaskState::Done
+                loopflow_execution::durable::TaskState::Done
             );
         }
         prs

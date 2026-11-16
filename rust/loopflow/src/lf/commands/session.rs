@@ -5,13 +5,13 @@ use anyhow::{bail, Context};
 
 use serde::{Deserialize, Serialize};
 
-use super::write::SessionOpenIntent;
 use crate::lf::SessionCommand;
 use crate::lf::SessionConnectionArgs;
 use crate::lf::SessionListArgs;
-use crate::ops::human_session::{SessionRecord, SessionState};
-use crate::session_record::SessionTitleSource;
-use crate::store::{open_store, storage_config_from_env, Store};
+use loopflow_execution::ops::human_session::{SessionRecord, SessionState};
+use loopflow_execution::session::SessionOpenIntent;
+use loopflow_execution::session_record::SessionTitleSource;
+use loopflow_execution::store::{open_store, storage_config_from_env, Store};
 
 pub fn run(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()> {
     if let SessionCommand::Card { id, .. } = command {
@@ -41,9 +41,11 @@ pub fn run(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()>
         command,
         SessionCommand::Resume { .. } | SessionCommand::New { .. }
     ) {
-        let cwd = crate::repo::working_directory()?;
+        let cwd = loopflow_execution::repo::working_directory()?;
         let argv = std::env::args().collect::<Vec<_>>();
-        crate::journal::with_runtime(&cwd, &argv, || runtime.block_on(run_async(command, cli)))
+        loopflow_execution::journal::with_runtime(&cwd, &argv, || {
+            runtime.block_on(run_async(command, cli))
+        })
     } else {
         runtime.block_on(run_async(command, cli))
     }
@@ -59,13 +61,13 @@ pub fn steer(
     message: &str,
     json: bool,
 ) -> anyhow::Result<()> {
-    use crate::engine::session::SteerScope;
+    use loopflow_execution::engine::session::SteerScope;
     let directory = std::env::current_dir()?;
     let runtime = tokio::runtime::Runtime::new()?;
     let (store, session) = runtime.block_on(async {
         let store = open_shared_store().await?;
         let session = match target {
-            Some(id) => crate::ops::human_session::session_by_id(&store, id).await?,
+            Some(id) => loopflow_execution::ops::human_session::session_by_id(&store, id).await?,
             None => None,
         };
         anyhow::Ok((store, session))
@@ -77,11 +79,14 @@ pub fn steer(
             let repo = super::mutation::selected_task_repository(cli, &directory, Some(issue))
                 .with_context(unknown)?;
             let thread = runtime.block_on(async {
-                let (store, task) = crate::ops::task::resolve_saved_task(&repo, wave, issue)
-                    .await
-                    .with_context(unknown)?;
+                let (store, task) =
+                    loopflow_execution::ops::task::resolve_saved_task(&repo, wave, issue)
+                        .await
+                        .with_context(unknown)?;
                 let scope = SteerScope::Task { issue, wave };
-                let steer = crate::engine::session::steer(&store, &repo, scope, message).await?;
+                let steer =
+                    loopflow_execution::engine::session::steer(&store, &repo, scope, message)
+                        .await?;
                 anyhow::Ok((steer, store.task_comments(&task.id)?))
             })?;
             match json {
@@ -97,7 +102,7 @@ pub fn steer(
             "name who to steer: a Session ID, a Task ID, `--wave WAVE` or `--repo NAME_OR_PATH`"
         ),
     };
-    let steer = runtime.block_on(crate::engine::session::steer(
+    let steer = runtime.block_on(loopflow_execution::engine::session::steer(
         &store, &directory, scope, message,
     ))?;
     if json {
@@ -118,7 +123,7 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             source,
         } => {
             let store = open_shared_store().await?;
-            let session = crate::ops::human_session::session_by_id(&store, id)
+            let session = loopflow_execution::ops::human_session::session_by_id(&store, id)
                 .await?
                 .context("Session not found")?;
             if let Some(source) = source {
@@ -181,7 +186,9 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             ..
         } => {
             let store = open_shared_store().await?;
-            let Some(session) = crate::ops::human_session::session_by_id(&store, id).await? else {
+            let Some(session) =
+                loopflow_execution::ops::human_session::session_by_id(&store, id).await?
+            else {
                 bail!("Session {id} was not found");
             };
             let events = store
@@ -213,15 +220,15 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             all,
             json,
         } => {
-            use crate::ops::human_session::moves_bulk::{move_sessions, parse_target};
+            use loopflow_execution::ops::human_session::moves_bulk::{move_sessions, parse_target};
             let target = parse_target(cli.agent.as_deref())?;
-            let filter = crate::session::SessionFilter {
+            let filter = loopflow_execution::session::SessionFilter {
                 blocked: selector.blocked,
                 on: selector.on.clone(),
                 repo: if *all {
                     None
                 } else {
-                    crate::repository::containing(&std::env::current_dir()?)?
+                    loopflow_execution::repository::containing(&std::env::current_dir()?)?
                         .map(|repo| repo.to_string())
                 },
                 ..Default::default()
@@ -269,20 +276,29 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             arrived,
         } => {
             let store = open_shared_store().await?;
-            let to = crate::ops::task_ownership::resolve_machine(&store.sqlite, to)?;
+            let to = loopflow_execution::ops::task_ownership::resolve_machine(&store.sqlite, to)?;
             if *arrived {
                 let task = task
                     .as_deref()
                     .expect("Clap requires --task with --arrived");
-                return crate::ops::human_session::moves::sent_task_arrived(&store, task, &to)
-                    .await;
+                return loopflow_execution::ops::human_session::moves::sent_task_arrived(
+                    &store, task, &to,
+                )
+                .await;
             }
             let moved = match (id, task) {
                 (id, Some(task)) => {
-                    crate::ops::human_session::moves::send_task(&store, task, &to, id.as_deref())
-                        .await?
+                    loopflow_execution::ops::human_session::moves::send_task(
+                        &store,
+                        task,
+                        &to,
+                        id.as_deref(),
+                    )
+                    .await?
                 }
-                (Some(id), None) => crate::ops::human_session::moves::send(&store, id, &to).await?,
+                (Some(id), None) => {
+                    loopflow_execution::ops::human_session::moves::send(&store, id, &to).await?
+                }
                 (None, None) => unreachable!("Clap requires a Session or a Task"),
             };
             println!("{}", serde_json::to_string(&moved)?);
@@ -299,17 +315,19 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             ..
         } => {
             let store = open_shared_store().await?;
-            let path = crate::ops::human_session::moves::checkout_of(
+            let path = loopflow_execution::ops::human_session::moves::checkout_of(
                 &store,
                 repository,
                 origin.as_deref(),
             )?;
-            let main = crate::git::worktrees::main_repo_root(&path)?;
+            let main = loopflow_execution::git::worktrees::main_repo_root(&path)?;
             if let Some(key) = planning_key {
-                crate::ops::planning_sync::adopt_personal_key(&store, &main, key).await?;
+                loopflow_execution::ops::planning_sync::adopt_personal_key(&store, &main, key)
+                    .await?;
             }
             let id = loopflow_model::durable::TaskId::parse(task)?;
-            crate::ops::human_session::moves::arriving_task(&store, &main, &id, issue).await?;
+            loopflow_execution::ops::human_session::moves::arriving_task(&store, &main, &id, issue)
+                .await?;
             if let Some(from) = from {
                 store.sqlite.record_move_checked(&id, from)?;
             }
@@ -320,7 +338,7 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             ..
         } => {
             let store = open_shared_store().await?;
-            let here = crate::store::machines::local_machine(&store.sqlite)?.id;
+            let here = loopflow_execution::store::machines::local_machine(&store.sqlite)?.id;
             anyhow::ensure!(
                 store.sqlite.task_move_arrived_on(task, &here)?,
                 "Task {task} did not arrive here"
@@ -334,11 +352,12 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
         SessionCommand::Receive { json, .. } => {
             let mut input = String::new();
             std::io::Read::read_to_string(&mut std::io::stdin(), &mut input)?;
-            let moved: crate::ops::human_session::moves::Move =
+            let moved: loopflow_execution::ops::human_session::moves::Move =
                 serde_json::from_str(&input).context("read the moved Session")?;
             let store = open_shared_store().await?;
             let task = moved.task.as_ref().map(|task| task.identifier.clone());
-            let session = crate::ops::human_session::moves::receive(&store, moved).await?;
+            let session =
+                loopflow_execution::ops::human_session::moves::receive(&store, moved).await?;
             let Some(session) = session else {
                 let task = task.expect("a move without a Session moves a Task");
                 if *json {
@@ -348,7 +367,7 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
                 }
                 return Ok(());
             };
-            let record = crate::ops::human_session::surface(&store, &session).await?;
+            let record = loopflow_execution::ops::human_session::surface(&store, &session).await?;
             if *json {
                 println!("{}", serde_json::to_string(&record)?);
             } else {
@@ -402,9 +421,9 @@ pub fn list_sessions(args: &SessionListArgs) -> anyhow::Result<()> {
     if args.subscribe {
         // This process reads the subscription itself, so it watches
         // transcripts the way the Machine server does.
-        let observations = crate::observe::Cache::shared();
-        let _transcripts = crate::transcript::watch::watch(&observations);
-        return subscribe_list(filter, super::subscribe::Transport::Stdio).map(drop);
+        let observations = loopflow_execution::observe::Cache::shared();
+        let _transcripts = loopflow_execution::transcript::watch::watch(&observations);
+        return subscribe_list(filter, loopflow_execution::read_stream::Transport::Stdio).map(drop);
     }
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_shared_store().await?;
@@ -417,8 +436,8 @@ pub fn list_sessions(args: &SessionListArgs) -> anyhow::Result<()> {
 pub(crate) fn list_filter(
     args: &SessionListArgs,
     directory: &std::path::Path,
-) -> anyhow::Result<crate::session::SessionFilter> {
-    Ok(crate::session::SessionFilter {
+) -> anyhow::Result<loopflow_execution::session::SessionFilter> {
+    Ok(loopflow_execution::session::SessionFilter {
         blocked: args.selector.blocked,
         on: args.selector.on.clone(),
         available: args.available,
@@ -426,14 +445,14 @@ pub(crate) fn list_filter(
         repo: if args.all {
             None
         } else {
-            crate::repository::containing(directory)?.map(|repo| repo.to_string())
+            loopflow_execution::repository::containing(directory)?.map(|repo| repo.to_string())
         },
         task: args.task.clone(),
         wave: args
             .wave
             .as_deref()
             .map(|wave| {
-                crate::work::wave::context::resolve_managed_wave_sync(
+                loopflow_execution::work::wave::context::resolve_managed_wave_sync(
                     (!args.all).then_some(directory),
                     Some(wave),
                 )
@@ -462,19 +481,19 @@ struct SessionWatchArgs {
 }
 
 pub(crate) fn subscribe_list(
-    filter: crate::session::SessionFilter,
-    transport: super::subscribe::Transport,
-) -> anyhow::Result<Option<super::subscribe::Subscription>> {
+    filter: loopflow_execution::session::SessionFilter,
+    transport: loopflow_execution::read_stream::Transport,
+) -> anyhow::Result<Option<loopflow_execution::read_stream::Subscription>> {
     let args = SessionWatchArgs {
         repo: filter.repo.clone(),
         task: filter.task.clone(),
         search: filter.search.clone(),
         headless: filter.headless,
     };
-    super::subscribe::start(
+    loopflow_execution::read_stream::start(
         args,
         move |store, args| {
-            let filter = crate::session::SessionFilter {
+            let filter = loopflow_execution::session::SessionFilter {
                 repo: args.repo,
                 task: args.task,
                 search: args.search,
@@ -499,7 +518,7 @@ async fn rename_session(
 ) -> anyhow::Result<SessionRecord> {
     let requested = required_text(name, "Session name")?;
     let store = open_shared_store().await?;
-    crate::ops::human_session::rename(&store, id, &requested, source).await
+    loopflow_execution::ops::human_session::rename(&store, id, &requested, source).await
 }
 
 /// `lf session rename <id> <name>`: the renamed Session.
@@ -532,7 +551,7 @@ pub(crate) async fn status_recorded(
     let agent_process = agent_process
         .map(loopflow_model::id::AgentProcessId::parse)
         .transpose()?;
-    crate::ops::human_session::record_program_status(
+    loopflow_execution::ops::human_session::record_program_status(
         &store,
         id,
         terminal,
@@ -553,8 +572,8 @@ pub(crate) async fn status_recorded(
 #[serde(untagged)]
 #[schemars(inline)]
 pub(crate) enum SessionBinding {
-    Bound(Box<crate::ops::human_session::SessionRecord>),
-    Preview(Box<crate::ops::human_session::SessionBindingPreview>),
+    Bound(Box<loopflow_execution::ops::human_session::SessionRecord>),
+    Preview(Box<loopflow_execution::ops::human_session::SessionBindingPreview>),
 }
 
 /// `lf session bind <id> --task <task> --json`: the bound Session, or with
@@ -564,11 +583,11 @@ pub(crate) fn bound(id: &str, task: &str, preview: bool) -> anyhow::Result<Sessi
         let store = open_shared_store().await?;
         Ok(if preview {
             SessionBinding::Preview(Box::new(
-                crate::ops::human_session::preview_binding(&store, id, task).await?,
+                loopflow_execution::ops::human_session::preview_binding(&store, id, task).await?,
             ))
         } else {
             SessionBinding::Bound(Box::new(
-                crate::ops::human_session::bind(&store, id, task).await?,
+                loopflow_execution::ops::human_session::bind(&store, id, task).await?,
             ))
         })
     })
@@ -579,10 +598,10 @@ pub(crate) fn moved(
     blocked: bool,
     on: Option<&str>,
     agent: &str,
-) -> anyhow::Result<crate::ops::human_session::moves_bulk::MoveReport> {
-    use crate::ops::human_session::moves_bulk::{move_sessions, parse_target};
+) -> anyhow::Result<loopflow_execution::ops::human_session::moves_bulk::MoveReport> {
+    use loopflow_execution::ops::human_session::moves_bulk::{move_sessions, parse_target};
     let target = parse_target(Some(agent))?;
-    let filter = crate::session::SessionFilter {
+    let filter = loopflow_execution::session::SessionFilter {
         blocked,
         on: on.map(str::to_owned),
         repo: None,
@@ -596,7 +615,7 @@ pub(crate) fn moved(
 
 /// What `lf session list --json` prints for `filter`.
 pub(crate) fn read_once(
-    filter: &crate::session::SessionFilter,
+    filter: &loopflow_execution::session::SessionFilter,
 ) -> anyhow::Result<serde_json::Value> {
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_shared_store().await?;
@@ -608,11 +627,11 @@ pub(crate) fn read_once(
 /// Session record.
 async fn read_list(
     store: &Arc<Store>,
-    filter: &crate::session::SessionFilter,
+    filter: &loopflow_execution::session::SessionFilter,
 ) -> anyhow::Result<serde_json::Value> {
     if filter.after.is_none() {
         return Ok(serde_json::to_value(
-            crate::ops::human_session::list(store, filter).await?,
+            loopflow_execution::ops::human_session::list(store, filter).await?,
         )?);
     }
     anyhow::ensure!(
@@ -624,7 +643,7 @@ async fn read_list(
         .limit
         .checked_add(1)
         .context("Session page limit is too large")?;
-    let mut entries = crate::ops::human_session::list(store, &selection).await?;
+    let mut entries = loopflow_execution::ops::human_session::list(store, &selection).await?;
     let next = if entries.len() > filter.limit {
         entries.pop();
         entries.last().map(|session| session.id.to_string())
@@ -632,7 +651,7 @@ async fn read_list(
         None
     };
     Ok(serde_json::to_value(
-        crate::ops::human_session::SessionPage {
+        loopflow_execution::ops::human_session::SessionPage {
             entries: entries
                 .into_iter()
                 .map(serde_json::to_value)
@@ -645,18 +664,18 @@ async fn read_list(
 async fn list(
     store: &Arc<Store>,
     json: bool,
-    filter: &crate::session::SessionFilter,
+    filter: &loopflow_execution::session::SessionFilter,
 ) -> anyhow::Result<()> {
     if json || filter.after.is_some() {
         println!(
             "{}",
-            serde_json::to_string_pretty(&super::subscribe::selected_answer(
+            serde_json::to_string_pretty(&loopflow_execution::read_stream::selected_answer(
                 &read_list(store, filter).await?
             )?)?
         );
         return Ok(());
     }
-    let sessions = crate::ops::human_session::list(store, filter).await?;
+    let sessions = loopflow_execution::ops::human_session::list(store, filter).await?;
     // Sessions copied from given-back Machines are history, never available here.
     let copied = if filter.available || filter.orphan {
         Vec::new()
@@ -726,11 +745,15 @@ async fn list(
 /// one this Machine does not know.
 fn copied_sessions(
     store: &Store,
-    filter: &crate::session::SessionFilter,
-) -> anyhow::Result<Vec<crate::machine_records::CopiedSession>> {
+    filter: &loopflow_execution::session::SessionFilter,
+) -> anyhow::Result<Vec<loopflow_execution::machine_records::CopiedSession>> {
     let task = match &filter.task {
         Some(selector) => {
-            match crate::store::children::resolve_task_id(&store.sqlite, selector, None)? {
+            match loopflow_execution::store::children::resolve_task_id(
+                &store.sqlite,
+                selector,
+                None,
+            )? {
                 Some(task) => Some(task),
                 None => return Ok(Vec::new()),
             }
@@ -744,7 +767,7 @@ fn copied_sessions(
         },
         None => None,
     };
-    Ok(crate::store::machines::copied_sessions(
+    Ok(loopflow_execution::store::machines::copied_sessions(
         &store.sqlite,
         task.as_ref(),
         repository.as_ref(),
@@ -754,7 +777,7 @@ fn copied_sessions(
 async fn resume(
     cli: &crate::lf::Cli,
     connection: &SessionConnectionArgs,
-    target: crate::ops::human_session::SessionTarget<'_>,
+    target: loopflow_execution::ops::human_session::SessionTarget<'_>,
     fork: bool,
 ) -> anyhow::Result<()> {
     // Prepared connections have already returned through shared mutation dispatch.
@@ -771,22 +794,23 @@ async fn resume(
         cli.batch || cli.output_schema.is_none(),
         "response schemas require a headless Run (-b)"
     );
-    let progress = crate::startup::Startup::new("Finding conversation");
+    let progress = loopflow_execution::startup::Startup::new("Finding conversation");
     let store = open_shared_store().await?;
     let cwd = std::env::current_dir()?;
     drop(progress);
     let named_work = connection.work_flag(cli).is_some();
     if let Some(message) = message {
         let id = select(&store, &cwd, target).await?;
-        let session = crate::ops::human_session::session_by_id(&store, &id)
+        let session = loopflow_execution::ops::human_session::session_by_id(&store, &id)
             .await?
             .context("Session not found")?;
         let lock_id = session.id.to_string();
         let launch = tokio::task::spawn_blocking(move || {
-            crate::ops::human_session::lock_session_process(&lock_id)
+            loopflow_execution::ops::human_session::lock_session_process(&lock_id)
         })
         .await??;
-        let session = crate::ops::human_session::admit_workspace(&store, session).await?;
+        let session =
+            loopflow_execution::ops::human_session::admit_workspace(&store, session).await?;
         drop(launch);
         let id = session.id;
         return tokio::task::block_in_place(|| {
@@ -810,9 +834,9 @@ async fn resume(
 async fn select(
     store: &Arc<Store>,
     directory: &Path,
-    target: crate::ops::human_session::SessionTarget<'_>,
+    target: loopflow_execution::ops::human_session::SessionTarget<'_>,
 ) -> anyhow::Result<String> {
-    let selected = crate::ops::human_session::select_connection(
+    let selected = loopflow_execution::ops::human_session::select_connection(
         store,
         directory,
         target,
@@ -820,7 +844,7 @@ async fn select(
     )
     .await?;
     if selected.started {
-        crate::journal::request::diagnostic(format_args!(
+        loopflow_execution::journal::request::diagnostic(format_args!(
             "Nothing to resume here; starting a new conversation."
         ));
     }
@@ -832,7 +856,7 @@ async fn select(
 async fn reopen(
     store: &Arc<Store>,
     directory: &Path,
-    target: crate::ops::human_session::SessionTarget<'_>,
+    target: loopflow_execution::ops::human_session::SessionTarget<'_>,
     connection: &SessionConnectionArgs,
     fork: bool,
     json: bool,
@@ -841,9 +865,11 @@ async fn reopen(
     let intent = connection.intent();
     if intent != SessionOpenIntent::Resume {
         anyhow::ensure!(!fork, "non-replacing opening cannot fork a conversation");
-        let selected =
-            crate::ops::human_session::select_connection(store, directory, target, intent).await?;
-        return crate::ops::human_session::open_without_replacing(
+        let selected = loopflow_execution::ops::human_session::select_connection(
+            store, directory, target, intent,
+        )
+        .await?;
+        return loopflow_execution::ops::human_session::open_without_replacing(
             store,
             &selected.id,
             intent,
@@ -854,7 +880,7 @@ async fn reopen(
         .await;
     }
     let id = select(store, directory, target).await?;
-    crate::ops::human_session::open(
+    loopflow_execution::ops::human_session::open(
         store,
         directory,
         &id,
@@ -921,7 +947,7 @@ pub(crate) fn prepared(cli: &crate::lf::Cli, directory: &Path) -> anyhow::Result
 async fn new_thread(
     cli: &crate::lf::Cli,
     connection: &SessionConnectionArgs,
-    target: crate::ops::human_session::SessionTarget<'_>,
+    target: loopflow_execution::ops::human_session::SessionTarget<'_>,
     request_id: Option<&str>,
 ) -> anyhow::Result<()> {
     anyhow::ensure!(
@@ -947,13 +973,13 @@ async fn new_thread(
 async fn restarted(
     store: &Arc<Store>,
     directory: &Path,
-    target: crate::ops::human_session::SessionTarget<'_>,
+    target: loopflow_execution::ops::human_session::SessionTarget<'_>,
     launch: bool,
     json: bool,
     request_id: Option<&str>,
     agent: Option<&str>,
 ) -> anyhow::Result<SessionRecord> {
-    let selected = crate::ops::human_session::select_connection(
+    let selected = loopflow_execution::ops::human_session::select_connection(
         store,
         directory,
         target,
@@ -963,7 +989,7 @@ async fn restarted(
     let request_id = request_id
         .map(str::to_owned)
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-    let next = crate::ops::human_session::new_thread(
+    let next = loopflow_execution::ops::human_session::new_thread(
         store,
         &selected.id,
         agent,
@@ -979,17 +1005,17 @@ async fn restarted(
     {
         return Ok(serde_json::from_value(result)?);
     }
-    crate::ops::human_session::surface(store, &next).await
+    loopflow_execution::ops::human_session::surface(store, &next).await
 }
 
 /// Finish a successful Session connection after its thin relay has returned.
 pub fn print_returned(id: &str) -> anyhow::Result<()> {
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_shared_store().await?;
-        let session = crate::ops::human_session::session_by_id(&store, id)
+        let session = loopflow_execution::ops::human_session::session_by_id(&store, id)
             .await?
             .context("Session not found")?;
-        let record = crate::ops::human_session::surface(&store, &session).await?;
+        let record = loopflow_execution::ops::human_session::surface(&store, &session).await?;
         println!("{}", serde_json::to_string_pretty(&record)?);
         Ok(())
     })
@@ -1036,8 +1062,8 @@ async fn rename(
 fn required_text(args: &[String], label: &str) -> anyhow::Result<String> {
     let text = args.join(" ").trim().to_string();
     if text.is_empty() {
-        return Err(crate::engine::Error::new(
-            crate::engine::ErrorCode::Invalid,
+        return Err(loopflow_execution::engine::Error::new(
+            loopflow_execution::engine::ErrorCode::Invalid,
             format!("{label} cannot be empty"),
         )
         .into());
@@ -1074,7 +1100,7 @@ pub(super) fn mutate(
     cli: &crate::lf::Cli,
     directory: &Path,
     command: &SessionCommand,
-    io: &mut super::mutation::CommandIo<'_>,
+    io: &mut loopflow_execution::command::CommandIo<'_>,
 ) -> anyhow::Result<()> {
     if let SessionCommand::Resume { connection, .. } | SessionCommand::New { connection, .. } =
         command
@@ -1112,7 +1138,8 @@ pub(super) fn mutate(
                 let store = open_shared_store().await?;
                 if *dry_run {
                     let preview =
-                        crate::ops::human_session::preview_binding(&store, id, task).await?;
+                        loopflow_execution::ops::human_session::preview_binding(&store, id, task)
+                            .await?;
                     if *json {
                         writeln!(io.output, "{}", serde_json::to_string_pretty(&preview)?)?;
                     } else {
@@ -1124,7 +1151,8 @@ pub(super) fn mutate(
                     }
                     return Ok(());
                 }
-                let session = crate::ops::human_session::bind(&store, id, task).await?;
+                let session =
+                    loopflow_execution::ops::human_session::bind(&store, id, task).await?;
                 if *json {
                     writeln!(io.output, "{}", serde_json::to_string_pretty(&session)?)?;
                 } else {

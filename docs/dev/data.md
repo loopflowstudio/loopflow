@@ -160,7 +160,7 @@ branch binary at the installed Machine.
 sqlite3 ~/.lf/loopflow.db ".backup /tmp/lf-plan.db"
 sqlite3 /tmp/lf-plan.db "ANALYZE; EXPLAIN QUERY PLAN
   SELECT steer_id FROM steer_delivered WHERE session_id = 'x' AND delivered_at IS NULL;"
-cargo test -p loopflow --lib store::query_plans::
+cargo test -p loopflow-execution --lib store::query_plans::
 ```
 
 ```text

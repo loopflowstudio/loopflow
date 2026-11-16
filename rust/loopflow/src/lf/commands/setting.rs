@@ -2,7 +2,7 @@
 //! operations Desktop's Settings pane reaches through the server.
 use std::path::Path;
 
-use crate::config::files::Destination;
+use loopflow_execution::config::files::Destination;
 
 /// Which file a setting is declared in; `lf --wave <name>` selects a Wave's.
 #[derive(clap::Args, Debug, Clone, Copy)]
@@ -29,13 +29,13 @@ pub fn declare(
     json: bool,
 ) -> anyhow::Result<()> {
     let saved = match value {
-        Some(value) => crate::engine::config::set(destination, key, value)?,
-        None => crate::engine::config::unset(destination, key)?,
+        Some(value) => loopflow_execution::engine::config::set(destination, key, value)?,
+        None => loopflow_execution::engine::config::unset(destination, key)?,
     };
     // The comma spelling still saves until LOO-875 removes it.
     if let Some(warning) = value
         .filter(|_| key.rsplit('.').next() == Some("default_agent"))
-        .and_then(crate::config::settings::old_default_agent_warning)
+        .and_then(loopflow_execution::config::settings::old_default_agent_warning)
     {
         eprintln!("warning: {}: {warning}", saved.path.display());
     }
@@ -53,7 +53,7 @@ pub fn declare(
 }
 
 pub fn get(destination: &Destination, key: &str, json: bool) -> anyhow::Result<()> {
-    let declared = crate::engine::config::get(destination, key)?;
+    let declared = loopflow_execution::engine::config::get(destination, key)?;
     if json {
         println!("{}", serde_json::to_string_pretty(&declared)?);
     } else if declared.value.is_null() {
@@ -66,7 +66,7 @@ pub fn get(destination: &Destination, key: &str, json: bool) -> anyhow::Result<(
 
 /// The explanation is a source table; text and JSON print the same value.
 pub fn explain(destination: &Destination, key: &str) -> anyhow::Result<()> {
-    let explained = crate::engine::config::explain(destination, key)?;
+    let explained = loopflow_execution::engine::config::explain(destination, key)?;
     println!("{}", serde_json::to_string_pretty(&explained)?);
     Ok(())
 }

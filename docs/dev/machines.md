@@ -82,7 +82,7 @@ server; LOO-718 adds authenticated remote client access. Neither moves execution
 ownership into a central service.
 
 The Machine and ownership types live in
-[`durable.rs`](../../rust/loopflow/src/durable.rs). SSH routing is exposed by
+[`durable.rs`](../../rust/loopflow-execution/src/durable.rs). SSH routing is exposed by
 the CLI under [`lf/`](../../rust/loopflow/src/lf).
 
 ## Own Tasks
@@ -416,7 +416,7 @@ preference does not create that capacity on another machine. File-backed setting
 resolution must distinguish the authored capacity choice from its runtime binding.
 
 Providers are reached through one embedded bridge
-(`rust/loopflow/src/rental/sandbox.py`) under `uv`, with the provider's pinned
+(`rust/loopflow-execution/src/rental/sandbox.py`) under `uv`, with the provider's pinned
 SDK where it has one (RunPod speaks plain HTTP). It creates, finds and
 deletes machines by the name lf gave them. Daytona and Modal build an image (an
 `lf` user, git, gh, Node and Claude Code, Rust, uv); RunPod and AWS boot
@@ -428,7 +428,7 @@ security group.
 
 The hard deadline never needs the laptop. Daytona (`ttl_minutes`) and Modal
 (`timeout`) hold it themselves; elsewhere the guardian
-(`rust/loopflow/src/rental/guardian.py`) does, starting before anything else on
+(`rust/loopflow-execution/src/rental/guardian.py`) does, starting before anything else on
 the machine. On RunPod it is the main process and the setup its child: when it
 exits it deletes its pod with
 the pod-scoped key RunPod injects, after reading the price charged so the
@@ -570,7 +570,7 @@ jobs pin that path. The installation promotion lock likewise stays at
 `~/.lf/promotion.lock`. Neither path is relocated.
 
 Artifact switching lives in
-[`installation.rs`](../../rust/loopflow/src/installation.rs) and the
+[`installation.rs`](../../rust/loopflow-execution/src/installation.rs) and the
 install command implementation under [`lf/commands/`](../../rust/loopflow/src/lf/commands).
 
 ## Boundary contracts

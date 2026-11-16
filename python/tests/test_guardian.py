@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-GUARDIAN = Path(__file__).parents[2] / "rust/loopflow/src/rental/guardian.py"
+GUARDIAN = Path(__file__).parents[2] / "rust/loopflow-execution/src/rental/guardian.py"
 _spec = importlib.util.spec_from_file_location("guardian", GUARDIAN)
 guardian = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(guardian)

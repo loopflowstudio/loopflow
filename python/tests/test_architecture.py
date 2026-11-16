@@ -34,7 +34,7 @@ def repo(tmp_path: Path) -> Path:
             "| Concept | Truth and authority | Data structure | Persistence | "
             "Process owner | Public surface | External edge |\n"
             "| --- | --- | --- | --- | --- | --- | --- |\n"
-            "| **Wave** | Goal | [`Wave`](../../rust/loopflow/src/wave/types.rs) | "
+            "| **Wave** | Goal | [`Wave`](../../rust/loopflow-execution/src/wave/types.rs) | "
             "`schema_migrations`, `waves` | `lf` | `lf wave` | "
             "`provider:linear`, `process:git` |\n"
             """<!-- architecture-map:end -->
@@ -57,7 +57,7 @@ def repo(tmp_path: Path) -> Path:
 """
         ),
     )
-    _write(tmp_path, "rust/loopflow/src/wave/types.rs", "pub struct Wave;\n")
+    _write(tmp_path, "rust/loopflow-execution/src/wave/types.rs", "pub struct Wave;\n")
     _write(
         tmp_path,
         "rust/loopflow/src/lf/mod.rs",
@@ -87,7 +87,7 @@ impl Provider {
     )
     _write(
         tmp_path,
-        "rust/loopflow/src/edge.rs",
+        "rust/loopflow-execution/src/edge.rs",
         'fn git() { let _ = std::process::Command::new("git"); }\n',
     )
     _write(

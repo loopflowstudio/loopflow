@@ -20,17 +20,17 @@ use std::process::Command;
 use anyhow::{anyhow, bail, Context, Result};
 use serde::Serialize;
 
-use crate::graph::ConcreteStep;
-use crate::ops::human_session::provider_conversation;
-use crate::ops::task::TaskRunSelection;
-use crate::portfolio::{self, PortfolioCommand};
-use crate::process::LfProcess;
-use crate::provider_auth::Provider;
-use crate::session::TitleSource;
-use crate::store::{SharedStore, StorageConfig};
-use crate::task_graph::END;
-use crate::work::wave::metrics::MetricTarget;
-pub use crate::work::wave::metrics::Threshold;
+use loopflow_execution::graph::ConcreteStep;
+use loopflow_execution::ops::human_session::provider_conversation;
+use loopflow_execution::ops::task::TaskRunSelection;
+use loopflow_execution::portfolio::{self, PortfolioCommand};
+use loopflow_execution::process::LfProcess;
+use loopflow_execution::provider_auth::Provider;
+use loopflow_execution::session::TitleSource;
+use loopflow_execution::store::{SharedStore, StorageConfig};
+use loopflow_execution::task_graph::END;
+use loopflow_execution::work::wave::metrics::MetricTarget;
+pub use loopflow_execution::work::wave::metrics::Threshold;
 use loopflow_model::durable::TaskId;
 use loopflow_model::id::{LfProcessId, TraceId};
 use loopflow_storage::work::edit::Disposition;
@@ -304,7 +304,7 @@ impl World {
             },
             &repo,
         )?;
-        crate::ops::planning_sync::defer_exchange(true);
+        loopflow_execution::ops::planning_sync::defer_exchange(true);
         Ok(Self {
             dir,
             env,
@@ -406,7 +406,9 @@ impl World {
     /// Add a Wave and its current Project, as `lf wave add` does.
     pub fn wave(&self, name: &str) -> Result<()> {
         self.runtime
-            .block_on(crate::ops::wave_lifecycle::add(&self.repo, name, None))?;
+            .block_on(loopflow_execution::ops::wave_lifecycle::add(
+                &self.repo, name, None,
+            ))?;
         Ok(())
     }
 
@@ -432,12 +434,13 @@ impl World {
                 target: target.clone(),
             })
             .collect();
-        self.runtime.block_on(crate::ops::project::update_plan(
-            &self.repo,
-            Some(wave),
-            &krs,
-            &targets,
-        ))?;
+        self.runtime
+            .block_on(loopflow_execution::ops::project::update_plan(
+                &self.repo,
+                Some(wave),
+                &krs,
+                &targets,
+            ))?;
         Ok(())
     }
 
@@ -469,51 +472,54 @@ impl World {
         };
         let end = time::OffsetDateTime::from_unix_timestamp(self.days_ago(ended_days_ago))?;
         let store = self.store()?;
-        self.runtime
-            .block_on(crate::ops::metrics::publish_metric_observations(
+        self.runtime.block_on(
+            loopflow_execution::ops::metrics::publish_metric_observations(
                 &store,
                 &self.repo,
-                vec![crate::ops::metrics::MetricProducerObservation::Observed {
-                    wave: wave.to_string(),
-                    metric_id: id.to_string(),
-                    instrument: instrument.to_string(),
-                    value,
-                    source_window_start: end - time::Duration::days(7),
-                    source_window_end: end,
-                    complete: true,
-                }],
+                vec![
+                    loopflow_execution::ops::metrics::MetricProducerObservation::Observed {
+                        wave: wave.to_string(),
+                        metric_id: id.to_string(),
+                        instrument: instrument.to_string(),
+                        value,
+                        source_window_start: end - time::Duration::days(7),
+                        source_window_end: end,
+                        complete: true,
+                    },
+                ],
                 time::OffsetDateTime::now_utc(),
-            ))?;
+            ),
+        )?;
         Ok(())
     }
 
     /// Create an unstarted Task in `wave`, or a standalone one without.
     pub fn task(&self, wave: Option<&str>, title: &str, report: &str) -> Result<Task> {
-        Ok(crate::ops::task::task_create(
+        Ok(loopflow_execution::ops::task::task_create(
             &self.repo,
             wave,
             Some(title.to_string()),
             Some(report.to_string()),
-            crate::ops::task::TaskAdoptionOptions::default(),
+            loopflow_execution::ops::task::TaskAdoptionOptions::default(),
             None,
         )?)
     }
 
     /// Place a Task in its own worktree the way `lf task checkout` does.
     pub fn checkout(&self, task: &Task) -> Result<Task> {
-        Ok(crate::ops::task::task_checkout(
+        Ok(loopflow_execution::ops::task::task_checkout(
             &self.repo,
             &task.identifier,
-            crate::ops::task::TaskCheckoutOptions::default(),
+            loopflow_execution::ops::task::TaskCheckoutOptions::default(),
         )?)
     }
 
     /// Claim a Task for this Machine's person the way `lf task claim` does.
     pub fn claim(&self, task: &Task) -> Result<()> {
-        crate::ops::task_ownership::change(
+        loopflow_execution::ops::task_ownership::change(
             &self.repo,
             &task.identifier,
-            crate::ops::task_ownership::OwnershipChange::Claim,
+            loopflow_execution::ops::task_ownership::OwnershipChange::Claim,
         )?;
         Ok(())
     }
@@ -521,7 +527,8 @@ impl World {
     /// Complete a Task the way `lf task complete` does, then date the
     /// completion `completed_days_ago` through the planning writer.
     pub fn complete(&self, task: &Task, note: &str, completed_days_ago: f64) -> Result<Task> {
-        let task = crate::ops::task::task_complete(&self.repo, &task.identifier, Some(note))?;
+        let task =
+            loopflow_execution::ops::task::task_complete(&self.repo, &task.identifier, Some(note))?;
         let at = time::OffsetDateTime::from_unix_timestamp(self.days_ago(completed_days_ago))?
             .format(&time::format_description::well_known::Rfc3339)?;
         self.dispose(
@@ -537,17 +544,17 @@ impl World {
 
     /// Unassign a Task the way `lf task unassign` does.
     pub fn unassign(&self, task: &Task) -> Result<()> {
-        crate::ops::task_ownership::change(
+        loopflow_execution::ops::task_ownership::change(
             &self.repo,
             &task.identifier,
-            crate::ops::task_ownership::OwnershipChange::Unassign,
+            loopflow_execution::ops::task_ownership::OwnershipChange::Unassign,
         )?;
         Ok(())
     }
 
     /// Abandon a Task the way `lf task abandon` does, removing its checkout.
     pub fn abandon(&self, task: &Task) -> Result<()> {
-        crate::ops::task::task_abandon(&self.repo, Some(&task.identifier), true)?;
+        loopflow_execution::ops::task::task_abandon(&self.repo, Some(&task.identifier), true)?;
         Ok(())
     }
 
@@ -598,8 +605,9 @@ impl World {
     ) -> Result<LfProcessId> {
         let store = self.store()?;
         let checkout = task.worktree()?.clone();
-        let names_step = crate::store::task_work::task_graph_row(&store.sqlite, &task.id)?
-            .is_some_and(|row| row.graph.find(requested).is_some());
+        let names_step =
+            loopflow_execution::store::task_work::task_graph_row(&store.sqlite, &task.id)?
+                .is_some_and(|row| row.graph.find(requested).is_some());
         let (graph, from) = match names_step {
             true => (None, Some(requested)),
             false => (Some(requested), None),
@@ -608,7 +616,14 @@ impl World {
             graph: captured,
             take_up,
             start,
-        } = crate::ops::task::select_task_run(&store, task, &checkout, graph, from)?;
+        } = loopflow_execution::ops::task::select_task_run(
+            &store,
+            task,
+            &checkout,
+            graph,
+            from,
+            crate::lf::navigation::command_merges,
+        )?;
         let Some(start) = start else {
             bail!("nothing remains of {requested}; complete the Task instead");
         };
@@ -636,11 +651,15 @@ impl World {
         let mut run = self.process(&trace, None, &checkout, argv, started - 2);
         store.sqlite.record_process(&run)?;
         if take_up {
-            crate::store::task_work::take_up_task_graph(&store.sqlite, &task.id, &captured)?;
+            loopflow_execution::store::task_work::take_up_task_graph(
+                &store.sqlite,
+                &task.id,
+                &captured,
+            )?;
         }
-        let row = crate::store::task_work::task_graph_row(&store.sqlite, &task.id)?
+        let row = loopflow_execution::store::task_work::task_graph_row(&store.sqlite, &task.id)?
             .expect("the Task has a graph");
-        if !crate::store::task_work::start_task_graph_run(
+        if !loopflow_execution::store::task_work::start_task_graph_run(
             &store.sqlite,
             &task.id,
             &row,
@@ -670,7 +689,7 @@ impl World {
     /// Put `task` at the interactive step `step`, as `lf task run --from` does.
     pub fn wait_at(&self, task: &Task, step: &str) -> Result<()> {
         let store = self.store()?;
-        let row = crate::store::task_work::task_graph_row(&store.sqlite, &task.id)?
+        let row = loopflow_execution::store::task_work::task_graph_row(&store.sqlite, &task.id)?
             .with_context(|| format!("Task {} has no graph", task.identifier))?;
         if row.graph.interactive_step(step).is_none() {
             bail!("graph {} has no interactive step {step:?}", row.graph.name);
@@ -712,7 +731,7 @@ impl World {
         minutes: i64,
         outcome: Outcome,
     ) -> Result<()> {
-        let compiled = crate::graph::compiled::compile(name, steps);
+        let compiled = loopflow_execution::graph::compiled::compile(name, steps);
         let mut graph = self.process(trace, Some(parent), cwd, argv, started - 1);
         let mut begin = started;
         let mut records = Vec::new();
@@ -786,14 +805,20 @@ impl World {
                 session.captured,
                 &task.id,
             ))?;
-            let next = self
-                .runtime
-                .block_on(crate::ops::human_session::append_input(&store, bound))?;
+            let next =
+                self.runtime
+                    .block_on(loopflow_execution::ops::human_session::append_input(
+                        &store, bound,
+                    ))?;
             // The provider observed that input resuming this conversation, so
             // connecting resumes it rather than starting a new one.
-            let dir = crate::ops::human_session::local_capture_dir(next.input_key()?)
+            let dir = loopflow_execution::ops::human_session::local_capture_dir(next.input_key()?)
                 .ok_or_else(|| anyhow!("Session {session_id} has an invalid capture reference"))?;
-            crate::session_record::write_provider_session(&dir, &id.as_str().into(), None)?;
+            loopflow_execution::session_record::write_provider_session(
+                &dir,
+                &id.as_str().into(),
+                None,
+            )?;
         }
         self.runtime
             .block_on(store.rename_session(&session_id, title, TitleSource::Human))?;
@@ -802,7 +827,13 @@ impl World {
 
     /// Post to a Task's thread the way `lf task report` does.
     pub fn comment(&self, task: &Task, message: &str) -> Result<()> {
-        crate::ops::task::task_comment(&self.repo, &task.identifier, None, Some(message), false)?;
+        loopflow_execution::ops::task::task_comment(
+            &self.repo,
+            &task.identifier,
+            None,
+            Some(message),
+            false,
+        )?;
         Ok(())
     }
 
@@ -817,7 +848,7 @@ impl World {
         let store = self.store()?;
         let record = self
             .runtime
-            .block_on(crate::ops::human_session::primary::ensure(
+            .block_on(loopflow_execution::ops::human_session::primary::ensure(
                 &store,
                 &self.repo,
                 Some(wave),
@@ -883,12 +914,12 @@ impl World {
             "{body}\n\n> **Task:** {} · {}\n",
             task.title, task.identifier
         );
-        crate::ops::task::request_task_pr_publication(&worktree, title, &body)?;
+        loopflow_execution::ops::task::request_task_pr_publication(&worktree, title, &body)?;
         let head = git(Some(&worktree), &["rev-parse", "HEAD"])?;
         let url = format!("{GITHUB_REPO}/pull/{number}");
-        crate::ops::task::attach_task_github_pr(
+        loopflow_execution::ops::task::attach_task_github_pr(
             &worktree,
-            Some(&crate::ops::PrInfo {
+            Some(&loopflow_execution::ops::PrInfo {
                 url: url.clone(),
                 number,
                 state: "open".to_string(),
@@ -1023,11 +1054,14 @@ impl World {
     /// Publish the planning saved while building, write `env.json` and return
     /// the environment.
     pub fn finish(self) -> Result<WorldEnv> {
-        crate::ops::planning_sync::defer_exchange(false);
+        loopflow_execution::ops::planning_sync::defer_exchange(false);
         self.runtime.block_on(async {
-            let store = crate::ops::planning_sync::planning_store().await?;
-            crate::ops::planning_sync::publish_repository(&store, &self.repo.to_string_lossy())
-                .await
+            let store = loopflow_execution::ops::planning_sync::planning_store().await?;
+            loopflow_execution::ops::planning_sync::publish_repository(
+                &store,
+                &self.repo.to_string_lossy(),
+            )
+            .await
         })?;
         std::fs::write(
             self.dir.join("env.json"),
@@ -1134,7 +1168,9 @@ impl World {
 
     fn store(&self) -> Result<SharedStore> {
         let config = StorageConfig::sqlite(self.env.lf_home.join("loopflow.db"));
-        let store = self.runtime.block_on(crate::store::open_store(&config))?;
+        let store = self
+            .runtime
+            .block_on(loopflow_execution::store::open_store(&config))?;
         Ok(std::sync::Arc::new(store))
     }
 }

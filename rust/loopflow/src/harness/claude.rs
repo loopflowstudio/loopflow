@@ -265,7 +265,7 @@ impl ClaudeHarness {
                     .expect("claude decoder lock poisoned")
                     .decode(&line, &turn_id());
                 let written = match decoded {
-                    Ok(decoded) => writer.write(&decoded).await.map(|()| decoded),
+                    Ok(decoded) => writer.write(&decoded).map(|()| decoded),
                     Err(error) => Err(error),
                 };
                 let decoded = match written {

@@ -231,23 +231,23 @@ impl CodexStream {
     }
 
     /// Decode and record a server message for the caller's known `thread`.
-    pub(super) async fn inbound(
+    pub(super) fn inbound(
         &mut self,
         rpc: &Value,
         thread: Option<&AgentSessionId>,
     ) -> (Vec<Decoded>, Result<()>) {
         let decoded = self.decoder.decode(rpc, thread);
-        let written = self.writer.write(&decoded).await;
+        let written = self.writer.write(&decoded);
         (decoded, written)
     }
 
     /// Freeze a turn request's origin and record what the client sent.
-    pub(super) async fn outbound(&mut self, rpc: &Value) -> Result<()> {
+    pub(super) fn outbound(&mut self, rpc: &Value) -> Result<()> {
         if let Some(request) = codex_decode::turn_request(rpc) {
             super::dispatch::off_reactor(|| self.writer.outbound(&request))?;
         }
         let decoded = self.decoder.outbound(rpc);
-        self.writer.write(&decoded).await
+        self.writer.write(&decoded)
     }
 }
 
@@ -901,7 +901,7 @@ impl CodexHarness {
                         json!({ "jsonrpc": "2.0", "id": id, "result": result })
                     }
                 };
-                let recorded = writer_stream.lock().await.outbound(&payload).await;
+                let recorded = writer_stream.lock().await.outbound(&payload);
                 if let Err(error) = recorded {
                     let _ = writer_events.send(ConversationEvent::Error {
                         code: "codex_dispatch_rejected".into(),
@@ -965,8 +965,7 @@ impl CodexHarness {
                     let (decoded, written) = stream
                         .lock()
                         .await
-                        .inbound(&value, thread.as_ref().ok().and_then(Option::as_ref))
-                        .await;
+                        .inbound(&value, thread.as_ref().ok().and_then(Option::as_ref));
                     if let Err(error) = thread.map_err(anyhow::Error::from).and(written) {
                         let _ = event_tx.send(ConversationEvent::Error {
                             code: "conversation_history_unavailable".into(),

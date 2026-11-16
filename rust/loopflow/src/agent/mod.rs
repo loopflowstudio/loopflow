@@ -319,17 +319,20 @@ fn _record_limit_recovery(provider: &str, reason: &str) {
     });
 }
 
-/// The step left `provider` for the next agent in its order.
-fn _record_agent_move(provider: &str, reason: &str, next: &str) {
-    eprintln!("Continuing on {next}: {reason}");
+/// The step left `agent` for the next agent in its order. The terminal gets
+/// one line; the recorded recovery keeps the provider's whole `reason`.
+fn _record_agent_move(agent: &str, failure: AgentFailure, reason: &str, next: &str) {
+    eprintln!("{agent}: {failure}; continuing on {next}");
+    let provider = parse_agent(agent).0;
     _record_limit_recovery(
-        provider,
+        &provider,
         &format!("{reason}{}{next}", crate::ops::task_execution::MOVED_TO),
     );
 }
 
 /// A provider refused the step and no agent it may use is left: the stop
 /// and what would let it move, where Task status and `lf task run` read it.
+/// The caller puts the advice in the run's final error, so it prints once.
 fn _record_limit_stop(
     provider: &str,
     reason: &str,
@@ -337,7 +340,6 @@ fn _record_limit_stop(
     rungs: &[String],
 ) -> String {
     let advice = _limit_stop_advice(provider, launch, rungs);
-    eprintln!("Stopped: {advice}");
     _record_limit_recovery(
         provider,
         &format!("{reason}{}{advice}", crate::ops::task_execution::STOPPED),
@@ -1056,7 +1058,7 @@ fn _run_with_retries(
                     return Ok(result);
                 };
                 rung += 1;
-                _record_agent_move(&provider, &reason, next);
+                _record_agent_move(attempt.agent()?, failure, &reason, next);
                 attempt = _climb(&attempt, next, process, launch);
                 Duration::ZERO
             }

@@ -129,7 +129,8 @@ their normal path. Legacy preference export lives only in `config/migrate.rs`.
 Launch fixtures no longer seed managed logins as a prerequisite; dedicated
 native-auth/adoption fixtures retain historical-account coverage. Native-home
 lookup dropped its unused override parameter. No compression deletion targets
-remain; stored rows and credentials are untouched.
+remain; stored rows and credentials are untouched. The numbered list below
+records the completed cuts.
 
 The first focused run found `answer_prose_cannot_supply_provider_errors_or_resume_identity`
 failing because a transient failure without a native thread rewrote the initial
@@ -254,6 +255,20 @@ merge or operate it. Task-interactive automatic recovery is outside this cut.
 
 ## Acceptance and checks
 
+Resumed compression removes the async-only receipt-writing interface left by
+account writes: `FactWriter::write` and `CodexStream::{inbound,outbound}` now
+complete synchronously, retaining `dispatch::off_reactor` for store work. Their
+callers no longer await immediate results or build a test runtime to record a
+snapshot. Service browser preferences no longer carry an unused account parameter.
+Release-note generation no longer classifies retired account-cooldown errors;
+`ReleaseNotesDegradation::Cooldown` remains solely to read archived NOTES.md
+markers, covered by `archived_account_cooldown_notes_remain_readable`.
+
+Resumed compression check: `cargo nextest run -p loopflow --lib --test integration --test release_tests --test session_launch_contract -E 'test(harness::fact_writer::) | test(harness::conformance_tests::) | test(harness::dispatch_tests::) | test(archived_account_cooldown_notes_remain_readable) | test(a_failed_ship_restarts_later_each_time_and_says_why) | test(release_notes_falls_back_for_every_provider_degradation_class) | test(auth_tests::service_auth_survives_subscription_removal) | test(native_auth_owns_launches_with_a_populated_catalog) | test(pinned_headless_refusal_shows_provider_message_reset_and_next_step)' --test-threads 1` — 35 passed; inherited `LF_*` removed and stdin closed. The existing 16MB unwind-table linker warning recurred. Gate/CI own broader suites.
+
+Resumed compression static checks: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, and `git diff --check` — passed. `lf context` remains below both scratch limits.
+
+
 Compression: `cargo nextest run -p loopflow --lib --test integration --test session_launch_contract --test agent_tests -E 'test(harness::claude_decode::) | test(harness::codex_decode::) | test(agent::tests::) | test(config::migrate::tests::) | test(ops::human_session::provider_conversation::tests::) | test(transcript::tests::old_account_transcripts_resume_with_native_auth_without_copying_credentials) | test(native_auth_owns_launches_with_a_populated_catalog) | test(model_unavailable_result_falls_through_or_stops_without_spending_quota) | test(session_steers::) | test(session_lifecycle_tests::task_conversation_starts_at_launch_not_creation) | test(auth_tests::service_auth_survives_subscription_removal)' --test-threads 1` — 103 passed; inherited `LF_*` removed and stdin closed. The lifecycle selector matched no row in these four binaries; it needs its standalone binary. The linker emitted its 16MB unwind-table warning; compilation and all selected tests passed.
 
 `cargo nextest run -p loopflow --test session_lifecycle_tests -E 'test(task_conversation_starts_at_launch_not_creation) | test(personal_task_launch_resume_and_skill_graph_keep_native_identity) | test(finished_headless_runs_leave_the_open_list_and_keep_their_history) | test(standalone_graph_launches_in_a_completed_tasks_checkout)' --test-threads 1` — all four affected lifecycle checks passed without managed-login fixture setup.
@@ -286,7 +301,7 @@ Cross-harness continuation retains previous history and outcomes.
 Checks use isolated homes and stand-ins, with inherited `LF_*` removed at the
 runner boundary and stdin closed. No paid provider or production login is used.
 
-- `cargo test -p loopflow --test session_launch_contract pinned_headless_refusal_shows_provider_message_reset_and_next_step` — passed; final CLI error retains the multiline refusal, reset time and pin/fallback advice after a rejection event, with exactly one input dispatch.
+- `cargo test -p loopflow --test session_launch_contract pinned_headless_refusal_shows_provider_message_reset_and_next_step` — passed again on merged head ed6ca991ed (6.8s); final CLI error retains the multiline refusal, reset time and pin/fallback advice after a rejection event, with exactly one input dispatch.
 - `cargo nextest run -p loopflow --lib --test agent_tests -E 'test(agent::tests::native_retry_policy_matrix) | test(agent::tests::a_pinned_agent_refused_at_launch_fails_with_its_limit) | test(model_unavailable_result_falls_through_or_stops_without_spending_quota)'` — 3 passed after the refusal-display fix; linker repeated its existing 16MB unwind-table warning. Gate owns broader suites and final review.
 - `cargo nextest run -p loopflow --test session_launch_contract -E 'test(native_auth_owns_launches_with_a_populated_catalog)' --test-threads 1` — passed; all four provider/Task cases, native API keys, passive quota snapshots and native missing-login diagnostics.
 - `cargo nextest run -p loopflow --lib -E 'test(agent::tests::native_retry_policy_matrix) | test(harness::fact_writer::tests::a_codex_turn_retains_its_request_peak) | test(detached_lf_keeps_native_authentication_environment) | test(lf::tests::native_login_controls_are_absent_and_service_auth_remains) | test(server::schema::tests::)' --test-threads 1` — 12 selected rows passed; retry policy, receipts, native env, CLI and generated schema.

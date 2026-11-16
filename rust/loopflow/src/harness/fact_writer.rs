@@ -80,7 +80,7 @@ impl FactWriter {
 
     /// Write every fact in one decoded message, in order, including the
     /// provider receipts and availability.
-    pub(super) async fn write(&mut self, decoded: &[Decoded]) -> Result<()> {
+    pub(super) fn write(&mut self, decoded: &[Decoded]) -> Result<()> {
         Ok(super::dispatch::off_reactor(|| self.record(decoded))?)
     }
 

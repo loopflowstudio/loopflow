@@ -226,6 +226,7 @@ pub struct ReleaseStatusResult {
 #[non_exhaustive]
 pub enum ReleaseNotesDegradation {
     MissingCli,
+    /// Retained for archived release-note markers from managed account routing.
     Cooldown,
     Quota,
     Authentication,
@@ -2471,12 +2472,6 @@ fn classify_release_notes_degradation(err: &CommandError) -> Option<ReleaseNotes
         || combined.contains("status 401")
     {
         return Some(ReleaseNotesDegradation::Authentication);
-    }
-    if combined.contains("no eligible managed")
-        || combined.contains("cooling down")
-        || combined.contains("cooldown")
-    {
-        return Some(ReleaseNotesDegradation::Cooldown);
     }
     if combined.contains("provider rate limit")
         || combined.contains("too many requests")
@@ -4736,6 +4731,16 @@ fn run_output(repo: &Path, command: &str, args: &[&str]) -> OpsResult<Output> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn archived_account_cooldown_notes_remain_readable() {
+        assert_eq!(
+            parse_release_notes_status(
+                "<!-- loopflow:release-notes=degraded;reason=cooldown;gate=safe -->"
+            ),
+            ReleaseNotesStatus::Degraded(ReleaseNotesDegradation::Cooldown)
+        );
+    }
 
     fn published(tag: &str, days_ago: i64, is_latest: bool) -> PublishedRelease {
         PublishedRelease {

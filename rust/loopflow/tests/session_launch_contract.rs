@@ -47,6 +47,11 @@ fn pinned_headless_refusal_shows_provider_message_reset_and_next_step() {
         "{stderr}"
     );
     assert_eq!(
+        stderr.matches("Change an `agent` or `-a` pin").count(),
+        1,
+        "{stderr}"
+    );
+    assert_eq!(
         fs::read_to_string(fixture.home.path().join("dispatches")).unwrap(),
         "dispatch\n"
     );

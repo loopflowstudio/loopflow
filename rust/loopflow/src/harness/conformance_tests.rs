@@ -354,11 +354,7 @@ fn opencode_display(
     messages: &[Value],
 ) -> Vec<ConversationEvent> {
     let Snapshot { decoded, .. } = decoder.messages(messages);
-    tokio::runtime::Builder::new_current_thread()
-        .build()
-        .unwrap()
-        .block_on(writer.write(&decoded))
-        .unwrap();
+    writer.write(&decoded).unwrap();
     decoded
         .into_iter()
         .filter_map(|decoded| match decoded {

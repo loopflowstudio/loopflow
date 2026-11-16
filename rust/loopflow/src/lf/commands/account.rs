@@ -4,7 +4,7 @@ pub(crate) mod account_status;
 use crate::lf::AccountCommand;
 use crate::profile::{AccessProfile, LocalChromeProfile, ProfileId};
 use crate::provider_auth::{AuthCompletion, Provider, ProviderAuthService};
-use crate::store::{open_store, CredentialType, ProviderAccountId, ProviderToken, SharedStore};
+use crate::store::{open_store, CredentialType, ProviderToken, SharedStore};
 use anyhow::{anyhow, bail, Context, Result};
 use std::future::Future;
 use std::io::IsTerminal;
@@ -102,7 +102,7 @@ async fn connect(raw_provider: &str, selection: Option<&str>) -> Result<()> {
         service.abort_pending(provider).await;
         result?;
         if remember {
-            remember_browser_profile(&store, provider, None, &profile).await?;
+            remember_browser_profile(&store, provider, &profile).await?;
         }
         narrate!("Connected local {}", provider.display_name());
         return Ok(());
@@ -124,14 +124,13 @@ async fn browser_profiles(
             true,
         ));
     }
-    let account_id = None;
     let bindings = store
-        .list_auth_browser_profiles(Some(provider), account_id)
+        .list_auth_browser_profiles(Some(provider), None)
         .await?;
     let mut profiles = Vec::new();
     for binding in bindings
         .into_iter()
-        .filter(|binding| binding.account_id.as_ref() == account_id)
+        .filter(|binding| binding.account_id.is_none())
     {
         profiles.push(
             store
@@ -176,14 +175,13 @@ async fn browser_profiles(
 async fn remember_browser_profile(
     store: &SharedStore,
     provider: Provider,
-    account_id: Option<&ProviderAccountId>,
     profile: &AccessProfile,
 ) -> Result<()> {
     if store.get_access_profile(&profile.id).await?.is_none() {
         store.upsert_access_profile(profile).await?;
     }
     store
-        .set_auth_browser_profiles(provider, account_id, std::slice::from_ref(&profile.id))
+        .set_auth_browser_profiles(provider, None, std::slice::from_ref(&profile.id))
         .await?;
     Ok(())
 }

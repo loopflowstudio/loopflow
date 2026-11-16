@@ -5,7 +5,7 @@ body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:900px;margin:2re
 h1{font-size:1.5rem}h2{font-size:1.15rem;margin-top:2rem;border-bottom:1px solid #ddd}
 pre{background:#f6f6f4;padding:.7rem;overflow-x:auto;font-size:13px;border-radius:4px}
 td,th{padding:.3rem .6rem;border-bottom:1px solid #eee;vertical-align:top;text-align:left}
-.ok{color:#1a7f37}.fix{color:#9a6700}.no{color:#b42318}
+.ok{color:#1a7f37}.fix,.fixed{color:#9a6700}.no{color:#b42318}
 </style></head><body>
 <h1>LOO-913 QA: native authentication, branch build</h1>
 <p>Branch <code>lf</code> built from <code>jack-heart/cli-prox</code> (base 9cafc410) and copied to
@@ -60,6 +60,49 @@ FALLBACK_OK</pre>One Claude dispatch.</td><td class="ok">works</td></tr>
 <li><code>cargo fmt --all -- --check</code>, <code>cargo clippy --all-targets -- -D warnings</code>, <code>git diff --check</code> — passed</li>
 </ul>
 
+<h2>Round 2: merged head ed6ca991ed, 2026-11-15</h2>
+<p>Fresh private <code>LF_HOME</code> at <code>/tmp/lf-qa-913</code>, real <code>HOME</code> logins, disposable repository, stdin closed. Checks the synchronous receipt writer, the refusal-display fix and the merge onto main.</p>
+<table>
+<tr><th>Scenario</th><th>What I saw</th><th></th></tr>
+<tr><td><code>lf -b -a claude:haiku</code> and <code>lf -b -a codex</code> on native logins</td>
+<td><code>QA913_CLAUDE</code>, <code>QA913_CODEX</code>. Each Session has <code>started</code>, <code>captured</code>, <code>usage</code>, <code>completed</code> events; <code>provider_accounts</code>, <code>provider_session_accounts</code>, limits and switches all 0 rows.</td><td class="ok">works</td></tr>
+<tr><td>Pinned <code>-a claude:haiku</code>, refusing stand-in</td>
+<td>Exit 1, one dispatch. Final error has the provider's refusal and reset and the pin advice, but the advice also printed above it as <code>Stopped: …</code>, so the same long sentence appeared twice.</td><td class="fix">fixed</td></tr>
+<tr><td>Unpinned, <code>agents: [claude, codex]</code>, refusing stand-in, real Codex behind</td>
+<td>Walked haiku → default Claude → Codex and answered <code>QA913_FALLBACK2</code>. Before the fix each move printed the raw two-line stderr (<code>Continuing on claude: provider_rate_limited: rejected: five_hour⏎claude_result: …</code>).</td><td class="fix">fixed</td></tr>
+<tr><td>Interactive <code>lf -i -a claude:haiku</code> in a PTY</td>
+<td>Native TUI "Haiku 5.5 · Claude Ultra", replied <code>QA913_INTERACTIVE</code>; provider exited after the PTY closed.</td><td class="ok">works</td></tr>
+<tr><td>Released <code>account:</code>/<code>accounts:</code> in <code>$LF_HOME/config.yaml</code></td><td><code>lf task list</code> prints nothing extra.</td><td class="ok">works</td></tr>
+<tr><td><code>lf account claude</code>, <code>lf account connect codex</code></td><td>"Claude signs in natively: run `claude`, then /login"; "Codex signs in natively: run `codex login`".</td><td class="ok">works</td></tr>
+<tr><td><code>lf account next</code>, <code>lf --account a@b.c</code></td><td>"unsupported provider: next"; Clap "unexpected argument '--account'".</td><td>rough</td></tr>
+</table>
+<p>Terminal after the fixes:</p>
+<pre>$ lf -b : 'Reply only with QA913_FALLBACK2'
+You've hit your limit · resets 3pm
+claude:haiku: provider usage limit; continuing on claude
+You've hit your limit · resets 3pm
+claude: provider usage limit; continuing on codex
+QA913_FALLBACK2
+
+$ lf -b -a claude:haiku : 'Reply only with PINNED'
+You've hit your limit · resets 3pm
+Error: agent stopped after provider usage limit.
+provider_rate_limited: rejected: five_hour
+claude_result: You've hit your limit · resets 3pm
+No fallback remains. Change an `agent` or `-a` pin to select another model or provider, or remove it to allow fallbacks. …
+Check /private/tmp/lf-qa-913/lfhome/runs/61/… for details.</pre>
+<p><code>agent_limit_recoveries</code> still records the provider's full reason with <code>; continuing on codex</code> / <code>; stopped: …</code> for Task status.</p>
+<h3>Fixes (round 2)</h3>
+<ul>
+<li><code>agent/mod.rs::_record_limit_stop</code> no longer prints <code>Stopped: {advice}</code>; the caller already puts the advice in the final error. <code>pinned_headless_refusal_shows_provider_message_reset_and_next_step</code> now asserts the advice appears once.</li>
+<li><code>_record_agent_move</code> prints <code>{agent}: {failure}; continuing on {next}</code> and records the whole reason.</li>
+</ul>
+<h3>Checks (round 2)</h3>
+<ul>
+<li><code>cargo nextest run -p loopflow --lib --test session_launch_contract --test agent_tests -E 'test(agent::tests::) | test(pinned_headless_refusal_shows_provider_message_reset_and_next_step) | test(model_unavailable_result_falls_through_or_stops_without_spending_quota) | test(native_auth_owns_launches_with_a_populated_catalog)'</code> — 37 passed</li>
+<li><code>cargo fmt --all</code>, <code>cargo clippy --all-targets -- -D warnings</code>, <code>git diff --check</code> — passed</li>
+</ul>
+
 <h2>Not reached</h2>
 <ul>
 <li>Desktop window: not launched. The Swift surfaces (SessionsView, RegistryQuery) rely on the earlier headless <code>ServerProtocolTests|DTOFixtureTests</code> run.</li>
@@ -70,10 +113,9 @@ FALLBACK_OK</pre>One Claude dispatch.</td><td class="ok">works</td></tr>
 
 <h2>Still rough, worst first</h2>
 <ol>
-<li>An exhausted pinned run ends with "provider usage limit. Check …/runs/… for details" and leaves out the provider's own words ("You've hit your limit · resets 3pm"), which the design asks for. The reset time only appears in the run directory.</li>
-<li><code>ReleaseNotesDegradation::Cooldown</code> matches "no eligible managed …" and "cooling down", strings this branch no longer produces. The slug <code>cooldown</code> is parsed back by <code>from_slug</code>, so deleting it needs a check on where the slug is stored; left alone.</li>
-<li>The fallback line "Continuing on codex: provider_rate_limited: rejected: five_hour" is machine text, and it follows a blank line.</li>
-<li><code>lf --account …</code> from old muscle memory gets plain Clap "unexpected argument" with no pointer to the native login.</li>
-<li>QA left a folder-trust entry for <code>/private/tmp/lf-qa-sub/repo</code> in the real <code>~/.claude.json</code> and QA threads in <code>~/.codex/sessions</code>. QA transcripts in <code>~/.claude/projects</code> were removed.</li>
+<li>A provider refusal's text shows twice in a fallback walk (streamed assistant line, then again in the final error when the walk ends). Small, and it is the provider's own wording.</li>
+<li><code>lf --account …</code> gets plain Clap "unexpected argument", and <code>lf account next</code> says "unsupported provider: next". A pointer would need a hidden flag or command, which the design rules out; left as is.</li>
+<li>The final error's <code>provider_rate_limited: rejected: five_hour</code> line is machine text beside the provider's own words.</li>
+<li>QA left folder-trust entries for <code>/private/tmp/lf-qa-sub/repo</code> and <code>/private/tmp/lf-qa-913/repo</code> in the real <code>~/.claude.json</code> and QA threads in <code>~/.codex/sessions</code>. QA transcripts in <code>~/.claude/projects</code> were removed.</li>
 </ol>
 </body></html>

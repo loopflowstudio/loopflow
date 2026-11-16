@@ -674,10 +674,7 @@ mod tests {
         assert_eq!(minutes(&handoff), 30);
 
         let failed_at = crate::store::rows::now_unix();
-        let failure = (
-            failed_at,
-            "no eligible managed claude account.\ncaused by".into(),
-        );
+        let failure = (failed_at, "provider usage limit.\ncaused by".into());
         let read = |failure| {
             shipping_snapshot(
                 None,
@@ -693,7 +690,7 @@ mod tests {
         assert_eq!(failed.state, ShippingState::Restarting);
         assert_eq!(
             failed.reason,
-            "Ship failed: no eligible managed claude account; retrying in 30 min"
+            "Ship failed: provider usage limit; retrying in 30 min"
         );
         // A process that ended without failing restarts on the next read.
         assert!(read(None).reason.starts_with("Ship process exited"));

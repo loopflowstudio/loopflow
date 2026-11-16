@@ -25,9 +25,9 @@ pub mod pi;
 mod pi_decode;
 pub(crate) mod task_updates;
 
-use loopflow_model::id::AgentSessionId;
 use anyhow::Result;
 use async_trait::async_trait;
+use loopflow_model::id::AgentSessionId;
 use tokio::sync::mpsc;
 
 use crate::agent::AgentConfig;

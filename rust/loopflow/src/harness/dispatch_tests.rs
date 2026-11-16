@@ -111,7 +111,6 @@ async fn stalled_dispatch() {
             &json!({"method":"turn/started","params":{"threadId":"thread","turn":{"id":"turn"}}}),
             None,
         )
-        .await
         .1
         .unwrap();
     // A distinct connection proves the Machine's WAL writer is also free, not

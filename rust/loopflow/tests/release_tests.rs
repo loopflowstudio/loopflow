@@ -546,10 +546,6 @@ fn release_notes_falls_back_for_every_provider_degradation_class() {
     let _env = EnvGuard::new(&[("gh", gh_script.as_str()), ("lf", lf_script)]);
     let cases = [
         (
-            "failed to select provider account: no eligible managed codex account: 'primary'",
-            ReleaseNotesDegradation::Cooldown,
-        ),
-        (
             "agent stopped after provider usage limit",
             ReleaseNotesDegradation::Quota,
         ),

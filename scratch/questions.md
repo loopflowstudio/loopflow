@@ -68,6 +68,17 @@
 - **Order sends one confirmed move at a time** within one send and rebases the
   effect after each move.
 
+- **Links coalesce.** A newer unsent `link` on the same subject retires the
+  older one: a PR's Open then Merged sends only Merged. Relations have unique
+  subjects, so nothing changes for them.
+- **A PR's managed Linear comment id** is the one an earlier lf recorded on the
+  PR, else uuid-v5(Task, PR URL). New PRs no longer record attachment or
+  comment ids; the attachment is found by URL.
+- **Asana follow-up relations retire `Unsupported`**; the follow-up stays the
+  comment `recover_task_filings` writes.
+- **`pm_issue_changes` stays** as acquisition evidence (released stores hold
+  removals it alone records).
+
 ## Open
 
 - Connecting a tracker to a repository with existing Tasks: export all of
@@ -76,5 +87,5 @@
   behavior people may rely on.
 
 - Wire `linear_id` → a neutral name crosses Rust, Swift and ~10 DTO fixtures.
-  Planned as a follow-up Task, not here. Is a neutral name wanted at all while
-  Linear is the only tracker in use?
+  Filed as Task 9fbce4, which opens with this question: is a neutral name
+  wanted at all while Linear is the only tracker in use?

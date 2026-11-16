@@ -264,43 +264,37 @@ Read against a2c956a129 and 7e3fa2ac84. No product choice in these.
   row the pass skips (owner held, `tracing::debug!` once), and drop
   `decide`'s `_ => Hold` arm for an exhaustive match inside the crate.
 
-### Concept review (2026-11-16, after the cut): next implement direction
+### Concept review (2026-11-16, after the cut): built
 
-Read against 3d21fe1ccb..90f825a173. No product choice in these.
+Read against 3d21fe1ccb..90f825a173; built in the commits after 81d2bd67b8.
 
-- **Follow-up relations are an eighth receipt.** `drain_repository` calls
-  `linear::sync_retained_relations` on every Linear pass: a
-  `follow_through_intent` task event is the receipt, a
-  `follow_through_relation_confirmed` event the settlement, and each pending
-  relation gets its own 5 s deadline outside the pass's request bound. It is a
-  `link` effect owned by the source Task, subject `relation:<relation_id>`,
-  enqueued where the intent is recorded; the migration (still in draft) copies
-  pending relations. Asana answers `Unsupported`. Deleted:
-  `sync_retained_relations`, `pending_retained_relations`,
-  `confirm_retained_relation`, the provider check in `drain.rs`, and the
-  `locks/follow-through-relations` lock path. The intent event stays as
-  history.
-- **PR links are `link` effects, subject `pr:<url>`.** Publish enqueues,
-  drains `Scope::First(task)`, then reads the effect's `error` into
-  `pr.linear_link_error`: the same line at publish, with a receipt and a
-  retry on the next pass instead of the next publish. This removes the
-  `Tracker::Asana(client)` match in `ops/task.rs:2478`, a forbidden outcome,
-  and `link_pr_with_client`'s ids-after-the-call.
-- **The bridge's error is the tracker's, not Linear's.** `asana/mod.rs` returns
-  `LinearResult`/`LinearError` (28 mentions) and `Sent::failed` takes a
-  `LinearError`. A `tracker::BridgeError { RateLimited { .. }, Message }` in
-  `ops/tracker.rs`, which `LinearError` and `AsanaFailure` convert into, makes
-  the Target's "Linear* types stay inside `linear/`" true for Asana.
-- **Saves drain their own owner first.** `sync_after_save` takes the saved
-  `EffectOwner` and drains `Scope::First`; `machine/task.rs:86` already does.
-  With 20 requests a pass and a backlog in `seq` order, `Scope::All` can leave
-  the edit someone just made for a later command.
-- **The pending diagnostic names `lf repo plan`.** Done in realign
-  (`planning_sync.rs:94`, two doc comments in `lf/commands/plan.rs`).
-- **"Done when" grep excludes migrations.** Its only hits are applied
-  migrations (`0.14.8.001_release.sql`, `bounded_identity_triggers.sql`),
-  which are immutable: `grep -rn 'teamId\|stateId\|assigneeId'
-  rust/loopflow-storage/src | grep -v migrations` is empty today.
+- **Follow-up relations are `link` effects** on the source Task, subject
+  `relation:<id>`, id = the relation id (`INSERT OR IGNORE`): queued where
+  `recover_task_filings` recovers the filing (`retain_relation_in`) and copied
+  by the draft migration when unconfirmed. The drain holds one until its target
+  Task is bound (`target_pending`). Deleted: `sync_retained_relations`,
+  `pending_retained_relations`, `confirm_retained_relation`, `RetainedRelation`,
+  the Linear check in `drain.rs`, `locks/follow-through-relations`.
+- **PR links are `link` effects**, subject `pr:<url>`, value
+  `{number, state, comment_id}` (`enqueue_pr_link`). Publish drains
+  `Scope::First(task)` and reads the effect into `pr.linear_link_error`
+  (unsettled without an error: "waiting to be sent"). Linear: attachmentLinkURL
+  (upsert by URL) + attachmentUpdate + one comment, id = an earlier lf's
+  `linear_comment_id` else uuid-v5(task, url); an acknowledged earlier link on
+  the subject switches create to update. Asana: one `sync_comment` per state.
+  Deleted: the `Tracker::Asana` match, `link_pr_async`/`link_pr`/
+  `link_pr_with_client`, `PrLinkageIds`/`PrLinkRequest`/`PrLinkageOutcome`.
+  `linear_attachment_id`/`linear_comment_id` are no longer written.
+- **`tracker::BridgeError { RateLimited { tracker, reset_at_ms }, Message }`**;
+  `asana/` names no `Linear*` type.
+- **`sync_after_save(store, repo, &EffectOwner)`** drains `Scope::First`.
+- **`pm_issue_changes` stays.** `a_tracker_removal_withdraws_new_launches`
+  shows removal stamps the Task; but dropping the launch read's
+  `changes.removed` term failed
+  `task_admission_reads_released_evidence_without_reconstructing_provider_content`
+  (released stores hold removals without a stamped Task), and acceptance uses
+  the table as a re-acceptance guard and revision watermark. It is inbound
+  acquisition evidence, which Exclusions leave alone.
 
 ### Migration (one, additive): `tracker_effects`
 
@@ -422,40 +416,30 @@ Deepest deletions first, then the queue, then the bridges. Commit at each.
    writes `linear`. `lf repo plan` lists the queue (`PlanStatus.effects`, schema
    regenerated). `sync.conflict` is the existing `adopted_linear` change in
    `lf task show`.
-6. **Remaining.**
-   - The "after the cut" concept review above, in order: relations as `link`
-     effects (`sync_retained_relations` still runs from `drain.rs:111`), PR
-     links as `link` effects (`ops/task.rs:2479` still matches
-     `Tracker::Asana`), `BridgeError` (25 `LinearResult`/`LinearError` uses in
-     `asana/mod.rs`), `sync_after_save(store, repo)` taking its owner. GOAL.md
-     name/summary as Wave `field` effects: not built (`EffectKind::of` queues
-     nothing for Wave values).
-   - Docs, after the code above: `docs/dev/planning.md:88` ("no generic
-     planning facade", now true; the file never mentions the queue),
-     `docs/dev/reference.md` rows Task (`task_creation_intents`,
-     `task_changes`, `task_state_deliveries`), Linear observations
-     (`project_transitions`), Asana planning (`PlanningClient`,
-     `planning_client.rs`) and Steer (`task_comment_deliveries`) name deleted
-     tables and code; `ops/README.md:9,45` names `planning_export.rs` and
-     `check_before_write`. File the contract-migration and DTO Tasks.
-   - `pm_issue_changes`: write `a_tracker_removal_withdraws_new_launches`,
-     then decide whether the table goes.
-   - Linear-fake tests now cover creation through the queue, order and its lost
-     reply, comments. Missing end to end on the fake: lost field reply, conflict
-     adopt, deletion retire (rules and drain cover them with the test bridge).
-     68 old-drain tests went with the drains.
-   - `uncreated()` plans on `tasks.external_issue_id` on an empty store; check
-     against a 10k-Task store.
+6. **Concept review fixes, Linear-fake tests, docs: done** (see the review
+   above). Fake tests: lost field reply, conflict adopt, restored deletion
+   (`ops/linear/planning_effect_tests.rs`). Docs: `planning.md` "One outbound
+   queue", `reference.md`, `reference-code.md`, `ops/README.md`. Filed:
+   contract migration (771562), wire names (9fbce4).
+7. **Remaining.**
+   - GOAL.md name/summary as Wave `field` effects: not built
+     (`EffectKind::of` queues nothing for Wave values).
+   - `uncreated()`'s Project half scans `project_transitions` per unbound
+     Project (small table); `task_creation_intents` and `project_transitions`
+     stay live as creation record and plan transitions, only their export
+     columns are dead (contract Task).
 
 ## Checks run
 
-- `cargo test -p loopflow-storage --lib` → 371 pass (before the provider cut; touched modules rerun after).
-- `cargo nextest run -p loopflow-execution --lib -E '(test(ops::tracker) | test(ops::linear::) | test(store::) | test(asana::)) - test(linear_on_demand_shares_checks_and_excludes_finished_tasks)'` → pass except `native_runner_is_quiet_until_its_turn_ends_codex_foreground`, whose fixture's `sccache rustc -vV` fails here ("cannot find binary path"); CI.
-- `cargo nextest run -p loopflow --lib -E 'test(local_planning::)' -j 4` → 32 pass. At default parallelism several fixtures' `lf` calls failed with empty stderr and passed alone.
+- `cargo nextest run -p loopflow-storage -p loopflow-execution --lib -E 'test(ops::tracker::) | test(asana_planning_tests) | test(tracker_effects) | test(task_history) | test(planning_effect_tests::) | test(planning_order_tests::) | test(task_comments_tests::) | test(linear::effects::)'` → 39 pass.
+- `cargo test -p loopflow-storage --lib -- query_plans tracker_effects` → 19 pass.
+- `cargo nextest run -p loopflow-execution --lib -E 'test(store::tests::) | test(linear::acceptance::) | test(planning_lookup_tests::)'` → pass.
+- `cargo nextest run -p loopflow --lib -E 'test(local_planning::) | test(pr_tests::) | test(planning_lookup_tests::)' -j 4` → 62 pass.
+- `cargo nextest run -p loopflow --test task_pr_authority_tests` → 12 pass.
+- `cargo test -p loopflow --test integration documented_commands::` → 4 pass.
 - `cargo clippy -p loopflow-storage -p loopflow-execution -p loopflow --all-targets -- -D warnings` → clean.
-- Offline demo (temp `LF_HOME`, Linear config, no origin): create, edit, complete → `lf repo plan` lists `create`, `title`, `complete` pending with the bridge error.
-- `cargo nextest run -p loopflow --test integration -E 'test(task_abandonment)'` → pass (ported onto the queue).
-- Not run: `test(documented_commands::)`, `binary(two_people)`, `test(transport::)`; gate/CI.
+- `EXPLAIN QUERY PLAN`, store from branch `lf` seeded to 10,001 Tasks / 9,508 effects (84 unsettled): `uncreated()` Task half searches `tasks` by `external_issue_id`, effects by `tracker_effects_task`; drain select reads `tracker_effects_unsettled`. Old `IN_REPO` listed every repository Task (`SCAN t`, 5 ms); per-row `EXISTS` form 1 ms, now in code.
+- Not run: `binary(two_people)`, `test(transport::)`, `binary(golden_prompt)`; gate/CI.
 
 ## Done when
 

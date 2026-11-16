@@ -192,10 +192,10 @@ struct TaskWorkflowHeader: View {
         .overlay(alignment: .bottom) { Rectangle().fill(palette.border).frame(height: 1) }
         .accessibilityIdentifier("task-workflow")
         .onChange(of: work, initial: true) { _, reading in
-            if reading.value != nil { Perf.endAfterCommit(Perf.workflowReady, id: task.id) }
+            if reading.value != nil { Perf.stateObserved(Perf.workflowReady, id: task.id, owner: model.navigation.performanceOwner) }
         }
         .onChange(of: task.id) { _, id in
-            if work.value != nil { Perf.endAfterCommit(Perf.workflowReady, id: id) }
+            if work.value != nil { Perf.stateObserved(Perf.workflowReady, id: id, owner: model.navigation.performanceOwner) }
         }
     }
 

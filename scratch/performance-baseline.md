@@ -157,6 +157,46 @@ contract; changing the harness requires a new baseline on both builds.
 
 ## Live report/check observations
 
+### First live three-repository pilot, 2026-11-16
+
+Jack Heart: “yeah this is more reasonable. can you just get some initial numbers,
+now on looplfow, manabot, and kata”.
+
+Installed Desktop 0.16.0, source `470da475a163869b59388f932273962b4d0ba69b`,
+against the live `~/.lf` Machine and `/Users/jack/src/{loopflow,manabot,kata}`.
+18 native observations: 3 per experience/repository. No Task submission, prompt
+submission, reset or input takeover. Existing repository conversation restoration
+still occurs as ordinary app behavior when opening its workspace.
+
+| Experience | Loopflow | Manabot | Kata |
+|---|---|---|---|
+| New Task → unsent request text visible | 1.313 s (1.297–1.333) | 1.346 s (1.292–1.417) | 1.644 s (1.324–1.744) |
+| Backlog → Working list visible/selectable | 0.661 s (0.661–0.665) | 2.734 s (0.671–5.137) | 0.834 s (0.651–2.390) |
+
+Values are median observation-inclusive **upper bounds**, with min–max observed
+bounds in parentheses. Start is immediately before CUA native click dispatch; end
+is after accessibility verification and native screenshot return. Typing the probe
+and observer work remain in the interval. These are not app-only first-frame latency,
+a P95, an isolation of app versus observer delay, or an optimization baseline.
+Working counts checked: 12/17/8; Backlog counts displayed: 188/52/21. These are
+live displayed section counts, not total historical store sizes. Host load averages
+were 10.737/11.594/9.918 before and 30.180/35.149/23.667 after. No load correction.
+
+Conversation input readiness remains unmeasured: LOO-916 was read-only with Rex
+holding input; Manabot showed a held terminal/account-cooling error; Kata showed
+restoration/input-paused state. No provider probe was performed. Partial Task and
+repository sidebar observations are retained separately and excluded from the table.
+Native menu stale-AX IDs and folder-picker selection problems were setup issues,
+not measured app failures. Captures returned JPEG; extensions were corrected without
+transcoding. The scripted input response and selected repository were checked in
+every AX receipt, and endpoint/outlier screenshots reviewed.
+
+Raw attempts, host/data identities, screenshots, exact CUA driver functions and
+reproducible summary renderer are private on disk at
+`/Users/jack/.lf/performance/live/20261116-three-repositories/`.
+`report.html`, `report.md`, `summary.json`, `trials.json`, `host.json` and
+`setup-issues.json` retain the figures and gaps. No raw captures enter the PR.
+
 - 2026-11-15: local retained 0.15.3 journal has 28 launch records; saved usable
   proxy n=26, median 566.0 ms, P95 4283.4 ms. No host load context; pooled builds
   within a version. Slow-reading percentiles sample only wait+apply >=100 ms.
@@ -167,3 +207,35 @@ contract; changing the harness requires a new baseline on both builds.
   build passed. Existing warnings in ServerClient.swift and TaskWorkView.swift.
 - `uv run pytest python/tests/test_desktop_timings.py -q`: 4 passed. Ruff format,
   Ruff check and git diff --check pass for the live reporting change.
+
+
+## Review rework, 2026-11-16
+
+Jack Heart: “wait no. acutally. just take on both in this PR./”
+
+Keep the harness extraction and corrected live journal together in #1950.
+Do not split the journal. No shipping approval or new numeric budgets.
+The supplied review calls for original event time, separate acknowledgment and
+usable presentation, shared Desktop/phone records, revision attribution, longer
+retention, cheap load context, existing-watchdog stalls and attributed work counts.
+
+Remaining: connect actual frame presentation and validated input readiness;
+connect UIKit event capture; attribute shared-server SQL and all interaction work;
+collect app-journal-driven trials on Loopflow, Manabot and Kata; exercise interleaved
+parent/candidate comparisons. The current producer endpoints are app-state only
+and deliberately unmeasured. Screen capture as a presentation source is an open
+choice in this conversation, not an approved default.
+
+SQLite profile callbacks have millisecond resolution even though their values use
+nanosecond units (https://sqlite.org/c3ref/c_trace.html). Fast real statements may
+report zero elapsed time. Assert positive callback count, not positive duration.
+
+- `swift test --package-path swift --jobs 2 --filter InteractionTests`: 5 passed;
+  shared framework and Desktop build passed, including board/filter source edits.
+- `uv run pytest python/tests/test_desktop_timings.py -q`: 8 passed after parser rework; Ruff check/format passed.
+- iOS simulator Debug app build passed (`/tmp/loo916-ios-build.log`).
+- `cargo clippy --all-targets --jobs 2 -- -D warnings`: passed; focused CLI-volume integration test passed after repairing the missing profile increment.
+
+Delete: the replaced phone Wait token, queued-callback completion helper, old
+manual input-trial headline importer, and interaction writer in LaunchJournal.
+Keep launch/read diagnostics and independent native input-capture receipts.

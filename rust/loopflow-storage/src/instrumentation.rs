@@ -6,6 +6,7 @@ pub static ENABLED: AtomicBool = AtomicBool::new(false);
 pub static CONNECTIONS: AtomicU64 = AtomicU64::new(0);
 pub static STATEMENTS: AtomicU64 = AtomicU64::new(0);
 pub static ROWS: AtomicU64 = AtomicU64::new(0);
+pub static SQL_PROFILES: AtomicU64 = AtomicU64::new(0);
 pub static SQL_NANOS: AtomicU64 = AtomicU64::new(0);
 
 pub fn observe_sqlite(connection: &rusqlite::Connection) {
@@ -40,6 +41,7 @@ fn count_sqlite(event: TraceEvent<'_>) {
             ROWS.fetch_add(1, Ordering::Relaxed);
         }
         TraceEvent::Profile(_, duration) => {
+            SQL_PROFILES.fetch_add(1, Ordering::Relaxed);
             SQL_NANOS.fetch_add(
                 u64::try_from(duration.as_nanos()).unwrap_or(u64::MAX),
                 Ordering::Relaxed,

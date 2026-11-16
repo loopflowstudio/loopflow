@@ -141,12 +141,14 @@ final class SessionsWorkspace {
         multiplexer.layout.allPanes.contains { $0.sessionId.map(held.contains) == true }
     }
 
+    let performanceOwner = UUID()
+
     func toggleFocus(_ paneId: String) {
-        Perf.begin(Perf.retainedWorkspaceAction, multiplexer.zoomedPaneId == nil ? "focus" : "restore", id: "workspace")
+        Perf.begin(Perf.retainedWorkspaceAction, multiplexer.zoomedPaneId == nil ? "focus" : "restore", id: "workspace", owner: performanceOwner)
         multiplexer.toggleZoom(paneId)
     }
     func setCollapsed(paneId: String, collapsed: Bool) {
-        Perf.begin(Perf.retainedWorkspaceAction, collapsed ? "collapse" : "expand", id: "workspace")
+        Perf.begin(Perf.retainedWorkspaceAction, collapsed ? "collapse" : "expand", id: "workspace", owner: performanceOwner)
         multiplexer.setCollapsed(paneId: paneId, collapsed: collapsed)
     }
 

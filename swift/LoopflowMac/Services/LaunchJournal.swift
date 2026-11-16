@@ -3,8 +3,8 @@
 //
 // Bounded NDJSON files under `<Machine>/desktop-cache/timings/`: `launches`
 // holds one line per launch milestone, `reads` one line per `lf` read and per
-// workspace refresh; `interactions` retains ordinary navigation spans and
-// superseded/unfinished observations. Lines carry durations, verbs and the app version; never
+// workspace refresh. InteractionJournal owns navigation records in the shared library.
+// Lines carry durations, verbs and the app version; never
 // arguments, output or error text. Each append is one write on a utility queue.
 // Report: scripts/benchmarks/desktop-performance/timings.py.
 //
@@ -42,6 +42,7 @@ final class LaunchJournal: @unchecked Sendable {
     private let queue = DispatchQueue(label: "studio.loopflow.launch-journal", qos: .utility)
     private var launch: String?
     private var app = ""
+    private var revision = ""
     private var marked: Set<Milestone> = []
     private var sizes: [String: Int] = [:]
     private var tally = Tally()
@@ -82,6 +83,7 @@ final class LaunchJournal: @unchecked Sendable {
             let id = UUID().uuidString
             launch = id
             self.app = app
+            self.revision = revision
             var line: [String: Any] = [
                 "event": "launch", "launch": id, "app": app, "at": at, "pid": Int(getpid()), "bundle": bundle,
                 "rev": revision, "os": "\(os.majorVersion).\(os.minorVersion).\(os.patchVersion)",
@@ -118,19 +120,6 @@ final class LaunchJournal: @unchecked Sendable {
             record("read", "verb", verb, ms: ms, ok: ok)
             tally.reads[verb, default: 0] += 1
             if !ok { tally.failed += 1 }
-        }
-    }
-
-    /// Ordinary navigation spans. The correlation is a random observation ID,
-    /// never a Task identity, terminal input or document content.
-    func interaction(_ name: String, scenario: String, observation: String,
-                     phase: String, ms: Double) {
-        let at = Date().timeIntervalSince1970
-        queue.async { [self] in
-            guard let launch else { return }
-            append(["event": "interaction", "name": name, "scenario": scenario,
-                    "observation": observation, "phase": phase, "ms": Self.rounded(ms),
-                    "at": at, "launch": launch, "app": app], to: "interactions")
         }
     }
 
@@ -274,8 +263,9 @@ final class LaunchJournal: @unchecked Sendable {
     }
 
     private func record(_ event: String, _ key: String, _ value: String, ms: Double, ok: Bool) {
-        guard launch != nil else { return }
-        append(["event": event, key: value, "ms": Self.rounded(ms), "ok": ok, "app": app], to: "reads")
+        guard let launch else { return }
+        append(["event": event, key: value, "ms": Self.rounded(ms), "ok": ok,
+                "app": app, "rev": revision, "launch": launch], to: "reads")
     }
 
     private static func rounded(_ ms: Double) -> Double { (ms * 10).rounded() / 10 }

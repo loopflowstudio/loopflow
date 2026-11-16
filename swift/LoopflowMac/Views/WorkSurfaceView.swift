@@ -211,7 +211,7 @@ struct WorkSurfaceView: View {
                 TaskCommentsView(model: model, task: task)
             }
             .onChange(of: task.id, initial: true) { _, id in
-                Perf.endAfterCommit(Perf.taskWorkspaceReady, id: id)
+                Perf.stateObserved(Perf.taskWorkspaceReady, id: id, owner: model.navigation.performanceOwner)
             }
         } else {
             missingSelection

@@ -50,7 +50,7 @@ struct WorkspacePanesView: View {
     }
 
     private func endWorkspaceAction() {
-        Perf.endAfterCommit(Perf.retainedWorkspaceAction, id: "workspace")
+        Perf.stateObserved(Perf.retainedWorkspaceAction, id: "workspace", owner: workspace.performanceOwner)
     }
 }
 

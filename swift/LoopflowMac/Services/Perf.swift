@@ -14,18 +14,45 @@ import OSLog
 enum Perf {
     static let signposter = PerfClock.signposter
 
-    /// Process launch → first outline rows committed.
-    static let coldStart: StaticString = "cold_start"
-    /// Process launch → every part of the workspace read by this launch, not saved text.
-    static let workspaceCurrent: StaticString = "workspace_current"
-    /// Outline input (fold, presentation, filter, repository) → new rows committed.
-    static let hierarchyInteraction: StaticString = "hierarchy_interaction"
-    /// Wave/Task selection → detail committed; Session selection → pane accepts input.
-    static let taskWorkspaceReady: StaticString = "task_workspace_ready"
-    /// Task selection → header observes its cached or freshly delivered Workflow.
-    static let workflowReady: StaticString = "workflow_ready"
-    static let workFrameApply: StaticString = "work_frame_apply"
-    static let retainedWorkspaceAction: StaticString = "retained_workspace_action"
+    enum Interval: Hashable {
+        case coldStart, workspaceCurrent, hierarchyInteraction, taskWorkspaceReady
+        case workflowReady, workFrameApply, retainedWorkspaceAction
+
+        var signpost: StaticString {
+            switch self {
+            case .coldStart: "cold_start"
+            case .workspaceCurrent: "workspace_current"
+            case .hierarchyInteraction: "hierarchy_interaction"
+            case .taskWorkspaceReady: "task_workspace_ready"
+            case .workflowReady: "workflow_ready"
+            case .workFrameApply: "work_frame_apply"
+            case .retainedWorkspaceAction: "retained_workspace_action"
+            }
+        }
+        var recordsInteraction: Bool {
+            switch self {
+            case .coldStart, .hierarchyInteraction, .taskWorkspaceReady, .retainedWorkspaceAction: true
+            case .workspaceCurrent, .workflowReady, .workFrameApply: false
+            }
+        }
+        func experience(_ scenario: String) -> String {
+            switch self {
+            case .coldStart: "open_app"
+            case .hierarchyInteraction: "find_work"
+            case .taskWorkspaceReady: scenario == "session" ? "return_session" : scenario == "task" ? "open_task" : "open_wave"
+            case .retainedWorkspaceAction: "workspace_layout"
+            default: "diagnostic"
+            }
+        }
+    }
+    static let coldStart = Interval.coldStart
+    static let workspaceCurrent = Interval.workspaceCurrent
+    static let hierarchyInteraction = Interval.hierarchyInteraction
+    static let taskWorkspaceReady = Interval.taskWorkspaceReady
+    static let workflowReady = Interval.workflowReady
+    static let workFrameApply = Interval.workFrameApply
+    static let retainedWorkspaceAction = Interval.retainedWorkspaceAction
+
     /// One `lf` subprocess read; the message names the verb.
     static let lf: StaticString = "lf"
     /// One Markdown parse into blocks; the message carries the source length.
@@ -44,61 +71,106 @@ enum Perf {
     private struct Pending {
         let state: OSSignpostIntervalState
         let id: String
-        let observation: String
-        let scenario: String
-        let started: ContinuousClock.Instant
+        let interaction: Interaction?
+    }
 
-        func record(_ name: String, phase: String) {
-            // Frame delivery has its own slow-reading journal; idle refreshes
-            // must not fill the interaction history.
-            guard name != "work_frame_apply" else { return }
-            LaunchJournal.home.interaction(name, scenario: scenario, observation: observation,
-                                           phase: phase, ms: started.elapsedMs)
+    private struct Key: Hashable {
+        let interval: Interval
+        let owner: UUID?
+    }
+    @MainActor private static var pending: [Key: Pending] = [:]
+    @MainActor private static var journal: InteractionJournal?
+
+    @MainActor
+    static func startRecording() {
+        var identity = ["platform": "macOS", "launch": UUID().uuidString]
+        identity["app"] = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        identity["revision"] = Bundle.main.object(forInfoDictionaryKey: "LoopflowSourceRevision") as? String
+        journal = InteractionJournal(directory: WorkCache.homeDirectory.appendingPathComponent("timings/interactions"),
+                                     identity: identity)
+    }
+
+    @MainActor
+    static func stalled(milliseconds: Double) { journal?.stalled(milliseconds: milliseconds) }
+
+    /// Capture before launching Tasks so their model work retains the initiating event.
+    @MainActor
+    static func userAction<Result>(_ interval: Interval, scenario: String, id: String,
+                                   liveSessions: Int?, owner: UUID, _ action: () -> Result) -> Result {
+        InteractionTrace.$input.withValue(InteractionInput.current) {
+            begin(interval, scenario, id: id, liveSessions: liveSessions, owner: owner)
+            return InteractionTrace.$current.withValue(pending[Key(interval: interval, owner: owner)]?.interaction, operation: action)
         }
     }
 
-    @MainActor private static var pending: [String: Pending] = [:]
-
-    /// Start a user-visible interval. A still-pending interval of the same
-    /// name is ended as `superseded` so the trace never shows two of them open.
     @MainActor
-    static func begin(_ name: StaticString, _ scenario: String, id: String, detail: String = "") {
-        let key = "\(name)"
+    static func begin(_ interval: Interval, _ scenario: String, id: String, detail: String = "",
+                      liveSessions: Int? = nil, owner: UUID? = nil) {
+        let key = Key(interval: interval, owner: owner)
+        if let inherited = InteractionTrace.current {
+            if inherited.isFinished { return }
+            if let existing = pending[key], existing.interaction === inherited {
+                pending[key] = Pending(state: existing.state, id: id, interaction: inherited)
+                return
+            }
+        }
         if let stale = pending.removeValue(forKey: key) {
-            signposter.endInterval(name, stale.state, "superseded")
-            stale.record(key, phase: "superseded")
+            signposter.endInterval(interval.signpost, stale.state, "superseded")
+            stale.interaction?.finish(.superseded)
         }
-        let state = signposter.beginInterval(
-            name, id: signposter.makeSignpostID(),
-            "scenario=\(scenario, privacy: .public) id=\(id, privacy: .public) \(detail, privacy: .public)"
-        )
-        let observation = Pending(state: state, id: id, observation: UUID().uuidString,
-                                  scenario: scenario, started: .now)
-        pending[key] = observation
-        observation.record(key, phase: "begin")
+        let state = signposter.beginInterval(interval.signpost, id: signposter.makeSignpostID(),
+            "scenario=\(scenario, privacy: .public) id=\(id, privacy: .public) \(detail, privacy: .public)")
+        let interaction: Interaction?
+        if interval.recordsInteraction, let journal {
+            let input: InteractionInput?
+            if interval == .coldStart, let ms = PerfClock.millisecondsSinceProcessStart() {
+                input = InteractionInput(uptime: ProcessInfo.processInfo.systemUptime - ms / 1000, source: .processStart)
+            } else { input = InteractionTrace.input }
+            interaction = Interaction(name: interval.experience(scenario), scenario: scenario, input: input,
+                context: Interaction.Context(thermalState: ProcessInfo.processInfo.thermalState.rawValue,
+                                             liveSessions: liveSessions), sink: journal.append)
+        } else { interaction = nil }
+        pending[key] = Pending(state: state, id: id, interaction: interaction)
     }
 
-    /// End the pending interval for `id`; another id or none pending is a no-op.
     @MainActor
-    static func end(_ name: StaticString, id: String) {
-        let key = "\(name)"
+    static func acknowledged(_ interval: Interval, id: String, owner: UUID? = nil) {
+        guard let current = pending[Key(interval: interval, owner: owner)], current.id == id else { return }
+        current.interaction?.acknowledged(at: ProcessInfo.processInfo.systemUptime, evidence: .appState)
+    }
+
+    @MainActor
+    static func end(_ interval: Interval, id: String, owner: UUID? = nil) {
+        let key = Key(interval: interval, owner: owner)
         guard let current = pending[key], current.id == id else { return }
         pending.removeValue(forKey: key)
-        signposter.endInterval(name, current.state, "ready")
-        current.record(key, phase: "ready")
+        signposter.endInterval(interval.signpost, current.state, "state_observed")
+        current.interaction?.usable(at: ProcessInfo.processInfo.systemUptime, evidence: .appState)
+        current.interaction?.finish(.unmeasured)
     }
 
-    /// End on the next main-queue callback after the view observes the change.
-    /// This is a scheduling proxy, not a render or compositor completion fence.
+    /// Observed view state is diagnostic until a real frame confirms presentation.
     @MainActor
-    static func endAfterCommit(_ name: StaticString, id: String) {
-        guard pending["\(name)"]?.id == id else { return }
-        DispatchQueue.main.async { end(name, id: id) }
+    static func stateObserved(_ interval: Interval, id: String, owner: UUID? = nil) {
+        if owner == nil, pending[Key(interval: interval, owner: nil)] == nil {
+            // A terminal callback can lack its window scope. Ambiguity stays
+            // unmeasured rather than completing another window's interaction.
+            let matches = pending.filter { $0.key.interval == interval && $0.value.id == id }
+            if matches.count == 1, let key = matches.first?.key { end(interval, id: id, owner: key.owner) }
+        } else { end(interval, id: id, owner: owner) }
     }
 
     @MainActor
-    static func isPending(_ name: StaticString) -> Bool {
-        pending["\(name)"] != nil
+    static func isPending(_ interval: Interval, owner: UUID? = nil) -> Bool {
+        pending[Key(interval: interval, owner: owner)] != nil
+    }
+
+    @MainActor
+    static func project<Result>(owner: UUID, _ operation: () -> Result) -> Result {
+        let candidates = pending.filter { $0.key.owner == owner }.values.compactMap(\.interaction)
+        let work = InteractionTrace.current?.work ?? (candidates.count == 1 ? candidates.first?.work : nil)
+        work?.project()
+        return operation()
     }
 
     static func measure<Value>(_ name: StaticString, _ detail: String, _ body: () throws -> Value) rethrows -> Value {

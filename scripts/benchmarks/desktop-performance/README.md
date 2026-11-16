@@ -30,48 +30,51 @@ The app retains bounded launch/read journals under
 launching the app. Records contain durations, command names and app versions,
 not arguments, prompts or output.
 
-Ordinary Desktop navigation also appends `interactions.ndjson` in that directory:
-hierarchy/filter changes, Task/Wave/Session opening, Workflow arrival and retained
-workspace controls. Each observation has a random correlation, start and terminal
-outcome. Superseded and unfinished observations remain counts, outside successful
-latency percentiles. A pending interaction and an interrupted one are not yet
-distinguished. These endpoints retain the signposts' meanings: observed view state
-or a queued main-thread callback, not verified provider input or displayed pixels.
-Terminal key-to-draw and Markdown spans remain in signposts, outside this journal.
-
-The headline report is organized by complete experiences: open the app, open a
-Task's conversation, return to a Session, start a conversation, get the first
-answer word, find work, open a file and recover a connection. Each names the
-initiating action and usable endpoint. **Existing internal timings do not supply
-these all-in numbers.** Without a full journey observation the row is unmeasured.
-
-The Task-to-conversation recorder in [agent-input.md](agent-input.md) measures from
-the Task click through an unsent probe's observed native response. After recording
-and summarizing owned live-app trials, include their receipts:
+Desktop and phone use the shared `Interaction` record: input → acknowledged →
+usable → outcome. Desktop writes daily files under
+`<Home>/desktop-cache/timings/interactions/`; phone uses its application-support
+`performance/interactions/`. Writes run on a utility queue, capped at 16 MiB per
+UTC day and fourteen daily files. Records contain build revision, launch identity,
+thermal state and cached live Session count where available. No new CPU sampler
+runs on the interaction path. Export journals before retention expires for trends.
 
 ```sh
-uv run python scripts/benchmarks/desktop-performance/timings.py --input-trial /tmp/codex-resume-before/report.json --html /tmp/loopflow-performance.html
+uv run python scripts/benchmarks/desktop-performance/timings.py --html /tmp/loopflow-performance.html
 ```
 
-Repeat `--input-trial` for additional reports. Cases, providers/versions, app/helper
-builds, Machine, fixture/data identity, conditions and before/after variants stay
-separate. Observed captures require review; they are not automatic passes. Capture,
-observer and hook/trust delays remain in the full interval. Failed/unproved trials
-remain counted outside observed latency statistics. Invalid or missing reports are
-named without manufacturing measurements. Other full-journey drivers remain missing.
+The headline table separates acknowledgment and usable-result medians/P95 for each
+experience, scenario and revision. P95 needs twenty completed samples. Failures,
+superseded, cancelled, unmeasured and unfinished attempts remain counts. Unknown
+revisions stay per-launch. App-state and commit callbacks cannot supply frame
+latencies. **The current call sites record app state only; no ordinary-use journey
+yet proves presentation or validated input readiness.** Mobile also lacks raw
+UIKit input-event capture. Those observations stay unmeasured.
 
-The diagnostics section reads the live Machine's retained journals, with app-version
-selection, median bars, P95/max and failure counts. Missing metrics stay unmeasured.
-Versions can contain several build revisions. Slow frame wait/apply samples are
-selected at 100 ms combined latency; their distribution excludes fast readings.
-No host-load adjustment or controlled-comparison claim follows from these records.
-The installed app needs a build containing interaction journaling to record it;
-older journals cannot supply missing historical navigation measurements.
+Desktop actions capture the AppKit event timestamp before asynchronous work, so
+queued main-thread time is included. Programmatic work has no synthetic input.
+Kernel process start is a launch diagnostic, not the launch-request timestamp.
+Agent clicks provide stimulus; the app journal must supply the measurement.
+The earlier three-repository pilot includes accessibility/screenshot observer cost
+and cannot establish a reactivity baseline. The independent
+[agent-input recorder](agent-input.md) retains its diagnostic receipts; its wall
+intervals do not enter the headline table.
 
-Desktop already logs five-minute memory/descriptor/thread vitals, memory-pressure
-events and main-thread hangs in `logs/lf.log`. That is separate from the timing
-journals and does not supply per-interaction host CPU/load context. Synthetic
-worlds and quiet-host comparisons complement these ordinary-use observations.
+Work receipts count attributed CLI reads, served reads and projections. A traced
+CLI process contributes statement/row totals; missing receipts and shared-server
+SQL attribution remain unavailable, never zero. These counts are diagnostic until
+all work for an interaction is attributed; they are not yet a complete CI gate.
+
+The existing DesktopVitals run-loop observer records busy main-thread turns of at
+least 50 ms through the same daily journal. Its existing hang watchdog still logs
+long hangs; there is no second watchdog thread. Busy-turn durations do not measure
+scroll/streaming frame drops. The report retains raw stall receipts.
+
+Internal launch/read/frame timings stay under diagnostics, grouped by build
+revision. Slow frame wait/apply samples include only readings selected at 100 ms
+combined latency. Their distribution excludes fast readings. No load correction
+or controlled-comparison claim follows from ordinary-use observations. The
+installed app needs this build to produce the new journal; it cannot reconstruct
+historical measurements.
 
 `record_live.py` collects signposts, process RSS/CPU samples and, when available,
 Instruments hitch/hang traces. `--no-xctrace` keeps signposts and resource samples
@@ -203,14 +206,17 @@ five-stream fixture. Prefer a quiet mini that can run the app's deployment targe
 | LF5 | File/layout save, review/delivery → local feedback and confirmed result | Base-revision conflict, held writer; both where supported | `file_edit_refresh`, layout/PR fixtures; generalized operation projection pending |
 | LF6 | Multi-window consistency; remote background/reconnect | Two windows/devices, epoch reset and lost reply; both | Transport fixtures; multi-window native journey pending |
 
-The proposed budget is P95 <100 ms for local reaction, separately from visible
-pixels and input readiness. Other regression budgets await a valid baseline;
-never substitute a time limit on the runner. Correctness gates require local
+Numeric experience budgets await a week of event-to-presented-frame live data.
+The quiet-host comparison workflow below remains available but parked: it has
+not produced a qualified baseline. Interleaved parent/candidate runs on the same
+loaded host will use the app journal, retaining each run’s conditions. Correctness gates require local
 selection/disclosure before held I/O, exact-identity attachment, no duplicate send,
 and operation-local rollback. Headless projection time is not gesture or paint time.
 
-`LF_PERF_OUTPUT` adds aggregate SQLite profile milliseconds, without SQL text or
-values. SQLite profile time may include waits inside SQLite and overlap nested
+`LF_PERF_OUTPUT` adds aggregate SQLite profile milliseconds and the number of
+profile callbacks, without SQL text or values. Zero elapsed milliseconds can be
+real because SQLite profile durations have millisecond resolution; callback count
+proves that profiling ran. SQLite profile time may include waits inside SQLite and overlap nested
 statements; it excludes Rust mutex wait and planning/Git/provider time. It does
 not diagnose a lock bottleneck. Git Trace2 and provider milestones remain separate.
 

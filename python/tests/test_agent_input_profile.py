@@ -56,25 +56,6 @@ def test_reviewable_endpoint_requires_exact_session_and_ordered_evidence(tmp_pat
     assert profile.summarize(tmp_path)["click_to_observed_response_ms"] is None
 
 
-def test_experience_report_consumes_the_full_trial_without_promoting_missing_input(
-    tmp_path: Path,
-) -> None:
-    timing_spec = importlib.util.spec_from_file_location("timings", SCRIPT.with_name("timings.py"))
-    timings = importlib.util.module_from_spec(timing_spec)
-    timing_spec.loader.exec_module(timings)
-    _trial(tmp_path)
-    profile.summarize(tmp_path)
-    observed = timings.summarize(tmp_path, [tmp_path / "report.json"])
-    assert observed["experiences"]["groups"][0]["median_ms"] == 4000
-    assert observed["experiences"]["groups"][0]["samples"] == 1
-    (tmp_path / "markers.ndjson").unlink()
-    profile.summarize(tmp_path)
-    incomplete = timings.summarize(tmp_path, [tmp_path / "report.json"])
-    assert incomplete["experiences"]["groups"][0]["samples"] == 0
-    assert incomplete["experiences"]["groups"][0]["median_ms"] is None
-    assert incomplete["experiences"]["groups"][0]["unmeasured"] == 1
-
-
 def test_failed_or_interrupted_trials_do_not_become_successes(tmp_path: Path) -> None:
     _trial(tmp_path)
     (tmp_path / "capture.json").write_text(

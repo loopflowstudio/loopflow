@@ -5,28 +5,6 @@ import Testing
 
 @Suite("Launch journal")
 struct LaunchJournalTests {
-    @Test("Interaction observations retain beginnings, completions and superseded waits")
-    func interactionHistory() throws {
-        let directory = try temporaryDirectory()
-        let journal = LaunchJournal(directory: directory)
-        journal.begin(app: "9.9.9", preMainMs: 1)
-        journal.interaction("hierarchy_interaction", scenario: "filter", observation: "a",
-                            phase: "begin", ms: 0)
-        journal.interaction("hierarchy_interaction", scenario: "filter", observation: "a",
-                            phase: "superseded", ms: 25)
-        journal.interaction("task_workspace_ready", scenario: "task", observation: "b",
-                            phase: "begin", ms: 0)
-        journal.interaction("task_workspace_ready", scenario: "task", observation: "b",
-                            phase: "ready", ms: 125.26)
-        journal.flush()
-        let records = try lines(directory, "interactions")
-        #expect(records.map { $0["phase"] as? String } == ["begin", "superseded", "begin", "ready"])
-        #expect(records[3]["ms"] as? Double == 125.3)
-        #expect(records.allSatisfy { $0["app"] as? String == "9.9.9" })
-        #expect(Set(records.map { $0["launch"] as? String }).count == 1)
-        #expect(records.allSatisfy { $0["at"] as? Double != nil })
-    }
-
     @Test("A launch records each milestone once, with the app version and no arguments")
     func launchRecord() throws {
         let directory = try temporaryDirectory()

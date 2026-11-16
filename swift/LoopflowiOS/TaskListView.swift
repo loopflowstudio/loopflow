@@ -25,7 +25,7 @@ final class TaskFeed {
     var filter = TaskList.started
     /// The Wave whose Tasks are listed; nil lists every Wave's.
     var wave: String?
-    @ObservationIgnored private var waiting: Perf.Wait?
+    @ObservationIgnored private var waiting: Interaction?
     @ObservationIgnored private let client: RemoteMobileClient
     @ObservationIgnored private var observation: RemoteTaskObservation?
     @ObservationIgnored private var reader: Task<Void, Never>?
@@ -36,7 +36,7 @@ final class TaskFeed {
     func start() async {
         stop()
         let current = generation
-        waiting = Perf.begin("tasks_current")
+        waiting = Perf.begin("find_work", scenario: filter.rawValue)
         // The last reading under each filter, shown at once while the Machine answers.
         // It is kept as wire bytes and read by the live decoder, so a file an older
         // app wrote fails to load instead of showing a stale shape.
@@ -66,16 +66,20 @@ final class TaskFeed {
                         self.loaded = true
                         self.error = nil
                         Perf.launch("tasks_current")
-                        if let waiting = self.waiting { Perf.end(waiting, self.filter.rawValue) }
+                        if let waiting = self.waiting { Perf.end(waiting) }
                         self.waiting = nil
                         if changed { self.save(update.wire) }
                         if self.waves.isEmpty, let found = try? await self.client.waves() { self.waves = found }
-                    case .failure(let error): self.error = error.message
+                    case .failure(let error):
+                        self.waiting?.finish(.failed)
+                        self.waiting = nil
+                        self.error = error.message
                     }
                 }
                 throw RegistryQueryError("Task updates ended.")
             } catch {
                 guard let self, current == self.generation else { return }
+                self.waiting?.finish(.failed)
                 self.stop()
                 self.error = machineConnectionMessage(error)
             }
@@ -91,6 +95,8 @@ final class TaskFeed {
     }
 
     func stop() {
+        waiting?.finish(.cancelled)
+        waiting = nil
         generation += 1
         reader?.cancel()
         reader = nil

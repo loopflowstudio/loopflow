@@ -660,7 +660,7 @@ final class WorkModel {
     private func placeSession(_ record: SessionRecord, in target: SessionsWorkspace,
                               store: SessionsStore, registry: SessionsWorkspaceRegistry,
                               navigating: Bool = true) -> SessionsWorkspace {
-        Perf.begin(Perf.taskWorkspaceReady, "session", id: record.id)
+        Perf.begin(Perf.taskWorkspaceReady, "session", id: record.id, liveSessions: liveSessionCount, owner: navigation.performanceOwner)
         let workspace: SessionsWorkspace
         if case .shell(let id, let machine) = store.localTerminal(for: record),
            let key = registry.key(containingShell: id, machineId: machine),
@@ -1168,7 +1168,9 @@ final class WorkModel {
     }
 
     var projection: WorkProjection {
-        WorkProjection(roadmaps: visibleRoadmaps, inventory: visibleTasks, sessions: sessions.value ?? [])
+        Perf.project(owner: navigation.performanceOwner) {
+            WorkProjection(roadmaps: visibleRoadmaps, inventory: visibleTasks, sessions: sessions.value ?? [])
+        }
     }
     /// Built from the whole projection, so it is computed once per change to
     /// what it reads, not on each of the several reads per window render.
@@ -1211,7 +1213,9 @@ final class WorkModel {
     }
 
     var visibleWork: WorkProjection {
-        WorkProjection(roadmaps: visibleRoadmaps, inventory: visibleTasks, sessions: visibleSessions)
+        Perf.project(owner: navigation.performanceOwner) {
+            WorkProjection(roadmaps: visibleRoadmaps, inventory: visibleTasks, sessions: visibleSessions)
+        }
     }
 
     private(set) var roadmap: WorkReading<RoadmapSnapshot> = .loading {
@@ -1250,9 +1254,14 @@ final class WorkModel {
         set { peerPlanningReadings[repositoryReadingKey(repoPath ?? "")] = newValue }
     }
     private var peerPlanningGeneration = 0
+    @ObservationIgnored private(set) var liveSessionCount: Int?
     private(set) var sessions: WorkReading<[SessionRecord]> {
         get { sessionReadings[repositoryReadingKey(repoPath ?? "")] ?? .loading }
-        set { sessionReadings[repositoryReadingKey(repoPath ?? "")] = newValue }
+        set {
+            sessionReadings[repositoryReadingKey(repoPath ?? "")] = newValue
+            liveSessionCount = newValue.value.map { $0.filter { $0.state == .active }.count }
+            navigation.liveSessionCount = liveSessionCount
+        }
     }
     private(set) var workActivity: WorkReading<WorkActivitySnapshot> = .loading
     /// Selectable Graphs per repository, read once on demand; never per repaint.
@@ -2264,10 +2273,10 @@ final class WorkModel {
         historyLookup?.cancel()
         historyLookup = nil
         if let requested, requested.kind == .task {
-            Perf.begin(Perf.workflowReady, "task", id: requested.id)
+            Perf.begin(Perf.workflowReady, "task", id: requested.id, owner: navigation.performanceOwner)
         }
         if let requested, requested.kind != .project {
-            Perf.begin(Perf.taskWorkspaceReady, requested.kind == .task ? "task" : "wave", id: requested.id)
+            Perf.begin(Perf.taskWorkspaceReady, requested.kind == .task ? "task" : "wave", id: requested.id, liveSessions: liveSessionCount, owner: navigation.performanceOwner)
         }
         let selection: WorkReference?
         if let requested, requested.kind == .project {
@@ -2288,6 +2297,7 @@ final class WorkModel {
         }
         if navigation.showsSelection { workspaceRegistry?.clearPresentation() }
         setSelection(selection)
+        if let selection { Perf.acknowledged(Perf.taskWorkspaceReady, id: selection.id, owner: navigation.performanceOwner) }
         if selection == nil { navigation.sidebarWaveID = nil }
         if let selection, selection.kind == .wave {
             navigation.sidebarWaveID = selection.id

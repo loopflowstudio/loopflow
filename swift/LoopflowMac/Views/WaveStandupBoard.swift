@@ -252,7 +252,13 @@ struct WaveStandupBoard: View {
         let shown = model.boardSection(view)
         return VStack(alignment: .leading, spacing: Spacing.md) {
             HStack(alignment: .center, spacing: Spacing.lg) {
-                Picker("Section", selection: Binding(get: { shown }, set: { model.navigation.boardSections[view] = $0 })) {
+                Picker("Section", selection: Binding(get: { shown }, set: { section in
+                    Perf.userAction(Perf.hierarchyInteraction, scenario: "board_section", id: "board_section",
+                                    liveSessions: model.liveSessionCount, owner: model.navigation.performanceOwner) {
+                        model.navigation.boardSections[view] = section
+                        Perf.acknowledged(Perf.hierarchyInteraction, id: "board_section", owner: model.navigation.performanceOwner)
+                    }
+                })) {
                     ForEach(WaveBoardSection.allCases, id: \.self) { item in
                         Text("\(item.title) · \(standup.rows(item).count)").tag(item)
                     }
@@ -267,6 +273,9 @@ struct WaveStandupBoard: View {
             }
             .id(shown)
             .accessibilityIdentifier("wave-section-\(shown.rawValue)")
+            .onChange(of: shown) { _, _ in
+                Perf.stateObserved(Perf.hierarchyInteraction, id: "board_section", owner: model.navigation.performanceOwner)
+            }
         }
     }
 }

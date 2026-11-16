@@ -4,7 +4,6 @@
 uv run python scripts/benchmarks/desktop-performance/timings.py
 uv run python scripts/benchmarks/desktop-performance/timings.py --json
 uv run python scripts/benchmarks/desktop-performance/timings.py --home /path/to/home
-uv run python scripts/benchmarks/desktop-performance/timings.py --input-trial /tmp/trial/report.json
 
 Reads `<Machine>/desktop-cache/timings/{launches,reads}.ndjson`, which the app
 appends to while it runs. Launch milliseconds count from kernel process start.
@@ -21,7 +20,6 @@ import statistics
 from collections import Counter
 from pathlib import Path
 
-BUDGETS_MS = {"first_frame": 400, "usable_saved": 1000, "usable_fresh": 1000}
 LAUNCH_METRICS = ["pre_main", "restored", "first_frame", "usable_saved", "usable_fresh", "fresh"]
 EXPERIENCES = [
     ("open_app", "Open the app", "Launch requested", "Workspace visible and input usable"),
@@ -99,8 +97,6 @@ def _launches(records: list[dict]) -> dict:
         if "refresh_failed" in events:
             failed[events["refresh_failed"].get("part")] += 1
     metrics = {name: _stats(samples) for name, samples in values.items()}
-    for name, budget in BUDGETS_MS.items():
-        metrics[name]["budget_ms"] = budget
     return {
         "launches": len(launches),
         "cache": dict(cache),
@@ -142,85 +138,161 @@ def _interactions(records: list[dict]) -> dict:
     }
 
 
-def _experience_trials(paths: list[Path]) -> dict:
-    groups = {}
+def _journal(directory: Path) -> dict:
+    attempts = {}
     errors = []
-    # Aliases of a receipt are one observation, never extra samples.
-    for path in dict.fromkeys(p.expanduser().resolve() for p in paths):
-        try:
-            report = json.loads(path.read_text())
-            metadata = report["metadata"]
-            dimensions = (
-                "provider",
-                "provider_version",
-                "case",
-                "conditions",
-                "app_revision",
-                "helper_revision",
-                "machine",
-                "data",
-                "variant",
-            )
-            context = {key: metadata[key] for key in dimensions}
-            if any(not isinstance(value, str) or not value for value in context.values()):
-                raise ValueError(
-                    "Trial conditions and build/provider identities must be nonempty text"
+    stalls = []
+    for path in sorted((directory / "interactions").glob("*.ndjson")):
+        for number, line in enumerate(path.read_text().splitlines(), 1):
+            try:
+                row = json.loads(line)
+                if not isinstance(row, dict):
+                    raise ValueError("Journal row must be an object")
+                if row.get("event") == "main_thread_stall":
+                    if (
+                        type(row.get("ms")) not in (int, float)
+                        or not math.isfinite(row["ms"])
+                        or row["ms"] < 0
+                    ):
+                        raise ValueError("Invalid stall duration")
+                    stalls.append(row)
+                    continue
+                if row["schema"] != 1:
+                    raise ValueError("Unknown interaction schema")
+                if (
+                    not isinstance(row.get("build"), dict)
+                    or not isinstance(row.get("context"), dict)
+                    or not isinstance(row.get("work"), dict)
+                ):
+                    raise ValueError("Missing build, context or work object")
+                if row.get("phase") not in (
+                    "input",
+                    "acknowledged",
+                    "usable",
+                    "outcome",
+                ) or not isinstance(row.get("evidence"), str):
+                    raise ValueError("Invalid interaction phase or evidence")
+                if not all(
+                    isinstance(row.get(key), str) for key in ("observation", "name", "scenario")
+                ):
+                    raise ValueError("Invalid interaction identity")
+                attempt = attempts.setdefault(
+                    row["observation"],
+                    {
+                        "name": row["name"],
+                        "scenario": row["scenario"],
+                        "build": row["build"],
+                        "context": row["context"],
+                        "events": [],
+                        "receipt": str(path),
+                    },
                 )
-            if context["provider"] not in ("codex", "claude") or context["case"] not in (
-                "cached",
-                "resume",
-                "fresh",
-            ):
-                raise ValueError("Unknown provider or cached/resume/fresh case")
-            key = json.dumps(context, sort_keys=True)
-            group = groups.setdefault(key, {"context": context, "attempts": []})
-            value = report["click_to_observed_response_ms"]
-            observed = report["status"] == "observed; native captures require review"
-            if observed and (
-                type(value) not in (int, float) or not math.isfinite(value) or value < 0
-            ):
-                raise ValueError("Observed trial has no finite, nonnegative elapsed time")
-            group["attempts"].append(
-                {
-                    "receipt": str(path),
-                    "status": report["status"],
-                    "ms": value if observed else None,
-                }
+                if any(attempt[key] != row[key] for key in ("name", "scenario", "build")):
+                    raise ValueError("Interaction identity changed")
+                attempt["events"].append(row)
+            except (KeyError, TypeError, ValueError) as error:
+                errors.append({"receipt": str(path), "line": number, "reason": str(error)})
+    groups = {}
+    for observation, attempt in attempts.items():
+        revision = attempt["build"].get("revision")
+        known_revision = bool(revision and revision != "unknown")
+        build = {k: v for k, v in attempt["build"].items() if k != "launch" or not known_revision}
+        # Unknown builds remain per-launch; never pool before/after by app version.
+        key = (attempt["name"], attempt["scenario"], json.dumps(build, sort_keys=True))
+        group = groups.setdefault(
+            key,
+            {
+                "name": attempt["name"],
+                "scenario": attempt["scenario"],
+                "build": build,
+                "attempts": [],
+            },
+        )
+        events = attempt["events"]
+        outcomes = [e for e in events if e["phase"] == "outcome"]
+        outcome = outcomes[-1].get("outcome") if outcomes else "unfinished"
+        phases = {}
+        for phase in ("acknowledged", "usable"):
+            values = [
+                e.get("ms")
+                for e in events
+                if e["phase"] == phase and e["evidence"] in ("presented_frame", "captured_frame")
+            ]
+            value = values[-1] if values else None
+            phases[phase] = (
+                value
+                if (type(value) in (float, int) and math.isfinite(value) and value >= 0)
+                else None
             )
-        except (OSError, ValueError, TypeError, KeyError) as error:
-            errors.append({"receipt": str(path), "reason": str(error)})
-    return {
-        "groups": [
+        ordered = (
+            phases["acknowledged"] is not None
+            and phases["usable"] is not None
+            and phases["acknowledged"] <= phases["usable"]
+        )
+        complete = (
+            outcome == "completed"
+            and len(outcomes) == 1
+            and ordered
+            and known_revision
+            and any(e["phase"] == "input" and e["evidence"] == "input_event" for e in events)
+        )
+        group["attempts"].append(
+            {
+                "observation": observation,
+                "outcome": outcome,
+                "measured": complete,
+                "phases": phases,
+                "work": (outcomes[-1] if outcomes else events[-1])["work"],
+                "context": attempt["context"],
+                "receipt": attempt["receipt"],
+            }
+        )
+    result = []
+    for group in groups.values():
+        samples = [a for a in group["attempts"] if a["measured"]]
+        result.append(
             {
                 **group,
-                **_stats([a["ms"] for a in group["attempts"] if a["ms"] is not None]),
-                "unmeasured": sum(a["ms"] is None for a in group["attempts"]),
+                "samples": len(samples),
+                "outcomes": dict(Counter(a["outcome"] for a in group["attempts"])),
+                "acknowledged": _stats([a["phases"]["acknowledged"] for a in samples]),
+                "usable": _stats([a["phases"]["usable"] for a in samples]),
             }
-            for group in groups.values()
-            if group["attempts"]
-        ],
+        )
+    return {
+        "groups": result,
         "errors": errors,
+        "stalls": stalls,
+        "stall_summary": _stats([row["ms"] for row in stalls]),
     }
 
 
-def summarize(directory: Path, input_trials: list[Path] | None = None) -> dict:
+def summarize(directory: Path) -> dict:
     launches = _lines(directory / "launches.ndjson")
     reads = _lines(directory / "reads.ndjson")
     interactions = _lines(directory / "interactions.ndjson")
     versions = {}
-    for app in dict.fromkeys(record.get("app", "") for record in launches + reads + interactions):
-        mine = [record for record in reads if record.get("app", "") == app]
-        versions[app] = {
-            **_launches([record for record in launches if record.get("app", "") == app]),
+    revisions = {r["launch"]: r.get("rev") for r in launches if r.get("event") == "launch"}
+
+    def build(record: dict) -> tuple:
+        return record.get("app", ""), record.get("rev") or revisions.get(record.get("launch"))
+
+    for app, revision in dict.fromkeys(build(r) for r in launches + reads + interactions):
+        mine = [r for r in reads if build(r) == (app, revision)]
+        key = f"{app} @ {revision}" if revision else f"{app} (unattributed)"
+        versions[key] = {
+            "app": app,
+            "revision": revision,
+            **_launches([r for r in launches if build(r) == (app, revision)]),
             "reads": _durations(mine, "read", "verb"),
             "refreshes": _durations(mine, "refresh", "part"),
             "frame_waits": _durations(mine, "frame_wait", "part"),
             "frame_applies": _durations(mine, "frame_apply", "part"),
-            "interactions": _interactions([r for r in interactions if r.get("app", "") == app]),
+            "interactions": _interactions([r for r in interactions if build(r) == (app, revision)]),
         }
     return {
         "source": str(directory),
-        "experiences": _experience_trials(input_trials or []),
+        "experiences": _journal(directory),
         "endpoints": {
             "first_frame": "first window content committed to the render server; "
             "not on-glass presentation",
@@ -247,20 +319,24 @@ def _cell(stats: dict) -> str:
 
 
 def _experience_text(report: dict) -> list[str]:
-    lines = ["Everyday experiences — all-in time", ""]
-    trials = report["experiences"]
+    lines = ["Everyday experiences — input → acknowledged → usable → outcome", ""]
     for identifier, label, start, end in EXPERIENCES:
         lines.append(f"{label}: {start} → {end}")
-        if identifier == "open_task" and trials["groups"]:
-            for group in trials["groups"]:
-                lines.append(
-                    f"  {json.dumps(group['context'], sort_keys=True)}: {_cell(group)}; "
-                    f"unmeasured attempts {group['unmeasured']}; captures require review"
-                )
-        else:
-            lines.append("  Unmeasured — no complete journey observations")
-    lines.extend(f"Unavailable receipt: {e['receipt']}: {e['reason']}" for e in trials["errors"])
-    lines += ["", "Internal timings below are diagnostics, not complete experience times."]
+        groups = [g for g in report["experiences"]["groups"] if g["name"] == identifier]
+        if not groups:
+            lines.append("  Unmeasured — no interaction journal observations")
+        for group in groups:
+            lines.append(
+                f"  {group['build']} / {group['scenario']}: {group['samples']} measured; "
+                f"outcomes {group['outcomes']}"
+            )
+            for phase in ("acknowledged", "usable"):
+                lines.append(f"    {phase}: {_cell(group[phase])}")
+    lines += [
+        "",
+        "App-state/commit callbacks cannot supply presented-frame latencies.",
+        "CLI, read and refresh timings below are diagnostics, not complete experiences.",
+    ]
     return lines
 
 
@@ -324,45 +400,58 @@ def render_html(report: dict) -> str:
         return html.escape(str(value), quote=True)
 
     experiences = []
-    trials = report["experiences"]
-    maximum = max((g["median_ms"] or 0 for g in trials["groups"]), default=0) or 1
-    for identifier, label, start, end in EXPERIENCES:
+    journal = report["experiences"]
+    definitions = list(EXPERIENCES)
+    known = {d[0] for d in definitions}
+    labels = {
+        "open_wave": "Open a Wave",
+        "workspace_layout": "Arrange the workspace",
+        "typing_echo": "See typed input",
+    }
+    for group in journal["groups"]:
+        if group["name"] not in known:
+            known.add(group["name"])
+            definitions.append(
+                (
+                    group["name"],
+                    labels.get(group["name"], group["name"]),
+                    "Input event",
+                    "Presented acknowledgment and usable content",
+                )
+            )
+    for identifier, label, start, end in definitions:
+        groups = [g for g in journal["groups"] if g["name"] == identifier]
         heading = f"<strong>{escape(label)}</strong><p>{escape(start)} → {escape(end)}</p>"
-        groups = trials["groups"] if identifier == "open_task" else []
         if not groups:
             experiences.append(
                 f'<tr><td>{heading}</td><td colspan="6" class="missing">'
-                "Unmeasured · no complete journey observations</td></tr>"
+                "Unmeasured · no interaction journal observations</td></tr>"
             )
         for group in groups:
-            context = group["context"]
-            case = escape(f"{context['provider']} · {context['case']} · {context['variant']}")
-            numbers = "".join(
-                f'<td class="num">{group[k]:,.1f}</td>'
-                if group[k] is not None
-                else '<td class="num">Unmeasured</td>'
-                for k in ("median_ms", "p95_ms", "max_ms")
-            )
-            receipts = "".join(
-                f'<li><a href="{escape(Path(a["receipt"]).as_uri())}">'
-                f"{escape(a['status'])}</a></li>"
-                for a in group["attempts"]
-            )
-            width = 100 * (group["median_ms"] or 0) / maximum
+            build = group["build"]
+            numbers = []
+            for phase in ("acknowledged", "usable"):
+                for key in ("median_ms", "p95_ms"):
+                    value = group[phase][key]
+                    numbers.append(f"{value:,.1f}" if value is not None else "Unmeasured")
+            outcomes = ", ".join(f"{k}: {v}" for k, v in group["outcomes"].items())
+            details = escape(json.dumps(group["attempts"], indent=2))
             experiences.append(
-                f"<tr><td>{heading}</td><td>{case}<br>"
-                f"Build {escape(context['app_revision'])}<br>"
-                "Observed input response; captures require review"
-                f"<details><summary>Conditions and receipts</summary>"
-                f"<pre>{escape(json.dumps(context, indent=2))}</pre>"
-                f"<ul>{receipts}</ul></details></td>"
-                f"<td>{group['samples']} / {len(group['attempts'])} attempts<br>"
-                f"{group['unmeasured']} unmeasured</td>{numbers}"
-                f'<td><span style="width:{width:.2f}%"></span></td></tr>'
+                f"<tr><td>{heading}</td><td>{escape(build.get('platform'))}<br>"
+                f"{escape(build.get('app'))} @ {escape(build.get('revision'))}<br>"
+                f"{escape(group['scenario'])}<details><summary>Outcomes, work and context</summary>"
+                f"<pre>{details}</pre></details></td><td>{group['samples']} / "
+                f"{len(group['attempts'])}<br>{escape(outcomes)}</td>"
+                + "".join(f'<td class="num">{v}</td>' for v in numbers)
+                + "</tr>"
             )
-    unavailable = "".join(
-        f"<li>{escape(e['receipt'])}: {escape(e['reason'])}</li>" for e in trials["errors"]
+    stall_summary = journal["stall_summary"]
+    stall_text = (
+        f"{stall_summary['samples']} main-thread busy turns of at least 50 ms. "
+        f"Median: {stall_summary['median_ms']} ms; max: {stall_summary['max_ms']} ms. "
+        "This is a thresholded diagnostic, not a frame-hitch distribution."
     )
+    unavailable = "".join(f"<li>{escape(e)}</li>" for e in journal["errors"])
     rows = []
     options = []
     versions = report["versions"]
@@ -408,7 +497,6 @@ def render_html(report: dict) -> str:
 body {{font:15px system-ui; color:#203c32; background:#f3f5ef;
 max-width:1320px; margin:48px auto; padding:0 24px}}
 h1 {{font-size:38px; letter-spacing:-1.3px; margin-bottom:8px}}
-.label {{letter-spacing:2px; text-transform:uppercase; font-size:12px}}
 .note {{background:#fff5d8; padding:18px; border-left:4px solid #bc8b2b; line-height:1.6}}
 select {{font:inherit; padding:8px 16px; margin:12px}}
 .table {{overflow:auto; background:white; border-radius:12px; border:1px solid #d5dfd4}}
@@ -422,28 +510,31 @@ pre {{white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.6; font-size:1
 details {{background:white; margin:20px 0; padding:20px; border-radius:12px}}
 summary {{cursor:pointer; font-weight:600}} [hidden] {{display:none}}
 </style>
-<main><div class="label">Loopflow · live observations</div>
+<main>
 <h1>The waits in everyday use</h1>
 <p>From your action to a usable result · milliseconds, lower is faster</p>
-<p class="note">Only complete journey observations belong in this table.
-The retained launch/read/navigation journals do not establish these all-in times.
-P95 needs 20 observed samples with matching conditions. Missing values stay unmeasured.</p>
+<p class="note">These times come from the app journal, starting at the input event’s timestamp.
+Acknowledgment and usability need frame evidence.
+State callbacks and unfinished waits do not enter percentiles.
+P95 needs 20 completed samples per build and case. Missing measurements remain unmeasured.</p>
 <div class="table"><table><thead><tr><th>Experience · start → finish</th><th>Case</th>
-<th>Observed / attempts</th><th>Median ms</th><th>P95 ms</th><th>Max ms</th><th>Median</th>
+<th>Measured / attempts</th><th>Ack median ms</th><th>Ack P95 ms</th>
+<th>Usable median ms</th><th>Usable P95 ms</th>
 </tr></thead><tbody>{"".join(experiences)}</tbody></table></div>
 <ul>{unavailable}</ul>
-<p>Task-to-conversation observations include capture and observer delay, and hook/trust waits.
-They time an unsent probe response, not model response latency. Captures need review;
-they are not an automatic pass. Cases, builds, providers and host/data conditions stay separate.</p>
+<p>{escape(stall_text)}</p>
+<p>Agent clicks provide the stimulus; app event/frame timestamps provide the measurement.
+The earlier observer-inclusive pilot is diagnostic only and is not a reactivity baseline.</p>
 <details id="diagnostics"><summary>Diagnostics · what happened inside the app</summary>
 <p>Real app journals · local Machine. These are internal phase timings, not all-in UX results.</p>
 <p class="note">These are ordinary-use observations, including busy-host samples.
 Host load was not recorded. P95 needs 20 completed samples.
 Unfinished interactions may still be pending. Older versions have no interaction journal.
-Builds sharing a version are pooled; this is not a controlled before/after comparison.</p>
+Records are grouped by build revision. Old records without a revision are marked unattributed;
+they cannot establish a before/after comparison.</p>
 <p class="note">Frame wait/apply rows contain only readings whose combined wait and apply
 time reached 100 ms. Their percentiles describe that slow subset, not all readings.</p>
-<label>App version <select id="version">{"".join(options)}</select></label>
+<label>App build <select id="version">{"".join(options)}</select></label>
 <p>Median bars share a scale within each metric category and version.
 Exact tail values remain in the table.</p>
 <div class="table"><table><thead><tr><th>Category</th><th>Measurement</th>
@@ -476,16 +567,8 @@ def main() -> int:
     )
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--html", type=Path, help="Write a standalone chart and table")
-    parser.add_argument(
-        "--input-trial",
-        type=Path,
-        action="append",
-        default=[],
-        help="Include an agent_input.py report.json as a Task-to-conversation observation; "
-        "repeat per trial",
-    )
     args = parser.parse_args()
-    report = summarize(args.home.expanduser() / "desktop-cache" / "timings", args.input_trial)
+    report = summarize(args.home.expanduser() / "desktop-cache" / "timings")
     if args.html:
         args.html.write_text(render_html(report), encoding="utf-8")
         print(args.html)

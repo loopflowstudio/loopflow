@@ -373,7 +373,8 @@ the phone's `view.select` Task list and its creation destinations all read it.
   function its CLI handler calls and returns the typed value; the CLI prints
   that value with `--json` and renders it as text otherwise. Nothing parses
   standard output. `task.create {directory,request_id,title,request,wave,graph,session,run}`
-  files a Task or adopts the named Session; `run` requests its Graph launch.
+  files a Task or adopts the named Session; `run` admits its conversation,
+  which makes the checkout and starts the Graph after the answer.
   A null `wave` selects the repository. Both paths return the same creation
   receipt, described below. A write whose Work
   lives on another Machine (`task.run`, `task.ship`, `task.hold`,
@@ -1077,11 +1078,22 @@ without age-based pruning; an old ID never becomes a new creation because time
 passed or its resource was removed.
 
 Task creation returns `{task, graph, session_id, milestone}` with or without
-`run`. Milestones distinguish filing, admission and confirmed start. If a launch
-was requested but its registration cannot be confirmed, the result is
-`outcome_unknown` with the Task and `run_requested` milestone. Only a launch
-correlated to this creation can settle that outcome; another current Graph is
-insufficient. Recovery never launches again across that uncertainty.
+`run`, plus the primary Session's record (with `open_argv`) and the Task's
+overview read after commit, so a client opens the conversation without another
+read. A repeat reads both again; the receipt does not store them.
+
+| Milestone | Means | Repeat |
+| --- | --- | --- |
+| `filed` | Task recorded, no `run` | complete |
+| `admitted` | Task, claim, Graph and primary Session recorded in one transaction; the held conversation owns checkout and Graph start | complete |
+| `started` | the Graph launch is recorded | complete |
+| `run_requested` | written by earlier releases: launch unconfirmed | inspect |
+
+`admitted` involves no network and no Git beyond resolving the repository and
+the Graph file. Tracker sync and the assignee check run after the answer under
+the request's trace; their failures are Task events. The conversation's setup
+steps read recorded state first, so a restarted conversation continues where it
+stopped and never launches a second Graph.
 
 `session.new` records its stop and new-thread admission against the same request.
 A completed retry returns the current record for the same Session without

@@ -80,22 +80,41 @@ pub(crate) async fn ensure_task(
         })
         .await??;
     }
-    let chosen = task_conversation(store, &task.id).await?;
-    let started = chosen.is_none();
-    let session = if let Some(session) = chosen {
-        store.choose_task_primary(&task.id, &session.id).await?
-    } else {
-        let cwd = task.worktree.as_deref().unwrap_or(repo);
-        let candidate = LfSession {
-            task_id: Some(task.id.clone()),
-            wave_id: task.wave_id.clone(),
-            work_source: Some(WorkSource::Declared),
-            request,
-            ..conversation(cwd, "task/session", task.title)?
-        };
-        store.ensure_primary_session(&scope, candidate).await?
-    };
+    let cwd = task.worktree.clone().unwrap_or_else(|| repo.to_path_buf());
+    let (session, started) = record_task_primary(store, &cwd, &task, request).await?;
     Ok((prepare(store, &session.id).await?, started))
+}
+
+/// Record a new Task's conversation at the main checkout without preparing
+/// its workspace: the conversation makes the checkout when it opens.
+pub(crate) async fn admit_task(
+    store: &SharedStore,
+    repo: &Path,
+    task: &loopflow_storage::work::task::Task,
+    request: Option<String>,
+) -> Result<LfSession> {
+    let _lock = lock_scope(&PrimaryScope::Task(task.id.clone())).await?;
+    Ok(record_task_primary(store, repo, task, request).await?.0)
+}
+
+async fn record_task_primary(
+    store: &SharedStore,
+    cwd: &Path,
+    task: &loopflow_storage::work::task::Task,
+    request: Option<String>,
+) -> Result<(LfSession, bool)> {
+    if let Some(session) = task_conversation(store, &task.id).await? {
+        return Ok((store.choose_task_primary(&task.id, &session.id).await?, false));
+    }
+    let candidate = LfSession {
+        task_id: Some(task.id.clone()),
+        wave_id: task.wave_id.clone(),
+        work_source: Some(WorkSource::Declared),
+        request,
+        ..conversation(cwd, "task/session", task.title.clone())?
+    };
+    let scope = PrimaryScope::Task(task.id.clone());
+    Ok((store.ensure_primary_session(&scope, candidate).await?, true))
 }
 
 /// Start a newly checked-out Task's conversation beside its Graph, so `lf
@@ -139,29 +158,67 @@ async fn start_in_background(
         tracing::info!(task = %task.identifier, %harness, "background Task conversation skipped: agent not installed");
         return Ok(None);
     }
+    // An opened conversation is not waited on: its launch lock is held
+    // until its provider starts.
+    if let Some(chosen) = task_conversation(store, &task.id).await? {
+        if opened(store, chosen.id.as_str())? {
+            return Ok(None);
+        }
+    }
     let (session, _) = ensure_task(store, &worktree, task.id.as_str(), None).await?;
     // Promotion can keep a repository or Wave conversation in its original
     // checkout. Allocating the Task's own checkout does not open that conversation.
-    if Path::new(&session.cwd) != worktree.as_path()
-        || session.agent_process_id.is_some()
-        || store
-            .sqlite
-            .session_terminal(session.id.as_str())?
-            .is_some()
-    {
-        // Prepared conversations can start; previously opened ones stay as they are.
+    if Path::new(&session.cwd) != worktree.as_path() {
         return Ok(None);
     }
-    let id = session.id.to_string();
+    Ok(hold(store, &session.id, Path::new(&session.cwd), wave).await?.then(|| session.id.to_string()))
+}
+
+/// Start a new Task's recorded conversation in a held terminal, where it
+/// makes its checkout and starts its Graph. `false` when no agent is selected
+/// or installed: opening the conversation then does the same.
+pub(crate) async fn hold_task_conversation(
+    store: &SharedStore,
+    task: &loopflow_storage::work::task::Task,
+    session: &LfSession,
+) -> Result<bool> {
+    let wave = match &task.wave_id {
+        Some(id) => store.get_wave(id).await?,
+        None => None,
+    };
+    let config =
+        crate::config::load_wave_config(Some(&session.cwd), wave.as_ref().map(|wave| wave.slug()))?
+            .unwrap_or_default();
+    let Ok(agent) = config.agent() else {
+        return Ok(false);
+    };
+    if !crate::agent::check_cli_available(&crate::config::parse_agent(agent).0) {
+        return Ok(false);
+    }
+    hold(store, &session.id, &session.cwd, wave).await
+}
+
+async fn hold(
+    store: &SharedStore,
+    session: &loopflow_model::id::LfSessionId,
+    cwd: &Path,
+    wave: Option<crate::work::wave::Wave>,
+) -> Result<bool> {
+    // Prepared conversations can start; previously opened ones stay as they are.
+    if opened(store, session.as_str())? {
+        return Ok(false);
+    }
     let argv = [
-        std::env::current_exe()?.to_string_lossy().into_owned(),
+        crate::os_process::resolve_lf_binary()?
+            .to_string_lossy()
+            .into_owned(),
         "session".into(),
         "resume".into(),
-        id.clone(),
+        session.to_string(),
     ];
-    let held = session.id.clone();
+    let (held, cwd) = (session.clone(), cwd.to_path_buf());
     tokio::task::spawn_blocking(move || {
-        crate::transport::start_held(&argv, &worktree, Some(&held), &|command| {
+        crate::transport::start_held(&argv, &cwd, Some(&held), &|command| {
             let key = crate::work::wave::context::WAVE_ID_ENV;
             match &wave {
                 Some(wave) => command.env(key, wave.id().as_str()),
@@ -170,7 +227,12 @@ async fn start_in_background(
         })
     })
     .await??;
-    Ok(Some(id))
+    Ok(true)
+}
+
+fn opened(store: &SharedStore, session: &str) -> Result<bool> {
+    Ok(store.sqlite.session_attachment(session)?.is_some()
+        || store.sqlite.session_terminal(session)?.is_some())
 }
 
 pub(super) async fn task_conversation(

@@ -133,11 +133,52 @@ impl SqliteStore {
         Ok(())
     }
 
+    /// The Task and its conversation are recorded; the conversation owns the
+    /// rest of setup and finds this receipt by its Session.
+    pub fn admit_creation(
+        &self,
+        id: &str,
+        session: &str,
+        result: &serde_json::Value,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        if conn.execute("UPDATE creation_receipts SET milestone='admitted',session_id=?2,result=?3,updated_at=?4 WHERE request_id=?1",
+            params![id,session,serde_json::to_string(result)?,crate::rows::now_unix()])? != 1 {
+            return Err(StoreError::NotFound);
+        }
+        Ok(())
+    }
+
+    /// The admitted Task creation whose conversation `session` is: its setup
+    /// has not launched the Graph yet.
+    pub fn admitted_task_creation(&self, session: &str) -> StoreResult<Option<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                "SELECT request_id FROM creation_receipts
+                 WHERE session_id=?1 AND milestone='admitted' AND kind='task.create'",
+                [session],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
+    /// `-b` creation's launch reported by its carrier.
     pub fn record_creation_launch(&self, id: &str, result: &serde_json::Value) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute("UPDATE creation_receipts SET milestone='started',launch=?2,updated_at=?3 WHERE request_id=?1 AND milestone='run_requested'",
             params![id,serde_json::to_string(result)?,crate::rows::now_unix()])?;
         Ok(())
+    }
+
+    /// An admitted creation's conversation launched its Graph; a repeat
+    /// answers `started` from then on.
+    pub fn record_setup_launch(&self, id: &str, launch: &serde_json::Value) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.execute("UPDATE creation_receipts SET milestone='started',launch=?2,
+            result=json_set(result,'$.milestone','started'),updated_at=?3
+            WHERE request_id=?1 AND milestone='admitted'",
+            params![id,serde_json::to_string(launch)?,crate::rows::now_unix()])? == 1)
     }
 }
 

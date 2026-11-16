@@ -226,3 +226,14 @@ Clicking Start closes the sheet into the conversation in the click, the words
 and setup lines show, and the provider takes typing with none of the three
 labels on the way; a repeat request returns the same Task; the report shows
 Start → typing with server steps for a local and a remote Machine.
+
+## Docs (written ahead of the code)
+
+`swift/README.md` (New Task → conversation), `swift/LoopflowiOS/README.md`,
+`docs/work.md` (milestones, setup lines, base, `<repo>.ready`),
+`docs/troubleshooting.md` (receipts, "Setup failed in a new Task's
+conversation"), `docs/dev/server.md`, `rust/loopflow/src/server/README.md`
+(answer shape, milestone table), `tests/fixtures/dto/README.md`,
+`scripts/benchmarks/desktop-performance/README.md` (spans, Machine kind).
+Docs promise: `lf wt prune` (even `--all`) keeps `<repo>.ready`; deleting it by
+hand is safe. Slice 3 must make that true.

@@ -53,8 +53,8 @@ pub fn create(
             approve,
         },
     );
-    let receipt = match created {
-        Ok(receipt) => receipt,
+    let (receipt, after) = match created {
+        Ok(created) => (created.receipt, created.after),
         Err(error) => {
             if *json {
                 if let Some(result) = creation::lookup(&id).ok().flatten().and_then(|r| r.result) {
@@ -67,7 +67,8 @@ pub fn create(
     if let Some(provider) = loopflow_execution::config::load_config_or_default(Some(repo))
         .planning_transport()
         .remote_name()
-        .filter(|_| receipt.task.linear_id.is_none())
+        // An admitted creation exchanges planning after its answer.
+        .filter(|_| receipt.task.linear_id.is_none() && after.is_none())
     {
         writeln!(
             io.error,
@@ -134,6 +135,12 @@ pub fn create(
                 "Open its conversation: lf resume --task {}",
                 receipt.task.identifier
             )?;
+        }
+    }
+    // Planning exchange runs after the answer; this process waits for it.
+    if let Some(after) = after {
+        if after.join().is_err() {
+            tracing::warn!("planning sync after creation panicked");
         }
     }
     Ok(())

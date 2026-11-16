@@ -29,7 +29,9 @@ you**, **Working now**, **Backlog** or **Done** — in the Machine's order, with
 with a conversation come first; started Tasks nobody has opened a conversation
 for fold under "N without a conversation". Search covers title and checkout
 path. Pull to refresh. **+** opens New Task: describe the work, pick a
-repository, **Create & start**.
+repository, **Create & start**. The Task's conversation opens as soon as the
+Machine answers and prints its setup (checkout, then Graph) before the agent's
+prompt.
 
 ## Task
 

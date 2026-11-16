@@ -93,7 +93,9 @@ writes! {
             agent: None,
             approve: false,
         },
-    )?,
+    )?
+    // The server lets planning exchange finish after the answer.
+    .receipt,
 
     /// `lf task complete <issue>`.
     #[serde(rename = "task.complete")]

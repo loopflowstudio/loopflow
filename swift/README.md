@@ -74,6 +74,23 @@ open their brief beside **Start**, which runs the Task's Workflow; opening alone
 starts nothing. Waves follow Tasks in the same scrolling sidebar, with counts
 from the planning inventory.
 
+**⌘N** opens New Task. Type what you want and click **Start**: the sheet closes
+in the click and the Task's workspace shows your words in its conversation, with
+the Task already in Working. Setup prints under them as it finishes, then the
+agent's prompt takes typing:
+
+```
+Fix the flaky reconnect test
+Checkout ready  0.2 s
+Graph code started
+```
+
+The checkout branches from the default branch as of Loopflow's last background
+fetch; the Task's first sync catches up. A setup step that fails prints its error
+in the pane, and the agent still starts once the checkout exists. Reopening the
+conversation continues setup from the step that stopped; it never starts a
+second Graph.
+
 Click a row to select its retained workspace. The title-bar **Repo › Wave › Task**
 path follows hierarchy: click a name to go there, or the **›** after it to list and
 search what it contains; Back and **⌘[ / ⌘]** follow visits. **⌘K** searches Work

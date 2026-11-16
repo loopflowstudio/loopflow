@@ -1803,7 +1803,6 @@ pub fn task_create(
     adoption: TaskAdoptionOptions,
     receipt: Option<loopflow_storage::sqlite::creation::CreationIdentity>,
 ) -> OpsResult<Task> {
-    let input = resolve_task_create_input(title.as_deref(), report.as_deref())?;
     let main = crate::git::worktrees::main_repo_root(repo).map_err(task_error)?;
     block_on_task(async {
         let store = Arc::new(super::planning_sync::planning_store().await?);
@@ -1812,7 +1811,64 @@ pub fn task_create(
         {
             tracing::debug!(%error,"planning acquisition pending; creating from retained planning");
         }
+        let task = file_task_in(&store, repo, &main, wave, title, report, adoption, receipt).await?;
+        super::planning_sync::sync_after_save(&store, &main.to_string_lossy()).await;
+        store
+            .get_task(&task.id)
+            .await
+            .map_err(task_error)?
+            .ok_or_else(|| task_error("Created Task is missing"))
+    })
+}
 
+/// File the Task from retained planning, with no network: a creation that
+/// answers first exchanges planning after its answer (`sync_admitted`).
+pub fn file_task(
+    repo: &Path,
+    wave: Option<&str>,
+    title: Option<String>,
+    report: Option<String>,
+    adoption: TaskAdoptionOptions,
+    receipt: Option<loopflow_storage::sqlite::creation::CreationIdentity>,
+) -> OpsResult<Task> {
+    let main = crate::git::worktrees::main_repo_root(repo).map_err(task_error)?;
+    block_on_task(async {
+        let store = Arc::new(super::planning_sync::planning_store().await?);
+        file_task_in(&store, repo, &main, wave, title, report, adoption, receipt).await
+    })
+}
+
+/// Planning exchange and the assignee check for a Task filed by `file_task`
+/// and claimed here. Failures are logged; the Task and its conversation stand.
+pub(crate) fn sync_admitted(main: &Path, task: &loopflow_model::durable::TaskId) {
+    let synced = block_on_task(async {
+        let store = Arc::new(super::planning_sync::planning_store().await?);
+        let repo = main.to_string_lossy();
+        if let Err(error) = super::planning_sync::acquire_repository(&store, &repo).await {
+            tracing::warn!(%error, "planning acquisition after creation failed");
+        }
+        super::planning_sync::sync_after_save(&store, &repo).await;
+        super::task_ownership::assert_assignee(&store.sqlite, main, task).await;
+        Ok(())
+    });
+    if let Err(error) = synced {
+        tracing::warn!(%task, %error, "planning sync after creation failed");
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn file_task_in(
+    store: &SharedStore,
+    repo: &Path,
+    main: &Path,
+    wave: Option<&str>,
+    title: Option<String>,
+    report: Option<String>,
+    adoption: TaskAdoptionOptions,
+    receipt: Option<loopflow_storage::sqlite::creation::CreationIdentity>,
+) -> OpsResult<Task> {
+    let input = resolve_task_create_input(title.as_deref(), report.as_deref())?;
+    {
         let source = adoption::resolve_source(&store, repo, &adoption).await?;
         if let Some(task) = source.task.as_ref() {
             if let Some(selected) = select_task_creation_wave(&store, &main, wave).await? {
@@ -1834,7 +1890,6 @@ pub fn task_create(
                 receipt.clone(),
             )
             .await?;
-            super::planning_sync::sync_after_save(&store, &main.to_string_lossy()).await;
             return store
                 .get_task(&task.id)
                 .await
@@ -1883,13 +1938,12 @@ pub fn task_create(
             receipt,
         )
         .await?;
-        super::planning_sync::sync_after_save(&store, &main.to_string_lossy()).await;
         store
             .get_task(&task.id)
             .await
             .map_err(task_error)?
             .ok_or_else(|| task_error("Created Task is missing"))
-    })
+    }
 }
 
 pub fn resolve_task_create_input(

@@ -32,6 +32,7 @@ pub mod moves_bulk;
 pub mod primary;
 pub use primary::ensure_scope_worktree;
 pub mod provider_conversation;
+mod setup;
 
 pub(crate) const HUMAN_SESSION_ENV: &str = "LF_HUMAN_SESSION";
 pub(crate) const PREPARED_CAPTURE_ENV: &str = "LF_PREPARED_CAPTURE";
@@ -1046,7 +1047,7 @@ pub async fn open(
     named_work: bool,
 ) -> Result<SessionRecord> {
     crate::agent_input_timing::record("connect_begin", session_id);
-    let progress = resume.then(|| crate::startup::Startup::new("Preparing conversation"));
+    let mut progress = resume.then(|| crate::startup::Startup::new("Preparing conversation"));
     let target = match find_session(store, session_id, true).await? {
         Some(target) => target,
         // Connecting is what brings a provider-started conversation in.
@@ -1091,11 +1092,23 @@ pub async fn open(
         }
     }
     let admitted;
-    let session = if resume {
+    // A viewer of a held terminal attaches; the holder does the setup.
+    let held_elsewhere = session.interactive
+        && store
+            .sqlite
+            .session_terminal(&session.id)?
+            .is_some_and(|terminal| crate::transport::current() != Some(&terminal));
+    let session = if resume && !held_elsewhere {
         let id = session.id.clone();
         let _launch =
             crate::journal::request::spawn_blocking(move || lock_session_process(&id)).await??;
-        admitted = primary::admit_workspace(store, session.clone()).await?;
+        admitted = match store.sqlite.admitted_task_creation(&session.id)? {
+            Some(request) => {
+                drop(progress.take());
+                setup::finish(store, session.clone(), &request).await?
+            }
+            None => primary::admit_workspace(store, session.clone()).await?,
+        };
         &admitted
     } else {
         session

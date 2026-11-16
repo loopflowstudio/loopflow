@@ -198,9 +198,24 @@ lf server receipt REQUEST_ID --json  # read the recorded creation; starts nothin
 lf task status TASK_ID --json        # inspect any Task the receipt identifies
 ```
 
-A `run_requested` receipt means launch is unconfirmed. Inspect the Task's Graphs
-and processes before starting anything; a lost answer does not establish a failed
-launch. See [creation recovery](server.md#recover-a-submitted-creation).
+An `admitted` or `started` receipt is complete: the Task and its conversation
+exist, and the conversation owns the rest of setup. Open it with
+`lf resume --task TASK_ID`; it continues setup from any step that stopped and
+starts no second Graph. A `run_requested` receipt, from an earlier release, means
+launch is unconfirmed. Inspect the Task's Graphs and processes before starting
+anything; a lost answer does not establish a failed launch. See
+[creation recovery](server.md#recover-a-submitted-creation).
+
+## Setup failed in a new Task's conversation
+
+The conversation prints the step and its error, for example a `git worktree add`
+failure. Fix the cause and reopen it:
+
+```bash
+lf resume --task TASK_ID   # setup continues from the failed step
+```
+
+The agent starts once the checkout exists, even if the Graph step failed.
 
 ## A launch reports `outcome_unknown`
 

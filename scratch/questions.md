@@ -10,3 +10,6 @@
   behind until its first sync. Taken as the simpler option.
 - The ready checkout lives at `<parent>/<repo>.ready` beside Task worktrees,
   costing one checkout of disk per repository in use.
+- Docs say `lf wt prune` leaves `<repo>.ready` alone, `--all` included, and
+  that deleting it by hand is safe. The simpler reading of "check cleanup leaves
+  it alone"; `--all` removing it would also be defensible.

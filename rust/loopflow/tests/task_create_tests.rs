@@ -66,7 +66,7 @@ impl Drop for Service {
 }
 
 #[test]
-fn task_create_survives_a_dropped_carrier_and_server_restart() {
+fn task_create_answers_and_its_conversation_starts_the_graph_across_a_server_restart() {
     use loopflow::lf::commands::write::Write as Change;
     use loopflow::server::wire::Operation;
     let task = CreationFixture::new();
@@ -106,24 +106,28 @@ fn task_create_survives_a_dropped_carrier_and_server_restart() {
         std::thread::sleep(Duration::from_millis(20));
     }
     drop(lost);
+    // The held conversation makes the checkout and launches the Graph.
     let saved: serde_json::Value =
         loop {
             use rusqlite::OptionalExtension;
             let result: Option<String> = db.query_row(
-            "SELECT result FROM creation_receipts WHERE request_id=?1 AND milestone='admitted'",
+            "SELECT result FROM creation_receipts WHERE request_id=?1 AND milestone='started'",
             [id.as_str()], |row| row.get(0)).optional().unwrap();
             if let Some(result) = result {
                 break serde_json::from_str(&result).unwrap();
             }
             assert!(
                 Instant::now() < deadline,
-                "creation did not settle after the client disconnected: {}\n{}",
+                "creation did not settle after the client disconnected: {}\n{}\n{}",
                 fs::read_to_string(task.home.path().join("service.stderr")).unwrap_or_default(),
-                fs::read_to_string(task.home.path().join("logs/lf.log")).unwrap_or_default()
+                fs::read_to_string(task.home.path().join("logs/lf.log")).unwrap_or_default(),
+                fs::read_to_string(task.home.path().join("logs/detached.log")).unwrap_or_default()
             );
             std::thread::sleep(Duration::from_millis(20));
         };
-    assert_eq!(saved["milestone"], "admitted", "{saved}");
+    assert_eq!(saved["milestone"], "started", "{saved}");
+    assert!(saved["session_id"].is_string(), "{saved}");
+    task.wait_for_graph_start();
     task.wait_for_graphs();
     drop(service);
     let service = Service::start(&task);
@@ -220,6 +224,22 @@ impl CreationFixture {
 
     fn run(&self, args: &[&str]) -> Output {
         self.command().args(args).output().unwrap()
+    }
+
+    /// The conversation's detached Task run registers its Graph.
+    fn wait_for_graph_start(&self) {
+        let db = rusqlite::Connection::open(self.home.path().join("loopflow.db")).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while db
+            .query_row("SELECT count(*) FROM graph_processes", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap()
+            == 0
+        {
+            assert!(Instant::now() < deadline, "the conversation started no Graph");
+            std::thread::sleep(Duration::from_millis(20));
+        }
     }
 
     fn wait_for_graphs(&self) {

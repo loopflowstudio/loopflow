@@ -74,7 +74,8 @@ def test_docs_subscriptions_page_owns_native_auth_and_retry_policy(page: Page, b
     assert content.is_visible()
     text = " ".join(content.inner_text().split())
     assert "Each launch uses the native client's authentication" in text
-    assert "Headless, with or without a Task" in text
+    assert "Graph step, with or without a Task" in text
+    assert "Other headless work" in text
     assert "Interactive, with or without a Task" in text
     assert "Wait 5, 15, 30, then 60 minutes" in text
     assert "already has a named file keeps its own" in text

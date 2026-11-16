@@ -2883,9 +2883,6 @@ mod tests {
         assert!(!gh_logout_is_already_disconnected("fatal: unknown host"));
     }
 
-    /// A `security` that keeps each item as `keychain/<service>/<account>`,
-    /// finding them by `-s` alone in `.order`, as the real one finds the oldest.
-    #[cfg(target_os = "macos")]
     #[tokio::test]
     async fn socket_auth_monitor_waits_until_credential_exists() {
         let temp = tempdir().expect("tempdir");

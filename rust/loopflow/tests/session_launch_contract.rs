@@ -64,7 +64,7 @@ if stream:
 elif os.path.basename(sys.argv[0]) == 'codex':
     sys.path.insert(0, SUPPORT_DIRECTORY)
     runpy.run_path(SUPPORT_DIRECTORY+'/native_codex.py', run_name='__main__')
-"#.replace("SUPPORT_DIRECTORY", &serde_json::to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support")).unwrap())
+"#.replace("SUPPORT_DIRECTORY", &serde_json::to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../loopflow-execution/tests/support")).unwrap())
             };
             fs::write(&script, source).unwrap();
             fs::set_permissions(script, fs::Permissions::from_mode(0o755)).unwrap();

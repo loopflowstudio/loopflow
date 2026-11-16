@@ -622,6 +622,313 @@ pub fn local_time(seconds: i64) -> String {
 mod tests {
     #[tokio::test]
     #[allow(clippy::await_holding_lock)]
+    async fn claude_usage_reconciliation_refreshes_both_logins() {
+        use crate::provider_account::operations::account_status::report as project_report;
+        use crate::provider_account::{
+            account_held_until, new_account, resolve_provider_account_exact,
+        };
+        use crate::provider_auth::Provider;
+        use crate::store::{AccountLimitWindow, ProviderAccountId, StorageConfig};
+        let _env = crate::journal::test_env_lock();
+        let root = tempfile::tempdir().unwrap();
+        let _homes = crate::test_ambient::EnvGuard::clear(&[
+            "LF_HOME",
+            "CLAUDE_CONFIG_DIR",
+            "LF_ACCOUNT_SELECTION",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            "ANTHROPIC_API_KEY",
+        ]);
+        let native = root.path().join("native");
+        std::env::set_var("LF_HOME", root.path().join("machine"));
+        std::env::set_var("CLAUDE_CONFIG_DIR", &native);
+        let store = std::sync::Arc::new(
+            crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+                root.path().join("machine/loopflow.db"),
+            ))
+            .await
+            .unwrap(),
+        );
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
+        let reset = now + 86_400;
+        let reset_at = time::OffsetDateTime::from_unix_timestamp(reset)
+            .unwrap()
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap();
+        let mut accounts = Vec::new();
+        let mut responses = Vec::new();
+        for (id, login, weekly, fable) in [
+            ("first", "jack@loopflow.studio", 66, 11),
+            ("second", "jackstah@gmail.com", 65, 100),
+        ] {
+            let home = root.path().join(id);
+            std::fs::create_dir_all(&home).unwrap();
+            let credential = serde_json::json!({"claudeAiOauth":{
+                "accessToken": format!("fixture-{id}"), "expiresAt":4102444800000i64
+            }})
+            .to_string();
+            std::fs::write(home.join(".credentials.json"), &credential).unwrap();
+            let mut account = new_account(
+                Provider::Claude,
+                ProviderAccountId::parse(id).unwrap(),
+                home,
+                Some(crate::profile::EmailAddress::parse(login).unwrap()),
+            );
+            account.observed_email = Some(login.into());
+            account.observed_subject = Some(id.into());
+            account.observed_credential_digest = Some(
+                crate::provider_account::identity::credential_digest(&credential),
+            );
+            store.upsert_provider_account(&account).await.unwrap();
+            // Historical stream alias, before normalized writes.
+            store
+                .upsert_provider_account_limits(
+                    "claude",
+                    &account.account_id,
+                    &[AccountLimitWindow {
+                        window: "rejected: seven_day_overage_included".into(),
+                        used_percent: 100,
+                        resets_at: Some(reset),
+                        plan: None,
+                        model: Some("fable".into()),
+                        limited_until: Some(reset + 5),
+                    }],
+                    "stream",
+                )
+                .await
+                .unwrap();
+            responses.push((
+                200,
+                serde_json::json!({"limits":[
+                    {"group":"weekly", "percent":weekly, "resets_at":reset_at},
+                    {"group":"weekly", "percent":fable, "resets_at":reset_at,
+                        "scope":{"model":{"display_name":"Fable"}}}
+                ]})
+                .to_string(),
+            ));
+            responses.push((
+                200,
+                serde_json::json!({"account":{"email":login, "uuid":id}}).to_string(),
+            ));
+            accounts.push(account);
+        }
+        let cached = project_report(
+            Some(crate::provider_account::operations::Target::Provider(
+                Provider::Claude,
+            )),
+            true,
+        )
+        .await
+        .unwrap();
+        assert!(cached
+            .accounts
+            .iter()
+            .filter(|row| row.scope == super::Scope::Managed)
+            .all(|row| row
+                .launches
+                .iter()
+                .any(|launch| launch.model.as_deref() == Some("fable") && !launch.eligible)));
+        let blocked = crate::provider_account::routing::next(None, Some("claude:fable"))
+            .await
+            .unwrap();
+        assert_eq!(
+            blocked[0].outcome,
+            crate::provider_account::routing::NextOutcome::Blocked
+        );
+        assert!(blocked[0].reason.contains("for fable until"));
+        for account in &accounts {
+            assert!(blocked[0]
+                .reason
+                .contains(crate::provider_account::account_login(account)));
+        }
+        let (_endpoints, server) =
+            crate::test_support::subscription::serve(responses.clone(), |_| {}).await;
+        let report = project_report(
+            Some(crate::provider_account::operations::Target::Provider(
+                Provider::Claude,
+            )),
+            false,
+        )
+        .await
+        .unwrap();
+        server.await.unwrap();
+        let managed: Vec<_> = report
+            .accounts
+            .iter()
+            .filter(|row| row.account_id.is_some())
+            .collect();
+        assert_eq!(managed.len(), 2);
+        assert!(
+            managed
+                .iter()
+                .all(|row| row.verification == super::Verification::Accepted
+                    && row.cooldown_until.is_none()
+                    && row.verified_windows.contains(&"seven_day_fable".to_owned())
+                    && row
+                        .windows
+                        .iter()
+                        .all(|window| window.window != "seven_day_overage_included")),
+            "{managed:?}"
+        );
+        for (row, held) in managed.iter().zip([false, true]) {
+            let fable = row
+                .launches
+                .iter()
+                .find(|launch| launch.model.as_deref() == Some("fable"))
+                .unwrap();
+            assert_eq!(fable.eligible, !held);
+            assert_eq!(fable.out_until, held.then_some(reset + 5));
+            let sonnet = row
+                .launches
+                .iter()
+                .find(|launch| launch.model.as_deref() == Some("sonnet"))
+                .unwrap();
+            assert!(sonnet.eligible);
+        }
+        let json = serde_json::to_value(&report).unwrap();
+        assert!(json.to_string().contains("seven_day_fable"));
+        let next = crate::provider_account::routing::next(None, Some("claude:fable"))
+            .await
+            .unwrap();
+        assert_eq!(next[0].model.as_deref(), Some("fable"));
+        assert_eq!(next[0].account_id.as_ref(), Some(&accounts[0].account_id));
+        assert_eq!(next[1].model, None);
+        let unknown = crate::provider_account::routing::next(None, Some("claude:future-sonnet"))
+            .await
+            .unwrap();
+        assert_eq!(
+            unknown[0].outcome,
+            crate::provider_account::routing::NextOutcome::Ready
+        );
+        assert_eq!(unknown[0].model.as_deref(), Some("future-sonnet"));
+        let limits = store.provider_account_limits(Some("claude")).await.unwrap();
+        assert_eq!(
+            account_held_until(&accounts[0], &limits, Some("fable"), now),
+            None
+        );
+        assert_eq!(
+            account_held_until(&accounts[1], &limits, Some("fable"), now),
+            Some(reset + 5)
+        );
+        for account in &accounts {
+            assert_eq!(
+                account_held_until(account, &limits, Some("sonnet"), now),
+                None
+            );
+        }
+        let next = crate::provider_account::routing::next(None, None)
+            .await
+            .unwrap();
+        assert_eq!(next[0].account_id.as_ref(), Some(&accounts[0].account_id));
+        for model in ["fable", "sonnet"] {
+            let route = resolve_provider_account_exact(
+                Provider::Claude,
+                None,
+                None,
+                None,
+                Some(model),
+                Some(root.path()),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            if model == "fable" {
+                assert_eq!(route.account_id(), &accounts[0].account_id);
+            }
+        }
+        // The same requested family reaches routing when reopening a recorded conversation.
+        let conversation: loopflow_model::id::AgentSessionId = "fixture-conversation".into();
+        std::fs::create_dir_all(native.join("projects/fixture")).unwrap();
+        std::fs::write(
+            native.join("projects/fixture/fixture-conversation.jsonl"),
+            "{}\n",
+        )
+        .unwrap();
+        store
+            .pin_provider_session_route(Provider::Claude, &conversation, &accounts[1].account_id)
+            .await
+            .unwrap();
+        let resumed = resolve_provider_account_exact(
+            Provider::Claude,
+            Some(&conversation),
+            Some(&accounts[1].account_id),
+            None,
+            Some("sonnet"),
+            Some(root.path()),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(accounts
+            .iter()
+            .any(|account| &account.account_id == resumed.account_id()));
+        assert_eq!(
+            store.provider_account_limits(Some("claude")).await.unwrap(),
+            limits
+        );
+        drop(_endpoints);
+        let writer = store.clone();
+        let first = accounts[0].account_id.clone();
+        let (_endpoints, server) =
+            crate::test_support::subscription::serve(responses, move |index| {
+                if index == 0 {
+                    writer
+                        .sqlite
+                        .record_provider_account_capacity(
+                            "claude",
+                            &first,
+                            &crate::store::AccountCapacity {
+                                utilization_percent: Some(100),
+                                cooldown_until: Some(reset + 5),
+                                cooldown_reason: Some("rejected: seven_day".into()),
+                                windows: vec![AccountLimitWindow {
+                                    window: "seven_day".into(),
+                                    used_percent: 100,
+                                    resets_at: Some(reset),
+                                    model: None,
+                                    plan: None,
+                                    limited_until: Some(reset + 5),
+                                }],
+                            },
+                        )
+                        .unwrap();
+                }
+            })
+            .await;
+        let raced = project_report(
+            Some(crate::provider_account::operations::Target::Provider(
+                Provider::Claude,
+            )),
+            false,
+        )
+        .await
+        .unwrap();
+        server.await.unwrap();
+        let first = raced
+            .accounts
+            .iter()
+            .find(|row| row.account_id.as_ref() == Some(&accounts[0].account_id))
+            .unwrap();
+        assert_eq!(first.verification, super::Verification::Accepted);
+        assert_eq!(first.cooldown_until, Some(reset + 5));
+        assert!(first.verified_windows.is_empty());
+        assert!(first.diagnostic.as_deref().unwrap().contains("superseded"));
+        assert_eq!(
+            first
+                .windows
+                .iter()
+                .find(|window| window.window == "seven_day")
+                .unwrap()
+                .used_percent,
+            100
+        );
+        let next = crate::provider_account::routing::next(None, None)
+            .await
+            .unwrap();
+        assert!(next[0].reason.contains("fable"), "{:?}", next[0]);
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn claude_cached_identity_requires_current_verified_credentials() {
         let _env = crate::journal::test_env_lock();
         let root = tempfile::tempdir().unwrap();

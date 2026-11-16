@@ -1730,7 +1730,8 @@ async fn watched_landing_completes_task_only_from_merged_pr_evidence() {
 #[test]
 fn deleted_task_status_requires_explicit_history_lookup() {
     const CHILD: &str = "LOOPFLOW_DELETED_STATUS_CHILD";
-    if std::env::var_os(CHILD).is_some() {
+    if let Some(home) = std::env::var_os(CHILD) {
+        std::env::set_var("LF_HOME", home);
         let path =
             std::path::PathBuf::from(std::env::var_os("LF_HOME").unwrap()).join("loopflow.db");
         let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -1809,7 +1810,7 @@ fn deleted_task_status_requires_explicit_history_lookup() {
         ])
         .env_clear()
         .envs(std::env::vars().filter(|(name, _)| !name.starts_with("LF_")))
-        .env(CHILD, "1")
+        .env(CHILD, fixture._database.path())
         .env("LF_HOME", fixture._database.path())
         .current_dir(repo.path())
         .output()

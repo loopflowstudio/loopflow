@@ -281,6 +281,8 @@ mod tests {
     #[test]
     fn selected_tools_and_hidden_splits_shape_the_task_layout() {
         let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let _restore = crate::test_ambient::EnvGuard::clear(&["LF_BIN"]);
+        std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
         let directory = tempfile::tempdir().unwrap();
         let cwd = directory.path().canonicalize().unwrap();
         std::fs::create_dir(cwd.join("src")).unwrap();

@@ -1048,7 +1048,7 @@ mod tests {
                 (Some("both"), true, true),
                 (Some("none"), false, false),
             ] {
-                let mut args = vec!["lf", "--batch"];
+                let mut args = vec!["lf", "--batch", "-a", "claude"];
                 if let Some(choice) = choice {
                     args.extend(["--diff", choice]);
                 }
@@ -1106,7 +1106,7 @@ mod tests {
             ".lf/config.yaml",
             "diff: false\ndiff_files: false\npaste: false\n",
         );
-        let cli = Cli::parse_from(["lf", "--batch"]);
+        let cli = Cli::parse_from(["lf", "--batch", "-a", "claude"]);
 
         for name in ["Jack", "Jacqueline", "  "] {
             std::fs::write(
@@ -1164,7 +1164,7 @@ mod tests {
             ".lf/config.yaml",
             "diff: false\ndiff_files: false\npaste: false\n",
         );
-        let cli = Cli::parse_from(["lf", "--batch"]);
+        let cli = Cli::parse_from(["lf", "--batch", "-a", "claude"]);
         for (caller, expected) in [("Jack", "Jack"), ("", "Host Owner")] {
             std::env::set_var("LF_USER_NAME", caller);
             let built = build_bound_prompt_at(None, "continue", "", &cli, repo.path()).unwrap();
@@ -1459,7 +1459,10 @@ for line in sys.stdin:
             "0",
             "handoff-research",
         );
-        let cli = Cli::default();
+        let cli = Cli {
+            agent: Some("claude".into()),
+            ..Cli::default()
+        };
 
         // Each run is its own recorded lf invocation, as from the CLI.
         let command = vec!["lf".to_string(), "research".to_string()];
@@ -1535,6 +1538,7 @@ for line in sys.stdin:
 
         let cli = Cli {
             batch: true,
+            agent: Some("claude".into()),
             wave: Some("ship".to_string()),
             ..Cli::default()
         };
@@ -1640,6 +1644,7 @@ for line in sys.stdin:
         repo.commit("bound basis");
         let cli = Cli {
             interactive: true,
+            agent: Some("claude".into()),
             ..Cli::default()
         };
 
@@ -1711,7 +1716,7 @@ for line in sys.stdin:
             ".lf/skills/proof.md",
             "# Proof\n\nInstructions that must reach the provider.",
         );
-        let cli = Cli::parse_from(["lf", "-i", "proof"]);
+        let cli = Cli::parse_from(["lf", "-i", "-a", "claude", "proof"]);
 
         let built = build_prompt_at(
             Some("proof"),
@@ -1763,7 +1768,7 @@ for line in sys.stdin:
             "release",
         )
         .unwrap();
-        let cli = Cli::parse_from(["lf", "-i", "--wave", "release", "design"]);
+        let cli = Cli::parse_from(["lf", "-i", "-a", "claude", "--wave", "release", "design"]);
         let built = build_prompt_at(
             Some("design"),
             Some("plan the release"),

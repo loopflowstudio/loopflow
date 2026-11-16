@@ -1214,7 +1214,10 @@ fn codex_same_login_recovery_status_launch_and_reset() {
     let home = tempfile::tempdir().unwrap();
     let script = support::codex_socket_script(&format!(
         "#!/bin/sh\nexec python3 '{}' \"$@\"\n",
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/codex_access.py")
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../loopflow-execution/tests/support/codex_access.py"
+        )
     ));
     let _env = EnvGuard::with_lf_home(&[("codex", &script)], home.path());
     let repo = loopflow_test_support::TestRepo::new();

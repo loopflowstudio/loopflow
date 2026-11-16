@@ -43,7 +43,7 @@ fn command(repo: &Path, home: &Path, args: &[&str]) -> Command {
 const CODEX_NATIVE: &str = concat!(
     "#!/bin/sh\nexec /usr/bin/python3 '",
     env!("CARGO_MANIFEST_DIR"),
-    "/tests/support/native_codex.py' \"$@\"\n"
+    "/../loopflow-execution/tests/support/native_codex.py' \"$@\"\n"
 );
 
 #[test]

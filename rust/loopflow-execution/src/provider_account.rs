@@ -4726,6 +4726,7 @@ mod account_first_tests {
         // Its ctor drops the provider home, so the fixture variable carries it.
         if let Some(native) = std::env::var_os("LIMIT_RECORDER_NATIVE") {
             std::env::set_var("CLAUDE_CONFIG_DIR", native);
+            std::env::set_var("LF_HOME", std::env::var_os("LIMIT_RECORDER_HOME").unwrap());
             record_limit();
             return;
         }
@@ -4739,8 +4740,9 @@ mod account_first_tests {
         fs::write(
             &recorder,
             format!(
-                "#!/bin/sh\nLIMIT_RECORDER_NATIVE='{}' exec '{}' --exact provider_account::account_first_tests::a_limit_hook_returns_while_its_recorder_waits_on_the_provider\n",
+                "#!/bin/sh\nLIMIT_RECORDER_NATIVE='{}' LIMIT_RECORDER_HOME='{}' exec '{}' --exact provider_account::account_first_tests::a_limit_hook_returns_while_its_recorder_waits_on_the_provider\n",
                 native.display(),
+                temp.path().display(),
                 std::env::current_exe().unwrap().display()
             ),
         )

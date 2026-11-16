@@ -322,6 +322,9 @@ them.
 - `unwrap()` is fine. Unit tests live in the same file; integration tests in `tests/`.
 - Register standalone test binaries in `rust/loopflow/Cargo.toml` (`autotests = false`); ordinary suites join `tests/integration.rs`. `tests/linear/` compiles into the library's test binary: `cargo test -p loopflow --lib task_graph_launch_tests::`.
 - Mock through closures or `#[cfg(test)]`, not factory traits.
+- After moving fixtures between crates, run one application launch/resume test and
+  one moved fixture. Compilation misses runtime script paths and child initializer
+  changes; prompt-only fixtures select their harness explicitly.
 - Cross-crate fixtures enable existing inspection helpers through a `test-support`
   dev-dependency feature; release builds omit them. The feature exposes inspection
   and explicit overrides; unit-test defaults stay behind `cfg(test)` so feature

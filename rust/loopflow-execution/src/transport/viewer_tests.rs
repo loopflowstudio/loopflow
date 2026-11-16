@@ -23,6 +23,8 @@ fn snapshot_preview_fixture() {
     let Ok(case) = std::env::var("LOOPFLOW_VIEWER_FIXTURE") else {
         return;
     };
+    // The test initializer isolates each binary before this child selects its fixture.
+    std::env::set_var("LF_HOME", std::env::var_os("LOOPFLOW_VIEWER_HOME").unwrap());
     ctrlc::set_handler(|| crate::agent::exit_on_interrupt()).unwrap();
     let home = crate::store::lf_home_dir();
     let mut saved = Terminal::new(80, 24).unwrap();
@@ -355,6 +357,7 @@ fn preview_case(case: &str) -> (tempfile::TempDir, Vec<u8>) {
             .env("LF_HOME", home.path())
             .env("LOOPFLOW_TEST_LF", binary)
             .env("LOOPFLOW_VIEWER_FIXTURE", case)
+            .env("LOOPFLOW_VIEWER_HOME", home.path())
             .args([
                 "--exact",
                 "transport::viewer_tests::snapshot_preview_fixture",

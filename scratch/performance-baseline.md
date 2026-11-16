@@ -275,3 +275,7 @@ exists, and the window lookup force-unwrapped it. Crash report
 `~/Library/Logs/DiagnosticReports/Loopflow Dev-2026-11-16-124101.ips` identifies
 Perf.begin → LoopflowApp.init. The lookup now permits no AppKit application;
 a focused pre-AppKit startup regression test exercises this case.
+
+- Startup regression `LaunchJournalTests/startupIntervalCanBeginBeforeAppKit`: passed. Updated Dev bundle revision `22d6885a6504d06094d64af0e1134763374c86d5` launches against the live store.
+- Live Kata Backlog → Working click, observation `E4D04DD2-0B56-4532-861D-0A106EEFEE4B`, recorded original AppKit input time and repository context. No frame was acquired; outcome remains unmeasured. This is not a latency baseline.
+- System Settings → Screen & System Audio Recording has no Loopflow Dev entry. New access has not been granted. Confirmation requested under the computer-use tool policy before adding this app. No phone capture session was started.

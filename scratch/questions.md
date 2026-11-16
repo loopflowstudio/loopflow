@@ -1,11 +1,13 @@
-# Remaining verification
+# Remaining native validation
 
 Jack Heart: “Lets get this done?”
 
-Keep both pieces in #1950. Mac screen acquisition is a visual-observation upper
-bound; phone consumes the next ReplayKit screen frame during an explicit session.
-Neither claims the compositor's first-present time. No bitmaps are written to disk.
-Missing grants, disabled sessions or invalid clocks remain unmeasured.
+Both pieces remain in #1950. Code builds and focused checks passed; the verified
+Dev app launches against the live store. The first Kata click has an original
+AppKit event but no captured frame and remains unmeasured.
 
-Verify final builds, real native capture and app-journal trials. Code-level checks
-cover UIKit event dispatch, visual ordering/supersession and request-isolated SQL.
+Native validation needs a macOS capture grant for the installed Loopflow Dev app.
+The computer-use tool requires confirmation for that new access; none was granted.
+Then collect journal-driven trials on Loopflow, Manabot and Kata. Phone ReplayKit
+still needs a real capture session; Simulator checks cover dispatch and disabled
+capture, not successful screen recording. No bitmaps/audio/video are saved.

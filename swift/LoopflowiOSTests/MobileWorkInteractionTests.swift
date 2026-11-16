@@ -73,11 +73,31 @@ extension ClientWorkQueryTests {
         try await leaveBothFeeds(abandon: false, move: true)
     }
 
-    private func leaveBothFeeds(abandon: Bool, move: Bool = false) async throws {
+    func testPhoneOwnershipActionsPublishBeforeDiskAndKeepBothRoutes() async throws {
+        try await leaveBothFeeds(abandon: false, ownership: true)
+    }
+
+    func testPhoneReopenButtonPublishesBeforeDiskAndKeepsBothRoutes() async throws {
+        try await leaveBothFeeds(abandon: false, reopening: true)
+    }
+
+    func testPhoneReopenCancelsSupportedPendingCompletionBeforeDone() async throws {
+        try await leaveBothFeeds(abandon: false, reopening: true, pending: true)
+    }
+
+    private func leaveBothFeeds(abandon: Bool, move: Bool = false, ownership: Bool = false, reopening: Bool = false, pending: Bool = false) async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         let query = ServedRead.viewSelect(expression: TaskList.started.expression(wave: nil))
-        let base = try workingPlan(["a", "b"])
+        var base = try workingPlan(["a", "b"])
+        if reopening {
+            var wire = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(base)) as? [String: Any])
+            var membership = base.membership
+            membership.facts[0].disposition.value.completed = !pending
+            membership.facts[0].disposition.value.completionRequest = pending ? 99 : nil
+            wire["membership"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(membership))
+            base = try JSONDecoder().decode(WorkViewPlan.self, from: JSONSerialization.data(withJSONObject: wire))
+        }
         let seed = store(directory)
         _ = try await seed.receivePlans([base], stamp: stamp("list", revision: 6), for: query)
         let otherQuery = ServedRead.viewSelect(expression: TaskList.available.expression(wave: nil))
@@ -96,12 +116,44 @@ extension ClientWorkQueryTests {
         let first = TaskFeed(client: client)
         let second = TaskFeed(client: client)
         first.mount(); second.mount()
+        defer { first.stop(); second.stop() }
         _ = owner.open(otherQuery) { _ in }
         owner.apply(prepared)
         var entered = hold.entered.makeAsyncIterator()
         _ = await entered.next()
         var route: WorkWorkspaceKey? = base.contents[0].work
         let otherRoute = route
+        if reopening {
+            let task = base.contents[0]
+            let menu = TaskOwnershipActions(completed: true, owned: first.taskFacts[task.work]?.owned) { first.edit(task, edit: $0) }
+            try menu.inspect().find(button: "Reopen").tap()
+            XCTAssertFalse(first.taskFacts[task.work]?.states.contains(.done) == true)
+            XCTAssertFalse(second.taskFacts[task.work]?.states.contains(.done) == true)
+            XCTAssertNil(first.taskFacts[task.work]?.disposition.value.completionRequest)
+            XCTAssertEqual(route?.id, "a")
+            XCTAssertEqual(otherRoute?.id, "a")
+            hold.release()
+            await owner.persistPending()
+            let records = try await disk.pending()
+            XCTAssertEqual(records.count, 1)
+            return
+        }
+        if ownership {
+            let task = try XCTUnwrap(first.repositories.first?.tasks.first)
+            let menu = TaskOwnershipActions(completed: false, owned: first.taskFacts[task.work]?.owned) { first.edit(task, edit: $0) }
+            try menu.inspect().find(button: "Unassign").tap()
+            XCTAssertEqual(first.taskFacts[task.work]?.owned, false)
+            XCTAssertEqual(second.taskFacts[task.work]?.owned, false)
+            first.edit(task, edit: .claim)
+            XCTAssertEqual(second.taskFacts[task.work]?.owned, true)
+            first.edit(task, edit: .reopen)
+            hold.release()
+            await owner.persistPending()
+            let records = try await disk.pending()
+            XCTAssertEqual(records.count, 3)
+            XCTAssertTrue(records.allSatisfy { $0.destination == "machine" })
+            return
+        }
         if move {
             let menu = TaskMoveMenu(waves: []) { first.move(base.contents[0], to: $0) }
             try menu.inspect().find(button: "No Wave").tap()

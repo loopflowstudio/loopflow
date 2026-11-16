@@ -109,24 +109,46 @@ final class ClientWorkDatabase {
         // Old cache stamps cannot acquire evidence from a later connection.
         // Keep exact outbox requests, receipts and reload requirements intact.
         try execute("DELETE FROM work_queries WHERE json_type(CAST(state AS TEXT),'$.stamp.observations') IS NULL")
-        // Combined state bags cannot acquire producer-declared field support.
+        // Aggregate lifecycle caches cannot recover the inputs terminal state masked.
+        // Keep exact commands, receipts and reload floors while replacing cached bodies.
         try execute("""
             DELETE FROM work_queries WHERE EXISTS (
                 SELECT 1 FROM json_each(CAST(work_queries.state AS TEXT),'$.plans') AS plan,
                     json_each(plan.value,'$.membership.facts') AS fact
                 WHERE json_type(fact.value,'$.parent') IS NOT 'object'
-                    OR json_type(fact.value,'$.lifecycle') IS NOT 'object'
-                    OR json_type(fact.value,'$.activity') IS NOT 'object')
+                    OR json_type(fact.value,'$.activity') IS NOT 'object'
+                    OR json_type(fact.value,'$.ownership') IS NOT 'object'
+                    OR json_type(fact.value,'$.publication') IS NOT 'object'
+                    OR json_type(fact.value,'$.execution') IS NOT 'object'
+                    OR json_type(fact.value,'$.disposition') IS NOT 'object'
+                    OR json_type(fact.value,'$.disposition.value.completed_at') IS NULL)
             """)
-        // A lifecycle-only cache cannot certify which completion its date belongs to.
-        // Replace cached answers/fields; retain commands, receipts and reload floors.
-        try execute("""
-            DELETE FROM work_queries WHERE EXISTS (
-                SELECT 1 FROM json_each(CAST(work_queries.state AS TEXT),'$.plans') AS plan,
-                    json_each(plan.value,'$.membership.facts') AS fact
-                WHERE json_type(fact.value,'$.lifecycle.completed_at') IS NULL)
-            """)
-        try execute("DELETE FROM work_fields WHERE json_type(CAST(state AS TEXT),'$.lifecycle.value.completedAt') IS NULL AND json_type(CAST(state AS TEXT),'$.lifecycle')='object'")
+        try transaction {
+            // An aggregate cannot reconstruct masked inputs. Its support still
+            // bounds the first replacement reading, so an older body cannot
+            // revive an already-incorporated effect after this cache upgrade.
+            var replacements: [String: [WorkQueryRequirement]] = [:]
+            for data in try rows("SELECT CAST(json_extract(CAST(state AS TEXT),'$.lifecycle.support') AS BLOB) FROM work_fields WHERE json_type(CAST(state AS TEXT),'$.lifecycle.support')='object'") {
+                guard let support = try? JSONDecoder().decode(WorkMembershipPlan.FieldSupport.self, from: data),
+                      support.schema == ServerProtocol.revision, !support.revisions.isEmpty else { continue }
+                let floor = WorkQueryRequirement(fence: CommitFence(machine: support.machine, epoch: support.epoch,
+                    schema: support.schema, revisions: support.revisions), directory: nil, kind: nil)
+                if replacements[support.machine] == nil { replacements[support.machine] = try requirements(support.machine) }
+                var floors = replacements[support.machine] ?? []
+                guard !floors.contains(where: { $0.covers(floor) }) else { continue }
+                floors.removeAll { floor.covers($0) }
+                floors.append(floor)
+                replacements[support.machine] = floors
+            }
+            for (machine, floors) in replacements {
+                try execute("INSERT OR REPLACE INTO work_requirements(id,state) VALUES(?,?)", id: machine, data: JSONEncoder().encode(floors))
+            }
+            // Parent facts and their incorporation survive. Old activity had
+            // already suppressed terminal Tasks; only a new raw capture replaces it.
+            try execute("UPDATE work_fields SET state=json_remove(CAST(state AS TEXT),'$.lifecycle','$.activity') WHERE json_type(CAST(state AS TEXT),'$.lifecycle') IS NOT NULL")
+            try execute("UPDATE work_fields SET state=json_remove(CAST(state AS TEXT),'$.activity') WHERE json_extract(CAST(state AS TEXT),'$.activity.support.derivation')='work.activity/1'")
+            try execute("UPDATE work_fields SET state=json_remove(CAST(state AS TEXT),'$.disposition') WHERE json_type(CAST(state AS TEXT),'$.disposition')='object' AND json_type(CAST(state AS TEXT),'$.disposition.value.value.completed_at') IS NULL")
+        }
         // Fixed-candidate programs cannot support arrivals or acquire new proof.
         try execute("DELETE FROM work_queries WHERE EXISTS (SELECT 1 FROM json_tree(CAST(state AS TEXT),'$.plans') WHERE key='kind' AND value='state' AND json_type(CAST(state AS TEXT),substr(fullkey,1,length(fullkey)-5) || '.members') IS NOT NULL)")
         let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
@@ -268,10 +290,9 @@ final class ClientWorkDatabase {
         let accepted = state.receipt ?? receipt
         try transaction {
             try update(state)
-            if accepted.validation == .bound, let declaration = OperationDeclaration(kind: accepted.kind),
-               let field = declaration.field {
+            if accepted.validation == .bound, let declaration = OperationDeclaration(kind: accepted.kind) {
                 for commit in accepted.commits where declaration.stages.contains(commit.stage) {
-                    try incorporate(commit, field: field, machine: state.record.destination)
+                    for field in declaration.fields { try incorporate(commit, field: field, machine: state.record.destination) }
                 }
             }
             for commit in accepted.commits where accepted.kind == "session.rename" && accepted.validation == .bound
@@ -514,12 +535,26 @@ final class ClientWorkDatabase {
         var facts = previous ?? WorkFieldFacts(machine: stamp.machine, work: fact.work)
         facts.parent = join(fact.parent.wave, support: fact.parent.support, previous: facts.parent,
             stamp: stamp, observation: observation, key: id + "/parent")
-        facts.lifecycle = join(WorkFieldLifecycle(fact.lifecycle), support: fact.lifecycle.support, previous: facts.lifecycle,
-            stamp: stamp, observation: observation, key: id + "/lifecycle")
+        var disposition = fact.disposition
+        disposition.support = nil
+        facts.disposition = join(disposition, support: fact.disposition.support, previous: facts.disposition,
+            stamp: stamp, observation: observation, key: id + "/disposition")
+        var ownership = fact.ownership
+        ownership.support = nil
+        facts.ownership = join(ownership, support: fact.ownership.support, previous: facts.ownership,
+            stamp: stamp, observation: observation, key: id + "/ownership")
+        var publication = fact.publication
+        publication.support = nil
+        facts.publication = join(publication, support: fact.publication.support, previous: facts.publication,
+            stamp: stamp, observation: observation, key: id + "/publication")
+        var execution = fact.execution
+        execution.support = nil
+        facts.execution = join(execution, support: fact.execution.support, previous: facts.execution,
+            stamp: stamp, observation: observation, key: id + "/execution")
         facts.activity = join(WorkFieldStates(fact.activity), support: fact.activity.support, previous: facts.activity,
             stamp: stamp, observation: observation, key: id + "/activity")
         for (field, commit) in stages { facts.incorporate(commit, field: field) }
-        guard facts != previous, facts.parent != nil || facts.lifecycle != nil || facts.activity != nil else { return }
+        guard facts != previous, facts.parent != nil || facts.disposition != nil || facts.ownership != nil || facts.publication != nil || facts.execution != nil || facts.activity != nil else { return }
         try execute("INSERT OR REPLACE INTO work_fields(id,state) VALUES(?,?)", id: id, data: JSONEncoder().encode(facts))
     }
 
@@ -623,17 +658,17 @@ final class ClientWorkDatabase {
             let state = try JSONDecoder().decode(State.self, from: data)
             guard state.receiptEpoch == epoch,
                   state.receiptUnavailable != true, let receipt = state.receipt, receipt.validation == .bound,
-                  let declaration = OperationDeclaration(kind: receipt.kind), let field = declaration.field else { continue }
-            stages.append(contentsOf: receipt.commits.filter { declaration.stages.contains($0.stage) }.map { (field, $0) })
+                  let declaration = OperationDeclaration(kind: receipt.kind) else { continue }
+            for field in declaration.fields { stages.append(contentsOf: receipt.commits.filter { declaration.stages.contains($0.stage) }.map { (field, $0) }) }
         }
         let prefix = queryID(machine: machine, query: "")
         for data in try rows("SELECT state FROM work_queries WHERE id>=?1 AND id<(?1 || char(1114111)) AND json_array_length(CAST(state AS TEXT),'$.effects')>0", id: prefix) {
             let query = try JSONDecoder().decode(ClientWorkQuery.self, from: data)
             for effect in query.effects ?? [] {
-                guard let declaration = OperationDeclaration(kind: effect.kind), let field = declaration.field,
+                guard let declaration = OperationDeclaration(kind: effect.kind),
                       let commit = effect.resolution, declaration.stages.contains(commit.stage),
                       commit.fence.machine == machine, commit.fence.epoch == epoch else { continue }
-                stages.append((field, commit))
+                for field in declaration.fields { stages.append((field, commit)) }
             }
         }
         var resources: [String: [(WorkField, OperationCommit)]] = [:]
@@ -659,7 +694,10 @@ final class ClientWorkDatabase {
             }
         }
         return WorkFieldReading(facts: facts, parentCurrent: current(facts.parent, "parent"),
-            lifecycleCurrent: facts.lifecycle?.value.known == true && current(facts.lifecycle, "lifecycle"),
+            dispositionCurrent: facts.disposition?.value.known == true && current(facts.disposition, "disposition"),
+            ownershipCurrent: facts.ownership?.value.known == true && current(facts.ownership, "ownership"),
+            publicationCurrent: facts.publication?.value.known == true && current(facts.publication, "publication"),
+            executionCurrent: facts.execution?.value.known == true && current(facts.execution, "execution"),
             activityCurrent: facts.activity?.value.known == true && current(facts.activity, "activity"))
     }
 
@@ -727,11 +765,11 @@ final class ClientWorkDatabase {
     private func incorporated(_ effect: WorkQueryEffect, machine: String) throws -> Bool {
         guard let commit = effect.resolution else { return false }
         if commit.resolution == .definitelyRefused { return true }
-        guard let field = OperationDeclaration(kind: effect.kind)?.field, !commit.resources.isEmpty else { return false }
+        guard let declaration = OperationDeclaration(kind: effect.kind), !declaration.fields.isEmpty, !commit.resources.isEmpty else { return false }
         for resource in commit.resources {
             let records = try rows("SELECT state FROM work_fields WHERE json_extract(CAST(state AS TEXT),'$.work.id')=?", id: resource)
                 .map { try JSONDecoder().decode(WorkFieldFacts.self, from: $0) }.filter { $0.machine == machine }
-            if !records.contains(where: { $0.incorporates(commit, field: field) }) { return false }
+            if !declaration.fields.allSatisfy({ field in records.contains { $0.incorporates(commit, field: field) } }) { return false }
         }
         return true
     }

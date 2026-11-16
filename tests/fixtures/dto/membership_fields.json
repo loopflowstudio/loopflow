@@ -21,27 +21,6 @@
         }
       }
     },
-    "lifecycle": {
-      "states": [
-        "working"
-      ],
-      "known": true,
-      "support": {
-        "machine": "machine_11111111111111111111111111111111",
-        "epoch": "fixture-epoch",
-        "schema": 6,
-        "derivation": "work.lifecycle/2",
-        "revisions": {
-          "planning": 7,
-          "graphs": 7,
-          "processes": 7
-        },
-        "observations": {
-          "kind": "sqlite"
-        }
-      },
-      "completed_at": null
-    },
     "activity": {
       "states": [
         "busy"
@@ -51,7 +30,7 @@
         "machine": "machine_11111111111111111111111111111111",
         "epoch": "fixture-epoch",
         "schema": 6,
-        "derivation": "work.activity/1",
+        "derivation": "work.activity/2",
         "revisions": {
           "planning": 7,
           "sessions": 7,
@@ -60,6 +39,92 @@
         },
         "observations": {
           "kind": "unavailable"
+        }
+      }
+    },
+    "disposition": {
+      "value": {
+        "completed": false,
+        "abandoned": false,
+        "completed_at": null,
+        "planning_state": null,
+        "completion_request": null
+      },
+      "known": true,
+      "support": {
+        "machine": "machine_11111111111111111111111111111111",
+        "epoch": "fixture-epoch",
+        "schema": 6,
+        "derivation": "work.disposition/1",
+        "revisions": {
+          "planning": 7
+        },
+        "observations": {
+          "kind": "sqlite"
+        }
+      }
+    },
+    "ownership": {
+      "value": {
+        "person": null,
+        "person_key": null,
+        "person_id": null,
+        "machine": {
+          "id": null,
+          "label": null
+        }
+      },
+      "known": true,
+      "support": {
+        "machine": "machine_11111111111111111111111111111111",
+        "epoch": "fixture-epoch",
+        "schema": 6,
+        "derivation": "work.ownership/1",
+        "revisions": {
+          "planning": 7
+        },
+        "observations": {
+          "kind": "sqlite"
+        }
+      }
+    },
+    "publication": {
+      "value": false,
+      "known": true,
+      "support": {
+        "machine": "machine_11111111111111111111111111111111",
+        "epoch": "fixture-epoch",
+        "schema": 6,
+        "derivation": "work.publication/1",
+        "revisions": {
+          "planning": 7
+        },
+        "observations": {
+          "kind": "sqlite"
+        }
+      }
+    },
+    "execution": {
+      "value": {
+        "checkout": true,
+        "held": false,
+        "graph_running": false,
+        "carrier_running": false,
+        "approved": false
+      },
+      "known": true,
+      "support": {
+        "machine": "machine_11111111111111111111111111111111",
+        "epoch": "fixture-epoch",
+        "schema": 6,
+        "derivation": "work.execution/1",
+        "revisions": {
+          "planning": 7,
+          "graphs": 7,
+          "processes": 7
+        },
+        "observations": {
+          "kind": "sqlite"
         }
       }
     }
@@ -86,27 +151,6 @@
         }
       }
     },
-    "lifecycle": {
-      "states": [
-        "working"
-      ],
-      "known": true,
-      "support": {
-        "machine": "machine_11111111111111111111111111111111",
-        "epoch": "fixture-epoch",
-        "schema": 6,
-        "derivation": "work.lifecycle/2",
-        "revisions": {
-          "planning": 7,
-          "graphs": 7,
-          "processes": 7
-        },
-        "observations": {
-          "kind": "sqlite"
-        }
-      },
-      "completed_at": null
-    },
     "activity": {
       "states": [
         "busy"
@@ -116,7 +160,7 @@
         "machine": "machine_11111111111111111111111111111111",
         "epoch": "fixture-epoch",
         "schema": 6,
-        "derivation": "work.activity/1",
+        "derivation": "work.activity/2",
         "revisions": {
           "planning": 7,
           "sessions": 7,
@@ -130,6 +174,92 @@
             "validated_at": 19,
             "dependencies": []
           }
+        }
+      }
+    },
+    "disposition": {
+      "value": {
+        "completed": false,
+        "abandoned": false,
+        "completed_at": null,
+        "planning_state": null,
+        "completion_request": null
+      },
+      "known": true,
+      "support": {
+        "machine": "machine_11111111111111111111111111111111",
+        "epoch": "fixture-epoch",
+        "schema": 6,
+        "derivation": "work.disposition/1",
+        "revisions": {
+          "planning": 7
+        },
+        "observations": {
+          "kind": "sqlite"
+        }
+      }
+    },
+    "ownership": {
+      "value": {
+        "person": null,
+        "person_key": null,
+        "person_id": null,
+        "machine": {
+          "id": null,
+          "label": null
+        }
+      },
+      "known": true,
+      "support": {
+        "machine": "machine_11111111111111111111111111111111",
+        "epoch": "fixture-epoch",
+        "schema": 6,
+        "derivation": "work.ownership/1",
+        "revisions": {
+          "planning": 7
+        },
+        "observations": {
+          "kind": "sqlite"
+        }
+      }
+    },
+    "publication": {
+      "value": false,
+      "known": true,
+      "support": {
+        "machine": "machine_11111111111111111111111111111111",
+        "epoch": "fixture-epoch",
+        "schema": 6,
+        "derivation": "work.publication/1",
+        "revisions": {
+          "planning": 7
+        },
+        "observations": {
+          "kind": "sqlite"
+        }
+      }
+    },
+    "execution": {
+      "value": {
+        "checkout": true,
+        "held": false,
+        "graph_running": false,
+        "carrier_running": false,
+        "approved": false
+      },
+      "known": true,
+      "support": {
+        "machine": "machine_11111111111111111111111111111111",
+        "epoch": "fixture-epoch",
+        "schema": 6,
+        "derivation": "work.execution/1",
+        "revisions": {
+          "planning": 7,
+          "graphs": 7,
+          "processes": 7
+        },
+        "observations": {
+          "kind": "sqlite"
         }
       }
     }

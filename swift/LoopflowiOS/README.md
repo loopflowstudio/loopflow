@@ -94,6 +94,15 @@ restart. A refusal restores only that change, leaving later edits and navigation
 alone. Incomplete cached destinations retain known rows and show their missing
 data notice; their counts remain unavailable until that data arrives.
 
+**Claim** requests ownership on this Machine; **Unassign** releases ownership
+while keeping checkout, PR and conversations. Controls and affected lists update
+immediately. **Reopen** withdraws completion without restarting the Workflow.
+For completed or completing work it also withdraws Auto-Ship approval; an
+already-open no-op keeps approval. The destination follows retained facts;
+missing facts leave it incomplete. Saved changes wait for the original Machine
+through restart. Refusal removes only that change; an uncertain send checks the
+original request. Later navigation, drafts and conversations stay put.
+
 The device touched last has the terminal. When another device takes it, the
 phone stops drawing and offers **Continue here**.
 

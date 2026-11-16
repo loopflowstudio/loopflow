@@ -1,12 +1,13 @@
 //! Saved selection and layout intent share one transaction and one Work snapshot.
 mod panes;
 use super::SqliteStore;
-use crate::durable::{RepositoryId, TaskSection, TaskState};
+use crate::durable::RepositoryId;
 use crate::store::{StoreError, StoreResult};
 use crate::work::selection::{
-    move_into_place, Arrangement, ArrangementEdit, ArrangementMode, Dashboard, DashboardId,
-    DashboardReading, Selection, SelectionExpression, SelectionId, SelectionResolution,
-    SelectionState, SelectionWork, SlotLayout, WorkWorkspaceKey, WorkWorkspaceKind,
+    move_into_place, task_selection_states, Arrangement, ArrangementEdit, ArrangementMode,
+    Dashboard, DashboardId, DashboardReading, Selection, SelectionExpression, SelectionId,
+    SelectionResolution, SelectionState, SelectionWork, SlotLayout, WorkWorkspaceKey,
+    WorkWorkspaceKind,
 };
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -82,7 +83,8 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
         name: repo.clone(),
         states: BTreeSet::new(),
         activity_known: false,
-        completed_at: None,
+        activity_states: BTreeSet::new(),
+        inputs: None,
         support: None,
     };
     let mut wave_work = Vec::with_capacity(waves.len());
@@ -93,7 +95,8 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
             name: wave.name().to_string(),
             states: BTreeSet::new(),
             activity_known: false,
-            completed_at: None,
+            activity_states: BTreeSet::new(),
+            inputs: None,
             support: None,
         });
     }
@@ -108,7 +111,7 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
         &super::children::ids_json(ids.iter().map(|id| id.as_str())),
     )?;
     let published = super::project_adoption::published_in(conn, &ids)?;
-    let owners = super::task_ownership::owners_in(conn, &ids)?;
+    let owners = super::task_ownership::owner_identities_in(conn, &ids)?;
     let mut task_work = Vec::with_capacity(tasks.len());
     for task in tasks {
         let inputs = task_inputs
@@ -121,16 +124,12 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
             owned,
             published.contains(&task.id),
             inputs.planning_state.as_deref(),
-            reading.activity.get(&task.id),
-        );
-        let activity_known = states.contains(&SelectionState::Done)
-            || reading
+            &reading
                 .activity
                 .get(&task.id)
-                .is_none_or(|activity| activity.known);
-        let completed_at = (state.lifecycle(inputs.planning_state.as_deref()) == TaskState::Done)
-            .then(|| inputs.completed_at.clone())
-            .flatten();
+                .map(|a| a.states.clone())
+                .unwrap_or_default(),
+        );
         let order = reading.order.key(task.id.as_str(), task.rank, &states);
         task_work.push((
             order,
@@ -139,8 +138,24 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
                 parent_wave: task.wave_id,
                 name: task.identifier,
                 states,
-                activity_known,
-                completed_at,
+                activity_known: reading.activity.get(&task.id).is_none_or(|a| a.known),
+                activity_states: reading
+                    .activity
+                    .get(&task.id)
+                    .map(|a| a.states.clone())
+                    .unwrap_or_default(),
+                inputs: Some(crate::work::selection::TaskMembershipInputs {
+                    disposition: crate::work::selection::TaskDisposition {
+                        completed: inputs.completed,
+                        abandoned: inputs.abandoned,
+                        completed_at: inputs.completed_at.clone(),
+                        planning_state: inputs.planning_state.clone(),
+                        completion_request: inputs.completion_request,
+                    },
+                    ownership: owners.get(&task.id).cloned(),
+                    publication: published.contains(&task.id),
+                    execution: inputs.execution,
+                }),
                 support: None,
             },
         ));
@@ -172,13 +187,24 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
     use crate::work::selection::{FieldObservations, MembershipSupport};
     let support = MembershipSupport {
         parent: support("work.parent/1", &["planning"], FieldObservations::Sqlite),
-        lifecycle: support(
-            "work.lifecycle/2",
+        disposition: support(
+            "work.disposition/1",
+            &["planning"],
+            FieldObservations::Sqlite,
+        ),
+        ownership: support("work.ownership/1", &["planning"], FieldObservations::Sqlite),
+        publication: support(
+            "work.publication/1",
+            &["planning"],
+            FieldObservations::Sqlite,
+        ),
+        execution: support(
+            "work.execution/1",
             &["planning", "graphs", "processes"],
             FieldObservations::Sqlite,
         ),
         activity: support(
-            "work.activity/1",
+            "work.activity/2",
             &["planning", "sessions", "graphs", "processes"],
             capture
                 .and_then(|capture| capture.evidence())
@@ -202,7 +228,7 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
 /// Conversation activity is independent of Task lifecycle and ownership.
 #[derive(Debug, Clone)]
 pub(crate) struct TaskActivity {
-    states: BTreeSet<SelectionState>,
+    pub(crate) states: BTreeSet<SelectionState>,
     known: bool,
 }
 
@@ -232,43 +258,6 @@ impl TaskOrder {
             id.to_owned(),
         )
     }
-}
-
-/// The same lifecycle, section and activity set for roadmap rows and selections.
-pub(crate) fn task_selection_states(
-    runtime: TaskState,
-    owned: bool,
-    published: bool,
-    plan_state: Option<&str>,
-    activity: Option<&TaskActivity>,
-) -> BTreeSet<SelectionState> {
-    let state = runtime.lifecycle(plan_state);
-    // Completion changes actionable membership, not the retained conversation's
-    // execution facts. A completed Task cannot re-enter Ready/Working from an
-    // old Session report after its removal effect is incorporated.
-    let mut states = if state.is_terminal() {
-        BTreeSet::new()
-    } else {
-        activity.map_or_else(BTreeSet::new, |activity| activity.states.clone())
-    };
-    if (owned || published) && !state.is_terminal() {
-        states.insert(SelectionState::Open);
-    }
-    states.insert(match state {
-        TaskState::Unstarted => SelectionState::Unstarted,
-        TaskState::Idle => SelectionState::Idle,
-        TaskState::Active => SelectionState::Active,
-        TaskState::Moving => SelectionState::Moving,
-        TaskState::Shipping => SelectionState::Shipping,
-        TaskState::Done | TaskState::Abandoned => SelectionState::Done,
-    });
-    states.insert(match TaskSection::of(runtime, owned, plan_state) {
-        TaskSection::Backlog => SelectionState::Backlog,
-        TaskSection::Working => SelectionState::Working,
-        TaskSection::Autonomous => SelectionState::Autonomous,
-        TaskSection::Done | TaskSection::Abandoned => SelectionState::Done,
-    });
-    states
 }
 
 fn task_selection_in(
@@ -1030,7 +1019,7 @@ mod tests {
         let (plan, _) = cache.capture(|| store.view_plan(&repo, Some("state:backlog")).unwrap());
         let fact = &plan.membership.facts[0];
         let parent = fact.parent.support.as_ref().unwrap();
-        let lifecycle = fact.lifecycle.support.as_ref().unwrap();
+        let lifecycle = fact.execution.support.as_ref().unwrap();
         let activity = fact.activity.support.as_ref().unwrap();
         assert_eq!(parent.revisions.keys().collect::<Vec<_>>(), ["planning"]);
         assert_eq!(parent.machine, store.reading_identity().unwrap().0);
@@ -1066,7 +1055,7 @@ mod tests {
                 .into_iter()
                 .find(|fact| fact.work.id == id.as_str())
                 .unwrap()
-                .lifecycle
+                .disposition
         };
         let decide = |target| {
             super::super::task_state_delivery::queue_in(&store.conn.lock().unwrap(), &id, target)
@@ -1084,32 +1073,35 @@ mod tests {
             )
             .unwrap();
         let d1 = read();
-        assert!(d1
-            .states
-            .contains(&crate::work::selection::SelectionState::Done));
-        assert_eq!(d1.completed_at.as_deref(), Some("2026-06-01T12:00:00Z"));
+        assert!(d1.value.completed);
+        assert_eq!(
+            d1.value.completed_at.as_deref(),
+            Some("2026-06-01T12:00:00Z")
+        );
         decide("started");
         let reopened = read();
-        assert!(!reopened
-            .states
-            .contains(&crate::work::selection::SelectionState::Done));
-        assert_eq!(reopened.completed_at, None);
+        assert!(!reopened.value.completed);
+        assert_eq!(reopened.value.completed_at, None);
         decide("completed");
         let d2 = read();
-        assert!(d2
-            .states
-            .contains(&crate::work::selection::SelectionState::Done));
-        assert!(d2.completed_at.is_some());
-        assert_ne!(d2.completed_at, d1.completed_at);
+        assert!(d2.value.completed);
+        assert!(d2.value.completed_at.is_some());
+        assert_ne!(d2.value.completed_at, d1.value.completed_at);
         assert!(
             d2.support.as_ref().unwrap().revisions["planning"]
                 > d1.support.as_ref().unwrap().revisions["planning"]
         );
         let wire = serde_json::to_value(&reopened).unwrap();
-        assert_eq!(wire["completed_at"], serde_json::Value::Null);
+        assert_eq!(wire["value"]["completed_at"], serde_json::Value::Null);
         let mut missing = wire;
-        missing.as_object_mut().unwrap().remove("completed_at");
-        assert!(serde_json::from_value::<crate::work::selection::LifecycleFact>(missing).is_err());
+        missing["value"]
+            .as_object_mut()
+            .unwrap()
+            .remove("completed_at");
+        assert!(serde_json::from_value::<
+            crate::work::selection::ValueFact<crate::work::selection::TaskDisposition>,
+        >(missing)
+        .is_err());
     }
 
     #[test]

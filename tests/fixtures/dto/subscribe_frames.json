@@ -254,16 +254,40 @@
                   "wave": null,
                   "support": null
                 },
-                "lifecycle": {
-                  "states": [
-                    "backlog"
-                  ],
-                  "known": true,
-                  "support": null,
-                  "completed_at": null
-                },
                 "activity": {
                   "states": [],
+                  "known": true,
+                  "support": null
+                },
+                "disposition": {
+                  "value": {
+                    "completed": false,
+                    "abandoned": false,
+                    "completed_at": null,
+                    "planning_state": null,
+                    "completion_request": null
+                  },
+                  "known": true,
+                  "support": null
+                },
+                "ownership": {
+                  "value": null,
+                  "known": true,
+                  "support": null
+                },
+                "publication": {
+                  "value": false,
+                  "known": true,
+                  "support": null
+                },
+                "execution": {
+                  "value": {
+                    "checkout": false,
+                    "held": false,
+                    "graph_running": false,
+                    "carrier_running": false,
+                    "approved": false
+                  },
                   "known": true,
                   "support": null
                 }
@@ -275,23 +299,25 @@
                 "stage": "task.completed",
                 "domains": [
                   "planning"
-                ],
-                "remove": [
-                  "open",
-                  "available",
-                  "busy",
-                  "blocked",
-                  "unstarted",
-                  "idle",
-                  "active",
-                  "moving",
-                  "shipping",
-                  "backlog",
-                  "working",
-                  "autonomous"
-                ],
-                "insert": [
-                  "done"
+                ]
+              },
+              "task.claim": {
+                "stage": "task.claimed",
+                "domains": [
+                  "planning"
+                ]
+              },
+              "task.unassign": {
+                "stage": "task.unassigned",
+                "domains": [
+                  "planning"
+                ]
+              },
+              "task.reopen": {
+                "stage": "task.reopened",
+                "domains": [
+                  "graphs",
+                  "planning"
                 ]
               }
             },

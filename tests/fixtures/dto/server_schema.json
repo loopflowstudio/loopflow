@@ -4436,44 +4436,6 @@
       ],
       "type": "string"
     },
-    "LifecycleFact": {
-      "description": "Lifecycle and its current completion time share one snapshot and support.",
-      "properties": {
-        "completed_at": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "known": {
-          "type": "boolean"
-        },
-        "states": {
-          "items": {
-            "$ref": "#/$defs/SelectionState"
-          },
-          "type": "array",
-          "uniqueItems": true
-        },
-        "support": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/FieldSupport"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      },
-      "required": [
-        "states",
-        "known",
-        "completed_at",
-        "support"
-      ],
-      "type": "object"
-    },
     "Limits": {
       "additionalProperties": false,
       "properties": {
@@ -4955,14 +4917,23 @@
         "activity": {
           "$ref": "#/$defs/StateFact"
         },
-        "lifecycle": {
-          "$ref": "#/$defs/LifecycleFact"
+        "disposition": {
+          "$ref": "#/$defs/ValueFact"
+        },
+        "execution": {
+          "$ref": "#/$defs/ValueFact4"
         },
         "name": {
           "type": "string"
         },
+        "ownership": {
+          "$ref": "#/$defs/ValueFact2"
+        },
         "parent": {
           "$ref": "#/$defs/ParentFact"
+        },
+        "publication": {
+          "$ref": "#/$defs/ValueFact3"
         },
         "work": {
           "$ref": "#/$defs/WorkWorkspaceKey"
@@ -4972,7 +4943,10 @@
         "work",
         "name",
         "parent",
-        "lifecycle",
+        "disposition",
+        "ownership",
+        "publication",
+        "execution",
         "activity"
       ],
       "type": "object"
@@ -5178,25 +5152,11 @@
       ]
     },
     "MembershipStateEffect": {
-      "description": "Predicted display-state changes. These never establish execution readiness.",
+      "description": "Semantic stages and reload domains; clients project the typed input change.",
       "properties": {
         "domains": {
           "items": {
             "type": "string"
-          },
-          "type": "array",
-          "uniqueItems": true
-        },
-        "insert": {
-          "items": {
-            "$ref": "#/$defs/SelectionState"
-          },
-          "type": "array",
-          "uniqueItems": true
-        },
-        "remove": {
-          "items": {
-            "$ref": "#/$defs/SelectionState"
           },
           "type": "array",
           "uniqueItems": true
@@ -5207,9 +5167,7 @@
       },
       "required": [
         "stage",
-        "domains",
-        "remove",
-        "insert"
+        "domains"
       ],
       "type": "object"
     },
@@ -14300,6 +14258,43 @@
       ],
       "type": "object"
     },
+    "TaskDisposition": {
+      "properties": {
+        "abandoned": {
+          "type": "boolean"
+        },
+        "completed": {
+          "type": "boolean"
+        },
+        "completed_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "completion_request": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "planning_state": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "completed",
+        "abandoned",
+        "completed_at",
+        "planning_state",
+        "completion_request"
+      ],
+      "type": "object"
+    },
     "TaskEdit": {
       "properties": {
         "id": {
@@ -14860,6 +14855,34 @@
           "type": "object"
         }
       ]
+    },
+    "TaskExecution": {
+      "description": "Recorded execution inputs, retained independently of completion and ownership.\nThese describe Graph work, not conversation activity or native input readiness.",
+      "properties": {
+        "approved": {
+          "type": "boolean"
+        },
+        "carrier_running": {
+          "type": "boolean"
+        },
+        "checkout": {
+          "type": "boolean"
+        },
+        "graph_running": {
+          "type": "boolean"
+        },
+        "held": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "checkout",
+        "graph_running",
+        "carrier_running",
+        "held",
+        "approved"
+      ],
+      "type": "object"
     },
     "TaskExecutionSnapshot": {
       "properties": {
@@ -16477,6 +16500,121 @@
       "required": [
         "windows",
         "reset_credits"
+      ],
+      "type": "object"
+    },
+    "ValueFact": {
+      "description": "Independently supported SQL input. Unknown is distinct from a known null.",
+      "properties": {
+        "known": {
+          "type": "boolean"
+        },
+        "support": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FieldSupport"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "value": {
+          "$ref": "#/$defs/TaskDisposition"
+        }
+      },
+      "required": [
+        "value",
+        "known",
+        "support"
+      ],
+      "type": "object"
+    },
+    "ValueFact2": {
+      "description": "Independently supported SQL input. Unknown is distinct from a known null.",
+      "properties": {
+        "known": {
+          "type": "boolean"
+        },
+        "support": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FieldSupport"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "value": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskOwner"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "value",
+        "known",
+        "support"
+      ],
+      "type": "object"
+    },
+    "ValueFact3": {
+      "description": "Independently supported SQL input. Unknown is distinct from a known null.",
+      "properties": {
+        "known": {
+          "type": "boolean"
+        },
+        "support": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FieldSupport"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "value": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "value",
+        "known",
+        "support"
+      ],
+      "type": "object"
+    },
+    "ValueFact4": {
+      "description": "Independently supported SQL input. Unknown is distinct from a known null.",
+      "properties": {
+        "known": {
+          "type": "boolean"
+        },
+        "support": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FieldSupport"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "value": {
+          "$ref": "#/$defs/TaskExecution"
+        }
+      },
+      "required": [
+        "value",
+        "known",
+        "support"
       ],
       "type": "object"
     },

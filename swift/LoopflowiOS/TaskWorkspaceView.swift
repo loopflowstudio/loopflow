@@ -11,10 +11,13 @@ struct TaskWorkspaceView: View {
     var complete: (() -> Void)? = nil
     var abandon: (() -> Void)? = nil
     var move: ((String?) -> Void)? = nil
+    var edit: ((WorkInteraction.TaskEdit) -> Void)? = nil
+    var facts: WorkMembershipPlan.Facts? = nil
     var waves: [Wave] = []
     var completionDirectory: String? = nil
 
     private var completionPending: Bool {
+        if facts?.disposition.value.completionRequest != nil { return true }
         guard let completionDirectory else { return false }
         return client.interaction.isCompleting(issue: task.identifier ?? task.work.id, directory: completionDirectory)
     }
@@ -52,6 +55,10 @@ struct TaskWorkspaceView: View {
             if abandon != nil {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
+                        if let edit {
+                            TaskOwnershipActions(completed: (facts?.states.contains(.done) ?? task.states.contains(.done)) || completionPending,
+                                owned: facts?.owned, edit: edit)
+                        }
                         if let move {
                             TaskMoveMenu(waves: waves, move: move)
                         }
@@ -61,7 +68,7 @@ struct TaskWorkspaceView: View {
                     }.accessibilityLabel("Task actions")
                 }
             }
-            if let complete {
+            if let complete, !(facts?.states.contains(.done) ?? task.states.contains(.done)) || completionPending {
                 ToolbarItem(placement: .topBarTrailing) {
                     TaskCompleteButton(complete: complete, pending: completionPending)
                 }
@@ -76,6 +83,21 @@ struct TaskWorkspaceView: View {
             try? await client.interaction.presented(.task(task.work.id))
         }
         .onAppear { PerfClock.interaction(.taskSelect, .contentMounted, id: task.work.id) }
+    }
+}
+
+struct TaskOwnershipActions: View {
+    let completed: Bool
+    let owned: Bool?
+    let edit: (WorkInteraction.TaskEdit) -> Void
+
+    var body: some View {
+        if completed {
+            Button("Reopen") { edit(.reopen) }.accessibilityIdentifier("task-reopen")
+        } else {
+            Button(owned == true ? "Unassign" : "Claim") { edit(owned == true ? .unassign : .claim) }
+                .disabled(owned == nil).accessibilityIdentifier("task-claim-unassign")
+        }
     }
 }
 

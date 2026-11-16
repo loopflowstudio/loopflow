@@ -16,7 +16,7 @@ final class ReadingStampTests: XCTestCase {
         }
         XCTAssertTrue(evidence.dependencies.isEmpty)
         XCTAssertEqual(try JSONDecoder().decode([WorkMembershipPlan.Facts].self, from: JSONEncoder().encode(facts)), facts)
-        for field in ["parent", "lifecycle", "activity"] {
+        for field in ["parent", "disposition", "ownership", "publication", "execution", "activity"] {
             var raw = try XCTUnwrap((JSONSerialization.jsonObject(with: data) as? [[String: Any]])?.first)
             var value = try XCTUnwrap(raw[field] as? [String: Any])
             value.removeValue(forKey: "support"); raw[field] = value

@@ -1,9 +1,10 @@
 //! Rust resolves identity, scope and order; clients evaluate this finite program
-//! over selection states without reconstructing Task lifecycle rules.
+//! over independently supported Task inputs.
 use super::{
     DashboardId, MemberRef, Selection, SelectionError, SelectionExpression, SelectionId,
     SelectionResolution, SelectionState, SelectionWork, WorkWorkspaceKey, WorkWorkspaceKind,
 };
+use crate::durable::{TaskSection, TaskState};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -44,15 +45,35 @@ pub struct StateFact {
     pub support: Option<FieldSupport>,
 }
 
-/// Lifecycle and its current completion time share one snapshot and support.
+/// Independently supported SQL input. Unknown is distinct from a known null.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct LifecycleFact {
-    pub states: BTreeSet<SelectionState>,
+#[serde(bound(deserialize = "T: Deserialize<'de>"))]
+pub struct ValueFact<T> {
+    #[serde(deserialize_with = "T::deserialize")]
+    pub value: T,
     pub known: bool,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub support: Option<FieldSupport>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct TaskDisposition {
+    pub completed: bool,
+    pub abandoned: bool,
     #[serde(deserialize_with = "Option::deserialize")]
     pub completed_at: Option<String>,
     #[serde(deserialize_with = "Option::deserialize")]
-    pub support: Option<FieldSupport>,
+    pub planning_state: Option<String>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub completion_request: Option<i64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TaskMembershipInputs {
+    pub disposition: TaskDisposition,
+    pub ownership: Option<crate::durable::TaskOwner>,
+    pub publication: bool,
+    pub execution: crate::durable::TaskExecution,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -60,21 +81,37 @@ pub struct MembershipFacts {
     pub work: WorkWorkspaceKey,
     pub name: String,
     pub parent: ParentFact,
-    pub lifecycle: LifecycleFact,
+    pub disposition: ValueFact<TaskDisposition>,
+    pub ownership: ValueFact<Option<crate::durable::TaskOwner>>,
+    pub publication: ValueFact<bool>,
+    pub execution: ValueFact<crate::durable::TaskExecution>,
     pub activity: StateFact,
 }
 
 impl MembershipFacts {
     fn contains(&self, state: &SelectionState) -> bool {
-        self.lifecycle.states.contains(state) || self.activity.states.contains(state)
+        self.states().contains(state)
     }
 
     pub fn states(&self) -> BTreeSet<SelectionState> {
-        self.lifecycle
-            .states
-            .union(&self.activity.states)
-            .copied()
-            .collect()
+        if self.work.kind != WorkWorkspaceKind::Task {
+            return BTreeSet::new();
+        }
+        let d = &self.disposition.value;
+        let runtime = if d.abandoned {
+            crate::durable::TaskState::Abandoned
+        } else if d.completed {
+            crate::durable::TaskState::Done
+        } else {
+            self.execution.value.state()
+        };
+        task_selection_states(
+            runtime,
+            self.ownership.value.is_some(),
+            self.publication.value,
+            d.planning_state.as_deref(),
+            &self.activity.states,
+        )
     }
 }
 
@@ -82,7 +119,10 @@ impl MembershipFacts {
 #[derive(Debug, Clone)]
 pub struct MembershipSupport {
     pub parent: FieldSupport,
-    pub lifecycle: FieldSupport,
+    pub disposition: FieldSupport,
+    pub ownership: FieldSupport,
+    pub publication: FieldSupport,
+    pub execution: FieldSupport,
     pub activity: FieldSupport,
 }
 
@@ -132,13 +172,11 @@ pub struct MembershipPlan {
     pub effects: BTreeMap<String, MembershipStateEffect>,
 }
 
-/// Predicted display-state changes. These never establish execution readiness.
+/// Semantic stages and reload domains; clients project the typed input change.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct MembershipStateEffect {
     pub stage: String,
     pub domains: BTreeSet<String>,
-    pub remove: BTreeSet<SelectionState>,
-    pub insert: BTreeSet<SelectionState>,
 }
 
 impl MembershipPlan {
@@ -333,27 +371,46 @@ impl Selection {
                         wave: item.parent_wave.clone(),
                         support: item.support.as_ref().map(|support| support.parent.clone()),
                     },
-                    lifecycle: LifecycleFact {
-                        completed_at: item.completed_at.clone(),
-                        states: item
-                            .states
-                            .iter()
-                            .copied()
-                            .filter(|state| !state.is_activity())
-                            .collect(),
-                        known: true,
-                        support: item
-                            .support
+                    disposition: ValueFact {
+                        value: item
+                            .inputs
                             .as_ref()
-                            .map(|support| support.lifecycle.clone()),
+                            .map(|i| i.disposition.clone())
+                            .unwrap_or(TaskDisposition {
+                                completed: false,
+                                abandoned: false,
+                                completed_at: None,
+                                planning_state: None,
+                                completion_request: None,
+                            }),
+                        known: item.inputs.is_some(),
+                        support: item.support.as_ref().map(|s| s.disposition.clone()),
+                    },
+                    ownership: ValueFact {
+                        value: item.inputs.as_ref().and_then(|i| i.ownership.clone()),
+                        known: item.inputs.is_some(),
+                        support: item.support.as_ref().map(|s| s.ownership.clone()),
+                    },
+                    publication: ValueFact {
+                        value: item.inputs.as_ref().is_some_and(|i| i.publication),
+                        known: item.inputs.is_some(),
+                        support: item.support.as_ref().map(|s| s.publication.clone()),
+                    },
+                    execution: ValueFact {
+                        value: item.inputs.as_ref().map(|i| i.execution).unwrap_or(
+                            crate::durable::TaskExecution {
+                                checkout: false,
+                                graph_running: false,
+                                carrier_running: false,
+                                held: false,
+                                approved: false,
+                            },
+                        ),
+                        known: item.inputs.is_some(),
+                        support: item.support.as_ref().map(|s| s.execution.clone()),
                     },
                     activity: StateFact {
-                        states: item
-                            .states
-                            .iter()
-                            .copied()
-                            .filter(SelectionState::is_activity)
-                            .collect(),
+                        states: item.activity_states.clone(),
                         known: item.activity_known,
                         support: item
                             .support
@@ -363,62 +420,25 @@ impl Selection {
                 })
                 .collect(),
             unavailable,
-            effects: BTreeMap::from([
+            effects: [
+                ("task.move", "task.membership_changed", vec!["planning"]),
+                ("task.complete", "task.completed", vec!["planning"]),
+                ("task.abandon", "task.abandoned", vec!["planning"]),
+                ("task.claim", "task.claimed", vec!["planning"]),
+                ("task.unassign", "task.unassigned", vec!["planning"]),
+                ("task.reopen", "task.reopened", vec!["planning", "graphs"]),
+            ]
+            .into_iter()
+            .map(|(kind, stage, domains)| {
                 (
-                    "task.move".into(),
+                    kind.into(),
                     MembershipStateEffect {
-                        stage: "task.membership_changed".into(),
-                        domains: BTreeSet::from(["planning".into()]),
-                        remove: BTreeSet::new(),
-                        insert: BTreeSet::new(),
+                        stage: stage.into(),
+                        domains: domains.into_iter().map(str::to_owned).collect(),
                     },
-                ),
-                (
-                    "task.complete".into(),
-                    MembershipStateEffect {
-                        stage: "task.completed".into(),
-                        domains: BTreeSet::from(["planning".into()]),
-                        remove: BTreeSet::from([
-                            SelectionState::Open,
-                            SelectionState::Available,
-                            SelectionState::Busy,
-                            SelectionState::Blocked,
-                            SelectionState::Unstarted,
-                            SelectionState::Idle,
-                            SelectionState::Active,
-                            SelectionState::Moving,
-                            SelectionState::Shipping,
-                            SelectionState::Backlog,
-                            SelectionState::Working,
-                            SelectionState::Autonomous,
-                        ]),
-                        insert: BTreeSet::from([SelectionState::Done]),
-                    },
-                ),
-                (
-                    "task.abandon".into(),
-                    MembershipStateEffect {
-                        stage: "task.abandoned".into(),
-                        domains: BTreeSet::from(["planning".into()]),
-                        remove: BTreeSet::from([
-                            SelectionState::Open,
-                            SelectionState::Available,
-                            SelectionState::Busy,
-                            SelectionState::Blocked,
-                            SelectionState::Unstarted,
-                            SelectionState::Idle,
-                            SelectionState::Active,
-                            SelectionState::Moving,
-                            SelectionState::Shipping,
-                            SelectionState::Backlog,
-                            SelectionState::Working,
-                            SelectionState::Autonomous,
-                            SelectionState::Done,
-                        ]),
-                        insert: BTreeSet::new(),
-                    },
-                ),
-            ]),
+                )
+            })
+            .collect(),
         })
     }
 
@@ -519,4 +539,41 @@ impl Selection {
         path.pop();
         Ok(node)
     }
+}
+
+/// The same lifecycle, section and activity set for roadmap rows and selections.
+pub(crate) fn task_selection_states(
+    runtime: TaskState,
+    owned: bool,
+    published: bool,
+    plan_state: Option<&str>,
+    activity: &BTreeSet<SelectionState>,
+) -> BTreeSet<SelectionState> {
+    let state = runtime.lifecycle(plan_state);
+    // Completion changes actionable membership, not the retained conversation's
+    // execution facts. A completed Task cannot re-enter Ready/Working from an
+    // old Session report after its removal effect is incorporated.
+    let mut states = if state.is_terminal() {
+        BTreeSet::new()
+    } else {
+        activity.clone()
+    };
+    if (owned || published) && !state.is_terminal() {
+        states.insert(SelectionState::Open);
+    }
+    states.insert(match state {
+        TaskState::Unstarted => SelectionState::Unstarted,
+        TaskState::Idle => SelectionState::Idle,
+        TaskState::Active => SelectionState::Active,
+        TaskState::Moving => SelectionState::Moving,
+        TaskState::Shipping => SelectionState::Shipping,
+        TaskState::Done | TaskState::Abandoned => SelectionState::Done,
+    });
+    states.insert(match TaskSection::of(runtime, owned, plan_state) {
+        TaskSection::Backlog => SelectionState::Backlog,
+        TaskSection::Working => SelectionState::Working,
+        TaskSection::Autonomous => SelectionState::Autonomous,
+        TaskSection::Done | TaskSection::Abandoned => SelectionState::Done,
+    });
+    states
 }

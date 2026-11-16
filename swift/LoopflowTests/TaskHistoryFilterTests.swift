@@ -173,7 +173,7 @@ struct TaskHistoryFilterTests {
         #expect(visible(try task("canceled", date: nil, runtime: "done", missing: true, review: true), TaskHistoryFilter()))
         let sessions = try JSONDecoder().decode([SessionRecord].self, from: Data(contentsOf: fixtures.appendingPathComponent("sessions.json")))
         let retained = TaskProjection(id: WorkNodeKey(repo: "/repo", work: .task(id: row.id)), task: row, sessions: [try #require(sessions.first)],
-            facts: .init(work: .init(repository: "/repo", kind: .task, id: row.id), name: row.task.identifier,
+            facts: membershipFact(work: .init(repository: "/repo", kind: .task, id: row.id), name: row.task.identifier,
                 parent: .init(wave: row.task.waveId, support: nil),
                 lifecycle: .init(completedAt: nil, states: Array(row.selectionStates), known: true, support: nil),
                 activity: .init(states: [], known: true, support: nil)))

@@ -156,7 +156,8 @@ final class WorkModel {
     func sessionTitle(_ record: SessionRecord) -> String { interaction?.named(record).title ?? record.title }
 
     func isCompleting(_ task: RoadmapTask) -> Bool {
-        interaction?.isCompleting(issue: task.task.identifier, directory: WaveOrigin.cached(task.task.repo)) == true
+        projectedTaskFacts(task)?.disposition.value.completionRequest != nil
+            || interaction?.isCompleting(issue: task.task.identifier, directory: WaveOrigin.cached(task.task.repo)) == true
     }
 
     var waitingForConnection: Bool { interaction?.waitingForConnection == true }
@@ -2886,17 +2887,30 @@ final class WorkModel {
         return repoPath
     }
 
-    func assignTask(_ task: RoadmapTask, claimed: Bool) async {
-        await performTaskAction(task.id) {
-            try await query.assignTask(issue: task.task.identifier, claimed: claimed, cwd: WaveOrigin.resolve(task.task.repo))
-        }
+    func assignTask(_ task: RoadmapTask, claimed: Bool) {
+        editTask(task, edit: claimed ? .claim : .unassign)
+    }
+
+    func projectedTaskFacts(_ task: RoadmapTask) -> WorkMembershipPlan.Facts? {
+        projectedTaskFacts(id: task.runtime?.workId ?? task.id)
+    }
+
+    func taskCompleted(_ task: RoadmapTask) -> Bool { projectedTaskFacts(task)?.states.contains(.done) ?? task.isCompleted }
+
+    func taskOwned(_ task: RoadmapTask) -> Bool? { projectedTaskFacts(task)?.owned }
+
+    private func editTask(_ task: RoadmapTask, edit: WorkInteraction.TaskEdit) {
+        if interaction == nil { interaction = .local(observingMachineId) }
+        let work = projectedTaskFacts(task)?.work ?? WorkWorkspaceKey(repository: task.task.repositoryId, kind: .task, id: task.runtime?.workId ?? task.id)
+        interaction?.editTask(work,
+            issue: task.task.identifier, directory: WaveOrigin.cached(task.task.repo), edit: edit)
     }
 
     func moveTask(_ task: RoadmapTask, toWave wave: String?) {
         if interaction == nil { interaction = .local(observingMachineId) }
         guard let interaction else { return }
-        let repository = selectedViewPlan?.repository ?? taskList?.repository ?? selectionPlans.value?.first?.repository ?? ""
-        interaction.moveTask(WorkWorkspaceKey(repository: repository, kind: .task, id: task.runtime?.workId ?? task.id),
+        let work = projectedTaskFacts(task)?.work ?? WorkWorkspaceKey(repository: task.task.repositoryId, kind: .task, id: task.runtime?.workId ?? task.id)
+        interaction.moveTask(work,
             issue: task.task.identifier, directory: WaveOrigin.cached(task.task.repo), wave: wave)
     }
 
@@ -2914,7 +2928,7 @@ final class WorkModel {
     private func leaveTask(_ task: RoadmapTask, abandoning: Bool, visible origin: [WorkWorkspaceKey]? = nil) {
         if interaction == nil { interaction = .local(observingMachineId) }
         guard let interaction else { return }
-        let repository = selectedViewPlan?.repository ?? taskList?.repository ?? selectionPlans.value?.first?.repository ?? ""
+        let repository = projectedTaskFacts(task)?.work.repository ?? task.task.repositoryId
         let order = origin ?? completionOrder
         func key(_ id: String) -> WorkWorkspaceKey {
             let canonical = self.task(id: id)?.task.runtime?.workId ?? id
@@ -2928,11 +2942,7 @@ final class WorkModel {
             { [self] next in select(next.map { .task(id: $0.id) }) })
     }
 
-    func reopenTask(_ task: RoadmapTask) async {
-        await performTaskAction(task.id) {
-            try await query.reopenTask(issue: task.task.identifier, cwd: WaveOrigin.resolve(task.task.repo))
-        }
-    }
+    func reopenTask(_ task: RoadmapTask) { editTask(task, edit: .reopen) }
 
     func abandonTask(_ task: RoadmapTask) async { leaveTask(task, abandoning: true) }
 
@@ -3151,7 +3161,7 @@ final class WorkModel {
 
     func projectedTaskFacts(id: String) -> WorkMembershipPlan.Facts? {
         let canonical = taskIndex.positions[id].map { taskIndex.tasks[$0].id } ?? id
-        return projectedInventories.lazy.compactMap { plan in
+        return ([selectedViewPlan, taskListReading.value].compactMap { $0 } + (selectionPlans.value ?? [])).lazy.compactMap { plan in
             plan.facts[.init(repository: plan.repository, kind: .task, id: canonical)]
         }.first
     }

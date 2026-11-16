@@ -261,6 +261,31 @@ public final class WorkInteraction {
         return id
     }
 
+    public enum TaskEdit { case claim, unassign, reopen }
+
+    /// Membership edits publish synchronously and keep navigation and native owners.
+    @discardableResult
+    public func editTask(_ work: WorkWorkspaceKey, issue: String, directory: String, edit: TaskEdit) -> String {
+        let command: ServedWrite
+        let kind: String
+        switch edit {
+        case .claim: command = .taskClaim(directory: directory, issue: issue); kind = "task.claim"
+        case .unassign: command = .taskUnassign(directory: directory, issue: issue); kind = "task.unassign"
+        case .reopen: command = .taskReopen(directory: directory, issue: issue); kind = "task.reopen"
+        }
+        let id = UUID().uuidString.lowercased()
+        let payload = try! JSONEncoder().encode(command)
+        let effect = WorkQueryEffect(operationID: id, sequence: 0, directory: directory, kind: kind, issue: issue, work: work, resolution: nil)
+        let intent = Intent(id: id, payload: payload, submittedAt: Date(), draftID: nil, destination: machine, effect: effect, resource: .task(work))
+        operations.append(PendingOperation(id: id, payload: payload, kind: kind, request: "", directory: directory,
+            wave: nil, graph: nil, submittedAt: intent.submittedAt, destination: machine))
+        intents.append(intent)
+        publish()
+        start()
+        enqueue(intent)
+        return id
+    }
+
     private func leave(_ work: WorkWorkspaceKey, command: ServedWrite, kind: String, issue: String, directory: String,
                        selected: WorkWorkspaceKey?, visible: [WorkWorkspaceKey], select: (WorkWorkspaceKey?) -> Void) -> String {
         let id = UUID().uuidString.lowercased()
@@ -429,10 +454,14 @@ public final class WorkInteraction {
             names[session] = (title, .human)
         }
         projectedNames = names
-        completing = Set(operations.filter { $0.kind == "task.complete" && $0.projectsEffect }.compactMap {
-            guard let issue = $0.targetIssue else { return nil }
-            return TaskTarget(issue: issue, directory: $0.directory)
-        })
+        var pending = Set<TaskTarget>()
+        for operation in operations where operation.projectsEffect {
+            guard let issue = operation.targetIssue else { continue }
+            let target = TaskTarget(issue: issue, directory: operation.directory)
+            if operation.kind == "task.complete" { pending.insert(target) }
+            if operation.kind == "task.reopen" || operation.kind == "task.abandon" { pending.remove(target) }
+        }
+        completing = pending
         for lease in Array(leases.values) { lease.receive(reconciled.contains(lease.key) ? bases[lease.key].map(project) : nil) }
     }
 

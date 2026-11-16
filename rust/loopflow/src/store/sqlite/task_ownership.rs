@@ -111,6 +111,22 @@ pub(super) fn owners_in(
     Ok(owners)
 }
 
+/// SQL-only ownership identity. Machine labels require a separate live reading.
+pub(super) fn owner_identities_in(
+    conn: &Connection,
+    tasks: &[TaskId],
+) -> StoreResult<HashMap<TaskId, TaskOwner>> {
+    let local = local_machine_in(conn)?;
+    Ok(logs_in(conn, tasks)?
+        .into_iter()
+        .filter_map(|(task, rows)| {
+            let mut owner = read_log(&rows, &local).owner?;
+            owner.machine.label = None;
+            Some((task, owner))
+        })
+        .collect())
+}
+
 /// Who holds a Task after an entry, with the Machine label as written.
 fn holder_after(entry: &TaskOwnershipEntry) -> Option<TaskOwner> {
     (entry.kind != OwnershipKind::Unassign).then(|| entry.owner())

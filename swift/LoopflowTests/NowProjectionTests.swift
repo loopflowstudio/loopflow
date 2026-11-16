@@ -67,7 +67,7 @@ struct NowProjectionTests {
         facts[position].parent = .init(wave: "unresolved", support: nil)
         let unresolved = nowSections(from: snapshot.tasks.items, facts: facts, waves: snapshot.waves)
         #expect(unresolved.flatMap(\.rows).first { $0.id == task.id }?.parentWave == "unresolved")
-        facts[position].lifecycle.states = [.done]
+        facts[position].disposition.value.completed = true
         let completed = nowSections(from: snapshot.tasks.items, facts: facts, waves: snapshot.waves)
         #expect(!completed.flatMap(\.rows).contains { $0.id == task.id })
     }

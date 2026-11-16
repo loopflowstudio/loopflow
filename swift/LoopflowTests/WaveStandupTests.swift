@@ -73,7 +73,7 @@ struct WaveStandupTests {
 
     private func fact(_ id: String, lifecycle: WorkMembershipPlan.LifecycleFact,
                       activity: [WorkSelectionState] = []) -> WorkMembershipPlan.Facts {
-        .init(work: .init(repository: "repo", kind: .task, id: id), name: id,
+        membershipFact(work: .init(repository: "repo", kind: .task, id: id), name: id,
             parent: .init(wave: nil, support: nil), lifecycle: lifecycle,
             activity: .init(states: activity, known: true, support: nil))
     }

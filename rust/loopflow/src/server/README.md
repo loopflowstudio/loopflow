@@ -461,13 +461,22 @@ beneath ordered per-query effects, including after command retirement and restar
   the database and survives server restart; a newly initialized database gets
   another epoch. `query` hashes the exact read arguments, JSON selection and
   resolution directory.
-  Work membership facts carry separate `parent`, `lifecycle` and `activity`
-  values. Lifecycle includes required nullable `completed_at`, captured with its
-  states under one support. Reopen clears it; a later completion gets its own
-  time. Page content cannot establish dated membership. Each value's `support`
+  Work membership facts carry separate `parent`, `disposition`, `ownership`,
+  `publication`, `execution` and `activity` values. Disposition correlates
+  completion, required nullable `completed_at` and pending completion identity.
+  Execution retains checkout, held position, running Graph work, the Auto-Ship
+  carrier and approval even for completed Tasks. These four input facts use
+  `value/known/support`; `ownership.value: null` means unowned only when `known`
+  is true. Ownership supplies a known null
+  or the actual SQL identity; its Machine label stays unknown without a live label
+  reading. Clients derive lifecycle and section from these inputs. Reopen clears
+  completion time and conditionally withdraws approval/carrier; a no-op keeps both.
+  Page content cannot establish dated membership. Each value's `support`
   declares its derivation, Machine, epoch, schema
   and consumed SQLite revisions. Observation support distinguishes SQL-only,
   captured (including an empty validated dependency set), and unavailable.
+  Activity carries raw reports even for terminal Tasks; membership masks them
+  while terminal and reevaluates them on Reopen. Its derivation is `work.activity/2`.
   Activity capture uses the existing invocation's answers, including inherited
   workers; unrelated invalid observations do not invalidate SQL-only fields.
   Current activity support conservatively includes the repository Session read's

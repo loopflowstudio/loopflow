@@ -15,11 +15,23 @@ extension ClientWorkQueryTests {
         try await leaveBothWindows(abandon: true)
     }
 
+    func testDesktopOwnershipControlsPublishBeforeDiskAndKeepBothSelections() async throws {
+        try await leaveBothWindows(abandon: false, ownership: true)
+    }
+
+    func testDesktopReopenButtonPublishesBeforeDiskAndKeepsBothSelections() async throws {
+        try await leaveBothWindows(abandon: false, reopening: true)
+    }
+
+    func testDesktopReopenCancelsSupportedPendingCompletionBeforeDone() async throws {
+        try await leaveBothWindows(abandon: false, reopening: true, pending: true)
+    }
+
     func testDesktopMoveRemainsAvailableOfflineAndKeepsBothSelections() async throws {
         try await leaveBothWindows(abandon: false, move: true)
     }
 
-    private func leaveBothWindows(abandon: Bool, move: Bool = false) async throws {
+    private func leaveBothWindows(abandon: Bool, move: Bool = false, ownership: Bool = false, reopening: Bool = false, pending: Bool = false) async throws {
         let fixture = try WorkTestFixture.load()
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -29,7 +41,14 @@ extension ClientWorkQueryTests {
         contents[0]["identifier"] = "W2-144"
         contents[1]["identifier"] = "W2-131"
         wire["contents"] = contents
-        let base = try JSONDecoder().decode(WorkViewPlan.self, from: JSONSerialization.data(withJSONObject: wire))
+        var base = try JSONDecoder().decode(WorkViewPlan.self, from: JSONSerialization.data(withJSONObject: wire))
+        if reopening {
+            var membership = base.membership
+            membership.facts[0].disposition.value.completed = !pending
+            membership.facts[0].disposition.value.completionRequest = pending ? 99 : nil
+            wire["membership"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(membership))
+            base = try JSONDecoder().decode(WorkViewPlan.self, from: JSONSerialization.data(withJSONObject: wire))
+        }
         let scope = WorkScope(repo: "/src/loopflow", headless: false, task: nil, activity: nil, taskListWave: nil)
         let query = try XCTUnwrap(WorkPart.taskList.read(for: scope))
         let seed = store(directory)
@@ -60,6 +79,45 @@ extension ClientWorkQueryTests {
         let task = try XCTUnwrap(first.task(id: "issue-now")?.task)
         let controls = TaskWorkflowHeader(model: first, task: task,
             work: .unavailable(lastGood: nil, reason: "Machine offline"))
+        if reopening {
+            XCTAssertTrue(first.taskCompleted(task) || first.isCompleting(task))
+            let button = try controls.inspect().find(viewWithAccessibilityIdentifier: "task-reopen").button()
+            XCTAssertFalse(try button.isDisabled())
+            try button.tap()
+            XCTAssertFalse(first.taskCompleted(task))
+            XCTAssertFalse(second.taskCompleted(task))
+            XCTAssertFalse(first.isCompleting(task))
+            XCTAssertFalse(second.isCompleting(task))
+            XCTAssertEqual(first.selection, .task(id: "issue-now"))
+            XCTAssertEqual(second.selection, .task(id: "issue-now"))
+            XCTAssertEqual(first.sidebarTaskIDs, ["issue-now", "issue-review"])
+            hold.release()
+            await owner.persistPending()
+            let records = try await disk.pending()
+            XCTAssertEqual(records.count, 1)
+            return
+        }
+        if ownership {
+            let button = try controls.inspect().find(viewWithAccessibilityIdentifier: "task-claim-unassign").button()
+            XCTAssertFalse(try button.isDisabled())
+            try button.tap()
+            XCTAssertEqual(first.taskOwned(task), false)
+            XCTAssertEqual(second.taskOwned(task), false)
+            XCTAssertEqual(first.selection, .task(id: "issue-now"))
+            XCTAssertEqual(second.selection, .task(id: "issue-now"))
+            first.assignTask(task, claimed: true)
+            XCTAssertEqual(second.taskOwned(task), true)
+            first.reopenTask(task)
+            XCTAssertEqual(first.selection, .task(id: "issue-now"))
+            XCTAssertNil(first.navigation.taskRunDrafts[task.id])
+            hold.release()
+            await owner.persistPending()
+            let records = try await disk.pending()
+            XCTAssertTrue(records.allSatisfy { $0.resource == .task(base.contents[0].work) })
+            XCTAssertEqual(try records.map { try JSONDecoder().decode(JSONValue.self, from: $0.payload)["kind"] },
+                [.string("task.unassign"), .string("task.claim"), .string("task.reopen")])
+            return
+        }
         if move {
             let menu = TaskActionItems(model: first, task: task, wave: nil)
             XCTAssertFalse(try menu.inspect().find(viewWithAccessibilityIdentifier: "task-move-wave").isDisabled())

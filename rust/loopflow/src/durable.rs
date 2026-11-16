@@ -452,8 +452,8 @@ pub enum TaskState {
 
 /// Recorded execution inputs, retained independently of completion and ownership.
 /// These describe Graph work, not conversation activity or native input readiness.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct TaskExecution {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct TaskExecution {
     pub checkout: bool,
     pub graph_running: bool,
     pub carrier_running: bool,

@@ -38,14 +38,16 @@ public struct OperationDeclaration {
         }
     }
 
-    var changesMembership: Bool { kind == .complete || kind == .abandon || kind == .move }
+    var changesMembership: Bool { kind == .complete || kind == .abandon || kind == .move || kind == .claim || kind == .unassign || kind == .reopen }
 
     /// The field written by the semantic stage, independent of query scope.
-    var field: WorkField? {
+    var fields: Set<WorkField> {
         switch kind {
-        case .complete, .abandon, .reopen: .lifecycle
-        case .move: .parent
-        default: nil
+        case .complete, .abandon: [.disposition]
+        case .reopen: [.disposition, .execution]
+        case .claim, .unassign: [.ownership]
+        case .move: [.parent]
+        default: []
         }
     }
 

@@ -1,7 +1,7 @@
 import Foundation
 
 enum WorkField: String, Codable, Hashable, Sendable {
-    case parent, lifecycle, activity
+    case parent, disposition, ownership, publication, execution, activity
 }
 
 /// A confirmed field is independent of the query that happened to carry it.
@@ -53,53 +53,58 @@ struct WorkFieldStates: Codable, Equatable, Sendable {
     init(_ fact: WorkMembershipPlan.StateFact) { states = Set(fact.states); known = fact.known }
 }
 
-struct WorkFieldLifecycle: Codable, Equatable, Sendable {
-    let states: Set<WorkSelectionState>
-    let known: Bool
-    let completedAt: String?
-    init(_ fact: WorkMembershipPlan.LifecycleFact) {
-        states = Set(fact.states); known = fact.known; completedAt = fact.completedAt
-    }
-    private enum CodingKeys: String, CodingKey { case states, known, completedAt }
-    init(from decoder: any Decoder) throws {
-        let fields = try decoder.container(keyedBy: CodingKeys.self)
-        states = try fields.decode(Set<WorkSelectionState>.self, forKey: .states)
-        known = try fields.decode(Bool.self, forKey: .known)
-        completedAt = try fields.decode(String?.self, forKey: .completedAt)
-    }
-    func encode(to encoder: any Encoder) throws {
-        var fields = encoder.container(keyedBy: CodingKeys.self)
-        try fields.encode(states, forKey: .states)
-        try fields.encode(known, forKey: .known)
-        try fields.encode(completedAt, forKey: .completedAt)
-    }
-}
-
 struct WorkFieldFacts: Codable, Equatable, Sendable {
     let machine: String
     let work: WorkWorkspaceKey
     var parent: WorkFieldFact<String?>?
-    var lifecycle: WorkFieldFact<WorkFieldLifecycle>?
+    var disposition: WorkFieldFact<WorkMembershipPlan.ValueFact<WorkMembershipPlan.Disposition>>?
+    var ownership: WorkFieldFact<WorkMembershipPlan.ValueFact<TaskOwner?>>?
+    var publication: WorkFieldFact<WorkMembershipPlan.ValueFact<Bool>>?
+    var execution: WorkFieldFact<WorkMembershipPlan.ValueFact<WorkMembershipPlan.ExecutionInputs>>?
     var activity: WorkFieldFact<WorkFieldStates>?
 
+    private func fieldCommit(_ commit: OperationCommit, field: WorkField) -> OperationCommit {
+        let domains: [String]
+        switch field {
+        case .parent, .disposition, .ownership, .publication: domains = ["planning"]
+        case .execution: domains = ["planning", "graphs", "processes"]
+        case .activity: domains = ["planning", "graphs", "processes", "sessions"]
+        }
+        let revisions = commit.fence.revisions.filter { domains.contains($0.key) }
+        return OperationCommit(resolution: commit.resolution, stage: commit.stage, resources: commit.resources,
+            fence: CommitFence(machine: commit.fence.machine, epoch: commit.fence.epoch, schema: commit.fence.schema, revisions: revisions),
+            result: commit.result, planningEffect: commit.planningEffect, planningChanges: commit.planningChanges)
+    }
+
     mutating func incorporate(_ commit: OperationCommit, field: WorkField) {
+        let commit = fieldCommit(commit, field: field)
         // The resource and field are part of the address. A coincidentally
         // newer revision on another resource or field cannot absorb this stage.
         guard work.kind == .task, commit.resources.contains(work.id) else { return }
         switch field {
         case .parent: parent?.incorporate(commit)
-        case .lifecycle:
-            if lifecycle?.value.known == true { lifecycle?.incorporate(commit) }
+        case .disposition:
+            if disposition?.value.known == true { disposition?.incorporate(commit) }
+        case .ownership:
+            if ownership?.value.known == true { ownership?.incorporate(commit) }
+        case .publication:
+            if publication?.value.known == true { publication?.incorporate(commit) }
+        case .execution:
+            if execution?.value.known == true { execution?.incorporate(commit) }
         case .activity:
             if activity?.value.known == true { activity?.incorporate(commit) }
         }
     }
 
     func incorporates(_ commit: OperationCommit, field: WorkField) -> Bool {
+        let commit = fieldCommit(commit, field: field)
         guard work.kind == .task, commit.resources.contains(work.id) else { return false }
         switch field {
         case .parent: return parent?.incorporates(commit) == true
-        case .lifecycle: return lifecycle?.incorporates(commit) == true
+        case .disposition: return disposition?.incorporates(commit) == true
+        case .ownership: return ownership?.incorporates(commit) == true
+        case .publication: return publication?.incorporates(commit) == true
+        case .execution: return execution?.incorporates(commit) == true
         case .activity: return activity?.incorporates(commit) == true
         }
     }
@@ -119,7 +124,10 @@ extension CommitFence {
 struct WorkFieldReading: Sendable {
     let facts: WorkFieldFacts
     let parentCurrent: Bool
-    let lifecycleCurrent: Bool
+    let dispositionCurrent: Bool
+    let ownershipCurrent: Bool
+    let publicationCurrent: Bool
+    let executionCurrent: Bool
     let activityCurrent: Bool
 }
 

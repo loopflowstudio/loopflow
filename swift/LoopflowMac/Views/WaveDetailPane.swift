@@ -726,7 +726,7 @@ struct RoadmapTaskView: View {
     /// State, owner when owned, and who moves next.
     private var statusLine: String {
         let state = row.status
-        let owner = task.runtime?.owner.map { " · \($0.summary)" } ?? ""
+        let owner = row.ownerLabel.map { " · \($0)" } ?? ""
         return "\(state)\(owner) · next: \(task.nextMove.owner.rawValue)"
     }
 

@@ -53,7 +53,7 @@ public struct ClientWorkQuery: Codable, Sendable {
                 positions: Dictionary(facts.enumerated().map { ($0.element.work, $0.offset) }, uniquingKeysWith: { first, _ in first }),
                 targets: targets, contents: Dictionary(contents.map { ($0.work, $0) }, uniquingKeysWith: { first, _ in first }),
                 ranks: Dictionary(potential.enumerated().map { ($0.element, $0.offset) }, uniquingKeysWith: min),
-                resolution: answer.membership.resolve(knownAbsent: answer.knownAbsent))
+                resolution: answer.membership.resolve())
         }
     }
 
@@ -62,7 +62,7 @@ public struct ClientWorkQuery: Codable, Sendable {
         let answer = answer ?? deriveAnswer()
         return zip(plans, answer.plans).map { plan, derived in
             ProjectedWorkPlan(plan, membership: derived.membership,
-                knownAbsent: derived.knownAbsent, coverage: derived.coverage, contents: availableContents(for: plan),
+                coverage: derived.coverage, contents: availableContents(for: plan),
                 inventoryDependencies: inventoryDependencies(derived))
         }
     }
@@ -71,10 +71,14 @@ public struct ClientWorkQuery: Codable, Sendable {
         let projected = Dictionary(grouping: answer.coverage.dependencies.filter(\.projected), by: \.work)
         return answer.membership.facts.flatMap { fact in
             let local = Set((projected[fact.work] ?? []).map(\.field))
-            return [WorkField.parent, .lifecycle].compactMap { field -> WorkAnswerDependency? in
+            var inputs: [WorkField] = [.parent, .disposition]
+            if !fact.disposition.known || (!fact.disposition.value.completed && !fact.disposition.value.abandoned) {
+                inputs += [.execution]
+                if !fact.execution.known || fact.execution.value.state != .unstarted { inputs += [.ownership] }
+            }
+            return inputs.compactMap { field -> WorkAnswerDependency? in
                 guard fact.work.kind == .task || field == .parent else { return nil }
-                return dependency(fact.work, field: field, fact: fact, projected: local,
-                    absent: answer.knownAbsent[fact.work] ?? [])
+                return dependency(fact.work, field: field, fact: fact, projected: local)
             }
         }
     }
@@ -112,11 +116,13 @@ public struct ClientWorkQuery: Codable, Sendable {
     }
 
     private func apply(_ effect: WorkQueryEffect, to fact: inout WorkMembershipPlan.Facts,
-                       change: WorkMembershipPlan.StateEffect?, absent: inout Set<WorkSelectionState>, projected: inout Set<WorkField>) {
+                       projected: inout Set<WorkField>) {
         guard fact.work.kind == .task, effect.resolution?.resolution != .definitelyRefused,
               let declaration = OperationDeclaration(kind: effect.kind) else { return }
-        if let commit = effect.resolution, let field = declaration.field,
-           fields[fact.work]?.facts.incorporates(commit, field: field) == true { return }
+        func incorporated(_ field: WorkField) -> Bool {
+            effect.resolution.map { fields[fact.work]?.facts.incorporates($0, field: field) == true } == true
+        }
+        if declaration.fields.allSatisfy(incorporated) { return }
         if declaration.kind == .move {
             var wave = effect.wave
             if let commit = effect.resolution, commit.resolution == .committed,
@@ -125,30 +131,84 @@ public struct ClientWorkQuery: Codable, Sendable {
                 else if actual == .null { wave = nil }
                 else { return }
             }
+            guard !incorporated(.parent) else { return }
             fact.parent = .init(wave: wave, support: nil)
             projected.insert(.parent)
             return
         }
-        guard let change else { return }
-        fact.lifecycle = .init(completedAt: nil, states: Set(fact.lifecycle.states).subtracting(change.remove)
-            .union(change.insert.filter { !$0.isActivity }).sorted { $0.rawValue < $1.rawValue }, known: true, support: nil)
-        fact.activity = .init(states: Set(fact.activity.states).subtracting(change.remove)
-            .union(change.insert.filter(\.isActivity)).sorted { $0.rawValue < $1.rawValue }, known: fact.activity.known, support: nil)
-        projected.insert(.lifecycle)
-        absent = absent.union(change.remove).subtracting(change.insert)
+        switch declaration.kind {
+        case .claim, .unassign:
+            guard !incorporated(.ownership) else { return }
+            if let commit = effect.resolution, commit.resolution == .committed,
+               case .object(let result) = commit.result, let owner = result["owner"] {
+                fact.requestedOwnership = owner != .null
+            } else { fact.requestedOwnership = declaration.kind == .claim }
+            if fact.requestedOwnership == false { fact.ownership = .init(value: nil, known: true, support: nil) }
+            projected.insert(.ownership)
+        case .complete, .abandon:
+            guard !incorporated(.disposition) else { return }
+            var d = fact.disposition.value
+            d.completed = declaration.kind == .complete; d.abandoned = declaration.kind == .abandon
+            d.completedAt = nil; d.completionRequest = nil
+            fact.disposition = .init(value: d, known: true, support: nil)
+            projected.insert(.disposition)
+        case .reopen:
+            // A committed no-op carries no planning change. It never withdraws approval.
+            let committed = effect.resolution?.resolution == .committed
+            let changed = effect.resolution.map { $0.planningEffect == .correlated }
+            let predicateKnown = fact.disposition.known && (projected.contains(.disposition)
+                || fields[fact.work]?.dispositionCurrent != false)
+            let predicate: Bool? = committed ? changed : predicateKnown
+                ? !fact.disposition.value.abandoned && (fact.disposition.value.completed || fact.disposition.value.completionRequest != nil) : nil
+            guard let predicate else {
+                fact.disposition.known = false; fact.execution.known = false
+                projected.formUnion([.disposition, .execution])
+                return
+            }
+            guard predicate else {
+                if committed {
+                    // A no-op preserves approval, but its Task result cannot
+                    // certify retained inputs that do not cover this stage.
+                    if !incorporated(.disposition) { fact.disposition.known = false; projected.insert(.disposition) }
+                    if !incorporated(.execution) { fact.execution.known = false; projected.insert(.execution) }
+                }
+                return
+            }
+            if !incorporated(.disposition) {
+                var d = fact.disposition.value
+                d.completed = false; d.completedAt = nil; d.completionRequest = nil; d.planningState = "unstarted"
+                fact.disposition = .init(value: d, known: true, support: nil)
+                projected.insert(.disposition)
+            }
+            if !incorporated(.execution) {
+                // Withdrawing approval/carrier does not establish checkout or
+                // Graph work when their retained reading is inconsistent.
+                fact.execution.known = fact.execution.known && fields[fact.work]?.executionCurrent != false
+                fact.execution.value.approved = false; fact.execution.value.carrierRunning = false
+                fact.execution.support = nil
+                projected.insert(.execution)
+            }
+        default: return
+        }
     }
 
     private func dependency(_ key: WorkWorkspaceKey, field: WorkField, fact: WorkMembershipPlan.Facts?,
-                            projected: Set<WorkField>, absent: Set<WorkSelectionState>) -> WorkAnswerDependency {
+                            projected: Set<WorkField>) -> WorkAnswerDependency {
         let reading = fields[key]
-        let support = field == .parent ? fact?.parent.support : field == .lifecycle ? fact?.lifecycle.support : fact?.activity.support
-        let current = field == .parent ? reading?.parentCurrent : field == .lifecycle ? reading?.lifecycleCurrent : reading?.activityCurrent
-        let exact = support == nil && stamp.complete
-            && (field != .lifecycle || reading?.lifecycleCurrent != false)
-            && (field == .parent || (field == .lifecycle && fact?.lifecycle.known == true))
-        let local = projected.contains(field)
-            || (field == .activity && absent.isSuperset(of: [.available, .busy, .blocked]))
-        return .init(work: key, field: field, support: support, current: local || current == true || exact, projected: local)
+        let support: WorkMembershipPlan.FieldSupport?
+        let current: Bool?
+        let known: Bool
+        switch field {
+        case .parent: support = fact?.parent.support; current = reading?.parentCurrent; known = fact != nil
+        case .disposition: support = fact?.disposition.support; current = reading?.dispositionCurrent; known = fact?.disposition.known == true
+        case .ownership: support = fact?.ownership.support; current = reading?.ownershipCurrent; known = fact?.owned != nil
+        case .publication: support = fact?.publication.support; current = reading?.publicationCurrent; known = fact?.publication.known == true
+        case .execution: support = fact?.execution.support; current = reading?.executionCurrent; known = fact?.execution.known == true
+        case .activity: support = fact?.activity.support; current = reading?.activityCurrent; known = fact?.activityKnown == true
+        }
+        let exact = support == nil && stamp.complete && current != false && known && field != .activity
+        let local = projected.contains(field) || (field == .activity && fact?.lifecycle.states.contains(.done) == true)
+        return .init(work: key, field: field, support: support, current: known && (local || current == true || exact), projected: local)
     }
 
     /// Prepared indexes keep gesture work on the changed resources. Full reads,
@@ -164,20 +224,17 @@ public struct ClientWorkQuery: Codable, Sendable {
             var derived = answers[index]
             var membership = derived.membership
             var facts = cached.facts
-            var absent = derived.knownAbsent
             var projected: [WorkWorkspaceKey: Set<WorkField>] = [:]
             var changed = Set<WorkWorkspaceKey>()
             for effect in effects where effect.directory == plan.repositoryPath {
                 let keys = effect.work.map { Set([$0]) } ?? cached.targets[effect.issue] ?? []
                 for key in keys {
                     guard var fact = facts[key], let position = cached.positions[key] else { continue }
-                    var missing = absent[key] ?? []
                     var local = projected[key] ?? []
-                    apply(effect, to: &fact, change: membership.effects[effect.kind], absent: &missing, projected: &local)
+                    apply(effect, to: &fact, projected: &local)
                     guard !local.isEmpty else { continue }
                     facts[key] = fact
                     membership.facts[position] = fact
-                    if !missing.isEmpty { absent[key] = missing }
                     projected[key] = local
                     changed.insert(key)
                 }
@@ -189,7 +246,7 @@ public struct ClientWorkQuery: Codable, Sendable {
             var states = rendered[index].states
             for key in changed {
                 guard let fact = facts[key] else { continue }
-                let result = membership.root.resolveMember(key, facts: facts, knownAbsent: absent)
+                let result = membership.root.resolveMember(key, facts: facts)
                 guard result.unavailable.isEmpty else { return nil }
                 for member in result.members {
                     let rank = cached.ranks[member] ?? Int.max
@@ -205,7 +262,7 @@ public struct ClientWorkQuery: Codable, Sendable {
                 if !result.members.isEmpty && (fact.states.contains(.available) || fact.states.contains(.blocked)) { attention.insert(key) }
                 states[key] = fact.states
                 for field in membership.root.fields(for: fact, manifest: facts).sorted(by: { $0.rawValue < $1.rawValue }) {
-                    dependencies.append(dependency(key, field: field, fact: fact, projected: projected[key] ?? [], absent: absent[key] ?? []))
+                    dependencies.append(dependency(key, field: field, fact: fact, projected: projected[key] ?? []))
                 }
             }
             let selected = Set(members.map(\.work))
@@ -214,11 +271,11 @@ public struct ClientWorkQuery: Codable, Sendable {
                 root: previous.root, candidates: previous.candidates, content: previous.content, dependencies: dependencies,
                 candidatesCurrent: previous.candidatesCurrent,
                 contentCurrent: selected.allSatisfy { cached.contents[$0] != nil } && selected.isDisjoint(with: unavailableContent))
-            derived = .init(membership: membership, knownAbsent: absent, coverage: coverage)
+            derived = .init(membership: membership, coverage: coverage)
             answers[index] = derived
             let resolution = WorkSelectionResolution(attention: attention.sorted { ($0.repository, $0.kind.rawValue, $0.id) < ($1.repository, $1.kind.rawValue, $1.id) },
                 members: members, unavailable: [])
-            renderings[index] = ProjectedWorkPlan(plan, membership: membership, knownAbsent: absent, coverage: coverage,
+            renderings[index] = ProjectedWorkPlan(plan, membership: membership, coverage: coverage,
                 contents: rendered[index].contents, resolution: resolution, states: states,
                 inventoryDependencies: inventoryDependencies(derived))
         }
@@ -237,14 +294,25 @@ public struct ClientWorkQuery: Codable, Sendable {
                 let original = membership.facts[index]
                 guard let reading = fields[original.work] else { continue }
                 let normalized = reading.facts
-                membership.facts[index] = .init(work: original.work, name: original.name,
-                    parent: sameEpoch(normalized.parent).map { .init(wave: $0.value, support: $0.support) } ?? original.parent,
-                    lifecycle: sameEpoch(normalized.lifecycle).map { .init(completedAt: $0.value.completedAt, states: $0.value.states.sorted { $0.rawValue < $1.rawValue },
-                        known: $0.value.known, support: reading.lifecycleCurrent ? $0.support : nil) } ?? original.lifecycle,
-                    activity: sameEpoch(normalized.activity).map { .init(states: $0.value.states.sorted { $0.rawValue < $1.rawValue },
-                        known: $0.value.known, support: $0.support) } ?? original.activity)
+                var next = original
+                if let parent = sameEpoch(normalized.parent) { next.parent = .init(wave: parent.value, support: parent.support) }
+                if let field = sameEpoch(normalized.disposition) {
+                    next.disposition = field.value; next.disposition.support = reading.dispositionCurrent ? field.support : nil
+                }
+                if let field = sameEpoch(normalized.ownership) {
+                    next.ownership = field.value; next.ownership.support = reading.ownershipCurrent ? field.support : nil
+                }
+                if let field = sameEpoch(normalized.publication) {
+                    next.publication = field.value; next.publication.support = reading.publicationCurrent ? field.support : nil
+                }
+                if let field = sameEpoch(normalized.execution) {
+                    next.execution = field.value; next.execution.support = reading.executionCurrent ? field.support : nil
+                }
+                if let activity = sameEpoch(normalized.activity) {
+                    next.activity = .init(states: activity.value.states.sorted { $0.rawValue < $1.rawValue }, known: activity.value.known, support: activity.support)
+                }
+                membership.facts[index] = next
             }
-            var knownAbsent: [WorkWorkspaceKey: Set<WorkSelectionState>] = [:]
             var projected: [WorkWorkspaceKey: Set<WorkField>] = [:]
             for effect in (effects ?? []).sorted(by: { $0.sequence < $1.sequence }) {
                 if effect.resolution?.resolution == .definitelyRefused { continue }
@@ -257,11 +325,9 @@ public struct ClientWorkQuery: Codable, Sendable {
                     || (effect.work == nil && (membership.facts[index].work.id == effect.issue || membership.facts[index].name == effect.issue)) {
                     let key = membership.facts[index].work
                     var fact = membership.facts[index]
-                    var absent = knownAbsent[key] ?? []
                     var changed = projected[key] ?? []
-                    apply(effect, to: &fact, change: membership.effects[effect.kind], absent: &absent, projected: &changed)
+                    apply(effect, to: &fact, projected: &changed)
                     membership.facts[index] = fact
-                    if !absent.isEmpty { knownAbsent[key] = absent }
                     if !changed.isEmpty { projected[key] = changed }
                 }
             }
@@ -270,10 +336,10 @@ public struct ClientWorkQuery: Codable, Sendable {
             var consumed: [WorkAnswerDependency] = []
             for key in membership.facts.map(\.work) where dependencies[key] != nil {
                 for field in (dependencies[key] ?? []).sorted(by: { $0.rawValue < $1.rawValue }) {
-                    consumed.append(dependency(key, field: field, fact: facts[key], projected: projected[key] ?? [], absent: knownAbsent[key] ?? []))
+                    consumed.append(dependency(key, field: field, fact: facts[key], projected: projected[key] ?? []))
                 }
             }
-            let resolution = membership.resolve(knownAbsent: knownAbsent)
+            let resolution = membership.resolve()
             let selected = Set(resolution.members.map(\.work))
             let content = Set(availableContents(for: plan).map(\.work))
             let missing = selected.subtracting(content)
@@ -284,7 +350,7 @@ public struct ClientWorkQuery: Codable, Sendable {
                 // Missing native input/location readiness is not missing Task
                 // content and cannot invalidate an otherwise exact list/count.
                 contentCurrent: missing.isEmpty && selected.isDisjoint(with: unavailableContent))
-            return WorkQueryAnswer.Plan(membership: membership, knownAbsent: knownAbsent, coverage: coverage)
+            return WorkQueryAnswer.Plan(membership: membership, coverage: coverage)
         })
     }
 }
@@ -354,8 +420,31 @@ struct SessionNameFact: Codable, Equatable, Sendable {
 struct WorkQueryAnswer: Codable, Equatable, Sendable {
     struct Plan: Codable, Equatable, Sendable {
         let membership: WorkMembershipPlan
-        let knownAbsent: [WorkWorkspaceKey: Set<WorkSelectionState>]
         let coverage: WorkAnswerCoverage
+        private enum CodingKeys: String, CodingKey { case membership, coverage, ownershipIntents }
+
+        init(membership: WorkMembershipPlan, coverage: WorkAnswerCoverage) {
+            self.membership = membership; self.coverage = coverage
+        }
+        init(from decoder: any Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            var membership = try c.decode(WorkMembershipPlan.self, forKey: .membership)
+            let ownership = try c.decode([WorkWorkspaceKey: Bool].self, forKey: .ownershipIntents)
+            for index in membership.facts.indices { membership.facts[index].requestedOwnership = ownership[membership.facts[index].work] }
+            self.membership = membership
+            coverage = try c.decode(WorkAnswerCoverage.self, forKey: .coverage)
+        }
+        func encode(to encoder: any Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(membership, forKey: .membership)
+            try c.encode(coverage, forKey: .coverage)
+            // A derived answer retains its local intent without adding fields to
+            // the immutable Machine DTO or fabricating an owner identity.
+            let ownership = Dictionary(uniqueKeysWithValues: membership.facts.compactMap { fact in
+                fact.requestedOwnership.map { (fact.work, $0) }
+            })
+            try c.encode(ownership, forKey: .ownershipIntents)
+        }
     }
     let plans: [Plan]
 }
@@ -386,14 +475,22 @@ extension WorkSelectionState {
 
 extension WorkMembershipPlan.Node {
     func fields(for fact: WorkMembershipPlan.Facts, manifest: [WorkWorkspaceKey: WorkMembershipPlan.Facts]) -> Set<WorkField> {
+        func inputs(_ state: WorkSelectionState) -> Set<WorkField> {
+            if fact.disposition.known && (fact.disposition.value.completed || fact.disposition.value.abandoned) { return [.disposition] }
+            let runtime: Set<WorkField> = [.disposition, .execution]
+            if state.isActivity { return runtime.union([.activity]) }
+            if state == .open { return runtime.union([.ownership, .publication]) }
+            if [.working, .backlog, .autonomous].contains(state) { return runtime.union([.ownership]) }
+            return runtime
+        }
         switch self {
         case .members: return []
         case .select(_, let predicate):
             switch predicate {
             case .default:
-                return fact.work.kind == .task && predicate.includes(fact, facts: manifest) ? [.parent, .lifecycle] : [.parent]
+                return fact.work.kind == .task && predicate.includes(fact, facts: manifest) ? inputs(.working).union([.parent]) : [.parent]
             case .descendants: return [.parent]
-            case .state(let state) where fact.work.kind == .task: return [state.isActivity ? .activity : .lifecycle]
+            case .state(let state) where fact.work.kind == .task: return inputs(state)
             default: return []
             }
         case .compose(let nodes), .intersect(let nodes):

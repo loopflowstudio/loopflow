@@ -76,7 +76,8 @@ final class TaskFeed {
         let current = generation
         lease = client.interaction.open(.viewSelect(expression: filter.expression(wave: wave))) { [weak self] plans in
             guard let self, current == self.generation else { return }
-            guard let plans else { self.repositories = []; self.loaded = false; return }
+            guard let plans else { self.repositories = []; self.taskFacts = [:]; self.loaded = false; return }
+            self.taskFacts = Dictionary(plans.flatMap { $0.membership.facts }.map { ($0.work, $0) }, uniquingKeysWith: { first, _ in first })
             switch RemoteTaskObservation.decodePlans(plans) {
             case .success(let repositories):
                 self.repositories = repositories
@@ -86,6 +87,13 @@ final class TaskFeed {
             case .failure(let error): self.error = error.message
             }
         }
+    }
+
+    private(set) var taskFacts: [WorkWorkspaceKey: WorkMembershipPlan.Facts] = [:]
+
+    func edit(_ task: WorkViewPlan.Content, edit: WorkInteraction.TaskEdit) {
+        guard let directory = repositories.first(where: { $0.repository == task.work.repository })?.path else { return }
+        client.interaction.editTask(task.work, issue: task.identifier ?? task.work.id, directory: directory, edit: edit)
     }
 
     func move(_ task: WorkViewPlan.Content, to wave: String?) {
@@ -371,7 +379,7 @@ struct TaskListView: View {
             abandon: { leave(task, abandoning: true) },
             move: { wave in
                 feed.move(task, to: wave)
-            }, waves: feed.waves.filter { wave in feed.repositories.contains { $0.repository == task.work.repository && $0.path == wave.repo } },
+            }, edit: { feed.edit(task, edit: $0) }, facts: feed.taskFacts[task.work], waves: feed.waves.filter { wave in feed.repositories.contains { $0.repository == task.work.repository && $0.path == wave.repo } },
             completionDirectory: feed.repositories.first { $0.repository == task.work.repository }?.path)
     }
 

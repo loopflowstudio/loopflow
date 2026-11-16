@@ -146,8 +146,21 @@
   content: dated totals use supported lifecycle/time; All ages uses lifecycle.
   Three numbered product questions remain open; native latency remains unmeasured.
 
-- Completion time, 2026-11-15: lifecycle and nullable completion time now share
-  one supported fact in the existing owner. Unknown, invalid or conflicting time
+- Completion time, 2026-11-15: disposition and nullable completion time share
+  one supported fact; lifecycle is derived in the existing owner. Unknown, invalid or conflicting time
   withholds dated membership/counts; All ages stays lifecycle-only. Replacing old
   cache bodies leaves exact pending commands and reload floors intact. No product
   answer or separate date cache is introduced.
+
+- Task input cut, 2026-11-15: SQL ownership facts carry the recorded person and
+  Machine identity, with Machine label unknown. Current labels read hostname and
+  placement configuration outside the planning revision; borrowing those labels
+  would falsely give them SQL support. Local Claim projects ownership intent,
+  never a fabricated person/Machine. This is an engineering choice, not a product
+  answer; native readiness remains independent.
+
+- Cache upgrade, 2026-11-15: old lifecycle support becomes a conservative
+  per-Machine reload floor before the aggregate is removed; independent parent
+  facts/incorporation remain. Missing raw inputs are never reconstructed from
+  state labels. Raw activity uses derivation 2 because derivation 1 had already
+  suppressed terminal Tasks. No product behavior is inferred from this migration.

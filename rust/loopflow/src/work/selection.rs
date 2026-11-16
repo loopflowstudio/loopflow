@@ -5,10 +5,11 @@ use std::collections::{BTreeMap, BTreeSet};
 
 mod membership;
 mod panes;
+pub(crate) use membership::task_selection_states;
 pub use membership::{
-    FieldObservations, FieldSupport, LifecycleFact, MembershipFacts, MembershipNode,
-    MembershipPlan, MembershipPredicate, MembershipStateEffect, MembershipSupport, ParentFact,
-    StateFact,
+    FieldObservations, FieldSupport, MembershipFacts, MembershipNode, MembershipPlan,
+    MembershipPredicate, MembershipStateEffect, MembershipSupport, ParentFact, StateFact,
+    TaskDisposition, TaskMembershipInputs, ValueFact,
 };
 mod query;
 pub use panes::{
@@ -179,7 +180,8 @@ pub struct SelectionWork {
     pub states: BTreeSet<SelectionState>,
     /// An unobservable process is different from a complete read with no current reports.
     pub activity_known: bool,
-    pub completed_at: Option<String>,
+    pub activity_states: BTreeSet<SelectionState>,
+    pub inputs: Option<TaskMembershipInputs>,
     pub support: Option<MembershipSupport>,
 }
 

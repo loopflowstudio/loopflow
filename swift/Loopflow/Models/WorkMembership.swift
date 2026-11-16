@@ -72,30 +72,15 @@ public struct WorkMembershipPlan: Codable, Equatable, Sendable {
             try fields.encode(support, forKey: .support)
         }
     }
-    public struct LifecycleFact: Codable, Equatable, Sendable {
+    /// Derived display value, never an authoritative wire or cached field.
+    public struct LifecycleFact: Equatable, Sendable {
         public let completedAt: String?
         public var states: [WorkSelectionState]
         public let known: Bool
         public let support: FieldSupport?
-        private enum CodingKeys: String, CodingKey { case states, known, support, completedAt = "completed_at" }
         public init(completedAt: String?, states: [WorkSelectionState], known: Bool, support: FieldSupport?) {
             self.completedAt = completedAt; self.states = states; self.known = known; self.support = support
         }
-        public init(from decoder: any Decoder) throws {
-            let fields = try decoder.container(keyedBy: CodingKeys.self)
-            completedAt = try fields.decode(String?.self, forKey: .completedAt)
-            states = try fields.decode([WorkSelectionState].self, forKey: .states)
-            known = try fields.decode(Bool.self, forKey: .known)
-            support = try fields.decode(FieldSupport?.self, forKey: .support)
-        }
-        public func encode(to encoder: any Encoder) throws {
-            var fields = encoder.container(keyedBy: CodingKeys.self)
-            try fields.encode(completedAt, forKey: .completedAt)
-            try fields.encode(states, forKey: .states)
-            try fields.encode(known, forKey: .known)
-            try fields.encode(support, forKey: .support)
-        }
-
         /// Nil means this dated answer is incomplete. Local intent has no Machine time.
         public func completed(inLast days: Int, now: Date) -> Bool? {
             guard known else { return nil }
@@ -106,15 +91,130 @@ public struct WorkMembershipPlan: Codable, Equatable, Sendable {
             return date <= now && date >= now.addingTimeInterval(-Double(days) * 86_400)
         }
     }
+    public struct ValueFact<Value: Codable & Equatable & Sendable>: Codable, Equatable, Sendable {
+        public var value: Value
+        public var known: Bool
+        public var support: FieldSupport?
+        public init(value: Value, known: Bool, support: FieldSupport?) {
+            self.value = value; self.known = known; self.support = support
+        }
+        private enum CodingKeys: String, CodingKey { case value, known, support }
+        public init(from decoder: any Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            value = try c.decode(Value.self, forKey: .value)
+            known = try c.decode(Bool.self, forKey: .known)
+            support = try c.decode(FieldSupport?.self, forKey: .support)
+        }
+        public func encode(to encoder: any Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(value, forKey: .value); try c.encode(known, forKey: .known); try c.encode(support, forKey: .support)
+        }
+    }
+    public struct Disposition: Codable, Equatable, Sendable {
+        public var completed: Bool
+        public var abandoned: Bool
+        public var completedAt: String?
+        public var planningState: String?
+        public var completionRequest: Int64?
+        private enum CodingKeys: String, CodingKey {
+            case completed, abandoned, completedAt = "completed_at", planningState = "planning_state", completionRequest = "completion_request"
+        }
+        public init(completed: Bool, abandoned: Bool, completedAt: String?, planningState: String?, completionRequest: Int64?) {
+            self.completed = completed; self.abandoned = abandoned; self.completedAt = completedAt
+            self.planningState = planningState; self.completionRequest = completionRequest
+        }
+        public init(from decoder: any Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            completed = try c.decode(Bool.self, forKey: .completed); abandoned = try c.decode(Bool.self, forKey: .abandoned)
+            completedAt = try c.decode(String?.self, forKey: .completedAt)
+            planningState = try c.decode(String?.self, forKey: .planningState)
+            completionRequest = try c.decode(Int64?.self, forKey: .completionRequest)
+        }
+        public func encode(to encoder: any Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(completed, forKey: .completed); try c.encode(abandoned, forKey: .abandoned)
+            try c.encode(completedAt, forKey: .completedAt); try c.encode(planningState, forKey: .planningState)
+            try c.encode(completionRequest, forKey: .completionRequest)
+        }
+    }
+    public struct ExecutionInputs: Codable, Equatable, Sendable {
+        public var checkout: Bool
+        public var graphRunning: Bool
+        public var carrierRunning: Bool
+        public var held: Bool
+        public var approved: Bool
+        private enum CodingKeys: String, CodingKey { case checkout, graphRunning = "graph_running", carrierRunning = "carrier_running", held, approved }
+        public init(checkout: Bool, graphRunning: Bool, carrierRunning: Bool, held: Bool, approved: Bool) {
+            self.checkout = checkout; self.graphRunning = graphRunning; self.carrierRunning = carrierRunning
+            self.held = held; self.approved = approved
+        }
+        var state: WorkSelectionState {
+            if graphRunning || carrierRunning { return approved ? .shipping : .moving }
+            if held && !approved { return .active }
+            return checkout ? .idle : .unstarted
+        }
+    }
     public struct Facts: Codable, Equatable, Sendable {
         public let work: WorkWorkspaceKey
         public let name: String
         public var parent: ParentFact
-        public var lifecycle: LifecycleFact
+        public var disposition: ValueFact<Disposition>
+        public var ownership: ValueFact<TaskOwner?>
+        public var publication: ValueFact<Bool>
+        public var execution: ValueFact<ExecutionInputs>
         public var activity: StateFact
-        public var activityKnown: Bool { activity.known }
+        /// A local claim projects ownership without inventing a person or Machine.
+        var requestedOwnership: Bool?
+        private enum CodingKeys: String, CodingKey { case work, name, parent, disposition, ownership, publication, execution, activity }
+        public init(work: WorkWorkspaceKey, name: String, parent: ParentFact, disposition: ValueFact<Disposition>,
+                    ownership: ValueFact<TaskOwner?>, publication: ValueFact<Bool>, execution: ValueFact<ExecutionInputs>, activity: StateFact) {
+            self.work = work; self.name = name; self.parent = parent; self.disposition = disposition
+            self.ownership = ownership; self.publication = publication; self.execution = execution; self.activity = activity
+        }
+        public var owned: Bool? { requestedOwnership ?? (ownership.known ? ownership.value != nil : nil) }
+        public var ownerLabel: String? {
+            if let requestedOwnership { return requestedOwnership ? "Claiming…" : "Unassigned" }
+            guard ownership.known else { return "Ownership unavailable" }
+            return ownership.value?.summary
+        }
+        public var activityKnown: Bool { knows(.done) && states.contains(.done) || activity.known }
+        /// Derived presentation only: no aggregate lifecycle is read or persisted.
+        public var lifecycle: LifecycleFact {
+            guard work.kind == .task else { return .init(completedAt: nil, states: [], known: true, support: nil) }
+            guard disposition.known else { return .init(completedAt: nil, states: [], known: false, support: nil) }
+            let d = disposition.value
+            if !d.abandoned && !d.completed && !execution.known { return .init(completedAt: nil, states: [], known: false, support: nil) }
+            if d.abandoned || (!d.completed && execution.value.state == .unstarted && ["canceled", "duplicate"].contains(d.planningState)) {
+                return .init(completedAt: nil, states: [], known: true, support: disposition.support)
+            }
+            var state = d.completed ? WorkSelectionState.done : execution.value.state
+            if state == .unstarted && ["completed", "canceled", "duplicate"].contains(d.planningState) { state = .done }
+            if state == .done {
+                // Planning can withdraw never-started work. That dated answer
+                // also needs supported execution, unlike explicit completion.
+                let supported = d.completed || execution.support.map { $0.observations != .unavailable } == true
+                return .init(completedAt: d.completedAt, states: [.done], known: true, support: supported ? disposition.support : nil)
+            }
+            var states: Set<WorkSelectionState> = [state]
+            if state == .unstarted { states.insert(.backlog) }
+            else if let owned { states.insert(!owned ? .backlog : state == .shipping ? .autonomous : .working) }
+            if owned == true || (publication.known && publication.value) { states.insert(.open) }
+            return .init(completedAt: nil, states: states.sorted { $0.rawValue < $1.rawValue }, known: state == .unstarted || owned != nil, support: nil)
+        }
+        func knows(_ state: WorkSelectionState) -> Bool {
+            guard disposition.known else { return false }
+            if disposition.value.completed || disposition.value.abandoned { return true }
+            guard execution.known else { return false }
+            if lifecycle.known && (lifecycle.states.isEmpty || lifecycle.states.contains(.done)) { return true }
+            if state.isActivity { return activity.known }
+            if state == .open { return owned == true || (publication.known && publication.value) || (owned != nil && publication.known) }
+            if [.working, .backlog, .autonomous].contains(state) { return execution.value.state == .unstarted || owned != nil }
+            return true
+        }
         public var states: [WorkSelectionState] {
-            (lifecycle.states + activity.states).sorted { $0.rawValue < $1.rawValue }
+            let lifecycle = lifecycle
+            if work.kind == .task && lifecycle.known && lifecycle.states.isEmpty { return [.done] }
+            return (lifecycle.states + (lifecycle.states.contains(.done) ? [] : activity.states)).sorted { $0.rawValue < $1.rawValue }
         }
     }
     public enum Predicate: Codable, Equatable, Sendable {
@@ -215,7 +315,7 @@ public struct WorkMembershipPlan: Codable, Equatable, Sendable {
             }
         }
 
-        fileprivate func evaluate(_ facts: [WorkWorkspaceKey: Facts], order: [WorkWorkspaceKey], knownAbsent: [WorkWorkspaceKey: Set<WorkSelectionState>], includeUnknown: Bool = false, only: WorkWorkspaceKey? = nil, unavailable: inout [String]) -> [WorkMemberRef] {
+        fileprivate func evaluate(_ facts: [WorkWorkspaceKey: Facts], order: [WorkWorkspaceKey], includeUnknown: Bool = false, only: WorkWorkspaceKey? = nil, unavailable: inout [String]) -> [WorkMemberRef] {
             switch self {
             case .members(let members): return only.map { key in members.filter { $0.work == key } } ?? members
             case .select(let source, let predicate):
@@ -223,19 +323,15 @@ public struct WorkMembershipPlan: Codable, Equatable, Sendable {
                     guard let fact = facts[key], predicate.includes(fact, facts: facts, unavailable: &unavailable) else { return nil }
                     let member = WorkMemberRef(source: source, work: key)
                     guard let state = predicate.state(for: fact) else { return member }
-                    if fact.states.contains(state) { return member }
-                    if knownAbsent[key]?.contains(state) == true { return nil }
-                    if !fact.activityKnown && state.isActivity {
-                        unavailable.append("Task \(fact.name) activity is unavailable")
-                        return includeUnknown ? member : nil
-                    }
-                    return nil
+                    if fact.knows(state) { return fact.states.contains(state) ? member : nil }
+                    unavailable.append("Task \(fact.name) \(state.isActivity ? "activity" : "state") is unavailable")
+                    return includeUnknown || fact.states.contains(state) ? member : nil
                 }
-            case .compose(let items): return items.flatMap { $0.evaluate(facts, order: order, knownAbsent: knownAbsent, includeUnknown: includeUnknown, only: only, unavailable: &unavailable) }
+            case .compose(let items): return items.flatMap { $0.evaluate(facts, order: order, includeUnknown: includeUnknown, only: only, unavailable: &unavailable) }
             case .intersect(let items):
                 var result: [WorkMemberRef]?
                 for item in items {
-                    let members = item.evaluate(facts, order: order, knownAbsent: knownAbsent, includeUnknown: includeUnknown, only: only, unavailable: &unavailable)
+                    let members = item.evaluate(facts, order: order, includeUnknown: includeUnknown, only: only, unavailable: &unavailable)
                     if let previous = result {
                         let keys = Set(members.map(\.work))
                         result = previous.filter { keys.contains($0.work) }
@@ -244,10 +340,9 @@ public struct WorkMembershipPlan: Codable, Equatable, Sendable {
                 return result ?? []
             }
         }
-        func resolveMember(_ key: WorkWorkspaceKey, facts: [WorkWorkspaceKey: Facts],
-                           knownAbsent: [WorkWorkspaceKey: Set<WorkSelectionState>]) -> WorkSelectionResolution {
+        func resolveMember(_ key: WorkWorkspaceKey, facts: [WorkWorkspaceKey: Facts]) -> WorkSelectionResolution {
             var unavailable: [String] = []
-            let members = evaluate(facts, order: [key], knownAbsent: knownAbsent, only: key, unavailable: &unavailable)
+            let members = evaluate(facts, order: [key], only: key, unavailable: &unavailable)
             return .init(attention: [], members: members, unavailable: unavailable)
         }
 
@@ -263,8 +358,6 @@ public struct WorkMembershipPlan: Codable, Equatable, Sendable {
     public struct StateEffect: Codable, Equatable, Sendable {
         public let stage: String
         public let domains: [String]
-        public let remove: [WorkSelectionState]
-        public let insert: [WorkSelectionState]
     }
     public let domains: [String]
     public let effects: [String: StateEffect]
@@ -272,19 +365,19 @@ public struct WorkMembershipPlan: Codable, Equatable, Sendable {
     public var facts: [Facts]
     public let unavailable: [String]
 
-    fileprivate func possibleMembers(knownAbsent: [WorkWorkspaceKey: Set<WorkSelectionState>] = [:]) -> Set<WorkMemberRef>? {
+    fileprivate func possibleMembers() -> Set<WorkMemberRef>? {
         // An unavailable named query has an unknown universe. Unknown activity
         // inside a compiled node still has finite, identifiable candidates.
         guard unavailable.isEmpty else { return nil }
         var reasons: [String] = []
         let order = facts.map(\.work)
         let facts = Dictionary(facts.map { ($0.work, $0) }, uniquingKeysWith: { first, _ in first })
-        return Set(root.evaluate(facts, order: order, knownAbsent: knownAbsent, includeUnknown: true, unavailable: &reasons))
+        return Set(root.evaluate(facts, order: order, includeUnknown: true, unavailable: &reasons))
     }
 
-    public func resolve(knownAbsent: [WorkWorkspaceKey: Set<WorkSelectionState>] = [:]) -> WorkSelectionResolution {
+    public func resolve() -> WorkSelectionResolution {
         var unavailable = unavailable
-        let members = root.evaluate(Dictionary(facts.map { ($0.work, $0) }, uniquingKeysWith: { first, _ in first }), order: facts.map(\.work), knownAbsent: knownAbsent, unavailable: &unavailable)
+        let members = root.evaluate(Dictionary(facts.map { ($0.work, $0) }, uniquingKeysWith: { first, _ in first }), order: facts.map(\.work), unavailable: &unavailable)
         let selected = Set(members.map(\.work))
         let attention = facts.filter { selected.contains($0.work) && ($0.states.contains(.available) || $0.states.contains(.blocked)) }.map(\.work)
         return WorkSelectionResolution(attention: attention.sorted { ($0.repository, $0.kind.rawValue, $0.id) < ($1.repository, $1.kind.rawValue, $1.id) }, members: members, unavailable: unavailable)
@@ -295,7 +388,6 @@ public struct WorkMembershipPlan: Codable, Equatable, Sendable {
 @dynamicMemberLookup
 public struct ProjectedWorkPlan: Equatable, Sendable {
     public let membership: WorkMembershipPlan
-    private let knownAbsent: [WorkWorkspaceKey: Set<WorkSelectionState>]
     public let contents: [WorkViewPlan.Content]
     public let confirmed: WorkViewPlan
     public let resolution: WorkSelectionResolution
@@ -320,7 +412,7 @@ public struct ProjectedWorkPlan: Equatable, Sendable {
             .select(source: ["scope"], predicate: .descendants(wave: $0))]) } ?? tasks
         let scoped = WorkMembershipPlan(domains: membership.domains, effects: membership.effects,
             root: root, facts: membership.facts, unavailable: membership.unavailable)
-        var resolution = scoped.resolve(knownAbsent: knownAbsent)
+        var resolution = scoped.resolve()
         var reasons = inventoryDependencies.filter { !$0.current }.map {
             "Work \($0.work.id) \($0.field.rawValue) awaits confirmation"
         }
@@ -338,14 +430,14 @@ public struct ProjectedWorkPlan: Equatable, Sendable {
         guard let from = members.firstIndex(where: { $0.work.kind == .task && $0.work.id == task }),
               let to = members.firstIndex(where: { $0.work.kind == .task && $0.work.id == target }) else { return self }
         members.insert(members.remove(at: from), at: to)
-        return Self(confirmed, membership: membership, knownAbsent: knownAbsent, memberOrder: members, coverage: coverage, contents: contents, inventoryDependencies: inventoryDependencies)
+        return Self(confirmed, membership: membership, memberOrder: members, coverage: coverage, contents: contents, inventoryDependencies: inventoryDependencies)
     }
 
-    public init(_ confirmed: WorkViewPlan, membership: WorkMembershipPlan? = nil, knownAbsent: [WorkWorkspaceKey: Set<WorkSelectionState>] = [:], memberOrder: [WorkMemberRef]? = nil) {
-        self.init(confirmed, membership: membership, knownAbsent: knownAbsent, memberOrder: memberOrder, coverage: nil)
+    public init(_ confirmed: WorkViewPlan, membership: WorkMembershipPlan? = nil, memberOrder: [WorkMemberRef]? = nil) {
+        self.init(confirmed, membership: membership, memberOrder: memberOrder, coverage: nil)
     }
 
-    init(_ confirmed: WorkViewPlan, membership: WorkMembershipPlan? = nil, knownAbsent: [WorkWorkspaceKey: Set<WorkSelectionState>] = [:], memberOrder: [WorkMemberRef]? = nil, coverage: WorkAnswerCoverage?, contents: [WorkViewPlan.Content]? = nil,
+    init(_ confirmed: WorkViewPlan, membership: WorkMembershipPlan? = nil, memberOrder: [WorkMemberRef]? = nil, coverage: WorkAnswerCoverage?, contents: [WorkViewPlan.Content]? = nil,
          resolution: WorkSelectionResolution? = nil, states: [WorkWorkspaceKey: [WorkSelectionState]]? = nil, inventoryDependencies: [WorkAnswerDependency] = []) {
         self.confirmed = confirmed
         self.inventoryDependencies = inventoryDependencies
@@ -353,9 +445,8 @@ public struct ProjectedWorkPlan: Equatable, Sendable {
         let membership = membership ?? confirmed.membership
         self.membership = membership
         facts = Dictionary(membership.facts.map { ($0.work, $0) }, uniquingKeysWith: { first, _ in first })
-        self.knownAbsent = knownAbsent
         self.coverage = coverage
-        var resolution = resolution ?? membership.resolve(knownAbsent: knownAbsent)
+        var resolution = resolution ?? membership.resolve()
         let membershipIncomplete = !resolution.unavailable.isEmpty
         if let coverage, !coverage.current {
             var reasons = coverage.dependencies.filter { !$0.current }.map {
@@ -383,10 +474,12 @@ public struct ProjectedWorkPlan: Equatable, Sendable {
         self.states = states ?? Dictionary(membership.facts.map { ($0.work, $0.states) }, uniquingKeysWith: { first, _ in first })
         let selected = Set(resolution.members)
         let departures: Set<WorkMemberRef>
-        if !resolution.unavailable.isEmpty, !knownAbsent.isEmpty,
+        if !resolution.unavailable.isEmpty,
            let previous = confirmed.membership.possibleMembers(),
-           let current = membership.possibleMembers(knownAbsent: knownAbsent) {
-            departures = previous.subtracting(current)
+           let current = membership.possibleMembers() {
+            let removed = previous.subtracting(current)
+            let gone = Set(removed.map(\.work)).subtracting(current.map(\.work))
+            departures = removed.union(confirmed.arrangement.order.filter { gone.contains($0.work) })
         } else { departures = [] }
         // Losing live coverage keeps the last evaluated members. It must not
         // resurrect occurrences removed by a newer normalized field merely
@@ -422,6 +515,7 @@ public struct ProjectedTaskHistory: Sendable {
         public var id: String { task.id }
         public let task: RoadmapTask
         public let lifecycle: WorkMembershipPlan.LifecycleFact?
+        public let ownerLabel: String?
         public let locationKnown: Bool
 
         public var status: String {
@@ -456,7 +550,7 @@ public struct ProjectedTaskHistory: Sendable {
                 WorkMembershipPlan.Predicate.descendants(wave: wave).includes($0, facts: fields, unavailable: &reasons)
             }
             let locationKnown = belongs != nil && reasons.isEmpty
-            let row = Row(task: task, lifecycle: fact?.lifecycle, locationKnown: locationKnown)
+            let row = Row(task: task, lifecycle: fact?.lifecycle, ownerLabel: fact?.ownerLabel, locationKnown: locationKnown)
             retained.append(row)
             if locationKnown && belongs == false { continue }
             guard locationKnown, let lifecycle = fact?.lifecycle, lifecycle.known else {

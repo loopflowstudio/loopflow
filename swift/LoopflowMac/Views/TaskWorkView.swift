@@ -16,6 +16,12 @@ struct TaskWorkflowHeader: View {
 
     private var lifecycleLabel: String {
         if model.isCompleting(task) { return OperationDeclaration.completionProgress }
+        if let fact = model.projectedTaskFacts(task) {
+            guard fact.lifecycle.known else { return "Updating…" }
+            if fact.disposition.value.abandoned { return "Canceled" }
+            if fact.lifecycle.states.contains(.done) { return "Completed" }
+            return fact.lifecycle.states.first(where: { [.unstarted, .idle, .active, .moving, .shipping].contains($0) })?.rawValue.capitalized ?? "Updating…"
+        }
         return switch task.lifecycle {
         case .done: "Completed"
         case .abandoned: "Canceled"
@@ -26,11 +32,11 @@ struct TaskWorkflowHeader: View {
     private var controls: some View {
             HStack(alignment: .center, spacing: Spacing.md) {
                 Text(lifecycleLabel)
-                    .fontWeight(task.isCompleted ? .semibold : .regular)
+                    .fontWeight(model.taskCompleted(task) ? .semibold : .regular)
                     .foregroundStyle(task.lifecycle == .done ? palette.success
                         : task.lifecycle == .abandoned ? palette.failure : palette.textSecondary)
                     .accessibilityIdentifier("task-lifecycle-status")
-                if task.isUnassigned {
+                if model.taskOwned(task) == false {
                     Text("Unassigned").foregroundStyle(palette.textSecondary)
                 }
                 if let workflow = work.value?.graph {
@@ -79,18 +85,18 @@ struct TaskWorkflowHeader: View {
                         .foregroundStyle(palette.textSecondary)
                     Spacer()
                 }
-                if task.isCompleted {
-                    Button("Reopen") { Task { await model.reopenTask(task) } }
-                        .disabled(acting || readingUnavailable != nil)
+                if model.taskCompleted(task) || model.isCompleting(task) {
+                    Button("Reopen") { model.reopenTask(task) }
+                        .disabled(acting)
                         .accessibilityIdentifier("task-reopen")
                 } else {
                     Button("Complete") { model.completeTask(task) }
                         .disabled(acting || model.isCompleting(task))
                         .accessibilityIdentifier("task-complete")
-                    Button(task.runtime?.owner == nil ? "Claim" : "Unassign") {
-                        Task { await model.assignTask(task, claimed: task.runtime?.owner == nil) }
+                    Button(model.taskOwned(task) != true ? "Claim" : "Unassign") {
+                        model.assignTask(task, claimed: model.taskOwned(task) != true)
                     }
-                    .disabled(acting || readingUnavailable != nil)
+                    .disabled(acting || model.taskOwned(task) == nil)
                     .accessibilityIdentifier("task-claim-unassign")
                     Button("Abandon…", role: .destructive) { confirmingAbandon = true }
                         .disabled(acting)
@@ -179,12 +185,12 @@ struct TaskWorkflowHeader: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
             palette.background
-            if task.isCompleted {
+            if model.taskCompleted(task) {
                 (task.lifecycle == .done ? palette.success : palette.failure).opacity(0.14)
             }
         }
         .overlay(alignment: .leading) {
-            if task.isCompleted {
+            if model.taskCompleted(task) {
                 Rectangle()
                     .fill(task.lifecycle == .done ? palette.success : palette.failure)
                     .frame(width: 3)
@@ -272,17 +278,17 @@ struct TaskShipControl: View {
                     .disabled(acting || readingUnavailable != nil)
                     .help("lf --task \(task.task.identifier) ship --stop: withdraw it and disarm auto-merge")
                     .accessibilityIdentifier("task-ship-stop")
-            } else if !task.isCompleted {
+            } else if !model.taskCompleted(task) {
                 let refusal = readingUnavailable ?? task.shipControl.unavailable
                 HStack(spacing: Spacing.sm) {
                     // Hovering Auto-Ship offers the other ways out of this Task.
                     if hovered {
-                        let owned = task.runtime?.owner != nil
+                        let owned = model.taskOwned(task) == true
                         Button(owned ? "Unassign" : "Claim") {
-                            Task { await model.assignTask(task, claimed: !owned) }
+                            model.assignTask(task, claimed: !owned)
                         }
                         .buttonStyle(WorkOutlineButtonStyle())
-                        .disabled(acting || readingUnavailable != nil)
+                        .disabled(acting || model.taskOwned(task) == nil)
                         .help(owned ? "lf task unassign: nobody owns it, so nothing moves it; its checkout, PR and history stay"
                                     : "lf task claim: you own it on this Machine")
                         .accessibilityIdentifier("task-unassign")
@@ -627,13 +633,13 @@ struct TaskActionItems: View {
                 }
             }
         }.disabled(acting).accessibilityIdentifier("task-move-wave")
-        if task.isCompleted {
-            Button("Reopen Task") { Task { await model.reopenTask(task) } }.disabled(unavailable)
+        if model.taskCompleted(task) || model.isCompleting(task) {
+            Button("Reopen Task") { model.reopenTask(task) }.disabled(acting)
         } else {
             Button("Complete Task") { model.completeTask(task, visible: completionOrder) }.disabled(acting || model.isCompleting(task))
-            Button(task.runtime?.owner == nil ? "Claim Task" : "Unassign Task") {
-                Task { await model.assignTask(task, claimed: task.runtime?.owner == nil) }
-            }.disabled(unavailable)
+            Button(model.taskOwned(task) != true ? "Claim Task" : "Unassign Task") {
+                model.assignTask(task, claimed: model.taskOwned(task) != true)
+            }.disabled(acting || model.taskOwned(task) == nil)
         }
         if let wave { Button("Open owning Wave") { model.select(.wave(id: wave.id)) } }
         Divider()

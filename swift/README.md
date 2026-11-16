@@ -90,6 +90,15 @@ completion leaves your newer selection alone. Filed identity, Graph admission,
 native attachment and Work query freshness remain separate facts. A stale query
 cannot replace the operation's saved outcome.
 
+**Claim** requests ownership on this Machine; **Unassign** releases ownership
+while keeping checkout, PR and conversations. Controls and affected lists update
+immediately. **Reopen** withdraws completion without restarting the Workflow.
+For completed or completing work it also withdraws Auto-Ship approval; an
+already-open no-op keeps approval. The destination follows retained facts;
+missing facts leave it incomplete. Saved changes wait for the original Machine
+through restart. Refusal removes only that change; an uncertain send checks the
+original request. Later navigation, drafts and conversations stay put.
+
 Complete and Abandon show their projected result while delivering, with no extra request
 row. A disconnected request shows **Waiting for connection** without an action;
 its saved identity resumes automatically when its original Machine reconnects,
@@ -1197,7 +1206,8 @@ stamped query bodies in the shared SQLite store. The phone restores those bases
 through the same freshness and invalidation rules; its separate query files are
 no longer read or written. Departed epochs and query ordering survive restart.
 Each subscription reading retains its receiving Machine link through buffering
-and decoding. Independently supported parent and lifecycle facts join before
+and decoding. Independently supported parent, disposition, ownership, publication and execution
+inputs join before
 query replacement; external activity joins only while that receiving link is
 current. Disconnect and reconnect leave earlier activity last-known until a
 current-link capture revalidates it, even when the server retains its observation
@@ -1205,6 +1215,8 @@ source. Queued old readings cannot borrow the new link or revoke its capture.
 Field facts, query writes and local revalidation proof commit or roll back together.
 Each cached query also stores a replaceable derived answer with its authored
 program, candidate snapshot, content identities and consumed membership fields.
+Requested ownership persists as local answer metadata, without adding an owner
+identity or projected field to the Machine DTO.
 Projection uses normalized fields and their persisted stage incorporation:
 Complete followed by a newer Reopen cannot be reapplied by a held query.
 Rows and dependency coverage publish together. Disconnect invalidates Busy

@@ -90,13 +90,8 @@ pub fn configured(repo: &Path) -> Option<Provider> {
     }
 }
 
-/// The configured tracker's product name; Git planning has none.
-pub fn remote_name(repo: &Path) -> Option<&'static str> {
-    transport(repo)?.remote_name()
-}
-
 pub fn connected(repo: &str) -> bool {
-    remote_name(Path::new(repo)).is_some()
+    configured(Path::new(repo)).is_some()
 }
 
 #[cfg(any(test, feature = "test-support"))]
@@ -308,6 +303,16 @@ pub(crate) fn visible_text(body: &str) -> String {
 
 pub(crate) fn message(error: impl std::fmt::Display) -> OpsError {
     OpsError::Message(error.to_string())
+}
+
+/// The value a `field` or `state` effect sets.
+pub(crate) fn value(effect: &TrackerEffect) -> OpsResult<WorkValue> {
+    serde_json::from_value(effect.value.clone()).map_err(message)
+}
+
+/// The values a `create` effect starts its tracker object with.
+pub(crate) fn values(effect: &TrackerEffect) -> OpsResult<Vec<WorkValue>> {
+    serde_json::from_value(effect.value.clone()).map_err(message)
 }
 
 /// The uuid a creation carries as the provider id: the owner's own.

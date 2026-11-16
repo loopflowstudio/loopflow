@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 use super::{completed, rich_text, AsanaClient, Task, IDENTITY_LABEL};
 use crate::ops::tracker::{
     creation_id, ingest_task, message, now, observed_task, remote_project, remote_task,
-    repository_scope, visible_text, BridgeError, Sent,
+    repository_scope, value, values, visible_text, BridgeError, Sent,
 };
 use crate::ops::OpsResult;
 use crate::store::Store;
@@ -362,14 +362,6 @@ impl AsanaClient {
             ..Observed::default()
         }))
     }
-}
-
-fn value(effect: &TrackerEffect) -> OpsResult<WorkValue> {
-    serde_json::from_value(effect.value.clone()).map_err(message)
-}
-
-fn values(effect: &TrackerEffect) -> OpsResult<Vec<WorkValue>> {
-    serde_json::from_value(effect.value.clone()).map_err(message)
 }
 
 /// The Asana task field a Task value sets; Project membership is separate.

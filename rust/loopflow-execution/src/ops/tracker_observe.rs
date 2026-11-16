@@ -1,6 +1,6 @@
-//! Turn a Linear issue read into durable Task direction.
+//! Turn a tracker read into durable Task direction.
 //!
-//! Someone editing a Linear issue's title or description or adding a comment
+//! Someone editing a tracker item's title or description or adding a comment
 //! appends an ordered Steer. This module maps one observation onto that input
 //! spine, and [`Store::apply_linear_observation`] persists it atomically.
 //! Exactly-once, the baseline, and the monotonic-revision guard all live in the
@@ -13,7 +13,8 @@ use std::time::Duration;
 use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 
-use super::{OpsError, OpsResult};
+use super::tracker::message;
+use super::OpsResult;
 use crate::store::{SharedStore, Store};
 use loopflow_storage::work::task::Task;
 
@@ -23,8 +24,8 @@ pub(crate) async fn refresh_task_comments(store: &SharedStore, task: &Task) -> O
     let task = store
         .get_task(&task.id)
         .await
-        .map_err(|error| OpsError::Message(error.to_string()))?
-        .ok_or_else(|| OpsError::Message(format!("Task {} is missing", task.id)))?;
+        .map_err(message)?
+        .ok_or_else(|| message(format!("Task {} is missing", task.id)))?;
     let Some(issue) = &task.linear_id else {
         return Ok(());
     };
@@ -40,11 +41,7 @@ pub(crate) async fn refresh_task_comments(store: &SharedStore, task: &Task) -> O
     }
     let client = super::tracker::Tracker::for_items(&repository).await?;
     // A coworker deleted the item: remove the Task from the plan, keeping its work.
-    if client
-        .removed(issue.as_str())
-        .await
-        .map_err(|error| OpsError::Message(error.to_string()))?
-    {
+    if client.removed(issue.as_str()).await.map_err(message)? {
         store
             .sqlite
             .observe_pm_issue_change(issue.as_str(), None, true)
@@ -54,7 +51,7 @@ pub(crate) async fn refresh_task_comments(store: &SharedStore, task: &Task) -> O
     let mut observation = client
         .observe_issue(issue.as_str())
         .await
-        .map_err(|error| OpsError::Message(error.to_string()))?;
+        .map_err(message)?;
     claim_local_comments(store, &task, &client, &mut observation)?;
     // Linear's team feed accepts provider edits into Work. Asana has
     // none, so this exact read is their acceptance: a renamed or completed task
@@ -63,7 +60,7 @@ pub(crate) async fn refresh_task_comments(store: &SharedStore, task: &Task) -> O
         if let Some((item, project)) = client
             .issue_ownership(issue.as_str())
             .await
-            .map_err(|error| OpsError::Message(error.to_string()))?
+            .map_err(message)?
         {
             super::tracker::ingest_task(
                 store,
@@ -83,7 +80,7 @@ pub(crate) async fn refresh_task_comments(store: &SharedStore, task: &Task) -> O
             planning_connected,
         )
         .await
-        .map_err(|error| OpsError::Message(error.to_string()))?;
+        .map_err(message)?;
     Ok(())
 }
 
@@ -110,10 +107,6 @@ fn claim_local_comments(
         }
     }
     Ok(())
-}
-
-fn message(error: impl std::fmt::Display) -> OpsError {
-    OpsError::Message(error.to_string())
 }
 
 /// Bring the repository's planning scope (a Linear Team or Asana project) up

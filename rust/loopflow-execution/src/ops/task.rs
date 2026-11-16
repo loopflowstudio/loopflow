@@ -2329,7 +2329,9 @@ pub fn task_sync(issue: &str, retry_updates: bool) -> OpsResult<String> {
             .ok_or_else(|| task_error(format!("Task {issue} is unavailable")))?;
         let repository = repository_for_task(&store, &task)?;
         let repo = repository.as_path();
-        let Some(provider) = super::tracker::remote_name(repo) else {
+        let Some(provider) = super::tracker::configured(repo)
+            .map(loopflow_storage::provider::Provider::display_name)
+        else {
             return Err(task_error(
                 "Task repository has no remote planning provider",
             ));

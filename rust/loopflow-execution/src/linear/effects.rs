@@ -10,7 +10,7 @@ use serde_json::{json, Value};
 use super::{LinearClient, OrderedIssue, PlanningResponse};
 use crate::ops::tracker::{
     creation_id, ingest_task, message, now, observed_project, observed_task, remote_project,
-    remote_task, repository_scope, Sent,
+    remote_task, repository_scope, value, values, Sent,
 };
 use crate::ops::OpsResult;
 use crate::store::Store;
@@ -104,7 +104,7 @@ impl LinearClient {
     ) -> OpsResult<Sent> {
         let team = repository_scope(repo)?;
         let mut input = json!({"id": creation_id(task.as_str())?, "teamId": team});
-        for value in creation_values(effect)? {
+        for value in values(effect)? {
             match value {
                 WorkValue::TaskTitle(title) => input["title"] = json!(title),
                 WorkValue::TaskDescription(description) => {
@@ -145,7 +145,7 @@ impl LinearClient {
         let id = creation_id(project.as_str())?;
         let mut input = json!({"id": id, "teamIds": [team], "useDefaultTemplate": false});
         let (mut description, mut krs, mut targets) = (String::new(), Vec::new(), Vec::new());
-        for value in creation_values(effect)? {
+        for value in values(effect)? {
             match value {
                 WorkValue::ProjectName(name) => input["name"] = json!(name),
                 WorkValue::ProjectSummary(summary) => input["description"] = json!(summary),
@@ -688,14 +688,6 @@ fn pr_comment_id(task: &TaskId, url: &str) -> OpsResult<String> {
         format!("loopflow/task/{task}/pr/{url}").as_bytes(),
     );
     super::comment_delivery_id(&id.to_string()).map_err(message)
-}
-
-fn value(effect: &TrackerEffect) -> OpsResult<WorkValue> {
-    serde_json::from_value(effect.value.clone()).map_err(message)
-}
-
-fn creation_values(effect: &TrackerEffect) -> OpsResult<Vec<WorkValue>> {
-    serde_json::from_value(effect.value.clone()).map_err(message)
 }
 
 /// A Task's Project as Linear knows it.

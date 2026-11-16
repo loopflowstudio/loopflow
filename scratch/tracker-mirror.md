@@ -333,7 +333,8 @@ Task, since an older lf locks the same inode (`planning_sync.rs:594`).
   `asana::task_fields`.
 - **Store-built GraphQL:** the `json!` inputs in
   `sqlite/planning_export.rs::prepare_planning_export`, `export_json.input`,
-  `linear_records::render_project_content` in storage (moves to `linear/`).
+  `linear_records` (`render_project_content` stays in `planning.rs`: the
+  Project document parser's round-trip tests share it).
 - **Old drains and receipt writers:** `ops/planning_export.rs`,
   `ops/planning_delivery.rs`, `ops/planning_order.rs` delivery,
   `tracker_observe::{sync_repository_deliveries, deliver_task_state,
@@ -431,7 +432,17 @@ storage src. The only Linear names in `ops/tracker{,/drain}.rs` are the
 Target architecture). Open choices in `questions.md` keep today's behavior and
 do not block publishing.
 
+### Compress (2026-11-16)
+
+`drain.rs` is one `Drain` pass context (no `too_many_arguments`); the queue is
+read once per pass (`queued`), the second round re-reads only when a Project
+creation is queued, and one `look` serves lost replies and order. One `value`/
+`values` parser and one `message` in `ops/tracker.rs`; `tracker::remote_name`
+is `configured().map(display_name)`.
+
 ## Checks run
+
+- Compress: `cargo nextest run -p loopflow-execution --lib -E 'test(ops::tracker::) | test(asana_planning_tests) | test(planning_effect_tests::) | test(planning_order_tests::) | test(task_comments_tests::) | test(linear::effects::) | test(planning_lookup_tests::)'` → 47 pass; clippy `-p loopflow-execution --all-targets` clean; `cargo check -p loopflow --all-targets` clean.
 
 - `cargo nextest run -p loopflow-storage -p loopflow-execution --lib -E 'test(ops::tracker::) | test(asana_planning_tests) | test(tracker_effects) | test(task_history) | test(planning_effect_tests::) | test(planning_order_tests::) | test(task_comments_tests::) | test(linear::effects::)'` → 39 pass.
 - `cargo test -p loopflow-storage --lib -- query_plans tracker_effects` → 19 pass.

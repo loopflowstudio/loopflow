@@ -47,13 +47,12 @@ public struct AgentProcess: Codable, Sendable, Equatable, Identifiable {
     public let cwd: String?
     public let startedAt: Int64
     public let completedAt: Int64?
-    public let outcome: String?
     public let exitCode: Int32?
     public let signal: String?
     public let error: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, pid, command, repo, cwd, outcome, signal, error
+        case id, pid, command, repo, cwd, signal, error
         case osStartedAt = "os_started_at"
         case agentSessionID = "agent_session_id"
         case traceID = "trace_id"
@@ -90,7 +89,7 @@ public enum ProcessEntry: Codable, Sendable, Equatable, Identifiable {
     public var outcome: String? {
         switch self {
         case .lf(let process): process.outcome
-        case .agent(let process): process.outcome
+        case .agent: nil
         }
     }
 

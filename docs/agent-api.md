@@ -3,10 +3,8 @@
 `lf` is the API agents call to launch, steer, and observe other agents. There
 is no SDK. The verbs are the same binary you use; every read surface takes
 `--json`; and every launched agent receives the
-launcher contract (`LOOPFLOW.md`) in its context. Work-associated launches also
-receive the `work` skill body. Read `lf help skill work` before using Task or
-Wave APIs in an existing conversation. Choose the commands and Skills that
-fit the requested work. Work context does not select a Graph or authorize Wave
+launcher contract (`LOOPFLOW.md`) in its context, which holds the Task model
+and its commands. Choose the commands and Skills that fit the requested work. Work context does not select a Graph or authorize Wave
 memory maintenance; the selected Loopflow Graph owns that procedure.
 
 ## Select the execution or client surface
@@ -25,9 +23,8 @@ lf session history show SESSION --instructions
 lf session history show SESSION --instructions --json
 ```
 
-The retained input records why launcher guidance, Work guidance and selected
-skills were supplied. It also records automatic opt-out, missing Work association,
-and deduplication when `work` was selected as a skill. Use `--input INPUT` to
+The retained input records why launcher guidance and selected skills were
+supplied. It also records automatic opt-out. Use `--input INPUT` to
 inspect an earlier input belonging to that Session. These are recorded decisions,
 not a reconstruction from the repository's current state. Old captures may have
 less detailed reasons; missing captures report unavailable evidence. Native
@@ -52,7 +49,7 @@ kind as the Mac app. It may inspect status and start a Session when the person
 asks it to converse with a Wave.
 
 A Loopflow-launched Wave or Task agent is an internal participant.
-It receives `LOOPFLOW.md` and work guidance; typed Work observations carry durable coordination,
+It receives `LOOPFLOW.md`; typed Work observations carry durable coordination,
 and headless failures remain visible in ordinary output and recorded outcomes.
 
 A Wave directing a task is the internal case:
@@ -278,8 +275,7 @@ Loopflow launches receive a small launcher contract: work in the supplied
 checkout, follow the requested tools and repository conventions, and answer in
 the current Session. Standalone native skills retain their own guidance.
 
-Task- and Wave-associated launches also receive Work guidance. Read
-`lf help skill work` when entering Work APIs from an existing conversation.
-Association supplies context and ownership; the selected skill or Graph supplies
+The Task model and its commands are in that text, so every launch carries
+them. Association supplies context and ownership; the selected skill or Graph supplies
 the procedure. Keep repeatable instructions with that skill and repository rules
 in its agent guide.

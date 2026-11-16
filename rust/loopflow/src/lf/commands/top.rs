@@ -986,7 +986,6 @@ mod tests {
             cwd: Some("/repo/task".into()),
             started_at: 100,
             completed_at: None,
-            outcome: None,
             exit_code: None,
             signal: None,
             error: None,

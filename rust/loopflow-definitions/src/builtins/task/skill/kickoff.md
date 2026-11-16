@@ -4,11 +4,16 @@ produces: an implementation plan with risks answered, one approach chosen and th
 ---
 Turn the direction into a plan worth building: risks answered, one approach chosen, the demo named.
 
-The product direction arrives settled: the Task brief, the direction chosen in
-explore, what people have said. Plan that outcome. Don't reopen discovery or
-swap in something technically convenient. Continue an existing design instead
-of re-deriving it, and if the plan is already good enough, keep it. Name an
-open product choice that blocks planning and ask; a plan can't grant approval.
+**Plan the outcome you were given.** The direction arrives settled: the Task
+brief, what was chosen in explore, what people have said. Don't reopen
+discovery or swap in something technically convenient.
+
+**Continue; don't re-derive.** Build on the design that exists. If the plan
+is already good enough, keep it.
+
+**Choose.** An open product choice gets asked when someone is here. With
+nobody here, make the bold choice and mark it in the plan as made for review,
+with what you passed over.
 
 ## Method
 
@@ -31,15 +36,15 @@ open product choice that blocks planning and ask; a plan can't grant approval.
 4. **Imagine it shipped.** Wild success: people love it. What details made it
    great? Wild failure: six months on you're ripping it out. What went wrong?
 
-5. **Choose.** Commit to one direction. Make reversible choices yourself and
-   leave real product decisions open and named.
+5. **Commit to one direction.** The plan describes one design, not a menu.
 
 6. **Name the demo.** The command someone runs and what appears, or the
    interaction that now works. If you can't describe it, the slice stops one
    step short; carry it to where it shows itself.
 
-7. **Write the plan** to `scratch/<slug>.md`. Every other scratch file is input
-   to reconcile; an older, worse design doesn't win by being there first.
+7. **Write the plan** to `scratch/plan.md`, the one file every later step is
+   handed first. Every other scratch file is input to reconcile; an older,
+   worse design doesn't win by being there first.
 
 ## What the plan covers
 
@@ -56,11 +61,16 @@ Cover these where they matter and skip the rest:
 - **Operational boundary** — latency, scale, network or recovery limits the
   code must hold.
 - **Exclusions** — nearby behavior left out.
-- **Delete — do not maintain** — the files, symbols, tests and fixtures this
-  change removes, and the behavior and data that must survive. Never plan
-  repairs to them. Add earlier attempts you find while reading.
-- **Slices** — for a change that can't be split, the full end state, deepest
-  deletions first, with the current slice marked and updated in place.
+- **What goes** — the files, symbols, tests and fixtures this change removes,
+  and the behavior and data that must survive. Never plan repairs to them.
+  Add earlier attempts you find while reading.
+- **Slices** — a suggested order to build in. Each slice runs end to end,
+  thinly, through every layer it touches, so it can be run and the pieces
+  seen to fit. First the slice that teaches the most: the one that could
+  prove the plan wrong. Say exactly what the first slice is and what it would
+  show; sketch the next two or three. Don't plan sixteen. The plan changes as
+  slices land, and by the eighth it will have left this list behind. Each
+  slice removes what it replaced once it works.
 
 "Done when" names behavior people see, not a list of files. Keep each finding
 beside the decision it informs, with source paths. Quote what people said word
@@ -71,15 +81,14 @@ decisions already made.
 
 ## Principles
 
-**Bold over safe.** When unsure, pick the more ambitious option.
+**Be bold.** When unsure, pick the more ambitious option.
 
-**Concrete over abstract.** "Fast" means nothing. "P95 under 100ms" means
-something.
+**Be concrete.** "Fast" means nothing. "P95 under 100ms" means something.
 
-**Whole over staged.** Land a coherent architectural change at once. Splitting
-it breeds adapters and dual states: legacy/new splits, fallbacks and dual
-writes need a reason and a deletion date. Split only when each piece is
-noticeable on its own.
+**Land whole, build in slices.** A coherent change lands at once: splitting
+it across PRs breeds adapters and dual states, and legacy/new splits,
+fallbacks and dual writes need a reason and a deletion date. Inside the
+Task, build it a slice at a time.
 
-**Reshape over layer.** Map the concepts, types, writers and launch paths that
-exist before adding another.
+**Reshape before you add.** Map the concepts, types, writers and launch paths
+that exist before adding another.

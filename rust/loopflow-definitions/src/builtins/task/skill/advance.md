@@ -21,7 +21,7 @@ elsewhere. A finished Graph alone is no reason to run it again.
 **A design has no Task.** Continue in its checkout: implement directly or run
 the chosen Graph, such as `lf graph pursue`. No Task, Wave or Linear setup is
 needed, and "keep coding" doesn't ask for one. Only when managed work is asked
-for, read `lf help skill work` and use `launch-plan`.
+for, use `launch-plan`.
 
 Check `lf help <command>` before relying on a command you're unsure of, and
 never upgrade the installation along the way. After launching, read the run

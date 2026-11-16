@@ -106,12 +106,49 @@ impl SkillSource {
         })
     }
 
+    /// The skill's text. A Loopflow file whose frontmatter says
+    /// `extends: builtin` is the builtin of the same name with the file's body
+    /// appended, so a repository adds its own section and keeps following the
+    /// builtin as it changes.
     pub fn read(&self) -> Result<String, LoadError> {
-        match &self.path {
-            Some(path) => Ok(crate::observe::read_to_string(path)?),
-            None => Ok(builtins::get_builtin_skill(&self.name)
+        let Some(path) = &self.path else {
+            return Ok(builtins::get_builtin_skill(&self.name)
                 .expect("embedded catalog entry names a builtin")
-                .to_string()),
+                .to_string());
+        };
+        let content = crate::observe::read_to_string(path)?;
+        if self.dialect != SkillDialect::Loopflow {
+            return Ok(content);
+        }
+        let Some((frontmatter, addition)) = split_frontmatter(&content) else {
+            return Ok(content);
+        };
+        let extends = serde_yaml_ng::from_str::<Value>(frontmatter)
+            .ok()
+            .and_then(|value| value.get("extends").cloned());
+        match extends.as_ref().map(Value::as_str) {
+            None => Ok(content),
+            Some(Some("builtin")) => {
+                let base = builtins::resolve_builtin_skill(&self.name)
+                    .and_then(builtins::get_builtin_skill)
+                    .ok_or_else(|| {
+                        LoadError::InvalidSkill(format!(
+                            "{} extends a builtin, but no builtin skill is named {:?}",
+                            path.display(),
+                            self.name
+                        ))
+                    })?;
+                let base = split_frontmatter(base).map_or(base, |(_, body)| body);
+                Ok(format!(
+                    "---{frontmatter}---\n{}\n\n{}",
+                    base.trim_end(),
+                    addition.trim_start()
+                ))
+            }
+            Some(_) => Err(LoadError::InvalidSkill(format!(
+                "{}: `extends` takes only `builtin`",
+                path.display()
+            ))),
         }
     }
 }
@@ -316,6 +353,38 @@ mod tests {
         let path = root.join(relative);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, content).unwrap();
+    }
+
+    #[test]
+    fn a_repository_skill_can_append_to_the_builtin_it_names() {
+        let repo = TempDir::new().unwrap();
+        write(
+            repo.path(),
+            ".lf/skills/gate.md",
+            "---\nextends: builtin\n---\n## Here\n\nRun the local suite first.\n",
+        );
+        write(
+            repo.path(),
+            ".lf/skills/mine.md",
+            "---\nextends: builtin\n---\nNothing to extend.\n",
+        );
+        let catalog = SkillCatalog::load(Some(repo.path()), None, false).unwrap();
+        let builtin = SkillCatalog::load(None, None, false)
+            .unwrap()
+            .load_skill("gate")
+            .unwrap()
+            .content
+            .unwrap();
+        let extended = catalog.load_skill("gate").unwrap().content.unwrap();
+        assert_eq!(
+            extended,
+            format!(
+                "{}\n\n## Here\n\nRun the local suite first.\n",
+                builtin.trim_end()
+            )
+        );
+        let error = catalog.load_skill("mine").unwrap_err().to_string();
+        assert!(error.contains("no builtin skill is named"), "{error}");
     }
 
     #[test]

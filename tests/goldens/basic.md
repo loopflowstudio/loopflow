@@ -31,8 +31,11 @@ run showed, outside facts. Code, history and a fresh run can recover the rest.
 Quote what people said; don't turn a reply into a verdict like "accepted". Aim
 for quality per word, not more words.
 
-Markdown under `scratch/` is loaded into this checkout's runs. Another
-checkout's files are not. Old notes are background, not new instructions.
+`scratch/` holds this checkout's working notes. `scratch/plan.md` is the plan:
+what is being built and what remains. Each run is handed the plan first, then
+a listing of the rest with the most recently edited notes preloaded; read
+what the work depends on in full. Another checkout's files are not included.
+Old notes are background, not new instructions.
 Keep secrets out of output.
 
 </lf:loopflow>

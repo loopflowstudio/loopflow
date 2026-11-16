@@ -1,0 +1,61 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Skills rewrite map</title>
+<style>
+:root{--bg:#fbfaf7;--fg:#1c1b19;--mut:#6b675f;--line:#e2ded5;--built:#1f7a4d;--want:#b45309;--open:#7c3aed}
+@media(prefers-color-scheme:dark){:root{--bg:#161513;--fg:#ece9e2;--mut:#9a958a;--line:#33302b;--built:#5fd39a;--want:#f0a44b;--open:#b99cff}}
+body{background:var(--bg);color:var(--fg);font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:980px;margin:40px auto;padding:0 20px}
+h1{font-size:24px;margin:0 0 4px}h2{font-size:18px;margin:36px 0 8px}
+p.sub{color:var(--mut);margin:0 0 20px}
+table{border-collapse:collapse;width:100%}td,th{border-top:1px solid var(--line);padding:8px 10px;vertical-align:top;text-align:left}
+th{color:var(--mut);font-weight:500;font-size:13px}td:first-child{width:30%;font-weight:600}
+.b{color:var(--built)}.w{color:var(--want)}.o{color:var(--open)}
+code{font:13px ui-monospace,Menlo,monospace}
+q{font-style:italic}
+</style>
+<h1>Skills rewrite: where everything stands</h1>
+<p class="sub">Branch <code>jack-heart/rewrite-skills</code>, 2026-11-16. The first rewrite pass is committed ("lf pr open: prepare branch"); everything after it is uncommitted.</p>
+
+<h2 class="b">1. Built in this branch</h2>
+<table>
+<tr><th>Area</th><th>What exists</th><th>Checked</th></tr>
+<tr><td>First editing pass</td><td>About 45 builtin skills rewritten, 38,074 to 24,834 words. Dead commands fixed, dead mechanisms removed, Loopflow-only method moved to <code>.lf/skills/</code>.</td><td>Committed. Definition, prompt and golden tests passed then.</td></tr>
+<tr><td>Skills deleted</td><td>start-chapter, review-chapter (ops and wave), wave-report, testing-audit. init kept.</td><td>Test asserts they stay gone.</td></tr>
+<tr><td>Prose-pinning tests</td><td>Removed, per <q>Yes that is good</q>.</td><td></td></tr>
+<tr><td>pursue</td><td>kickoff, concept-review, write-docs, then implement / sync / realign as the inner loop, then compress, qa, concept-review deciding on the finished change.</td><td>225 execution tests pass; docs updated.</td></tr>
+<tr><td>Loop deciders</td><td>Any skill on a loop gets the meaning of advance / iterate / blocked appended by Loopflow. loop-or-next is now only the fallback.</td><td>Same tests.</td></tr>
+<tr><td>concept-review</td><td>One skill for both cases: always writes the recommended way to pursue into the design and always writes <code>scratch/concept-review.html</code>. Headless, it makes the bold choice and marks it "made for review". New rule: more behavior is scope, not review.</td><td>Text only; no run yet.</td></tr>
+<tr><td>kickoff</td><td>Headless, makes the bold product choice and marks it for review.</td><td>Text only.</td></tr>
+<tr><td>realign</td><td>One light review step; never grows the plan.</td><td>Golden regenerated.</td></tr>
+<tr><td><code>redesign</code> graph</td><td>interactive design, then pursue.</td><td>Loads; never run.</td></tr>
+<tr><td>Commit after every step</td><td>A Task run commits what each skill step leaves, as "Checkpoint after &lt;skill&gt;". Before this, only sync and the agents themselves committed.</td><td>Compiles. No test, never run.</td></tr>
+<tr><td>Code survival script</td><td>Prototype outside the repo: share of each merged PR's lines still on main. 33% overall, but file moves understate it.</td><td>Ran once; numbers not yet trustworthy.</td></tr>
+</table>
+
+<h2 class="w">2. Wanted, not built yet</h2>
+<table>
+<tr><th>Area</th><th>What was said</th><th>State</th></tr>
+<tr><td>Hierarchical <code>loop:</code> blocks</td><td><q>call it loop, but otherwise agree</q>; pursue splits into plan and build (<q>This looks nice</q>).</td><td>Designed, parser read, no code. The old <code>loop: name</code> form has to keep loading until loopflow and manabot graphs migrate, because the released lf reads the same files.</td></tr>
+<tr><td>Suffix overrides</td><td><q>Agreed, that can go into this task.</q></td><td>Loader read, no code.</td></tr>
+<tr><td>Self-improvement in more skills</td><td><q>look at adding more generic suggestion to do this and/or adding it to more skills</q></td><td>Not started. Depends on suffix overrides for where lessons go.</td></tr>
+<tr><td>Per-Task and per-Graph summary</td><td><q>upgrading from per-session/per-turn info to per-graph/per-task summary stats</q></td><td>Not started. Inputs exist: ship events, loop decisions, cost.</td></tr>
+<tr><td>Remove process <code>outcome</code></td><td><q>we should probably remove it</q>; <q>Also can go into this task</q></td><td>Not started. A staged schema drop.</td></tr>
+<tr><td>Skill version on each run</td><td><q>yeah, seems fine</q></td><td>Not started.</td></tr>
+<tr><td>Priority list for voice refinement</td><td>The step after high-level feedback, <q>more directly using my voice</q>.</td><td>Not written.</td></tr>
+</table>
+
+<h2 class="o">3. Discussed, no clear plan</h2>
+<table>
+<tr><th>Area</th><th>What was said</th><th>What is missing</th></tr>
+<tr><td>Task size limit</td><td><q>There are definitely limits to how big one task should be. whether the kickoff is the right place or the instructions are right i have no idea</q></td><td>The limit, and whether the split is automatic.</td></tr>
+<tr><td>Feature flags</td><td><q>probably underusing feature-flags as a code development tool</q></td><td>kickoff and implement still discourage them.</td></tr>
+<tr><td>Why late reviews still find things</td><td><q>I want more of what I get at the end as it goes</q></td><td>The new pursue is a bet. No way yet to count late finds.</td></tr>
+<tr><td>verify and when a Task is done</td><td><q>a little unclear on where i stand on allowing multiple PRs per task</q>; cleanup <q>solveable though</q></td><td>No decision on completing at merge.</td></tr>
+<tr><td>demo</td><td>The Task conversation should start the demo itself; <q>a more new process for demoing at regular intervals</q>.</td><td>Both are separate Tasks; neither filed.</td></tr>
+<tr><td>QA notes by area</td><td><q>not sure about this one</q></td><td><code>.lf/skills/qa.md</code> is 8,113 words and still growing.</td></tr>
+<tr><td>80/20 scorer and eval suite</td><td><q>interested in maybe a 80/20-style prototype</q>; scorer <q>once we have a proper experiment set up</q></td><td>Candidate: read a finished Task's conversation once for feedback a better instruction would have prevented. Not designed.</td></tr>
+<tr><td>Code survival as a real metric</td><td>Third way to judge a Session.</td><td>Needs move tracking and real revert detection.</td></tr>
+<tr><td>reduce and polish as generative skills</td><td><q>a very powerful idea</q></td><td>Untouched in the rewrite.</td></tr>
+<tr><td>External skill libraries</td><td>T3 Code, GStack, Poteto may have good ideas.</td><td>Not read.</td></tr>
+<tr><td>"jev"</td><td>Asked about under loop-or-next.</td><td>I don't know what it refers to.</td></tr>
+</table>

@@ -559,7 +559,7 @@ wrapper hooks; host declarations and saved Codex trust decisions remain unchange
 
 ```bash
 lf context                         # size targets, sources and current usage
-lf context --wave intelligence     # local Wave memory and scratch
+lf context --wave intelligence     # local Wave memory
 lf context --task LOO-303 --json    # Task checkout, including Wave memory
 ```
 
@@ -569,7 +569,6 @@ Edit the existing repo `.lf/config.yaml`:
 context:
   budgets:
     memory_tokens: 6000
-    scratch_tokens: 8000
 ```
 
 Override individual fields for a Wave in `.lf/wave/<name>/config.yaml`:
@@ -581,14 +580,14 @@ context:
 ```
 
 Each field follows the same source and scope precedence. `lf context` shows the winning source for every value.
-The same block supports `memory_bytes` and `scratch_bytes`. Values must be positive
+The same block supports `memory_bytes`. Values must be positive
 integers. These are authoring targets, not launch limits; exceeding them does not
-refuse a launch or select its context. The retired `goal_*` and `input_*` keys are removed.
+refuse a launch or select its context. The retired `goal_*`, `input_*` and
+`scratch_*` keys are removed; a file that still sets a scratch target loads without it.
 
-`lf context` measures recursive scratch Markdown and checkout Wave/ancestor memory,
-without contacting a provider or reading the clipboard. Defaults are 16,000 tokens /
-128 KiB for memory and 12,000 tokens / 96 KiB for scratch. Curate stale notes gradually,
-preserving live decisions and evidence; re-query after writing.
+`lf context` measures checkout Wave/ancestor memory, without contacting a provider
+or reading the clipboard. The default is 16,000 tokens / 128 KiB. Curate stale notes
+gradually, preserving live decisions and evidence; re-query after writing.
 
 The first conversation turn contains the skill, request and explicitly selected
 documents. Codex uses app-server input and Claude uses streamed or file input.
@@ -686,9 +685,8 @@ previous target tag.
 
 ### Loopflow Guidance
 
-Launches receive the small `LOOPFLOW.md` contract. Task- and Wave-associated
-launches also preload Work guidance. Read `lf help skill work` when entering
-Work APIs from an existing conversation. Standalone native skills retain their
+Launches receive the small `LOOPFLOW.md` contract, which holds the Task model
+and its commands. Standalone native skills retain their
 own guidance. Association selects context; a requested skill or Graph selects
 the procedure.
 

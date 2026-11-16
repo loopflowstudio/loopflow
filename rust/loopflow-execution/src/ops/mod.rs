@@ -50,7 +50,9 @@ pub mod wt;
 pub mod wt_timing;
 
 pub use abandon::{abandon_branch, AbandonOptions};
-pub use commit::{commit_selected, commit_workflow, commit_workflow_traced, CommitOptions};
+pub use commit::{
+    commit_selected, commit_step, commit_workflow, commit_workflow_traced, CommitOptions,
+};
 pub use error::{OpsError, OpsResult};
 pub use land::{arm, mark_ready, submit, LandOptions};
 pub use land::{finish_arm_after_sync, finish_submit_after_sync};

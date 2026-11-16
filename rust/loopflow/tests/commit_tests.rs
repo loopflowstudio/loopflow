@@ -4,7 +4,9 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::Command;
 
-use loopflow_execution::ops::{commit_selected, commit_workflow, CommitOptions, NullProgress};
+use loopflow_execution::ops::{
+    commit_selected, commit_step, commit_workflow, CommitOptions, NullProgress,
+};
 use loopflow_test_support::TestRepo;
 use support::EnvGuard;
 
@@ -195,6 +197,26 @@ fn commit_generates_message_when_none() {
         message.starts_with("lf implement"),
         "expected 'lf implement' prefix, got: {message}"
     );
+}
+
+#[test]
+fn step_commit_checkpoints_edits_once_and_keeps_the_default_branch_unpushed() {
+    let _env = EnvGuard::new(&[]);
+    let repo = TestRepo::new();
+    let commits = || git_output(repo.path(), &["rev-list", "--count", "HEAD"]);
+    let (before, published) = (commits(), repo.bare_head_sha());
+
+    assert!(!commit_step(repo.path(), "implement", &NullProgress).unwrap());
+    assert_eq!(commits(), before);
+
+    repo.create_file("notes.md", "what the skill left\n");
+    assert!(commit_step(repo.path(), "implement", &NullProgress).unwrap());
+    assert_eq!(last_commit_message(&repo), "lf implement: checkpoint");
+    assert_eq!(
+        commits().trim().parse::<u32>().unwrap(),
+        before.trim().parse::<u32>().unwrap() + 1
+    );
+    assert_eq!(repo.bare_head_sha(), published);
 }
 
 #[test]

@@ -27,15 +27,6 @@ Link related work where you explain why it matters, as
 `[Title · Task ID or PR number](URL)`, with the relationship: builds on,
 supersedes, verified by. Only URLs you know. Loopflow adds the Task ID itself.
 
-## Command changes
-
-`lf help --all` prints the public command tree. When the diff adds, removes or
-renames a Clap command, compare that tree before and after the change and list
-each added or removed command under **What changes**: "Adds `lf skill customize`",
-"Removes `lf transport start`". Mention changed arguments only when they change
-what someone types. For an added command, name the Task or design it delivers,
-or say none was recorded. Keep this list even when the change looks minor.
-
 ## Output format
 
 Return a structured response with **title** and **body** (Markdown).
@@ -54,3 +45,12 @@ other work.
 Type an unfinished command in a Task terminal, switch Tasks, then return.
 Your terminal and unfinished input should still be there. (Suggested; not run.)
 ```
+
+## Command changes
+
+`lf help --all` prints the public command tree. When the diff adds, removes or
+renames a Clap command, compare that tree before and after the change and list
+each added or removed command under **What changes**: "Adds `lf skill customize`",
+"Removes `lf transport start`". Mention changed arguments only when they change
+what someone types. For an added command, name the Task or design it delivers,
+or say none was recorded. Keep this list even when the change looks minor.

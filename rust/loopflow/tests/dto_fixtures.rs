@@ -346,7 +346,6 @@ fn process_page_retains_outcomes_unknowns_and_continuation() {
     assert_eq!(agent.agent_session_id.as_deref(), Some("conversation"));
     assert_eq!(agent.os_started_at, Some(1790640000));
     assert_eq!(agent.parent_lf_process_id.as_ref(), Some(&lf.id));
-    assert_eq!(agent.outcome, None);
     assert_eq!(page.next.as_ref().unwrap().id, agent.id.as_str());
     assert_eq!(
         serde_json::to_value(page).unwrap(),

@@ -492,17 +492,14 @@ fn execute_target(
                         && !loopflow_execution::journal::has_caller()
                         && loopflow_execution::repo::discover_repo_root(&repo_root)?.is_some()
                     {
-                        let options = loopflow_execution::ops::CommitOptions {
-                            add: true,
-                            message: Some(format!("lf commit: {name}")),
-                            ..loopflow_execution::ops::CommitOptions::for_task(name)
-                        };
-                        loopflow_execution::ops::commit_workflow(
+                        // Best-effort: the skill ran whether or not its edits commit.
+                        if let Err(error) = loopflow_execution::ops::commit_step(
                             &repo_root,
-                            &options,
+                            name,
                             &loopflow_execution::ops::NullProgress,
-                            &|_| {},
-                        )?;
+                        ) {
+                            tracing::warn!(skill = name, %error, "could not commit the skill's edits");
+                        }
                     }
                     Ok(())
                 })

@@ -672,6 +672,7 @@ pub struct PendingInput {
     captured: Option<i64>,
     thread: Option<AgentSessionId>,
     turn: Option<String>,
+    skill_version: Option<String>,
     /// The latest `observed_at` of any of its history rows. Every time its
     /// decoded history reports is a row's `observed_at` or a payload time its
     /// writer also stored as that row's `observed_at`, so none is later.
@@ -1219,7 +1220,8 @@ impl SqliteStore {
                     s.current_capture,s.cwd,s.repo,s.skill,s.provider,s.model,s.interactive,
                     total > MAX(?8,unfinished),COALESCE((SELECT json_extract(payload,'$.work_source') FROM session_events WHERE seq=eligible.captured),
                         CASE WHEN eligible.captured=s.current_capture AND s.bound_at IS NULL THEN s.work_source END),
-                    eligible.captured,eligible.thread,eligible.turn,eligible.latest
+                    eligible.captured,eligible.thread,eligible.turn,eligible.latest,
+                    CASE WHEN eligible.captured=s.current_capture THEN s.skill_version END
                 FROM eligible CROSS JOIN agent_sessions s ON s.id=eligible.session_id
                 WHERE (?8 IS NULL OR ended IS NULL OR ordinal<=MAX(?8-unfinished,0))
                 ORDER BY started DESC,eligible.input_id DESC,eligible.session_id,eligible.thread,eligible.turn")?;
@@ -1274,6 +1276,7 @@ impl SqliteStore {
                     thread: row.get(17)?,
                     turn: row.get(18)?,
                     latest: row.get(19)?,
+                    skill_version: row.get(20)?,
                 });
             }
             inputs
@@ -1320,6 +1323,7 @@ impl SqliteStore {
             captured,
             thread,
             turn,
+            skill_version,
             latest: _,
         } = input.clone();
         let input = input
@@ -1350,6 +1354,7 @@ impl SqliteStore {
             cwd: cwd.into(),
             repo,
             skill,
+            skill_version,
             provider,
             model,
             interactive,
@@ -1397,6 +1402,19 @@ impl SqliteStore {
                 |row| row.get(0),
             )
             .optional()?)
+    }
+
+    /// Record which skill text the launch of `artifact_key` ran, while that
+    /// input is still its Session's current one.
+    pub fn record_skill_version(&self, artifact_key: &str, version: &str) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "UPDATE agent_sessions SET skill_version=?2
+             WHERE id=(SELECT session_id FROM session_events WHERE kind='captured' AND receipt_key=?1)
+               AND current_capture=(SELECT seq FROM session_events WHERE kind='captured' AND receipt_key=?1)",
+            params![artifact_key, version],
+        )?;
+        Ok(())
     }
 
     pub fn session_for_artifact(&self, artifact_key: &str) -> StoreResult<Option<LfSession>> {
@@ -2062,7 +2080,8 @@ pub(super) fn replace_input_in(
     session.captured = Some(capture_in(conn, session, crate::rows::now_unix(), process)?);
     // A selected AgentSession belongs to its provider; another provider starts
     // a fresh one. Earlier selections remain in session_events.
-    conn.execute("UPDATE agent_sessions SET current_capture=?2,input_published=?3,skill=?4,provider=?5,model=?6,
+    // The version belongs to the input it launched with; the next launch records its own.
+    conn.execute("UPDATE agent_sessions SET current_capture=?2,input_published=?3,skill=?4,skill_version=NULL,provider=?5,model=?6,
         request=?7,provider_thread=CASE WHEN provider IS ?5 THEN provider_thread END
         WHERE id=?1",
         params![session.id,session.captured,session.input_published,

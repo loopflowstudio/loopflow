@@ -1004,6 +1004,38 @@ fn answer_value(text: &str) -> Result<serde_json::Value, String> {
     })
 }
 
+impl RunningGraph<'_> {
+    /// Every skill step's edits become one commit, pushed where the branch
+    /// allows. A Graph contributing to a Task that another run carries leaves
+    /// the checkout's edits to that run. Best-effort: the next step runs
+    /// either way.
+    async fn commit_step(&self, step: &str) {
+        let contribution = self.task.is_some() && self.task_run.is_none();
+        if contribution
+            || !matches!(
+                loopflow_execution::git::intervention_state(self.cwd),
+                Ok(None)
+            )
+        {
+            return;
+        }
+        let (repo, name) = (self.cwd.to_path_buf(), step.to_owned());
+        let committed = loopflow_execution::journal::request::spawn_blocking(move || {
+            loopflow_execution::ops::commit_step(
+                &repo,
+                &name,
+                &loopflow_execution::ops::NullProgress,
+            )
+        })
+        .await;
+        match committed {
+            Ok(Ok(_)) => {}
+            Ok(Err(error)) => tracing::warn!(%step, %error, "could not commit the step's edits"),
+            Err(error) => tracing::warn!(%step, %error, "could not commit the step's edits"),
+        }
+    }
+}
+
 #[async_trait]
 impl SkillExecutor for &RunningGraph<'_> {
     async fn checkpoint(&self, cursor: &ExecutionCursor) -> Result<()> {
@@ -1107,6 +1139,7 @@ impl SkillExecutor for &RunningGraph<'_> {
                 StepExit::Held => return Ok(SkillOutcome::Waiting),
                 StepExit::Interrupted => return Ok(SkillOutcome::Interrupted),
             }
+            self.commit_step(name).await;
             let Some(output) = &output else {
                 return Ok(SkillOutcome::Completed);
             };

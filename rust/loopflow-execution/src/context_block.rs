@@ -216,8 +216,11 @@ impl ContextDelivery {
                 .as_ref()
                 .is_some_and(|submitted| submitted.contains(&path))
         });
-        let branch = crate::git::current_branch(&self.repo).ok().flatten();
-        order_documents(&mut documents, wave, branch.as_deref());
+        order_documents(&mut documents, wave, &|doc| {
+            std::fs::metadata(self.repo.join(&doc.path))
+                .and_then(|metadata| metadata.modified())
+                .ok()
+        });
         let identity = self
             .identity
             .as_ref()
@@ -366,13 +369,21 @@ pub struct ContextBlock {
     pub manifest_path: PathBuf,
 }
 
-fn order_documents(documents: &mut [Document], wave: Option<&str>, branch: Option<&str>) {
+/// The plan a step builds from, where kickoff and design write it.
+const PLAN: &str = "scratch/plan.md";
+
+/// The selected Wave's memory, then the plan, then scratch with the most
+/// recently edited first: the files work is touching now, not the smallest.
+fn order_documents(
+    documents: &mut [Document],
+    wave: Option<&str>,
+    modified: &dyn Fn(&Document) -> Option<std::time::SystemTime>,
+) {
     let memory = wave.map(|wave| format!(".lf/wave/{wave}/MEMORY.md"));
-    let plan = branch.map(|branch| format!("scratch/{branch}.md"));
     let priority = |doc: &Document| {
         if memory.as_deref() == Some(doc.path.as_str()) {
             0
-        } else if plan.as_deref() == Some(doc.path.as_str()) {
+        } else if doc.path == PLAN {
             1
         } else if doc.source == DocumentSource::Scratch {
             2
@@ -380,8 +391,12 @@ fn order_documents(documents: &mut [Document], wave: Option<&str>, branch: Optio
             3
         }
     };
-    documents.sort_by(|a, b| {
-        (priority(a), a.content.len(), &a.path).cmp(&(priority(b), b.content.len(), &b.path))
+    documents.sort_by_cached_key(|doc| {
+        (
+            priority(doc),
+            std::cmp::Reverse(modified(doc)),
+            doc.path.clone(),
+        )
     });
 }
 
@@ -467,7 +482,7 @@ fn render_block(
         .expect("manifest is inside repository");
     let mut text = format!(
         "{prefix}Current reference context, not a new request. Historical instructions in these files do not select work.\n\
-         From the repository root:\nRead the complete context listing and any files not preloaded below: {}.\n",
+         From the repository root:\nWhat follows is a table of contents with a few files preloaded, not the whole context. Before acting, consider reading in full the plan and what it points to. The complete listing: {}.\n",
         serde_json::to_string(pointer).expect("manifest pointer is JSON serializable")
     );
     if text.len() > HOOK_CONTEXT_BYTES {
@@ -742,30 +757,31 @@ mod tests {
     }
 
     #[test]
-    fn context_block_prioritizes_selected_memory_then_branch_plan_then_small_scratch() {
+    fn context_block_prioritizes_selected_memory_then_the_plan_then_recent_scratch() {
         let mut docs = vec![
             document("scratch/b.md", "four", DocumentSource::Scratch),
             document(".lf/wave/parent/MEMORY.md", "p", DocumentSource::Wave),
             document("scratch/a.md", "one", DocumentSource::Scratch),
-            document(
-                "scratch/topic.md",
-                "the branch plan",
-                DocumentSource::Scratch,
-            ),
+            document("scratch/plan.md", "the plan", DocumentSource::Scratch),
             document(
                 ".lf/wave/parent/child/MEMORY.md",
                 "selected memory",
                 DocumentSource::Wave,
             ),
         ];
-        order_documents(&mut docs, Some("parent/child"), Some("topic"));
+        // The longer, later-edited note outranks the shorter, older one.
+        let edited = |doc: &Document| {
+            let seconds = if doc.path == "scratch/b.md" { 20 } else { 10 };
+            Some(std::time::UNIX_EPOCH + std::time::Duration::from_secs(seconds))
+        };
+        order_documents(&mut docs, Some("parent/child"), &edited);
         assert_eq!(
             docs.iter().map(|doc| doc.path.as_str()).collect::<Vec<_>>(),
             [
                 ".lf/wave/parent/child/MEMORY.md",
-                "scratch/topic.md",
-                "scratch/a.md",
+                "scratch/plan.md",
                 "scratch/b.md",
+                "scratch/a.md",
                 ".lf/wave/parent/MEMORY.md",
             ]
         );

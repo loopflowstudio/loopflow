@@ -342,6 +342,8 @@ struct PromptBuild {
     harness: String,
     model: Option<String>,
     skill_name: Option<String>,
+    /// SHA-256 of the resolved skill text, recorded on the run.
+    skill_version: Option<String>,
     log_name: String,
     subjects: Vec<String>,
     work: Option<loopflow_execution::session::SessionWork>,
@@ -604,10 +606,6 @@ fn build_prompt_at(
             message: message.map(|value| value.to_string()),
             skill_arguments: arguments.to_string(),
             no_loopflow: standalone_native,
-            work: cli
-                .task
-                .clone()
-                .map(loopflow_execution::prompt::WorkContext::Task),
             source_overrides: ContextSourceOverrides::default(),
             summary: None,
             references: task_message
@@ -682,6 +680,9 @@ fn build_prompt_at(
         harness,
         model,
         skill_name,
+        skill_version: discovered_skill
+            .as_ref()
+            .map(loopflow_execution::graph::Skill::version),
         log_name,
         subjects: Vec::new(),
         work: None,
@@ -968,6 +969,9 @@ fn begin_process_runtime(
         anyhow!("failed to publish Session capture manifest before agent launch: {error}")
     })?;
     runtime.claim_session_attachment()?;
+    if let Some(version) = &built.skill_version {
+        runtime.record_skill_version(version);
+    }
     debug!(
         elapsed_ms = started.elapsed().as_millis(),
         "published Session capture"
@@ -1262,6 +1266,7 @@ for line in sys.stdin:
             harness: "claude".to_string(),
             model: None,
             skill_name: Some("implement".to_string()),
+            skill_version: None,
             log_name: "generic-run-proof".to_string(),
             subjects: vec!["task:LOO-265".to_string()],
             work: None,
@@ -1385,6 +1390,7 @@ for line in sys.stdin:
                 harness: "claude".to_string(),
                 model: None,
                 skill_name: Some("research".to_string()),
+                skill_version: Some("research-text".to_string()),
                 log_name: log_name.to_string(),
                 subjects: vec!["task:LOO-267".to_string()],
                 work: None,
@@ -1481,6 +1487,16 @@ for line in sys.stdin:
             second.join().unwrap().unwrap();
         });
 
+        // Each run recorded the skill text it launched with.
+        let versions: Vec<Option<String>> = rusqlite::Connection::open(&ledger)
+            .unwrap()
+            .prepare("SELECT skill_version FROM agent_sessions")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(versions, vec![Some("research-text".to_string()); 2]);
         assert_eq!(
             std::fs::read_to_string(&runtime).unwrap(),
             "runtime evidence bytes\n"
@@ -1784,13 +1800,10 @@ for line in sys.stdin:
             built
                 .agent_config
                 .system_prompt
-                .matches("<lf:work-guidance>")
+                .matches("<lf:loopflow>")
                 .count(),
             1
         );
-        assert!(built.context.decisions.iter().any(|decision| {
-            decision.label == "work" && decision.reason == "Wave association: release"
-        }));
         assert!(!built.agent_config.system_prompt.contains(goal));
         let context = built
             .agent_config

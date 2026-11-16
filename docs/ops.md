@@ -30,7 +30,7 @@ Nothing repairs its PR until a waited landing does.
 To go from review-ready to merged in one step, ship the Task:
 
 ```bash
-lf ship LOO-12               # remaining steps, then deliver: gate, land --wait-and-fix
+lf ship LOO-12               # remaining steps, then deliver: reflect, gate, land --wait-and-fix
 ```
 
 A PR merged while shipping sends the Task to its graph's last interactive step

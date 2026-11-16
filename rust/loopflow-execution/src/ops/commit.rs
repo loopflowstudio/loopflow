@@ -131,12 +131,10 @@ pub fn commit_workflow(
         message.to_string()
     } else {
         progress.status("Generating commit message...");
-        let generated = generate_commit_message(repo, options.agent.as_deref());
-        format_commit_message(
-            &options.task,
-            &options.sources,
-            generated.as_ref().map(|m| m.title.as_str()).ok(),
-        )
+        match generate_commit_message(repo, options.agent.as_deref()) {
+            Ok(message) => message.text(),
+            Err(_) => format_commit_message(&options.task, &options.sources, None),
+        }
     };
 
     progress.status("Committing...");
@@ -168,14 +166,57 @@ fn format_commit_message(task: &str, sources: &[String], title: Option<&str>) ->
 #[derive(Debug, Deserialize)]
 struct CommitMessage {
     title: String,
-    #[allow(dead_code)]
     body: String,
 }
 
+impl CommitMessage {
+    fn text(&self) -> String {
+        match self.body.trim() {
+            "" => self.title.trim().to_string(),
+            body => format!("{}\n\n{body}", self.title.trim()),
+        }
+    }
+}
+
+/// Commit what a skill left as `lf <step>: checkpoint`, and push it unless
+/// this is the default branch. The title names the step and nothing else:
+/// writing what changed takes an agent launch, which is a recorded Session,
+/// and a step owns exactly one.
+///
+/// # Errors
+/// Returns the Git failure when staging, committing or pushing fails.
+pub fn commit_step(repo: &Path, step: &str, progress: &impl Progress) -> OpsResult<bool> {
+    if is_clean(repo)? {
+        return Ok(false);
+    }
+    stage_all(repo, &|_| {})?;
+    if git_stdout(repo, &["diff", "--cached", "--name-only"])?
+        .trim()
+        .is_empty()
+    {
+        return Ok(false);
+    }
+    let message = format!("lf {step}: checkpoint");
+    let default_branch = crate::git::get_default_branch(repo)?;
+    let push = crate::git::current_branch(repo)?.is_some_and(|branch| branch != default_branch);
+    commit_workflow(
+        repo,
+        &CommitOptions {
+            push,
+            message: Some(message),
+            ..CommitOptions::for_task(step)
+        },
+        progress,
+        &|_| {},
+    )
+}
+
 fn generate_commit_message(repo: &Path, agent_override: Option<&str>) -> OpsResult<CommitMessage> {
-    let template = load_skill("commit-message", repo)
-        .map_err(|err| OpsError::Message(format!("commit-message skill not found: {err}")))?
+    let skill = load_skill("commit-message", repo)
+        .map_err(|err| OpsError::Message(format!("commit-message skill not found: {err}")))?;
+    let template = skill
         .content
+        .clone()
         .ok_or_else(|| OpsError::Message("commit-message skill has no content".to_string()))?;
 
     let diff = git_stdout(repo, &["diff", "--cached"])?;
@@ -188,42 +229,57 @@ fn generate_commit_message(repo: &Path, agent_override: Option<&str>) -> OpsResu
          No markdown fences. No explanation."
     );
 
+    // The skill's own `agent`, `default_agent` and `agents` preferences apply,
+    // so a cheap model can be chosen for `commit-message` alone.
     let config = load_config_or_default(Some(repo));
-    let agent = match agent_override {
-        Some(agent) => agent,
-        None => config.agent()?,
-    }
-    .to_string();
-
-    let launch = AgentConfig {
-        chrome: config.chrome,
-        codex_service_tier: config.codex.service_tier,
-        claude_model: config.claude.model.clone(),
-        task_prompt: prompt,
-        agent: Some(agent),
-        cwd: Some(repo.to_path_buf()),
-        skip_permissions: true,
-        ..Default::default()
+    let config = crate::config::settings::resolve(&config, Some(&skill))
+        .map(|resolved| resolved.config)
+        .unwrap_or(config);
+    let agents = match agent_override {
+        Some(agent) => vec![agent.to_string()],
+        None => match config.agent_order() {
+            order if order.is_empty() => vec![config.agent()?.to_string()],
+            order => order,
+        },
     };
     let process = ProcessConfig {
         auto: true,
         stream: false,
         ..Default::default()
     };
-
-    let result = run_agent(&launch, &process)
-        .map_err(|err| OpsError::Message(format!("commit message generation failed: {err}")))?;
-    if result.exit_code != 0 {
-        return Err(OpsError::Message(format!(
-            "commit message generation failed (exit {}): {}",
-            result.exit_code,
-            result.stderr.trim()
-        )));
+    let mut failure = String::new();
+    for agent in agents {
+        let launch = AgentConfig {
+            chrome: config.chrome,
+            codex_service_tier: config.codex.service_tier,
+            claude_model: config.claude.model.clone(),
+            task_prompt: prompt.clone(),
+            agent: Some(agent.clone()),
+            cwd: Some(repo.to_path_buf()),
+            skip_permissions: true,
+            ..Default::default()
+        };
+        match run_agent(&launch, &process) {
+            Ok(result) if result.exit_code == 0 => {
+                let combined = format!("{}\n{}", result.stdout, result.stderr);
+                if let Some(message) = parse_commit_message(&combined) {
+                    return Ok(message);
+                }
+                failure = format!("{agent}: no commit message in the reply");
+            }
+            Ok(result) => {
+                failure = format!(
+                    "{agent}: exit {}: {}",
+                    result.exit_code,
+                    result.stderr.trim()
+                );
+            }
+            Err(error) => failure = format!("{agent}: {error}"),
+        }
     }
-
-    let combined = format!("{}\n{}", result.stdout, result.stderr);
-    parse_commit_message(&combined)
-        .ok_or_else(|| OpsError::Message("failed to parse commit message from agent".to_string()))
+    Err(OpsError::Message(format!(
+        "commit message generation failed ({failure})"
+    )))
 }
 
 fn parse_commit_message(raw: &str) -> Option<CommitMessage> {

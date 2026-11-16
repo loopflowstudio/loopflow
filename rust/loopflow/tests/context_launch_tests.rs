@@ -576,7 +576,7 @@ exit 23
             .unwrap();
         fs::read_to_string(args[index + 1]).unwrap()
     };
-    assert_eq!(instructions.matches("<lf:work-guidance>").count(), 1);
+    assert_eq!(instructions.matches("<lf:loopflow>").count(), 1);
     assert!(!instructions.contains("CURRENT_SCRATCH"));
     assert!(!instructions.contains("CURRENT_WAVE_MEMORY"));
     assert!(!instructions.contains("Saved active skill."));
@@ -738,10 +738,6 @@ while read -r line; do :; done
         .as_str()
         .unwrap()
         .contains("<lf:loopflow>"));
-    assert!(!thread["params"]["developerInstructions"]
-        .as_str()
-        .unwrap()
-        .contains("<lf:work-guidance>"));
     assert!(thread["params"]["baseInstructions"].is_null());
     assert!(thread["params"]["config"]["model_instructions_file"].is_null());
     assert!(!thread["params"]["developerInstructions"]
@@ -1248,7 +1244,7 @@ fn a_task_checkout_without_the_agent_installed_skips_its_conversation() {
 }
 
 #[test]
-fn existing_task_checkout_preloads_work_without_enrolling_other_checkouts() {
+fn a_task_checkout_and_any_other_carry_the_same_launcher_text() {
     let repo = TestRepo::new();
     repo.create_branch("launcher");
     let task_checkout = repo
@@ -1281,7 +1277,8 @@ exit 17
     )
     .unwrap();
     fs::set_permissions(&provider, fs::Permissions::from_mode(0o755)).unwrap();
-    for (checkout, work) in [(repo.path(), false), (task_checkout.as_path(), true)] {
+    // A Task's checkout and any other carry the same launcher text.
+    for checkout in [repo.path(), task_checkout.as_path()] {
         let output = Command::new(env!("CARGO_BIN_EXE_lf"))
             .env_clear()
             .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
@@ -1299,7 +1296,7 @@ exit 17
             String::from_utf8_lossy(&output.stderr)
         );
         let instructions = fs::read_to_string(home.path().join("instructions")).unwrap();
-        assert_eq!(instructions.contains("<lf:work-guidance>"), work);
+        assert_eq!(instructions.matches("<lf:loopflow>").count(), 1);
         assert!(!instructions.contains("You are this Task's operator"));
     }
     let db = rusqlite::Connection::open(&registered.database).unwrap();
@@ -1467,7 +1464,7 @@ fn graph_context_preview_retains_native_arguments_and_operating_guidance() {
     assert!(input["system_prompt"]
         .as_str()
         .unwrap()
-        .contains("# Using lf"));
+        .contains("<lf:loopflow>"));
     assert!(!home.path().join("machine").exists());
     assert!(!repo.path().join(".lf/tmp").exists());
 }

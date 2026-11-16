@@ -51,6 +51,7 @@ fn format_target(target: &Target) -> String {
         Target::Command(command) => command.to_string(),
         Target::Graph(graph) => format_written_steps(&graph.items),
         Target::Xor(xor) => format_xor(xor.router.as_deref(), &xor.paths),
+        Target::Loop(steps) => format!("loop({})", format_written_steps(steps)),
     }
 }
 

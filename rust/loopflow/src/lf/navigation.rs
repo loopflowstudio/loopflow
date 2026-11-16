@@ -636,7 +636,7 @@ fn definition_help(
 ) -> Result<String> {
     let target = resolve_definition(repo, name, kind)?;
     let (name, kind, description, source) = match &target {
-        Target::Command(_) | Target::Xor(_) => {
+        Target::Command(_) | Target::Xor(_) | Target::Loop(_) => {
             anyhow::bail!("{name} is not a named skill or graph")
         }
         Target::Skill(skill) => (

@@ -594,6 +594,13 @@ pub(crate) fn normalize_context(value: &mut serde_yaml_ng::Value) {
             context.entry(new.into()).or_insert(value);
         }
     }
+    // Released lf wrote scratch size targets here; they selected nothing and
+    // are gone. A file that still sets them loads without them.
+    if let Some(budgets) = context.get_mut("budgets").and_then(Value::as_mapping_mut) {
+        for retired in ["scratch_tokens", "scratch_bytes"] {
+            budgets.remove(retired);
+        }
+    }
     if !context.is_empty() {
         map.insert("context".into(), context.into());
     }

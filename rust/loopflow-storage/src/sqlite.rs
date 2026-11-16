@@ -107,6 +107,7 @@ mod transport;
 pub use task_retirement::{TaskRetirement, ViewerHold, WORKSPACE_GRACE};
 pub mod task_history;
 pub mod task_state_delivery;
+pub mod task_summaries;
 pub mod task_work;
 pub mod wave_definitions;
 mod wave_lifecycle;

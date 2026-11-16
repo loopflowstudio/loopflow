@@ -661,7 +661,7 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Show memory and scratch size targets, their sources, and current usage
+    /// Show Wave memory size targets, their sources, and current usage
     Context {
         #[arg(long)]
         json: bool,

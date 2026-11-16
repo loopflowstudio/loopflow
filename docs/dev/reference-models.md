@@ -379,7 +379,8 @@ launches an agent. Agent-issued children resolve stable Session/AgentProcess
 provenance to the current attached LfProcess once, at admission. Delayed children
 of a replaced provider retain their historical origin; existing parents never change.
 
-Process outcomes are succeeded, failed or interrupted when observed. Unobserved
+LfProcess outcomes are succeeded, failed or interrupted when observed; an
+AgentProcess records no outcome, only its completion, exit code and signal. Unobserved
 completion, exit code and signal stay unknown. The outer command owns terminal
 settlement, including interruption. Bootstrap/installation logging must not open
 or migrate an incompatible installed store before its authority preflight.

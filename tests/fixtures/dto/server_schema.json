@@ -579,12 +579,6 @@
             "null"
           ]
         },
-        "outcome": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "parent_lf_process_id": {
           "anyOf": [
             {
@@ -635,7 +629,6 @@
         "cwd",
         "started_at",
         "completed_at",
-        "outcome",
         "exit_code",
         "signal",
         "error"
@@ -11102,6 +11095,13 @@
             "null"
           ]
         },
+        "skill_version": {
+          "description": "SHA-256 of the resolved skill text the run launched with; `null` when unrecorded.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "surface": {
           "type": "string"
         },
@@ -11173,6 +11173,7 @@
         "work_source",
         "wave_name",
         "skill",
+        "skill_version",
         "observed_at",
         "first_provider_attempt_at",
         "recorded_outcome",

@@ -50,6 +50,20 @@ and Task, and shows how turn time grows as context grows. `lf context` shows
 each budget, where it was set and current usage;
 [configuration](config.md#context-budgets) says how to change them.
 
+## How a Task went
+
+```bash
+lf task status LOO-12 --json | jq .summary   # one row, written when the Task completes or is abandoned
+```
+
+The summary names how the Task ended and when, the Graph it ran, how many times
+each loop went around again (`loop_passes`, by the deciding step), its Auto-Ship
+log by kind (`ship_events`), wall time from its first Graph process, and the
+first line its last `reflect` step said. It is `null` until the Task ends.
+Cost stays in `lf session usage --task`. Each recorded run also carries
+`skill_version`, the SHA-256 of the skill text it launched with, in
+`lf session usage --json`, so two runs of one skill name compare by its text.
+
 ## What happened
 
 ```bash
@@ -67,7 +81,8 @@ lf session retention                              # what providers still keep, a
 recorded outcomes — each tagged with its Task or Wave. Changes no Session made
 (PRs, Steers, Workflow moves, sync) are on the Task: `lf task status`.
 `session history list` is the command record underneath it, one row per lf or
-agent process (`kind`), with its parent and outcome. Narrow it with `--parent`,
+agent process (`kind`), with its parent. An lf command has an outcome; an agent
+process has its exit code and signal. Narrow it with `--parent`,
 `--caller SESSION` or `--outcome`; an agent `--parent` lists the lf commands it
 issued.
 

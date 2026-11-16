@@ -5,7 +5,7 @@
 
 use crate::name::portable_name;
 
-/// Launcher guidance shared by all agents; work APIs add the `work` skill body.
+/// Launcher guidance every launch carries: how to work, Tasks and notes.
 pub const LOOPFLOW_DOC: &str = include_str!("builtins/LOOPFLOW.md");
 
 /// Headless preamble — the only surface that needs one (no user is present).
@@ -145,9 +145,9 @@ mod tests {
                 .unwrap_or_else(|| panic!("{graph} is builtin"))
                 .contains("interactive:"));
         }
-        assert!(get_builtin_graph("pursue")
+        assert!(get_builtin_graph("build")
             .expect("Task loop graph")
-            .contains("graph: refresh"));
+            .contains("cmd: sync"));
         assert!(get_builtin_graph("deliver")
             .expect("Task final graph")
             .contains("- cmd: land --wait-and-fix"));
@@ -217,7 +217,6 @@ mod tests {
             assert!(get_builtin_skill(name).is_none(), "{name}");
         }
         for name in [
-            "build",
             "slice",
             "pair",
             "design-and-ship",
@@ -312,32 +311,18 @@ mod tests {
     }
 
     #[test]
-    fn chapter_skills_are_registered() {
+    fn retired_skills_are_not_registered() {
         for name in [
+            "export-memory",
+            "update-wave",
+            "record-learnings",
             "start-chapter",
             "review-chapter",
             "wave/start-chapter",
             "wave/review-chapter",
+            "wave-report",
+            "testing-audit",
         ] {
-            assert!(get_builtin_skill(name).is_some(), "{name}");
-            assert!(
-                !builtin_skill_description(name).is_empty(),
-                "{name} needs a catalog description"
-            );
-        }
-        assert_eq!(
-            resolve_builtin_skill("start-chapter"),
-            Some("start-chapter")
-        );
-        assert_eq!(
-            resolve_builtin_skill("review-chapter"),
-            Some("review-chapter")
-        );
-    }
-
-    #[test]
-    fn retired_memory_skills_are_not_registered() {
-        for name in ["export-memory", "update-wave", "record-learnings"] {
             assert!(get_builtin_skill(name).is_none(), "{name}");
         }
     }

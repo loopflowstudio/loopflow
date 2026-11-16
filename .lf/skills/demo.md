@@ -45,6 +45,14 @@ design.
 Then go back to implement with their words, or move on when they're done.
 Closing the window, going quiet or the provider exiting is never approval.
 
+Clean up what the demo started: stop the processes you launched, by their own
+identity and never by name, and keep anything that holds history.
+
+## Headless
+
+With nobody there, nobody can feel it. Say the demo didn't happen and why, then
+finish. Don't act out a person's reactions or invent feedback.
+
 ## Disposable Loopflow demos
 
 Before launch, create two private roots outside build output and temporary
@@ -66,8 +74,3 @@ recreate the editor.
 Confirm the demo processes exited before removing the runtime root. Never delete
 the history root. If teardown is incomplete, keep the runtime root and record
 what survives and the next action. No other cleaner, no signaling by process name.
-
-## Headless
-
-With nobody there, nobody can feel it. Say the demo didn't happen and why, then
-finish. Don't act out a person's reactions or invent feedback.

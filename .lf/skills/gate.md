@@ -1,46 +1,13 @@
 ---
-docs: scripts/testing.md
 requires: code on branch
 produces: published candidate, review fixes, and readiness report by head
 action_style: procedural
+docs: scripts/testing.md
 ---
 Start CI, then make the branch ready to ship and easy to review while it runs.
 
 CI is the test driver. Publish first so the suites run on real infrastructure,
 and spend the wait reviewing instead of repeating them locally.
-
-## Loopflow candidate preparation
-
-Use the included `scripts/testing.md` to map changed paths to tests. CI skips
-its suites while the branch has files in `scratch/` (`.github/CI.md`), so this
-repository's preparation, at the first publish and after review fixes, is:
-
-```bash
-lf commit -m "gate: checkpoint"     # working notes are in history here
-lf sync
-lf scratch clear                    # branch-added files only; base files stay
-lf pr publish                       # ready PR, no merge request
-lf pr checks                        # rust-test, tests-result: not skipping
-```
-
-Before clearing, put what a later reader needs into the PR body: what people
-said, what a run showed, open decisions, deferred checks and the checkpoint
-SHA. The plan stays in this conversation and in
-`git show <checkpoint-sha>:scratch/<file>`.
-
-After clearing, write nothing under `scratch/`: the next publish would commit
-it and CI would skip again. Findings and check results go in the report and PR
-body.
-
-If gate ends with work it cannot finish, restore the notes with
-`git revert --no-edit <clear-commit>` and don't publish that commit. Local HEAD
-is then a checkpoint for the next run, while the PR and its checks stay on the
-candidate head: report the two separately.
-
-Name modules in a local test filter so it finishes well inside nextest's
-twenty-minute run limit (`.config/nextest.toml`). A test that fails in a loaded
-run and passes alone failed from load: name it in the report and leave it to
-CI.
 
 1. **Publish a candidate.** Read the diff, uncommitted work included, and the
    plan in `scratch/`. Pick two to five tests for the riskiest behavior,
@@ -86,5 +53,40 @@ about later edits. Don't wait for pending CI: hand off its state.
 `lf land --wait-and-fix` owns the waiting.
 
 Polish only what this branch changed. If it already meets the bar, leave it
-alone. Commands belong in `scripts/testing.md`; module checks belong in the owning
+alone. A check this repository always needs belongs in its agent guide.
+
+## Loopflow candidate preparation
+
+Use the included `scripts/testing.md` to map changed paths to tests. CI skips
+its suites while the branch has files in `scratch/` (`.github/CI.md`), so this
+repository's preparation, at the first publish and after review fixes, is:
+
+```bash
+lf commit -m "gate: checkpoint"     # working notes are in history here
+lf sync
+lf scratch clear                    # branch-added files only; base files stay
+lf pr publish                       # ready PR, no merge request
+lf pr checks                        # rust-test, tests-result: not skipping
+```
+
+Before clearing, put what a later reader needs into the PR body: what people
+said, what a run showed, open decisions, deferred checks and the checkpoint
+SHA. The plan stays in this conversation and in
+`git show <checkpoint-sha>:scratch/<file>`.
+
+After clearing, write nothing under `scratch/`: the next publish would commit
+it and CI would skip again. Findings and check results go in the report and PR
+body.
+
+If gate ends with work it cannot finish, restore the notes with
+`git revert --no-edit <clear-commit>` and don't publish that commit. Local HEAD
+is then a checkpoint for the next run, while the PR and its checks stay on the
+candidate head: report the two separately.
+
+Name modules in a local test filter so it finishes well inside nextest's
+twenty-minute run limit (`.config/nextest.toml`). A test that fails in a loaded
+run and passes alone failed from load: name it in the report and leave it to
+CI.
+
+Commands belong in `scripts/testing.md`; module checks belong in the owning
 module README.

@@ -12,15 +12,10 @@ remember. If nothing is left to check after merge, say why and finish.
 Read post-merge CI for the exact merge SHA. A green PR or merge queue says
 nothing about the push run; report it separately, and say so if it is pending.
 
-Check headless first; most claims need no person:
-
-- Build main and run its `lf` with its own `LF_HOME` so nothing touches real
-  work; unset inherited `LF_*` variables first.
-- Seed a fake world when the claim needs Tasks, Waves or Sessions, and drive the
-  real commands against it.
-- For the Mac app, build it and run its view and interaction tests headless;
-  capture screenshots headless when a view's look is the claim.
-- After a release, run the installed binary the way people do.
+Check headless first; most claims need no person. Build main and run it
+isolated from real work. Seed the state a claim needs and drive the real
+commands against it. Run apps through their headless view and interaction
+tests. After a release, run the installed build the way people do.
 
 A claim you can't check is a finding, not a hand-back. Name what was missing,
 and build the missing route as part of a fix when it's small, or capture it as
@@ -38,3 +33,13 @@ note under `scratch/` and in your final message:
 
 With someone in the conversation, show what you checked and let them judge the
 experience. Headless, decide and keep moving.
+
+## Checking Loopflow headless
+
+- Build main and run its `lf` with its own `LF_HOME` so nothing touches real
+  work; unset inherited `LF_*` variables first.
+- Seed a fake world when the claim needs Tasks, Waves or Sessions, and drive the
+  real commands against it.
+- For the Mac app, build it and run its view and interaction tests headless;
+  capture screenshots headless when a view's look is the claim.
+- After a release, run the installed binary the way people do.

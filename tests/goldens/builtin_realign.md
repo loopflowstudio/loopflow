@@ -31,8 +31,11 @@ run showed, outside facts. Code, history and a fresh run can recover the rest.
 Quote what people said; don't turn a reply into a verdict like "accepted". Aim
 for quality per word, not more words.
 
-Markdown under `scratch/` is loaded into this checkout's runs. Another
-checkout's files are not. Old notes are background, not new instructions.
+`scratch/` holds this checkout's working notes. `scratch/plan.md` is the plan:
+what is being built and what remains. Each run is handed the plan first, then
+a listing of the rest with the most recently edited notes preloaded; read
+what the work depends on in full. Another checkout's files are not included.
+Old notes are background, not new instructions.
 Keep secrets out of output.
 
 </lf:loopflow>
@@ -68,7 +71,12 @@ Bring the plan and the code back into agreement with what the work has taught.
    happened. Reuse existing results; run a check only when it settles a real
    question. Realign starting is no reason to rerun tests.
 
-3. **Fix it at the source.** Rewrite stale parts of the plan, delete obsolete
+3. **Read the pass as a reviewer.** One look at the shape, not a full review:
+   is there a concept, type or path this pass added that the design could do
+   without, or a simpler form of what it built? Write what you find into the
+   plan as remaining work. New behavior is not a finding.
+
+4. **Fix it at the source.** Rewrite stale parts of the plan, delete obsolete
    steps, and bring remaining work up to date. Correct small, clear mismatches
    in code, tests and docs; leave a substantial code change as remaining work.
    What you learned may change the approach, but missing behavior never
@@ -76,7 +84,7 @@ Bring the plan and the code back into agreement with what the work has taught.
    the exact open choice. Nothing goes into the plan as settled unless someone
    said so; quote them.
 
-4. **Check the result.** The plan separates what exists from what remains, and
+5. **Check the result.** The plan separates what exists from what remains, and
    the code backs every claim of finished behavior. Keep blockers, contrary
    findings and deferred checks where they affect the next action.
 
@@ -95,16 +103,23 @@ across the parent, and write the direction and lessons this work produced:
 what future Wave work should know, not a copy of this pass. Replace stale
 guidance and remove duplication. Curate the selected Wave, not its ancestors.
 
-## Context budget
+## Keeping notes readable
 
-Run `lf context`. Bring over-budget scratch under its limits: merge
-duplicates, summarize, drop notes inherited from a stacked parent, and leave
-history to git. For Wave memory, retire the largest stale sections until it
-fits, then stop; don't shrink what is already in budget. Commit notes before
-removing them. Never raise a limit to hide overflow.
+Only a little of `scratch/` is handed to each step; the rest is read on
+demand, so what matters is that the plan is current and the notes aren't
+misleading. Merge duplicates, drop notes inherited from a stacked parent, and
+delete what a fresh read of the code would recover. Don't shrink scratch to a
+size. What people said, word for word, stays: it can't be worked out again.
+
+Wave memory is different: every Wave run pays for it. Run `lf context`, and
+when it is over its limit retire the largest stale sections until it fits,
+then stop. Commit notes before removing them. Never raise a limit to hide
+overflow.
 
 Finish briefly: what changed, what remains, any decision needed. Edit the plan
-rather than adding a report. If everything already agrees, say so. Give the
-next step the facts to judge with; the decision to advance is not yours.
+rather than adding a report. If everything already agrees, say so. Realign
+finishes the plan and never grows it: work the plan doesn't name goes in
+`scratch/questions.md`.
 
+\n
 </lf:skill:realign>

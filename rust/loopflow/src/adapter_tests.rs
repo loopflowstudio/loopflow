@@ -400,20 +400,6 @@ fn configuration_write_rejects_a_scope_outside_its_destination() {
 }
 
 #[test]
-fn work_skill_help_includes_the_operating_guidance() {
-    let repo = loopflow_test_support::TestRepo::new();
-    let source = loopflow_definitions::builtins::get_builtin_skill("work").unwrap();
-    let (_, body) = loopflow_definitions::text::split_frontmatter(source).unwrap();
-    let help = crate::lf::navigation::render_help(
-        &["skill".to_owned(), "work".to_owned()],
-        repo.path(),
-        false,
-    )
-    .unwrap();
-    assert!(help.contains(body.trim()));
-}
-
-#[test]
 fn the_card_for_a_raw_conversation_carries_its_turn() {
     use crate::lf::commands::screens::{SessionCard, SessionLiveness};
     let fixture: serde_json::Value = serde_json::from_str(include_str!(

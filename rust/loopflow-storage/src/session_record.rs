@@ -174,6 +174,8 @@ pub struct SessionHistory {
     pub work_source: Option<crate::session::WorkSource>,
     pub wave_name: Option<String>,
     pub skill: Option<String>,
+    /// SHA-256 of the resolved skill text the run launched with; `null` when unrecorded.
+    pub skill_version: Option<String>,
     pub observed_at: i64,
     pub first_provider_attempt_at: Option<i64>,
     pub recorded_outcome: Option<String>,

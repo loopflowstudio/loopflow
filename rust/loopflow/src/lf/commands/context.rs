@@ -1,4 +1,4 @@
-//! Inspect memory and scratch size targets without restricting launch input.
+//! Inspect Wave memory size targets without restricting launch input.
 
 pub mod preview;
 pub use loopflow_execution::ops::human_session::{
@@ -67,7 +67,7 @@ pub fn run(json: bool, wave: Option<&str>, task: Option<&str>) -> Result<()> {
         _ => None,
     });
     let budgets = ContextBudgets::load(&repo, wave.as_deref())?;
-    // Size targets concern authored memory and scratch, not a prospective launch.
+    // Size targets concern authored memory, not a prospective launch.
     let docs = gather_documents(&GatherSpec {
         repo_root: repo.clone(),
         wave: wave.clone(),

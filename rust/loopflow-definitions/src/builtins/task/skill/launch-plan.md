@@ -9,7 +9,7 @@ Continue the caller's way of working. With no Task attached and nobody asking
 for managed work, keep the chosen implementation in this checkout, keep later
 ideas in the design, report the decision and finish. A Graph that includes
 this skill is no reason to look up a Wave or create Tasks. For existing or
-requested managed work, read `lf help skill work` and continue.
+requested managed work, continue it.
 
 ## Choose the work
 

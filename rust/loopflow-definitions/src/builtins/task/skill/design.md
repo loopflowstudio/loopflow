@@ -1,6 +1,6 @@
 ---
 requires: none
-produces: scratch/<branch>.md
+produces: scratch/plan.md
 action_style: exploratory
 ---
 Dream big, detail the idea, then shape it into one exact design.
@@ -11,7 +11,7 @@ mechanisms you propose, real constraints, and what people said. Keep the
 original problem when the solution changes.
 
 Read `scratch/` and the agent guide, and continue an existing design rather
-than restarting. Write the design to `scratch/<workspace-slug>.md` as you go,
+than restarting. Write the design to `scratch/plan.md` as you go,
 so a crashed Session loses no decisions, and open questions to
 `scratch/questions.md`. Quote the words that anchor intent, with the speaker's
 name. "Looks fine" stays "looks fine".

@@ -763,7 +763,7 @@ mod tests {
             Some("Repository implementation.")
         );
         assert_eq!(selected.skill.agent.as_deref(), Some("claude:repo"));
-        assert_eq!(selected.skill.occurrence.as_ref().unwrap().graph, "pursue");
+        assert_eq!(selected.skill.occurrence.as_ref().unwrap().graph, "build");
         assert_eq!(selected.arguments, "Exact request");
         // A runtime Graph's already resolved capture retains its body/arguments.
         let captured = home.path().join("runtime.json");
@@ -849,22 +849,22 @@ mod tests {
         let repo = TempDir::new().unwrap();
         fs::create_dir_all(home.path().join(".lf/skills")).unwrap();
         fs::write(
-            home.path().join(".lf/skills/loop-or-next.md"),
-            "Personal decision criteria",
+            home.path().join(".lf/skills/realign.md"),
+            "Personal realign method",
         )
         .unwrap();
         sync_skills(&options_for(&home)).unwrap();
         let global = home.path().join(".claude/skills/pursue/SKILL.md");
         let original = fs::read_to_string(&global).unwrap();
-        assert!(original.contains("Execute the skill `loop-or-next` in this conversation."));
+        assert!(original.contains("Execute the skill `realign` in this conversation."));
         assert!(original.contains(
             &home
                 .path()
-                .join(".lf/skills/loop-or-next.md")
+                .join(".lf/skills/realign.md")
                 .display()
                 .to_string()
         ));
-        assert!(!original.contains("Personal decision criteria"));
+        assert!(!original.contains("Personal realign method"));
 
         fs::create_dir_all(repo.path().join(".lf/graphs")).unwrap();
         let graph = repo.path().join(".lf/graphs/pursue.yaml");

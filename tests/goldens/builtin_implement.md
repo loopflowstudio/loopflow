@@ -31,8 +31,11 @@ run showed, outside facts. Code, history and a fresh run can recover the rest.
 Quote what people said; don't turn a reply into a verdict like "accepted". Aim
 for quality per word, not more words.
 
-Markdown under `scratch/` is loaded into this checkout's runs. Another
-checkout's files are not. Old notes are background, not new instructions.
+`scratch/` holds this checkout's working notes. `scratch/plan.md` is the plan:
+what is being built and what remains. Each run is handed the plan first, then
+a listing of the rest with the most recently edited notes preloaded; read
+what the work depends on in full. Another checkout's files are not included.
+Old notes are background, not new instructions.
 Keep secrets out of output.
 
 </lf:loopflow>
@@ -59,7 +62,7 @@ Turn the plan into working code.
 Working code with rough edges beats perfect code that took too long. A first
 draft doesn't satisfy acceptance it hasn't met.
 
-Read the plan in `scratch/` and the agent guide; a small change may have its
+Read the plan, `scratch/plan.md`, and the agent guide; a small change may have its
 plan in the conversation. Read the affected user docs too, including edits made
 since the last pass: they describe the experience to build, so keep their
 corrections.
@@ -84,6 +87,10 @@ corrections.
   every query you add or change, bound what a hot path reads, keep writes
   short, and time it at realistic size.
 - **Test behavior.** Assert on what people see, not on mock calls.
+- **Commit each coherent change** as you finish it, with a message that says
+  what changed and why. Committing and pushing are always safe here: history
+  keeps everything, and nothing needs the branch to stay clean. Whatever you
+  leave is committed for you when the step ends.
 
 ## Check
 

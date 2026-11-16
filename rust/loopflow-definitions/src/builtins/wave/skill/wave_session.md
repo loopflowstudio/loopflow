@@ -29,8 +29,7 @@ with current instructions and what this one knew.
 ## Develop direction
 
 For a new idea, follow `lf help capture-tasks` here. Captured Tasks start when
-someone selects them. Chapter changes go through start-chapter; never replan
-just to make ordinary work possible.
+someone selects them. Never replan just to make ordinary work possible.
 
 The Wave's direction lives in `.lf/wave/<wave>/MEMORY.md`: what it will do,
 with what people said about it word for word. Working plans stay in

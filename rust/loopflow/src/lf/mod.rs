@@ -3733,6 +3733,8 @@ mod tests {
     fn account_commands_printed_by_errors_parse() {
         let sources = [
             include_str!("commands/account.rs"),
+            include_str!("../provider_account/operations.rs"),
+            include_str!("../provider_account/account_status.rs"),
             include_str!("commands/account_status.rs"),
             include_str!("commands/machine_credentials.rs"),
             include_str!("../provider_account.rs"),

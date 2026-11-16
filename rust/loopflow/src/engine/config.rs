@@ -273,8 +273,8 @@ fn inspect_selection(
 #[cfg(test)]
 mod tests {
     use super::{explain, get, set, unset as unset_key};
+    use crate::config::environment::EnvVarGuard;
     use crate::config::files::Destination;
-    use crate::lf::commands::graph::EnvVarGuard;
     use loopflow_test_support::TestRepo;
     use serde_json::{json, Value};
     use std::path::Path;

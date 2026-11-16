@@ -462,7 +462,7 @@ mod tests {
 
     use super::super::remote::{manage, Control};
     use super::{configured, save, TailscaleIdentity};
-    use crate::lf::commands::graph::EnvVarGuard;
+    use crate::config::environment::EnvVarGuard;
     use std::path::PathBuf;
     use std::sync::Arc;
 

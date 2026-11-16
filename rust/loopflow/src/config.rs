@@ -16,6 +16,7 @@ use crate::error::LoadError;
 
 pub mod catalog;
 mod definitions;
+pub(crate) mod environment;
 pub mod files;
 pub mod keys;
 pub mod migrate;
@@ -1234,7 +1235,7 @@ release:
         let _env = loopflow_test_support::env_lock().lock().unwrap();
         let home = tempfile::tempdir().unwrap();
         let _home =
-            crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+            crate::config::environment::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
         let repo = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(repo.path().join(".lf/wave/infra")).unwrap();
         std::fs::write(

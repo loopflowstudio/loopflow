@@ -287,8 +287,8 @@ Test skill body.
         let _lock = crate::journal::test_env_lock();
         let home = tempfile::tempdir().unwrap();
         let _home =
-            crate::lf::commands::graph::EnvVarGuard::set("HOME", home.path().to_str().unwrap());
-        let _lf_home = crate::lf::commands::graph::EnvVarGuard::set(
+            crate::config::environment::EnvVarGuard::set("HOME", home.path().to_str().unwrap());
+        let _lf_home = crate::config::environment::EnvVarGuard::set(
             "LF_HOME",
             home.path().join(".lf").to_str().unwrap(),
         );
@@ -625,7 +625,7 @@ Test skill body.
     fn preferred_name_reaches_provider_prompts_on_every_surface() {
         let _home = crate::journal::TestLedgerGuard::new();
         let _name =
-            crate::lf::commands::graph::EnvVarGuard::set(crate::config::USER_NAME_ENV, "  Jack  ");
+            crate::config::environment::EnvVarGuard::set(crate::config::USER_NAME_ENV, "  Jack  ");
         let tmp = create_repo_fixture();
         for agent in ["claude", "codex", "opencode", "pi"] {
             let _selection = select_agent(agent);

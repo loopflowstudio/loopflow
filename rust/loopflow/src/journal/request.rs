@@ -176,11 +176,11 @@ mod tests {
     #[test]
     fn request_settings_ignore_the_launcher_and_restore_after_failure() {
         let _env = loopflow_test_support::env_lock().lock().unwrap();
-        let _agent = crate::lf::commands::graph::EnvVarGuard::set(
+        let _agent = crate::config::environment::EnvVarGuard::set(
             crate::config::AGENT_OVERRIDE_ENV,
             "claude",
         );
-        let _profile = crate::lf::commands::graph::EnvVarGuard::set(
+        let _profile = crate::config::environment::EnvVarGuard::set(
             crate::config::remote::PROFILE_ENV,
             "invalid launcher profile",
         );

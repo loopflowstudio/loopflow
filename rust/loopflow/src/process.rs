@@ -1,6 +1,7 @@
 //! Process records describe OS lifetimes; runtime resources hold exact attachment authority.
 
 pub mod attachment;
+pub mod launch_log;
 mod runtime;
 pub use runtime::LfProcessRuntime;
 pub(crate) use runtime::{

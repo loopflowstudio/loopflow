@@ -1308,7 +1308,9 @@ async fn operate(
             }
             effect(target, id, instance, trace_id, move || {
                 let _held = reservation;
-                crate::lf::commands::account::served(|| Ok(serde_json::to_value(change.run()?)?))
+                crate::provider_account::operations::served(|| {
+                    Ok(serde_json::to_value(change.run()?)?)
+                })
             })
             .await
         }
@@ -1624,7 +1626,7 @@ mod tests {
         let _env = loopflow_test_support::env_lock().lock().unwrap();
         let home = tempfile::tempdir().unwrap();
         let _home =
-            crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+            crate::config::environment::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
         // block_on is synchronous, so the env guard never spans an await point.
         tokio::runtime::Builder::new_multi_thread()
             .enable_all()
@@ -3002,7 +3004,7 @@ mod tests {
         let _env = loopflow_test_support::env_lock().lock().unwrap();
         let home = tempfile::tempdir().unwrap();
         let _home =
-            crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+            crate::config::environment::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(1)
             .max_blocking_threads(2)
@@ -3229,7 +3231,7 @@ mod tests {
             // Only the launch request is built; no CLI is executed.
             let binary = std::env::current_exe().unwrap();
             let _binary =
-                crate::lf::commands::graph::EnvVarGuard::set("LF_BIN", binary.to_str().unwrap());
+                crate::config::environment::EnvVarGuard::set("LF_BIN", binary.to_str().unwrap());
             let store = home_store();
             let session =
                 store.test_session("continued", &crate::session_record::new_artifact_key());

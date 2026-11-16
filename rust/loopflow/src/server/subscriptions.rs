@@ -631,7 +631,7 @@ mod tests {
         let _env = loopflow_test_support::env_lock().lock().unwrap();
         let home = tempfile::tempdir().unwrap();
         let _home =
-            crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+            crate::config::environment::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
         let store =
             crate::store::opening::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
         let runtime = tokio::runtime::Builder::new_multi_thread()

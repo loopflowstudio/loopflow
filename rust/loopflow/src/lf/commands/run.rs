@@ -127,7 +127,12 @@ pub fn resume(id: &str, message: &str, cli: &Cli, named_work: bool) -> Result<()
             bail!(refusal);
         }
     }
-    let mut resolved = crate::agent::resolve_session_config(&session, cli)?;
+    let mut resolved = crate::agent::resolve_session_config(
+        &session,
+        cli.setting_values()?,
+        cli.output_schema.as_ref(),
+        cli.batch,
+    )?;
     let mut turn = cli.process_options();
     turn.agent = resolved.agent.clone();
     let message = if session.captured.is_some()

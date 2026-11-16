@@ -6,62 +6,13 @@
 
 use std::path::Path;
 
-use serde::{Deserialize, Serialize};
-
 use super::{Error, ErrorCode, Result};
-use crate::lf::commands::account as handlers;
-use crate::lf::commands::account::account_status::AccountReport;
-use crate::lf::commands::profile::NextLaunch;
+use crate::provider_account::operations as handlers;
+use crate::provider_account::operations::account_status::AccountReport;
+use crate::provider_account::routing::NextLaunch;
 use crate::provider_auth::Provider;
-use crate::store::{AccountLimitWindow, ProviderAccountId};
-use crate::subscription::RateLimitResetCredits;
 
-/// The login a write selected, as the caller named it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct Account {
-    pub provider: Provider,
-    /// The managed login; null for the provider's local credentials.
-    pub login: Option<String>,
-}
-
-/// `account.set`'s changes; every absent field leaves its setting alone.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Settings {
-    pub login_email: Option<String>,
-    pub plan: Option<String>,
-    pub clear_plan: bool,
-    pub paid_through: Option<String>,
-    pub clear_paid_through: bool,
-    pub clear_cooldown: bool,
-    /// Replace the ordered browser choices; empty keeps them.
-    pub chrome_profiles: Vec<String>,
-    pub clear_chrome_profiles: bool,
-}
-
-/// An account's windows and banked resets at one instant.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct UsageSnapshot {
-    pub windows: Vec<AccountLimitWindow>,
-    pub reset_credits: Option<RateLimitResetCredits>,
-}
-
-/// What `account.redeem_reset` spent, and the usage before and after.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct Redemption {
-    pub provider: Provider,
-    pub account_id: ProviderAccountId,
-    pub login: String,
-    /// Retry this attempt with the same key; a new key is a new spend.
-    pub idempotency_key: String,
-    pub outcome: String,
-    pub before: UsageSnapshot,
-    /// Null when the refresh after the spend failed; `refresh_error` says why.
-    pub after: Option<UsageSnapshot>,
-    pub refresh_error: Option<String>,
-}
+pub use crate::provider_account::operations::{Account, Redemption, Settings, UsageSnapshot};
 
 /// `account.list`: every login's state, as `lf account [provider]` shows it.
 /// Naming a target includes its details; cached reads never contact providers.
@@ -91,19 +42,19 @@ pub fn next(
             None => crate::repository::containing(directory).map_err(unavailable)?,
         }
     };
-    block_on(crate::lf::commands::profile::next(repo_id.as_ref(), agent)).map_err(unavailable)
+    block_on(crate::provider_account::routing::next(
+        repo_id.as_ref(),
+        agent,
+    ))
+    .map_err(unavailable)
 }
 
 pub fn disconnect(provider: &str, email: Option<&str>) -> Result<Account> {
-    change(
-        provider,
-        email,
-        crate::lf::AccountCommand::Disconnect {
-            target: target(provider, email),
-        },
-    )
+    let account = account(provider, email)?;
+    block_on(handlers::disconnect_target(&target(provider, email)))
+        .map_err(|error| Error::written(&error))?;
+    Ok(account)
 }
-
 pub fn connect(
     provider: &str,
     email: Option<&str>,
@@ -111,53 +62,26 @@ pub fn connect(
     import: bool,
     api_key: bool,
 ) -> Result<Account> {
-    change(
-        provider,
-        email,
-        crate::lf::AccountCommand::Connect {
-            target: target(provider, email),
-            chrome_profile: chrome_profile.map(str::to_owned),
-            import,
-            api_key,
-        },
-    )
+    let account = account(provider, email)?;
+    block_on(handlers::connect_target(
+        &target(provider, email),
+        chrome_profile,
+        import,
+        api_key,
+    ))
+    .map_err(|error| Error::outcome_unknown(&error))?;
+    Ok(account)
 }
-
 pub fn set(provider: &str, email: Option<&str>, settings: &Settings) -> Result<Account> {
-    change(
-        provider,
-        email,
-        crate::lf::AccountCommand::Set {
-            target: target(provider, email),
-            login_email: settings.login_email.clone(),
-            plan: settings.plan.clone(),
-            clear_plan: settings.clear_plan,
-            paid_through: settings.paid_through.clone(),
-            clear_paid_through: settings.clear_paid_through,
-            clear_cooldown: settings.clear_cooldown,
-            chrome_profile: settings.chrome_profiles.clone(),
-            clear_chrome_profiles: settings.clear_chrome_profiles,
-        },
-    )
+    let account = account(provider, email)?;
+    block_on(handlers::set(&target(provider, email), settings))
+        .map_err(|error| Error::written(&error))?;
+    Ok(account)
 }
-
 fn target(provider: &str, email: Option<&str>) -> String {
     email
         .map(|email| format!("{provider}={email}"))
         .unwrap_or_else(|| provider.to_owned())
-}
-
-fn change(
-    provider: &str,
-    email: Option<&str>,
-    command: crate::lf::AccountCommand,
-) -> Result<Account> {
-    let account = account(provider, email)?;
-    block_on(handlers::run_async(&command, None)).map_err(|error| match command {
-        crate::lf::AccountCommand::Connect { .. } => Error::outcome_unknown(&error),
-        _ => Error::written(&error),
-    })?;
-    Ok(account)
 }
 
 /// `account.redeem_reset`: spend one banked Codex reset for a managed login.
@@ -179,26 +103,15 @@ pub fn redeem_reset(
 
 /// Hold a login on this Machine, or release holds with `auto`.
 pub fn activate(login: &str) -> Result<()> {
-    block_on(handlers::run_async(
-        &crate::lf::AccountCommand::Use {
-            login: login.to_owned(),
-        },
-        None,
-    ))
-    .map_err(|error| Error::written(&error))
+    block_on(handlers::use_login(login)).map_err(|error| Error::written(&error))
 }
-
 pub fn pause(login: &str, paused: bool) -> Result<()> {
-    let command = if paused {
-        crate::lf::AccountCommand::Pause {
-            login: login.to_owned(),
-        }
+    let routing = if paused {
+        crate::store::RoutingState::ExplicitOnly
     } else {
-        crate::lf::AccountCommand::Unpause {
-            login: login.to_owned(),
-        }
+        crate::store::RoutingState::Automatic
     };
-    block_on(handlers::run_async(&command, None)).map_err(|error| Error::written(&error))
+    block_on(handlers::set_rotation(login, routing)).map_err(|error| Error::written(&error))
 }
 
 fn account(provider: &str, email: Option<&str>) -> Result<Account> {

@@ -828,7 +828,7 @@ mod tests {
         let _env = loopflow_test_support::env_lock().lock().unwrap();
         let home = tempfile::tempdir().unwrap();
         let _home =
-            crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+            crate::config::environment::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
         let repo = loopflow_test_support::TestRepo::new();
         let subscribe = || {
             let (sender, wakes) = mpsc::channel();
@@ -875,7 +875,7 @@ mod tests {
         let _env = loopflow_test_support::env_lock().lock().unwrap();
         let home = tempfile::tempdir().unwrap();
         let _home =
-            crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+            crate::config::environment::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
         let repo = loopflow_test_support::TestRepo::new();
         let checkout = home.path().join("task");
         assert!(std::process::Command::new("git")
@@ -1000,7 +1000,7 @@ mod tests {
         let _env = loopflow_test_support::env_lock().lock().unwrap();
         let home = tempfile::tempdir().unwrap();
         let _home =
-            crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+            crate::config::environment::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
         let repo = tempfile::tempdir().unwrap();
         let (sender, wakes) = mpsc::channel();
         let directory = repo.path().to_owned();

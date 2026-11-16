@@ -1,10 +1,13 @@
 # Open choices
 
-- November 15 concept review: begin the next substantial cut by moving shared
-  operations below CLI/server adapters. Final crate membership and the existing
-  entry point for idle cache refresh remain engineering choices; neither changes
-  commands, recovery or approval. Keep ordinary build/debug instructions until
-  automatic root upkeep is implemented. No new product answer is assumed.
+- November 15 implementation: the selected cache upkeep entry is `scripts/dev-lf`
+  before Cargo. Configuration reload follows the existing server's natural idle
+  exit; no shared-daemon restart or new schedule. Ordinary Cargo does not refresh
+  inventory, explicit `SCCACHE_CONF` remains caller-owned, and isolated builds
+  bypass it. This reversible placement does not install Machine configuration.
+- The shared-operation preparation is implemented, but an execution crate and
+  distinct command-only/runtime rebuilds are still required. Do not count moving
+  files within `loopflow` as a smaller compiler unit or time it as a completed cut.
 
 - Use two disposable source roots for the initial cache comparison and one
   sequential late-root fixture for refresh; one build at a time. Admission/job budgets and shared-cache
@@ -14,8 +17,8 @@
 - November 15 direction supersedes the source-debugging stop. Cross-root hits
   may retain A's debug paths; use `scripts/dev-lf --isolated-build` for local
   debugging and cache diagnosis. No source-retention system is selected.
-- LOO-908 is done with no PR; no live root-refresh integration is available.
-  The private probe tests refresh; a shared-daemon owner remains unselected.
+- LOO-908 is done with no PR. The new developer-entry inventory owner is local to
+  this Task; the private root probe checks natural idle reload without a restart RPC.
 - The isolated build option is a leading `--isolated-build` argument to
   `scripts/dev-lf`; ordinary lf arguments pass through after it. A fixed
   checkout-local `target/isolated` is the simpler reusable debugging target.
@@ -90,7 +93,6 @@
   generated SQL literal, anchored by its build script, to keep test-support
   reuse independent of application files and manifest-root environment values.
 
-- Before merge, check whether an initial lower-crate-only edit refreshes the
-  application dirty-build label. Application provenance watches its own source
-  and Git metadata; the timed Task-record edit follows a shipping edit, so it
-  does not answer that clean-to-dirty question.
+- The clean-to-dirty lower-crate provenance check now passes with the production
+  build script and real Cargo. It is independent of the older sequential
+  shipping/Task-record timing cases.

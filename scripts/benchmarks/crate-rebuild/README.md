@@ -1,6 +1,7 @@
 # Rebuild measurements
 
 ```bash
+uv run python scripts/benchmarks/crate-rebuild/root_probe.py --sccache /path/to/sccache --output /tmp/lf-root-proof
 uv run python scripts/benchmarks/crate-rebuild/probe.py --sccache /path/to/sccache --output /tmp/lf-cache-proof
 uv run python scripts/benchmarks/crate-rebuild/cochange.py --revision HEAD --count 80
 uv run python scripts/benchmarks/crate-rebuild/run.py --base 3fbf3d2ca3 --candidate HEAD --sccache /path/to/sccache --output /tmp/lf-build-comparison
@@ -30,7 +31,7 @@ Both revisions retain their own profiles and dependencies; inspect differences b
 timing change to crate layout. It needs the source repository's `origin/main`
 for migration ordering. Network fetches remain possible on cold builds.
 
-Both commands own a private local cache and daemon and stop it on failure or
+The probes and full comparison own a private local cache and daemon and stop it on failure or
 completion. They never reset the Machine's cache or share mutable targets. Raw
 Cargo JSON, native time logs and cache receipts remain in the output directory.
 The full comparison retains its source copies, targets and caches on failure
@@ -39,8 +40,14 @@ Nonfresh Cargo artifacts include cache retrieval; inspect sccache hit/miss delta
 to distinguish retrieval from compilation. Client-side compilation lets native
 time include compiler and linker CPU in the client process tree; storage-daemon
 overhead is excluded. These receipts do not establish total Machine CPU savings
-or a safe concurrent build budget. The commands do not configure shared daemon
-root refresh or Machine admission budgets.
+or a safe concurrent build budget. The comparison and owner probe do not configure Machine admission budgets.
+
+The root upkeep probe uses the same inventory/configuration function as
+`scripts/dev-lf`. It creates a linked worktree after starting its private server,
+checks the expected miss while the old configuration remains active, waits for
+that exact server's natural idle exit, then checks a hit in a fresh independent
+target. It never sends a restart RPC or edits a root list. The tiny library checks
+root reload; the owner probe separately checks the actual extracted crates.
 
 The private daemon accepts frames up to 1 GiB: client-side cache uploads of
 storage/application libraries exceed sccache's default 8 MiB IPC frame limit.

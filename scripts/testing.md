@@ -290,8 +290,8 @@ use sccache.
 
 Cross-worktree reuse needs sccache with Rust basedir normalization and verbatim
 environment-dependency tracking. Version 0.19.0 does not provide that reuse.
-The cache configuration must list each worktree's absolute root in
-`SCCACHE_BASEDIRS`; listing only their shared parent is insufficient. Use
+The cache configuration must list each worktree's absolute root in `basedirs`
+(or `SCCACHE_BASEDIRS`); listing only their shared parent is insufficient. Use
 `SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS` to keep checkout identity values such as
 `CARGO_MANIFEST_DIR`, `CARGO_MANIFEST_PATH` and `LOOPFLOW_BUILD_SOURCE_ROOT`
 verbatim when compiled code reads them.
@@ -300,13 +300,23 @@ Cache hits can retain another checkout's absolute debug-source paths. Use the
 isolated build above when those paths no longer resolve. The
 [crate rebuild probe](benchmarks/crate-rebuild/README.md) records source paths
 alongside runtime-identity checks. Use the isolated build for source debugging.
-Automatic cross-root reuse still needs shared-server root upkeep.
+`scripts/dev-lf` refreshes the derived worktree inventory before building.
 
-Use one machine-wide server for a shared local cache. Root configuration takes
-effect when that server starts; apply root changes when builds are idle. A new
-worktree can compile with cache misses until the server picks up its root. Do
-not restart the shared server during another build or run separate servers
-against the same local cache.
+Use one machine-wide server for a shared local cache. Before a developer build,
+`scripts/build_cache.py` reads `git worktree list --porcelain -z` and writes
+`~/.cache/loopflow/sccache.json` (under `XDG_CACHE_HOME` when set). Other settings
+follow the Machine's default sccache file. The current canonical root is included, and inventories from other repositories are retained.
+The script selects that file for the build and keeps checkout environment
+dependencies verbatim. It never stops or restarts the daemon: refreshed roots
+apply after its normal idle shutdown, when the next build starts it. Until then,
+a new root can compile with cache misses. Each worktree still owns its target.
+An explicit `SCCACHE_CONF` stays under its caller's control.
+
+Ordinary Cargo uses the Machine's configuration and whichever shared server is
+running; it does not run this inventory refresh. The isolated developer build
+bypasses it. Neither path installs a wrapper or changes the Machine's Cargo
+configuration. The [root upkeep probe](benchmarks/crate-rebuild/README.md) checks
+late-root reuse after an observed idle exit with correct runtime identity.
 
 If the configured wrapper is missing or the cache service fails, build directly:
 

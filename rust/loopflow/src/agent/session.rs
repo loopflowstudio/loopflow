@@ -247,9 +247,11 @@ pub(crate) fn session_environment(
 /// Explicit continuation reloads policy at the saved checkout, retaining native identity.
 pub(crate) fn resolve_session_config(
     session: &crate::session::LfSession,
-    cli: &crate::lf::Cli,
+    settings: serde_yaml_ng::Value,
+    output_schema: Option<&serde_json::Value>,
+    batch: bool,
 ) -> Result<AgentConfig> {
-    let _selection = crate::config::settings::select_invocation(cli.setting_values()?);
+    let _selection = crate::config::settings::select_invocation(settings);
     let store = crate::store::open_sqlite(&crate::store::database_path_from_env()?)?;
     let wave = session
         .wave_id
@@ -341,7 +343,7 @@ pub(crate) fn resolve_session_config(
         } else {
             None
         },
-        output_schema: cli.output_schema.clone(),
+        output_schema: output_schema.cloned(),
         ..Default::default()
     };
     let mut needs_execution_boundary = false;
@@ -357,7 +359,7 @@ pub(crate) fn resolve_session_config(
         config.write_scope = request.write_scope;
         needs_execution_boundary = request.execution_boundary.is_some();
     }
-    if cli.batch {
+    if batch {
         if let Some(task) = session
             .task_id
             .as_ref()

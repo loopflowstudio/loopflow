@@ -7,7 +7,7 @@ fn machine_defaults_route_unowned_tasks_until_one_is_claimed() {
     let _env = crate::journal::test_env_lock();
     let home = tempfile::tempdir().unwrap();
     let _home =
-        crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+        crate::config::environment::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
     let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
     let repo = home.path().canonicalize().unwrap();
     let repo = repo.to_str().unwrap();

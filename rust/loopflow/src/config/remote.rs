@@ -614,9 +614,9 @@ mod tests {
         let _env = loopflow_test_support::env_lock().lock().unwrap();
         let home = tempfile::tempdir().unwrap();
         let _home =
-            crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+            crate::config::environment::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
         let _personal_home =
-            crate::lf::commands::graph::EnvVarGuard::set("HOME", home.path().to_str().unwrap());
+            crate::config::environment::EnvVarGuard::set("HOME", home.path().to_str().unwrap());
         let repo = loopflow_test_support::TestRepo::new();
         repo.create_file(
             ".lf/skills/probe.md",
@@ -649,7 +649,7 @@ mod tests {
             inspection.config.agent().unwrap().to_owned()
         };
         {
-            let _profile = crate::lf::commands::graph::EnvVarGuard::set(
+            let _profile = crate::config::environment::EnvVarGuard::set(
                 super::PROFILE_ENV,
                 &serde_json::to_string(&carried).unwrap(),
             );

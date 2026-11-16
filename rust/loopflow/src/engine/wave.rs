@@ -53,7 +53,7 @@ pub fn planning_connect(
                     )
                 })?
             }
-            None => crate::lf::commands::ops::planning_wave(&repo, None)
+            None => crate::work::wave::context::planning_wave(&repo, None)
                 .map_err(written)?
                 .ok_or_else(|| {
                     Error::new(

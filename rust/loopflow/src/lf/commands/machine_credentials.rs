@@ -6,6 +6,7 @@
 //! `--owned`, an access token the laptop refreshes from a login it holds for
 //! rentals and sends again before it expires. Nothing forwards credentials
 //! while a Session runs.
+use crate::provider_auth::{access_only_expiry, opencode_command as opencode};
 use std::fs;
 use std::io::{Read, Write};
 use std::path::Path;
@@ -111,9 +112,13 @@ pub(super) async fn connect(
             if owned || store.sqlite.rental_for_machine(&machine.id)?.is_none() {
                 require_foreground(batch)?;
                 connecting(machine, provider, login);
-                let (staging, identity) =
-                    super::account::fresh_machine_login(&store, provider, &account, chrome_profile)
-                        .await?;
+                let (staging, identity) = crate::provider_account::operations::fresh_machine_login(
+                    &store,
+                    provider,
+                    &account,
+                    chrome_profile,
+                )
+                .await?;
                 let credential =
                     fs::read_to_string(staging.path().join(credential_file(provider)?))?;
                 Credential::Claude {
@@ -156,9 +161,13 @@ pub(super) async fn connect(
             }
             require_foreground(batch)?;
             connecting(machine, provider, login);
-            let (staging, identity) =
-                super::account::fresh_machine_login(&store, provider, &account, chrome_profile)
-                    .await?;
+            let (staging, identity) = crate::provider_account::operations::fresh_machine_login(
+                &store,
+                provider,
+                &account,
+                chrome_profile,
+            )
+            .await?;
             let credential = fs::read_to_string(staging.path().join(credential_file(provider)?))?;
             Credential::Codex {
                 login: login.into(),
@@ -231,8 +240,12 @@ pub(super) async fn connect(
                 let staging = tempfile::Builder::new()
                     .prefix("lf-machine-login-")
                     .tempdir()?;
-                super::account::fresh_opencode_login(&store, chrome_profile, staging.path())
-                    .await?;
+                crate::provider_account::operations::fresh_opencode_login(
+                    &store,
+                    chrome_profile,
+                    staging.path(),
+                )
+                .await?;
                 let fresh = opencode_active(&opencode_export(Some(staging.path()), "laptop")?)
                     .cloned()
                     .ok_or_else(|| {
@@ -348,9 +361,13 @@ async fn rental_access(
             bail!("the laptop holds no Claude rental login for {login}; `lf machine connect <rental> claude {login}` in a foreground terminal approves one");
         }
         eprintln!("Approving a Claude login the laptop holds for rentals: {login}");
-        let (staging, _) =
-            super::account::fresh_machine_login(store, Provider::Claude, account, chrome_profile)
-                .await?;
+        let (staging, _) = crate::provider_account::operations::fresh_machine_login(
+            store,
+            Provider::Claude,
+            account,
+            chrome_profile,
+        )
+        .await?;
         let credential = fs::read(staging.path().join(".credentials.json"))?;
         fs::create_dir_all(&home)?;
         write_private(&home.join(".credentials.json"), &credential)?;
@@ -456,18 +473,6 @@ fn require_foreground(batch: bool) -> Result<()> {
         bail!("a missing machine login needs a foreground terminal without --batch; run `lf machine connect <machine> <provider> [email]` there first");
     }
     Ok(())
-}
-
-/// When a Claude credential holding only an access token stops working. `None`
-/// for a login it can refresh itself.
-pub(in crate::lf::commands) fn access_only_expiry(credential: &str) -> Result<Option<i64>> {
-    let json: serde_json::Value =
-        serde_json::from_str(credential).map_err(|_| anyhow!("invalid Claude credential"))?;
-    let node = json.get("claudeAiOauth").unwrap_or(&json);
-    if node.get("refreshToken").is_some() {
-        return Ok(None);
-    }
-    Ok(Some(node["expiresAt"].as_i64().unwrap_or_default() / 1000))
 }
 
 async fn managed_account(
@@ -658,9 +663,11 @@ async fn installed(store: &SharedStore, provider: Provider, login: &str) -> Resu
             if !registered {
                 let _lock = acquire_managed_login_lock(home, provider, &account.account_id)?;
                 let (identity, plan) =
-                    super::account::verify_managed_identity(store, provider, &account, home)
-                        .await?;
-                super::account::register_managed_account(
+                    crate::provider_account::operations::verify_managed_identity(
+                        store, provider, &account, home,
+                    )
+                    .await?;
+                crate::provider_account::operations::register_managed_account(
                     store,
                     provider,
                     &account.account_id,
@@ -862,24 +869,6 @@ async fn install(store: &SharedStore, credential: Credential) -> Result<()> {
     }
 }
 
-/// OpenCode 2 on a private server; `home` isolates a staging login from this user's.
-pub(super) fn opencode(home: Option<&Path>, args: &[&str]) -> Command {
-    let mut command = Command::new("opencode");
-    command.args(args).arg("--standalone");
-    if let Some(home) = home {
-        command.env("HOME", home);
-        for (key, directory) in [
-            ("XDG_DATA_HOME", ".local/share"),
-            ("XDG_CONFIG_HOME", ".config"),
-            ("XDG_STATE_HOME", ".local/state"),
-            ("XDG_CACHE_HOME", ".cache"),
-        ] {
-            command.env(key, home.join(directory));
-        }
-    }
-    command
-}
-
 fn opencode_run(args: &[&str]) -> Result<()> {
     let status = opencode(None, args)
         .stdin(Stdio::null())
@@ -996,12 +985,14 @@ async fn install_managed(
         };
     if home.join(file).is_file() && !replaces_access {
         // A prior transfer can have installed the file and lost its SQLite write.
-        let (identity, plan) =
-            super::account::verify_managed_identity(store, provider, &account, &home).await?;
+        let (identity, plan) = crate::provider_account::operations::verify_managed_identity(
+            store, provider, &account, &home,
+        )
+        .await?;
         if identity.subject != subject {
             bail!("existing login has a different identity; left unchanged");
         }
-        return super::account::register_managed_account(
+        return crate::provider_account::operations::register_managed_account(
             store,
             provider,
             &account.account_id,
@@ -1015,8 +1006,13 @@ async fn install_managed(
         .prefix(".receive-")
         .tempdir_in(parent)?;
     write_private(&staging.path().join(file), credential.as_bytes())?;
-    let (identity, plan) =
-        super::account::verify_managed_identity(store, provider, &account, staging.path()).await?;
+    let (identity, plan) = crate::provider_account::operations::verify_managed_identity(
+        store,
+        provider,
+        &account,
+        staging.path(),
+    )
+    .await?;
     if identity.subject != subject {
         bail!("received login has a different identity; discarded");
     }
@@ -1029,7 +1025,7 @@ async fn install_managed(
         let bytes = fs::read(staging.path().join(file))?;
         write_private(&home.join(file), &bytes)?;
     }
-    super::account::register_managed_account(
+    crate::provider_account::operations::register_managed_account(
         store,
         provider,
         &account.account_id,
@@ -1091,7 +1087,7 @@ async fn install_access(
             credential,
         )),
     };
-    super::account::register_managed_account(
+    crate::provider_account::operations::register_managed_account(
         store,
         provider,
         &account.account_id,

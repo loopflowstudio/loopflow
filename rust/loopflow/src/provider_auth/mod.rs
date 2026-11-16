@@ -357,6 +357,35 @@ impl PmRefreshError {
     }
 }
 
+/// Expiry for a Claude credential that cannot refresh itself.
+pub(crate) fn access_only_expiry(credential: &str) -> anyhow::Result<Option<i64>> {
+    let json: serde_json::Value = serde_json::from_str(credential)
+        .map_err(|_| anyhow::anyhow!("invalid Claude credential"))?;
+    let node = json.get("claudeAiOauth").unwrap_or(&json);
+    if node.get("refreshToken").is_some() {
+        return Ok(None);
+    }
+    Ok(Some(node["expiresAt"].as_i64().unwrap_or_default() / 1000))
+}
+
+/// OpenCode 2 on a private server; `home` isolates a staging login.
+pub(crate) fn opencode_command(home: Option<&Path>, args: &[&str]) -> std::process::Command {
+    let mut command = std::process::Command::new("opencode");
+    command.args(args).arg("--standalone");
+    if let Some(home) = home {
+        command.env("HOME", home);
+        for (key, directory) in [
+            ("XDG_DATA_HOME", ".local/share"),
+            ("XDG_CONFIG_HOME", ".config"),
+            ("XDG_STATE_HOME", ".local/state"),
+            ("XDG_CACHE_HOME", ".cache"),
+        ] {
+            command.env(key, home.join(directory));
+        }
+    }
+    command
+}
+
 #[cfg(test)]
 tokio::task_local! {
     pub(crate) static PM_REFRESH_URL: String;

@@ -715,7 +715,7 @@ impl SessionOn {
         match crate::harness::HarnessKind::parse(&harness) {
             Some(harness) if !raw.contains('@') => Ok(Self::Agent { harness, model }),
             _ => {
-                let login = crate::lf::commands::account::resolve_on(store, raw).await?;
+                let login = crate::provider_account::operations::resolve_on(store, raw).await?;
                 Ok(Self::Login {
                     provider: login.provider,
                     account_id: login.account_id,
@@ -958,7 +958,8 @@ pub(crate) fn inherited_launch_lock() -> Option<File> {
 }
 
 async fn conversation_launch_args(store: &SharedStore, session: &LfSession) -> Result<Vec<String>> {
-    let config = crate::agent::resolve_session_config(session, &crate::lf::Cli::default())?;
+    let config =
+        crate::agent::resolve_session_config(session, serde_yaml_ng::Value::Null, None, false)?;
     let mut args = vec![
         "-i".to_string(),
         "--agent".to_string(),
@@ -1137,7 +1138,7 @@ pub(crate) async fn open(
         }
     }
     if resume && session.provider.as_deref() == Some("claude") && running()? {
-        crate::lf::commands::account::switch_to_named_login(
+        crate::provider_account::operations::switch_to_named_login(
             store,
             crate::provider_auth::Provider::Claude,
         )

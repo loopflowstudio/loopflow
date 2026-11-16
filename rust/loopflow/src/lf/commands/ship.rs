@@ -38,7 +38,7 @@ pub fn run(
         .expect("a ship that began has a registered Process");
     let letting_go = super::graph::lets_launcher_go(cli);
     let log = letting_go
-        .then(|| super::graph::PendingLog::open(&format!("ship-{issue}")))
+        .then(|| crate::process::launch_log::PendingLog::open(&format!("ship-{issue}")))
         .transpose()?;
     let shipping = TaskShip::Shipping {
         issue: issue.clone(),
@@ -47,7 +47,7 @@ pub fn run(
     };
     announce(&shipping, json)?;
     if let Some(log) = &log {
-        super::graph::release_launcher(&log.file)?;
+        crate::process::launch_log::release_launcher(&log.file)?;
     }
     // Every run is `lf -b task run`: straight through, interactive steps headless.
     let mut headless = cli.process_options();

@@ -683,7 +683,7 @@ mod tests {
         let _lock = crate::journal::test_env_lock();
         let home = tempfile::tempdir().unwrap();
         let _home =
-            crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+            crate::config::environment::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
         let tmp = loopflow_test_support::TestRepo::new();
         std::fs::create_dir_all(tmp.path().join(".lf/wave/release")).unwrap();
         let goal = "---\ncrons: []\n---\n## Objective\nShip a reliable release.\n\n## Bounds\nKeep rollback available.\n";
@@ -774,7 +774,7 @@ mod tests {
         let _lock = crate::journal::test_env_lock();
         let (home, store) = test_store().await;
         let _home =
-            crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+            crate::config::environment::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
         let repo = loopflow_test_support::TestRepo::new();
         for (name, memory) in [
             ("infrastructure", "Parent memory"),

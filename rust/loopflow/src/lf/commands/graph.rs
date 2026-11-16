@@ -1,3 +1,4 @@
+use crate::config::environment::EnvVarGuard;
 use crate::graph::compile_graph;
 use crate::graph::output::GraphOutput;
 use crate::graph::return_target;
@@ -17,6 +18,7 @@ use crate::lf::output::Colors;
 use crate::lf::{Cli, Commands, PrCommand};
 use crate::ops::graph_process;
 use crate::ops::WorkBinding;
+use crate::process::launch_log::{release_launcher, PendingLog};
 use crate::store::SharedStore;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -406,56 +408,6 @@ fn spawn_task_child(
 }
 
 /// Where a Task run that let its launcher go keeps its Graph process's output.
-pub fn graph_log_path(id: &str) -> std::path::PathBuf {
-    crate::store::lf_home_dir()
-        .join("logs")
-        .join(format!("graph-{id}.log"))
-}
-
-/// A run's output once its launcher lets go: an attempt's until it registers,
-/// when it becomes that Graph process's log, or a ship's for its whole run.
-#[derive(Debug)]
-pub(crate) struct PendingLog {
-    pub(crate) file: std::fs::File,
-    pub(crate) path: std::path::PathBuf,
-}
-
-impl PendingLog {
-    pub(crate) fn open(name: &str) -> Result<Self> {
-        use std::os::unix::fs::OpenOptionsExt;
-        let path = graph_log_path(name);
-        std::fs::create_dir_all(path.parent().expect("graph logs live in a directory"))?;
-        let file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .read(true)
-            .mode(0o600)
-            .custom_flags(libc::O_NOFOLLOW)
-            .open(&path)
-            .with_context(|| format!("could not open the Graph log {}", path.display()))?;
-        Ok(Self { file, path })
-    }
-
-    /// Name the log for the registered Process; open descriptors follow the rename.
-    fn settle(&mut self, registered: &LfProcessId) -> Result<()> {
-        let path = graph_log_path(registered.as_str());
-        std::fs::rename(&self.path, &path)
-            .with_context(|| format!("could not name the Graph log {}", path.display()))?;
-        self.path = path;
-        Ok(())
-    }
-
-    /// An attempt that ended before registering tells its launcher why.
-    fn replay(mut self) {
-        use std::io::{Read, Seek, Write};
-        let mut bytes = Vec::new();
-        if self.file.rewind().is_ok() && self.file.read_to_end(&mut bytes).is_ok() {
-            let _ = std::io::stderr().write_all(&bytes);
-        }
-        let _ = std::fs::remove_file(&self.path);
-    }
-}
-
 /// Wait until the attempt records its GraphProcess or ends first. No deadline:
 /// the child's own exit bounds it.
 fn registration(
@@ -482,21 +434,6 @@ pub(crate) fn lets_launcher_go(cli: &Cli) -> bool {
     !cli.batch
         && !cli.interactive
         && (crate::transport::current().is_some() || crate::os_process::detached::launched())
-}
-
-/// Hand the launcher its last lines, keep this run's own output in the log
-/// from here on, and let the launcher go.
-pub(crate) fn release_launcher(log: &std::fs::File) -> Result<()> {
-    use std::io::Write;
-    std::io::stdout().flush()?;
-    std::io::stderr().flush()?;
-    if crate::transport::current().is_some() {
-        crate::transport::detach_viewers()?;
-    }
-    crate::terminal_output::redirect(log, 1)?;
-    crate::terminal_output::redirect(log, 2)?;
-    crate::os_process::detached::release();
-    Ok(())
 }
 
 /// The child a Task run starts: this launcher's options, the Task, then `tail`.
@@ -774,29 +711,6 @@ fn tree_prefix(index: usize, total: usize) -> &'static str {
         "└─"
     } else {
         "├─"
-    }
-}
-
-pub(crate) struct EnvVarGuard {
-    key: &'static str,
-    previous: Option<std::ffi::OsString>,
-}
-
-impl EnvVarGuard {
-    pub(crate) fn set(key: &'static str, value: &str) -> Self {
-        let previous = std::env::var_os(key);
-        std::env::set_var(key, value);
-        Self { key, previous }
-    }
-}
-
-impl Drop for EnvVarGuard {
-    fn drop(&mut self) {
-        if let Some(previous) = &self.previous {
-            std::env::set_var(self.key, previous);
-        } else {
-            std::env::remove_var(self.key);
-        }
     }
 }
 

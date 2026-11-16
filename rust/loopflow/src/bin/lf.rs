@@ -688,7 +688,7 @@ fn print_task_snapshot(
         }
         // A run that let its launcher go named this log after its Graph or skill Process.
         let log = |id: &str| {
-            let path = loopflow::lf::commands::graph::graph_log_path(id);
+            let path = loopflow::process::launch_log::graph_log_path(id);
             if path.exists() {
                 format!("  log: {}", path.display())
             } else {

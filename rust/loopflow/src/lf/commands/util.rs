@@ -98,7 +98,8 @@ pub(crate) fn resume_session_with_env(
     let session = store
         .session_for_artifact(artifact_key)?
         .ok_or_else(|| anyhow!("Session input {artifact_key} is not recorded"))?;
-    let mut config = crate::agent::resolve_session_config(&session, &crate::lf::Cli::default())?;
+    let mut config =
+        crate::agent::resolve_session_config(&session, serde_yaml_ng::Value::Null, None, false)?;
     // Reopening a conversation recorded as Task, Wave or repository work is
     // Work whatever command reopened it.
     let work = store.is_work(named_work, Some(&session))?;

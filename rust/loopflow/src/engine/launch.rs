@@ -67,7 +67,7 @@ pub(crate) fn carry(operation: &str, run: impl Into<String>) -> anyhow::Result<O
     }
     let process = crate::journal::current_lf_process_id()
         .context("a detached operation requires a registered Process")?;
-    let log = crate::lf::commands::graph::PendingLog::open(&format!(
+    let log = crate::process::launch_log::PendingLog::open(&format!(
         "{}-{process}",
         operation.replace('.', "-")
     ))?;
@@ -78,7 +78,7 @@ pub(crate) fn carry(operation: &str, run: impl Into<String>) -> anyhow::Result<O
         log: log.path.clone(),
     };
     report(Ok(&launched));
-    crate::lf::commands::graph::release_launcher(&log.file)?;
+    crate::process::launch_log::release_launcher(&log.file)?;
     Ok(Some(launched))
 }
 

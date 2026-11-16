@@ -173,15 +173,19 @@ fn prepare(
 /// ready for a teammate's merge, as `lf pr submit` does.
 pub fn submit(directory: &Path, input: &LandInput, progress: &impl Progress) -> Result<Prepared> {
     let repo = repo_root(directory)?;
-    let pr =
-        crate::lf::commands::ops::with_sync_retry(&repo, "submit", progress, |repo, integrated| {
+    let pr = crate::ops::sync_execution::with_sync_retry(
+        &repo,
+        "submit",
+        progress,
+        |repo, integrated| {
             if integrated {
                 crate::ops::finish_submit_after_sync(repo, &input.options(), progress)
             } else {
                 crate::ops::submit(repo, &input.options(), progress)
             }
-        })
-        .map_err(outcome_unknown)?;
+        },
+    )
+    .map_err(outcome_unknown)?;
     Ok(Prepared { pr })
 }
 
@@ -303,7 +307,7 @@ fn land_in(repo: &Path, options: &LandOptions, progress: &impl Progress) -> anyh
     }
     // The wave home stays put on land.
     let pr =
-        crate::lf::commands::ops::with_sync_retry(repo, "land", progress, |repo, integrated| {
+        crate::ops::sync_execution::with_sync_retry(repo, "land", progress, |repo, integrated| {
             if integrated {
                 crate::ops::finish_arm_after_sync(repo, options, progress, &|_| {})
             } else {

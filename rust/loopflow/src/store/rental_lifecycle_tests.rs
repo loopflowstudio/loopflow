@@ -35,7 +35,7 @@ fn file_edits_change_admission_without_rewriting_live_rentals() {
     let _env = loopflow_test_support::env_lock().lock().unwrap();
     let (home, store) = store();
     let _home =
-        crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+        crate::config::environment::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
     crate::store::rentals::add_ondemand(&store, &code(1)).unwrap();
     let admitted = crate::store::rentals::admit_rental(&store, "code", None, None, false).unwrap();
     crate::engine::config::set(
@@ -210,7 +210,7 @@ fn an_ended_rental_hands_its_open_tasks_back_here() {
     let _env = crate::journal::test_env_lock();
     let (_dir, store) = store();
     let _home =
-        crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", _dir.path().to_str().unwrap());
+        crate::config::environment::EnvVarGuard::set("LF_HOME", _dir.path().to_str().unwrap());
     crate::store::rentals::add_ondemand(&store, &code(1)).unwrap();
     let rental = crate::store::rentals::admit_rental(&store, "code", None, None, false).unwrap();
     store
@@ -260,7 +260,7 @@ fn a_stale_rental_hand_back_reacquires_without_losing_claims() {
     let _env = crate::journal::test_env_lock();
     let (dir, store) = store();
     let _home =
-        crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", dir.path().to_str().unwrap());
+        crate::config::environment::EnvVarGuard::set("LF_HOME", dir.path().to_str().unwrap());
     crate::store::rentals::add_ondemand(&store, &code(1)).unwrap();
     let rental = crate::store::rentals::admit_rental(&store, "code", None, None, false).unwrap();
     store

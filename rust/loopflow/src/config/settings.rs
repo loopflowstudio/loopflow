@@ -1453,7 +1453,7 @@ mod tests {
                 Some(expected)
             );
         }
-        let _environment = crate::lf::commands::graph::EnvVarGuard::set(
+        let _environment = crate::config::environment::EnvVarGuard::set(
             "LF_SETTINGS",
             "codex: {service_tier: default}",
         );
@@ -1556,7 +1556,7 @@ mod tests {
                 expected
             );
         }
-        let _environment = crate::lf::commands::graph::EnvVarGuard::set(
+        let _environment = crate::config::environment::EnvVarGuard::set(
             "LF_SETTINGS",
             "default_agent: claude:environment",
         );
@@ -1736,7 +1736,7 @@ mod tests {
     #[test]
     fn cli_overrides_environment_without_exporting_the_selection() {
         let _env = loopflow_test_support::env_lock().lock().unwrap();
-        let _guard = crate::lf::commands::graph::EnvVarGuard::set(
+        let _guard = crate::config::environment::EnvVarGuard::set(
             crate::config::AGENT_OVERRIDE_ENV,
             "claude",
         );
@@ -1870,7 +1870,7 @@ mod tests {
         let _env = loopflow_test_support::env_lock().lock().unwrap();
         let home = tempfile::tempdir().unwrap();
         let _home =
-            crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+            crate::config::environment::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
         let repo = loopflow_test_support::TestRepo::new();
         repo.create_file(
             ".lf/skills/probe.md",
@@ -1927,7 +1927,7 @@ mod tests {
         let _env = loopflow_test_support::env_lock().lock().unwrap();
         let home = tempfile::tempdir().unwrap();
         let _home =
-            crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+            crate::config::environment::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
         let repo = loopflow_test_support::TestRepo::new();
         repo.create_file(".lf/config.yaml", "agent: codex\n");
         repo.create_file(".lf/graphs/probe.yaml", "- kickoff\n- step: kickoff\n");

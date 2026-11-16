@@ -617,7 +617,7 @@ mod tests {
         let executable = directory.path().join("gh");
         std::fs::write(&executable, "#!/bin/sh\n/bin/cat report\n").unwrap();
         std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let _path = crate::lf::commands::graph::EnvVarGuard::set(
+        let _path = crate::config::environment::EnvVarGuard::set(
             "PATH",
             &format!(
                 "{}:{}",

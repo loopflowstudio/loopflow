@@ -686,7 +686,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn settings_polling_launches_no_git_in_main_or_linked_checkouts() {
-        use crate::lf::commands::graph::EnvVarGuard;
+        use crate::config::environment::EnvVarGuard;
         use std::os::unix::fs::PermissionsExt;
 
         let _env = loopflow_test_support::env_lock().lock().unwrap();
@@ -749,7 +749,7 @@ mod tests {
         let _env = loopflow_test_support::env_lock().lock().unwrap();
         let home = tempfile::tempdir().unwrap();
         let _home =
-            crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+            crate::config::environment::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
         let repo = loopflow_test_support::TestRepo::new();
         let path = repo.path().join(super::PRIVATE_FILE);
         std::fs::write(&path, "agent: codex\n").unwrap();
@@ -757,7 +757,7 @@ mod tests {
             // Missing Git makes any subprocess attempt fail. Ordinary reads
             // still resolve private preferences, including a subsequent edit.
             let _path =
-                crate::lf::commands::graph::EnvVarGuard::set("PATH", home.path().to_str().unwrap());
+                crate::config::environment::EnvVarGuard::set("PATH", home.path().to_str().unwrap());
             for _ in 0..60 {
                 assert_eq!(
                     crate::config::load_config(Some(repo.path()))
@@ -950,7 +950,7 @@ mod tests {
         let _env = loopflow_test_support::env_lock().lock().unwrap();
         let home = tempfile::tempdir().unwrap();
         let _home =
-            crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+            crate::config::environment::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
         let repo = loopflow_test_support::TestRepo::new();
         repo.create_file(".lf/config.yaml", "agent: claude\n");
         let child = home.path().join("child");
@@ -997,7 +997,7 @@ mod tests {
         let _env = loopflow_test_support::env_lock().lock().unwrap();
         let home = tempfile::tempdir().unwrap();
         let _home =
-            crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+            crate::config::environment::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
         let first = loopflow_test_support::TestRepo::new();
         let second = loopflow_test_support::TestRepo::new();
         for repo in [&first, &second] {
@@ -1049,7 +1049,7 @@ mod tests {
         let _env = loopflow_test_support::env_lock().lock().unwrap();
         let home = tempfile::tempdir().unwrap();
         let _home =
-            crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+            crate::config::environment::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
         let repo = loopflow_test_support::TestRepo::new();
         let first = loopflow_model::id::WaveId::new();
         repo.create_file(".lf/wave/old/config.yaml", &format!("id: {first}\n"));
@@ -1180,7 +1180,7 @@ mod tests {
         let _env = loopflow_test_support::env_lock().lock().unwrap();
         let home = tempfile::tempdir().unwrap();
         let _home =
-            crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+            crate::config::environment::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
         let repo = loopflow_test_support::TestRepo::new();
         let path = set(
             repo.path(),

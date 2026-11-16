@@ -332,7 +332,7 @@ pub enum Read {
     /// `lf account [<login|provider>] [--cached] --json`: every login's
     /// state on this Machine.
     #[serde(rename = "account.list")]
-    #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::account::account_status::AccountReport>()))]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::provider_account::operations::account_status::AccountReport>()))]
     AccountList {
         target: Option<String>,
         cached: bool,
@@ -340,7 +340,7 @@ pub enum Read {
     /// `lf --cwd <directory> account next [-a <harness>:<model>] [--repo <repo>] [--default]
     /// --json`: how the repository selects an account for each provider.
     #[serde(rename = "account.next")]
-    #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::lf::commands::profile::NextLaunch>>()))]
+    #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::provider_account::routing::NextLaunch>>()))]
     AccountNext {
         directory: PathBuf,
         repo: Option<String>,

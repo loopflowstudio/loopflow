@@ -1315,7 +1315,7 @@ printf updated > "$LF_APPLICATIONS_DIR/Loopflow.app/Contents/MacOS/lf"
     #[cfg(target_os = "macos")]
     #[test]
     fn launchd_schedule_preserves_frequency_and_reuses_its_job() {
-        use crate::lf::commands::graph::EnvVarGuard;
+        use crate::config::environment::EnvVarGuard;
         use std::os::unix::fs::symlink;
 
         let _env = loopflow_test_support::env_lock().lock().unwrap();
@@ -1389,7 +1389,7 @@ printf updated > "$LF_APPLICATIONS_DIR/Loopflow.app/Contents/MacOS/lf"
 
     #[test]
     fn cleanup_schedule_never_provisions_a_disposable_home() {
-        use crate::lf::commands::graph::EnvVarGuard;
+        use crate::config::environment::EnvVarGuard;
         let _env = loopflow_test_support::env_lock().lock().unwrap();
         let home = tempfile::tempdir().unwrap();
         let _home = EnvVarGuard::set("HOME", home.path().to_str().unwrap());
@@ -1433,7 +1433,7 @@ printf updated > "$LF_APPLICATIONS_DIR/Loopflow.app/Contents/MacOS/lf"
     #[cfg(target_os = "macos")]
     #[test]
     fn cleanup_schedule_pins_machine_and_reloads_only_when_needed() {
-        use crate::lf::commands::graph::EnvVarGuard;
+        use crate::config::environment::EnvVarGuard;
         let _env = loopflow_test_support::env_lock().lock().unwrap();
         let home = tempfile::tempdir().unwrap();
         let bin = home.path().join("bin");

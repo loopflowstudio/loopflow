@@ -1,8 +1,8 @@
 use std::path::Path;
 
+use crate::config::environment::EnvVarGuard;
 use crate::config::{remote, settings, Config};
 use crate::graph::{ConcreteStep, Skill};
-use crate::lf::commands::graph::EnvVarGuard;
 use crate::prompt::process::{prepare_process_prompt, ProcessPromptInput};
 use loopflow_test_support::TestRepo;
 

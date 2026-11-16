@@ -167,10 +167,15 @@ fn emit_build_provenance(manifest_dir: &Path, git_root: Option<&Path>, unmerged:
     println!("cargo:rustc-env=LOOPFLOW_VERSION_LINE={version_line}");
     println!("cargo:rerun-if-env-changed=LOOPFLOW_BUILD_PROVENANCE");
     println!("cargo:rerun-if-env-changed=LOOPFLOW_RELEASE_TAG");
-    println!(
-        "cargo:rerun-if-changed={}",
-        manifest_dir.join("src").display()
-    );
+    // Provenance describes the whole workspace, including an initial edit in a
+    // lower crate before any application file changes.
+    let sources = git_root.map_or_else(|| manifest_dir.join("src"), |root| root.join("rust"));
+    println!("cargo:rerun-if-changed={}", sources.display());
+    if let Some(root) = git_root {
+        for input in ["Cargo.toml", "Cargo.lock"] {
+            println!("cargo:rerun-if-changed={}", root.join(input).display());
+        }
+    }
     if let Some(root) = git_root {
         let mut git_paths = vec![
             "HEAD".to_string(),

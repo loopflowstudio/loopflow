@@ -2742,7 +2742,7 @@ mod tests {
         let _lock = crate::journal::test_env_lock();
         let home = tempfile::tempdir().unwrap();
         let _home =
-            crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+            crate::config::environment::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
         crate::store::opening::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
         let temp = loopflow_test_support::TestRepo::new();
         let repo = temp.path();

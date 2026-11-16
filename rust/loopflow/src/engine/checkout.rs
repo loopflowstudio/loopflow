@@ -256,7 +256,7 @@ pub fn carry_sync(
     progress: &impl Progress,
 ) -> Result<Sync> {
     let repo = repo_root(directory)?;
-    crate::lf::commands::ops::run_sync_in(&repo, input, progress)
+    crate::ops::sync_execution::run_sync_in(&repo, input, progress)
         .map_err(|error| Error::refused(&error, ErrorCode::OutcomeUnknown))
 }
 

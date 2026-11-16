@@ -7,7 +7,7 @@
 //! (`lf/commands/util.rs`) and the Claude stream (`harness/claude.rs`) turn
 //! that into argv with `build_session_command`. `lf session resume` selects the
 //! command line's settings in `bin/lf.rs`; `resume_session_with_env` then calls
-//! `resolve_session_config(session, &Cli::default())` and
+//! `resolve_session_config(session, serde_yaml_ng::Value::Null, None, false)` and
 //! `build_session_command` with `ProviderInvocation::Resume`.
 //!
 //! Owners, PTYs, provider processes, native conversation identity and the
@@ -133,7 +133,7 @@ impl Table {
     fn resume(&self, session: &LfSession, flags: &[&str]) -> anyhow::Result<Launch> {
         let cli = Cli::try_parse_from(std::iter::once("lf").chain(flags.iter().copied()))?;
         let _settings = crate::config::settings::select_invocation(cli.setting_values()?);
-        let config = resolve_session_config(session, &Cli::default())?;
+        let config = resolve_session_config(session, serde_yaml_ng::Value::Null, None, false)?;
         let command = build_session_command(
             &config,
             ProviderInvocation::Resume {

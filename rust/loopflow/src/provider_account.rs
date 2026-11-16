@@ -8,6 +8,8 @@ pub mod catalog;
 pub(crate) mod codex_access;
 pub(crate) mod hold;
 pub(crate) mod identity;
+pub(crate) mod operations;
+pub(crate) mod routing;
 pub mod selection;
 
 use loopflow_model::id::AgentSessionId;

@@ -368,6 +368,18 @@ pub fn wave_origin(repo_root: &Path) -> PathBuf {
     repo_origin(repo_root)
 }
 
+pub(crate) fn planning_wave(
+    repo: &std::path::Path,
+    explicit: Option<&str>,
+) -> anyhow::Result<Option<String>> {
+    use crate::work::wave::context::WaveResolveError;
+    match crate::work::wave::context::resolve_managed_wave_sync(Some(repo), explicit) {
+        Ok(wave) => Ok(Some(wave.slug().to_string())),
+        Err(WaveResolveError::NoContext) => Ok(None),
+        Err(error) => Err(error.into()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

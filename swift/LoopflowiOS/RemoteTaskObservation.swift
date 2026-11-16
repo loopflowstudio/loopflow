@@ -17,6 +17,8 @@ typealias MobileTaskReading = Result<[RepositoryTasks], RegistryQueryError>
 /// A reading and the wire bytes it was decoded from, which is what the phone keeps.
 struct TaskListReading {
     let reading: MobileTaskReading
+    /// The revisions the Machine read it at.
+    let readAt: Revisions?
     let wire: Data
 }
 
@@ -100,23 +102,34 @@ final class RemoteTaskObservation {
         refreshing = nil
     }
 
-    private func receive(_ reading: (answers: UInt64?, reading: MobileTaskReading), wire: Data) {
-        continuation.yield(TaskListReading(reading: reading.reading, wire: wire))
+    private func receive(_ reading: (answers: UInt64?, readAt: Revisions?, reading: MobileTaskReading), wire: Data) {
+        continuation.yield(TaskListReading(reading: reading.reading, readAt: reading.readAt, wire: wire))
         if let refreshing, let answers = reading.answers, answers >= refreshing.id {
             self.refreshing = nil
             refreshing.continuation.resume()
         }
     }
 
-    nonisolated static func decode(frame: RawJSON) throws -> (answers: UInt64?, reading: MobileTaskReading) {
+    nonisolated static func decode(frame: RawJSON) throws -> (answers: UInt64?, readAt: Revisions?, reading: MobileTaskReading) {
         struct Frame: Decodable {
             let answers: UInt64?
             let unavailable: String?
             let body: [WorkViewPlan]?
+            let readAt: Revisions?
+
+            enum CodingKeys: String, CodingKey { case answers, unavailable, body, readAt = "read_at" }
+
+            init(from decoder: any Decoder) throws {
+                let box = try decoder.container(keyedBy: CodingKeys.self)
+                answers = try box.decode(UInt64?.self, forKey: .answers)
+                unavailable = try box.decode(String?.self, forKey: .unavailable)
+                body = try box.decode([WorkViewPlan]?.self, forKey: .body)
+                readAt = try box.decode(Revisions?.self, forKey: .readAt)
+            }
         }
         let reading = try frame.decode(Frame.self)
         if let reason = reading.unavailable {
-            return (reading.answers, .failure(RegistryQueryError(reason)))
+            return (reading.answers, reading.readAt, .failure(RegistryQueryError(reason)))
         }
         guard let plans = reading.body else { throw RegistryQueryError("Task reading is missing its contents") }
         // One repository that cannot answer leaves the others listed; the reading
@@ -129,8 +142,8 @@ final class RemoteTaskObservation {
             }
         }
         if let failure, repositories.allSatisfy(\.tasks.isEmpty), plans.allSatisfy({ !$0.resolution.unavailable.isEmpty }) {
-            return (reading.answers, .failure(failure))
+            return (reading.answers, reading.readAt, .failure(failure))
         }
-        return (reading.answers, .success(repositories))
+        return (reading.answers, reading.readAt, .success(repositories))
     }
 }

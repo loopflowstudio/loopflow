@@ -118,7 +118,6 @@ final class WorkModel {
     let pendingChanges = PendingChanges()
     /// The revisions each Task-showing part was last read at.
     private var readAt: [String: Revisions] = [:]
-    var dashboardError: String?
     private(set) var dashboardSaving = false
 
     private var selectionReadings: [RepositoryReadingKey: WorkReading<[WorkViewPlan]>] = [:]
@@ -3326,10 +3325,11 @@ extension WorkModel {
         openWarmConversations()
     }
 
-    func saveDashboard(id: String, expression: String, name: String, pinned: Bool, revision: Int64?) async {
-        guard !dashboardSaving, let repoPath else { return }
+    /// Whether the Dashboard saved; a failure raises the Notice.
+    @discardableResult
+    func saveDashboard(id: String, expression: String, name: String, pinned: Bool, revision: Int64?) async -> Bool {
+        guard !dashboardSaving, let repoPath else { return false }
         dashboardSaving = true
-        dashboardError = nil
         defer { dashboardSaving = false }
         do {
             var saved = try await query.editDashboardQuery(id: id, expression: expression, revision: revision, repoPath: repoPath)
@@ -3341,10 +3341,12 @@ extension WorkModel {
             }
             try await refreshDashboard(id, repoPath: repoPath)
             if self.repoPath == repoPath { selectDashboard(id) }
+            return true
         } catch {
-            dashboardError = error.localizedDescription
+            navigation.notices.post(Notice(error.localizedDescription))
             // A preceding metadata write may have succeeded; read effects, never replay writes.
             try? await refreshDashboard(id, repoPath: repoPath)
+            return false
         }
     }
 
@@ -3352,35 +3354,32 @@ extension WorkModel {
     func setDashboardTile(_ id: String, member: WorkWorkspaceKey, hidden: Bool) async {
         guard !dashboardSaving, let repoPath else { return }
         dashboardSaving = true
-        dashboardError = nil
         defer { dashboardSaving = false }
         do {
             _ = try await query.setDashboardTile(id: id, member: member, hidden: hidden, repoPath: repoPath)
             try await refreshDashboard(id, repoPath: repoPath)
-        } catch { dashboardError = error.localizedDescription }
+        } catch { navigation.notices.post(Notice(error.localizedDescription)) }
     }
 
     /// A tile drop: the dragged Work takes the target's place in the Dashboard's order.
     func reorderDashboard(_ id: String, member: WorkWorkspaceKey, to target: WorkWorkspaceKey) async {
         guard member != target, !dashboardSaving, let repoPath else { return }
         dashboardSaving = true
-        dashboardError = nil
         defer { dashboardSaving = false }
         do {
             _ = try await query.reorderDashboard(id: id, member: member, to: target, repoPath: repoPath)
             try await refreshDashboard(id, repoPath: repoPath)
-        } catch { dashboardError = error.localizedDescription }
+        } catch { navigation.notices.post(Notice(error.localizedDescription)) }
     }
 
     func setDashboardSlots(_ id: String, slots: DashboardSlotLayout?, revision: Int64) async {
         guard !dashboardSaving, let repoPath else { return }
         dashboardSaving = true
-        dashboardError = nil
         defer { dashboardSaving = false }
         do {
             _ = try await query.saveDashboardSlots(id: id, slots: slots, revision: revision, repoPath: repoPath)
             try await refreshDashboard(id, repoPath: repoPath)
-        } catch { dashboardError = error.localizedDescription }
+        } catch { navigation.notices.post(Notice(error.localizedDescription)) }
     }
 
     /// The sidebar and the Working Tasks grid write the same order; both read the
@@ -3389,14 +3388,13 @@ extension WorkModel {
     @discardableResult
     func reorderWorkingTask(_ task: String, to target: String) -> Task<Void, Never> {
         guard task != target, let repoPath else { return Task {} }
-        dashboardError = nil
         moveRepositoryMember(task, to: target)
         return Task {
             do {
                 _ = try await query.reorderTask(task, to: target, repoPath: repoPath)
                 try await refreshPlan(nil, repoPath: repoPath)
             } catch {
-                dashboardError = error.localizedDescription
+                navigation.notices.post(Notice(error.localizedDescription))
                 try? await refreshPlan(nil, repoPath: repoPath)
             }
         }
@@ -3469,7 +3467,7 @@ extension WorkModel {
             presentView(plan)
         } catch {
             guard self.repoPath == repoPath, navigation.destination == .view(previous) else { return }
-            dashboardError = error.localizedDescription
+            navigation.notices.post(Notice(error.localizedDescription))
         }
     }
 
@@ -3488,7 +3486,7 @@ extension WorkModel {
         } catch {
             guard viewOpening == request else { return }
             viewOpening = nil
-            dashboardError = error.localizedDescription
+            navigation.notices.post(Notice(error.localizedDescription))
             selectionOpening = DesktopOpening(revision: UUID().uuidString, url: link, status: .failed, reason: error.localizedDescription)
         }
     }

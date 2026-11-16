@@ -225,5 +225,6 @@
     },
     "repo": "repo_fixture",
     "repo_path": "/Users/dev/src/loopflow"
-  }
+  },
+  "revisions": null
 }

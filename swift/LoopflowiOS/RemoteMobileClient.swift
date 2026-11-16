@@ -159,6 +159,11 @@ final class RemoteMobileClient: MobileTaskCreationClient {
         return link
     }
 
+    /// A Task change under its request ID; a repeat after a lost answer runs nothing.
+    func change(_ change: ServedWrite, requestID: String) async throws -> Revisions? {
+        try await connection().write(change, requestID: requestID).revisions
+    }
+
     private func request(_ operation: ServerOperation) async throws -> RawJSON {
         try await connection().request(operation, deadline: Self.requestDeadline)
     }

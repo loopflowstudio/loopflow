@@ -63,7 +63,7 @@ struct WorkNavigator: View {
             if let status = model.workStatus.message {
                 WorkReadStatus(model: model, status: status)
             }
-            if let error = model.dashboardError ?? model.selectionPlans.errorMessage,
+            if let error = model.selectionPlans.errorMessage,
                ![model.roadmap.errorMessage, model.taskListReading.errorMessage, model.sessions.errorMessage]
                 .compactMap({ $0 }).contains(error) {
                 Text(error).font(Typography.body(11)).foregroundStyle(palette.warning).padding(10)
@@ -206,14 +206,11 @@ struct WorkNavigator: View {
         return Button {
             Perf.userAction(Perf.taskWorkspaceReady, scenario: "wave", id: reference?.id ?? "repository",
                             repository: model.repoPath, liveSessions: model.liveSessionCount, owner: model.navigation.performanceOwner) {
-                // Keep the input timestamp through the deliberate selection animation.
-                guard !reduceMotion else { model.select(reference); return }
+                // Select in the click; the pressed highlight animates over the selected row.
+                model.select(reference)
+                guard !reduceMotion else { return }
                 withAnimation(.easeOut(duration: 0.12)) { pressedScope = scope }
-                Task {
-                    try? await Task.sleep(for: .milliseconds(120))
-                    model.select(reference)
-                    pressedScope = nil
-                }
+                withAnimation(.easeOut(duration: 0.12).delay(0.12)) { pressedScope = nil }
             }
         } label: {
             HStack {

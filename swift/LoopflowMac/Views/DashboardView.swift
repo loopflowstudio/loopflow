@@ -19,14 +19,13 @@ struct DashboardEditor: View {
             Text("For example: (wave:product state:open), state:available or state:shipping")
                 .font(.caption).foregroundStyle(.secondary)
             Toggle("Pin in sidebar", isOn: $pinned)
-            if let error = model.dashboardError { Text(error).foregroundStyle(.red).textSelection(.enabled) }
             HStack {
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Spacer()
                 Button("Save") {
                     Task {
-                        await model.saveDashboard(id: id, expression: expression, name: name, pinned: pinned, revision: revision)
-                        if model.dashboardError == nil { dismiss() }
+                        if await model.saveDashboard(id: id, expression: expression, name: name, pinned: pinned,
+                                                     revision: revision) { dismiss() }
                     }
                 }.keyboardShortcut(.defaultAction).disabled(model.dashboardSaving || expression.isEmpty || name.isEmpty)
             }
@@ -94,7 +93,7 @@ struct DashboardView: View {
                         Button(plan.dashboardID == nil ? "Save Dashboard" : "Edit Dashboard") { editing = true }
                     }
                 }.padding(10)
-                if let error = model.dashboardError ?? model.selectionPlans.errorMessage {
+                if let error = model.selectionPlans.errorMessage {
                     Text(error).foregroundStyle(palette.warning).textSelection(.enabled)
                 }
                 // One line: membership may be incomplete; every reason stays in its help.
@@ -326,7 +325,7 @@ extension WorkModel {
     /// Hide or restore a tile. Rust decides the mode; hiding never touches the order.
     func setTile(_ plan: WorkViewPlan, _ member: WorkMemberRef, hidden: Bool) {
         guard let id = plan.dashboardID else {
-            dashboardError = "Save this Dashboard before arranging its Work."; return
+            navigation.notices.post(Notice("Save this Dashboard before arranging its Work.")); return
         }
         Task { await setDashboardTile(id, member: member.work, hidden: hidden) }
     }

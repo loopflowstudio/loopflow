@@ -20,8 +20,14 @@ extension TaskList {
 final class TaskFeed {
     private(set) var repositories: [RepositoryTasks] = []
     private(set) var loaded = false
-    private(set) var error: String?
+    /// The last read failed; the Notice says why and the list keeps what it showed.
+    private(set) var failed = false
     private(set) var waves: [Wave] = []
+    /// This Machine's changes shown before the reading that shows them.
+    let pendingChanges = PendingChanges()
+    /// The app's one Notice.
+    let notices: NoticeCenter
+    private var readAt: Revisions?
     var filter = TaskList.started {
         didSet {
             guard filter != oldValue else { return }
@@ -40,7 +46,67 @@ final class TaskFeed {
     @ObservationIgnored private var reader: Task<Void, Never>?
     @ObservationIgnored private var generation = 0
 
-    init(client: RemoteMobileClient) { self.client = client }
+    init(client: RemoteMobileClient, notices: NoticeCenter) {
+        self.client = client
+        self.notices = notices
+    }
+
+    /// The Machine's Tasks with this phone's pending Completes made.
+    var shownRepositories: [RepositoryTasks] {
+        guard !pendingChanges.changes.isEmpty else { return repositories }
+        return repositories.map { entry in
+            RepositoryTasks(repository: entry.repository, path: entry.path, tasks: entry.tasks.filter {
+                !pendingChanges.removes(task: $0.identifier ?? $0.work.id, at: readAt)
+            })
+        }
+    }
+
+    /// The row leaves the list in the swipe; a refusal brings it back and the Notice says why.
+    func complete(_ task: WorkViewPlan.Content) {
+        guard let directory = directory(of: task) else { return }
+        let issue = task.identifier ?? task.work.id
+        let requestID = pendingChanges.add(.complete(task: issue))
+        Task {
+            do {
+                let revisions = try await client.change(.taskComplete(directory: directory, issue: issue), requestID: requestID)
+                pendingChanges.answered(requestID, revisions: revisions ?? Revisions([:]))
+                try? await observation?.refresh()
+            } catch let error as ServerError where error.revisions != nil {
+                pendingChanges.answered(requestID, revisions: error.revisions ?? Revisions([:]))
+                notices.post(Notice("\(issue) was completed, but \(error.message)"))
+            } catch {
+                pendingChanges.refused(requestID)
+                notices.post(Notice("\(issue) couldn't be completed: \(machineConnectionMessage(error))"))
+            }
+        }
+    }
+
+    /// Start, Auto-Ship and Stop Auto-Ship: the Notice says the change was requested.
+    func request(_ name: String, _ task: WorkViewPlan.Content, _ write: (String, String) -> ServedWrite) {
+        guard let directory = directory(of: task) else { return }
+        let issue = task.identifier ?? task.work.id
+        let change = write(directory, issue)
+        Task {
+            do {
+                _ = try await client.change(change, requestID: UUID().uuidString)
+                notices.post(Notice("\(issue) \(name) requested"))
+                try? await observation?.refresh()
+            } catch {
+                notices.post(Notice("\(issue) \(name) couldn't be requested: \(machineConnectionMessage(error))"))
+            }
+        }
+    }
+
+    /// The repository on the Machine whose reading listed `task`.
+    private func directory(of task: WorkViewPlan.Content) -> String? {
+        repositories.first { $0.tasks.contains { $0.work == task.work } }?.path
+    }
+
+    private func failed(_ message: String) {
+        failed = true
+        notices.post(Notice("Tasks couldn't be updated: \(message)", key: "tasks",
+                            action: Notice.Action("Try again") { [weak self] in Task { await self?.start() } }))
+    }
 
     func start() async {
         stop()
@@ -71,12 +137,15 @@ final class TaskFeed {
             do {
                 for try await update in observation.readings {
                     guard let self, current == self.generation else { return }
+                    self.readAt = update.readAt
+                    self.pendingChanges.read("tasks", at: update.readAt)
                     switch update.reading {
                     case .success(let repositories):
                         let changed = repositories != self.repositories || !self.loaded
                         if changed { self.repositories = repositories }
                         self.loaded = true
-                        self.error = nil
+                        if self.failed { self.notices.clear(key: "tasks") }
+                        self.failed = false
                         Perf.launch("tasks_current")
                         self.reading += 1
                         if changed { self.save(update.wire) }
@@ -84,7 +153,7 @@ final class TaskFeed {
                     case .failure(let error):
                         self.waiting?.finish(.failed)
                         self.waiting = nil
-                        self.error = error.message
+                        self.failed(error.message)
                     }
                 }
                 throw RegistryQueryError("Task updates ended.")
@@ -92,7 +161,7 @@ final class TaskFeed {
                 guard let self, current == self.generation else { return }
                 self.waiting?.finish(.failed)
                 self.stop()
-                self.error = machineConnectionMessage(error)
+                self.failed(machineConnectionMessage(error))
             }
         } }
     }
@@ -112,7 +181,7 @@ final class TaskFeed {
         guard let observation else { await start(); return }
         do { try await observation.refresh() } catch {
             stop()
-            self.error = machineConnectionMessage(error)
+            failed(machineConnectionMessage(error))
         }
     }
 
@@ -160,6 +229,7 @@ struct TaskListView: View {
     @State private var showingCreated = false
     @State private var captureError: String?
     @State private var selectedTask: WorkViewPlan.Content?
+    @State private var notices: NoticeCenter
     /// The repository shown, by durable ID; empty shows every repository.
     @AppStorage("repository") private var repository = ""
     @Environment(\.colorScheme) private var colorScheme
@@ -170,14 +240,16 @@ struct TaskListView: View {
         self.client = client
         self.onForget = onForget
         self.onChangeAddress = onChangeAddress
-        _feed = State(initialValue: TaskFeed(client: client))
+        let notices = NoticeCenter()
+        _notices = State(initialValue: notices)
+        _feed = State(initialValue: TaskFeed(client: client, notices: notices))
     }
 
     /// Repositories with matching Tasks, each split into Tasks with a conversation and those without.
     private var sections: [(repository: String, open: [WorkViewPlan.Content], quiet: [WorkViewPlan.Content])] {
         feed.project()
         let term = search.trimmingCharacters(in: .whitespacesAndNewlines)
-        return feed.repositories.compactMap { entry in
+        return feed.shownRepositories.compactMap { entry in
             guard shown.isEmpty || entry.repository == shown else { return nil }
             let tasks = term.isEmpty ? entry.tasks : entry.tasks.filter {
                 $0.title.localizedStandardContains(term) || $0.location?.cwd.localizedStandardContains(term) == true
@@ -209,15 +281,6 @@ struct TaskListView: View {
     var body: some View {
         NavigationStack {
             List {
-                if let error = feed.error {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label("Couldn’t update Tasks", systemImage: "wifi.exclamationmark").font(Typography.strong(15))
-                        Text(error).font(Typography.caption(13))
-                        Button("Try again") { Task { await feed.start() } }
-                    }
-                    .foregroundStyle(theme.palette.textSecondary)
-                    .listRowBackground(theme.palette.surface)
-                }
                 ForEach(sections, id: \.repository) { section in
                     Section {
                         ForEach(section.open, id: \.work) { link($0) }
@@ -244,9 +307,9 @@ struct TaskListView: View {
             .scrollContentBackground(.hidden)
             .background(theme.palette.background)
             .overlay {
-                if !feed.loaded && feed.error == nil {
+                if !feed.loaded && !feed.failed {
                     ProgressView()
-                } else if sections.isEmpty && feed.error == nil {
+                } else if sections.isEmpty && feed.loaded {
                     if search.isEmpty {
                         ContentUnavailableView("No \(feed.filter.title.lowercased()) Tasks", systemImage: "checkmark.circle")
                     } else {
@@ -254,6 +317,7 @@ struct TaskListView: View {
                     }
                 }
             }
+            .overlay { NoticeView(center: notices) }
             .refreshable { await feed.refresh() }
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
@@ -352,12 +416,16 @@ struct TaskListView: View {
             HStack { row(task); Spacer(); Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary) }
         }
             .buttonStyle(.plain)
+            .swipeActions(edge: .trailing) {
+                Button("Complete", systemImage: "checkmark") { feed.complete(task) }
+                    .tint(theme.palette.success)
+            }
             .listRowInsets(EdgeInsets(top: 12, leading: 20, bottom: 12, trailing: 16))
             .listRowBackground(theme.palette.background)
     }
 
     private func workspace(_ task: WorkViewPlan.Content) -> some View {
-        TaskWorkspaceView(client: client, task: task, theme: theme, draft: Binding(
+        TaskWorkspaceView(client: client, feed: feed, task: task, theme: theme, draft: Binding(
             get: { drafts[task.work] ?? "" },
             set: { drafts[task.work] = $0 }))
     }

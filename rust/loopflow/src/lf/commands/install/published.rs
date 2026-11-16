@@ -598,19 +598,13 @@ pub fn schedule(frequency: Option<InstallFrequency>) -> Result<()> {
     fs::create_dir_all(&logs)?;
     if cfg!(target_os = "macos") {
         launchd_schedule(&home, &binary, &logs, frequency)?;
-        launchd_cleanup(&home, &binary, &logs)?;
-        retire_launchd(&home, RETIRED_RENEWAL_LABEL)
+        launchd_cleanup(&home, &binary, &logs)
     } else if cfg!(target_os = "linux") {
         cron_schedule(&home, &binary, &logs, frequency)
     } else {
         bail!("automatic cleanup needs launchd on macOS or cron on Linux")
     }
 }
-
-/// Earlier installs renewed rental Claude logins every 2 hours with the
-/// since-deleted `lf machine credentials renew`; scheduling removes that job.
-const RETIRED_RENEWAL_LABEL: &str = "com.loopflow.rental-renewal";
-const RETIRED_RENEWAL_CRON_MARKER: &str = "# loopflow rental renewal";
 
 /// The frequency whose rendered schedule is already installed, else daily.
 fn installed_frequency(installed: impl Fn(InstallFrequency) -> bool) -> InstallFrequency {
@@ -705,38 +699,6 @@ fn install_launchd(home: &Path, name: &str, payload: &str) -> Result<bool> {
     Ok(true)
 }
 
-/// Unload and delete the LaunchAgent `name` when an earlier install left it.
-fn retire_launchd(home: &Path, name: &str) -> Result<()> {
-    let path = home.join(format!("Library/LaunchAgents/{name}.plist"));
-    if !path.exists() {
-        return Ok(());
-    }
-    let uid = Command::new("id")
-        .arg("-u")
-        .output()
-        .context("read launchd user")?;
-    if !uid.status.success() {
-        bail!("cannot determine launchd user");
-    }
-    let label = format!("gui/{}/{name}", String::from_utf8_lossy(&uid.stdout).trim());
-    let loaded = Command::new("launchctl")
-        .args(["print", &label])
-        .output()?
-        .status
-        .success();
-    if loaded
-        && !Command::new("launchctl")
-            .args(["bootout", &label])
-            .status()?
-            .success()
-    {
-        bail!("could not unload the retired {name} job; rerun `lf install schedule`");
-    }
-    fs::remove_file(&path)?;
-    println!("Removed the retired {name} job");
-    Ok(())
-}
-
 /// `lf task retire` every minute, separate from the update schedule.
 fn launchd_cleanup(home: &Path, binary: &Path, logs: &Path) -> Result<()> {
     let payload = cleanup_plist(home, binary, logs);
@@ -805,7 +767,7 @@ fn cron_schedule(
     });
     let table = cron_table(
         &cron_table(
-            &cron_without(&current, RETIRED_RENEWAL_CRON_MARKER),
+            &current,
             CRON_MARKER,
             &cron_line(home, binary, logs, frequency),
         ),
@@ -899,18 +861,13 @@ fn cron_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\"'\"'")).replace('%', "\\%")
 }
 
-/// `current` without its `marker` line; other entries stay.
-fn cron_without(current: &str, marker: &str) -> String {
-    current
+/// `current` with its `marker` line replaced by `line`; other entries stay.
+fn cron_table(current: &str, marker: &str, line: &str) -> String {
+    let mut table: String = current
         .lines()
         .filter(|entry| !entry.ends_with(marker))
         .map(|entry| format!("{entry}\n"))
-        .collect()
-}
-
-/// `current` with its `marker` line replaced by `line`; other entries stay.
-fn cron_table(current: &str, marker: &str, line: &str) -> String {
-    let mut table = cron_without(current, marker);
+        .collect();
     table.push_str(line);
     table.push('\n');
     table
@@ -986,11 +943,11 @@ fn launch_agent_plist(
 #[cfg(test)]
 mod tests {
     #[cfg(target_os = "macos")]
-    use super::{checked, launchd_schedule, DiskImage, RETIRED_RENEWAL_LABEL};
+    use super::{checked, launchd_schedule, DiskImage};
     use super::{
-        cron_table, cron_without, is_current, newest_release, newest_run, package_target,
-        record_stream, recorded_stream, release_tag, run_verified_installer, InstallFrequency,
-        Stream, CRON_MARKER, RETIRED_RENEWAL_CRON_MARKER,
+        cron_table, is_current, newest_release, newest_run, package_target, record_stream,
+        recorded_stream, release_tag, run_verified_installer, InstallFrequency, Stream,
+        CRON_MARKER,
     };
     use sha2::{Digest, Sha256};
     use std::fs;
@@ -1536,41 +1493,6 @@ printf updated > "$LF_APPLICATIONS_DIR/Loopflow.app/Contents/MacOS/lf"
             format!("MAILTO=me\n*/10 * * * * backup\n{daily}\n")
         );
         assert_eq!(cron_table("", CRON_MARKER, &daily), format!("{daily}\n"));
-        // An earlier install's rental renewal line goes; the rest stays.
-        let renewal =
-            format!("0 */2 * * * lf machine credentials renew {RETIRED_RENEWAL_CRON_MARKER}");
-        assert_eq!(
-            cron_without(
-                &format!("{daily}\n{renewal}\n"),
-                RETIRED_RENEWAL_CRON_MARKER
-            ),
-            format!("{daily}\n")
-        );
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn scheduling_removes_the_retired_rental_renewal_job() {
-        use loopflow_execution::config::environment::EnvVarGuard;
-        let _env = loopflow_test_support::env_lock().lock().unwrap();
-        let home = tempfile::tempdir().unwrap();
-        let bin = home.path().join("bin");
-        fs::create_dir_all(&bin).unwrap();
-        std::os::unix::fs::symlink("/usr/bin/id", bin.join("id")).unwrap();
-        fs::write(bin.join("launchctl"), "#!/bin/sh\ncase $1 in\nprint) test -f \"$HOME/loaded\";;\nbootout) /bin/rm \"$HOME/loaded\";;\nesac\n").unwrap();
-        fs::set_permissions(bin.join("launchctl"), fs::Permissions::from_mode(0o755)).unwrap();
-        let _home = EnvVarGuard::set("HOME", home.path().to_str().unwrap());
-        let _path = EnvVarGuard::set("PATH", bin.to_str().unwrap());
-        // Nothing installed: nothing to do.
-        super::retire_launchd(home.path(), RETIRED_RENEWAL_LABEL).unwrap();
-        let agents = home.path().join("Library/LaunchAgents");
-        fs::create_dir_all(&agents).unwrap();
-        let plist = agents.join(format!("{RETIRED_RENEWAL_LABEL}.plist"));
-        fs::write(&plist, "<plist/>").unwrap();
-        fs::write(home.path().join("loaded"), "").unwrap();
-        super::retire_launchd(home.path(), RETIRED_RENEWAL_LABEL).unwrap();
-        assert!(!plist.exists());
-        assert!(!home.path().join("loaded").exists(), "the job stays loaded");
     }
 
     #[test]

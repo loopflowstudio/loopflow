@@ -10,4 +10,3 @@ that distinction instead of promising that every bare harness pin stops.
 
 A forwarded file the destination already has is kept, not replaced; the launch
 says so. Replacing would silently sign a Machine out of a newer login of its own.
-- Retired rental-renewal job removal in `lf install schedule` (`RETIRED_RENEWAL_*`, `retire_launchd`, `cron_without` caller) can go once released installs have all run it; no removal Task filed yet.

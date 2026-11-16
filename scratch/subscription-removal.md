@@ -395,7 +395,7 @@ switcher gains `refresh [provider] --login <email> --after-reset` to release
 cached holds and immediately fetch current usage without choosing/installing a
 login. No account-management functionality is added back to removal branch.
 
-## Usage-limit backoff — 2026-11-16 (next implement step)
+## Usage-limit backoff — 2026-11-16 (built)
 
 Supersedes “Exhaustion stops … there is no account-reset wait loop” above.
 Jack Heart: “one kind of failover is an exponential backoff on the same
@@ -404,33 +404,51 @@ I'm imagining 5/5 day or 5 minutes, then 15 minutes, then 30 minutes, then an
 hour, and then probably fail”. Also: “SSW should not be starting any runs … we
 can't have Loopflow know about SSW”.
 
-First finish the paused merge of main `470da475a1` (57 unmerged paths). The
-worktree holds an unverified resolution with no conflict markers;
-`cargo check -p loopflow-execution --all-targets` stops at
-`rust/loopflow-storage/src/session.rs:372` (`crate::store::ProviderAccountId`).
-Main's crate extraction re-adds `rust/loopflow-execution/src/provider_account/`
-(`routing`, `capacity`, `catalog`, `operations`, `account_status`) and their
-tests; the removal deletes them again. Keep the removal's behavior everywhere.
+Merge of main `470da475a1` redone from a clean `git merge` (the earlier
+unverified resolution had dropped this branch's `store/sqlite.rs` edits and
+duplicated moved types). Main's re-added `provider_account/`, `subscription.rs`,
+storage `capacity.rs`/`account_selection.rs`, Claude/Codex machine credentials,
+`machine/task.rs` account forwarding and account test fixtures are deleted again.
+Surviving service auth moved to `provider_auth::operations`; historical account
+labels and service browser profiles to `store::account_labels`.
 
-Then, in `agent/mod.rs::_run_with_retries`:
-
-- Headless only (`process.auto`). Interactive still dispatches once.
-- Last resort: on `AgentFailure::UsageLimit` with no rung left, wait 5 min, then
-  15, 30, 60, retrying after each; a fifth refusal stops with the provider's
-  message and today's pin/fallback advice. A pinned agent goes straight here.
-- Each retry reads native auth fresh and restarts the configured order at its
-  first rung. Resend a continuation on a known native thread, the original
-  input when there is none (existing rule).
-- No account state, usage polling, reset parsing or knowledge of any other tool.
-- Long waits use `SystemTime`; tests inject the wait closure and never sleep.
-- The Session shows that it is waiting and when it next tries, with the refusal
-  text kept, through existing Session records. `CapacityWait` at base
-  `9cafc410` is reference only; restore no account fields.
-- Extend `native_retry_policy_matrix`: schedule order, stop after the fourth
-  wait, success after a wait, interactive unchanged. Update
-  `docs/subscriptions.md` and the retry text in config/troubleshooting docs.
+Built in `agent/mod.rs::_run_with_retries`: `USAGE_LIMIT_WAITS` (5, 15, 30, 60
+min) after a headless `UsageLimit` with no rung left; each wait records
+`agent_limit_recoveries.retry_at` (Task status: “waiting … until …”), prints
+“Waiting until <time> before trying again”, then restarts at the first rung.
+`_sleep_wall_clock` naps against `SystemTime`. Interactive, `CredentialInvalidated`
+and `ModelUnavailable` unchanged. The e2e refusal fixture now stops the run once
+the wait is announced; schedule and final stop are unit-tested.
 
 Open, noted for review: whether `CredentialInvalidated` also waits (currently
 stops), and restart-at-first-rung versus retrying only the last rung.
+
+## Named secret and file forwarding — 2026-11-16 (next implement step)
+
+Steers 3a44d344, 7b5bdd97, d0965a15 (comments by Session
+`session_b8d40af2618248bfad63f072df86cb63` for Jack Heart). Jack Heart on “a
+launch forwards named secrets from your store into the destination's
+environment …”: “This is good, include in current task worker”. On which route
+Codex rentals use (every saved Codex login here is personal Pro/Plus): “auth.json
+copy”.
+
+- Personal configuration names environment variables and home-relative files to
+  forward to remote launches; lf does not interpret them.
+- Variables: initiating Machine's environment, else Doppler; passed over the
+  existing SSH launch channel; never in argv, logs, store, Session records or a
+  destination file. Missing value stops before renting, naming the variable.
+- Files: copied to the same home-relative path, mode 0600 in a 0700 parent, over
+  the existing SSH channel; contents never in argv/logs/store. Missing local
+  file stops before renting. Replaces “lf still never reads a native credential
+  file” with “lf copies only files the person named”.
+- Docs facts (checked 2026-11-16 per steer, learn.chatgpt.com/docs/auth and
+  /docs/enterprise/access-tokens, codex-cli 0.169.0): Codex access tokens only
+  for ChatGPT Business/Enterprise; Plus/Pro use device login, auth.json copy or
+  API key. Claude: `claude setup-token` → `CLAUDE_CODE_OAUTH_TOKEN`. Copies of one
+  login share a refresh credential; one refreshing can sign the others out.
+- Still to verify against installed Codex before documenting: whether
+  lf-launched Codex (app-server and exec) reads `CODEX_ACCESS_TOKEN` with no
+  login step, which API-key variable `codex exec` reads, and whether macOS Codex
+  keeps credentials in a credential store instead of auth.json.
 
 Do not publish, merge or land. Auto-Ship is on hold for this run.

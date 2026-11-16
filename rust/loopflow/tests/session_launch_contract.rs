@@ -9,7 +9,7 @@ use loopflow_test_support::{MachineServer, TestRepo};
 use serde_json::Value;
 
 #[test]
-fn pinned_headless_refusal_shows_provider_message_reset_and_next_step() {
+fn pinned_headless_refusal_shows_provider_message_and_waits_before_trying_again() {
     let fixture = Fixture::new("claude:opus");
     let provider = fixture.home.path().join("bin/claude");
     let source = fs::read_to_string(&provider).unwrap().replace(
@@ -24,33 +24,45 @@ fn pinned_headless_refusal_shows_provider_message_reset_and_next_step() {
     );
     fs::write(provider, source).unwrap();
 
-    let output = fixture
+    // The real waits are minutes long: read until the wait is announced, then
+    // stop the run. Its schedule and final stop are unit-tested.
+    let mut child = fixture
         .command()
         .args(["-b", "-a", "claude:opus", ":", "say done"])
-        .output()
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
         .unwrap();
+    let stderr = std::io::BufReader::new(child.stderr.take().unwrap());
+    let (lines, announced) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        use std::io::BufRead;
+        for line in stderr.lines().map_while(Result::ok) {
+            if lines.send(line).is_err() {
+                return;
+            }
+        }
+    });
+    let mut stderr = String::new();
+    while !stderr.contains("before trying again") {
+        let line = announced
+            .recv_timeout(std::time::Duration::from_secs(60))
+            .unwrap_or_else(|_| panic!("no usage-limit wait was announced: {stderr}"));
+        stderr.push_str(&line);
+        stderr.push('\n');
+    }
+    child.kill().unwrap();
+    child.wait().unwrap();
 
-    assert!(!output.status.success());
-    let stderr = String::from_utf8(output.stderr).unwrap();
-    let (_, final_error) = stderr
-        .split_once("error:")
-        .or_else(|| stderr.split_once("Error:"))
-        .expect(&stderr);
-    assert!(final_error.contains("provider usage limit"), "{stderr}");
-    assert!(final_error.contains("You've hit your limit."), "{stderr}");
+    assert!(stderr.contains("You've hit your limit."), "{stderr}");
     assert!(
-        final_error.contains("Resets 3pm (America/Los_Angeles)."),
+        stderr.contains("Resets 3pm (America/Los_Angeles)."),
         "{stderr}"
     );
-    assert!(
-        final_error.contains("Change an `agent` or `-a` pin"),
-        "{stderr}"
-    );
-    assert_eq!(
-        stderr.matches("Change an `agent` or `-a` pin").count(),
-        1,
-        "{stderr}"
-    );
+    assert!(stderr.contains("claude: "), "{stderr}");
+    assert!(stderr.contains("Waiting until "), "{stderr}");
+    // It waits before a second dispatch, never instead of the first.
     assert_eq!(
         fs::read_to_string(fixture.home.path().join("dispatches")).unwrap(),
         "dispatch\n"

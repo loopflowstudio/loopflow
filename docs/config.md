@@ -59,7 +59,9 @@ Haiku.
 
 When a usage limit or model-unavailable error refuses a headless step, it tries
 the next configured model or harness. It uses each native client's own login.
-An explicit agent pins the harness; an explicit model pin stops instead.
+An explicit agent pins the harness; an explicit model pin stays on that model.
+Once every entry has refused on a usage limit, the step waits 5, 15, 30, then
+60 minutes, trying the whole order again after each, and then stops.
 Interactive Sessions keep the refusal visible and require an explicit retry or
 move, with or without a Task.
 
@@ -77,8 +79,9 @@ lf task status MTG-328
 | `lf -a codex graph code` | Codex only | Codex only |
 
 An `agent` choice or `-a` pins the harness. Bare Claude can still try its other
-models; `claude:opus` pins the model too. An exhausted fallback order stops.
-Loopflow never switches logins or waits for resets.
+models; `claude:opus` pins the model too. An exhausted fallback order waits and
+tries again on a usage limit, then stops. Loopflow never switches logins or
+reads reset times.
 Neither choice is checked against `agents`, so `-a pi` runs Pi for that command
 whatever the list says.
 The list covers what Loopflow picks by itself.

@@ -64,14 +64,23 @@ model fallthrough and explicit pins.
 | Headless, with or without a Task | Follow configured model/harness fallbacks |
 | Interactive, with or without a Task | Keep the provider, thread and refusal visible; wait for an explicit retry or move |
 | Explicit agent | Keep the harness; bare Claude retains model fallthrough |
-| Explicit model pin | Stop when that choice cannot continue |
-| Headless order exhausted | Stop with the provider error and a next step |
+| Explicit model pin | Wait on that choice, then stop |
+| Headless order exhausted on a usage limit | Wait 5, 15, 30, then 60 minutes, trying the order again after each; then stop with the provider error and a next step |
+| Headless order exhausted otherwise | Stop with the provider error and a next step |
 
-Loopflow never waits for a subscription reset or retries through another saved
-login. A quota reading or a successful answer mentioning limits does not trigger
-fallback. After fixing native authentication or waiting for provider capacity,
-retry explicitly. For a stopped Task, inspect `lf task status <ID>`, then run
-`lf task run <ID>` to continue its remaining steps. To move a conversation to
+```
+claude: You've hit your limit. Resets 3pm (America/Los_Angeles).
+Waiting until Nov 16 14:05 before trying again
+```
+
+Each try after a wait starts the order again at its first agent and uses
+whatever native login the Machine has then, so signing in elsewhere or buying
+more usage is picked up. `lf task status <ID>` shows the wait and when the
+next try starts. Loopflow never polls quotas, reads reset times or retries
+through another saved login. A quota reading or a successful answer mentioning
+limits does not trigger fallback. After fixing native authentication, retry a
+stopped run explicitly. For a stopped Task, inspect `lf task status <ID>`, then
+run `lf task run <ID>` to continue its remaining steps. To move a conversation to
 another harness, use `lf -a codex resume <session-id>`.
 
 ## Remote Machines and rentals

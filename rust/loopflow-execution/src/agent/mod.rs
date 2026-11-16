@@ -19,7 +19,7 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use crate::config::parse_agent;
 use crate::error::CoreError;
@@ -304,16 +304,28 @@ fn _note_limit_recovery(
     }
 }
 
-fn _record_limit_recovery(provider: &str, reason: &str) {
+fn _record_limit_recovery(provider: &str, reason: &str, retry_at: Option<i64>) {
     _note_limit_recovery(|store, process| {
         store.record_agent_limit_recovery(
             process,
             provider,
             reason,
-            None,
+            retry_at,
             crate::config::agent_override().as_deref(),
         )
     });
+}
+
+/// Every agent the step may use refused it on a usage limit: it waits `delay`
+/// before starting its order again. The terminal and Task status say until when.
+fn _record_limit_wait(provider: &str, reason: &str, delay: Duration) {
+    let retry_at = loopflow_storage::rows::now_unix()
+        + i64::try_from(delay.as_secs()).expect("usage-limit wait fits in i64 seconds");
+    eprintln!(
+        "{provider}: {reason}\nWaiting until {} before trying again",
+        crate::output::format_time(retry_at)
+    );
+    _record_limit_recovery(provider, reason, Some(retry_at));
 }
 
 /// The step left `agent` for the next agent in its order. The terminal gets
@@ -324,6 +336,7 @@ fn _record_agent_move(agent: &str, failure: AgentFailure, reason: &str, next: &s
     _record_limit_recovery(
         &provider,
         &format!("{reason}{}{next}", crate::ops::task_execution::MOVED_TO),
+        None,
     );
 }
 
@@ -340,6 +353,7 @@ fn _record_limit_stop(
     _record_limit_recovery(
         provider,
         &format!("{reason}{}{advice}", crate::ops::task_execution::STOPPED),
+        None,
     );
     advice
 }
@@ -741,6 +755,14 @@ const TRANSIENT_RETRY_DELAYS: [Duration; 4] = [
     Duration::from_secs(15),
     Duration::from_secs(30),
 ];
+/// The last resort for a headless run every configured agent refused on a usage
+/// limit: wait, then start the order again; after the last wait, stop.
+const USAGE_LIMIT_WAITS: [Duration; 4] = [
+    Duration::from_secs(5 * 60),
+    Duration::from_secs(15 * 60),
+    Duration::from_secs(30 * 60),
+    Duration::from_secs(60 * 60),
+];
 const RETRY_PROMPT: &str = "Continue the original task after the transient provider failure. Re-read the current workspace state, finish any interrupted work, and return the result.";
 const LIMIT_FAILOVER_PROMPT: &str = "Continue this task after the previous provider reached its usage limit. Re-read the current workspace state and finish any interrupted work.";
 const MODEL_FAILOVER_PROMPT: &str = "Continue this task after the previous model was unavailable. Re-read the current workspace state and finish any interrupted work.";
@@ -988,7 +1010,7 @@ fn run_admitted_agent(
         &process,
         &TRANSIENT_RETRY_DELAYS,
         |attempt, retry| _run_agent_once(attempt, &process, retry),
-        thread::sleep,
+        _sleep_wall_clock,
     );
     if let Err(error) = crate::ops::planning_sync::check_directory(&directory) {
         tracing::debug!(%error, "end-of-turn planning check pending");
@@ -1017,6 +1039,7 @@ fn _run_with_retries(
     let mut attempt = launch.clone();
     let mut launched = false;
     let mut transient_failures = 0;
+    let mut usage_waits = 0;
     loop {
         let provider = parse_agent(attempt.agent()?).0;
         let mut result = run(&attempt, launched)?;
@@ -1049,15 +1072,28 @@ fn _run_with_retries(
             | AgentFailure::CredentialInvalidated
             | AgentFailure::ModelUnavailable => {
                 let reason = _failure_reason(&result, failure);
-                let Some(next) = rungs.get(rung + 1) else {
+                if let Some(next) = rungs.get(rung + 1) {
+                    rung += 1;
+                    _record_agent_move(attempt.agent()?, failure, &reason, next);
+                    attempt = _climb(&attempt, next, process, launch);
+                    Duration::ZERO
+                } else if let (AgentFailure::UsageLimit, Some(&delay)) =
+                    (failure, USAGE_LIMIT_WAITS.get(usage_waits))
+                {
+                    // Each try after the wait starts the order again and reads
+                    // the native login afresh.
+                    usage_waits += 1;
+                    _record_limit_wait(&provider, &reason, delay);
+                    if rung > 0 {
+                        rung = 0;
+                        attempt = _climb(&attempt, &rungs[0], process, launch);
+                    }
+                    delay
+                } else {
                     let advice = _record_limit_stop(&provider, &reason, launch, &rungs);
                     result.stderr = format!("{reason}\n{advice}");
                     return Ok(result);
-                };
-                rung += 1;
-                _record_agent_move(attempt.agent()?, failure, &reason, next);
-                attempt = _climb(&attempt, next, process, launch);
-                Duration::ZERO
+                }
             }
             _ => {
                 let Some(delay) = retry_delays.get(transient_failures).copied() else {
@@ -1069,6 +1105,21 @@ fn _run_with_retries(
         };
         tracing::warn!(%failure, delay_ms = delay.as_millis(), resumed = attempt.resume_token.is_some(), "recoverable provider failure; retrying");
         wait(delay);
+    }
+}
+
+/// Sleep `delay` of wall-clock time. `Instant` stops while a Mac sleeps, so a
+/// usage-limit wait checks `SystemTime` between short naps.
+fn _sleep_wall_clock(delay: Duration) {
+    let deadline = SystemTime::now() + delay;
+    loop {
+        let left = deadline
+            .duration_since(SystemTime::now())
+            .unwrap_or_default();
+        if left.is_zero() {
+            return;
+        }
+        thread::sleep(left.min(Duration::from_secs(30)));
     }
 }
 
@@ -2343,24 +2394,6 @@ trust_level = "trusted"
     }
 
     #[test]
-    fn unrecorded_subscription_limit_is_not_retried() {
-        let launch = AgentConfig {
-            agent: Some("codex".to_string()),
-            ..default_launch()
-        };
-        let result = _run_with_retries(
-            &launch,
-            &auto_process(),
-            &[Duration::ZERO],
-            |_, _| Ok(failed_result("You've hit your usage limit")),
-            |_| panic!("unsafe failover must not retry"),
-        )
-        .expect("typed launch failure is returned");
-
-        assert!(matches!(result.failure, Some(AgentFailure::UsageLimit)));
-    }
-
-    #[test]
     fn claude_spent_lines_read_as_subscription_limits() {
         for line in [
             "You've hit your session limit \u{b7} resets 3pm",
@@ -2530,12 +2563,13 @@ trust_level = "trusted"
     }
 
     #[test]
-    fn a_pinned_agent_refused_at_launch_fails_with_its_limit() {
+    fn a_pinned_agent_refused_on_every_try_stops_after_the_last_wait() {
         let launch = AgentConfig {
             agent: Some("codex".into()),
             ..Default::default()
         };
         let mut attempts = 0;
+        let mut waits = Vec::new();
         let result = _run_with_retries(
             &launch,
             &auto_process(),
@@ -2544,11 +2578,15 @@ trust_level = "trusted"
                 attempts += 1;
                 Ok(failed_result("codex_error: You've hit your usage limit"))
             },
-            |_| {},
+            |delay| waits.push(delay),
         )
         .unwrap();
-        assert_eq!(attempts, 1);
+        assert_eq!(attempts, 5);
+        assert_eq!(waits, USAGE_LIMIT_WAITS);
         assert_eq!(result.failure, Some(AgentFailure::UsageLimit));
+        assert!(result
+            .stderr
+            .starts_with("codex_error: You've hit your usage limit\nNo fallback remains."));
         // What it records names the way out; with an order, what was tried.
         let advice = _limit_stop_advice("codex", &launch, &["codex".into()]);
         assert_eq!(
@@ -2569,6 +2607,35 @@ trust_level = "trusted"
             "Nothing is left in its order after codex; add another agent to `agents`"
         );
     }
+    #[test]
+    fn a_usage_limit_that_clears_during_a_wait_continues_the_thread() {
+        let launch = AgentConfig {
+            agent: Some("claude:opus".into()),
+            task_prompt: "compress the diff".into(),
+            ..Default::default()
+        };
+        let mut scripted = vec![limited_result(), done()].into_iter();
+        let mut attempts = Vec::new();
+        let mut waits = Vec::new();
+        let result = _run_with_retries(
+            &launch,
+            &auto_process(),
+            &[],
+            |config, _| {
+                attempts.push(config.clone());
+                Ok(scripted.next().expect("scripted attempt"))
+            },
+            |delay| waits.push(delay),
+        )
+        .unwrap();
+        assert_eq!(result.exit_code, 0);
+        assert_eq!(waits, [Duration::from_secs(5 * 60)]);
+        assert_eq!(attempts.len(), 2);
+        assert_eq!(attempts[1].agent.as_deref(), Some("claude:opus"));
+        assert_eq!(attempts[1].resume_token, Some("thread".into()));
+        assert_eq!(attempts[1].task_prompt, LIMIT_FAILOVER_PROMPT);
+    }
+
     #[test]
     fn native_retry_policy_matrix() {
         let directory = tempfile::tempdir().unwrap();
@@ -2641,6 +2708,7 @@ trust_level = "trusted"
                         AgentFailure::ModelUnavailable,
                     ] {
                         let mut attempts = Vec::new();
+                        let mut waits = Vec::new();
                         let result = _run_with_retries(
                             &launch,
                             &process,
@@ -2655,11 +2723,34 @@ trust_level = "trusted"
                                     ..Default::default()
                                 })
                             },
-                            |delay| assert_eq!(delay, Duration::ZERO),
+                            |delay| waits.extend(Some(delay).filter(|delay| !delay.is_zero())),
                         )
                         .unwrap();
                         assert_eq!(result.failure, Some(failure));
-                        assert_eq!(attempts.len(), if auto && !pinned { 3 } else { 1 });
+                        // Only a headless usage limit waits: 5, 15, 30 and 60
+                        // minutes, each followed by the whole order again.
+                        let backoff = auto && failure == AgentFailure::UsageLimit;
+                        assert_eq!(
+                            waits,
+                            if backoff {
+                                USAGE_LIMIT_WAITS.to_vec()
+                            } else {
+                                vec![]
+                            }
+                        );
+                        let order = if auto && !pinned { 3 } else { 1 };
+                        let tries = if backoff {
+                            1 + USAGE_LIMIT_WAITS.len()
+                        } else {
+                            1
+                        };
+                        assert_eq!(attempts.len(), order * tries);
+                        if backoff && !pinned {
+                            // After a wait the order starts again at its first agent.
+                            assert_eq!(attempts[3].agent.as_deref(), Some("claude:fable"));
+                            assert!(attempts[3].resume_token.is_none());
+                            assert!(attempts[3].task_prompt.contains("finish the operation"));
+                        }
                         assert_eq!(
                             attempts[0]
                                 .resume_token

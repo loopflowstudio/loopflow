@@ -55,7 +55,9 @@ def test_initial_lower_crate_edit_refreshes_clean_application_provenance(tmp_pat
         '[package]\nname="loopflow-storage"\nversion="0.1.0"\n'
         'edition="2021"\nlinks="loopflow_storage"\n'
     )
-    (lower / "build.rs").write_text('fn main() { println!("cargo:unmerged="); }\n')
+    (lower / "build.rs").write_text(
+        'fn main() { println!("cargo:rerun-if-changed=build.rs"); println!("cargo:unmerged="); }\n'
+    )
     record = lower / "src/lib.rs"
     record.write_text("pub fn value() -> u8 { 1 }\n")
     run("git", "init", "-q")
@@ -88,5 +90,5 @@ def test_initial_lower_crate_edit_refreshes_clean_application_provenance(tmp_pat
     record.write_text("pub fn value() -> u8 { 2 }\n")
     changed, dirty = build()
     assert "provenance-fixture" in changed
-    assert ".dirty" in dirty
+    assert ".dirty" in dirty, dirty
     assert dirty.endswith(f"|{tmp_path.resolve()}|2")

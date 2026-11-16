@@ -132,7 +132,15 @@ fn call_site() -> String {
         .lines()
         .filter_map(frame_function)
         .find(|name| {
-            (name.starts_with("loopflow::") || name.starts_with("<loopflow::")) && !own(name)
+            [
+                "loopflow::",
+                "<loopflow::",
+                "loopflow_storage::",
+                "<loopflow_storage::",
+            ]
+            .iter()
+            .any(|prefix| name.starts_with(prefix))
+                && !own(name)
         })
         .unwrap_or_else(|| "unknown".to_owned())
 }
@@ -193,7 +201,12 @@ pub mod empty_writes {
 
 #[cfg(test)]
 mod tests {
-    use super::frame_function;
+    use super::{call_site, frame_function};
+
+    #[test]
+    fn call_sites_name_storage_callers() {
+        assert!(call_site().starts_with("loopflow_storage::write_holds::tests::"));
+    }
 
     #[test]
     fn frames_drop_hashes_and_closures() {

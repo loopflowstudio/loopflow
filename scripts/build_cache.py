@@ -243,17 +243,21 @@ def cache_status(repo: Path) -> dict:
         return {**result, "exit_code": 1}
     socket = env.get("SCCACHE_SERVER_UDS")
     if socket and Path(socket).exists():
-        owners = subprocess.run(["lsof", "-t", socket], capture_output=True, text=True)
+        owners = subprocess.run(
+            ["lsof", "-nP", "-a", "-U", "-c", "sccache", "-t", socket],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
         for pid in set(owners.stdout.split()):
             command = subprocess.run(
-                ["ps", "-p", pid, "-o", "comm=", "-o", "etime="], capture_output=True, text=True
+                ["ps", "-p", pid, "-o", "comm="], capture_output=True, text=True
             ).stdout.strip()
-            if command.startswith(str(wrapper) + " "):
-                result["daemon"] = {
-                    "pid": int(pid),
-                    "executable": str(wrapper),
-                    "uptime": command[len(str(wrapper)) :].strip(),
-                }
+            if command == str(wrapper):
+                uptime = subprocess.run(
+                    ["ps", "-p", pid, "-o", "etime="], capture_output=True, text=True
+                ).stdout.strip()
+                result["daemon"] = {"pid": int(pid), "executable": command, "uptime": uptime}
                 break
     if result["daemon"]:
         # --show-stats answers empty statistics if no server exists; never starts one.
@@ -264,7 +268,7 @@ def cache_status(repo: Path) -> dict:
             timeout=10,
         )
         stats = json.loads(raw)
-        result["loaded_roots"] = stats["basedirs"]
+        result["loaded_roots"] = [str(Path(root)) for root in stats["basedirs"]]
         result["stats"] = stats
     loaded = result["loaded_roots"] if result["daemon"] else listed
     return {**result, "exit_code": 0 if root in loaded else 3}

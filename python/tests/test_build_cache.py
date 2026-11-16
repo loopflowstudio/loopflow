@@ -5,7 +5,6 @@ import subprocess
 from pathlib import Path
 
 import pytest
-
 from build_cache import configure_cargo, install_hook, refresh
 
 
@@ -124,7 +123,10 @@ def test_status_classifies_loaded_roots(tmp_path, monkeypatch, running, loaded, 
 
     def run(argv, **kwargs):
         return subprocess.CompletedProcess(
-            argv, 0, "123\n" if argv[0] == "lsof" else f"{wrapper} 03:10\n", ""
+            argv,
+            0,
+            "123\n" if argv[0] == "lsof" else "03:10\n" if argv[-1] == "etime=" else f"{wrapper}\n",
+            "",
         )
 
     monkeypatch.setattr(subprocess, "check_output", check_output)

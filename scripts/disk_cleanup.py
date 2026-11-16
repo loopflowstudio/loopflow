@@ -21,7 +21,6 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from build_cache import configured_cache
 from cleanup_evidence import evidence_outcome
 from resource_envelope import _lock_recovery, load_policy
 
@@ -992,19 +991,39 @@ class Cleaner:
                     {"step": "sccache", "status": "retained", "reason": "server not running"}
                 )
                 return
-            wrapper, cache_env = configured_cache()
-            stats = json.loads(
-                self._command(
-                    [
-                        "env",
-                        *(f"{key}={value}" for key, value in cache_env.items()),
-                        str(wrapper) if wrapper else "sccache",
-                        "--show-stats",
-                        "--stats-format",
-                        "json",
-                    ]
-                )
+            cargo_config = (
+                Path(self.env.get("CARGO_HOME", str(self.home / ".cargo"))) / "config.toml"
             )
+            if cargo_config.exists():
+                status = json.loads(
+                    self._command(
+                        [
+                            "uv",
+                            "run",
+                            "--project",
+                            str(Path(__file__).resolve().parents[1]),
+                            "python",
+                            str(Path(__file__).with_name("build_cache.py")),
+                            "status",
+                            "--json",
+                        ],
+                        allowed=(0, 3),
+                    )
+                )
+                stats = status["stats"]
+                if stats is None:
+                    self.maintenance.append(
+                        {
+                            "step": "sccache",
+                            "status": "retained",
+                            "reason": "configured server not running",
+                        }
+                    )
+                    return
+            else:
+                stats = json.loads(
+                    self._command(["sccache", "--show-stats", "--stats-format", "json"])
+                )
             limit = stats.get("max_cache_size")
             if not isinstance(limit, int) or limit > self.cache_caps["sccache_bytes"]:
                 raise RuntimeError("native sccache limit exceeds the configured cap or is unknown")

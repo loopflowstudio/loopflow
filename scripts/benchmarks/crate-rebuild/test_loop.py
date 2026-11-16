@@ -225,7 +225,9 @@ def main() -> None:
     # Its lifetime is bounded by this command, including failures and interruptions.
     try:
         _run([str(cache), "--start-server"], ROOT, env)
-        owners = _run(["lsof", "-t", str(root / "cache.sock")], ROOT, env).split()
+        owners = _run(
+            ["lsof", "-nP", "-a", "-U", "-c", "sccache", "-t", str(root / "cache.sock")], ROOT, env
+        ).split()
         daemon_pid = next(
             int(p) for p in owners if _run(["ps", "-p", p, "-o", "comm="], ROOT, env) == str(cache)
         )

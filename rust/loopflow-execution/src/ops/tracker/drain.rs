@@ -80,14 +80,22 @@ fn message(error: impl std::fmt::Display) -> OpsError {
     OpsError::Message(error.to_string())
 }
 
-/// Drain `repo`'s queue to `tracker` within `bound`. `first` (the owner just
-/// saved) goes ahead of older work; `only` restricts the pass to one owner.
+/// Which owners a pass drains.
+#[derive(Debug, Clone, Copy)]
+pub enum Scope<'a> {
+    All,
+    /// The owner just saved goes ahead of older work.
+    First(&'a EffectOwner),
+    /// `lf task sync <id>`: this owner only.
+    Only(&'a EffectOwner),
+}
+
+/// Drain `repo`'s queue to `tracker` within `bound`.
 pub async fn drain(
     store: &Store,
     repo: &str,
     tracker: &Tracker,
-    first: Option<&EffectOwner>,
-    only: bool,
+    scope: Scope<'_>,
     bound: Bound,
 ) -> OpsResult<Pass> {
     store
@@ -113,14 +121,15 @@ pub async fn drain(
             None => owners.push((effect.owner.clone(), vec![effect])),
         }
     }
-    if let Some(first) = first {
-        if let Some(at) = owners.iter().position(|(owner, _)| owner == first) {
-            let owner = owners.remove(at);
-            owners.insert(0, owner);
+    match scope {
+        Scope::All => {}
+        Scope::First(first) => {
+            if let Some(at) = owners.iter().position(|(owner, _)| owner == first) {
+                let owner = owners.remove(at);
+                owners.insert(0, owner);
+            }
         }
-        if only {
-            owners.truncate(usize::from(owners.first().is_some_and(|(o, _)| o == first)));
-        }
+        Scope::Only(only) => owners.retain(|(owner, _)| owner == only),
     }
     let budget = Budget {
         left: AtomicUsize::new(bound.requests),
@@ -332,7 +341,7 @@ mod tests {
     use loopflow_storage::work::edit::WorkValue;
     use serde_json::json;
 
-    use super::{drain, Bound, Pass};
+    use super::{drain, Bound, Pass, Scope};
     use crate::ops::tracker::fake::Fake;
     use crate::ops::tracker::rules::Observed;
     use crate::ops::tracker::Tracker;
@@ -411,16 +420,9 @@ mod tests {
         }
 
         async fn pass(&self) -> Pass {
-            drain(
-                &self.store,
-                "/repo",
-                &self.tracker,
-                None,
-                false,
-                Bound::PASS,
-            )
-            .await
-            .unwrap()
+            drain(&self.store, "/repo", &self.tracker, Scope::All, Bound::PASS)
+                .await
+                .unwrap()
         }
 
         fn phases(&self, task: &TaskId) -> Vec<EffectPhase> {

@@ -256,8 +256,8 @@ Read against a2c956a129 and 7e3fa2ac84. No product choice in these.
   write lock every agent shares. Select first on a plain read; open the write
   only when it returns owners, with `NOT EXISTS` repeated in the insert.
   Check its plan with `EXPLAIN QUERY PLAN` against a 10k-Task store.
-- **`drain` scope is one argument.** `first: Option<&EffectOwner>, only:
-  bool` → `Scope::{All, First(owner), Only(owner)}`.
+- **`drain` scope is one argument.** Done: `drain::Scope::{All,
+  First(owner), Only(owner)}`.
 - **An unknown kind fails one owner, not the pass.** `EffectKind::parse`
   errors the whole `unsettled_tracker_effects` read, so a row a later lf
   writes stops this one's drain for the repository. Read unknown kinds as a
@@ -391,9 +391,14 @@ Deepest deletions first, then the queue, then the bridges. Commit at each.
      (Linear create and comment: our id) in `linear/effects.rs`,
      `asana/effects.rs`; Observed built from `TrackerItem`/`TrackerProject`.
    - `sync_after_save`, `sync_scope` and `lf task sync` call `drain`
-     (`Bound::PASS`, `first`; `Bound::NOW`, `only`); delete the four drains,
+     (`Bound::PASS`, `Scope::First`; `Bound::NOW`, `Scope::Only`); delete the four drains,
      storage GraphQL, `PlanningClient`; move `lock_delivery` into `drain.rs`.
    - `lf repo plan` lists unsettled effects; `lf task show` `sync.conflict`.
+   - From the second concept review, still unbuilt: `enqueue_tracker_creations`
+     reads before it opens a write (EXPLAIN on 10k Tasks); unknown kinds skip
+     one owner instead of failing `unsettled_tracker_effects`
+     (`EffectKind::parse`, `tracker_effects.rs:195`); `decide` loses its
+     `_ => Hold` arm once it lives in storage; `Observed.state_history`.
    - Tests on the Linear fake per kind; existing `asana_planning_tests`,
      `task_comments_tests`, `planning_order_tests` move onto the queue.
    Found while sizing it:
@@ -423,7 +428,7 @@ Deepest deletions first, then the queue, then the bridges. Commit at each.
 ## Checks run
 
 - `cargo test -p loopflow-storage --lib -- tracker_effects planning_update_triggers revisions::` → 13 pass (upgrade fixture included).
-- `cargo test -p loopflow-execution --lib ops::tracker::` → 12 pass (rules per kind; drain: 0 requests when empty, 20 of 100, window hold, look settles, conflict adopts, wrong bridge retires).
+- `cargo test -p loopflow-execution --lib ops::tracker::` → 12 pass (rules per kind; drain: 0 requests when empty, 20 of 100, window hold, look settles, conflict adopts, wrong bridge retires); rerun after `Scope` → 12 pass, clippy clean.
 - `cargo clippy -p loopflow-storage -p loopflow-execution -p loopflow --all-targets -- -D warnings` → clean after the drain commit.
 
 - `cargo clippy -p loopflow-storage -p loopflow-execution -p loopflow --all-targets -- -D warnings` → clean (after slice 2 + renames).

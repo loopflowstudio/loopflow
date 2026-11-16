@@ -93,7 +93,7 @@ struct DashboardView: View {
                         Button(plan.dashboardID == nil ? "Save Dashboard" : "Edit Dashboard") { editing = true }
                     }
                 }.padding(10)
-                if let error = model.selectionPlans.errorMessage {
+                if let error = model.selectionPlans.failure {
                     Text(error).foregroundStyle(palette.warning).textSelection(.enabled)
                 }
                 // One line: membership may be incomplete; every reason stays in its help.
@@ -128,7 +128,7 @@ struct DashboardView: View {
                 }
             } else {
                 ContentUnavailableView("Dashboard unavailable", systemImage: "exclamationmark.triangle",
-                    description: Text(model.selectionPlans.errorMessage ?? "This Dashboard is no longer available."))
+                    description: Text(model.selectionPlans.failure ?? "This Dashboard is no longer available."))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }.padding(10).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top).background(palette.surfaceMuted)

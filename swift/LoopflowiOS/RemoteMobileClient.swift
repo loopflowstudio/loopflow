@@ -47,8 +47,10 @@ final class RemoteMobileClient: MobileTaskCreationClient {
     }
 
     /// Every repository's Tasks matching `expression`, kept current.
-    func observeTasks(expression: String) -> RemoteTaskObservation {
-        RemoteTaskObservation(query: .viewSelect(expression: expression)) { [self] in try await connection() }
+    func observeTasks(expression: String, saved: SavedReadings, subscription: String) -> RemoteTaskObservation {
+        RemoteTaskObservation(query: .viewSelect(expression: expression), saved: saved, subscription: subscription) { [self] in
+            try await connection()
+        }
     }
 
     /// The Machine's Waves that are still in use.

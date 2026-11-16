@@ -16,7 +16,7 @@ struct WorkSurfaceView: View {
     @State private var editingTask: RoadmapTask?
 
     private var snapshot: RoadmapSnapshot? { model.roadmap.value }
-    private var queryError: String? { model.roadmap.errorMessage }
+    private var queryError: String? { model.roadmap.failure }
     private var visibleWaves: [WaveRoadmap] { model.visibleRoadmaps }
 
     var body: some View {

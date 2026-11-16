@@ -215,7 +215,7 @@ struct WorkNavigationProofTests {
             #expect(workspace.multiplexer.layout == layout)
             #expect(window.firstResponder === terminals[1])
             if failing {
-                guard case .unavailable(_, let reason) = model.sessions else {
+                guard let reason = model.sessions.failure else {
                     Issue.record("Failed page lost its unavailable state")
                     return
                 }

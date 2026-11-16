@@ -4,7 +4,7 @@ import Loopflow
 
 struct WaveDetailReading {
     private(set) var snapshot: WaveRoadmap?
-    private(set) var errorMessage: String?
+    private(set) var failure: String?
 
     func plan(cached: WavePlan) -> WavePlan {
         guard let snapshot else { return cached }
@@ -13,17 +13,17 @@ struct WaveDetailReading {
 
     mutating func update(_ snapshot: WaveRoadmap) {
         self.snapshot = snapshot
-        errorMessage = nil
+        failure = nil
     }
 
     mutating func recordFailure(_ error: Error) {
         snapshot = nil
-        errorMessage = "Wave status unavailable: \(error.localizedDescription)"
+        failure = "Wave status unavailable: \(error.localizedDescription)"
     }
 
     mutating func clear() {
         snapshot = nil
-        errorMessage = nil
+        failure = nil
     }
 }
 
@@ -291,7 +291,7 @@ private struct WavePlanView: View {
     /// failed refresh; the plan above still renders from the cached `WavePlan`.
     @ViewBuilder
     private var liveStatusFooter: some View {
-        if let errorMessage = reading.errorMessage {
+        if let errorMessage = reading.failure {
             DisclosureGroup {
                 Text(errorMessage)
                     .font(Typography.caption(10))

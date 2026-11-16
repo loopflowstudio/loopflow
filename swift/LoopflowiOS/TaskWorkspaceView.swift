@@ -14,7 +14,7 @@ struct TaskWorkspaceView: View {
     var body: some View {
         content
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) { action }
+                ToolbarItem(placement: .topBarTrailing) { action.disabled(!feed.pendingChanges.acceptsChanges) }
             }
             .overlay { NoticeView(center: feed.notices) }
     }

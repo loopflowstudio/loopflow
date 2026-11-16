@@ -275,7 +275,7 @@ struct DesktopHeadlessTests {
             ["task", "run", task.task.identifier, "--from", "demo", "--json"],
         ])
         feed.send(WorkFrame(sequence: 8, answers: 3, unavailable: "offline", content: .task(nil), wire: nil))
-        try await eventually { model.taskWork[task.id].errorMessage == "offline" }
+        try await eventually { model.taskWork[task.id].failure == "offline" }
         _ = try log.inspect().find(text: "Graph processes could not be read: offline")
         _ = try log.inspect().find(viewWithAccessibilityIdentifier: "task-work-44444444-4444-4444-8444-444444444444")
     }
@@ -303,8 +303,8 @@ struct DesktopHeadlessTests {
         await source.fail()
         await model.loadGraphCatalog(force: true)
         #expect(model.workflowCatalog.value == retained)
-        #expect(model.workflowCatalog.errorMessage == "catalog unreadable")
-        #expect(model.graphCatalog.errorMessage == "catalog unreadable")
+        #expect(model.workflowCatalog.failure == "catalog unreadable")
+        #expect(model.graphCatalog.failure == "catalog unreadable")
         #expect(model.paletteIsStale)
         #expect(model.navigation.palette == .workflow("feature"))
         let view = WorkflowCatalogInspector(entry: retained?.first, model: model)
@@ -431,7 +431,7 @@ struct DesktopHeadlessTests {
         #expect(await started.calls.last == ["task", "hold", shipping.task.identifier, "--json"])
 
         // Auto-Ship says it was requested, never that it shipped; its Undo stops Auto-Ship.
-        await model.shipTask(task)
+        model.shipTask(task)
         let notice = try #require(model.navigation.notices.current)
         #expect(notice.text == "\(task.task.identifier) Auto-Ship requested")
         let view = NoticeView(center: model.navigation.notices)

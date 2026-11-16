@@ -11,7 +11,7 @@ struct TaskCommentsView: View {
     let task: RoadmapTask
     @Environment(\.palette) private var palette
 
-    private var reading: WorkReading<TaskComments> { model.comments[task.id] }
+    private var reading: Reading<TaskComments> { model.comments[task.id] }
     private var thread: TaskComments? { reading.value }
     private var expanded: Bool { model.navigation.expandedComments.contains(task.id) }
 
@@ -22,7 +22,7 @@ struct TaskCommentsView: View {
                 count: thread?.comments.count,
                 expanded: expanded,
                 inFlight: false,
-                failure: reading.errorMessage == nil ? nil : thread != nil,
+                failure: reading.failure == nil ? nil : thread != nil,
                 identifier: "task-comments",
                 accessibilityLabel: accessibilityHeading,
                 help: heading,
@@ -54,7 +54,7 @@ struct TaskCommentsView: View {
 
     @ViewBuilder
     private var statusText: some View {
-        Text(reading.errorMessage.map { "Comments could not be read: \($0)" } ?? "Reading comments…")
+        Text(reading.failure.map { "Comments could not be read: \($0)" } ?? "Reading comments…")
             .font(Typography.body(12.5))
             .foregroundStyle(palette.textSecondary)
             .textSelection(.enabled)
@@ -64,7 +64,7 @@ struct TaskCommentsView: View {
 
     private func threadView(_ thread: TaskComments) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            if let reason = reading.errorMessage ?? thread.refreshError {
+            if let reason = reading.failure ?? thread.refreshError {
                 Text("Latest read failed: \(reason)")
                     .font(Typography.body(12))
                     .foregroundStyle(palette.textSecondary)

@@ -75,7 +75,7 @@ struct RoadmapView: View {
 
     private var repoPath: String? { model.repoPath }
     private var snapshot: RoadmapSnapshot? { model.roadmap.value }
-    private var queryError: String? { model.roadmap.errorMessage }
+    private var queryError: String? { model.roadmap.failure }
     private var isRefreshing: Bool { model.isRefreshing }
 
     private var visibleWaves: [WaveRoadmap] {

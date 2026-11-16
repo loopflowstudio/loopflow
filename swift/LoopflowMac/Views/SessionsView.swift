@@ -1567,14 +1567,14 @@ private struct SessionsReconciler: View {
                 guard model.repoPath?.normalizedFilePath == store.repoPath.normalizedFilePath,
                       let records else { return }
                 store.reconcile(records)
-                if model.sessions.errorMessage == nil {
+                if model.sessions.failure == nil {
                     if let selection = workspaces.reconcileMembership(records) { model.select(selection) }
                     model.openWarmConversations()
                 }
             }
             .onChange(of: model.roadmap.value) { _, _ in
                 guard model.repoPath?.normalizedFilePath == store.repoPath.normalizedFilePath,
-                      model.roadmap.errorMessage == nil, model.sessions.errorMessage == nil else { return }
+                      model.roadmap.failure == nil, model.sessions.failure == nil else { return }
                 model.openWarmConversations()
             }
     }

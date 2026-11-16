@@ -1,15 +1,55 @@
 import Foundation
-import Loopflow
+@testable import Loopflow
 import Testing
+
+/// A Machine whose replies the test hands out one at a time.
+@MainActor
+final class HeldMachine {
+    private(set) var sent: [String] = []
+    private var replies: [CheckedContinuation<Revisions?, any Error>] = []
+
+    func send(_ write: ServedWrite, _ requestID: String) async throws -> Revisions? {
+        sent.append(requestID)
+        return try await withCheckedThrowingContinuation { replies.append($0) }
+    }
+
+    func answer(_ revisions: Revisions?) async {
+        await until { !self.replies.isEmpty }
+        replies.removeFirst().resume(returning: revisions)
+        await settle()
+    }
+
+    func fail(_ error: any Error) async {
+        await until { !self.replies.isEmpty }
+        replies.removeFirst().resume(throwing: error)
+        await settle()
+    }
+
+    /// Lets the change's task run to its next suspension.
+    func settle() async {
+        for _ in 0..<50 { await Task.yield() }
+    }
+
+    func until(_ condition: () -> Bool) async {
+        for _ in 0..<10_000 where !condition() { await Task.yield() }
+    }
+}
 
 /// A change shows in the click and stays until a reading covers the revisions
 /// its answer advanced; a refusal returns the row at once.
 @MainActor
 struct PendingChangesTests {
     private let repo = "repo_11111111111111111111111111111111"
+    private let machine = HeldMachine()
+    private let notices = NoticeCenter()
+
+    private func changes() -> PendingChanges {
+        let machine = machine
+        return PendingChanges(send: { try await machine.send($0, $1) })
+    }
 
     /// Three started Tasks, `LOO-1`…`LOO-3`, in order.
-    private func plan(_ states: [String] = ["idle", "working"]) throws -> WorkViewPlan {
+    private func plan(_ states: [String] = ["idle", "working"], at planning: Int64? = 4) throws -> Reading<WorkViewPlan> {
         var json = try #require(JSONSerialization.jsonObject(with: loadFixtureData("view_plan.json")) as? [String: Any])
         let members: [[String: Any]] = (1...3).map { n in
             ["source": ["started"], "work": ["repository": repo, "kind": "task", "id": "task_\(n)"]]
@@ -24,94 +64,165 @@ struct PendingChangesTests {
              "primary_session": NSNull(), "location": NSNull(), "argv": NSNull(), "unavailable": [], "face": NSNull(),
              "pane_revision": NSNull()]
         }
-        return try JSONDecoder().decode(WorkViewPlan.self, from: JSONSerialization.data(withJSONObject: json))
+        let value = try JSONDecoder().decode(WorkViewPlan.self, from: JSONSerialization.data(withJSONObject: json))
+        return .available(value, readAt: planning.map(at))
     }
 
-    private func identifiers(_ plan: WorkViewPlan) -> [String] { plan.contents.compactMap(\.identifier) }
+    /// A planning row from the shared fixture: `section`, owned when `owner` is set.
+    private func task(_ id: String, section: String = "working", wave: String? = "product",
+                      owner: String? = "Ada") throws -> RoadmapTask {
+        let fixtures = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent("tests/fixtures/dto")
+        let rows = try #require(JSONSerialization.jsonObject(
+            with: Data(contentsOf: fixtures.appendingPathComponent("task_history_rows.json"))) as? [[String: Any]])
+        var row = rows[0]
+        var plan = try #require(row["task"] as? [String: Any])
+        plan["id"] = id
+        plan["identifier"] = id
+        plan["wave_id"] = wave.map { $0 as Any } ?? NSNull()
+        row["task"] = plan
+        row["section"] = section
+        row["lifecycle"] = "idle"
+        let ownerJSON: Any = owner.map { person -> Any in
+            ["person": person, "person_id": NSNull(), "person_key": NSNull(),
+             "machine": ["id": NSNull(), "label": NSNull()]] as [String: Any]
+        } ?? NSNull()
+        row["runtime"] = ["work_id": id, "status": "idle", "reason": "Running", "updated_at": "2026-10-26T12:00:00Z",
+                          "provider": "claude", "completion_pending": NSNull(), "owner": ownerJSON] as [String: Any]
+        return try JSONDecoder().decode(RoadmapTask.self, from: JSONSerialization.data(withJSONObject: row))
+    }
+
+    private func identifiers(_ plan: WorkViewPlan?) -> [String] { plan?.contents.compactMap(\.identifier) ?? [] }
 
     private func at(_ planning: Int64) -> Revisions { Revisions(["planning": planning, "sessions": 9]) }
 
-    @Test func completeHidesTheRowUntilACoveringReading() throws {
-        let changes = PendingChanges()
-        let shown = try plan()
-        let id = changes.add(.complete(task: "LOO-2"))
-        // Before any answer, every reading hides it.
-        #expect(identifiers(changes.apply(to: shown, readAt: at(4))) == ["LOO-1", "LOO-3"])
-        #expect(changes.apply(to: shown, readAt: at(4)).projection.visible.count == 2)
-        changes.read("tasks", at: at(4))
-        changes.answered(id, revisions: Revisions(["planning": 5]))
-        // A stale reading still shows the row as the Machine had it: the patch holds.
-        changes.read("tasks", at: at(4))
-        #expect(identifiers(changes.apply(to: shown, readAt: at(4))) == ["LOO-1", "LOO-3"])
-        #expect(changes.changes.count == 1)
-        // The covering reading replaces the patch, whatever it says.
-        changes.read("tasks", at: at(5))
-        #expect(changes.changes.isEmpty)
-        #expect(identifiers(changes.apply(to: shown, readAt: at(5))) == ["LOO-1", "LOO-2", "LOO-3"])
+    private func complete(_ changes: PendingChanges, _ issue: String) {
+        changes.make(.complete(task: issue), issue: issue, verb: "completed",
+                     write: .taskComplete(directory: "/repo", issue: issue), notices: notices)
     }
 
-    @Test func aChangeWaitsForEveryLiveReadingOfItsMachine() throws {
-        let changes = PendingChanges()
-        changes.read("sidebar", at: at(4))
-        changes.read("board", at: at(4))
-        let id = changes.add(.abandon(task: "LOO-1"))
-        changes.answered(id, revisions: Revisions(["planning": 5]))
-        changes.read("sidebar", at: at(5))
+    @Test func completeHidesTheRowUntilACoveringReading() async throws {
+        let changes = changes()
+        complete(changes, "LOO-2")
+        // Before any answer, every reading hides it.
+        #expect(identifiers(changes.apply(to: try plan())) == ["LOO-1", "LOO-3"])
+        #expect(changes.apply(to: try plan())?.projection.visible.count == 2)
+        changes.read("tasks", try plan())
+        await machine.answer(Revisions(["planning": 5]))
+        // A stale reading still shows the row as the Machine had it: the patch holds.
+        changes.read("tasks", try plan())
+        #expect(identifiers(changes.apply(to: try plan())) == ["LOO-1", "LOO-3"])
+        #expect(changes.changes.count == 1)
+        // The covering reading replaces the patch, whatever it says.
+        changes.read("tasks", try plan(at: 5))
+        #expect(changes.changes.isEmpty)
+        #expect(identifiers(changes.apply(to: try plan(at: 5))) == ["LOO-1", "LOO-2", "LOO-3"])
+    }
+
+    @Test func aChangeWaitsForEveryLiveReadingOfItsMachine() async throws {
+        let changes = changes()
+        changes.read("sidebar", try plan())
+        changes.read("board", try plan())
+        changes.make(.abandon(task: "LOO-1"), issue: "LOO-1", verb: "abandoned",
+                     write: .taskAbandon(directory: "/repo", issue: "LOO-1"), notices: notices)
+        await machine.answer(Revisions(["planning": 5]))
+        changes.read("sidebar", try plan(at: 5))
         #expect(changes.changes.count == 1)
         // The board's reading at 4 does not show it yet, the sidebar's at 5 does.
-        #expect(changes.removes(task: "LOO-1", at: at(4)))
-        #expect(!changes.removes(task: "LOO-1", at: at(5)))
+        #expect(identifiers(changes.apply(to: try plan())) == ["LOO-2", "LOO-3"])
+        #expect(identifiers(changes.apply(to: try plan(at: 5))).count == 3)
         changes.ended("board")
         #expect(changes.changes.isEmpty)
     }
 
-    @Test func aRefusalReturnsTheRowAtOnce() throws {
-        let changes = PendingChanges()
-        let id = changes.add(.complete(task: "LOO-3"))
-        #expect(identifiers(changes.apply(to: try plan(), readAt: at(4))) == ["LOO-1", "LOO-2"])
-        changes.refused(id)
-        #expect(identifiers(changes.apply(to: try plan(), readAt: at(4))) == ["LOO-1", "LOO-2", "LOO-3"])
+    @Test func aRefusalReturnsTheRowAndPostsOneNotice() async throws {
+        let changes = changes()
+        complete(changes, "LOO-3")
+        #expect(identifiers(changes.apply(to: try plan())) == ["LOO-1", "LOO-2"])
+        await machine.fail(ServerError(code: "conflict", message: "its PR #12 is open", data: .null))
+        #expect(identifiers(changes.apply(to: try plan())) == ["LOO-1", "LOO-2", "LOO-3"])
+        #expect(notices.current?.text == "LOO-3 couldn't be completed: its PR #12 is open")
     }
 
-    @Test func aPartlyDoneChangeIsKeptUntilCovered() throws {
-        let changes = PendingChanges()
-        let id = changes.add(.abandon(task: "LOO-1"))
+    @Test func aPartlyDoneChangeIsKeptUntilCovered() async throws {
+        let changes = changes()
+        changes.make(.abandon(task: "LOO-1"), issue: "LOO-1", verb: "abandoned",
+                     write: .taskAbandon(directory: "/repo", issue: "LOO-1"), notices: notices)
         // Abandon saved, then failed to delete its branch: the answer still advanced planning.
-        changes.answered(id, revisions: Revisions(["planning": 6]))
-        changes.read("tasks", at: at(5))
-        #expect(identifiers(changes.apply(to: try plan(), readAt: at(5))) == ["LOO-2", "LOO-3"])
-        changes.read("tasks", at: at(6))
+        await machine.fail(ServerError(code: "conflict", message: "its branch is still checked out", data: .null,
+                                       revisions: Revisions(["planning": 6])))
+        changes.read("tasks", try plan(at: 5))
+        #expect(identifiers(changes.apply(to: try plan(at: 5))) == ["LOO-2", "LOO-3"])
+        #expect(notices.current?.text == "LOO-1 was abandoned, but its branch is still checked out")
+        changes.read("tasks", try plan(at: 6))
         #expect(changes.changes.isEmpty)
     }
 
-    @Test func aCommandThatChangedNothingDropsAtTheNextReading() throws {
-        let changes = PendingChanges()
-        let id = changes.add(.claim(task: "LOO-1"))
-        changes.read("tasks", at: at(4))
-        changes.answered(id, revisions: Revisions([:]))
+    @Test func aCommandThatChangedNothingDropsAtOnce() async throws {
+        let changes = changes()
+        changes.make(.claim(task: "LOO-1"), issue: "LOO-1", verb: "claimed",
+                     write: .taskClaim(directory: "/repo", issue: "LOO-1"), notices: notices)
+        changes.read("tasks", try plan())
+        await machine.answer(Revisions([:]))
         #expect(changes.changes.isEmpty)
     }
 
-    @Test func sectionChangesFollowTheTableAndMoveLeavesOtherWaves() throws {
-        let changes = PendingChanges()
-        changes.add(.unassign(task: "LOO-1"))
-        changes.add(.reopen(task: "LOO-2"))
-        changes.add(.move(task: "LOO-3", wave: "other"))
-        let shown = try plan(["idle", "working"])
-        let patched = changes.apply(to: shown, readAt: nil, wave: "product")
-        #expect(patched.contents.first { $0.identifier == "LOO-1" }?.states == [.idle, .backlog])
-        #expect(patched.contents.first { $0.identifier == "LOO-2" }?.states == [.open, .idle, .working])
+    @Test func sectionChangesFollowTheTableAndMoveLeavesOtherWaves() async throws {
+        let changes = changes()
+        for (command, issue) in [(PendingCommand.unassign(task: "LOO-1"), "LOO-1"), (.reopen(task: "LOO-2"), "LOO-2"),
+                                 (.move(task: "LOO-3", wave: "other"), "LOO-3")] {
+            changes.make(command, issue: issue, verb: "changed", write: .taskReopen(directory: "/repo", issue: issue),
+                         notices: notices)
+        }
+        let shown = try plan(["idle", "working"], at: nil)
+        let patched = changes.apply(to: shown, wave: "product")
+        #expect(patched?.contents.first { $0.identifier == "LOO-1" }?.states == [.idle, .backlog])
+        #expect(patched?.contents.first { $0.identifier == "LOO-2" }?.states == [.open, .idle, .working])
         #expect(identifiers(patched) == ["LOO-1", "LOO-2"])
         // A list of every Wave keeps a moved Task.
-        #expect(identifiers(changes.apply(to: shown, readAt: nil)).count == 3)
+        #expect(identifiers(changes.apply(to: shown)).count == 3)
     }
 
-    @Test func unansweredChangesAreResentUnderTheirRequestIDs() {
-        let changes = PendingChanges()
-        let first = changes.add(.claim(task: "LOO-1"))
-        let second = changes.add(.complete(task: "LOO-2"))
-        changes.answered(second, revisions: Revisions(["planning": 3]))
-        #expect(changes.unanswered.map(\.requestID) == [first])
+    @Test func planningRowsTakeEveryCommandSoCountsFollow() async throws {
+        let changes = changes()
+        let rows = [try task("LOO-1"), try task("LOO-2"), try task("LOO-3", section: "backlog", owner: nil),
+                    try task("LOO-4", wave: "other")]
+        let working = { (rows: [RoadmapTask]) in rows.filter { $0.section == .working }.map(\.task.identifier) }
+        changes.make(.complete(task: "LOO-1"), issue: "LOO-1", verb: "completed",
+                     write: .taskComplete(directory: "/repo", issue: "LOO-1"), notices: notices)
+        changes.make(.claim(task: "LOO-3"), issue: "LOO-3", verb: "claimed",
+                     write: .taskClaim(directory: "/repo", issue: "LOO-3"), notices: notices)
+        changes.make(.unassign(task: "LOO-2"), issue: "LOO-2", verb: "unassigned",
+                     write: .taskUnassign(directory: "/repo", issue: "LOO-2"), notices: notices)
+        changes.make(.move(task: "LOO-4", wave: "product"), issue: "LOO-4", verb: "moved",
+                     write: .taskMove(directory: "/repo", issue: "LOO-4", wave: "product", machine: nil), notices: notices)
+        let product = changes.apply(to: Array(rows.prefix(3)), readAt: at(4), wave: "product", inventory: rows)
+        #expect(working(product) == ["LOO-3", "LOO-4"])
+        #expect(product.first { $0.task.identifier == "LOO-1" }?.section == .done)
+        #expect(product.first { $0.task.identifier == "LOO-2" }?.runtime?.owner == nil)
+        #expect(product.first { $0.task.identifier == "LOO-4" }?.task.waveId == "product")
+        #expect(changes.apply(to: [rows[3]], readAt: at(4), wave: "other").isEmpty)
+    }
+
+    @Test func aLostLinkSendsAgainUnderTheSameRequestID() async throws {
+        let changes = changes()
+        complete(changes, "LOO-2")
+        await machine.fail(RegistryQueryError(ServerLink.disconnected))
+        #expect(changes.link == .blip)
+        #expect(changes.acceptsChanges)
+        await machine.until { self.machine.sent.count == 2 }
+        await machine.answer(Revisions(["planning": 5]))
+        #expect(Set(machine.sent).count == 1)
+        #expect(changes.link == .connected)
+        #expect(changes.changes.first?.answer == Revisions(["planning": 5]))
+    }
+
+    @Test func requestedShowsInTheClickAndARefusalPostsOverIt() async throws {
+        let changes = changes()
+        changes.request("Auto-Ship", issue: "LOO-5", write: .taskShip(directory: "/repo", issue: "LOO-5"), notices: notices)
+        #expect(notices.current?.text == "LOO-5 Auto-Ship requested")
+        await machine.fail(ServerError(code: "conflict", message: "it has no checkout", data: .null))
+        #expect(notices.current?.text == "LOO-5 Auto-Ship couldn't be requested: it has no checkout")
     }
 
     @Test func revisionsCoverOnlyWhenEveryDomainIsReached() {
@@ -121,7 +232,14 @@ struct PendingChangesTests {
         #expect(Revisions([:]).covers(Revisions([:])))
     }
 
-    @Test func aNewNoticeReplacesTheLastAndARefreshedOneRestarts() {
+    @Test func aReadingNeverGivesWayToOneReadEarlier() throws {
+        let newer = try plan(at: 6)
+        #expect(!newer.yields(to: try plan(at: 5)))
+        #expect(try plan(at: 5).yields(to: newer))
+        #expect(newer.yields(to: newer.failed("offline")))
+    }
+
+    @Test func aNewEventReplacesTheLastAndARefreshedOneRestarts() {
         let center = NoticeCenter()
         center.post(Notice("LOO-5 Auto-Ship requested"))
         center.post(Notice("Tasks couldn't be read: offline", key: "task_list"))
@@ -130,6 +248,19 @@ struct PendingChangesTests {
         center.post(Notice("Tasks couldn't be read: offline", key: "task_list"))
         #expect(center.posted == posted + 1)
         center.clear(key: "task_list")
+        #expect(center.current == nil)
+    }
+
+    @Test func aConditionStandsUnderEventsUntilItEnds() {
+        let center = NoticeCenter()
+        center.post(Notice("The Machine is away", key: "away", kind: .condition))
+        center.post(Notice("LOO-2 couldn't be completed: offline"))
+        #expect(center.current?.text == "LOO-2 couldn't be completed: offline")
+        center.expire(center.posted)
+        #expect(center.current?.text == "The Machine is away")
+        center.post(Notice("The Machine is away", key: "away", kind: .condition))
+        #expect(center.conditions.count == 1)
+        center.clear(key: "away")
         #expect(center.current == nil)
     }
 }

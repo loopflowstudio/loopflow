@@ -1065,12 +1065,12 @@ struct DesktopPerformanceFixtureTests {
             try await Task.sleep(for: .milliseconds(5))
         }
         await model.loadTaskContext(task: task.task)
-        #expect(model.graphCatalog.errorMessage == nil)
-        #expect(model.taskWork[task.task.id].errorMessage == nil)
-        #expect(model.taskContext[task.task.id].errorMessage == nil)
+        #expect(model.graphCatalog.failure == nil)
+        #expect(model.taskWork[task.task.id].failure == nil)
+        #expect(model.taskContext[task.task.id].failure == nil)
         await model.loadSessionHistory(task: task.task)
         #expect(model.sessionHistory[task.task.id].value?.count == 256)
-        #expect(model.sessionHistory[task.task.id].errorMessage == nil)
+        #expect(model.sessionHistory[task.task.id].failure == nil)
         let store = TaskFilesStore(issue: "PERF-0", cwd: NSTemporaryDirectory(), query: query)
         store.autosave = false
         store.selection = "notes.txt"

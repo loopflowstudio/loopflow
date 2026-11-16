@@ -39,7 +39,7 @@ struct WorkNavigator: View {
             return model.dashboard(id) == nil ? "This Dashboard is no longer available." : "No Tasks in this Dashboard"
         case .repository, .wave:
             if model.taskListReading.isLoading { return nil }
-            if model.taskListReading.errorMessage != nil { return "Task list unavailable" }
+            if model.taskListReading.failure != nil { return "Task list unavailable" }
             if case .wave = model.navigation.sidebarScope { return "No working Tasks in this Wave" }
             return "No working Tasks in this list"
         }
@@ -63,8 +63,8 @@ struct WorkNavigator: View {
             if let status = model.workStatus.message {
                 WorkReadStatus(model: model, status: status)
             }
-            if let error = model.selectionPlans.errorMessage,
-               ![model.roadmap.errorMessage, model.taskListReading.errorMessage, model.sessions.errorMessage]
+            if let error = model.selectionPlans.failure,
+               ![model.roadmap.failure, model.taskListReading.failure, model.sessions.failure]
                 .compactMap({ $0 }).contains(error) {
                 Text(error).font(Typography.body(11)).foregroundStyle(palette.warning).padding(10)
             }
@@ -259,7 +259,7 @@ struct WorkNavigator: View {
         let selected = model.isSelected(.task(id: id))
         let muted = quiet || model.selection?.kind == .wave && found?.wave?.wave.id != model.selection?.id
         let sessions = model.taskSessions(id)
-        let status = SessionProgramStatus(sessions: sessions, unavailable: model.sessions.errorMessage)
+        let status = SessionProgramStatus(sessions: sessions, unavailable: model.sessions.failure)
         let presentation = model.taskPresentation(id: id)
         let title = presentation.title
         // Rows slide under the pointer while scrolling. Only the ⌘N hint reads the

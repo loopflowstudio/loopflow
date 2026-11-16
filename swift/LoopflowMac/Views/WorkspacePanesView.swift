@@ -104,7 +104,7 @@ struct ConversationPlaceholder: View {
         if let start = workspace.conversationStart { return start.help }
         if workspace.conversationClosed { return "Closed here. Select it again to reopen the conversation." }
         if model.showsSavedWork { return WorkCache.savedReason }
-        return model.roadmap.errorMessage ?? model.sessions.errorMessage ?? "Show the recorded conversation."
+        return model.roadmap.failure ?? model.sessions.failure ?? "Show the recorded conversation."
     }
 }
 

@@ -10,7 +10,7 @@ struct WorkActivityView: View {
         VStack(spacing: 0) {
             header
             Divider()
-            if let reason = model.workActivity.errorMessage {
+            if let reason = model.workActivity.failure {
                 evidenceBanner(reason)
             }
             content
@@ -65,7 +65,7 @@ struct WorkActivityView: View {
 
     @ViewBuilder
     private var content: some View {
-        if model.workActivity.value == nil, model.workActivity.errorMessage == nil {
+        if model.workActivity.value == nil, model.workActivity.failure == nil {
             ProgressView("Reading Activity…")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .accessibilityIdentifier("loopflow-activity-loading")

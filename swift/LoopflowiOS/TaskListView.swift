@@ -18,16 +18,13 @@ extension TaskList {
 @MainActor
 @Observable
 final class TaskFeed {
-    private(set) var repositories: [RepositoryTasks] = []
-    private(set) var loaded = false
-    /// The last read failed; the Notice says why and the list keeps what it showed.
-    private(set) var failed = false
+    /// The last reading; while reads fail it keeps what the list showed and the Notice says why.
+    private(set) var tasks: Reading<[RepositoryTasks]> = .loading
     private(set) var waves: [Wave] = []
     /// This Machine's changes shown before the reading that shows them.
-    let pendingChanges = PendingChanges()
+    let pendingChanges: PendingChanges
     /// The app's one Notice.
     let notices: NoticeCenter
-    private var readAt: Revisions?
     var filter = TaskList.started {
         didSet {
             guard filter != oldValue else { return }
@@ -42,6 +39,7 @@ final class TaskFeed {
     var wave: String?
     @ObservationIgnored private var waiting: Interaction?
     @ObservationIgnored private let client: RemoteMobileClient
+    @ObservationIgnored private let saved: SavedReadings
     @ObservationIgnored private var observation: RemoteTaskObservation?
     @ObservationIgnored private var reader: Task<Void, Never>?
     @ObservationIgnored private var generation = 0
@@ -49,15 +47,22 @@ final class TaskFeed {
     init(client: RemoteMobileClient, notices: NoticeCenter) {
         self.client = client
         self.notices = notices
+        saved = SavedReadings(machine: client.savedMachine.machineID)
+        pendingChanges = PendingChanges(send: { try await client.change($0, requestID: $1) },
+                                        describe: machineConnectionMessage)
+        pendingChanges.report(to: notices)
     }
 
-    /// The Machine's Tasks with this phone's pending Completes made.
+    var repositories: [RepositoryTasks] { tasks.value ?? [] }
+    var loaded: Bool { tasks.value != nil }
+    var failed: Bool { tasks.failure != nil }
+
+    /// The Machine's Tasks with this phone's pending changes made.
     var shownRepositories: [RepositoryTasks] {
         guard !pendingChanges.changes.isEmpty else { return repositories }
         return repositories.map { entry in
-            RepositoryTasks(repository: entry.repository, path: entry.path, tasks: entry.tasks.filter {
-                !pendingChanges.removes(task: $0.identifier ?? $0.work.id, at: readAt)
-            })
+            RepositoryTasks(repository: entry.repository, path: entry.path,
+                            tasks: pendingChanges.apply(to: entry.tasks, readAt: tasks.readAt, wave: wave))
         }
     }
 
@@ -65,19 +70,9 @@ final class TaskFeed {
     func complete(_ task: WorkViewPlan.Content) {
         guard let directory = directory(of: task) else { return }
         let issue = task.identifier ?? task.work.id
-        let requestID = pendingChanges.add(.complete(task: issue))
-        Task {
-            do {
-                let revisions = try await client.change(.taskComplete(directory: directory, issue: issue), requestID: requestID)
-                pendingChanges.answered(requestID, revisions: revisions ?? Revisions([:]))
-                try? await observation?.refresh()
-            } catch let error as ServerError where error.revisions != nil {
-                pendingChanges.answered(requestID, revisions: error.revisions ?? Revisions([:]))
-                notices.post(Notice("\(issue) was completed, but \(error.message)"))
-            } catch {
-                pendingChanges.refused(requestID)
-                notices.post(Notice("\(issue) couldn't be completed: \(machineConnectionMessage(error))"))
-            }
+        pendingChanges.make(.complete(task: issue), issue: issue, verb: "completed",
+                            write: .taskComplete(directory: directory, issue: issue), notices: notices) { [weak self] in
+            try? await self?.observation?.refresh()
         }
     }
 
@@ -85,15 +80,8 @@ final class TaskFeed {
     func request(_ name: String, _ task: WorkViewPlan.Content, _ write: (String, String) -> ServedWrite) {
         guard let directory = directory(of: task) else { return }
         let issue = task.identifier ?? task.work.id
-        let change = write(directory, issue)
-        Task {
-            do {
-                _ = try await client.change(change, requestID: UUID().uuidString)
-                notices.post(Notice("\(issue) \(name) requested"))
-                try? await observation?.refresh()
-            } catch {
-                notices.post(Notice("\(issue) \(name) couldn't be requested: \(machineConnectionMessage(error))"))
-            }
+        pendingChanges.request(name, issue: issue, write: write(directory, issue), notices: notices) { [weak self] in
+            try? await self?.observation?.refresh()
         }
     }
 
@@ -102,11 +90,15 @@ final class TaskFeed {
         repositories.first { $0.tasks.contains { $0.work == task.work } }?.path
     }
 
+    /// A read failed: the list keeps what it showed. Away says so once instead.
     private func failed(_ message: String) {
-        failed = true
+        tasks = tasks.failed(message)
+        guard pendingChanges.acceptsChanges else { return }
         notices.post(Notice("Tasks couldn't be updated: \(message)", key: "tasks",
                             action: Notice.Action("Try again") { [weak self] in Task { await self?.start() } }))
     }
+
+    private var subscription: String { "tasks-\(filter.rawValue)\(wave.map { "-\($0)" } ?? "")" }
 
     func start() async {
         stop()
@@ -114,53 +106,47 @@ final class TaskFeed {
         waiting = requested ?? Perf.begin("find_work", scenario: filter.rawValue)
         requested = nil
         // The last reading under each filter, shown at once while the Machine answers.
-        // It is kept as wire bytes and read by the live decoder, so a file an older
-        // app wrote fails to load instead of showing a stale shape.
-        let url = savedURL
-        let saved = await Task.detached(priority: .userInitiated) {
-            (try? RemoteTaskObservation.decode(frame: RawJSON(Data(contentsOf: url))).reading).flatMap { try? $0.get() }
+        let subscription = subscription
+        let wire = await saved.load(subscription)
+        let restored = await Task.detached(priority: .userInitiated) {
+            wire.flatMap { try? RemoteTaskObservation.decode(frame: RawJSON($0)).reading }
         }.value
         guard current == generation else { return }
-        if let saved {
-            repositories = saved
-            loaded = true
+        if let restored, restored.failure == nil {
+            tasks = restored
             Perf.launch("tasks_saved")
         } else {
-            repositories = []
-            loaded = false
+            tasks = .loading
         }
         let observation = InteractionTrace.$current.withValue(waiting) {
-            client.observeTasks(expression: filter.expression(wave: wave))
+            client.observeTasks(expression: filter.expression(wave: wave), saved: saved, subscription: subscription)
         }
         self.observation = observation
         reader = InteractionTrace.$current.withValue(waiting) { Task { [weak self] in
             do {
                 for try await update in observation.readings {
                     guard let self, current == self.generation else { return }
-                    self.readAt = update.readAt
-                    self.pendingChanges.read("tasks", at: update.readAt)
-                    switch update.reading {
-                    case .success(let repositories):
-                        let changed = repositories != self.repositories || !self.loaded
-                        if changed { self.repositories = repositories }
-                        self.loaded = true
-                        if self.failed { self.notices.clear(key: "tasks") }
-                        self.failed = false
-                        Perf.launch("tasks_current")
-                        self.reading += 1
-                        if changed { self.save(update.wire) }
-                        if self.waves.isEmpty, let found = try? await self.client.waves() { self.waves = found }
-                    case .failure(let error):
+                    self.pendingChanges.linkReturned()
+                    self.pendingChanges.read("tasks", update)
+                    if let reason = update.failure {
                         self.waiting?.finish(.failed)
                         self.waiting = nil
-                        self.failed(error.message)
+                        self.failed(reason)
+                        continue
                     }
+                    guard self.tasks.yields(to: update) else { continue }
+                    if self.failed { self.notices.clear(key: "tasks") }
+                    if update != self.tasks { self.tasks = update }
+                    Perf.launch("tasks_current")
+                    self.reading += 1
+                    if self.waves.isEmpty, let found = try? await self.client.waves() { self.waves = found }
                 }
                 throw RegistryQueryError("Task updates ended.")
             } catch {
                 guard let self, current == self.generation else { return }
                 self.waiting?.finish(.failed)
                 self.stop()
+                if ServerLink.lostLink(error) { self.pendingChanges.linkLost() }
                 self.failed(machineConnectionMessage(error))
             }
         } }
@@ -193,28 +179,14 @@ final class TaskFeed {
         reader = nil
         observation?.close()
         observation = nil
+        pendingChanges.ended("tasks")
     }
 
     /// Removes what this Machine's readings left on the phone.
     func forget() {
         stop()
-        let saved = (try? FileManager.default.contentsOfDirectory(at: .cachesDirectory, includingPropertiesForKeys: nil)) ?? []
-        for file in saved where file.lastPathComponent.hasPrefix("tasks-\(client.savedMachine.machineID)-") {
-            try? FileManager.default.removeItem(at: file)
-        }
+        saved.forget()
     }
-
-    private var savedURL: URL {
-        URL.cachesDirectory.appending(path: "tasks-\(client.savedMachine.machineID)-\(filter.rawValue)\(wave.map { "-\($0)" } ?? "").json")
-    }
-
-    private func save(_ wire: Data) {
-        let url = savedURL
-        Task.detached(priority: .utility) {
-            try? wire.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
-        }
-    }
-
 }
 
 struct TaskListView: View {
@@ -419,6 +391,7 @@ struct TaskListView: View {
             .swipeActions(edge: .trailing) {
                 Button("Complete", systemImage: "checkmark") { feed.complete(task) }
                     .tint(theme.palette.success)
+                    .disabled(!feed.pendingChanges.acceptsChanges)
             }
             .listRowInsets(EdgeInsets(top: 12, leading: 20, bottom: 12, trailing: 16))
             .listRowBackground(theme.palette.background)

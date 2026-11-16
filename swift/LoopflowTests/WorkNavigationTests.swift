@@ -306,11 +306,13 @@ struct WorkNavigationTests {
         model.applyStartedFixture(working: ["issue-review", "issue-now"])
         model.select(.task(id: "issue-review"))
         let changed = try #require(model.task(id: "issue-review")?.task)
-        if command == "abandon" { await model.abandonTask(changed) } else { model.completeTask(changed) }
+        if command == "abandon" { model.abandonTask(changed) } else { model.completeTask(changed) }
         // The write is still held: the row is gone and the next Task is open.
         #expect(model.sidebarTaskIDs == ["issue-now"])
         #expect(model.selection == .task(id: "issue-now"))
-        #expect(!model.visibleTasks.contains { $0.id == "issue-review" })
+        // Abandoned leaves every list; completed stays only in Done.
+        let shown = model.visibleTasks.first { $0.id == "issue-review" }
+        if command == "abandon" { #expect(shown == nil) } else { #expect(shown?.section == .done) }
         release.continuation.finish()
         for _ in 0..<200 where !model.pendingChanges.changes.isEmpty { try await Task.sleep(for: .milliseconds(5)) }
         #expect(model.sidebarTaskIDs == ["issue-review", "issue-now"])
@@ -678,8 +680,8 @@ struct WorkNavigationTests {
         model.select(.task(id: "issue-review"))
         await source.fail()
         await model.refresh()
-        #expect(model.roadmap.errorMessage == "offline")
-        #expect(model.sessions.errorMessage == "offline")
+        #expect(model.roadmap.failure == "offline")
+        #expect(model.sessions.failure == "offline")
         #expect(model.projection.waves[0].tasks.map(\.id) == keys)
         #expect(model.projection.subject(for: "human") == model.selection)
         let view = WorkNavigator(model: model, onOpenSession: { _ in })
@@ -697,12 +699,12 @@ struct WorkNavigationTests {
         model.setRepoPath("/src/loopflow")
         #expect(model.sessions.value?.map(\.id) == ["human"])
         await model.refreshSessions()
-        #expect(model.sessions.errorMessage == "offline")
+        #expect(model.sessions.failure == "offline")
         #expect(model.sessions.value?.map(\.id) == ["human"])
         model.setRepoPath("/src/context")
         model.setRepoPath("/src/loopflow")
         #expect(model.sessions.value?.map(\.id) == ["human"])
-        #expect(model.sessions.errorMessage == "offline")
+        #expect(model.sessions.failure == "offline")
     }
 
     @Test("Incomplete planning preserves the repository's selected Task", arguments: [false, true])
@@ -728,7 +730,7 @@ struct WorkNavigationTests {
         #expect(model.selection == .task(id: "issue-review"))
         #expect(model.navigation.content == .details)
         #expect(model.projection.unmatchedSessions.isEmpty)
-        #expect(model.roadmap.errorMessage != nil)
+        #expect(model.roadmap.failure != nil)
         #expect(model.projection.subject(for: "human") == .task(id: "issue-review"))
     }
 

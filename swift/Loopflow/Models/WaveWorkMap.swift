@@ -70,7 +70,7 @@ public struct TaskPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable 
     public let repositoryId: String
     public let repo: String
     public let projectId: String?
-    public let waveId: String?
+    public internal(set) var waveId: String?
     public let linearId: String?
     public let identifier: String
     public let name: String
@@ -110,7 +110,7 @@ public struct TaskRuntimeSnapshot: Decodable, Sendable, Hashable {
     public let updatedAt: String
     public let provider: String?
     /// Who owns the Task on which Machine; absent when it is unowned.
-    public let owner: TaskOwner?
+    public internal(set) var owner: TaskOwner?
 
     enum CodingKeys: String, CodingKey {
         case status, reason, provider, owner
@@ -200,13 +200,13 @@ public enum TaskSection: String, Decodable, Sendable, Hashable {
 public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     public var id: String { task.id }
 
-    public let task: TaskPlanningSnapshot
+    public internal(set) var task: TaskPlanningSnapshot
     public let reference: TaskReferenceSnapshot
     /// Effective lifecycle, including planning withdrawal of never-started work.
-    public let lifecycle: TaskState
+    public internal(set) var lifecycle: TaskState
     /// The same states Rust uses for Task selections and conversation activity.
     public let selectionStates: Set<WorkSelectionState>
-    public let runtime: TaskRuntimeSnapshot?
+    public internal(set) var runtime: TaskRuntimeSnapshot?
     public let nextMove: WorkNextMove
     public let condition: TaskConditionSnapshot
     public let actions: TaskActionModel
@@ -218,7 +218,7 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     public let shipControl: TaskRunControl
     public let shipping: ShippingSnapshot?
     public let pr: PrSnapshot?
-    public let section: TaskSection
+    public internal(set) var section: TaskSection
 
     enum CodingKeys: String, CodingKey {
         case task, reference, runtime, condition, actions, execution, section, pr, lifecycle

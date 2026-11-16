@@ -7,7 +7,7 @@ struct TaskWorkflowHeader: View {
     let model: WorkModel
     let task: RoadmapTask
     /// The Task part of the workspace stream, as last read.
-    let work: WorkReading<TaskOverview>
+    let work: Reading<TaskOverview>
     var workspaceActions: AnyView? = nil
     @Environment(\.palette) private var palette
 
@@ -57,7 +57,7 @@ struct TaskWorkflowHeader: View {
                     .help(unavailable ?? "lf task run \(task.task.identifier) --from <step>")
                     .accessibilityIdentifier("task-workflow-move")
 
-                } else if work.value != nil, work.errorMessage == nil {
+                } else if work.value != nil, work.failure == nil {
                     // The shared resolver reports the first-run default and its owner.
                     Text(task.graphName.map { "\($0) · \(task.graphSource ?? "")" } ?? "No workflow selected")
                         .foregroundStyle(palette.textSecondary)
@@ -73,13 +73,13 @@ struct TaskWorkflowHeader: View {
                         .accessibilityIdentifier("task-workflow-start")
                     Spacer()
                 } else {
-                    Text(work.errorMessage.map { "Workflow could not be read: \($0)" }
+                    Text(work.failure.map { "Workflow could not be read: \($0)" }
                          ?? "Reading workflow…")
                         .foregroundStyle(palette.textSecondary)
                     Spacer()
                 }
                 if task.isCompleted {
-                    Button("Reopen") { Task { await model.reopenTask(task) } }
+                    Button("Reopen") { model.reopenTask(task) }
                         .disabled(readingUnavailable != nil)
                         .accessibilityIdentifier("task-reopen")
                 } else {
@@ -87,7 +87,7 @@ struct TaskWorkflowHeader: View {
                         .disabled(readingUnavailable != nil)
                         .accessibilityIdentifier("task-complete")
                     Button(task.runtime?.owner == nil ? "Claim" : "Unassign") {
-                        Task { await model.assignTask(task, claimed: task.runtime?.owner == nil) }
+                        model.assignTask(task, claimed: task.runtime?.owner == nil)
                     }
                     .disabled(readingUnavailable != nil)
                     .accessibilityIdentifier("task-claim-unassign")
@@ -106,7 +106,7 @@ struct TaskWorkflowHeader: View {
         VStack(alignment: .leading, spacing: 6) {
             ScrollView(.horizontal) { controls }
                 .scrollIndicators(.visible)
-            if work.value?.graph != nil, let error = work.errorMessage {
+            if work.value?.graph != nil, let error = work.failure {
                 Text("Workflow refresh failed: \(error)")
                     .foregroundStyle(palette.failure)
                     .textSelection(.enabled)
@@ -152,7 +152,7 @@ struct TaskWorkflowHeader: View {
         }
         .confirmationDialog("Abandon \(task.task.identifier)?", isPresented: $confirmingAbandon) {
             Button("Abandon Task", role: .destructive) {
-                Task { await model.abandonTask(task) }
+                model.abandonTask(task)
             }
         } message: {
             Text("Cancels the Task, closes its PRs and deletes its branches. Unassign it instead to keep its work for later.")
@@ -223,7 +223,7 @@ struct TaskWorkflowHeader: View {
     }
 
     private var readingUnavailable: String? {
-        if let error = work.errorMessage ?? model.roadmap.errorMessage { return error }
+        if let error = work.failure ?? model.roadmap.failure { return error }
         if model.showsSavedPlanning { return WorkCache.savedReason }
         return nil
     }
@@ -240,7 +240,7 @@ struct TaskShipControl: View {
     @State private var confirmingAbandon = false
 
     private var readingUnavailable: String? {
-        if let error = model.roadmap.errorMessage { return error }
+        if let error = model.roadmap.failure { return error }
         if model.showsSavedPlanning { return WorkCache.savedReason }
         return nil
     }
@@ -248,7 +248,7 @@ struct TaskShipControl: View {
     var body: some View {
         Group {
             if task.shipping != nil {
-                Button("Stop Auto-Ship") { Task { await model.stopShipping(task) } }
+                Button("Stop Auto-Ship") { model.stopShipping(task) }
                     .buttonStyle(WorkOutlineButtonStyle())
                     .disabled(readingUnavailable != nil)
                     .help("lf --task \(task.task.identifier) ship --stop: withdraw it and disarm auto-merge")
@@ -260,7 +260,7 @@ struct TaskShipControl: View {
                     if hovered {
                         let owned = task.runtime?.owner != nil
                         Button(owned ? "Unassign" : "Claim") {
-                            Task { await model.assignTask(task, claimed: !owned) }
+                            model.assignTask(task, claimed: !owned)
                         }
                         .buttonStyle(WorkOutlineButtonStyle())
                         .disabled(readingUnavailable != nil)
@@ -272,7 +272,7 @@ struct TaskShipControl: View {
                             .disabled(readingUnavailable != nil)
                             .accessibilityIdentifier("task-ship-abandon")
                     }
-                    Button("Auto-Ship") { Task { await model.shipTask(task) } }
+                    Button("Auto-Ship") { model.shipTask(task) }
                         .buttonStyle(WorkShipButtonStyle())
                         .disabled(refusal != nil)
                         .help(refusal ?? "lf --task \(task.task.identifier) ship: run every remaining step and land it")
@@ -284,7 +284,7 @@ struct TaskShipControl: View {
         .fixedSize()
         .confirmationDialog("Abandon \(task.task.identifier)?", isPresented: $confirmingAbandon) {
             Button("Abandon Task", role: .destructive) {
-                Task { await model.abandonTask(task) }
+                model.abandonTask(task)
             }
         } message: {
             Text("Cancels the Task, closes its PRs and deletes its branches. Unassign it instead to keep its work for later.")
@@ -300,7 +300,7 @@ struct TaskWorkflowBar: View {
     let model: WorkModel
     let task: RoadmapTask
     /// The Task part of the workspace stream, as last read.
-    let work: WorkReading<TaskOverview>
+    let work: Reading<TaskOverview>
     /// Per viewer: the bar opens to its step cells.
     @State private var expanded = false
     @Environment(\.palette) private var palette
@@ -419,7 +419,7 @@ struct TaskWorkflowBar: View {
 
     private var position: String {
         guard let workflow = work.value?.graph else {
-            if let error = work.errorMessage { return "Workflow could not be read: \(error)" }
+            if let error = work.failure { return "Workflow could not be read: \(error)" }
             if work.value == nil { return "Reading workflow…" }
             return task.graphName.map { "Takes up \($0) when it starts" } ?? "No workflow selected"
         }
@@ -488,7 +488,7 @@ struct TaskStartOffer: View {
     let task: RoadmapTask
 
     private var unavailable: String? {
-        if let error = model.roadmap.errorMessage { return error }
+        if let error = model.roadmap.failure { return error }
         if model.showsSavedPlanning { return WorkCache.savedReason }
         return task.runControl.unavailable
     }
@@ -520,26 +520,26 @@ struct TaskActionItems: View {
     @State private var copied: String?
 
     private var unavailable: Bool {
-        model.roadmap.errorMessage != nil || model.showsSavedPlanning
+        model.roadmap.failure != nil || model.showsSavedPlanning
     }
 
     var body: some View {
         Button("New conversation") { newConversation?() }.disabled(newConversation == nil || unavailable)
         Menu("Move to Wave") {
-            Button("No Wave") { Task { await model.moveTask(task, toWave: nil) } }
+            Button("No Wave") { model.moveTask(task, toWave: nil) }
                 .disabled(task.task.waveId == nil)
             ForEach(model.visibleRoadmaps.filter { $0.wave.repo == task.task.repo }, id: \.wave.id) { destination in
                 Button(destination.wave.displayName) {
-                    Task { await model.moveTask(task, toWave: destination.wave.id) }
+                    model.moveTask(task, toWave: destination.wave.id)
                 }.disabled(destination.wave.id == task.task.waveId)
             }
         }.disabled(unavailable).accessibilityIdentifier("task-move-wave")
         if task.isCompleted {
-            Button("Reopen Task") { Task { await model.reopenTask(task) } }.disabled(unavailable)
+            Button("Reopen Task") { model.reopenTask(task) }.disabled(unavailable)
         } else {
             Button("Complete Task") { model.completeTaskFromInput(task) }.disabled(unavailable)
             Button(task.runtime?.owner == nil ? "Claim Task" : "Unassign Task") {
-                Task { await model.assignTask(task, claimed: task.runtime?.owner == nil) }
+                model.assignTask(task, claimed: task.runtime?.owner == nil)
             }.disabled(unavailable)
         }
         if let wave { Button("Open owning Wave") { model.select(.wave(id: wave.id)) } }
@@ -615,7 +615,7 @@ struct GraphProcessLog: View {
         let details = readsWindow ? model.graphProcesses : Dictionary(uniqueKeysWithValues:
             (captured?.graphProcesses ?? []).map { ($0.entry.id, $0) })
         let contentQuery = readsWindow ? query : historyQuery
-        let readError = readsWindow ? reading?.errorMessage : error
+        let readError = readsWindow ? reading?.failure : error
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 HStack {
@@ -753,7 +753,7 @@ struct TaskWorkView: View {
                     Text("No recorded work.")
                 }
             }
-            if let error = model.taskExecution[task.id].errorMessage {
+            if let error = model.taskExecution[task.id].failure {
                 Text("Work could not be read: \(error)")
                 Button("Retry") { model.rescanWork() }
             }

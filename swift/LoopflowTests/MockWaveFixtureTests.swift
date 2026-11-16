@@ -39,7 +39,7 @@ struct MockWaveFixtureTests {
     func loadingDetailState() {
         let outcome = MockWaveFixture.detailReading(state: .loading)
         #expect(outcome.reading.snapshot == nil)
-        #expect(outcome.reading.errorMessage == nil)
+        #expect(outcome.reading.failure == nil)
         #expect(outcome.awaitingFirstRead)  // loading affordance stays on screen
     }
 
@@ -49,7 +49,7 @@ struct MockWaveFixtureTests {
         #expect(outcome.reading.snapshot == nil)
         // The cached authored plan remains outside the reading; the failure is
         // framed as a quiet footer reason, never stale operational evidence.
-        #expect(outcome.reading.errorMessage == "Wave status unavailable: the local registry is unreachable")
+        #expect(outcome.reading.failure == "Wave status unavailable: the local registry is unreachable")
         #expect(outcome.awaitingFirstRead == false)
     }
 

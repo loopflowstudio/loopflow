@@ -20,7 +20,7 @@ struct WaveDetailReadingTests {
         reading.recordFailure(RegistryQueryError("registry busy"))
 
         #expect(reading.snapshot == nil)
-        #expect(reading.errorMessage == "Wave status unavailable: registry busy")
+        #expect(reading.failure == "Wave status unavailable: registry busy")
     }
 
     @Test("a successful refresh clears the stale warning")
@@ -31,7 +31,7 @@ struct WaveDetailReadingTests {
 
         reading.update(detail)
 
-        #expect(reading.errorMessage == nil)
+        #expect(reading.failure == nil)
         #expect(reading.snapshot?.wave.id == "wave-1")
     }
 
@@ -49,7 +49,7 @@ struct WaveDetailReadingTests {
 
         reading.recordFailure(RegistryQueryError("registry unavailable"))
         #expect(reading.plan(cached: cached) == cached)
-        #expect(reading.errorMessage != nil)
+        #expect(reading.failure != nil)
     }
 
     @Test("Mac metric rows render the shared DTO fields without recomputing evidence")

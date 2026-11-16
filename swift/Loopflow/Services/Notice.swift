@@ -36,34 +36,58 @@ public struct Notice: Identifiable {
     }
 }
 
-/// One window's (Desktop) or app's (phone) Notice. A new Notice replaces the last.
+/// One window's (Desktop) or app's (phone) Notice: at most one event over the
+/// standing conditions. The event shows, else the newest condition; when the
+/// event expires the condition shows again.
 @MainActor
 @Observable
 public final class NoticeCenter {
     public static let eventLifetime = Duration.seconds(6)
 
-    public private(set) var current: Notice?
-    /// Moves on every post, so a refreshed Notice restarts its six seconds.
+    public private(set) var event: Notice?
+    /// Standing conditions, oldest first; one per key.
+    public private(set) var conditions: [Notice] = []
+    /// Moves on every event posted, so a refreshed event restarts its six seconds.
     public private(set) var posted = 0
 
     public init() {}
 
+    public var current: Notice? { event ?? conditions.last }
+
+    /// A new event replaces the current one; a condition replaces the one with its key.
     public func post(_ notice: Notice) {
-        current = notice
-        posted += 1
+        switch notice.kind {
+        case .event:
+            event = notice
+            posted += 1
+        case .condition:
+            if let index = conditions.firstIndex(where: { $0.key == notice.key }) {
+                conditions[index] = notice
+            } else {
+                conditions.append(notice)
+            }
+        }
     }
 
-    /// End the Notice keyed `key`: its condition is over.
+    /// End the Notice keyed `key`: its condition is over, or its event no longer holds.
     public func clear(key: String) {
-        if current?.key == key { current = nil }
+        conditions.removeAll { $0.key == key }
+        if event?.key == key { event = nil }
     }
 
-    public func dismiss() { current = nil }
+    /// Put away what is shown: the event, else the newest condition.
+    public func dismiss() {
+        if event != nil {
+            event = nil
+        } else if !conditions.isEmpty {
+            conditions.removeLast()
+        }
+    }
 
     /// What the overlay runs after showing an event for its lifetime.
     func expire(_ posted: Int) {
-        guard posted == self.posted, current?.kind == .event else { return }
-        current = nil
+        guard posted == self.posted else { return }
+        event = nil
     }
 }
 
@@ -106,7 +130,7 @@ public struct NoticeView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-        .animation(.easeOut(duration: 0.18), value: center.posted)
+        .animation(.easeOut(duration: 0.18), value: center.current?.id)
         .task(id: center.posted) {
             let posted = center.posted
             try? await Task.sleep(for: NoticeCenter.eventLifetime)

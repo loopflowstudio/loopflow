@@ -107,7 +107,7 @@ struct TaskHistoryProofTests {
         try find("task-history-toggle").button().tap()
         try await settle(window)
         try find("task-history-toggle").button().tap()
-        try await waitFor { model.sessionHistory["issue-review"].errorMessage != nil }
+        try await waitFor { model.sessionHistory["issue-review"].failure != nil }
         try await settle(window)
         #expect(try find("task-history-stale").text().string() == "May be out of date")
         _ = try find("task-history-input-run_a1:12")

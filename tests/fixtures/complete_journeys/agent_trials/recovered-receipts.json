@@ -1,0 +1,43 @@
+[
+  {
+    "seq": 3021509,
+    "session_id": "session_7d0e30c793f4436eab4ce222853085cd",
+    "provider_thread": "01a1e21d-a704-77d0-9bcb-a29b33dd31ea",
+    "provider_turn": "01a1e21d-a7c8-7271-a389-3898ceb5b36c",
+    "kind": "completed",
+    "agent_process_id": "db2b20c5-f4a9-423f-bd6a-03b66924db91",
+    "lf_process_id": "89f58491-a106-4494-ac5c-61fff2fc93b3",
+    "task_id": "task_d805f74fed4249c69ec06fb530d805c2",
+    "wave_id": "cb366067-4821-4071-9393-82ff4b6d61d2",
+    "observed_at": 1794795082,
+    "payload": {
+      "completed_at": 1794795082,
+      "duration_ms": null,
+      "error": null,
+      "started_at": 1794794957,
+      "status": "interrupted"
+    }
+  },
+  {
+    "seq": 3021510,
+    "session_id": "session_7d0e30c793f4436eab4ce222853085cd",
+    "provider_thread": null,
+    "provider_turn": null,
+    "kind": "observed",
+    "agent_process_id": null,
+    "lf_process_id": null,
+    "task_id": "task_d805f74fed4249c69ec06fb530d805c2",
+    "wave_id": "cb366067-4821-4071-9393-82ff4b6d61d2",
+    "observed_at": 1794795085,
+    "payload": {
+      "evidence": {
+        "ended_at": "2026-11-16T02:11:25.237724Z",
+        "outcome": "completed",
+        "result_ref": null,
+        "schema_version": 1
+      },
+      "input_id": "385fb9143cee4f9694910dff817fcc20",
+      "source": "terminal.json"
+    }
+  }
+]

@@ -43,8 +43,12 @@ fix; Infrastructure owns coordinated release, installation and installed proof.
   reject incomplete controls. Their replay hashes the skills but applies fixed
   repairs without submitting instructions to an agent. It would pass with the
   old skill bodies too: source hashes beside a passing run do not establish
-  instruction use. Agent demonstrations remain pending, with completed solutions
-  and expected review answers withheld from their inputs.
+  instruction use. Interrupted trial directories later yielded consumer patches
+  and passing checks; one coverage table remained stale and review outcomes were
+  absent. The parent provider receipt says interrupted while its outer receipt
+  says completed. Retain partial artifacts, recover child submission/settlement
+  before claiming instruction use, and repeat only missing demonstrations.
+  Completed solutions and expected review answers stay out of trial inputs.
 - A complete representative journey can leave named migration rows pending.
   Headless list consumers establish neither native responsiveness nor fewer
   production implementation passes. Keep those limits beside the result rather

@@ -116,7 +116,8 @@ symbols or exclusive tests are retired by this prose change.
 ## Finite migration coverage
 
 Skill-body rows, instruction delivery and executable fixture journeys are
-verified. Demonstrating an agent using the changed instructions remains open;
+verified. Interrupted demonstration artifacts are recovered; instruction-use provenance and
+review/continuation outcomes remain open;
 gate acceptance remains later. Paths below are relative to the
 builtin skill directory unless prefixed otherwise.
 
@@ -129,7 +130,7 @@ builtin skill directory unless prefixed otherwise.
 | Bounded review | `concept-review.md`; direct, pursue and pursue-auto | Replace unconditional broad repeat review; keep changed-decision review and open-choice handling | Unchanged contract ends briefly; changed model gets full review | Implemented |
 | Legible progress and continuation | `realign.md`, `loop-or-next.md`; Graph readers | Amend existing output, no new ledger/protocol | Repairs, scope discovery and shrinking coverage distinguishable; no false Advance | Implemented |
 | Instruction delivery | `skills/catalog.rs`, `skills/mod.rs`, `tests/golden_prompt.rs`, affected fixtures | Reuse existing selection/export paths; adjust tests only for changed delivery | Repo override, builtin fallback, assembled prompt and standalone export agree | Preview, export and goldens pass |
-| Behavioral demonstration | Two bounded LOO-650/906-derived scenarios | Add small reproducible scenario inputs/results, no eval framework | Changed instructions used to produce an early journey, honest remaining work, recovery and no unauthorized action | Authored replay passes; agent demonstration pending |
+| Behavioral demonstration | Two bounded LOO-650/906-derived scenarios | Add small reproducible scenario inputs/results, no eval framework | Changed instructions used to produce an early journey, honest remaining work, recovery and no unauthorized action | Authored replay passes; partial trial artifacts recovered, acceptance pending |
 
 ## This slice and demo
 
@@ -150,27 +151,44 @@ fixtures for every changed builtin, isolated preview/export inspection, and
 two executable fixture journeys. No runtime protocol or Graph changes.
 Remaining verification is recorded below; gate owns later suite acceptance.
 
-**Next bounded outcome:** demonstrate the changed instructions in disposable
-agent runs on the two existing scenarios. Start from the unmigrated ownership
-fixture and incomplete state fixture, supply the scenario and effective skill
-bodies, and withhold the completed solutions and scripted repair. Retain the
-submitted context, source hashes, resulting patch, checks and final account of
-remaining coverage. Inspect the actual consumer path and recovery checks, plus
-whether the report leaves Graph/export and Create/Reopen work pending. Include
-the existing review/continuation inputs to observe unchanged-review and
-no-progress behavior. This is a bounded demonstration, not a comparative
-benchmark or a claim of fewer production passes; it needs no new runner,
-runtime state or evaluation framework. It does not restart either motivating
-Task or authorize publication.
+**Next bounded outcome:** finish the interrupted demonstration record. The
+previous implementation prepared and changed both disposable repositories;
+repeat neither implementation merely because its results were omitted from
+this plan. Recover the child submissions and completion receipts if available,
+reconcile ownership's stale coverage row, and run the four review/continuation
+inputs without their expected answers. If instruction-use provenance cannot be
+recovered, rerun only the affected scenario from its retained initial tree,
+with completed sources and scripted repairs withheld. Retain submitted context,
+patches, checks, remaining coverage and review outcomes. This is a bounded
+demonstration, not a benchmark or permission to operate the motivating Tasks.
 
-The counterexample is the current replay itself: `run.py` hashes the skill
-sources but never submits them to an agent. Its hardcoded edits and restored
-completed implementation would pass with the old instruction bodies too.
-Keep that replay as fixture validation, separate from the pending instruction
-demonstration. If a run stops at an internal layer or declares pending rows
-complete, use that observed failure to repair the effective skill owner and
-repeat only the affected scenario. No product choice is open; this makes the
-existing validation requirement concrete.
+Recovered on 2026-11-16 UTC from `/tmp/loo915-agents-18lrhucp/`:
+
+- Ownership moved the sole lookup owner and both production/test imports,
+  strengthened the exact CLI body assertion, and removed runtime. Saved checks
+  show compilation, two focused tests, clippy and direct CLI exits 0/2 passing.
+  The fresh whole-fixture build took 1.07 seconds; this is not an application
+  build measurement. Its plan still marks lookup **Planned** and has no final
+  report. Graph definitions and native exports remain pending.
+- State routes Complete through persisted Store state and reconciles both list
+  consumers. Saved output shows baseline 2 failures out of 3, then 3 passing
+  tests covering stale reply, restart, refusal and empty selection. Its final
+  report retains Create/Reopen as pending and native timing as unmeasured.
+- `agent_trials/*/recovered/` retains the exact patches, plans, reports where
+  present, and saved checks. Both disposable input files match the retained
+  inputs byte-for-byte; all source hashes still match current effective files.
+  These are recovered filesystem artifacts, not yet verified child transcripts.
+- `lf session history --json session_7d0e30c793f4436eab4ce222853085cd`
+  records provider completion as **interrupted**, while the outer terminal
+  receipt says **completed**. Selected receipts are retained in
+  `agent_trials/recovered-receipts.json`. Neither proves child settlement or
+  instruction use. No review.txt was found in either disposable repository.
+
+The scripted `run.py` replay remains fixture validation only: it hashes skills
+but applies fixed repairs. Recovered patches and check logs add observed work,
+but do not by themselves close the instruction demonstration. No observed
+instruction failure yet warrants changing a skill: interruption can explain the
+unfinished ownership report. Full-target acceptance remains unchanged.
 
 Demo: with the branch-built binary, `lf --context implement` shows the
 repository's journey instructions; the same preview in an isolated repository
@@ -262,17 +280,16 @@ pass counts or native responsiveness.
 - `cargo fmt --all -- --check` and fixture `cargo fmt --manifest-path tests/fixtures/complete_journeys/ownership/Cargo.toml -- --check` — pass.
 - `git diff --check` and `lf context` — pass; memory and scratch remain under both limits.
 
-Remaining implementation demonstration: the disposable agent runs above;
-authored fixtures alone do not close the behavioral-demonstration row.
+Remaining demonstration: instruction-use provenance, ownership's final coverage
+account and independent review/continuation outcomes, as detailed above.
 Remaining gate work: catalog precedence and standalone-export library checks,
 affected CI suites, clippy and package extraction per scripts/testing.md.
-No product choice, runtime change, Graph change or additional Task was needed.
+No product decision or new scope is needed. Native responsiveness and fewer
+production passes remain unmeasured.
 
-Realign corrected stale review wording and clarified that agent-trial inputs
-must omit completed solutions and expected review answers. No new scope was
-discovered; the pending demonstration remains the next bounded outcome.
-Wave memory records the replay's limits. The entire selected memory was read;
-there are no immediate child Wave memories. Metrics files were not reread:
-this change makes no metric claim.
+Realign reused saved check results and inspected both recovered patches; no
+runtime tests were rerun. The selected Wave memory was read in full and has no
+immediate child memories. Metrics files were not reread: no metric claim changed.
 
-- `git diff --check` and `lf context` — pass after reconciliation; both authored-context budgets fit. Existing runtime results were reused, not rerun.
+- Artifact recovery/hash comparison — both submitted-input files match retained inputs; all effective-source hashes match. Saved checks pass; trial acceptance remains incomplete.
+- `git diff --check` and `lf context` — pass after reconciliation; memory and scratch fit both targets.

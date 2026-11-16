@@ -1,0 +1,10 @@
+Initial inspection: cat input.txt; output truncated, followed by sed -n '190,330p' input.txt to read kickoff completely. Read supplied implement instructions.
+Inventory: rg --files excluding input/target/git; ls -la; cat Cargo.toml src/lib.rs src/main.rs src/runtime.rs tests/cli.rs. Observed one library lookup, CLI and integration tests; no AGENTS.md, scratch or scripts/testing.md in fixture.
+Context limitation: scenario states no lf context service exists in this isolated fixture. No context call made; limits and usage unavailable. No reads outside fixture, live Task operations or publication.
+Created scratch/plan.md using supplied kickoff: selected journey, deletion list, finite migration coverage and acceptance.
+Ownership cut: mv src/runtime.rs src/definitions.rs; changed lib module and both consumer imports with sed. cargo check --all-targets completed successfully (check-compile.txt). Logging command then failed because zsh reserves status; no compile rerun needed.
+cargo fmt; cargo test --test cli cli_and_library_resolve_the_same_skill -- --exact: exit 0 (check-known.txt).
+cargo test --test cli missing_skill_is_a_caller_error -- --exact: exit 0 (check-missing.txt).
+cargo clippy --all-targets -- -D warnings: exit 0 (check-clippy.txt).
+/usr/bin/time -p cargo build --all-targets --target-dir target/fixture-build (fresh target): exit 0; timing in check-build.txt; whole fixture only, not Loopflow application; no cache probe.
+Direct CLI demo: implement exit 0, exact body in demo-known.txt; missing exit 2, zero stdout bytes in demo-missing.txt.

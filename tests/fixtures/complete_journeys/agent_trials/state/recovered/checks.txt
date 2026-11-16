@@ -1,0 +1,12 @@
+cat input.txt; sed -n '205,285p' input.txt — read scenario and supplied kickoff/implement instructions.
+rg --files; ls -la; cat state.py — fixture contains state.py and input.txt; no AGENTS.md or existing scratch. Store.complete persists and increments revision; TaskList.complete currently bypasses it.
+lf context — unavailable by fixture contract; not invoked because no context service exists and outside-directory reads are prohibited. Context budget cannot be verified here.
+Baseline wrapper hit zsh's read-only `status` variable after the test command; inspected its captured output instead.
+
+UV_CACHE_DIR=.tmp/uv-cache TMPDIR="$PWD/.tmp" uv run python -m unittest state.CompleteJourney — implementation exit 0; output in .tmp/focused.txt.
+
+uv run python -m py_compile state.py — exit 0.
+git diff --check — exit 0.
+Baseline captured result: 3 tests, 2 failures (stale-reply/persistence journey and empty lists), 1 pass (refusal).
+Edited TaskList.complete using uv run python: call Store.complete once, then receive its saved result on initiating and peer consumers.
+Focused implementation result: all 3 CompleteJourney tests passed; both headless consumers, saved restart, stale reply, refusal, and empty selection exercised.

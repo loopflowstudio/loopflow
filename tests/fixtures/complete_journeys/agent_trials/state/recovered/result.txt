@@ -1,0 +1,5 @@
+Complete journey implemented in state.py: TaskList.complete persists through Store.complete and reconciles the saved revision into both Desktop and mobile headless list consumers. Removed the duplicate local permission/removal/selection decisions.
+
+Validation: baseline 3 tests, 2 failures; implementation 3 tests passed. Checks exercise both lists, next selection, stale reply rejection, restart from disk, refusal without changes, and empty selection. Python compilation and git diff --check passed. Commands and results are in checks.txt; working design and coverage are in scratch/plan.md.
+
+Remaining full target: Create and Reopen pending. Native click-to-paint timing unmeasured; these are headless list consumers, not native views. lf context unavailable in the isolated fixture, so its budget check was not run. No live Task operations or publication performed.

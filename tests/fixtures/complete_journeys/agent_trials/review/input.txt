@@ -1,0 +1,173 @@
+Read the concept-review and loop-or-next bodies in input.txt. Assess these four independent hypothetical inputs against the working design; do not change code. Use prose outcomes; there is no machine decision protocol. Write assessments to review.txt.
+
+1. Only an internal helper name changed; the interaction, owners, persistence and recovery are unchanged. No open choice or regression.
+2. The test consumer still imports runtime::skill; production imports definitions::skill.
+3. The inventory is unchanged for a second pass. No behavior closed, no new finding, no changed approach.
+4. Every required row and this step's checks is complete; no open findings. Publishing belongs to a later step.
+
+Working design: lookup moves from runtime to definitions for CLI and library/test consumers; Graph definitions and native exports remain pending. Complete persists through one Store and updates both headless lists; Create/Reopen remain pending, native timing unmeasured. Observed selected journeys pass their focused checks. Each numbered hypothetical is independent and supersedes these observations where stated.
+
+<skill name="concept-review">
+---
+requires: the intended experience, the current product design, and a person when a product choice must be made
+produces: the product design, what people said about it, and open choices in the working design
+action_style: exploratory
+---
+Step back and decide what the product's concepts and interactions should be,
+then follow that answer through the data model, APIs and infrastructure.
+
+## Bound the review
+
+Start with the working design and what changed: contracts, concrete regressions
+and unresolved choices. The first review establishes that reference design.
+On later reviews, inspect the affected interaction and recovery; if the design
+still holds and no choice remains, say so briefly and finish without another
+page or redesign. Implementation details alone do not reopen product choices.
+
+Widen the review when experience, ownership, persistence or recovery decisions
+change, or a counterexample invalidates the design. Follow those changes through
+the system using the review below; do not trade away accepted behavior.
+
+## With a person
+
+Start from the experience they want and the constraints they've stated. The
+current implementation informs the design; it doesn't bind it. Walk through one
+concrete interaction, including recovery. Draft the affected usage docs and
+skill instructions so the proposed experience is tangible before designing
+code. Leave clear guidance alone and mark unbuilt behavior as proposed.
+
+Show, in one screen, the actions people take, the few concepts behind them and
+the APIs that change their state. Explore the biggest mismatch together before
+presenting a full redesign. Ask about choices that change what the product
+should be, never about cosmetic refactors. Update the working design as
+answers come, keeping proposals apart from stated requirements and built
+behavior. Record what people say word for word, with the speaker's name, never a
+verdict like "accepted" or "chose".
+
+Write that screen as `scratch/concept-review.html`: actions → concepts → APIs,
+before and after, with the biggest mismatch called out. The conversation is
+about the page; the decisions live in the working design.
+
+- One self-contained `.html` in `scratch/`: inline CSS and script, no network,
+  escaped code, readable in light, dark and narrow widths.
+- Lead with the decision needed. End with numbered questions so "2b" is a
+  complete answer.
+- Show the thing, not a description of it. Mark proposed against existing
+  behavior visibly.
+- One reading column, no dashboard chrome or badges, no fixed template.
+- Header: Task, step, date, and the files it is built from.
+- Say its path. Loopflow Desktop shows `scratch/` pages beside the
+  conversation; in a bare terminal, open it in a browser. Regenerate the same
+  path as things change, after the Markdown.
+
+## Follow the experience through
+
+Find distinctions people must learn for no benefit, awkward actions, and names
+that hide what happens. Describe the simpler interaction first, then trace it
+through types, APIs, persistence, execution and recovery. Look for a whole
+lifecycle that could become a record, derived state, or nothing at all.
+
+Test the proposal on a normal path, a failure and recovery. What must survive?
+What changes on purpose? What counterexample would break it? Keep
+counterexamples and revise when the proposal fails. Never trade away required
+behavior or recoverable data for a deletion count; a clearer interaction is
+worth it even when the code grows.
+
+Use history only to answer a specific design question. Read the patch, its
+rationale and later repairs before treating a past deletion as precedent. When
+recording alternatives, keep the stated requirements in full so a proposal
+can't pass for one of them.
+
+## Record the decision
+
+Keep a short account in the existing working design: the experience and model
+it will build, consequences across layers, open product choices, and what to show
+next. Write down only what can't be worked out again from the code, git
+history or a fresh run: what people said, word for word, what a run showed at
+the time, and facts from outside the repo. Quality per word, not
+volume. Don't write a per-slice review; realign reconciles plan and code. Don't
+rewrite code or restart execution unless asked.
+
+## In a Graph without a person
+
+Use the same changed-contract review against the working design and implemented
+change, widening it only for the reasons above.
+Settle what the design already implies (clearer names, merged concepts,
+machinery a clearer design makes unnecessary) and write it into the working
+design as the next implement direction. Don't change code here.
+
+A real product choice changes what the product should be and isn't settled by
+the design. Write each one into the working design as an open question, with
+why it matters. Don't write an answer into the design as settled unless someone
+said so; quote what they said.
+
+Then report one outcome for loop-or-next:
+- nothing to change and no open choice: say so; remaining implementation still
+  belongs to loop-or-next's assessment.
+- the design changed: name the change; it iterates to implement.
+- an open product choice: state the question; it returns Blocked with it.
+
+Don't create a Task, publish or merge. Loop-or-next decides.
+
+</skill>
+<skill name="loop-or-next">
+---
+requires: objective, current results and feedback, and the caller's decision protocol
+produces: Advance or Iterate with the reasons, or Blocked with what needs resolving
+action_style: procedural
+---
+Decide whether the Graph should advance, iterate, or stop because progress is blocked.
+
+Judge against the objective, success conditions and constraints the caller
+supplies. Work and review steps bring their own criteria; this step decides
+where the Graph goes.
+
+Read the previous direction, what changed or was learned, current feedback and
+open findings. Open the files they point to when those may have changed.
+Accepted changes stand; a newer proposal doesn't override an accepted
+requirement. A process exiting is not the work being done.
+
+A check that can't run here, or needs a person, is never a reason for Blocked.
+Use a headless equivalent or leave it to gate or CI and continue. Before gate,
+a build and focused tests are enough. Real failures and missing behavior still
+need work. Never claim a deferred check passed or skip an authored review.
+
+- **Advance** when what this step requires is done, including acceptance
+  conditions and earlier findings. Later obligations belong to later steps.
+- **Iterate** when the last pass made real progress and specific work remains
+  that the backward edge can do. Give the next action and the result it should
+  produce, within the accepted scope. Ruling out a hypothesis or narrowing the
+  problem counts as progress; activity doesn't.
+- **Blocked** when the last pass made no real progress, repeated the same
+  failure with nothing new learned, or needs an input or judgment you can't
+  supply. Say what needs resolving. Don't spend another pass on unchanged
+  direction. If results are missing, say so; missing results don't prove there
+  was no progress.
+
+Before deciding, name completed behavior, remaining migration, repairs versus
+new scope, and the next bounded outcome or missing input. Check the existing
+coverage rows against actual consumers and results. Repeated inventories with
+no closed behavior, new finding or changed approach do not justify an identical
+iteration. A useful internal layer alone cannot satisfy a journey exit check;
+a complete first journey cannot satisfy unfinished full-target acceptance.
+Look at actual results, not a confidence score. There is no pass limit: decide
+from the work, not the iteration count. The runner owns edge targets.
+
+Answer through the supplied decision protocol for this exact decision. Advance
+and Iterate move the Graph; Blocked stops it here. Existing output and logs are
+enough; no separate handoff is needed.
+
+On a retry, reassess with the new results or direction; a retry doesn't mean
+the work is done. Authored reviews feed this assessment; they aren't verdicts.
+Carry accepted changes, open questions and the next action into the summary,
+with paths the next step can follow.
+
+If output validation asks for a corrected value, correct it in this
+conversation; don't rerun implementation. Malformed output doesn't mean no
+progress. If the protocol still can't be satisfied, leave the failure visible.
+
+Without a decision protocol, give the assessment in the conversation. Don't
+make up a decision command, create a Task, launch the next step, or write a
+file for a later agent to act on.
+
+</skill>

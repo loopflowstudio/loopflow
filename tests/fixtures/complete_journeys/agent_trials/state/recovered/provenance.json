@@ -1,0 +1,10 @@
+{
+  "source": "/Users/jack/.codex/sessions/2026/11/15/rollout-2026-11-15T18-10-10-01a1e21e-7b06-77e1-a3d8-d3381a898ba5.jsonl",
+  "sha256": "b5b25f265a6d189653ed3d2ada67ae5ee3f1c5115a40be545e6b89761344ce33",
+  "thread_id": "01a1e21e-7b06-77e1-a3d8-d3381a898ba5",
+  "parent_thread_id": "01a1e21d-a704-77d0-9bcb-a29b33dd31ea",
+  "agent_path": "/root/state_trial",
+  "last_ordinal": 61,
+  "completion_recorded": true,
+  "selection": "Tool calls/results, assistant messages, start and completion events only. Ambient instructions, account metadata and encrypted content omitted."
+}

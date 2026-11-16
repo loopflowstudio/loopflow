@@ -1,0 +1,9 @@
+   Compiling journey-ownership v0.1.0 (/private/tmp/loo915-agents-18lrhucp/ownership)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.74s
+     Running tests/cli.rs (target/debug/deps/cli-f2c43662d9bd80d3)
+
+running 1 test
+test cli_and_library_resolve_the_same_skill ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.42s
+

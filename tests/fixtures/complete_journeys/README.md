@@ -84,3 +84,18 @@ Use each independently with the working design and observed scenario results:
 These review inputs are walkthrough cases until a separate agent run is
 recorded. Executing the fixtures proves their behavior, not a model's choice of
 review outcome. A useful first journey leaves the pending rows pending.
+
+## Interrupted agent trials
+
+`agent_trials/` retains scenario inputs, initial trees and source hashes from
+the 2026-11-16 attempt. Each `recovered/` directory contains the patch and saved
+checks recovered from the disposable repository, plus its plan and any final
+report. Inputs match byte-for-byte and source hashes match the effective skills.
+The ownership plan's Planned row is retained exactly as found, not corrected
+retroactively. State reports Create/Reopen pending and native timing unmeasured.
+
+`recovered-receipts.json` records the parent provider interruption and outer
+completed receipt. Child submission/settlement provenance and the four review
+assessments remain missing; these partial artifacts do not close the instruction
+demonstration. The active plan in `scratch/complete-journeys.md` names the work
+remaining. Completed patches and this README must stay out of fresh trial inputs.

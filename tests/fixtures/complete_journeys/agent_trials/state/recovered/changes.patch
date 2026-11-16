@@ -1,0 +1,18 @@
+--- a/state.py
++++ b/state.py
+@@ -40,10 +40,11 @@
+             self.selected = next(iter(self.tasks), None)
+ 
+     def complete(self, task: str, consumers: list["TaskList"], allowed: bool = True) -> None:
+-        if not allowed:
+-            raise PermissionError("completion refused")
+-        self.tasks.remove(task)
+-        self.selected = next(iter(self.tasks), None)
++        state = self.store.complete(task, allowed)
++        self.receive(state)
++        for consumer in consumers:
++            if consumer is not self:
++                consumer.receive(state)
+ 
+ 
+ class CompleteJourney(unittest.TestCase):

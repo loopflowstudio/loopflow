@@ -1,0 +1,2 @@
+    Checking journey-ownership v0.1.0 (/private/tmp/loo915-agents-18lrhucp/ownership)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.85s

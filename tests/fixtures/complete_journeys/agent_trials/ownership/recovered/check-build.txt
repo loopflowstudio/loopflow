@@ -1,0 +1,5 @@
+   Compiling journey-ownership v0.1.0 (/private/tmp/loo915-agents-18lrhucp/ownership)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.04s
+real 1.07
+user 0.67
+sys 0.37

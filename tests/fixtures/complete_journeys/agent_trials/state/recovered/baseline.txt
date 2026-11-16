@@ -1,0 +1,41 @@
+FF.
+======================================================================
+FAIL: test_complete_reaches_both_lists_and_survives_stale_reply_and_restart (state.CompleteJourney.test_complete_reaches_both_lists_and_survives_stale_reply_and_restart)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/loo915-agents-18lrhucp/state/state.py", line 67, in test_complete_reaches_both_lists_and_survives_stale_reply_and_restart
+    self.assertEqual(consumer.tasks, ["two"])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Lists differ: ['one', 'two'] != ['two']
+
+First differing element 0:
+'one'
+'two'
+
+First list contains 1 additional elements.
+First extra element 1:
+'two'
+
+- ['one', 'two']
++ ['two']
+
+======================================================================
+FAIL: test_completing_last_task_clears_selection_on_both_lists (state.CompleteJourney.test_completing_last_task_clears_selection_on_both_lists)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/loo915-agents-18lrhucp/state/state.py", line 85, in test_completing_last_task_clears_selection_on_both_lists
+    self.assertEqual(consumer.tasks, [])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+AssertionError: Lists differ: ['two'] != []
+
+First list contains 1 additional elements.
+First extra element 0:
+'two'
+
+- ['two']
++ []
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.002s
+
+FAILED (failures=2)

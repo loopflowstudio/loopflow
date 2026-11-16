@@ -91,7 +91,7 @@ pub(crate) async fn sync_after_save(store: &Store, repo: &str) {
     if let Err(error) = attempt.await {
         tracing::debug!(%error, "planning synchronization pending after local save");
         crate::journal::request::diagnostic(format_args!(
-            "Saved locally; planning synchronization pending. See `lf planning status`."
+            "Saved locally; planning synchronization pending. See `lf repo plan`."
         ));
     }
 }

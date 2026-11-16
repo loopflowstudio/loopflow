@@ -107,7 +107,7 @@ async fn run_async(repo: &Path, cmd: Option<&PlanCommand>, status_json: bool) ->
     Ok(())
 }
 
-/// `lf planning status --subscribe`: `lf planning status --json` now and each time
+/// `lf repo plan --subscribe`: `lf repo plan --json` now and each time
 /// it changes. The subscription reads stored status; `lf wave status --sync` and
 /// foreground providers exchange planning.
 pub(crate) fn subscribe_status(
@@ -186,7 +186,7 @@ enum Status {
 }
 
 impl Status {
-    /// What `lf planning status --json` prints.
+    /// What `lf repo plan --json` prints.
     fn report(self) -> PlanStatus {
         match self {
             Self::Remote(provider, effects) => PlanStatus {

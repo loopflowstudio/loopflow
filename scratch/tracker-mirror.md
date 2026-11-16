@@ -295,8 +295,8 @@ Read against 3d21fe1ccb..90f825a173. No product choice in these.
   `EffectOwner` and drains `Scope::First`; `machine/task.rs:86` already does.
   With 20 requests a pass and a backlog in `seq` order, `Scope::All` can leave
   the edit someone just made for a later command.
-- **The pending diagnostic names `lf repo plan`.** `planning_sync.rs:94` says
-  "See `lf planning status`", a moved alias.
+- **The pending diagnostic names `lf repo plan`.** Done in realign
+  (`planning_sync.rs:94`, two doc comments in `lf/commands/plan.rs`).
 - **"Done when" grep excludes migrations.** Its only hits are applied
   migrations (`0.14.8.001_release.sql`, `bounded_identity_triggers.sql`),
   which are immutable: `grep -rn 'teamId\|stateId\|assigneeId'
@@ -423,13 +423,21 @@ Deepest deletions first, then the queue, then the bridges. Commit at each.
    regenerated). `sync.conflict` is the existing `adopted_linear` change in
    `lf task show`.
 6. **Remaining.**
-   - Docs: `docs/dev/planning.md`, `docs/dev/reference.md:89`,
-     `rust/loopflow-execution/src/ops/README.md` (still names the deleted drains
-     and `check_before_write`). File the contract-migration and DTO Tasks.
-   - The "after the cut" concept review above, in order: relations and PR
-     links as `link` effects, `BridgeError`, `sync_after_save` with its owner,
-     the diagnostic. GOAL.md name/summary as Wave `field` effects: not built
-     (`EffectKind::of` queues nothing for Wave values).
+   - The "after the cut" concept review above, in order: relations as `link`
+     effects (`sync_retained_relations` still runs from `drain.rs:111`), PR
+     links as `link` effects (`ops/task.rs:2479` still matches
+     `Tracker::Asana`), `BridgeError` (25 `LinearResult`/`LinearError` uses in
+     `asana/mod.rs`), `sync_after_save(store, repo)` taking its owner. GOAL.md
+     name/summary as Wave `field` effects: not built (`EffectKind::of` queues
+     nothing for Wave values).
+   - Docs, after the code above: `docs/dev/planning.md:88` ("no generic
+     planning facade", now true; the file never mentions the queue),
+     `docs/dev/reference.md` rows Task (`task_creation_intents`,
+     `task_changes`, `task_state_deliveries`), Linear observations
+     (`project_transitions`), Asana planning (`PlanningClient`,
+     `planning_client.rs`) and Steer (`task_comment_deliveries`) name deleted
+     tables and code; `ops/README.md:9,45` names `planning_export.rs` and
+     `check_before_write`. File the contract-migration and DTO Tasks.
    - `pm_issue_changes`: write `a_tracker_removal_withdraws_new_launches`,
      then decide whether the table goes.
    - Linear-fake tests now cover creation through the queue, order and its lost

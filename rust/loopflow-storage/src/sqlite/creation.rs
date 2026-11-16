@@ -39,6 +39,26 @@ pub struct CreationIdentity {
     pub run: bool,
 }
 
+/// A Task creation's receipt, written in the transaction that files the Task.
+#[derive(Debug, Clone)]
+pub struct TaskCreationRecord {
+    pub identity: CreationIdentity,
+    /// A started creation's Graph and conversation commit with the Task, so
+    /// no reading shows it unstarted; its receipt is `admitted`, never `filed`.
+    pub admission: Option<TaskAdmission>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TaskAdmission {
+    /// The serialized Graph to take up at its first step; `None` keeps the
+    /// one an adopted Task already has.
+    pub graph: Option<String>,
+    /// The conversation made primary when the Task has none: new, or one of
+    /// the Task's own.
+    pub session: crate::session::LfSession,
+    pub caller: Option<loopflow_model::id::LfProcessId>,
+}
+
 pub(crate) fn insert_in(
     conn: &Connection,
     identity: &CreationIdentity,
@@ -128,22 +148,6 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         if conn.execute("UPDATE creation_receipts SET milestone=?2,result=COALESCE(?3,result),updated_at=?4 WHERE request_id=?1",
             params![id,milestone,result.map(serde_json::to_string).transpose()?,crate::rows::now_unix()])? != 1 {
-            return Err(StoreError::NotFound);
-        }
-        Ok(())
-    }
-
-    /// The Task and its conversation are recorded; the conversation owns the
-    /// rest of setup and finds this receipt by its Session.
-    pub fn admit_creation(
-        &self,
-        id: &str,
-        session: &str,
-        result: &serde_json::Value,
-    ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        if conn.execute("UPDATE creation_receipts SET milestone='admitted',session_id=?2,result=?3,updated_at=?4 WHERE request_id=?1",
-            params![id,session,serde_json::to_string(result)?,crate::rows::now_unix()])? != 1 {
             return Err(StoreError::NotFound);
         }
         Ok(())

@@ -86,13 +86,78 @@ fn step<T>(name: &'static str, run: impl FnOnce() -> T) -> T {
     })
 }
 
+/// `task.create`'s answer: its receipt, the primary conversation's record and
+/// the Task's overview, both read when answering so a client opens the
+/// conversation without another read. The stored receipt holds neither.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct TaskCreated {
+    #[serde(flatten)]
+    pub receipt: TaskCreateReceipt,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub session: Option<crate::ops::human_session::SessionRecord>,
+    pub overview: crate::task_work::TaskOverview,
+}
+
 /// A created Task, and for a conversation-admitting `run` the planning
-/// exchange still running after the answer. A caller that exits joins it;
-/// the server lets it finish on its own.
+/// exchange still running after the answer.
 #[derive(Debug)]
 pub struct Created {
-    pub receipt: TaskCreateReceipt,
-    pub after: Option<std::thread::JoinHandle<()>>,
+    pub answer: TaskCreated,
+    pub after: Option<After>,
+}
+
+fn answer(
+    store: &crate::store::SharedStore,
+    runtime: &tokio::runtime::Runtime,
+    receipt: TaskCreateReceipt,
+) -> Result<TaskCreated> {
+    step("read_answer", || {
+        let session = receipt
+            .session_id
+            .as_ref()
+            .map(|id| {
+                runtime.block_on(crate::ops::human_session::primary::admitted_record(
+                    store,
+                    id.as_str(),
+                ))
+            })
+            .transpose()?;
+        let (overview, _) =
+            crate::store::task_work::task_overview(&store.sqlite, &receipt.task.id)?;
+        Ok(TaskCreated {
+            receipt,
+            session,
+            overview,
+        })
+    })
+}
+
+/// Planning exchange and the assignee check following an answer, under the
+/// creation request's attribution. A caller that exits joins it; dropping it
+/// lets it finish on its own, as the server does.
+#[derive(Debug)]
+pub struct After {
+    runtime: Option<tokio::runtime::Runtime>,
+    handle: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl After {
+    pub fn join(mut self) {
+        let (Some(runtime), Some(handle)) = (self.runtime.take(), self.handle.take()) else {
+            return;
+        };
+        if runtime.block_on(handle).is_err() {
+            tracing::warn!("planning sync after creation panicked");
+        }
+    }
+}
+
+impl Drop for After {
+    fn drop(&mut self) {
+        if let Some(runtime) = self.runtime.take() {
+            runtime.shutdown_background();
+        }
+    }
 }
 
 pub fn create(id: &str, mut input: TaskCreation) -> Result<Created> {
@@ -117,36 +182,46 @@ pub fn create(id: &str, mut input: TaskCreation) -> Result<Created> {
             other => other.into(),
         },
     )?;
-    // A started Task with a conversation answers before any network or checkout.
+    // A started Task with a conversation commits Task, Graph, claim and
+    // conversation together and answers before any network or checkout.
     let admits = input.run && !input.approve;
-    let recorded = match store.sqlite.creation_receipt(id)? {
-        Some(receipt) => receipt,
+    let (recorded, filed) = match store.sqlite.creation_receipt(id)? {
+        Some(receipt) => (receipt, false),
         None => {
             if let Some(graph) = input.graph.as_deref() {
                 crate::ops::task::load_graph(graph, "", &input.directory)?;
             }
-            let file = if admits {
-                crate::ops::task::file_task
-            } else {
-                crate::ops::task::task_create
+            let adoption = crate::ops::task::TaskAdoptionOptions {
+                session: input.session.clone(),
+                worktree: input.worktree.clone(),
             };
             step("file_task", || {
-                file(
-                    &input.directory,
-                    input.wave.as_deref(),
-                    input.title.clone(),
-                    input.request.clone(),
-                    crate::ops::task::TaskAdoptionOptions {
-                        session: input.session.clone(),
-                        worktree: input.worktree.clone(),
-                    },
-                    Some(identity),
-                )
+                if admits {
+                    crate::ops::task::admit_task(
+                        &input.directory,
+                        input.wave.as_deref(),
+                        input.title.clone(),
+                        input.request.clone(),
+                        adoption,
+                        input.graph.as_deref(),
+                        identity,
+                    )
+                } else {
+                    crate::ops::task::task_create(
+                        &input.directory,
+                        input.wave.as_deref(),
+                        input.title.clone(),
+                        input.request.clone(),
+                        adoption,
+                        Some(identity),
+                    )
+                }
             })?;
-            store
+            let receipt = store
                 .sqlite
                 .creation_receipt(id)?
-                .context("creation receipt is missing")?
+                .context("creation receipt is missing")?;
+            (receipt, true)
         }
     };
     let mut receipt: TaskCreateReceipt = serde_json::from_value(
@@ -157,17 +232,17 @@ pub fn create(id: &str, mut input: TaskCreation) -> Result<Created> {
     )?;
     match recorded.disposition {
         RecoveryDisposition::Inspect => return Err(unknown(&recorded).into()),
+        RecoveryDisposition::Complete if filed && admits => {
+            return start_conversation(&input, &store, runtime, receipt)
+        }
         RecoveryDisposition::Complete => {
             return Ok(Created {
-                receipt,
+                answer: answer(&store, &runtime, receipt)?,
                 after: None,
             })
         }
-        RecoveryDisposition::Continue => {}
+        RecoveryDisposition::Continue if !admits => {}
         _ => return Err(unknown(&recorded).into()),
-    }
-    if admits {
-        return admit(id, &input, &store, &runtime, receipt);
     }
     // `-b` runs without a conversation; its carrier reports the launch.
     if recorded.milestone == "filed" {
@@ -200,42 +275,28 @@ pub fn create(id: &str, mut input: TaskCreation) -> Result<Created> {
         Ok(())
     })?;
     Ok(Created {
-        receipt,
+        answer: answer(&store, &runtime, receipt)?,
         after: None,
     })
 }
 
-/// Take up the Graph, claim the Task here and record its conversation, then
-/// start that conversation held and answer. The conversation makes the
-/// checkout and starts the Graph; planning exchange follows the answer.
-fn admit(
-    id: &str,
+/// Start the admitted conversation held and answer. The conversation makes
+/// the checkout and starts the Graph; planning exchange follows the answer.
+fn start_conversation(
     input: &TaskCreation,
     store: &crate::store::SharedStore,
-    runtime: &tokio::runtime::Runtime,
-    mut receipt: TaskCreateReceipt,
+    runtime: tokio::runtime::Runtime,
+    receipt: TaskCreateReceipt,
 ) -> Result<Created> {
     let task = receipt.task.clone();
-    let graph = step("take_up_graph", || take_up_graph(store, input, &task))?;
-    step("claim", || {
-        crate::store::ownership::claim_task(&store.sqlite, &task.id)
-    })?;
-    let session = step("record_conversation", || {
-        runtime.block_on(crate::ops::human_session::primary::admit_task(
-            store,
-            &input.directory,
-            &task,
-            input.request.clone(),
-        ))
-    })?;
-    receipt.graph = Some(graph);
-    receipt.session_id = Some(session.id.clone());
-    receipt.milestone = "admitted".into();
-    step("admit_receipt", || {
-        store
-            .sqlite
-            .admit_creation(id, session.id.as_str(), &serde_json::to_value(&receipt)?)
-    })?;
+    let session = receipt
+        .session_id
+        .as_ref()
+        .context("admitted creation has no conversation")?;
+    let session = store
+        .sqlite
+        .session(session.as_str())?
+        .context("admitted conversation is missing")?;
     // A conversation that does not start here starts, and sets up, when opened.
     step("hold_conversation", || {
         match runtime.block_on(crate::ops::human_session::primary::hold_task_conversation(
@@ -248,40 +309,23 @@ fn admit(
             }
         }
     });
+    let answer = answer(store, &runtime, receipt)?;
     let main = crate::git::worktrees::main_repo_root(&input.directory)?;
-    let span = tracing::Span::current();
-    let after = std::thread::spawn(move || {
-        span.in_scope(|| {
+    let handle = {
+        let _runtime = runtime.enter();
+        crate::journal::request::spawn_blocking(move || {
             step("sync_planning", || {
                 crate::ops::task::sync_admitted(&main, &task.id)
             })
         })
-    });
-    Ok(Created {
-        receipt,
-        after: Some(after),
-    })
-}
-
-fn take_up_graph(
-    store: &crate::store::SharedStore,
-    input: &TaskCreation,
-    task: &loopflow_storage::work::task::Task,
-) -> Result<String> {
-    use crate::ops::task::{load_graph, repository_for_task, task_graph_default};
-    if let Some(row) = crate::store::task_work::task_graph_row(&store.sqlite, &task.id)? {
-        return Ok(row.graph.name);
-    }
-    let graph = match input.graph.as_deref() {
-        Some(name) => load_graph(name, "", &input.directory)?,
-        None => {
-            let (name, source) = task_graph_default(store, task)?;
-            let source = format!("{} default ", source.as_str());
-            load_graph(&name, &source, &repository_for_task(store, task)?)?
-        }
     };
-    crate::store::task_work::take_up_task_graph(&store.sqlite, &task.id, &graph)?;
-    Ok(graph.name)
+    Ok(Created {
+        answer,
+        after: Some(After {
+            runtime: Some(runtime),
+            handle: Some(handle),
+        }),
+    })
 }
 
 pub fn unknown(receipt: &CreationReceipt) -> Error {

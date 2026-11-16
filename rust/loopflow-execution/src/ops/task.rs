@@ -1811,6 +1811,10 @@ pub fn task_create(
         {
             tracing::debug!(%error,"planning acquisition pending; creating from retained planning");
         }
+        let receipt = receipt.map(|identity| Receipt {
+            identity,
+            admit: None,
+        });
         let task =
             file_task_in(&store, repo, &main, wave, title, report, adoption, receipt).await?;
         super::planning_sync::sync_after_save(&store, &main.to_string_lossy()).await;
@@ -1822,24 +1826,44 @@ pub fn task_create(
     })
 }
 
-/// File the Task from retained planning, with no network: a creation that
-/// answers first exchanges planning after its answer (`sync_admitted`).
-pub fn file_task(
+/// File the Task with its Graph and primary conversation in one transaction,
+/// from retained planning and with no network. Planning exchange follows the
+/// answer (`sync_admitted`); the conversation makes the checkout.
+pub fn admit_task(
     repo: &Path,
     wave: Option<&str>,
     title: Option<String>,
-    report: Option<String>,
+    request: Option<String>,
     adoption: TaskAdoptionOptions,
-    receipt: Option<loopflow_storage::sqlite::creation::CreationIdentity>,
+    graph: Option<&str>,
+    receipt: loopflow_storage::sqlite::creation::CreationIdentity,
 ) -> OpsResult<Task> {
     let main = crate::git::worktrees::main_repo_root(repo).map_err(task_error)?;
     block_on_task(async {
         let store = Arc::new(super::planning_sync::planning_store().await?);
-        file_task_in(&store, repo, &main, wave, title, report, adoption, receipt).await
+        let admit = Admit {
+            graph,
+            request: request.clone(),
+        };
+        let receipt = Receipt {
+            identity: receipt,
+            admit: Some(admit),
+        };
+        file_task_in(
+            &store,
+            repo,
+            &main,
+            wave,
+            title,
+            request,
+            adoption,
+            Some(receipt),
+        )
+        .await
     })
 }
 
-/// Planning exchange and the assignee check for a Task filed by `file_task`
+/// Planning exchange and the assignee check for a Task filed by `admit_task`
 /// and claimed here. Failures are logged; the Task and its conversation stand.
 pub(crate) fn sync_admitted(main: &Path, task: &loopflow_model::durable::TaskId) {
     let synced = block_on_task(async {
@@ -1857,6 +1881,85 @@ pub(crate) fn sync_admitted(main: &Path, task: &loopflow_model::durable::TaskId)
     }
 }
 
+/// A creation's receipt, and for a started one what its admission commits.
+struct Receipt<'a> {
+    identity: loopflow_storage::sqlite::creation::CreationIdentity,
+    admit: Option<Admit<'a>>,
+}
+
+struct Admit<'a> {
+    graph: Option<&'a str>,
+    request: Option<String>,
+}
+
+/// The Graph and conversation a started creation commits with its Task:
+/// `existing` is an adopted Task, else the new Task `id` in `wave`.
+#[allow(clippy::too_many_arguments)]
+async fn admission(
+    store: &SharedStore,
+    repo: &Path,
+    main: &Path,
+    existing: Option<&Task>,
+    id: &loopflow_model::durable::TaskId,
+    title: &str,
+    wave: Option<&str>,
+    selected: Option<&crate::session::LfSession>,
+    admit: Admit<'_>,
+) -> OpsResult<loopflow_storage::sqlite::creation::TaskAdmission> {
+    let taken = match existing {
+        Some(task) => crate::store::task_work::task_graph_row(&store.sqlite, &task.id)
+            .map_err(task_error)?
+            .is_some(),
+        None => false,
+    };
+    let graph = match (taken, admit.graph) {
+        (true, _) => None,
+        (false, Some(name)) => Some(load_graph(name, "", repo)?),
+        (false, None) => {
+            let (name, source) = match existing {
+                Some(task) => task_graph_default(store, task)?,
+                None => scope_graph_default(main, wave)?,
+            };
+            Some(load_graph(
+                &name,
+                &format!("{} default ", source.as_str()),
+                main,
+            )?)
+        }
+    };
+    let chosen = match (selected, existing) {
+        (Some(session), _) => Some(session.clone()),
+        (None, Some(task)) => {
+            crate::ops::human_session::primary::task_conversation(store, &task.id)
+                .await
+                .map_err(|error| task_error(format!("{error:#}")))?
+        }
+        (None, None) => None,
+    };
+    let session = match chosen {
+        Some(session) => session,
+        None => {
+            let mut session = crate::session::LfSession {
+                task_id: Some(id.clone()),
+                work_source: Some(crate::session::WorkSource::Declared),
+                request: admit.request,
+                ..crate::session::conversation(main, "task/session", title.to_string())
+                    .map_err(|error| task_error(format!("{error:#}")))?
+            };
+            crate::store::sessions::discover_session_repo(&mut session).map_err(task_error)?;
+            session
+        }
+    };
+    Ok(loopflow_storage::sqlite::creation::TaskAdmission {
+        graph: graph
+            .map(|graph| serde_json::to_string(&graph))
+            .transpose()
+            .map_err(task_error)?,
+        session,
+        caller: crate::journal::current_lf_process_id(),
+    })
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn file_task_in(
     store: &SharedStore,
@@ -1866,8 +1969,9 @@ async fn file_task_in(
     title: Option<String>,
     report: Option<String>,
     adoption: TaskAdoptionOptions,
-    receipt: Option<loopflow_storage::sqlite::creation::CreationIdentity>,
+    receipt: Option<Receipt<'_>>,
 ) -> OpsResult<Task> {
+    use loopflow_storage::sqlite::creation::TaskCreationRecord;
     let input = resolve_task_create_input(title.as_deref(), report.as_deref())?;
     {
         let source = adoption::resolve_source(store, repo, &adoption).await?;
@@ -1880,17 +1984,31 @@ async fn file_task_in(
                     )));
                 }
             }
-            let task = adoption::save(
-                store,
-                main,
-                task.id.clone(),
-                None,
-                source,
-                None,
-                false,
-                receipt.clone(),
-            )
-            .await?;
+            let receipt = match receipt {
+                Some(Receipt { identity, admit }) => Some(TaskCreationRecord {
+                    identity,
+                    admission: match admit {
+                        Some(admit) => Some(
+                            admission(
+                                store,
+                                repo,
+                                main,
+                                Some(task),
+                                &task.id,
+                                &task.title,
+                                None,
+                                source.session.as_ref(),
+                                admit,
+                            )
+                            .await?,
+                        ),
+                        None => None,
+                    },
+                }),
+                None => None,
+            };
+            let id = task.id.clone();
+            let task = adoption::save(store, main, id, None, source, None, false, receipt).await?;
             return store
                 .get_task(&task.id)
                 .await
@@ -1909,6 +2027,7 @@ async fn file_task_in(
             }
         }
         let selected = select_task_creation_wave(store, main, wave).await?;
+        let wave_slug = selected.as_ref().map(|wave| wave.slug().to_string());
         let (creation_project, acquisition) = match selected {
             Some(wave) => {
                 let acquisition = super::planning_sync::lock_wave_planning(&wave).await?;
@@ -1927,6 +2046,29 @@ async fn file_task_in(
             project_id: creation_project,
             title: input.title,
             description: input.report,
+        };
+        let receipt = match receipt {
+            Some(Receipt { identity, admit }) => Some(TaskCreationRecord {
+                identity,
+                admission: match admit {
+                    Some(admit) => Some(
+                        admission(
+                            store,
+                            repo,
+                            main,
+                            None,
+                            &creation.id,
+                            &creation.title,
+                            wave_slug.as_deref(),
+                            source.session.as_ref(),
+                            admit,
+                        )
+                        .await?,
+                    ),
+                    None => None,
+                },
+            }),
+            None => None,
         };
         let task = adoption::save(
             store,

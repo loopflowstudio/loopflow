@@ -78,7 +78,7 @@ writes! {
         graph: Option<String>,
         session: Option<String>,
         run: bool,
-    } => loopflow_execution::engine::creation::TaskCreateReceipt;
+    } => loopflow_execution::engine::creation::TaskCreated;
     { request_id, title, request, wave, graph, session, run, .. } => loopflow_execution::engine::creation::create(
         request_id,
         loopflow_execution::engine::creation::TaskCreation {
@@ -95,7 +95,7 @@ writes! {
         },
     )?
     // The server lets planning exchange finish after the answer.
-    .receipt,
+    .answer,
 
     /// `lf task complete <issue>`.
     #[serde(rename = "task.complete")]

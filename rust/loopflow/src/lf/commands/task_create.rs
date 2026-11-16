@@ -53,8 +53,8 @@ pub fn create(
             approve,
         },
     );
-    let (receipt, after) = match created {
-        Ok(created) => (created.receipt, created.after),
+    let (answer, after) = match created {
+        Ok(created) => (created.answer, created.after),
         Err(error) => {
             if *json {
                 if let Some(result) = creation::lookup(&id).ok().flatten().and_then(|r| r.result) {
@@ -64,6 +64,7 @@ pub fn create(
             return Err(error);
         }
     };
+    let receipt = &answer.receipt;
     if let Some(provider) = loopflow_execution::config::load_config_or_default(Some(repo))
         .planning_transport()
         .remote_name()
@@ -77,7 +78,7 @@ pub fn create(
         )?;
     }
     if *json {
-        writeln!(io.output, "{}", serde_json::to_string_pretty(&receipt)?)?;
+        writeln!(io.output, "{}", serde_json::to_string_pretty(&answer)?)?;
     } else {
         writeln!(
             io.output,
@@ -139,9 +140,7 @@ pub fn create(
     }
     // Planning exchange runs after the answer; this process waits for it.
     if let Some(after) = after {
-        if after.join().is_err() {
-            tracing::warn!("planning sync after creation panicked");
-        }
+        after.join();
     }
     Ok(())
 }

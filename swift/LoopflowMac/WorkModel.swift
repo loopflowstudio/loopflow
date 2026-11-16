@@ -2547,7 +2547,7 @@ final class WorkModel {
         let presentation = owner.paletteGeneration
         let destination = destinationGeneration
         do {
-            let receipt = try await query.createTask(request: request, wave: wave?.name, graph: graph, cwd: repoPath, requestID: requestID)
+            let receipt = try await query.createTask(request: request, wave: wave?.name, graph: graph, cwd: repoPath, requestID: requestID).receipt
             Perf.retarget(.startTask, from: "new-task", to: receipt.sessionId ?? receipt.task.id,
                           owner: owner.performanceOwner)
             CreationRecovery.shared.awaitingPresentation(requestID, of: .task(receipt.task.id))

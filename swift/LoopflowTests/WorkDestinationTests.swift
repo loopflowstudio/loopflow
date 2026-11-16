@@ -191,7 +191,8 @@ struct WorkDestinationTests {
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let receipt = """
         {"task": {"id": "\(task.task.id)", "identifier": "\(task.task.identifier)", "title": "\(task.task.name)"},
-         "graph": "code", "session_id": "\(record.id)", "milestone": "admitted"}
+         "graph": "code", "session_id": "\(record.id)", "milestone": "admitted",
+         "session": \(encoded), "overview": {"sessions": [], "graph_processes": [], "graph": null}}
         """
         let created = OSAllocatedUnfairLock<[[String]]>(initialState: [])
         let query = RegistryQuery { args, _ in
@@ -226,7 +227,8 @@ struct WorkDestinationTests {
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let receipt = """
         {"task": {"id": "\(task.task.id)", "identifier": "\(task.task.identifier)", "title": "\(task.task.name)"},
-         "graph": "code", "session_id": "\(record.id)", "milestone": "admitted"}
+         "graph": "code", "session_id": "\(record.id)", "milestone": "admitted",
+         "session": \(encoded), "overview": {"sessions": [], "graph_processes": [], "graph": null}}
         """
         let barrier = LinkedDestinationBarrier()
         let held = OSAllocatedUnfairLock(initialState: true)
@@ -266,7 +268,8 @@ struct WorkDestinationTests {
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let receipt = """
         {"task": {"id": "\(task.task.id)", "identifier": "\(task.task.identifier)", "title": "\(task.task.name)"},
-         "graph": "code", "session_id": "\(record.id)", "milestone": "admitted"}
+         "graph": "code", "session_id": "\(record.id)", "milestone": "admitted",
+         "session": \(encoded), "overview": {"sessions": [], "graph_processes": [], "graph": null}}
         """
         let barrier = LinkedDestinationBarrier()
         let submitted = OSAllocatedUnfairLock(initialState: "")

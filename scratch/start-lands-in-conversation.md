@@ -192,56 +192,37 @@ detached `lf task run` is the one Task-run carrier, not a fallback: its
 
 ## Status (2026-11-16)
 
-Slice 1 built (`engine/creation.rs::admit`, `ops/human_session/setup.rs`):
-the answer is `admitted` with Task, Graph and Session before any fetch;
-the held `lf session resume` prints the request, `Checkout ready  N s`,
-`Graph <name> started`, then execs the provider. Differences from the
-approach above:
-- Admission is sequential writes under the creation lock (file, take up,
-  claim, Session, receipt `admitted` + `session_id`), not one transaction. A
-  repeat before `admitted` is `filed`+run → Continue and redoes only
-  idempotent writes.
+Slice 1 built. `task.create {run}` files Task, claim, Graph take-up, primary
+Session and the `admitted` receipt in `promote_task_prepared`'s IMMEDIATE
+transaction (`ops/task.rs::admit_task` → `TaskCreationRecord.admission`), holds
+the conversation, answers `TaskCreated` (receipt + `SessionRecord` read with
+`surface`, no workspace preparation + `TaskOverview`), then runs `sync_admitted`
+on `journal::request::spawn_blocking` (`creation::After`; dropping it detaches,
+the CLI joins). The held `lf session resume` prints the request,
+`Checkout ready  N s`, `Graph <name> started`, then execs the provider.
+Differences from the approach above:
 - Setup launches `lf task run <ID>` detached (the carrier that retries and
   settles completion), not `lf graph run`, and records it with
-  `record_setup_launch` (`admitted` → `started`, result milestone too). It
-  finds its creation via `admitted_task_creation(session)`, indexed by
-  migration `creation_receipt_sessions.sql`.
+  `record_setup_launch` (`admitted` → `started`). It finds its creation via
+  `admitted_task_creation(session)` (migration `creation_receipt_sessions.sql`).
 - The conversation is held even with no agent selected: setup needs none.
-- A viewer of a held terminal (`connect`, `held_elsewhere`) skips setup and
-  attaches; only the holder does setup.
+- A viewer of a held terminal (`connect`, `held_elsewhere`) skips setup.
 - `-b` creation keeps `run_requested` + `start_creation` (no conversation).
-
-Concept review (2026-11-16), next implement direction:
-- **Admission becomes the one transaction the brief states** ("records the
-  Task and its primary Session in one transaction"). Today a reading between
-  `file_task` and `admit_receipt` shows the Task unstarted with no Session
-  (Backlog on another window or the phone), and a crash there leaves it so.
-  `promote_task_prepared` already writes Task, Session and receipt in one
-  IMMEDIATE transaction with ownership facts; load the Graph, acquire claim
-  facts and build the Session candidate before it, and write take-up, claim,
-  Session and the receipt at `admitted` inside it. Then `admit`'s separate
-  `take_up_graph`/`claim`/`record_conversation`/`admit_receipt` steps,
-  `primary::admit_task` and the admits' `filed`+run → Continue branch go
-  away; a receipt for a conversation-admitting create is never `filed`.
-- **The planning continuation runs on `journal::request::spawn_blocking`**,
-  as the approach says, not a bare `std::thread` carrying the span: served
-  creation keeps request attribution for `sync_planning` and the assignee
-  check.
-- Recorded consequence: setup's "start the Graph" obligation lives on the
-  receipt (`admitted` + `session_id`). Nothing prunes `creation_receipts`
-  today; whatever later expires request IDs ("for a day") must keep
-  `admitted` rows, or a conversation first opened after expiry never starts
-  its Graph.
+- An adopted Task with conversations but no primary gets its ranked
+  conversation (`task_conversation`) chosen inside the transaction.
+- A released `filed`+run row for a conversation-admitting create answers
+  `outcome_unknown` instead of continuing.
+- Setup's "start the Graph" obligation lives on the receipt (`admitted` +
+  `session_id`). Nothing prunes `creation_receipts`; whatever later expires
+  request IDs must keep `admitted` rows.
 
 Remaining, in order:
-1. Answer carries the Session's `SessionRecord` and the Task's overview
-   (docs in `rust/loopflow/src/server/README.md` and `tests/fixtures/dto/README.md`
-   already say so; DTO fixture + Swift decode needed).
-2. Slice 2 (Desktop, phone).
-3. Checkout without network for a new branch: `fetch_task_refs`, the base
+1. Slice 2 (Desktop, phone): consume `TaskCreated.session`/`.overview`; Swift
+   `TaskCreated` decodes them, nothing reads them yet.
+2. Checkout without network for a new branch: `fetch_task_refs`, the base
    fetch and `assert_assignee` still run inside setup (off the answer path,
    on the typing path); with slice 3.
-4. Slices 3–5.
+3. Slices 3–5.
 
 ## Slices
 

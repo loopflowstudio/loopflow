@@ -24,7 +24,7 @@ pub struct Source {
     pub task: Option<Task>,
     checkout: Option<PathBuf>,
     explicit_checkout: bool,
-    session: Option<LfSession>,
+    pub(super) session: Option<LfSession>,
     // Serialize source resolution and the local commit, including concurrent retries.
     _admission: Vec<Arc<std::fs::File>>,
 }
@@ -147,7 +147,7 @@ pub async fn save(
     source: Source,
     acquisition: Option<Arc<PlanningLocks>>,
     continue_in_task: bool,
-    receipt: Option<loopflow_storage::sqlite::creation::CreationIdentity>,
+    receipt: Option<loopflow_storage::sqlite::creation::TaskCreationRecord>,
 ) -> OpsResult<Task> {
     if let Some(task) = source.task.as_ref().filter(|task| task.id != id) {
         return Err(task_error(format!(

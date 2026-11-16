@@ -13310,7 +13310,8 @@
       ],
       "type": "object"
     },
-    "TaskCreateReceipt": {
+    "TaskCreated": {
+      "description": "`task.create`'s answer: its receipt, the primary conversation's record and\nthe Task's overview, both read when answering so a client opens the\nconversation without another read. The stored receipt holds neither.",
       "properties": {
         "graph": {
           "type": [
@@ -13320,6 +13321,19 @@
         },
         "milestone": {
           "type": "string"
+        },
+        "overview": {
+          "$ref": "#/$defs/TaskOverview"
+        },
+        "session": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionRecord"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "session_id": {
           "anyOf": [
@@ -13339,7 +13353,9 @@
         "task",
         "graph",
         "session_id",
-        "milestone"
+        "milestone",
+        "session",
+        "overview"
       ],
       "type": "object"
     },
@@ -16878,7 +16894,7 @@
           ],
           "type": "object",
           "x-result": {
-            "$ref": "#/$defs/TaskCreateReceipt"
+            "$ref": "#/$defs/TaskCreated"
           }
         },
         {

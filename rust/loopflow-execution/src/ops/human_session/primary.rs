@@ -85,18 +85,6 @@ pub(crate) async fn ensure_task(
     Ok((prepare(store, &session.id).await?, started))
 }
 
-/// Record a new Task's conversation at the main checkout without preparing
-/// its workspace: the conversation makes the checkout when it opens.
-pub(crate) async fn admit_task(
-    store: &SharedStore,
-    repo: &Path,
-    task: &loopflow_storage::work::task::Task,
-    request: Option<String>,
-) -> Result<LfSession> {
-    let _lock = lock_scope(&PrimaryScope::Task(task.id.clone())).await?;
-    Ok(record_task_primary(store, repo, task, request).await?.0)
-}
-
 async fn record_task_primary(
     store: &SharedStore,
     cwd: &Path,
@@ -231,7 +219,7 @@ fn opened(store: &SharedStore, session: &str) -> Result<bool> {
         || store.sqlite.session_terminal(session)?.is_some())
 }
 
-pub(super) async fn task_conversation(
+pub(crate) async fn task_conversation(
     store: &SharedStore,
     task: &loopflow_model::durable::TaskId,
 ) -> Result<Option<LfSession>> {
@@ -381,6 +369,16 @@ fn repository_session(repo: &crate::repository::CanonicalRepo) -> Result<LfSessi
 }
 
 /// Prepare the workspace; connecting owns input reservation and provider launch.
+/// A new Task's conversation as a client opens it, read without preparing
+/// its workspace: its own setup makes the checkout.
+pub(crate) async fn admitted_record(store: &SharedStore, id: &str) -> Result<SessionRecord> {
+    let session = store
+        .session(id)
+        .await?
+        .ok_or_else(|| session_not_found(id))?;
+    surface(store, &session).await
+}
+
 async fn prepare(store: &SharedStore, id: &str) -> Result<SessionRecord> {
     let lock_id = id.to_string();
     let _launch =

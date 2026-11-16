@@ -132,7 +132,7 @@ fn task_create_answers_and_its_conversation_starts_the_graph_across_a_server_res
     drop(service);
     let service = Service::start(&task);
     let reply = service.connect().request(operation()).unwrap();
-    assert_eq!(reply.result, saved);
+    assert_eq!(receipt(reply.result), saved);
     let output = task.run(&[
         "task",
         "create",
@@ -150,7 +150,7 @@ fn task_create_answers_and_its_conversation_starts_the_graph_across_a_server_res
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(
-        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap(),
+        receipt(serde_json::from_slice(&output.stdout).unwrap()),
         saved
     );
     let counts: (i64, i64, i64) = db
@@ -201,6 +201,14 @@ fn task_create_answers_before_the_checkout_its_conversation_makes() {
     assert_eq!(answer["milestone"], "admitted", "{answer}");
     assert_eq!(answer["graph"], "feature");
     let session = answer["session_id"].as_str().unwrap().to_owned();
+    // The answer opens the conversation without another read.
+    assert_eq!(answer["session"]["id"], session.as_str());
+    assert!(!answer["session"]["open_argv"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    assert_eq!(answer["overview"]["graph"]["name"], "feature");
+    assert_eq!(answer["overview"]["sessions"][0]["id"], session.as_str());
     let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
     let graphs = || -> i64 {
         db.query_row("SELECT count(*) FROM graph_processes", [], |row| row.get(0))
@@ -243,6 +251,7 @@ fn task_create_answers_before_the_checkout_its_conversation_makes() {
     let repeated: serde_json::Value = serde_json::from_slice(&repeat.stdout).unwrap();
     assert_eq!(repeated["task"]["id"], answer["task"]["id"]);
     assert_eq!(repeated["session_id"], session.as_str());
+    assert_eq!(repeated["session"]["id"], session.as_str());
 
     fs::write(&release, "").unwrap();
     task.wait_for_graph_start();
@@ -468,8 +477,8 @@ fn task_create_request_preserves_a_filed_task_after_start_failure() {
     let retry = task.run(&args);
     assert!(!retry.status.success());
     assert_eq!(
-        serde_json::from_slice::<serde_json::Value>(&retry.stdout).unwrap(),
-        outcome
+        receipt(serde_json::from_slice(&retry.stdout).unwrap()),
+        receipt(outcome)
     );
     assert_eq!(support::recorded_graphs(task.home.path()), before);
 }
@@ -537,7 +546,10 @@ exec {} "$@"
         "{}",
         String::from_utf8_lossy(&retry.stderr)
     );
-    assert_eq!(retry.stdout, output.stdout);
+    assert_eq!(
+        receipt(serde_json::from_slice(&retry.stdout).unwrap()),
+        receipt(serde_json::from_slice(&output.stdout).unwrap())
+    );
     assert_eq!(support::recorded_graphs(task.home.path()), before);
 }
 
@@ -575,10 +587,14 @@ fn task_create_without_recovery_keeps_the_existing_receipt_and_exit_status() {
         "{}",
         String::from_utf8_lossy(&created.stderr)
     );
-    let receipt: loopflow_execution::engine::creation::TaskCreateReceipt =
+    let answer: loopflow_execution::engine::creation::TaskCreated =
         serde_json::from_slice(&created.stdout).unwrap();
-    assert_eq!(receipt.graph.as_deref(), Some("feature"));
-    assert!(receipt.session_id.is_some());
+    assert_eq!(answer.receipt.graph.as_deref(), Some("feature"));
+    assert_eq!(
+        answer.session.map(|session| session.id),
+        answer.receipt.session_id
+    );
+    assert_eq!(answer.overview.graph.unwrap().name, "feature");
     task.wait_for_graphs();
 
     let failed = task.run(&[
@@ -596,4 +612,12 @@ fn task_create_without_recovery_keeps_the_existing_receipt_and_exit_status() {
         serde_json::from_slice(&failed.stdout).unwrap();
     assert_eq!(receipt.task.title, "Ordinary failure");
     assert_eq!(receipt.graph.as_deref(), Some("gate"));
+}
+
+/// An answer's stored receipt: a repeat reads the conversation record and the
+/// Task's overview again, so only the receipt repeats exactly.
+fn receipt(mut answer: serde_json::Value) -> serde_json::Value {
+    let fields = answer.as_object_mut().unwrap();
+    assert!(fields.remove("session").is_some() && fields.remove("overview").is_some());
+    answer
 }

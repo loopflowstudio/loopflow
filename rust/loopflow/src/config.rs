@@ -59,7 +59,7 @@ fn load_user_name(directory: &Path) -> Result<Option<String>, LoadError> {
     if let Some(name) = load_global_config()?
         .and_then(|config| config.user.name)
         .as_deref()
-        .and_then(normalize_user_name)
+        .and_then(loopflow_model::person::normalize_name)
     {
         return Ok(Some(name));
     }
@@ -75,7 +75,7 @@ fn load_user_name(directory: &Path) -> Result<Option<String>, LoadError> {
     };
     Ok(std::str::from_utf8(&output.stdout)
         .ok()
-        .and_then(normalize_user_name))
+        .and_then(loopflow_model::person::normalize_name))
 }
 
 /// A boolean this Machine sets for itself in `config.yaml` under `home`, such
@@ -120,11 +120,6 @@ pub fn participant_email(repo: &Path) -> Option<String> {
         .filter(|output| output.status.success())?;
     let email = std::str::from_utf8(&output.stdout).ok()?.trim();
     (!email.is_empty()).then(|| email.to_lowercase())
-}
-
-pub(crate) fn normalize_user_name(name: &str) -> Option<String> {
-    let name = name.trim();
-    (!name.is_empty()).then(|| name.to_string())
 }
 
 /// Agents Loopflow can drive; listing order grants no preference.

@@ -1354,8 +1354,7 @@ fn codex_same_login_recovery_status_launch_and_reset() {
         serde_json::json!([first_turn, second_turn])
     );
     client.close();
-    let sessions =
-        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let sessions = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     let prior = sessions.session(&session).unwrap().unwrap();
     assert!(prior.completed_at.is_some());
     let listing = run(&["history", "list", "--json"]);

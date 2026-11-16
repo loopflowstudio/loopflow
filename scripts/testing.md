@@ -144,7 +144,7 @@ Never `cargo test`, `cargo test --all` or `cargo nextest run --all` here.
 Promotion and binding decisions (`test(adoption::tests::)`), launch and
 resume settings (`test(run::launch_policy_tests::)`), Task run and checkout
 previews (`test(ops::task::explain::tests::)`) and Machine dispatch and
-ownership (`test(ssh::dispatch_tests::) | test(task_ownership::tests::)`) run
+ownership (`test(ssh::dispatch_tests::) | test(task_ownership::tests::) | test(store::ownership_lifecycle_tests::)`) run
 as library rows
 (`cargo nextest run -p loopflow --lib -E '<filter>'`); run those before the
 surface's full-Machine tests. The lists are in
@@ -267,6 +267,11 @@ For source debugging or cache diagnosis, `--isolated-build` uses this checkout's
 It leaves the ordinary target and shared cache in place. Reuse that isolated
 target for later debugging builds. This also works when another checkout that
 produced cached debug-source paths has been removed.
+
+Storage fixture changes first compile `cargo test -p loopflow-storage --lib --no-run`
+without `test-support`, then `cargo test -p loopflow --lib --no-run` with its
+dev dependency. Application acquisition and lifecycle tests stay above storage;
+prepared SQL invariants and migration checks stay in the storage crate.
 
 Cargo rebuilds changed libraries and their dependents. An edit to Task shipping
 rebuilds the application; unchanged lower-level libraries can be reused. Changes

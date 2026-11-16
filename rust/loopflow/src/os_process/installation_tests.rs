@@ -12,7 +12,6 @@ use crate::installation::{
     self, ActivationTargets, ActiveInstall, ArtifactIdentity, ArtifactRole, ArtifactSet,
     InstallSelection, InstallSource, RecoveryOwner, SwitchPhase, SwitchReceipt,
 };
-use crate::store::sqlite::SqliteStore;
 
 #[test]
 #[ignore = "requires disposable OS installation: scripts/test_task_installation.py"]
@@ -28,7 +27,7 @@ fn running_provider_uses_updated_install_for_commands_hooks_and_graph() {
     fs::create_dir(&home).unwrap();
     let database = home.join("loopflow.db");
     crate::store::migrations::apply_sqlite(&Connection::open(&database).unwrap()).unwrap();
-    let store = SqliteStore::new(&database).unwrap();
+    let store = crate::store::open_sqlite(&database).unwrap();
     let session = store.test_session(
         "upgrade-session",
         &crate::session_record::new_artifact_key(),

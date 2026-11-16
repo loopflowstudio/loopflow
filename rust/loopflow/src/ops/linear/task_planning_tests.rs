@@ -14,12 +14,12 @@ use serde_json::json;
 use super::test_fixture::{now, Fixture, PlanningEnvironment};
 use super::{LinearRefresh, LINEAR_TEST_CONTEXT};
 use crate::ops::NullProgress;
-use crate::work::edit::WorkValue;
-use crate::work::task::{
+use loopflow_model::durable::WorkStatus;
+use loopflow_storage::work::edit::WorkValue;
+use loopflow_storage::work::task::{
     GithubPr, LinearWritebackState, Observation, PrMergeMode, PrMergeRequest, PrPhase,
     PrPresentation, PrPublication, Task, TaskEventKind, TaskPr, TaskPrId,
 };
-use loopflow_model::durable::WorkStatus;
 
 async fn planning_repo(fixture: &Fixture) -> (PathBuf, crate::work::wave::Wave) {
     let (repo, wave) = fixture.planning_repo().await;
@@ -29,7 +29,7 @@ async fn planning_repo(fixture: &Fixture) -> (PathBuf, crate::work::wave::Wave) 
         "initiative_ids": ["initiative-1"], "team_ids": ["team-1"]
     }))
     .unwrap();
-    crate::linear::acceptance::accept_linear_project_in(
+    loopflow_storage::sqlite::linear_acceptance::accept_linear_project_in(
         &fixture.store.sqlite,
         wave.id(),
         "initiative-1",
@@ -37,7 +37,7 @@ async fn planning_repo(fixture: &Fixture) -> (PathBuf, crate::work::wave::Wave) 
         now(),
     )
     .unwrap();
-    crate::store::sqlite::project_selection::write_project_binding(
+    loopflow_storage::sqlite::project_selection::write_project_binding(
         &fixture.store.sqlite,
         wave.id(),
         None,
@@ -1025,17 +1025,17 @@ assert_eq!(retained.title, expected.title);
 assert_eq!(retained.description, expected.description);
 assert_eq!(retained.pm_snapshot_synced_at, expected.pm_snapshot_synced_at);
                 assert!(retained.worktree.is_none());
-                assert!(fixture.store.sqlite.task_graph(&task.id).unwrap().is_none());
+                assert!(crate::store::task_work::task_graph(&fixture.store.sqlite, &task.id).unwrap().is_none());
                 assert_eq!(runtime.block_on(fixture.store.task_events_after(&task.id, 0)).unwrap(), history);
                 if connected {
                     assert!(matches!(retained.pm_writeback, LinearWritebackState::Pending {
-                        operation: crate::work::task::LinearWritebackOperation::CancelTask, ..
+                        operation: loopflow_storage::work::task::LinearWritebackOperation::CancelTask, ..
                     }));
                     runtime.block_on(crate::ops::linear_observe::sync_task_state(&fixture.store, &retained)).unwrap();
                     // Cancellation must never fall into the old sender's reopen arm.
                     assert_eq!(receipt(), saved);
                 }
-                let reopened = crate::store::sqlite::SqliteStore::open_ephemeral(&fixture.database).unwrap();
+                let reopened = crate::store::opening::open_ephemeral(&fixture.database).unwrap();
                 assert_eq!(reopened.work_status(&work).unwrap(), WorkStatus::Abandoned);
                 assert_eq!(receipt(), saved);
             });
@@ -1265,7 +1265,11 @@ fn task_completion_retains_request_but_rolls_back_status_if_delivery_cannot_comm
             .task_completion_pending(&task.id)
             .unwrap()
             .is_some());
-        assert!(fixture.store.sqlite.task_graph(&task.id).unwrap().is_none());
+        assert!(
+            crate::store::task_work::task_graph(&fixture.store.sqlite, &task.id)
+                .unwrap()
+                .is_none()
+        );
         assert!(fixture
             .store
             .sqlite
@@ -1310,7 +1314,8 @@ fn task_completion_ingestion_preserves_baseline_and_atomically_adopts_linear() {
             .pending_task_state(&task.id)
             .unwrap()
             .unwrap();
-        let workflow = fixture.store.sqlite.task_graph(&task.id).unwrap();
+        let workflow =
+            crate::store::task_work::task_graph(&fixture.store.sqlite, &task.id).unwrap();
         // A changed unrelated field does not conflict with the pending state save.
         remote.item.name = "Linear title".into();
         remote.item.revision = Some("2026-10-08T01:00:00Z".into());
@@ -1373,13 +1378,15 @@ fn task_completion_ingestion_preserves_baseline_and_atomically_adopts_linear() {
         let mut late = remote.item.clone();
         late.state = Some("completed".into());
         late.completed = true;
-        assert!(!crate::linear::acceptance::observe_task_state(
-            &fixture.store.sqlite,
-            &delivery,
-            &late,
-            crate::linear::StateHistory::Unknown
-        )
-        .unwrap());
+        assert!(
+            !loopflow_storage::sqlite::linear_acceptance::observe_task_state(
+                &fixture.store.sqlite,
+                &delivery,
+                &late,
+                crate::linear::StateHistory::Unknown
+            )
+            .unwrap()
+        );
         fixture
             .store
             .sqlite
@@ -1402,7 +1409,10 @@ fn task_completion_ingestion_preserves_baseline_and_atomically_adopts_linear() {
                 .as_deref(),
             Some("canceled")
         );
-        assert_eq!(fixture.store.sqlite.task_graph(&task.id).unwrap(), workflow);
+        assert_eq!(
+            crate::store::task_work::task_graph(&fixture.store.sqlite, &task.id).unwrap(),
+            workflow
+        );
         assert_eq!(
             runtime
                 .block_on(
@@ -1465,17 +1475,15 @@ fn task_completion_late_acknowledgement_preserves_explicit_reopening() {
             error: None,
         };
         fixture.store.sqlite.record_process(&process).unwrap();
-        fixture
-            .store
-            .sqlite
-            .take_up_task_graph(
-                &task.id,
-                &crate::task_graph::CapturedGraph {
-                    name: "reopen".into(),
-                    steps: Vec::new(),
-                },
-            )
-            .unwrap();
+        crate::store::task_work::take_up_task_graph(
+            &fixture.store.sqlite,
+            &task.id,
+            &crate::task_graph::CapturedGraph {
+                name: "reopen".into(),
+                steps: Vec::new(),
+            },
+        )
+        .unwrap();
         fixture
             .store
             .sqlite
@@ -1504,13 +1512,15 @@ fn task_completion_late_acknowledgement_preserves_explicit_reopening() {
             .item;
         late.state = Some("canceled".into());
         late.revision = Some("2026-10-08T03:00:00Z".into());
-        assert!(!crate::linear::acceptance::observe_task_state(
-            &fixture.store.sqlite,
-            &completed,
-            &late,
-            crate::linear::StateHistory::Unknown
-        )
-        .unwrap());
+        assert!(
+            !loopflow_storage::sqlite::linear_acceptance::observe_task_state(
+                &fixture.store.sqlite,
+                &completed,
+                &late,
+                crate::linear::StateHistory::Unknown
+            )
+            .unwrap()
+        );
         assert_eq!(
             fixture
                 .store
@@ -1805,7 +1815,7 @@ fn assert_completion_adopts_reopening(during_delivery: bool) {
             before,
             "planning adoption has no execution authority"
         );
-        let sync = fixture.store.sqlite.task_planning_sync(&task.id).unwrap();
+        let sync = fixture.store.task_planning_sync(&task.id).unwrap();
         let retained = sync
             .changes
             .iter()
@@ -1813,7 +1823,7 @@ fn assert_completion_adopts_reopening(during_delivery: bool) {
             .unwrap();
         assert_eq!(
             retained.state,
-            crate::store::planning_sync::PlanningSyncState::AdoptedLinear
+            loopflow_storage::planning_sync::PlanningSyncState::AdoptedLinear
         );
         assert_eq!(retained.local_value, json!("completed"));
         assert_eq!(retained.linear_value, Some(json!("unstarted")));
@@ -1855,7 +1865,8 @@ fn task_completion_unseen_reopening_can_be_overwritten_by_unconditional_delivery
             .pending_task_state(&task.id)
             .unwrap()
             .unwrap();
-        let workflow = fixture.store.sqlite.task_graph(&task.id).unwrap();
+        let workflow =
+            crate::store::task_work::task_graph(&fixture.store.sqlite, &task.id).unwrap();
         runtime.block_on(async {
             state.lock().await.reopen_during_completion = true;
             crate::ops::linear_observe::sync_task_state(&fixture.store, task)
@@ -1880,7 +1891,10 @@ fn task_completion_unseen_reopening_can_be_overwritten_by_unconditional_delivery
                 .unwrap();
             assert_eq!(state.lock().await.completion_writes, 1);
         });
-        assert_eq!(fixture.store.sqlite.task_graph(&task.id).unwrap(), workflow);
+        assert_eq!(
+            crate::store::task_work::task_graph(&fixture.store.sqlite, &task.id).unwrap(),
+            workflow
+        );
         // Matching readback settles only the observed state. It cannot record a
         // conflict it never saw or certify that no intermediate edit was lost.
         let conn = rusqlite::Connection::open(&fixture.database).unwrap();
@@ -1938,7 +1952,11 @@ fn task_completion_lost_reply_adopts_linear_reopening() {
             .is_none());
         let adopted = fixture.store.sqlite.task(&task.id).unwrap().unwrap();
         assert_eq!(adopted.state.as_deref(), Some("unstarted"));
-        assert!(fixture.store.sqlite.task_graph(&task.id).unwrap().is_none());
+        assert!(
+            crate::store::task_work::task_graph(&fixture.store.sqlite, &task.id)
+                .unwrap()
+                .is_none()
+        );
         assert!(fixture
             .store
             .sqlite
@@ -1961,13 +1979,15 @@ fn task_completion_lost_reply_adopts_linear_reopening() {
             .item;
         late.state = Some("completed".into());
         late.completed = true;
-        assert!(!crate::linear::acceptance::observe_task_state(
-            &fixture.store.sqlite,
-            &original,
-            &late,
-            crate::linear::StateHistory::Unknown
-        )
-        .unwrap());
+        assert!(
+            !loopflow_storage::sqlite::linear_acceptance::observe_task_state(
+                &fixture.store.sqlite,
+                &original,
+                &late,
+                crate::linear::StateHistory::Unknown
+            )
+            .unwrap()
+        );
         assert!(fixture
             .store
             .sqlite
@@ -2022,7 +2042,7 @@ fn complete_during_outage(
     repo: &Path,
     task: &Task,
     state: &Arc<tokio::sync::Mutex<PlanningState>>,
-) -> crate::store::sqlite::task_state_delivery::TaskStateDelivery {
+) -> loopflow_storage::sqlite::task_state_delivery::TaskStateDelivery {
     runtime.block_on(async { state.lock().await.field_outage = true });
     crate::ops::task::task_complete(repo, task.id.as_str(), Some("Verified")).unwrap();
     crate::ops::task::append_task_comment(&fixture.store, task, "Verified on main", false).unwrap();
@@ -2460,11 +2480,11 @@ fi
                 .unwrap()
                 .unwrap();
             let mut task = Task {
-                repository_id: fixture
-                    .store
-                    .sqlite
-                    .ensure_repository(repo.to_str().unwrap())
-                    .unwrap(),
+                repository_id: crate::repository::location::ensure_repository(
+                    &fixture.store.sqlite,
+                    repo.to_str().unwrap(),
+                )
+                .unwrap(),
                 id: runtime
                     .block_on(fixture.store.get_task_by_issue(&item.id))
                     .unwrap()
@@ -2563,8 +2583,8 @@ fi
                 .block_on(async {
                     let task = &task;
                     let pr = fixture.store.task_prs(&task.id).await.unwrap().remove(0);
-                    let landing = crate::pr_landing::PrLanding::new(
-                        crate::pr_landing::NewPrLanding {
+                    let landing = loopflow_storage::pr_landing::PrLanding::new(
+                        loopflow_storage::pr_landing::NewPrLanding {
                             repo: "loopflowstudio/fixture".into(),
                             pr_number: 42,
                             worktree: repo.clone(),
@@ -2720,11 +2740,11 @@ esac
                 .find(|project| project.linear_id.as_ref().unwrap().as_str() == "project-1")
                 .unwrap();
             let task = Task {
-                repository_id: fixture
-                    .store
-                    .sqlite
-                    .ensure_repository(repo.to_str().unwrap())
-                    .unwrap(),
+                repository_id: crate::repository::location::ensure_repository(
+                    &fixture.store.sqlite,
+                    repo.to_str().unwrap(),
+                )
+                .unwrap(),
                 id: runtime
                     .block_on(fixture.store.get_task_by_issue(&item.id))
                     .unwrap()
@@ -3276,7 +3296,7 @@ fn planning_fields_selected_before_deletion_cannot_be_attempted_afterward() {
             .edit_task(
                 &task.id,
                 task.revision,
-                &crate::work::task::TaskUpdate {
+                &loopflow_storage::work::task::TaskUpdate {
                     title: Some("Pending edit".into()),
                     ..Default::default()
                 },
@@ -3293,7 +3313,7 @@ fn planning_fields_selected_before_deletion_cannot_be_attempted_afterward() {
             .store
             .sqlite
             .attempt_planning_field(
-                crate::store::sqlite::planning_changes::PlanningChanges::Task(&task.id),
+                loopflow_storage::sqlite::planning_changes::PlanningChanges::Task(&task.id),
                 &change,
                 change
                     .base
@@ -3421,7 +3441,7 @@ fn save_field_name(
             .edit_task(
                 &task.id,
                 current.revision,
-                &crate::work::task::TaskUpdate {
+                &loopflow_storage::work::task::TaskUpdate {
                     title: Some(name.into()),
                     ..Default::default()
                 },
@@ -3435,7 +3455,7 @@ fn field_receipts(
     fixture: &Fixture,
     task: &Task,
     project: bool,
-) -> Vec<crate::store::planning_sync::PlanningChange> {
+) -> Vec<loopflow_storage::planning_sync::PlanningChange> {
     if project {
         fixture
             .store
@@ -3515,7 +3535,11 @@ fn planning_fields_unsent_save_replaces_a_concurrent_linear_edit_without_moving_
                         .unwrap(),
                     WorkStatus::Ready
                 );
-                assert!(fixture.store.sqlite.task_graph(&task.id).unwrap().is_none());
+                assert!(
+                    crate::store::task_work::task_graph(&fixture.store.sqlite, &task.id)
+                        .unwrap()
+                        .is_none()
+                );
             });
         });
     }
@@ -3537,7 +3561,7 @@ fn planning_fields_project_content_preserves_prose_and_task_assignee_can_be_clea
                 .sqlite
                 .update_project_content(
                     task.project_id.as_ref().unwrap(),
-                    &[crate::work::project::ProjectKR { text: "Keep working offline".into(), holds: true }],
+                    &[loopflow_storage::work::project::ProjectKR { text: "Keep working offline".into(), holds: true }],
                     &[],
                 )
                 .unwrap();
@@ -3573,7 +3597,7 @@ fn planning_fields_project_content_preserves_prose_and_task_assignee_can_be_clea
                     .edit_task(
                         &task.id,
                         saved.revision,
-                        &crate::work::task::TaskUpdate {
+                        &loopflow_storage::work::task::TaskUpdate {
                             assignee: Some(assignee.clone()),
                             ..Default::default()
                         },
@@ -3666,7 +3690,7 @@ fn planning_fields_deliver_project_activation_and_task_membership_without_execut
                 .await
                 .extra_projects
                 .push(planning_project("project-2", "project-2"));
-            crate::linear::acceptance::accept_linear_project_in(&fixture
+            loopflow_storage::sqlite::linear_acceptance::accept_linear_project_in(&fixture
                 .store
                 .sqlite, task.wave_id.as_ref().unwrap(), "initiative-1", &destination, now())
                 .unwrap();
@@ -3677,7 +3701,7 @@ fn planning_fields_deliver_project_activation_and_task_membership_without_execut
                 .unwrap()
                 .unwrap();
             // The Wave selects its next Project; the Task follows it with its identity.
-            crate::store::sqlite::project_selection::write_project_binding(
+            loopflow_storage::sqlite::project_selection::write_project_binding(
                 &fixture.store.sqlite,
                 task.wave_id.as_ref().unwrap(),
                 Some("project-1"),
@@ -3708,7 +3732,7 @@ fn planning_fields_deliver_project_activation_and_task_membership_without_execut
             assert_eq!(retained.id, task.id);
             assert_eq!(retained.project_id, Some(destination.id));
             assert!(retained.worktree.is_none());
-            assert!(fixture.store.sqlite.task_graph(&task.id).unwrap().is_none());
+            assert!(crate::store::task_work::task_graph(&fixture.store.sqlite, &task.id).unwrap().is_none());
         });
     });
 }
@@ -3736,12 +3760,12 @@ fn with_export_plan(
     let task = fixture
         .store
         .sqlite
-        .create_task(&crate::work::task::NewTask {
-            repository_id: fixture
-                .store
-                .sqlite
-                .ensure_repository(repo.to_str().unwrap())
-                .unwrap(),
+        .create_task(&loopflow_storage::work::task::NewTask {
+            repository_id: crate::repository::location::ensure_repository(
+                &fixture.store.sqlite,
+                repo.to_str().unwrap(),
+            )
+            .unwrap(),
             due_date: None,
             id: loopflow_model::durable::TaskId::new(),
             project_id: Some(project),
@@ -3784,7 +3808,7 @@ fn exports_later_tasks_after_timeout(after_save: bool) {
             let later = fixture
                 .store
                 .sqlite
-                .create_task(&crate::work::task::NewTask {
+                .create_task(&loopflow_storage::work::task::NewTask {
                     repository_id: task.repository_id.clone(),
                     due_date: None,
                     id: loopflow_model::durable::TaskId::new(),
@@ -3805,7 +3829,7 @@ fn exports_later_tasks_after_timeout(after_save: bool) {
                 .store
                 .sqlite
                 .prepare_planning_export(
-                    crate::store::sqlite::planning_changes::PlanningChanges::Task(first),
+                    loopflow_storage::sqlite::planning_changes::PlanningChanges::Task(first),
                     "team-1",
                     Some("initiative-1"),
                 )
@@ -3889,7 +3913,7 @@ fn task_sync_explicit_updates_retry_saved_state_and_fields_without_execution() {
             repo,
             task.id.as_str(),
             None,
-            crate::work::task::TaskUpdate {
+            loopflow_storage::work::task::TaskUpdate {
                 title: Some("Saved new title".into()),
                 ..Default::default()
             },
@@ -3946,10 +3970,10 @@ fn task_sync_explicit_retry_still_adopts_a_newer_linear_state() {
 #[test]
 fn historical_comment_delivery_retains_local_identity_after_linear_readback() {
     with_planning_task(|runtime, fixture, _repo, task, state| {
-        let comment = crate::work::task::comment::TaskComment {
+        let comment = loopflow_model::comment::TaskComment {
             id: uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_URL, b"retained-filing").to_string(),
             body: "Retained follow-up evidence".into(),
-            author: crate::work::task::comment::TaskCommentAuthor::Person {
+            author: loopflow_model::comment::TaskCommentAuthor::Person {
                 name: Some("Jack Heart".into()),
             },
             created_at: Some("2026-10-08T01:00:00Z".into()),
@@ -3983,7 +4007,7 @@ fn historical_comment_delivery_retains_local_identity_after_linear_readback() {
             .pending_task_comments(&task.id)
             .unwrap()
             .is_empty());
-        let thread = fixture.store.sqlite.task_comments(&task.id).unwrap();
+        let thread = fixture.store.task_comments(&task.id).unwrap();
         assert_eq!(thread.comments.len(), 1);
         assert_eq!(thread.comments[0].id, comment.id);
         assert_eq!(thread.comments[0].body, comment.body);
@@ -4059,7 +4083,7 @@ fn uncertain_creation_is_resent_once_per_window_and_on_task_sync() {
             .store
             .sqlite
             .prepare_planning_export(
-                crate::store::sqlite::planning_changes::PlanningChanges::Task(&task.id),
+                loopflow_storage::sqlite::planning_changes::PlanningChanges::Task(&task.id),
                 "team-1",
                 Some("initiative-1"),
             )
@@ -4103,7 +4127,7 @@ fn task_sync_explicit_retry_preserves_saved_creation_identity() {
                 .store
                 .sqlite
                 .planning_export_attempts(
-                    crate::store::sqlite::planning_changes::PlanningChanges::Task(&task.id),
+                    loopflow_storage::sqlite::planning_changes::PlanningChanges::Task(&task.id),
                 )
                 .unwrap()
                 .creation
@@ -4129,7 +4153,7 @@ fn task_sync_explicit_retry_preserves_saved_creation_identity() {
             .store
             .sqlite
             .prepare_planning_export(
-                crate::store::sqlite::planning_changes::PlanningChanges::Task(&task.id),
+                loopflow_storage::sqlite::planning_changes::PlanningChanges::Task(&task.id),
                 "team-1",
                 Some("initiative-1"),
             )
@@ -4154,7 +4178,7 @@ fn seed_uncertain_exports(
             let task = fixture
                 .store
                 .sqlite
-                .create_task(&crate::work::task::NewTask {
+                .create_task(&loopflow_storage::work::task::NewTask {
                     repository_id: template.repository_id.clone(),
                     due_date: None,
                     id: loopflow_model::durable::TaskId::new(),
@@ -4163,7 +4187,7 @@ fn seed_uncertain_exports(
                     description: String::new(),
                 })
                 .unwrap();
-            let owner = crate::store::sqlite::planning_changes::PlanningChanges::Task(&task.id);
+            let owner = loopflow_storage::sqlite::planning_changes::PlanningChanges::Task(&task.id);
             let export = fixture
                 .store
                 .sqlite
@@ -4225,7 +4249,7 @@ fn uncertain_exports_inside_their_window_cost_a_pass_no_requests() {
                     .store
                     .sqlite
                     .observe_planning_export(
-                        crate::store::sqlite::planning_changes::PlanningChanges::Task(id),
+                        loopflow_storage::sqlite::planning_changes::PlanningChanges::Task(id),
                         now() - 3600,
                     )
                     .unwrap();
@@ -4256,7 +4280,7 @@ fn uncertain_exports_inside_their_window_cost_a_pass_no_requests() {
                     .store
                     .sqlite
                     .prepare_planning_export(
-                        crate::store::sqlite::planning_changes::PlanningChanges::Task(id),
+                        loopflow_storage::sqlite::planning_changes::PlanningChanges::Task(id),
                         "team-1",
                         Some("initiative-1"),
                     )
@@ -4362,7 +4386,7 @@ fn timed_out_creation_names_its_step_and_the_next_pass_resolves_it() {
                     .contains("timed out while sending the creation"),
                 "{error}"
             );
-            let owner = crate::store::sqlite::planning_changes::PlanningChanges::Task(&task.id);
+            let owner = loopflow_storage::sqlite::planning_changes::PlanningChanges::Task(&task.id);
             assert!(
                 fixture
                     .store
@@ -4562,7 +4586,7 @@ fn planning_export_lost_creation_and_attachment_recover_without_duplicate_effect
             .edit_task(
                 &task.id,
                 saved.revision,
-                &crate::work::task::TaskUpdate {
+                &loopflow_storage::work::task::TaskUpdate {
                     title: Some("After export".into()),
                     ..Default::default()
                 },
@@ -4615,7 +4639,7 @@ fn planning_export_late_readback_preserves_newer_edits_and_inventory_identity() 
                                 .edit_task(
                                     id,
                                     saved.revision,
-                                    &crate::work::task::TaskUpdate {
+                                    &loopflow_storage::work::task::TaskUpdate {
                                         title: Some("Later task".into()),
                                         ..Default::default()
                                     },
@@ -4763,7 +4787,7 @@ fn planning_export_removal_during_uncertain_creation_retains_identity() {
         let never_exported = fixture
             .store
             .sqlite
-            .create_task(&crate::work::task::NewTask {
+            .create_task(&loopflow_storage::work::task::NewTask {
                 repository_id: task.repository_id.clone(),
                 due_date: None,
                 id: loopflow_model::durable::TaskId::new(),
@@ -4945,7 +4969,7 @@ fn linear_rate_limit_retries_field_without_losing_saved_identity() {
             .edit_task(
                 &task.id,
                 task.revision,
-                &crate::work::task::TaskUpdate {
+                &loopflow_storage::work::task::TaskUpdate {
                     title: Some("After reset".into()),
                     ..Default::default()
                 },
@@ -5240,7 +5264,7 @@ fn planning_fields_use_mutation_responses_without_reading_back_own_writes() {
             .edit_task(
                 &task.id,
                 task.revision,
-                &crate::work::task::TaskUpdate {
+                &loopflow_storage::work::task::TaskUpdate {
                     title: Some("Confirmed in the mutation".into()),
                     description: Some("Both fields share one initial observation".into()),
                     ..Default::default()
@@ -5334,7 +5358,7 @@ fn planning_export_captures_shared_task_fields_without_local_execution() {
         let child = fixture
             .store
             .sqlite
-            .create_task(&crate::work::task::NewTask {
+            .create_task(&loopflow_storage::work::task::NewTask {
                 repository_id: task.repository_id.clone(),
                 id: loopflow_model::durable::TaskId::new(),
                 project_id: task.project_id.clone(),
@@ -5343,7 +5367,7 @@ fn planning_export_captures_shared_task_fields_without_local_execution() {
                 due_date: Some("2026-12-31".into()),
             })
             .unwrap();
-        let owner = crate::store::sqlite::planning_changes::PlanningChanges::Task(&child.id);
+        let owner = loopflow_storage::sqlite::planning_changes::PlanningChanges::Task(&child.id);
         let first = fixture
             .store
             .sqlite
@@ -5368,7 +5392,7 @@ fn planning_export_captures_shared_task_fields_without_local_execution() {
             .edit_task(
                 &child.id,
                 child.revision,
-                &crate::work::task::TaskUpdate {
+                &loopflow_storage::work::task::TaskUpdate {
                     title: Some("Later save".into()),
                     ..Default::default()
                 },
@@ -5414,7 +5438,7 @@ fn project_field_delivery_requires_revision_accepted_into_work() {
                     .pending_project_changes(task.project_id.as_ref().unwrap())
                     .unwrap();
                 let saved_task = fixture.store.sqlite.task(&task.id).unwrap();
-                let workflow = fixture.store.sqlite.task_graph(&task.id).unwrap();
+                let workflow = crate::store::task_work::task_graph(&fixture.store.sqlite, &task.id).unwrap();
                 match rejection {
                     "stale" => provider["updatedAt"] = json!("2026-10-10T11:59:00Z"),
                     "foreign" => {
@@ -5459,7 +5483,7 @@ fn project_field_delivery_requires_revision_accepted_into_work() {
                 );
                 assert_eq!(state.lock().await.field_writes, 0, "{rejection}");
                 assert_eq!(fixture.store.sqlite.task(&task.id).unwrap(), saved_task);
-                assert_eq!(fixture.store.sqlite.task_graph(&task.id).unwrap(), workflow);
+                assert_eq!(crate::store::task_work::task_graph(&fixture.store.sqlite, &task.id).unwrap(), workflow);
                 let attempted: bool = rusqlite::Connection::open(&fixture.database)
                     .unwrap()
                     .query_row(
@@ -5649,7 +5673,7 @@ fn project_prose_save_delivers_and_settles_without_changing_managed_fields() {
             conn.execute("INSERT INTO task_checkouts(task_id,worktree,branch) VALUES(?1,'/retained/task','retained/branch') ON CONFLICT(task_id) DO UPDATE SET worktree=excluded.worktree,branch=excluded.branch", [task.id.as_str()]).unwrap();
             conn.execute("INSERT INTO processes(id,trace_id,command,cwd,started_at) VALUES('11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222','lf run code','/retained/task',2)", []).unwrap();
             conn.execute("INSERT INTO task_graphs(task_id,graph,step,run_start,lf_process_id,updated_at) VALUES(?1,?2,'start','{\"index\":0}','11111111-1111-4111-8111-111111111111',3)", rusqlite::params![task.id.as_str(),json!({"name":"code","steps":[]}).to_string()]).unwrap();
-            let workflow_before = fixture.store.sqlite.task_graph(&task.id).unwrap();
+            let workflow_before = crate::store::task_work::task_graph(&fixture.store.sqlite, &task.id).unwrap();
             let work = loopflow_model::durable::WorkRef::Project(task.project_id.clone().unwrap());
             let mut provider = planning_project("project-1", "project-1");
             provider["content"] = json!("Before.\n\nworkflow: feature\n\n## KRs\n- [x] Preserve work\n\n## Notes\nAfter.\n");
@@ -5676,7 +5700,7 @@ fn project_prose_save_delivers_and_settles_without_changing_managed_fields() {
             }
             // Writes carry no scope check, so the Task is untouched.
             assert_eq!(fixture.store.sqlite.task(&task.id).unwrap().unwrap(), task_before);
-            assert_eq!(fixture.store.sqlite.task_graph(&task.id).unwrap(), workflow_before);
+            assert_eq!(crate::store::task_work::task_graph(&fixture.store.sqlite, &task.id).unwrap(), workflow_before);
             let outcome: Option<String> = conn.query_row("SELECT outcome FROM processes WHERE id='11111111-1111-4111-8111-111111111111'", [], |r| r.get(0)).unwrap();
             assert_eq!(outcome, None);
         });
@@ -5724,7 +5748,8 @@ fn task_field_delivery_requires_revision_accepted_into_work() {
                 let work = save_field_name(fixture, task, false, "Pending local title");
                 let saved = fixture.store.sqlite.task(&task.id).unwrap().unwrap();
                 let receipt = field_receipts(fixture, task, false)[0].clone();
-                let workflow = fixture.store.sqlite.task_graph(&task.id).unwrap();
+                let workflow =
+                    crate::store::task_work::task_graph(&fixture.store.sqlite, &task.id).unwrap();
                 {
                     let mut provider = state.lock().await;
                     if foreign {
@@ -5746,7 +5771,10 @@ fn task_field_delivery_requires_revision_accepted_into_work() {
                 );
                 assert_eq!(state.lock().await.field_writes, 0);
                 assert_eq!(fixture.store.sqlite.task(&task.id).unwrap().unwrap(), saved);
-                assert_eq!(fixture.store.sqlite.task_graph(&task.id).unwrap(), workflow);
+                assert_eq!(
+                    crate::store::task_work::task_graph(&fixture.store.sqlite, &task.id).unwrap(),
+                    workflow
+                );
                 let pending = field_receipts(fixture, task, false);
                 assert_eq!(pending.len(), 1);
                 assert_eq!(pending[0].id, receipt.id);
@@ -5791,11 +5819,11 @@ fn linear_scope_reads_each_repository_once_and_refreshes_next_check() {
             for (index, path) in paths.iter().enumerate() {
                 std::fs::create_dir_all(path.join(".lf")).unwrap();
                 std::fs::write(path.join(".lf/config.yaml"), configs[index]).unwrap();
-                let repository_id = fixture
-                    .store
-                    .sqlite
-                    .ensure_repository(path.to_str().unwrap())
-                    .unwrap();
+                let repository_id = crate::repository::location::ensure_repository(
+                    &fixture.store.sqlite,
+                    path.to_str().unwrap(),
+                )
+                .unwrap();
                 // Both loops encounter every repository more than once, including failures.
                 for row in 0..2 {
                     let wave = crate::work::wave::Wave::new(
@@ -5807,7 +5835,7 @@ fn linear_scope_reads_each_repository_once_and_refreshes_next_check() {
                     let saved = fixture
                         .store
                         .sqlite
-                        .create_task(&crate::work::task::NewTask {
+                        .create_task(&loopflow_storage::work::task::NewTask {
                             id: loopflow_model::durable::TaskId::new(),
                             repository_id: repository_id.clone(),
                             project_id: None,
@@ -5898,12 +5926,11 @@ fn linear_on_demand_adopts_new_open_issues_without_allocating_execution() {
             assert_eq!(adopted.title, "New work in another Project");
             assert_ne!(adopted.project_id, task.project_id);
             assert!(adopted.worktree.is_none());
-            assert!(fixture
-                .store
-                .sqlite
-                .task_graph(&adopted.id)
-                .unwrap()
-                .is_none());
+            assert!(
+                crate::store::task_work::task_graph(&fixture.store.sqlite, &adopted.id)
+                    .unwrap()
+                    .is_none()
+            );
             assert!(fixture
                 .store
                 .sqlite

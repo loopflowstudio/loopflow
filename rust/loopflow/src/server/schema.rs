@@ -320,7 +320,8 @@ pub fn summary() -> String {
 /// A bare `time::OffsetDateTime` as its serde writes it: year, ordinal day,
 /// hour, minute, second, nanosecond and the offset's hours, minutes and
 /// seconds. A field that wants RFC 3339 says `time::serde::rfc3339`.
-pub(crate) type TimeTuple = (i32, u16, u8, u8, u8, u32, i8, i8, i8);
+#[cfg(test)]
+pub(crate) use crate::store::TimeTuple;
 
 /// A result that is `serde_json::Value` on the wire: this build promises no
 /// shape for it, and the schema says so rather than inventing one.

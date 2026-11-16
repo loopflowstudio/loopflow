@@ -24,7 +24,7 @@ use crate::ops::task::{
 };
 use crate::store::SharedStore;
 use crate::task_graph::CapturedGraph;
-use crate::work::task::Task;
+use loopflow_storage::work::task::Task;
 
 const GRAPHS: [(&str, &str); 5] = [
     ("proof", "- cmd: task sync --plan\n"),
@@ -101,14 +101,14 @@ impl Table {
             .unwrap()
             .unwrap();
         let sqlite = &self.store.sqlite;
-        sqlite.take_up_task_graph(&self.task.id, &graph).unwrap();
+        crate::store::task_work::take_up_task_graph(sqlite, &self.task.id, &graph).unwrap();
         assert!(sqlite.set_task_graph_step(&self.task.id, step).unwrap());
     }
 
     /// A Task with no checkout yet, as `lf task create` files it.
     fn unplaced(&self) -> Task {
         let mut task = self.task.clone();
-        task.id = crate::work::task::TaskId::new();
+        task.id = loopflow_storage::work::task::TaskId::new();
         task.identifier = "INF-124".into();
         task.linear_id = None;
         task.worktree = None;
@@ -492,10 +492,8 @@ fn checkout_restores_a_missing_checkout_unless_occupied_terminal_or_remote() {
     // A handoff is append-only, so the remote owner comes last.
     reset();
     let peer = loopflow_model::durable::MachineId::new();
-    sqlite
-        .add_machine(&peer, "must-not-contact.invalid", "peer")
-        .unwrap();
-    sqlite.move_claim(&table.task.id, &peer).unwrap();
+    crate::store::machines::add_machine(sqlite, &peer, "must-not-contact.invalid", "peer").unwrap();
+    crate::store::ownership::move_claim(sqlite, &table.task.id, &peer).unwrap();
     let report = explain();
     assert!(
         matches!(&report.resolution.execution_machine, ContextFact::Bound { value, .. } if value == peer.as_str()),

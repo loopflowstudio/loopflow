@@ -1,12 +1,9 @@
 //! Durable tracked Work, independent of any autonomous controller.
 
-pub mod edit;
+pub use loopflow_storage::work::edit;
 pub mod link;
 pub mod link_receiver;
-pub mod project;
-pub mod selection;
-pub mod task;
+pub use loopflow_storage::work::project;
+pub use loopflow_storage::work::selection;
+pub use loopflow_storage::work::task;
 pub mod wave;
-
-#[cfg(test)]
-mod selection_tests;

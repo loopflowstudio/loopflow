@@ -11,13 +11,13 @@ use time::OffsetDateTime;
 
 use crate::config::load_config_or_default;
 use crate::git::current_branch;
-use crate::pr_landing::{
+use crate::store::{open_store, storage_config_from_env, SharedStore};
+use loopflow_storage::pr_landing::{
     LandingPlacement, LandingSupervisor, NewPrLanding, PrLanding, PrLandingState,
     SUPERVISOR_STALE_AFTER,
 };
-use crate::store::sqlite::ci_incidents::RepairAttempt;
-use crate::store::{open_store, storage_config_from_env, SharedStore};
-use crate::work::task::{CiCheck, CiIncident};
+use loopflow_storage::sqlite::ci_incidents::RepairAttempt;
+use loopflow_storage::work::task::{CiCheck, CiIncident};
 
 use super::error::{OpsError, OpsResult};
 use super::land::LandOptions;
@@ -271,10 +271,12 @@ fn admit_ci_fix(
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
         let store = landing_store().await?;
-        let lock = store
-            .sqlite
-            .lock_task_checkouts(&[&landing.worktree], landing.task_id.as_ref())
-            .map_err(repair_error)?;
+        let lock = crate::store::admission::lock_task_checkouts(
+            &store.sqlite,
+            &[&landing.worktree],
+            landing.task_id.as_ref(),
+        )
+        .map_err(repair_error)?;
         let reservation = store
             .sqlite
             .repair_reservation(&incident.identity)
@@ -1071,12 +1073,7 @@ async fn refresh_joined_request(store: &SharedStore, landing: &mut PrLanding) ->
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?
         .ok_or_else(|| OpsError::Message(format!("landing {} disappeared", landing.id)))?;
-    if current.generation != landing.generation
-        || matches!(
-            current.state,
-            PrLandingState::Merged | PrLandingState::Closed
-        )
-    {
+    if current.generation != landing.generation || current.state.is_terminal() {
         return Err(OpsError::Message(format!(
             "landing {} generation {} is no longer active",
             landing.id, landing.generation
@@ -1140,9 +1137,7 @@ async fn cleanup_landed_pr(store: &SharedStore, landing: &PrLanding) -> OpsResul
         }
         return Ok(());
     }
-    let _admission = store
-        .sqlite
-        .lock_checkout(&landing.worktree)
+    let _admission = crate::store::admission::lock_checkout(&store.sqlite, &landing.worktree)
         .map_err(repair_error)?;
     // A conversation is history; only a running Process holds the checkout.
     if let Some(reason) = checkout_execution_blockers(store, &landing.worktree)?
@@ -1303,11 +1298,16 @@ pub fn wait_for_merge(repo: &Path, options: &LandOptions, pr: &PrInfo) -> OpsRes
 /// only unassigning the Task holds its repair. No elapsed time ends the wait.
 async fn wait_for_landing(
     store: &SharedStore,
-    id: &crate::pr_landing::PrLandingId,
+    id: &loopflow_storage::pr_landing::PrLandingId,
 ) -> OpsResult<()> {
     let io = LandingIo::github(Some(ci_fix(None)));
     #[cfg(test)]
     let io = LANDING_IO.try_with(Clone::clone).unwrap_or(io);
+    let unsupported = |state: PrLandingState| {
+        OpsError::DeliveryHeld(format!(
+            "Landing {id} has unsupported state {state:?}; inspect its saved receipt"
+        ))
+    };
     let mut reported = None;
     loop {
         let landing = store
@@ -1315,6 +1315,14 @@ async fn wait_for_landing(
             .await
             .map_err(repair_error)?
             .ok_or_else(|| repair_error("landing disappeared while waiting"))?;
+        match landing.state {
+            PrLandingState::Watching
+            | PrLandingState::Repairing
+            | PrLandingState::Blocked
+            | PrLandingState::Merged
+            | PrLandingState::Closed => {}
+            state => return Err(unsupported(state)),
+        }
         let checked = reconcile_pr_landing(store.clone(), landing, io.clone()).await;
         let saved = store
             .get_pr_landing(id)
@@ -1329,6 +1337,7 @@ async fn wait_for_landing(
                 ))
             }
             PrLandingState::Watching | PrLandingState::Repairing | PrLandingState::Blocked => {}
+            state => return Err(unsupported(state)),
         }
         let report = checked.err().map(|error| error.to_string());
         if report.is_some() && report != reported {
@@ -1351,7 +1360,7 @@ tokio::task_local! {
 #[cfg(test)]
 pub(super) async fn wait_with_io(
     store: &SharedStore,
-    id: &crate::pr_landing::PrLandingId,
+    id: &loopflow_storage::pr_landing::PrLandingId,
     io: LandingIo,
 ) -> OpsResult<()> {
     LANDING_IO.scope(io, wait_for_landing(store, id)).await
@@ -1418,7 +1427,7 @@ async fn reconcile_repository_async(
 async fn repository_tasks(
     store: &SharedStore,
     repo: &crate::repository::RepoId,
-) -> OpsResult<Vec<crate::work::task::Task>> {
+) -> OpsResult<Vec<loopflow_storage::work::task::Task>> {
     let mut tasks = Vec::new();
     for task in store.list_tasks(None).await.map_err(repair_error)? {
         let task_repo = super::task::repository_for_task(store, &task)?;
@@ -1448,10 +1457,12 @@ mod tests {
         ManualRemoval, MergeGateReading, MergeRequest, MergeRequestRemoval, PrInfo,
         PrMergeObservation,
     };
-    use crate::pr_landing::{NewPrLanding, PrLanding, PrLandingState};
     use crate::store::{SharedStore, StorageConfig};
-    use crate::work::task::{CiCheck, LinearWritebackState, Observation, Task, TaskPr, TaskPrId};
     use loopflow_model::durable::TaskId;
+    use loopflow_storage::pr_landing::{NewPrLanding, PrLanding, PrLandingState};
+    use loopflow_storage::work::task::{
+        CiCheck, LinearWritebackState, Observation, Task, TaskPr, TaskPrId,
+    };
     use std::path::{Path, PathBuf};
 
     fn github_landing_fixture() -> (PrLanding, PrInfo) {
@@ -1670,10 +1681,11 @@ mod tests {
     async fn seed_task(store: &SharedStore, worktree: &Path) -> TaskId {
         let now = OffsetDateTime::now_utc();
         let task = Task {
-            repository_id: store
-                .sqlite
-                .ensure_repository(&worktree.display().to_string())
-                .unwrap(),
+            repository_id: crate::repository::location::ensure_repository(
+                &store.sqlite,
+                &worktree.display().to_string(),
+            )
+            .unwrap(),
             id: TaskId::new(),
             revision: 0,
             linear_id: None,
@@ -1767,7 +1779,7 @@ mod tests {
     #[tokio::test]
     async fn landing_wait_missing_record_is_a_failure_not_a_hold() {
         let (_directory, store, _) = fixture().await;
-        let missing = crate::pr_landing::PrLandingId::from_raw("missing");
+        let missing = loopflow_storage::pr_landing::PrLandingId::from_raw("missing");
         let result = wait_for_landing(&store, &missing).await;
         assert!(matches!(result, Err(OpsError::Message(reason)) if reason.contains("disappeared")));
     }

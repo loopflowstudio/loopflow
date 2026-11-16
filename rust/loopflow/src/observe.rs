@@ -734,4 +734,151 @@ mod tests {
             ProcessIdentityEvidence::Dead
         );
     }
+    fn session_projection_fixture(
+        pid: u32,
+    ) -> (
+        tempfile::TempDir,
+        loopflow_storage::sqlite::SqliteStore,
+        loopflow_model::durable::RepositoryId,
+    ) {
+        let home = tempfile::tempdir().unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute_batch(include_str!("../tests/fixtures/saved_selection_work.sql"))
+            .unwrap();
+        store.test_session("session", &crate::session_record::new_artifact_key());
+        store.conn.lock().unwrap().execute("UPDATE agent_sessions SET repo='/repo',task_id='task_22222222222222222222222222222222',wave_id='11111111-1111-1111-1111-111111111111' WHERE id='session'", []).unwrap();
+        let attachment = crate::process::attachment::claim_session_attachment(
+            &store,
+            "session",
+            None,
+            &store.test_lf_process(),
+            true,
+        )
+        .unwrap();
+        store
+            .record_agent_process_identity(
+                "session",
+                &attachment,
+                pid,
+                crate::journal::process_started_at(pid).unwrap().unwrap(),
+            )
+            .unwrap();
+        store
+            .record_session_activity(
+                "session",
+                &attachment,
+                &crate::session::SessionActivity {
+                    preview: None,
+                    observed_at: time::OffsetDateTime::now_utc().unix_timestamp(),
+                    open_tools: 0,
+                    pending_input: 0,
+                    yielded: false,
+                },
+            )
+            .unwrap();
+        let repo =
+            loopflow_model::durable::RepositoryId::parse("repo_11111111111111111111111111111111")
+                .unwrap();
+        (home, store, repo)
+    }
+
+    #[test]
+    fn quiet_deadline_repages_sessions_and_task_selections_without_a_write() {
+        use crate::session::SessionFilter;
+        use loopflow_storage::work::selection::Selection;
+        let (_home, store, repo) = session_projection_fixture(std::process::id());
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
+        let filter = SessionFilter {
+            available: true,
+            limit: 1,
+            ..Default::default()
+        };
+        let selection = Selection::parse("state:available", None).unwrap();
+        let cache = Arc::new(Cache::default());
+        let revision = store.revisions().unwrap();
+        let read = || {
+            (
+                crate::store::session_projection::session_summaries(&store, &filter, now).unwrap(),
+                crate::store::selections::resolve_selection(&store, &repo, &selection).unwrap(),
+            )
+        };
+        let (before, dependencies) = cache.capture(read);
+        assert!(before.0.is_empty());
+        assert!(before.1.members.is_empty());
+        // Advance the observed deadline deterministically, without advancing SQL.
+        let mut advanced = false;
+        for (fact, entry) in cache.entries.lock().unwrap().iter() {
+            if matches!(fact, super::Fact::Deadline(_)) {
+                let mut entry = entry.lock().unwrap();
+                entry.answer = Some(super::Answer::Bool(true));
+                entry.revision += 1;
+                advanced = true;
+            }
+        }
+        assert!(advanced, "the read must register its quiet deadline");
+        assert!(dependencies.changed());
+        let (after, _) = cache.capture(read);
+        assert_eq!(after.0[0].id.as_str(), "session");
+        assert_eq!(
+            after.1.members[0].work.id,
+            "task_22222222222222222222222222222222"
+        );
+        assert_eq!(store.revisions().unwrap(), revision);
+    }
+
+    #[test]
+    fn process_death_invalidates_session_pages_and_task_selections_without_a_write() {
+        use crate::session::SessionFilter;
+        use loopflow_storage::work::selection::Selection;
+        struct Child(std::process::Child);
+        impl Drop for Child {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+        let mut child = Child(
+            std::process::Command::new("/bin/sleep")
+                .arg("60")
+                .spawn()
+                .unwrap(),
+        );
+        let (_home, store, repo) = session_projection_fixture(child.0.id());
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute("UPDATE session_activity SET observed_at=1", [])
+            .unwrap();
+        let filter = SessionFilter {
+            available: true,
+            limit: 1,
+            ..Default::default()
+        };
+        let selection = Selection::parse("state:available", None).unwrap();
+        let cache = Arc::new(Cache::default());
+        let revision = store.revisions().unwrap();
+        let read = || {
+            (
+                crate::store::session_projection::session_summaries(&store, &filter, 500).unwrap(),
+                crate::store::selections::resolve_selection(&store, &repo, &selection).unwrap(),
+            )
+        };
+        let (before, dependencies) = cache.capture(read);
+        assert_eq!(before.0.len(), 1);
+        assert_eq!(before.1.members.len(), 1);
+        child.0.kill().unwrap();
+        child.0.wait().unwrap();
+        refresh(&cache);
+        assert!(dependencies.changed());
+        let (after, _) = cache.capture(read);
+        assert!(after.0.is_empty());
+        assert!(after.1.members.is_empty());
+        assert!(after.1.unavailable.is_empty(), "proven death is known");
+        assert_eq!(store.revisions().unwrap(), revision);
+    }
 }

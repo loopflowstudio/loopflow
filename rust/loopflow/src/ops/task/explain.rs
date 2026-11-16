@@ -209,7 +209,7 @@ async fn read_task_run(
 pub(super) async fn read_local_task(
     store: &SharedStore,
     resolution: &mut ContextExplanation,
-) -> anyhow::Result<crate::work::task::Task> {
+) -> anyhow::Result<loopflow_storage::work::task::Task> {
     let id = match &resolution.task {
         ContextFact::Bound { value, .. } => loopflow_model::durable::TaskId::parse(value)?,
         ContextFact::Unbound => {

@@ -1262,9 +1262,7 @@ os.execv({binary}, [{binary}, *sys.argv[1:]])
     }
 
     fn select_wave_graph(&self, name: &str) {
-        let store =
-            loopflow::store::sqlite::SqliteStore::new(&self.home.path().join("loopflow.db"))
-                .unwrap();
+        let store = loopflow::store::open_sqlite(&self.home.path().join("loopflow.db")).unwrap();
         support::select_wave_graph(
             self.repo.path(),
             &store,
@@ -1480,9 +1478,7 @@ fn checkout_leaves_graph_selection_to_the_first_run() {
         .unwrap()
         .display()
         .to_string();
-    let sqlite =
-        loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
-            .unwrap();
+    let sqlite = loopflow::store::open_sqlite(&fixture.home.path().join("loopflow.db")).unwrap();
     let mut observation: crate::test_linear_input::IssueFixture =
         loopflow_test_support::retained_task_input(
             &fixture.registered.database,
@@ -1515,10 +1511,16 @@ fn checkout_leaves_graph_selection_to_the_first_run() {
     };
     select("before-checkout");
     fixture.ok(&["task", "checkout", "INF-124", "--name", "first-graph"]);
-    assert!(sqlite.task_work(&task.id).unwrap().graph.is_none());
+    assert!(crate::store::task_work::task_work(&sqlite, &task.id)
+        .unwrap()
+        .graph
+        .is_none());
     select("at-first-run");
     fixture.task_run_ok(&["task", "run", "INF-124"]);
-    let captured = sqlite.task_work(&task.id).unwrap().graph.unwrap();
+    let captured = crate::store::task_work::task_work(&sqlite, &task.id)
+        .unwrap()
+        .graph
+        .unwrap();
     assert_eq!(captured.name, "at-first-run");
     assert_eq!(
         serde_json::to_value(&captured.position).unwrap(),
@@ -1526,7 +1528,10 @@ fn checkout_leaves_graph_selection_to_the_first_run() {
     );
     select("after-first-run");
     fixture.task_run_ok(&["task", "run", "INF-124"]);
-    let retained = sqlite.task_work(&task.id).unwrap().graph.unwrap();
+    let retained = crate::store::task_work::task_work(&sqlite, &task.id)
+        .unwrap()
+        .graph
+        .unwrap();
     assert_eq!(retained.name, captured.name);
     assert_eq!(serde_json::to_value(&retained.position).unwrap(), at("end"));
 }

@@ -533,7 +533,7 @@ fn notion_status_title_body_and_comments_write_back_to_the_page() {
             repo,
             saved.id.as_str(),
             None,
-            crate::work::task::TaskUpdate {
+            loopflow_storage::work::task::TaskUpdate {
                 title: Some("Write back, renamed".into()),
                 description: Some("# Renamed\nNew body".into()),
                 ..Default::default()
@@ -576,7 +576,7 @@ fn notion_status_title_body_and_comments_write_back_to_the_page() {
         let thread = runtime.block_on(state.lock()).comments[page["id"].as_str().unwrap()].clone();
         assert_eq!(thread.len(), 1);
         assert_eq!(thread[0]["rich_text"][1]["annotations"]["bold"], true);
-        let comments = fixture.store.sqlite.task_comments(&saved.id).unwrap();
+        let comments = fixture.store.task_comments(&saved.id).unwrap();
         assert_eq!(comments.comments.len(), 1);
         assert!(comments.pending_sync.is_empty());
     });
@@ -732,7 +732,7 @@ fn notion_renames_and_completion_reach_the_task() {
             repo,
             saved.id.as_str(),
             None,
-            crate::work::task::TaskUpdate {
+            loopflow_storage::work::task::TaskUpdate {
                 title: Some("Renamed locally".into()),
                 ..Default::default()
             },
@@ -851,7 +851,7 @@ fn notion_pages_move_to_in_progress_when_work_starts() {
         .unwrap();
         let id = saved.linear_id.clone().unwrap().as_str().to_string();
         // Checkout claims the Task; the fixture has no fetchable origin.
-        fixture.store.sqlite.claim_task(&saved.id).unwrap();
+        crate::store::ownership::claim_task(&fixture.store.sqlite, &saved.id).unwrap();
         runtime.block_on(crate::ops::linear_observe::sync_repository(
             &fixture.store,
             repo.to_str().unwrap(),
@@ -865,7 +865,7 @@ fn notion_pages_move_to_in_progress_when_work_starts() {
 
 #[test]
 fn notion_pages_show_the_pr() {
-    use crate::work::task::{GithubPr, PrPublication, TaskPr, TaskPrId};
+    use loopflow_storage::work::task::{GithubPr, PrPublication, TaskPr, TaskPrId};
     with_notion(|runtime, fixture, repo, state| {
         let saved = crate::ops::task::task_create(
             repo,

@@ -187,7 +187,7 @@ pub(crate) async fn admit(
             request: None,
             ready_summary: None,
             completed_at: None,
-            created_at: crate::store::rows::now_unix(),
+            created_at: loopflow_storage::rows::now_unix(),
         })
         .await?;
     let session = select(

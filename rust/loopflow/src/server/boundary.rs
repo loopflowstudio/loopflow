@@ -2,6 +2,8 @@
 //! boundary, for the server to record. The hook opens no store for this; it
 //! reads the Session's steers and Task update from the store itself afterwards
 //! ([`crate::steer::claim`]).
+
+use crate::process::attachment;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -10,7 +12,7 @@ use anyhow::{anyhow, Result};
 use crate::context_block::ContextDelivery;
 use crate::server::wire::{BoundaryMoment, SessionBoundary, SessionBoundaryAnswer};
 use crate::steer::NativeBoundary;
-use crate::store::sqlite::SqliteStore;
+use loopflow_storage::sqlite::SqliteStore;
 
 /// How long a hook waits for the server before its turn goes on without it.
 pub(crate) const HOOK_DEADLINE: Duration = Duration::from_secs(2);
@@ -103,7 +105,7 @@ pub(super) fn answer(
     if let Some(gap) = gap {
         store.record_recording_gap(&adapter.session, gap.first, gap.last)?;
     }
-    let connection = store.session_connection(&adapter.session)?;
+    let connection = attachment::session_connection(store, &adapter.session)?;
     // Where the server wakes this conversation once it is idle.
     if let Some(inbox) = inbox {
         store.record_agent_inbox(adapter, inbox)?;
@@ -216,11 +218,13 @@ async fn record_codex_turns(
 
 #[cfg(test)]
 mod tests {
+    use crate::process::attachment;
+
     use super::answer;
     use crate::context_block::ContextDelivery;
     use crate::server::wire::{BoundaryGap, BoundaryMoment, SessionBoundary};
     use crate::steer::{NativeBoundary, SteerAdapter};
-    use crate::store::sqlite::SqliteStore;
+    use loopflow_storage::sqlite::SqliteStore;
 
     /// A native Session whose provider selected conversation `native`, and a
     /// delivery file for its checkout.
@@ -242,12 +246,11 @@ mod tests {
         std::path::PathBuf,
     ) {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("session", &crate::session_record::new_artifact_key());
         let process = store.test_lf_process();
-        let claim = store
-            .claim_session_attachment("session", None, &process, false)
-            .unwrap();
+        let claim =
+            attachment::claim_session_attachment(&store, "session", None, &process, false).unwrap();
         store
             .record_agent_process_identity("session", &claim, std::process::id(), 1)
             .unwrap();
@@ -323,8 +326,9 @@ mod tests {
         assert_eq!(identity.task, None);
 
         let task = store
-            .create_task(&crate::work::task::NewTask {
-                repository_id: store.ensure_repository("/repo").unwrap(),
+            .create_task(&loopflow_storage::work::task::NewTask {
+                repository_id: crate::repository::location::ensure_repository(&store, "/repo")
+                    .unwrap(),
                 due_date: None,
                 id: loopflow_model::durable::TaskId::new(),
                 project_id: None,
@@ -383,7 +387,8 @@ mod tests {
     fn a_moved_checkouts_delivery_follows_the_repository() {
         let (home, store, adapter, delivery) = fixture();
         let old = home.path().join("repo");
-        let id = store.ensure_repository(old.to_str().unwrap()).unwrap();
+        let id =
+            crate::repository::location::ensure_repository(&store, old.to_str().unwrap()).unwrap();
         let mut saved = ContextDelivery::load(&delivery).unwrap();
         saved.repository = Some((id.clone(), old.clone()));
         saved.skill_file = Some(old.join("active.md"));
@@ -471,7 +476,7 @@ mod tests {
     /// neither list; only an empty snapshot settles it.
     #[test]
     fn a_turn_end_settles_only_once_no_watch_or_wakeup_remains() {
-        use crate::store::sqlite::sessions::TerminalRetention::LiveTurn;
+        use loopflow_storage::sqlite::sessions::TerminalRetention::LiveTurn;
         let (_home, store, adapter, delivery) = fixture();
         let terminal = loopflow_model::id::TerminalId::new();
         store.create_terminal(&terminal, "build").unwrap();
@@ -632,8 +637,8 @@ mod tests {
         store
             .save_session_steer("session", "Fixture author", "TRACED")
             .unwrap();
-        let traced = crate::store::query_plans::assert_no_empty_writes(&store, || {
-            crate::store::query_plans::statements(&store, || {
+        let traced = loopflow_storage::query_plans::assert_no_empty_writes(&store, || {
+            loopflow_storage::query_plans::statements(&store, || {
                 let at = |moment, callback: serde_json::Value| {
                     boundary(moment, &adapter, &delivery, callback)
                 };
@@ -700,7 +705,7 @@ mod tests {
         .unwrap();
             })
         });
-        let found = crate::store::query_plans::growing_scans(&store, &traced);
+        let found = loopflow_storage::query_plans::growing_scans(&store, &traced);
         assert!(found.is_empty(), "{}", found.join("\n"));
     }
 

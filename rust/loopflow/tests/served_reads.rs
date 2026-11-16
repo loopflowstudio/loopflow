@@ -679,8 +679,7 @@ fn screen_reads_are_compact_passive_and_match_cli() {
     let repo = TestRepo::new();
     repo.create_file(".lf/config.yaml", "default_agent: claude\n");
     let mut registered = register_task_with_pr(home.path(), repo.path(), "main", &repo.head_sha());
-    let store =
-        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     store
         .create_task(&loopflow::work::task::NewTask {
             id: loopflow::durable::TaskId::new(),
@@ -691,37 +690,37 @@ fn screen_reads_are_compact_passive_and_match_cli() {
             due_date: None,
         })
         .unwrap();
-    let session = store
-        .create_session(
-            loopflow::session::LfSession {
-                captured: None,
-                id: "session_11111111111141118111111111111111".into(),
-                artifact_key: None,
-                caller_artifact_key: None,
-                input_published: false,
-                cwd: repo.path().into(),
-                skill: None,
-                provider: None,
-                model: None,
-                node: None,
-                iterations: None,
-                task_id: None,
-                wave_id: None,
-                graph_lf_process_id: None,
-                work_source: None,
-                bound_at: None,
-                interactive: true,
-                repo: Some(repo.path().display().to_string()),
-                title: "Recorded conversation".into(),
-                title_source: loopflow::session::TitleSource::Generated,
-                request: None,
-                ready_summary: None,
-                completed_at: None,
-                created_at: 1,
-            },
-            None,
-        )
-        .unwrap();
+    let session = loopflow::store::sessions::create_session(
+        &store,
+        loopflow::session::LfSession {
+            captured: None,
+            id: "session_11111111111141118111111111111111".into(),
+            artifact_key: None,
+            caller_artifact_key: None,
+            input_published: false,
+            cwd: repo.path().into(),
+            skill: None,
+            provider: None,
+            model: None,
+            node: None,
+            iterations: None,
+            task_id: None,
+            wave_id: None,
+            graph_lf_process_id: None,
+            work_source: None,
+            bound_at: None,
+            interactive: true,
+            repo: Some(repo.path().display().to_string()),
+            title: "Recorded conversation".into(),
+            title_source: loopflow::session::TitleSource::Generated,
+            request: None,
+            ready_summary: None,
+            completed_at: None,
+            created_at: 1,
+        },
+        None,
+    )
+    .unwrap();
     let _server = Server::start(repo.path(), home.path());
     let mut connection = loopflow::server::client::Connection::open().unwrap();
     let directory = repo.path().to_owned();
@@ -841,9 +840,13 @@ fn screen_reads_are_compact_passive_and_match_cli() {
 
     // The detail names the recorded primary and observed PR checks.
     let conn = rusqlite::Connection::open(&database).unwrap();
-    store
-        .bind_session(session.id.as_str(), session.captured, &registered.task.id)
-        .unwrap();
+    loopflow::store::sessions::bind_session(
+        &store,
+        session.id.as_str(),
+        session.captured,
+        &registered.task.id,
+    )
+    .unwrap();
     conn.execute(
         "INSERT OR REPLACE INTO task_primary_sessions(session_id,task_id) VALUES(?1,?2)",
         rusqlite::params![session.id.as_str(), registered.task.id.as_str()],

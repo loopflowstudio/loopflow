@@ -15,6 +15,31 @@ import tomllib
 ROOT = Path(__file__).resolve().parents[3]
 
 
+def _verify_receipts(receipts: list[dict]) -> None:
+    expected_hits = {
+        "model_b",
+        "definitions_b",
+        "terminal_b",
+        "storage_b",
+        "storage_test_support_b",
+        "new_root_after_refresh",
+    }
+    for receipt in receipts:
+        case = receipt["case"]
+        owner = None
+        if case.startswith(("model_", "new_root_", "changed_model_")):
+            owner = "loopflow_model"
+        if case.startswith(("storage_", "changed_storage_")):
+            owner = "loopflow_storage"
+        if owner and receipt["libraries"] != [owner]:
+            raise RuntimeError(f"owner dependencies were not warm: {receipt}")
+        count = len(receipt["libraries"])
+        expected = (count, 0) if case in expected_hits else (0, count)
+        actual = receipt["cache_hits"], receipt["cache_misses"]
+        if actual != expected:
+            raise RuntimeError(f"unexpected cache result: {receipt}; expected {expected}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--sccache", type=Path, required=True)
@@ -32,13 +57,19 @@ def main() -> None:
         root = Path(temporary).resolve()
         trees = [root / name for name in ("a", "b")]
         for tree in trees:
-            for package in ("loopflow-model", "loopflow-definitions", "loopflow-terminal"):
+            for package in (
+                "loopflow-model",
+                "loopflow-definitions",
+                "loopflow-terminal",
+                "loopflow-storage",
+                "loopflow-test-support",
+            ):
                 shutil.copytree(ROOT / "rust" / package, tree / "rust" / package)
             shutil.copyfile(ROOT / "Cargo.lock", tree / "Cargo.lock")
             (tree / "Cargo.toml").write_text(
                 '[workspace]\nresolver="2"\n'
                 'members=["rust/loopflow-model", "rust/loopflow-definitions", '
-                '"rust/loopflow-terminal", "rust/model-dependencies", "path-fixture"]\n'
+                '"rust/loopflow-terminal", "rust/loopflow-storage", "rust/loopflow-test-support", "rust/model-dependencies", "rust/storage-dependencies", "path-fixture"]\n'
                 "[workspace.package]\n"
                 + package_fields
                 + "[profile.dev]\ndebug=1\nincremental=false\n"
@@ -53,6 +84,17 @@ def main() -> None:
                 .replace('name = "loopflow-model"', 'name = "model-dependencies"', 1)
             )
             (dependencies / "src/lib.rs").write_text("")
+            dependencies = tree / "rust/storage-dependencies"
+            (dependencies / "src").mkdir(parents=True)
+            manifest = (tree / "rust/loopflow-storage/Cargo.toml").read_text()
+            (dependencies / "Cargo.toml").write_text(
+                manifest.replace(
+                    'name = "loopflow-storage"', 'name = "storage-dependencies"', 1
+                ).replace('links = "loopflow_storage"\n', "")
+            )
+            # Match both host/build and target/runtime dependency features.
+            (dependencies / "src/lib.rs").write_text("")
+            (dependencies / "build.rs").write_text("fn main() {}\n")
             fixture = tree / "path-fixture/src"
             fixture.mkdir(parents=True)
             (fixture.parent / "Cargo.toml").write_text(
@@ -80,6 +122,9 @@ def main() -> None:
             ),
             CARGO_INCREMENTAL="0",
             SCCACHE_CLIENT_SIDE="1",
+            # Client-side uploads include the compressed library. Storage and
+            # application artifacts exceed the daemon's default 8 MiB frame.
+            SCCACHE_MAX_FRAME_LENGTH=str(1024 * 1024 * 1024),
             RUSTC_WRAPPER=str(cache),
         )
         (root / "sccache.toml").write_text("")
@@ -111,7 +156,7 @@ def main() -> None:
         )
         receipts = []
 
-        def build(label: str, tree: Path, package: str) -> None:
+        def build(label: str, tree: Path, package: str, features: str | None = None) -> None:
             before = stats()
             start = time.monotonic()
             result = run(
@@ -129,13 +174,19 @@ def main() -> None:
                     "-p",
                     package,
                     "--message-format=json",
+                    *(["--features", features] if features else []),
                 ],
                 tree,
             )
             after = stats()
             (output / f"{label}.jsonl").write_text(result.stdout)
             (output / f"{label}.log").write_text(result.stderr)
-            receipt = {"case": label, "wall_seconds": round(time.monotonic() - start, 3)}
+            receipt = {
+                "case": label,
+                "wall_seconds": round(time.monotonic() - start, 3),
+                "stats_before": before,
+                "stats_after": after,
+            }
             for field in ("cache_hits", "cache_misses"):
                 receipt[field] = after[field]["counts"].get("Rust", 0) - before[field][
                     "counts"
@@ -152,10 +203,28 @@ def main() -> None:
                     and "lib" in item["target"]["kind"]
                 }
             )
+            if package == "loopflow-storage":
+                directories = {
+                    item["out_dir"]
+                    for item in artifacts
+                    if item.get("reason") == "build-script-executed"
+                    and "/loopflow-storage#" in item["package_id"]
+                }
+                if len(directories) != 1:
+                    raise RuntimeError(f"storage catalogue output missing in {label}")
+                directory = Path(directories.pop())
+                receipt["fixture_sha256"] = hashlib.sha256(
+                    (directory / "test-store.db").read_bytes()
+                ).hexdigest()
+                if label.endswith("_b"):
+                    first = next(item for item in receipts if item["case"] == "storage_a")
+                    if receipt["fixture_sha256"] != first["fixture_sha256"]:
+                        raise RuntimeError(f"fixture bytes changed between roots: {receipt}")
             if package.replace("-", "_") not in receipt["libraries"]:
                 raise RuntimeError(f"owner did not compile in {label}")
             receipts.append(receipt)
             print(json.dumps(receipt), flush=True)
+            _verify_receipts([receipt])
 
         try:
             run(["nice", "-n", "10", str(cache), "--start-server"])
@@ -180,17 +249,43 @@ def main() -> None:
                 build(f"model_{label}", tree, "loopflow-model")
                 build(f"definitions_{label}", tree, "loopflow-definitions")
                 build(f"terminal_{label}", tree, "loopflow-terminal")
-                for package in ("loopflow_model", "loopflow_definitions", "loopflow_terminal"):
+                result = run(
+                    ["cargo", "build", "--offline", "--jobs", "1", "-p", "storage-dependencies"],
+                    tree,
+                )
+                (output / f"storage_dependencies_{label}.log").write_text(result.stderr)
+                build(f"storage_{label}", tree, "loopflow-storage")
+                for package in (
+                    "loopflow_model",
+                    "loopflow_definitions",
+                    "loopflow_terminal",
+                    "loopflow_storage",
+                ):
                     library = tree / "target/debug" / f"lib{package}.rlib"
                     shutil.copyfile(library, output / f"{package}_{label}.rlib")
                     paths = run(["strings", str(library)]).stdout
                     (output / f"{package}_{label}_source_paths.txt").write_text(
                         "\n".join(line for line in paths.splitlines() if str(root) in line) + "\n"
                     )
+                build(
+                    f"storage_test_support_{label}",
+                    tree,
+                    "loopflow-storage",
+                    "test-support",
+                )
                 build(f"path_{label}", tree, "path-fixture")
                 actual = run([str(tree / "target/debug/path-fixture")], tree).stdout.strip()
                 if actual != str(tree / "path-fixture"):
                     raise RuntimeError(f"wrong checkout identity: {actual}")
+            changed = trees[1] / "rust/loopflow-storage/src/work/task/mod.rs"
+            changed.write_text(
+                changed.read_text().replace(
+                    '#[error("invalid Task: {0}")]', '#[error("invalid Task: {0} (cache probe)")]'
+                )
+            )
+            build("changed_storage_b", trees[1], "loopflow-storage")
+            if receipts[-1]["libraries"] != ["loopflow_storage"]:
+                raise RuntimeError(f"Task edit rebuilt outside storage: {receipts[-1]}")
             # Roots are server-startup state. A newly added root misses until
             # our own idle server is refreshed; the same cache then serves it.
             third = root / "c"
@@ -242,18 +337,6 @@ def main() -> None:
                 changed.read_text().replace("MAX_RECORDS: usize = 64", "MAX_RECORDS: usize = 63")
             )
             build("changed_model_b", trees[1], "loopflow-model")
-            for receipt in receipts:
-                if receipt["case"].startswith(("model_", "new_root_", "changed_model_")):
-                    if receipt["libraries"] != ["loopflow_model"]:
-                        raise RuntimeError(f"model dependencies were not warm: {receipt}")
-            expected_hits = {"model_b", "definitions_b", "terminal_b", "new_root_after_refresh"}
-            for receipt in receipts:
-                count = len(receipt["libraries"])
-                expected = (count, 0) if receipt["case"] in expected_hits else (0, count)
-                actual = receipt["cache_hits"], receipt["cache_misses"]
-                if actual != expected:
-                    raise RuntimeError(f"unexpected cache result: {receipt}; expected {expected}")
-
         finally:
             (output / "receipts.json").write_text(json.dumps(receipts, indent=2) + "\n")
             run([str(cache), "--stop-server"])

@@ -6,8 +6,6 @@
 use std::path::Path;
 use std::time::{Duration, SystemTime};
 
-use crate::store::sqlite::SqliteStore;
-
 const EVERY: Duration = Duration::from_secs(24 * 60 * 60);
 /// How often the thread checks the wall-clock deadline. `SystemTime`, unlike
 /// `Instant`, keeps counting while a Mac sleeps.
@@ -37,7 +35,7 @@ fn maintain() {
 }
 
 fn refresh(path: &Path) -> anyhow::Result<()> {
-    SqliteStore::new(path)?.refresh_statistics()?;
+    crate::store::open_sqlite(path)?.refresh_statistics()?;
     Ok(())
 }
 
@@ -47,7 +45,7 @@ mod tests {
     fn a_refresh_measures_a_seeded_store() {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("loopflow.db");
-        let store = crate::store::sqlite::SqliteStore::open_ephemeral(&path).unwrap();
+        let store = crate::store::opening::open_ephemeral(&path).unwrap();
         store
             .conn
             .lock()

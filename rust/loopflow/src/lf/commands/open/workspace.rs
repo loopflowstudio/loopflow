@@ -2,6 +2,7 @@
 //! splits, in a Rex session, Herdr workspace or cmux group. The host owns them
 //! afterwards: LF records no host, container, tab or creation state. Native
 //! handles live only in this command, or in a Rex follower while it runs.
+use crate::store::selections;
 mod layout;
 mod tools;
 
@@ -19,13 +20,13 @@ use super::{
     rex::{self, Rex},
     OpenHost, OpenReceipt, OpenReport, OpenStatus, Resolved, WorkspaceArgs,
 };
-use crate::store::sqlite::SqliteStore;
-use crate::work::selection::{
+use loopflow_model::durable::{MachineId, RepositoryId, TaskId};
+use loopflow_model::id::WaveId;
+use loopflow_storage::sqlite::SqliteStore;
+use loopflow_storage::work::selection::{
     Selection, SelectionExpression, SelectionFilter, SelectionId, SelectionState, SplitAxis,
     TaskLayoutTemplate, ViewContent, ViewPlan, WorkWorkspaceKey, WorkWorkspaceKind,
 };
-use loopflow_model::durable::{MachineId, RepositoryId, TaskId};
-use loopflow_model::id::WaveId;
 
 /// Where a Task's tools run: its recorded checkout, else the repository.
 fn tool_cwd<'a>(content: &'a ViewContent, repo: &'a Path) -> &'a Path {
@@ -58,7 +59,7 @@ fn workspace_plan(
             expression => expression.clone(),
         },
     };
-    let mut plan = store.plan_selection(repository, inventory)?;
+    let mut plan = selections::plan_selection(store, repository, inventory)?;
     plan.selection = selected;
     Ok(plan)
 }
@@ -258,7 +259,7 @@ pub(super) fn run(cli: &crate::lf::Cli, args: &WorkspaceArgs, host: OpenHost) ->
     }
     let (targets, unknown) = super::workspace_targets(cli, args)?;
     crate::store::read_existing_registry()?.context("Work registry is unavailable")?;
-    let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
+    let store = crate::store::open_sqlite(&crate::store::database_path_from_env()?)?;
     let mut report = OpenReport {
         receipts: Vec::new(),
         unknown,
@@ -324,7 +325,9 @@ fn place_task(
     let unplaced = plan.contents.iter().any(|content| {
         content.location.is_none() && !content.states.contains(&SelectionState::Done)
     });
-    if !unplaced || store.task_execution_route(&task.id)?.machine_id != *local {
+    if !unplaced
+        || crate::store::ownership::task_execution_route(store, &task.id)?.machine_id != *local
+    {
         return Ok(false);
     }
     crate::ops::task::task_checkout(
@@ -353,7 +356,7 @@ fn open_machines(
         .context("Repository has no Work identity")?;
     let repository = RepositoryId::parse(repository)?;
     let selected = scope(store, target)?;
-    let local = store.local_machine()?.id;
+    let local = crate::store::machines::local_machine(store)?.id;
     let mut plan = workspace_plan(store, &repository, selected.clone())?;
     if place_task(store, target, &plan, &local)? {
         plan = workspace_plan(store, &repository, selected.clone())?;
@@ -452,7 +455,7 @@ fn route<'a>(
         .filter(|content| explicit || !content.states.contains(&SelectionState::Done))
     {
         let task = TaskId::parse(&content.work.id)?;
-        match store.task_execution_route(&task) {
+        match crate::store::ownership::task_execution_route(store, &task) {
             Ok(route) if route.machine_id == *local => {
                 if explicit || started(content) {
                     routed.local.push(content);
@@ -588,8 +591,7 @@ fn remote_open(
     selection: &Selection,
     args: &WorkspaceArgs,
 ) -> Result<OpenReport> {
-    let machine = store
-        .machines()?
+    let machine = crate::store::machines::machines(store)?
         .into_iter()
         .find(|entry| entry.id.as_str() == machine)
         .context("Task execution Machine has no configured route")?;
@@ -978,7 +980,7 @@ fn follow(cli: &crate::lf::Cli, session: &str, args: &WorkspaceArgs) -> Result<(
     let target = targets
         .first()
         .context("Follower selection is unavailable")?;
-    let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
+    let store = crate::store::open_sqlite(&crate::store::database_path_from_env()?)?;
     let selected = scope(&store, target)?;
     let repository = RepositoryId::parse(
         target
@@ -1013,7 +1015,7 @@ fn follow(cli: &crate::lf::Cli, session: &str, args: &WorkspaceArgs) -> Result<(
     };
     let native = Native::Rex(rex.clone());
     let mut container = Container::existing(session);
-    let local = store.local_machine()?.id;
+    let local = crate::store::machines::local_machine(&store)?.id;
     let mut refresh = std::time::Instant::now();
     let mut request_id = 0_u64;
     loop {
@@ -1159,7 +1161,7 @@ fn arrive_remote(
 mod tests {
     use super::{settle_remote, started, Candidate, Placement};
     use crate::lf::commands::open::{OpenHost, OpenReceipt, OpenReport, OpenStatus};
-    use crate::work::selection::{
+    use loopflow_storage::work::selection::{
         SelectionState, ViewContent, WorkWorkspaceKey, WorkWorkspaceKind,
     };
 

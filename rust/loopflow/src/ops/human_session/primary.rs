@@ -1,6 +1,7 @@
 //! The ongoing conversation of a scope. Shared scopes mark their primary
 //! Session; a Task points to one of its existing conversations.
 
+use crate::store::session_projection;
 use std::path::Path;
 
 use anyhow::{anyhow, bail, Context, Result};
@@ -29,7 +30,7 @@ pub(crate) async fn ensure(
         Some(binding) => {
             PrimaryScope::Wave(binding.wave_id.clone().expect("explicit Wave selection"))
         }
-        None => PrimaryScope::Repository(crate::repository::CanonicalRepo::discover(repo)?),
+        None => PrimaryScope::Repository(crate::repository::discover(repo)?),
     };
     let _lock = lock_scope(&scope).await?;
     if let Some(previous) = store.sqlite.primary_session(&scope)? {
@@ -37,7 +38,7 @@ pub(crate) async fn ensure(
     }
     let session = match &binding {
         Some(binding) => wave_session(binding)?,
-        None => repository_session(&crate::repository::CanonicalRepo::discover(repo)?)?,
+        None => repository_session(&crate::repository::discover(repo)?)?,
     };
     let session = store.ensure_primary_session(&scope, session).await?;
     Ok((prepare(store, &session.id).await?, true))
@@ -100,7 +101,10 @@ pub(crate) async fn ensure_task(
 /// Start a newly checked-out Task's conversation beside its Graph, so `lf
 /// resume` reattaches instead of creating it. Best-effort: a failure is logged
 /// and `lf resume` creates the conversation as before.
-pub(crate) async fn start_task_conversation(store: &SharedStore, task: &crate::work::task::Task) {
+pub(crate) async fn start_task_conversation(
+    store: &SharedStore,
+    task: &loopflow_storage::work::task::Task,
+) {
     let (phase, subject) = match start_in_background(store, task).await {
         Ok(Some(session)) => ("background_start", session),
         Ok(None) => ("background_skip", task.identifier.clone()),
@@ -114,7 +118,7 @@ pub(crate) async fn start_task_conversation(store: &SharedStore, task: &crate::w
 
 async fn start_in_background(
     store: &SharedStore,
-    task: &crate::work::task::Task,
+    task: &loopflow_storage::work::task::Task,
 ) -> Result<Option<String>> {
     let worktree = task.worktree()?.clone();
     let wave = match &task.wave_id {
@@ -225,6 +229,7 @@ fn scope_segment(scope: &PrimaryScope) -> Result<crate::git::worktrees::Worktree
         PrimaryScope::Repository(_) => WorktreeSegment::parse("repo")?,
         PrimaryScope::Wave(id) => wave_agent_segment(id.as_str())?,
         PrimaryScope::Task(id) => bail!("Task {id}'s conversations live in its own checkout"),
+        _ => bail!("Unsupported conversation scope: {scope:?}"),
     })
 }
 
@@ -234,7 +239,8 @@ pub(crate) async fn admit_workspace(store: &SharedStore, session: LfSession) -> 
     let Some(scope) = store.sqlite.primary_scope(&session.id)? else {
         return Ok(session);
     };
-    let summary = store.sqlite.session_summary(
+    let summary = session_projection::session_summary(
+        &store.sqlite,
         &session.id,
         time::OffsetDateTime::now_utc().unix_timestamp(),
     )?;
@@ -283,6 +289,7 @@ pub(crate) async fn admit_workspace(store: &SharedStore, session: LfSession) -> 
                 .await??
             }
         }
+        _ => bail!("Unsupported conversation scope: {scope:?}"),
     };
     if session.cwd != cwd {
         return Ok(store.sqlite.admit_session_workspace(&session, &cwd)?);
@@ -353,11 +360,7 @@ async fn prepare(store: &SharedStore, id: &str) -> Result<SessionRecord> {
 
 /// Admission and replacement of one scope are serial across processes.
 async fn lock_scope(scope: &PrimaryScope) -> Result<std::fs::File> {
-    let key = match scope {
-        PrimaryScope::Repository(repo) => format!("primary:repository:{repo}"),
-        PrimaryScope::Wave(wave) => format!("primary:wave:{wave}"),
-        PrimaryScope::Task(task) => format!("primary:task:{task}"),
-    };
+    let key = scope.lock_key();
     crate::journal::request::spawn_blocking(move || lock_session_process(&key))
         .await
         .context("lock primary Session scope")?
@@ -454,7 +457,7 @@ mod tests {
         tokio::runtime::Runtime::new().unwrap().block_on(async {
             let store = home.store().await;
             let repo = loopflow_test_support::TestRepo::new();
-            let canonical = crate::repository::CanonicalRepo::discover(repo.path()).unwrap();
+            let canonical = crate::repository::discover(repo.path()).unwrap();
             let previous = store
                 .ensure_primary_session(
                     &crate::session::PrimaryScope::Repository(canonical.clone()),

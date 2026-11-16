@@ -82,7 +82,7 @@ pub fn steer(
                     .with_context(unknown)?;
                 let scope = SteerScope::Task { issue, wave };
                 let steer = crate::engine::session::steer(&store, &repo, scope, message).await?;
-                anyhow::Ok((steer, store.sqlite.task_comments(&task.id)?))
+                anyhow::Ok((steer, store.task_comments(&task.id)?))
             })?;
             match json {
                 true => println!("{}", serde_json::to_string(&thread.1)?),
@@ -221,7 +221,7 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
                 repo: if *all {
                     None
                 } else {
-                    crate::repository::CanonicalRepo::containing(&std::env::current_dir()?)?
+                    crate::repository::containing(&std::env::current_dir()?)?
                         .map(|repo| repo.to_string())
                 },
                 ..Default::default()
@@ -320,7 +320,7 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             ..
         } => {
             let store = open_shared_store().await?;
-            let here = store.sqlite.local_machine()?.id;
+            let here = crate::store::machines::local_machine(&store.sqlite)?.id;
             anyhow::ensure!(
                 store.sqlite.task_move_arrived_on(task, &here)?,
                 "Task {task} did not arrive here"
@@ -426,7 +426,7 @@ pub(crate) fn list_filter(
         repo: if args.all {
             None
         } else {
-            crate::repository::CanonicalRepo::containing(directory)?.map(|repo| repo.to_string())
+            crate::repository::containing(directory)?.map(|repo| repo.to_string())
         },
         task: args.task.clone(),
         wave: args
@@ -729,10 +729,12 @@ fn copied_sessions(
     filter: &crate::session::SessionFilter,
 ) -> anyhow::Result<Vec<crate::machine_records::CopiedSession>> {
     let task = match &filter.task {
-        Some(selector) => match store.sqlite.resolve_task_id(selector, None)? {
-            Some(task) => Some(task),
-            None => return Ok(Vec::new()),
-        },
+        Some(selector) => {
+            match crate::store::children::resolve_task_id(&store.sqlite, selector, None)? {
+                Some(task) => Some(task),
+                None => return Ok(Vec::new()),
+            }
+        }
         None => None,
     };
     let repository = match &filter.repo {
@@ -742,9 +744,11 @@ fn copied_sessions(
         },
         None => None,
     };
-    Ok(store
-        .sqlite
-        .copied_sessions(task.as_ref(), repository.as_ref())?)
+    Ok(crate::store::machines::copied_sessions(
+        &store.sqlite,
+        task.as_ref(),
+        repository.as_ref(),
+    )?)
 }
 
 async fn resume(

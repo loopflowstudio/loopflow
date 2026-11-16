@@ -307,8 +307,8 @@ pub(crate) fn resolve_lf_binary() -> Result<PathBuf> {
 }
 
 /// Capture the resolved CLI and Machine for a provider child.
-pub(crate) fn execution_context() -> Result<crate::child::ChildExecutionContext> {
-    Ok(crate::child::ChildExecutionContext {
+pub(crate) fn execution_context() -> Result<loopflow_storage::child::ChildExecutionContext> {
+    Ok(loopflow_storage::child::ChildExecutionContext {
         lf_bin: resolve_lf_binary()?,
         lf_home: crate::store::lf_home_dir(),
     })

@@ -1,11 +1,12 @@
 //! Steers and Task updates for idle managed conversations, pushed by the
 //! Machine server. The store says which conversations are idle and how to
-//! reach them (`SqliteStore::idle_conversations`); when a steer is saved or
+//! reach them (`crate::steer::idle_conversations`); when a steer is saved or
 //! the store's `task_updates` revision moves, one watcher reads them and wakes
 //! each one it has news for. A server restart forgets nothing. No process or
 //! clock per Session: Claude takes the message in its cross-session inbox,
 //! Codex as a turn its app-server starts. A conversation the server cannot
 //! reach hears it at its next boundary.
+
 use std::io::Write;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
@@ -15,7 +16,7 @@ use anyhow::{anyhow, Context, Result};
 use serde_json::json;
 
 use crate::steer::{IdleConversation, IdleReach};
-use crate::store::sqlite::SqliteStore;
+use loopflow_storage::sqlite::SqliteStore;
 
 /// How long the watcher waits for a store change before reading the revision
 /// anyway: the change signal can miss a checkpoint or a Machine's sleep.
@@ -44,7 +45,7 @@ pub(super) fn start() {
 
 fn watch() {
     let path = crate::store::default_db_path();
-    let mut changes = crate::store::changes::StoreChanges::watch(&path);
+    let mut changes = loopflow_storage::changes::StoreChanges::watch(&path);
     let mut watcher = Watcher::default();
     loop {
         watcher.read(&path);
@@ -66,7 +67,7 @@ impl Watcher {
     /// claimed updates and confirmed steers say so.
     fn read(&mut self, path: &Path) {
         if self.store.is_none() && path.exists() {
-            self.store = SqliteStore::new(path)
+            self.store = crate::store::open_sqlite(path)
                 .inspect_err(|error| tracing::warn!(%error, "Task update watcher has no store"))
                 .ok();
         }
@@ -91,7 +92,7 @@ impl Watcher {
 }
 
 fn wake_idle(store: &SqliteStore, session: Option<&str>) {
-    match store.idle_conversations(session) {
+    match crate::steer::idle_conversations(store, session) {
         Ok(idle) => {
             for conversation in idle {
                 wake(store, &conversation);
@@ -229,11 +230,13 @@ fn send_inbox(socket: &mut UnixStream, token: &str, thread: &str, text: &str) ->
 
 #[cfg(test)]
 mod tests {
+    use crate::process::attachment;
+
     use super::{after_turn, wake_idle, Watcher};
     use crate::context_block::ContextDelivery;
     use crate::server::wire::{BoundaryMoment, SessionBoundary};
     use crate::steer::{NativeBoundary, SteerAdapter};
-    use crate::store::sqlite::SqliteStore;
+    use loopflow_storage::sqlite::SqliteStore;
     use std::io::Read;
     use std::os::unix::net::UnixListener;
     use std::path::{Path, PathBuf};
@@ -250,12 +253,11 @@ mod tests {
     /// conversation `native`, and its delivery file.
     fn fixture(session: &str) -> Fixture {
         let home = tempfile::tempdir_in("/tmp").unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session(session, &crate::session_record::new_artifact_key());
         let process = store.test_lf_process();
-        let claim = store
-            .claim_session_attachment(session, None, &process, false)
-            .unwrap();
+        let claim =
+            attachment::claim_session_attachment(&store, session, None, &process, false).unwrap();
         let pid = std::process::id();
         store
             .record_agent_process_identity(
@@ -276,8 +278,9 @@ mod tests {
             .unwrap();
         let task = loopflow_model::durable::TaskId::new();
         store
-            .create_task(&crate::work::task::NewTask {
-                repository_id: store.ensure_repository("/wake").unwrap(),
+            .create_task(&loopflow_storage::work::task::NewTask {
+                repository_id: crate::repository::location::ensure_repository(&store, "/wake")
+                    .unwrap(),
                 id: task.clone(),
                 project_id: None,
                 title: "Wake".into(),
@@ -299,7 +302,7 @@ mod tests {
             .unwrap();
         }
         let captured = store.session(session).unwrap().unwrap().captured;
-        store.bind_session(session, captured, &task).unwrap();
+        crate::store::sessions::bind_session(&store, session, captured, &task).unwrap();
         // The conversation's first boundary records what it already knows.
         crate::harness::task_updates::write(&store, session).unwrap();
         let repo = home.path().join("repo");
@@ -385,10 +388,10 @@ mod tests {
             store
                 .append_task_comment(
                     &self.task,
-                    &crate::work::task::comment::TaskComment {
+                    &loopflow_model::comment::TaskComment {
                         id: id.into(),
                         body: body.into(),
-                        author: crate::work::task::comment::TaskCommentAuthor::Person {
+                        author: loopflow_model::comment::TaskCommentAuthor::Person {
                             name: Some("jack".into()),
                         },
                         created_at: Some("2026-11-11T09:00:00Z".into()),
@@ -462,7 +465,7 @@ mod tests {
         let content = received(&listener)[1]["message"]["content"].to_string();
         assert!(content.contains("pr/1"));
         // News after the restart wakes it too.
-        let restarted = SqliteStore::new(&path).unwrap();
+        let restarted = crate::store::open_sqlite(&path).unwrap();
         fixture.stop(&restarted, &inbox);
         fixture.comment(&restarted, "c-2", "PR: https://example.test/pr/2");
         wake_idle(&restarted, None);
@@ -544,9 +547,7 @@ mod tests {
         fixture.comment(&fixture.store, "c-2", "PR: https://example.test/pr/1");
         after_turn(&fixture.store, "wake-gone");
         assert_eq!(
-            fixture
-                .store
-                .idle_conversations(Some("wake-gone"))
+            crate::steer::idle_conversations(&fixture.store, Some("wake-gone"))
                 .unwrap()
                 .len(),
             1,
@@ -555,5 +556,24 @@ mod tests {
         let page = fixture.store.session_steers("wake-gone", 0, 8).unwrap();
         assert_eq!(page.pending, 2, "the direction and the Task update");
         assert!(page.items.iter().any(|row| row.steer.text.contains("pr/1")));
+    }
+    #[test]
+    fn an_unknown_provider_identity_is_never_woken() {
+        let fixture = fixture("wake-unknown");
+        let inbox = fixture.claude(&fixture.home.path().join("unknown.sock"));
+        fixture.stop(&fixture.store, &inbox);
+        assert_eq!(
+            crate::steer::idle_conversations(&fixture.store, Some("wake-unknown"))
+                .unwrap()
+                .len(),
+            1
+        );
+        let conn = rusqlite::Connection::open(fixture.store_path()).unwrap();
+        conn.execute("UPDATE processes SET os_started_at=NULL WHERE id=(SELECT agent_process_id FROM agent_sessions WHERE id='wake-unknown')", []).unwrap();
+        assert!(
+            crate::steer::idle_conversations(&fixture.store, Some("wake-unknown"))
+                .unwrap()
+                .is_empty()
+        );
     }
 }

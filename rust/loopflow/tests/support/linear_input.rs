@@ -99,7 +99,7 @@ pub trait SeedLinearSqlite {
 impl SeedLinearSqlite for SqliteStore {
     fn seed_inventory(&self, input: &InventoryFixture) -> StoreResult<()> {
         assert_eq!(input.provider, "linear");
-        loopflow::linear::acceptance::accept_linear_inventory_in(
+        loopflow::store::sqlite::linear_acceptance::accept_linear_inventory_in(
             self,
             &input.wave_id,
             &input.initiative,
@@ -116,7 +116,7 @@ impl SeedLinearSqlite for SqliteStore {
         confirmed: Option<(&WaveId, &str)>,
     ) -> StoreResult<()> {
         assert_eq!(provider, "linear");
-        loopflow::linear::acceptance::accept_linear_issue_in(
+        loopflow::store::sqlite::linear_acceptance::accept_linear_issue_in(
             self,
             repo,
             &input.item,

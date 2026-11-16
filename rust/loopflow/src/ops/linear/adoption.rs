@@ -5,8 +5,7 @@ use std::path::Path;
 use crate::linear::LinearProject;
 use crate::ops::{OpsError, OpsResult};
 use crate::store::Store;
-use crate::work::project::ProjectStatus;
-use crate::work::wave::WaveLocator;
+use loopflow_storage::work::project::ProjectStatus;
 
 use super::{project_is_foreign, LinearRepository};
 
@@ -25,7 +24,7 @@ pub(super) async fn adopt_legacy_projects(
     initiative: &str,
     apply: bool,
 ) -> OpsResult<Vec<LinearProject>> {
-    let locator = WaveLocator::discover(repo, wave_name).map_err(adoption_error)?;
+    let locator = crate::work::wave::discover(repo, wave_name).map_err(adoption_error)?;
     let Some(wave) = store.get_wave_at(&locator).await.map_err(adoption_error)? else {
         return Ok(Vec::new());
     };

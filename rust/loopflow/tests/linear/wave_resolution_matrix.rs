@@ -299,7 +299,7 @@ fn classify(output: &std::process::Output) -> Outcome {
 // ─── Helpers ────────────────────────────────────────────────────────────
 
 fn open_test_store(path: &Path) -> SqliteStore {
-    SqliteStore::new(path).expect("open store")
+    loopflow::store::open_sqlite(path).expect("open store")
 }
 
 /// Seed a machine home with one registered wave ("product"), a PM snapshot,
@@ -339,7 +339,7 @@ fn seed(home: &Path, repo: &Path) -> Wave {
         "product".to_string(),
         repo.display().to_string(),
     );
-    store.create_wave(&wave).expect("register wave");
+    loopflow::work::wave::bootstrap::upsert_wave(&store, &wave).expect("register wave");
     store
         .seed_inventory(&InventoryFixture {
             wave_id: wave.id().clone(),

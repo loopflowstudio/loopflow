@@ -15,8 +15,8 @@ use crate::ops::human_session::tests::SessionHome;
 use crate::session::{LfSession, SessionWork, WorkSource};
 use crate::session_record::{SessionCaptureSpec, SessionGraphMembership, SessionRecorder};
 use crate::store::SharedStore;
-use crate::work::task::{Task, TaskId};
 use loopflow_model::id::LfSessionId;
+use loopflow_storage::work::task::{Task, TaskId};
 
 struct Table {
     repo: loopflow_test_support::TestRepo,

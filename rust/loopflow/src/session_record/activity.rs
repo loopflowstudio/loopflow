@@ -11,7 +11,7 @@ use std::time::Duration;
 use time::OffsetDateTime;
 
 use crate::session::SessionLiveness;
-use crate::store::sqlite::SqliteStore;
+use loopflow_storage::sqlite::SqliteStore;
 
 pub(crate) const SAMPLE_INTERVAL: Duration = Duration::from_secs(15);
 const MAX_SAMPLE_GAP: i64 = 45;

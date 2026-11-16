@@ -10,25 +10,11 @@ use serde::{Deserialize, Serialize};
 
 use super::{conversation_home, scan, ExpiryPolicy, Indexed, RetentionState};
 use crate::harness::HarnessKind;
-use crate::store::sqlite::SqliteStore;
 use crate::store::ProviderAccountId;
-use loopflow_model::id::AgentSessionId;
+use loopflow_storage::sqlite::SqliteStore;
 
 const WEEK: i64 = 7 * 86_400;
 const NEXT_EXPIRIES: usize = 20;
-
-/// A Session as the summary reads it.
-#[derive(Debug, Clone)]
-pub struct RetainedSession {
-    pub id: String,
-    pub title: String,
-    pub harness: String,
-    pub thread: Option<AgentSessionId>,
-    pub cwd: PathBuf,
-    /// Its last recorded activity, Unix seconds.
-    pub last_at: i64,
-    pub account: Option<ProviderAccountId>,
-}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RetentionSummary {
@@ -244,8 +230,9 @@ mod tests {
     const GONE: &str = "0199a213-81c0-4800-8aa1-bbab2a035a03";
 
     fn account(store: &SqliteStore, provider: &str, name: &str, home: &std::path::Path) {
-        store
-            .upsert_provider_account(&crate::store::ProviderAccount {
+        crate::provider_account::catalog::upsert_provider_account(
+            store,
+            &crate::store::ProviderAccount {
                 provider: provider.into(),
                 account_id: ProviderAccountId::parse(name).unwrap(),
                 home: Some(home.to_path_buf()),
@@ -264,8 +251,9 @@ mod tests {
                 last_selected_at: None,
                 created_at: 1,
                 updated_at: 1,
-            })
-            .unwrap();
+            },
+        )
+        .unwrap();
     }
 
     /// A Session on `provider` whose conversation `thread` ran on its account
@@ -328,7 +316,7 @@ mod tests {
     #[test]
     fn retention_counts_what_providers_keep_and_explains_what_is_gone() {
         let root = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&root.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&root.path().join("store.db")).unwrap();
         let claude = root.path().join("claude");
         let codex = root.path().join("codex");
         account(&store, "claude", "claude", &claude);

@@ -1,5 +1,7 @@
 //! Public launch proofs for the Session delivery cutover.
 use crate::support;
+use loopflow::process::attachment;
+
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::process::{Command, Stdio};
@@ -27,8 +29,9 @@ fn connect_fixture_account(home: &std::path::Path, store: &loopflow::store::sqli
     let credential = serde_json::json!({"claudeAiOauth":{"accessToken":"fixture-only","expiresAt":4102444800000i64}}).to_string();
     fs::write(account_home.join(".credentials.json"), &credential).unwrap();
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    store
-        .upsert_provider_account(&loopflow::store::ProviderAccount {
+    loopflow::provider_account::catalog::upsert_provider_account(
+        store,
+        &loopflow::store::ProviderAccount {
             provider: "claude".into(),
             account_id: loopflow::store::ProviderAccountId::parse("fixture").unwrap(),
             home: Some(account_home),
@@ -52,8 +55,9 @@ fn connect_fixture_account(home: &std::path::Path, store: &loopflow::store::sqli
             last_selected_at: None,
             created_at: now,
             updated_at: now,
-        })
-        .unwrap();
+        },
+    )
+    .unwrap();
 }
 
 /// The same launch, with `lf_bin` as the `lf` it runs for its own commands.
@@ -194,11 +198,10 @@ fn claude_startup_preserves_large_combined_seed_and_correlated_answer() {
     let home = tempfile::tempdir().unwrap();
     let _task =
         support::register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
-    let store =
-        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     let steer = store
         .save_repository_steer(
-            &loopflow::repository::CanonicalRepo::discover(repo.path()).unwrap(),
+            &loopflow::repository::discover(repo.path()).unwrap(),
             "Fixture author",
             &format!("STARTUP_DIRECTION {}", "界<&>".repeat(20_000)),
         )
@@ -250,8 +253,7 @@ fn a_bare_skill_in_a_task_checkout_takes_a_steer_and_asks_no_server() {
     let home = tempfile::tempdir().unwrap();
     let task =
         support::register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
-    let store =
-        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     let output = launch_startup_proof(&repo, home.path(), &store, None);
     assert_launched(&output, home.path());
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
@@ -281,8 +283,7 @@ fn a_task_launch_with_no_machine_server_fails_naming_it() {
     let home = tempfile::tempdir().unwrap();
     let _task =
         support::register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
-    let store =
-        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     // The selected installation's `lf install server` reaches no supervisor.
     let lf = home.path().join("lf");
     fs::write(
@@ -320,8 +321,7 @@ impl InteractiveTask {
         let home = tempfile::tempdir().unwrap();
         let _task =
             support::register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
-        let store =
-            loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+        let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
         connect_fixture_account(home.path(), &store);
         let bin = home.path().join("bin");
         fs::create_dir(&bin).unwrap();
@@ -477,7 +477,7 @@ fn a_task_pane_reopened_by_session_id_fails_naming_a_missing_server() {
 #[test]
 fn public_context_capability_survives_claim_changes_and_rejects_children_and_replacement() {
     use loopflow::id::LfProcessId;
-    use loopflow::store::sqlite::SqliteStore;
+
     use std::io::Write;
     use std::time::{Duration, Instant};
 
@@ -487,7 +487,7 @@ fn public_context_capability_survives_claim_changes_and_rejects_children_and_rep
     // capability and starts beside the Machine server its hooks call.
     let _task =
         support::register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
-    let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     let mut server = Some(MachineServer::start(env!("CARGO_BIN_EXE_lf"), home.path()));
     connect_fixture_account(home.path(), &store);
     // Signing the shared Claude home in goes through the Keychain on macOS.
@@ -592,17 +592,16 @@ while not (home / 'finish').exists() and time.monotonic() < deadline:
         [&other],
     )
     .unwrap();
-    let second = store
-        .claim_session_attachment(session, Some(&first), &other, false)
-        .unwrap();
-    let third = store
-        .claim_session_attachment(
-            session,
-            Some(&second),
-            first.lf_process_id.as_ref().unwrap(),
-            false,
-        )
-        .unwrap();
+    let second =
+        attachment::claim_session_attachment(&store, session, Some(&first), &other, false).unwrap();
+    let third = attachment::claim_session_attachment(
+        &store,
+        session,
+        Some(&second),
+        first.lf_process_id.as_ref().unwrap(),
+        false,
+    )
+    .unwrap();
     assert_eq!(first.agent_process_id, third.agent_process_id);
     assert_ne!(first.token, third.token);
     // The Machine server records each boundary; the hook claims its own steers.
@@ -894,7 +893,7 @@ fn public_commands_save_steers_without_launching_providers() {
     ]);
     // A thread entry can sort after the comment this command saves. Its
     // timestamp must not decide which comment's steer the command returns.
-    loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db"))
+    loopflow::store::open_sqlite(&home.path().join("loopflow.db"))
         .unwrap()
         .append_task_comment(
             &task.task.id,
@@ -913,7 +912,7 @@ fn public_commands_save_steers_without_launching_providers() {
         VALUES('idle','Idle fixture','human',1,?1,1,?2)",
         rusqlite::params![
             repo.path().to_str().unwrap(),
-            loopflow::repository::CanonicalRepo::discover(repo.path())
+            loopflow::repository::discover(repo.path())
                 .unwrap()
                 .to_string()
         ],

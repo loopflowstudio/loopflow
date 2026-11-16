@@ -86,7 +86,7 @@ pub async fn steer(
             let root = crate::repo::discover_repo_root(directory)
                 .map_err(written)?
                 .unwrap_or_else(|| directory.to_path_buf());
-            let repo = crate::repository::CanonicalRepo::discover(&root).map_err(written)?;
+            let repo = crate::repository::discover(&root).map_err(written)?;
             store
                 .sqlite
                 .save_repository_steer(&repo, &author, message)

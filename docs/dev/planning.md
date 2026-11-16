@@ -91,7 +91,7 @@ both transports. Ordinary Task lookup and comments belong to `ops/task.rs`.
 A Git lookup miss stays a Git lookup miss; it cannot fall through to Linear.
 Unmapped local Projects remain local during Linear refresh until their export links them.
 
-`work::task::comment::TaskComment` owns shared discussion. `TaskComments` joins
+`loopflow_model::comment::TaskComment` owns shared discussion. `TaskComments` joins
 the thread with local delivery status. Linear comment IDs, author IDs and revisions
 stay in adapter-internal observations and retained receipts; one adapter conversion
 provides domain authorship. Local saves and acquisition share the typed comment writer.

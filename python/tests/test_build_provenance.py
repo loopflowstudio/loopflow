@@ -30,33 +30,33 @@ def test_initial_lower_crate_edit_refreshes_clean_application_provenance(tmp_pat
         ).stdout
 
     app = tmp_path / "rust/app"
-    lower = tmp_path / "rust/model"
+    lower = tmp_path / "rust/storage"
     (app / "src").mkdir(parents=True)
     (lower / "src").mkdir(parents=True)
     (tmp_path / "Cargo.toml").write_text(
-        '[workspace]\nresolver="2"\nmembers=["rust/app", "rust/model"]\n'
+        '[workspace]\nresolver="2"\nmembers=["rust/app", "rust/storage"]\n'
     )
     (tmp_path / ".gitignore").write_text("/target\n")
     (app / "Cargo.toml").write_text(
         '[package]\nname="provenance-fixture"\nversion="0.1.0"\nedition="2021"\n'
-        '[dependencies]\nloopflow-model={path="../model"}\n'
-        '[build-dependencies]\ncc="1"\nsha2="0.10"\nrusqlite={version="0.40",features=["bundled"]}\n'
-        'serde={version="1",features=["derive"]}\nserde_json="1"\n'
+        '[dependencies]\nloopflow-storage={path="../storage"}\n'
+        '[build-dependencies]\ncc="1"\n'
     )
     shutil.copyfile(ROOT / "rust/loopflow/build.rs", app / "build.rs")
-    (app / "src/store/migrations").mkdir(parents=True)
-    for file in ["migration_build.rs", "migration_catalog.rs", "migration_schema.rs"]:
-        shutil.copyfile(ROOT / "rust/loopflow/src/store" / file, app / "src/store" / file)
     for file in ["installation/registration.m", "journal/os_process/macos.c"]:
         source = app / "src" / file
         source.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(ROOT / "rust/loopflow/src" / file, source)
     (app / "src/main.rs").write_text(
         'fn main() { println!("{}|{}|{}", env!("LOOPFLOW_BUILD_VERSION"), '
-        'env!("LOOPFLOW_BUILD_SOURCE_ROOT"), loopflow_model::value()); }\n'
+        'env!("LOOPFLOW_BUILD_SOURCE_ROOT"), loopflow_storage::value()); }\n'
     )
     (lower / "Cargo.toml").write_text(
-        '[package]\nname="loopflow-model"\nversion="0.1.0"\nedition="2021"\n'
+        '[package]\nname="loopflow-storage"\nversion="0.1.0"\n'
+        'edition="2021"\nlinks="loopflow_storage"\n'
+    )
+    (lower / "build.rs").write_text(
+        'fn main() { println!("cargo:rerun-if-changed=build.rs"); println!("cargo:unmerged="); }\n'
     )
     record = lower / "src/lib.rs"
     record.write_text("pub fn value() -> u8 { 1 }\n")

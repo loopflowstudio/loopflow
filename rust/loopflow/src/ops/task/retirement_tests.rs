@@ -7,11 +7,11 @@ use loopflow_test_support::TestRepo;
 use rusqlite::params;
 
 use super::{advance, now, sweep};
-use crate::store::sqlite::ViewerHold;
 use crate::store::{SharedStore, StorageConfig};
-use crate::work::task::Task;
 use loopflow_model::durable::TaskId;
 use loopflow_model::id::{LfProcessId, TerminalId};
+use loopflow_storage::sqlite::ViewerHold;
+use loopflow_storage::work::task::Task;
 
 struct Workspace {
     repo: TestRepo,
@@ -261,7 +261,7 @@ fn cleanup_ends_a_done_tasks_held_conversation() {
         assert!(!reason.contains("still has live"), "{reason}");
         assert_eq!(fixture.intent().phase, "closing");
         // Past the viewing grace since completion, cleanup names the terminal.
-        let later = now() + crate::store::sqlite::WORKSPACE_GRACE;
+        let later = now() + loopflow_storage::sqlite::WORKSPACE_GRACE;
         assert_eq!(
             fixture
                 .store
@@ -374,10 +374,11 @@ impl Workspace {
                     .unwrap(),
             ),
         };
-        let repository = store
-            .sqlite
-            .ensure_repository(repo.path().to_str().unwrap())
-            .unwrap();
+        let repository = crate::repository::location::ensure_repository(
+            &store.sqlite,
+            repo.path().to_str().unwrap(),
+        )
+        .unwrap();
         {
             let conn = store.sqlite.conn.lock().unwrap();
             conn.execute("INSERT INTO tasks(id,repository_id,issue_identifier,issue_title,issue_description,created_at,updated_at,workspace_slug,planning_completed,planning_completed_at) VALUES(?1,?2,?1,'Retire workspace','',1,1,?3,1,'2026-11-03T00:00:00Z')", params![id.as_str(),repository.as_str(),branch]).unwrap();
@@ -423,7 +424,7 @@ impl Workspace {
             .unwrap();
     }
 
-    fn intent(&self) -> crate::store::sqlite::TaskRetirement {
+    fn intent(&self) -> loopflow_storage::sqlite::TaskRetirement {
         self.store
             .sqlite
             .task_retirement(&self.task.id)
@@ -604,7 +605,7 @@ fn conversation_cleanup_owns_grace_membership_and_work() {
     let guard = crate::journal::TestLedgerGuard::new();
     let store = crate::journal::process_ledger().unwrap();
     let conn = rusqlite::Connection::open(guard.home().join("loopflow.db")).unwrap();
-    let repo = store.ensure_repository("/repo").unwrap();
+    let repo = crate::repository::location::ensure_repository(&store, "/repo").unwrap();
     let task = TaskId::new();
     conn.execute("INSERT INTO tasks(id,repository_id,issue_identifier,created_at,planning_completed,planning_completed_at)
         VALUES(?1,?2,'CLOSE-1',1,1,'2000-01-01T00:00:00Z')", params![task.as_str(),repo.as_str()]).unwrap();

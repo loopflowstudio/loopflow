@@ -341,7 +341,7 @@ fn asana_status_title_and_comments_write_back_to_the_mirrored_task() {
             repo,
             saved.id.as_str(),
             None,
-            crate::work::task::TaskUpdate {
+            loopflow_storage::work::task::TaskUpdate {
                 title: Some("Write back, renamed".into()),
                 ..Default::default()
             },
@@ -378,7 +378,7 @@ fn asana_status_title_and_comments_write_back_to_the_mirrored_task() {
             thread[0]["html_text"],
             "<body>Delivered <strong>once</strong></body>"
         );
-        let comments = fixture.store.sqlite.task_comments(&saved.id).unwrap();
+        let comments = fixture.store.task_comments(&saved.id).unwrap();
         assert_eq!(comments.comments.len(), 1);
         assert!(comments.pending_sync.is_empty());
     });

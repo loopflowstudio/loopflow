@@ -2,20 +2,12 @@
 
 use time::OffsetDateTime;
 
-use crate::pr_landing::PrLandingId;
-use crate::work::task::CiIncident;
+use loopflow_storage::pr_landing::PrLandingId;
+use loopflow_storage::work::task::CiIncident;
 
 use super::{run_sqlite, Store, StoreResult};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct CiIncidentReportRow {
-    pub incident: CiIncident,
-    pub wave: Option<String>,
-    pub task: Option<String>,
-    pub task_started_at: Option<OffsetDateTime>,
-    pub task_status: Option<String>,
-    pub human_assisted: bool,
-}
+use super::records::CiIncidentReportRow;
 
 impl Store {
     /// Preserve one failing poll observation without changing wake ownership.

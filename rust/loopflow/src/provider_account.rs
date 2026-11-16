@@ -1,6 +1,10 @@
 //! Machine-local provider accounts, selection, and launch homes for Claude and Codex.
 
 pub mod activation;
+pub(crate) mod capacity;
+#[cfg(test)]
+mod capacity_tests;
+pub mod catalog;
 pub(crate) mod codex_access;
 pub(crate) mod hold;
 pub(crate) mod identity;
@@ -170,11 +174,11 @@ thread_local! {
 
 impl LaunchCapacity {
     pub(crate) fn read(
-        store: &crate::store::sqlite::SqliteStore,
+        store: &loopflow_storage::sqlite::SqliteStore,
     ) -> crate::store::StoreResult<Self> {
         #[cfg(test)]
         CAPACITY_READS.set(CAPACITY_READS.get() + 1);
-        let accounts = store.list_provider_accounts(None)?;
+        let accounts = catalog::list_provider_accounts(store, None)?;
         let active = [Provider::Claude, Provider::Codex]
             .into_iter()
             .map(|provider| {
@@ -189,7 +193,7 @@ impl LaunchCapacity {
             .collect();
         Ok(Self {
             accounts,
-            limits: store.provider_account_limits(None)?,
+            limits: capacity::limits(store, None)?,
             active,
             now: now_unix(),
         })
@@ -1798,11 +1802,11 @@ pub(crate) fn launch_repo_id(
     directory: Option<&Path>,
 ) -> Result<Option<CanonicalRepo>, ProviderAccountError> {
     match directory {
-        Some(directory) => Ok(CanonicalRepo::discover(directory).ok()),
+        Some(directory) => Ok(crate::repository::discover(directory).ok()),
         None => {
             let current = std::env::current_dir()
                 .map_err(|error| ProviderAccountError::Runtime(error.to_string()))?;
-            Ok(CanonicalRepo::discover(&current).ok())
+            Ok(crate::repository::discover(&current).ok())
         }
     }
 }
@@ -1917,7 +1921,7 @@ pub(crate) async fn nearest_provider_route(
         .chain(repo_id.cloned().map(RouteScope::Repo))
         .chain([RouteScope::Default])
         .collect();
-    let layers = store.sqlite.account_declarations(&scopes)?;
+    let layers = catalog::account_declarations(&store.sqlite, &scopes)?;
     let resolved = crate::config::settings::resolve_layers(&layers, None)
         .map_err(|error| ProviderAccountError::Runtime(error.to_string()))?;
     let Some(setting) = resolved
@@ -2055,7 +2059,10 @@ pub(crate) fn resolve_recorded_provider_account_blocking(
                 lf_home.join("loopflow.db")
             };
             let catalog = Arc::new(crate::store::Store {
-                sqlite: crate::store::sqlite::SqliteStore::open_read_only(&catalog)?,
+                sqlite: loopflow_storage::sqlite::SqliteStore::open_read_only(
+                    &catalog,
+                    crate::store::token_key::encryption_key,
+                )?,
             });
             let route = ProviderAccountRoute {
                 provider,
@@ -2109,7 +2116,10 @@ pub(crate) fn read_account_store() -> Result<Option<SharedStore>, ProviderAccoun
     match path.try_exists() {
         Ok(false) => Ok(None),
         Ok(true) => Ok(Some(Arc::new(crate::store::Store {
-            sqlite: crate::store::sqlite::SqliteStore::open_read_only(&path)?,
+            sqlite: loopflow_storage::sqlite::SqliteStore::open_read_only(
+                &path,
+                crate::store::token_key::encryption_key,
+            )?,
         }))),
         Err(error) => Err(ProviderAccountError::Filesystem(error.to_string())),
     }
@@ -2774,7 +2784,7 @@ mod account_first_tests {
         for (scope, account) in [
             (RouteScope::Default, &machine),
             (
-                RouteScope::Repo(CanonicalRepo::discover(&repository).unwrap()),
+                RouteScope::Repo(crate::repository::discover(&repository).unwrap()),
                 &project,
             ),
         ] {
@@ -5015,7 +5025,6 @@ mod inspection_tests {
     use crate::profile::{EmailAddress, ProviderRoute, RouteScope};
     use crate::provider_account::{inspect_provider_route, new_account};
     use crate::provider_auth::Provider;
-    use crate::repository::CanonicalRepo;
     use crate::store::{
         open_ephemeral_store, AccountLimitWindow, ProviderAccountId, StorageConfig,
     };
@@ -5078,7 +5087,7 @@ mod inspection_tests {
                 .await
                 .unwrap(),
         );
-        let repo = CanonicalRepo::discover(temp.path()).unwrap();
+        let repo = crate::repository::discover(temp.path()).unwrap();
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
         assert!(
             inspect_provider_route(Some(&store), Some(&repo), Provider::Codex, None)

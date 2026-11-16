@@ -16,7 +16,7 @@ use serde_json::{json, Value};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
-use super::{Provider, Rental, Usd};
+use loopflow_storage::rental::{Provider, Rental, Usd};
 
 const BRIDGE: &str = include_str!("sandbox.py");
 const GUARDIAN: &str = include_str!("guardian.py");
@@ -215,10 +215,39 @@ mod tests {
         assert_eq!(pod.usd_per_hour, Some(Usd::parse("0.59").unwrap()));
     }
 
+    fn rental() -> Rental {
+        use loopflow_storage::rental::{Hardware, RentalId, RentalState};
+        let id = RentalId::new();
+        let now = OffsetDateTime::UNIX_EPOCH;
+        Rental {
+            provider_name: Rental::provider_name_for(&id),
+            id,
+            ondemand: "code".into(),
+            provider: Provider::Daytona,
+            provider_id: None,
+            machine_id: None,
+            by_hand: false,
+            hardware: Hardware {
+                vcpus: 4,
+                memory_gb: 8,
+                disk_gb: 20,
+                gpu: None,
+                spot: false,
+            },
+            usd_per_hour: Usd::ZERO,
+            cap_usd: Usd::ZERO,
+            deadline: now + time::Duration::hours(4),
+            state: RentalState::Requested,
+            created_at: now,
+            ended_at: None,
+            cost_usd: None,
+        }
+    }
+
     #[test]
     fn a_create_without_a_route_is_not_a_machine() {
         let created = replying(r#"{"id": "sb-1", "gone": false, "route": null}"#)
-            .create(&crate::rental::tests::rented(false), "ssh-ed25519 AAAA");
+            .create(&rental(), "ssh-ed25519 AAAA");
         assert!(created.is_err());
     }
 }

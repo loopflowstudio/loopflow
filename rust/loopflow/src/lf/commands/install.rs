@@ -378,7 +378,7 @@ fn _read_executable_compatibility(
     };
     let candidate_path = directory.path().join("candidate.db");
     let copied = match store_path.exists() {
-        true => crate::store::copy::snapshot(store_path, &candidate_path),
+        true => loopflow_storage::copy::snapshot(store_path, &candidate_path),
         false => Ok(()),
     };
     if let Err(error) = copied {
@@ -646,9 +646,10 @@ mod compatibility_tests {
         let store = home.path().join("loopflow.db");
         let conn = rusqlite::Connection::open(&store).unwrap();
         crate::store::migrations::apply_before_migration(&conn, "settings_authority");
-        conn.execute_batch(include_str!(
-            "../../../tests/fixtures/migrations/settings_authority_released.sql"
-        ))
+        conn.execute_batch(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../loopflow-storage/tests/fixtures/migrations/settings_authority_released.sql"
+        )))
         .unwrap();
         conn.execute(
             "UPDATE repository_plans SET repo=?1",
@@ -740,7 +741,7 @@ mod compatibility_tests {
     fn a_ref_whose_catalog_root_is_gone_does_not_block_promotion() {
         let directory = tempfile::tempdir().unwrap();
         let store = directory.path().join("loopflow.db");
-        crate::store::sqlite::SqliteStore::open_as_promotion_boundary(&store).unwrap();
+        crate::store::opening::open_for_promotion(&store).unwrap();
 
         // A ready wave whose repo (its catalog root) was deleted: the
         // durable row outlived the checkout. Before the fix this failed the whole
@@ -2323,7 +2324,7 @@ pub fn advance_switch(switch_id: &str) -> Result<()> {
             return Err(anyhow!("development installations are retired; install a published release with `lf install`"));
         }
         crate::installation::InstallSource::Published => {
-            crate::store::sqlite::SqliteStore::open_as_promotion_boundary(&receipt.target.store)
+            crate::store::opening::open_for_promotion(&receipt.target.store)
                 .map_err(|error| anyhow!("advance reliable published store: {error}"))?;
         }
     }
@@ -2631,10 +2632,8 @@ pub fn recover_switch(switch_id: Option<&str>) -> Result<()> {
                     ));
                 }
                 crate::installation::InstallSource::Published => {
-                    crate::store::sqlite::SqliteStore::open_as_promotion_boundary(
-                        &receipt.target.store,
-                    )
-                    .map_err(|error| anyhow!("recover reliable published store: {error}"))?;
+                    crate::store::opening::open_for_promotion(&receipt.target.store)
+                        .map_err(|error| anyhow!("recover reliable published store: {error}"))?;
                 }
             }
         }

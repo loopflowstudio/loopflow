@@ -3,6 +3,7 @@
 //! Nothing here ends a conversation for want of viewers. Task cleanup ends a
 //! done or abandoned Task's conversations (`ops::task::retirement`); a Desktop
 //! shell's Close ends its terminal directly (`desktop::shells`).
+
 use std::collections::HashMap;
 use std::io::Write;
 use std::os::unix::net::UnixStream;
@@ -13,9 +14,9 @@ use anyhow::Result;
 
 use crate::harness::native_exit::{NativeExit, Settled};
 use crate::process::SessionAttachment;
-use crate::store::sqlite::{SqliteStore, ViewerHold};
 use crate::store::RecordingGap;
 use loopflow_model::id::TerminalId;
+use loopflow_storage::sqlite::{SqliteStore, ViewerHold};
 
 /// How often the recorder retries a failed write and rechecks shell Close and
 /// native clients while nothing changes.
@@ -193,7 +194,7 @@ impl Watch {
     }
 
     /// Record what changed.
-    fn record(&mut self, store: &crate::store::sqlite::SqliteStore) {
+    fn record(&mut self, store: &loopflow_storage::sqlite::SqliteStore) {
         if self.recorded != Some(self.hold)
             && report_result(
                 &mut self.hold_failure,
@@ -279,8 +280,10 @@ fn report_result<T>(
 
 #[cfg(test)]
 mod tests {
-    use crate::store::sqlite::ViewerHold;
+    use crate::process::attachment;
+
     use loopflow_model::id::TerminalId;
+    use loopflow_storage::sqlite::ViewerHold;
     use std::time::{Duration, Instant};
 
     #[test]
@@ -341,12 +344,16 @@ mod tests {
     fn client_retirement_waits_for_a_readable_store_and_keeps_its_move_notice() {
         use super::{Client, ClientState};
         let home = tempfile::tempdir().unwrap();
-        let store =
-            crate::store::sqlite::SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
         let session = store.test_session("moving", &crate::session_record::new_artifact_key());
-        let attachment = store
-            .claim_session_attachment(&session.id, None, &store.test_lf_process(), true)
-            .unwrap();
+        let attachment = attachment::claim_session_attachment(
+            &store,
+            &session.id,
+            None,
+            &store.test_lf_process(),
+            true,
+        )
+        .unwrap();
         let client = Client(std::sync::Mutex::new(ClientState {
             attached: Some((session.id.to_string(), attachment.clone())),
             departure: None,
@@ -367,17 +374,17 @@ mod tests {
             .unwrap()
             .execute_batch("ALTER TABLE agent_sessions_unavailable RENAME TO agent_sessions")
             .unwrap();
-        store
-            .finish_session_attachment(
-                &session.id,
-                &attachment,
-                "completed",
-                Some(&crate::process::Departure::Terminal {
-                    to: Some("tmux %9".into()),
-                }),
-                || Ok(true),
-            )
-            .unwrap();
+        attachment::finish_session_attachment(
+            &store,
+            &session.id,
+            &attachment,
+            "completed",
+            Some(&crate::process::Departure::Terminal {
+                to: Some("tmux %9".into()),
+            }),
+            || Ok(true),
+        )
+        .unwrap();
         assert!(client.check(&store).unwrap());
         let moved = client.take_departure().unwrap();
         assert_eq!(moved.code, 0);

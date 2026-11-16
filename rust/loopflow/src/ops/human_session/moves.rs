@@ -23,14 +23,15 @@ use crate::process::Departure;
 use crate::provider_auth::Provider;
 use crate::repository::CanonicalRepo;
 use crate::session::{LfSession, PrimaryScope, TitleSource, WorkSource};
-use crate::store::sqlite::task_moves::{MoveInFlight, MoveStage};
-use crate::store::sqlite::task_work::{ShipApproval, TaskGraphRecord};
-use crate::store::sqlite::SqliteStore;
+use crate::store::task_work::TaskGraphRecord;
 use crate::store::SharedStore;
 use crate::transcript::{Located, Source};
-use crate::work::task::Task;
 use loopflow_model::durable::{MachineId, RepositoryId, TaskId, TaskOwnershipEntry, WorkRef};
 use loopflow_model::id::{AgentSessionId, LfSessionId, WaveId};
+use loopflow_storage::sqlite::task_moves::{MoveInFlight, MoveStage};
+use loopflow_storage::sqlite::task_work::ShipApproval;
+use loopflow_storage::sqlite::SqliteStore;
+use loopflow_storage::work::task::Task;
 
 /// One Session, or one Task with its Session, on its way from one Machine to another.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -146,7 +147,7 @@ pub(crate) async fn send(store: &SharedStore, id: &str, to: &MachineId) -> Resul
     )?;
     store.sqlite.complete_moved_session(&session.id, to)?;
     Ok(Move {
-        from_machine_id: store.sqlite.local_machine()?.id,
+        from_machine_id: crate::store::machines::local_machine(&store.sqlite)?.id,
         session: Some(moved),
         checkout: Some(checkout),
         history,
@@ -214,9 +215,7 @@ pub(crate) async fn send_task(
             stage: MoveStage::Leaving { claim_id, stopped },
             ..
         }) if &to_machine_id == to => {
-            let claim = store
-                .sqlite
-                .task_ownership(&task.id)?
+            let claim = crate::store::ownership::task_ownership(&store.sqlite, &task.id)?
                 .log
                 .into_iter()
                 .find(|entry| entry.id == claim_id)
@@ -242,22 +241,22 @@ pub(crate) async fn send_task(
         match leave(store, &task, worktree.as_deref(), to, conversation, stopped).await {
             Ok(left) => left,
             Err(error) => {
-                store.sqlite.hand_back(&task.id, &claim)?;
+                crate::store::ownership::hand_back(&store.sqlite, &task.id, &claim)?;
                 return Err(error);
             }
         };
     let (session, history) =
         taken.map_or((None, None), |(session, history)| (Some(session), history));
     let moved = Move {
-        from_machine_id: store.sqlite.local_machine()?.id,
+        from_machine_id: crate::store::machines::local_machine(&store.sqlite)?.id,
         session,
         checkout,
         history,
         task: Some(MovedTask {
             task_id: task.id.clone(),
             identifier: task.identifier.clone(),
-            ownership_marker: crate::store::sqlite::task_ownership::marker(&claim)?,
-            graph: store.sqlite.task_graph_record(&task.id)?,
+            ownership_marker: loopflow_storage::sqlite::task_ownership::marker(&claim)?,
+            graph: crate::store::task_work::task_graph_record(&store.sqlite, &task.id)?,
             stopped,
             approval: store.sqlite.task_ship_approval(&task.id)?,
         }),
@@ -283,7 +282,7 @@ pub(crate) async fn sent_task_arrived(
         .get_task_by_issue(issue)
         .await?
         .ok_or_else(|| anyhow!("no Task {issue} on this Machine"))?;
-    let here = store.sqlite.local_machine()?.id;
+    let here = crate::store::machines::local_machine(&store.sqlite)?.id;
     Ok(store.sqlite.record_move_arrived(&task.id, &here, to)?)
 }
 
@@ -398,14 +397,15 @@ fn take(
 /// claim moves there. An unowned Task is claimed first; one `to` already owns
 /// has nothing to send.
 fn claim_for(store: &SqliteStore, task: &Task, to: &MachineId) -> Result<TaskOwnershipEntry> {
-    let owner = store
-        .task_ownership(&task.id)?
+    let owner = crate::store::ownership::task_ownership(store, &task.id)?
         .owner
         .and_then(|owner| owner.machine.id);
     if owner.as_ref() == Some(to) {
         bail!("{} already runs on {to}", task.identifier);
     }
-    Ok(store.begin_task_move(&task.id, to)?)
+    Ok(crate::store::ownership::begin_task_move(
+        store, &task.id, to,
+    )?)
 }
 
 /// Interrupt the Task so nothing starts again, then end each Graph still
@@ -512,7 +512,7 @@ fn checkpoint(
         crate::git::push_with_upstream(root, "origin", &branch, &|_| {})
             .with_context(|| format!("push {branch} before moving {name}"))?;
     }
-    let canonical = CanonicalRepo::discover(root)?;
+    let canonical = crate::repository::discover(root)?;
     Ok(MovedCheckout {
         repository_id: store
             .repository_id(&canonical.to_string())?
@@ -636,9 +636,11 @@ pub(crate) async fn receive(store: &SharedStore, moved: Move) -> Result<Option<L
     // Arrival acknowledges the conversation as well as the checkout. A failed
     // transcript import must leave the checked move available for retry.
     if let Some(task) = task {
-        store
-            .sqlite
-            .record_move_arrived(&task, &from, &store.sqlite.local_machine()?.id)?;
+        store.sqlite.record_move_arrived(
+            &task,
+            &from,
+            &crate::store::machines::local_machine(&store.sqlite)?.id,
+        )?;
     }
     Ok(received)
 }
@@ -661,7 +663,7 @@ async fn receive_move(store: &SharedStore, moved: Move) -> Result<Option<LfSessi
         (None, Some(checkout)) => check_out(&main, checkout)?,
         (None, None) => bail!("Session {} moved without its checkout", moved_session.id),
     };
-    let canonical = CanonicalRepo::discover(&cwd)?;
+    let canonical = crate::repository::discover(&cwd)?;
     let session = admit(store, moved_session, task.as_ref(), &cwd, &canonical).await?;
     let (Some(history), Some(provider)) = (&moved.history, moved_session.provider.as_deref())
     else {
@@ -757,9 +759,11 @@ pub(crate) fn checkout_of(
     );
     fs::create_dir_all(&root)?;
     crate::git::git_stdout(&root, &["clone", "-q", origin, &path.to_string_lossy()])?;
-    store
-        .sqlite
-        .bind_repository(&path.canonicalize()?.to_string_lossy(), repository)?;
+    crate::repository::location::bind_repository(
+        &store.sqlite,
+        &path.canonicalize()?.to_string_lossy(),
+        repository,
+    )?;
     Ok(path.canonicalize()?)
 }
 
@@ -773,9 +777,11 @@ async fn take_in_task(
 ) -> Result<Task> {
     let name = &moved.identifier;
     arriving_task(store, main, &moved.task_id, name).await?;
-    store
-        .sqlite
-        .ingest_ownership_marker(&moved.task_id, &moved.ownership_marker)?;
+    crate::store::ownership::ingest_ownership_marker(
+        &store.sqlite,
+        &moved.task_id,
+        &moved.ownership_marker,
+    )?;
     if let Some(checkout) = checkout {
         let source = crate::ops::task::remote::TaskSource {
             branch: checkout.branch.clone(),
@@ -794,7 +800,8 @@ async fn take_in_task(
         })?;
     }
     if let Some(graph) = &moved.graph {
-        store.sqlite.place_moved_task_graph(
+        crate::store::task_work::place_moved_task_graph(
+            &store.sqlite,
             &moved.task_id,
             graph,
             crate::journal::current_lf_process_id().as_ref(),
@@ -917,7 +924,7 @@ async fn admit(
         request: None,
         ready_summary: None,
         completed_at: None,
-        created_at: crate::store::rows::now_unix(),
+        created_at: loopflow_storage::rows::now_unix(),
     };
     let scope = match (&moved.primary, task) {
         (_, Some(task)) => PrimaryScope::Task(task.id.clone()),
@@ -925,10 +932,7 @@ async fn admit(
         (Some(MovedPrimary::Repository), None) => PrimaryScope::Repository(repo.clone()),
         (Some(MovedPrimary::Wave { wave_id }), None) => PrimaryScope::Wave(wave_id.clone()),
     };
-    let caller = crate::journal::current_lf_process_id();
-    let admitted = store
-        .sqlite
-        .ensure_primary_session(&scope, session, caller.as_ref())?;
+    let admitted = store.ensure_primary_session(&scope, session).await?;
     anyhow::ensure!(
         admitted.id == moved.id,
         "this Machine already runs its own Session {} for that scope; complete it, then move again",

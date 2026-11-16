@@ -1356,7 +1356,7 @@ async fn session_boundary(
         crate::journal::request::isolate(|| {
             let path = crate::store::default_db_path();
             anyhow::ensure!(path.exists(), "Machine registry is absent");
-            let store = crate::store::sqlite::SqliteStore::new(&path)?;
+            let store = crate::store::open_sqlite(&path)?;
             super::boundary::answer(&store, &boundary)
         })
     })
@@ -2498,10 +2498,10 @@ mod tests {
     #[test]
     fn typed_events_share_connection_order_survive_selection_and_stop_on_cancel() {
         with_empty_home(async {
-            use crate::work::task::TaskId;
             use loopflow_model::durable::{Author, WorkRef};
+            use loopflow_storage::work::task::TaskId;
             let path = crate::store::database_path_from_env().unwrap();
-            let store = crate::store::sqlite::SqliteStore::open_ephemeral(&path).unwrap();
+            let store = crate::store::opening::open_ephemeral(&path).unwrap();
             rusqlite::Connection::open(&path)
                 .unwrap()
                 .execute_batch(include_str!(
@@ -2743,14 +2743,16 @@ mod tests {
         with_empty_home(async {
             let path =
                 std::path::PathBuf::from(std::env::var_os("LF_HOME").unwrap()).join("loopflow.db");
-            let store = crate::store::sqlite::SqliteStore::open_ephemeral(&path).unwrap();
+            let store = crate::store::opening::open_ephemeral(&path).unwrap();
             let repo = loopflow_test_support::TestRepo::new();
             let task = loopflow_model::durable::TaskId::new();
             store
-                .create_task(&crate::work::task::NewTask {
-                    repository_id: store
-                        .ensure_repository(repo.path().to_str().unwrap())
-                        .unwrap(),
+                .create_task(&loopflow_storage::work::task::NewTask {
+                    repository_id: crate::repository::location::ensure_repository(
+                        &store,
+                        repo.path().to_str().unwrap(),
+                    )
+                    .unwrap(),
                     id: task.clone(),
                     project_id: None,
                     title: "Completed wait".into(),
@@ -3105,23 +3107,25 @@ mod tests {
     // ---- Work subscriptions over the test's Machine store ----
 
     /// The Machine store under the test's `LF_HOME`.
-    fn home_store() -> crate::store::sqlite::SqliteStore {
-        crate::store::sqlite::SqliteStore::open_ephemeral(
-            &crate::store::lf_home_dir().join("loopflow.db"),
-        )
-        .unwrap()
+    fn home_store() -> loopflow_storage::sqlite::SqliteStore {
+        crate::store::opening::open_ephemeral(&crate::store::lf_home_dir().join("loopflow.db"))
+            .unwrap()
     }
 
     /// A started (owned) Task in `repo`, so `state:open` selects it.
     fn create_task(
-        store: &crate::store::sqlite::SqliteStore,
+        store: &loopflow_storage::sqlite::SqliteStore,
         repo: &loopflow_test_support::TestRepo,
         title: &str,
-    ) -> crate::work::task::Task {
+    ) -> loopflow_storage::work::task::Task {
         let path = repo.path().canonicalize().unwrap();
         let task = store
-            .create_task(&crate::work::task::NewTask {
-                repository_id: store.ensure_repository(path.to_str().unwrap()).unwrap(),
+            .create_task(&loopflow_storage::work::task::NewTask {
+                repository_id: crate::repository::location::ensure_repository(
+                    store,
+                    path.to_str().unwrap(),
+                )
+                .unwrap(),
                 id: loopflow_model::durable::TaskId::new(),
                 project_id: None,
                 title: title.into(),

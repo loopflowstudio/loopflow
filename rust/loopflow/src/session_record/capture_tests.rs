@@ -1,3 +1,4 @@
+use crate::process::attachment;
 use std::collections::BTreeMap;
 use std::fs;
 
@@ -254,14 +255,14 @@ fn a_failed_terminal_receipt_still_closes_only_the_owned_provider() {
             let birth = crate::journal::process_started_at(pid)?.unwrap();
             store.record_agent_process_identity(&session, &attachment, pid, birth)?;
             let replacement = takeover.then(|| {
-                store
-                    .claim_session_attachment(
-                        &session,
-                        Some(&attachment),
-                        &store.test_lf_process(),
-                        false,
-                    )
-                    .unwrap()
+                attachment::claim_session_attachment(
+                    &store,
+                    &session,
+                    Some(&attachment),
+                    &store.test_lf_process(),
+                    false,
+                )
+                .unwrap()
             });
             // A directory at the receipt path makes the write fail independently
             // of the store that owns the still-running provider.
@@ -349,9 +350,9 @@ fn prepared_run_keeps_its_recorded_pr_instead_of_the_launching_pr() {
     let _ambient = crate::test_ambient::EnvGuard::new();
     let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
     let home = tempfile::tempdir().unwrap();
-    let original = crate::work::task::TaskPrId::new();
+    let original = loopflow_storage::work::task::TaskPrId::new();
     let mut step = crate::session_record::SessionGraphStep {
-        task_id: Some(crate::work::task::TaskId::new()),
+        task_id: Some(loopflow_storage::work::task::TaskId::new()),
         task_pr_id: Some(original.clone()),
         invocation_id: "invocation".into(),
         graph: "feature".into(),
@@ -365,7 +366,7 @@ fn prepared_run_keeps_its_recorded_pr_instead_of_the_launching_pr() {
     let id =
         crate::session_record::SessionRecorder::prepare_at(home.path(), prepared, None).unwrap();
     let (dir, _) = crate::session_record::resolve_manifest(home.path(), id.as_str()).unwrap();
-    step.task_pr_id = Some(crate::work::task::TaskPrId::new());
+    step.task_pr_id = Some(loopflow_storage::work::task::TaskPrId::new());
     let mut process = spec(home.path());
     process.graph = crate::session_record::SessionGraphMembership::Step(step);
     let context = crate::trace::PreparedTurnContext::from_prompts("system", "review");
@@ -428,12 +429,13 @@ fn helper_capture_admits_a_headless_conversation_with_its_input_and_outcome() {
 
     assert_eq!(after.id, session.id);
     assert_eq!(
-        crate::session_record::row_store(&capture.artifact_dir())
-            .unwrap()
-            .input_history(capture.artifact_key().as_str())
-            .unwrap()
-            .recorded_outcome
-            .as_deref(),
+        crate::store::sessions::input_history(
+            &crate::session_record::row_store(&capture.artifact_dir()).unwrap(),
+            capture.artifact_key().as_str()
+        )
+        .unwrap()
+        .recorded_outcome
+        .as_deref(),
         Some("failed")
     );
     assert!(after.completed_at.is_none());
@@ -957,7 +959,7 @@ fn continuation_resumes_the_saved_thread_on_a_fresh_agent_process() {
             Some(&next_attachment.provider_lf_process_id),
             next_attachment.lf_process_id.as_ref()
         );
-        assert!(store.session_connection(&session.id)?.is_none());
+        assert!(attachment::session_connection(&store, &session.id)?.is_none());
         assert!(store.agent_process_identity(&session.id)?.is_none());
         assert_ne!(next_attachment.token, attachment.token);
         let saved = crate::session_record::read_manifest(&next.artifact_dir()).unwrap();
@@ -1058,13 +1060,13 @@ fn continuation_publication_failure_keeps_reservation_without_settling_a_turn() 
 fn attached_session(
     ledger: &crate::journal::TestLedgerGuard,
 ) -> (
-    crate::store::sqlite::SqliteStore,
+    loopflow_storage::sqlite::SqliteStore,
     crate::process::SessionAttachment,
     std::process::Child,
     loopflow_model::id::LfProcessId,
 ) {
     let path = ledger.home().join("loopflow.db");
-    let store = crate::store::sqlite::SqliteStore::open_ephemeral(&path).unwrap();
+    let store = crate::store::opening::open_ephemeral(&path).unwrap();
     store.test_session("conversation", &crate::session_record::new_artifact_key());
     let first = loopflow_model::id::LfProcessId::new();
     let second = loopflow_model::id::LfProcessId::new();
@@ -1102,9 +1104,8 @@ fn attached_session(
         .unwrap(),
     )
     .unwrap();
-    let attachment = store
-        .claim_session_attachment("conversation", None, &first, true)
-        .unwrap();
+    let attachment =
+        attachment::claim_session_attachment(&store, "conversation", None, &first, true).unwrap();
     (store, attachment, process, second)
 }
 
@@ -1159,7 +1160,9 @@ fn resume_dead_attachment_ends_its_agent_before_starting_another() {
     let _ = agent_process.wait();
     assert_ne!(replacement.agent_process_id, attachment.agent_process_id);
     assert_eq!(replacement.provider_lf_process_id, next);
-    assert!(store.session_connection("conversation").unwrap().is_none());
+    assert!(attachment::session_connection(&store, "conversation")
+        .unwrap()
+        .is_none());
     assert!(store
         .agent_process_identity("conversation")
         .unwrap()

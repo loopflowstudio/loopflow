@@ -116,7 +116,7 @@ one frame, with accepted and confirmed times beside it.
 
   The section rule in Reopen/Claim/Unassign is the only derivation the client
   does; a covering reading always wins over it.
-  `apply(to: WorkViewPlan)`, `apply(to: RoadmapSnapshot)`,
+  `apply(to: Reading<WorkViewPlan>)`, `apply(to: [RoadmapTask], readAt:, wave:, inventory:)`,
   `apply(to: [SessionRecord])` return patched copies; counts read the patched
   rows. A change applies to a reading unless the reading's `readAt` is at or
   past every domain in its answer. It is removed once every live reading of
@@ -225,95 +225,50 @@ one frame, with accepted and confirmed times beside it.
 
 ## Slices
 
-All in one PR; deepest first. Status as of the first implement pass
-(2026-11-16).
+All in one PR; deepest first. Status after the second implement pass
+(2026-11-16), which built the concept review's seven directions
+(`54b1ad9a87` has their text).
 
 1. **Machine — built.** `journal::request::{after_reply, answer_first}`;
    `sync_after_save` and the claim's `assert_assignee` defer inside a served
-   write. `Revisions` (storage) on `response`/`error` and `read_at` on frames;
-   `request_id` with `command_answers` (`server/answers.rs`, one migration);
-   protocol 7/7, schema and DTO fixtures (`error_written.json`, `task_ship`
-   carries a request ID). Pi extension and hook fixtures send `request_id`.
-2. **Shared Swift — partly built.** Protocol 7 mirror, `Revisions`,
-   `ServerLink.write(_:requestID:)`, `ServerLink.lostLink`, `RegistryQuery.change`,
-   `PendingChanges` (WorkViewPlan states/removal, Session titles), `Notice`,
-   `NoticeCenter`, `NoticeView`, `WorkFrame.readAt`. Not built: `Reading<Value>`
-   replacing `WorkReading`/`TaskListReading`/`MobileTaskReading`;
-   `SavedReadings`; link state (connected/blip/away). Blip is covered only by
-   Desktop's resend loop on a lost link; away (controls disabled after ~10 s,
-   condition Notice) does not exist.
-3. **Desktop — partly built.** Complete, Abandon, Reopen, Claim, Unassign and
-   Move go through `PendingChanges`; next-Task rule in the click; counts read
-   the patched planning rows (removal only); refusals post the Notice; Start,
-   Auto-Ship, Stop Auto-Ship post "requested" (Undo on Auto-Ship); Wave click
-   selects in the click. Deleted: `TaskRunDraft`, `taskRunDrafts`,
-   `performTaskAction`, `abandoningTaskIDs`, the acting/"Updating Task…"
-   gating, `ShipNotice*`, `dashboardError`, **Retry completion**. Left:
-   Session rename in the click (still awaits its answer); planning-row patches
-   for owner/section/Wave (`RoadmapTask` is immutable; only removal applies);
-   the planning-rows bridge in `sidebarTaskRows`; `CreationRecoveryView`;
-   `WavePlanningNotice`/`expandedNotices`; the ~50 inline load-failure sites.
-4. **Phone — partly built.** Swipe Complete, toolbar Start/Auto-Ship/Stop
-   Auto-Ship, Notice overlay, list failures as a Notice with Try again,
-   `read_at` decoded. Left: `TaskFeedTests` (needs a `RemoteMobileClient`
-   stand-in), resend on a lost link, `Reading`/`SavedReadings`.
-5. **Journey — not started.**
+   write. `Revisions` on `response`/`error`, `read_at` on frames; `request_id`
+   with `command_answers` (`server/answers.rs`, one migration); protocol 7/7.
+2. **Shared Swift — built except Desktop's saved `task_list`.**
+   `PendingChanges` (one per Machine) owns the change path: `make` and
+   `request` send under the request ID through the app's send closure, resend
+   while `ServerLink.lostLink` holds, post the Notice, and hold the link
+   (connected, blip, away after 10 s; away posts one condition Notice to every
+   reporting `NoticeCenter`; `acceptsChanges` greys controls). Planning rows
+   take every command (`RoadmapTask` fields are `internal(set)`): Complete
+   marks a row done, Abandon removes it, Move adds the row to the target Wave
+   from the inventory. `Reading<Value>` (value, readAt, failure, `yields(to:)`)
+   replaces `WorkReading`, `TaskListReading`, `MobileTaskReading`.
+   `SavedReadings` keeps wire bytes per (Machine, subscription); the phone
+   uses it. `NoticeCenter` holds conditions by key under one event.
+3. **Desktop — mostly built.** Every command in the table goes through
+   `PendingChanges.thisMachine` (shared by windows; tests get their own).
+   Start, Auto-Ship and Stop Auto-Ship post "requested" in the click. Session
+   rename closes its edit and patches titles (`sessions` reads `sessionsRead`
+   through the patches). The Work observation feeds the link; Task controls
+   disable while away. Outside-the-plan is a condition Notice per open Wave
+   with Copy recovery. `CreationRecoveryView` is gone: `CreationRecovery`
+   posts condition Notices and opens its inspector from the action
+   (`CreationNotices`). Left: Claim's owner (Desktop has no local person
+   identity; the section moves, the owner waits for the reading); the refusal
+   Notice's "· Show" action; the planning-rows bridge in `sidebarTaskRows` and
+   saving `task_list` through `SavedReadings`; the ~50 inline load-failure
+   sites; suppressing per-part failure Notices while away (only the phone does).
+4. **Phone — built except tests.** `TaskFeed` holds `Reading<[RepositoryTasks]>`
+   from `SavedReadings` and changes through `PendingChanges` (so it resends);
+   controls disable while away. Left: `TaskFeedTests`, which needs a
+   `ServerCarrier` stand-in speaking hello/subscribe/frames; the shared
+   behavior is covered by `PendingChangesTests` on macOS.
+5. **Journey — not started** (demo step).
 
-Checks run: `cargo test -p loopflow --lib server::` (90 ok),
-`-p loopflow-storage --lib command_answers revisions::` ok,
-`-p loopflow-execution --lib journal::request:: machine::wire::` ok,
-`--test integration dto_fixtures documented_commands::` ok, clippy and fmt
-clean; `swift test --filter 'PendingChangesTests|WorkModelTests|WorkNavigationTests|DesktopHeadlessTests|ServerProtocolTests|DTOFixtureTests|TaskGraphProofTests|WorkObservation|WorkCLISubscriptionTests|DesktopPerformanceTests|DashboardWorkspaceTests'`
-ok; `scripts/test_ios.py` MobileTaskCreationTests + MachinePairingTests ok.
-
-## Concept review (2026-11-16): next implement direction
-
-What the built slices show: each app writes its own send → answer → refuse
-switch (`WorkModel.change`/`request`/`send`, `TaskFeed` in
-`LoopflowiOS/TaskListView.swift:56-107`), and only Desktop resends. A reading's
-revisions live in a side dictionary (`WorkModel.readAt[part]`) mirrored again
-inside `PendingChanges.readings`. Planning rows take removal only, so Wave
-counts ignore Move, Claim, Unassign and Reopen. The direction below follows
-from the brief's model; none of it is a new product choice.
-
-1. **One change path, in shared Swift.** `PendingChanges` makes the change:
-   `make(_ command:, issue:, verb:, write:)` adds the patch, sends under the
-   request ID (resending while the link is lost), records the answer or the
-   refusal and posts the Notice. `request(_ name:, write:, undo:)` does the
-   same for Start, Auto-Ship and Stop Auto-Ship. The send is a closure the app
-   passes in (`query.change` / `client.change`). Delete `WorkModel.change`,
-   `request`, `send`, `Sent`, and `TaskFeed`'s copies; the phone gains resend
-   by deletion.
-2. **"Requested" in the click.** Start, Auto-Ship and Stop Auto-Ship post
-   "LOO-5 Auto-Ship requested" before the write goes out; a refusal posts over
-   it ("couldn't be requested: …"). Today both apps wait for the answer.
-3. **`Reading<Value>` carries `readAt`.** `PendingChanges.read(_:)` and
-   `apply(to:)` take readings; `WorkModel.readAt` goes, and so do
-   `WorkReading`, `TaskListReading` and `MobileTaskReading`.
-4. **Planning rows take the whole table.** `apply(to: [RoadmapTask], readAt:)`
-   returns patched copies for every command (disposition, owner, Wave,
-   section), not just removal; `RoadmapTask` gets a copy-with for those fields.
-   `shown(_ tasks:)` and `removes(task:at:)` go. Counts read these rows.
-5. **Link state lives with `PendingChanges`, per Machine.** One object per
-   Machine (Desktop: shared by every window on that Machine, not per
-   `WorkModel`) holds the changes, the link (connected, blip, away) and the
-   resend. Away disables change controls and posts one condition Notice;
-   per-part read failures are not posted while away.
-6. **Notices: one event over standing conditions.** `NoticeCenter` keeps
-   conditions by key and at most one event. It shows the event, else the
-   newest condition; when the event expires the condition shows again.
-   "A new Notice replaces the current one" holds for events only. Without
-   this, an event posted while away hides "away" for good.
-7. **A Task outside the plan is a condition, not an event.** The board posts
-   one condition Notice per Wave while its reading lists `unavailableTasks`:
-   "LOO-7 is outside the current plan · Copy recovery" (several: "3 Tasks are
-   outside the current plan · Copy recovery", copying every recovery). The
-   reason goes in the action's help. Cleared when the reading no longer lists
-   them or the board closes. This replaces "once per board load" above.
-
-Unchanged and still to build: Session rename in the click, `SavedReadings`,
-the planning-rows bridge in `sidebarTaskRows`, `CreationRecoveryView`, the
-inline load-failure sites, `TaskFeedTests`, the journey.
+Checks: `swift test --filter 'PendingChangesTests|WorkModelTests|WorkNavigationTests|SessionRenameTests|WaveStandupTests|DesktopHeadlessTests|WorkCLISubscriptionTests|DashboardWorkspaceTests|SessionRefreshTests|DTOFixtureTests|CreationSubmissionTests|SessionControlsTests|SessionsStoreTests|WorkDestinationTests'`
+passed; `scripts/test_ios.py -only-testing:LoopflowiOSTests/MobileTaskCreationTests`
+19 passed; `documented_commands::` 4 passed. `WorkNavigationProofTests` (display) edited for rename in the
+click, not run here: gate/CI. Rust unchanged since the first pass.
 
 ## Acceptance at gate (headless)
 

@@ -15,17 +15,22 @@
   Machine (and the reverse) with the existing incompatible message.
 - `command_answers` vs `creation_receipts`: two request-ID memories until
   LOO-932 folds creation into the generic one. Flag for LOO-932.
-- `Reading.readAt`: the first pass kept revisions beside readings
-  (`WorkModel.readAt[part]`, `PendingChanges.read(subscription, at:)`).
-  Concept review item 3 puts `readAt` on `Reading<Value>` and deletes the
-  side dictionary.
 - An answer whose `revisions` is empty (changed nothing, or the CLI transport
   that cannot say) drops its patch at once rather than at the next reading.
-- `PendingChanges` is per `WorkModel` (one per window) today; concept review
-  item 5 makes it one per Machine, so a second window sees the change in the
-  click too.
-- Resend: Desktop resends a change under its request ID while
+- Resend: `PendingChanges` resends a change under its request ID while
   `ServerLink.lostLink` holds (disconnected, unanswered, POSIX), backing off to
   4 s, with no cap. A Machine that never returns keeps the patch until quit.
+- Planning rows: Complete marks the row done (it stays in Done lists, as the
+  table says) rather than removing it; Abandon removes it.
+- Claim does not show the owner in the click: Desktop has no local person
+  identity to fill `TaskOwner`. The section moves; the owner arrives with the
+  reading. Docs still say "your name as owner".
+- Rename refusal closes the edit and the typed name is gone; the Notice says
+  why. Before, the typed name stayed in the field with its error.
+- Desktop counts any end of the Work observation as the link lost; the next
+  frame returns it.
+- `WorkModel.change`/`request` stay as two-line private helpers binding the
+  window's Notice and checkpoint to `PendingChanges.make`/`request`; the
+  send/answer/refuse switch lives only in `PendingChanges`.
 - `outcome_unknown` without revisions counts as refused: the row returns and
   the Notice carries the message; the next reading shows what happened.

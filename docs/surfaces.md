@@ -143,7 +143,10 @@ LOO-4 couldn't be completed: its PR #12 is open · Show
 A Notice is one line at the bottom of the window with at most one action. A new
 one replaces the last; it goes after six seconds. Auto-Ship's Notice carries
 **Undo**, which stops Auto-Ship. A read that fails also raises a Notice, once,
-and the view keeps what it last showed.
+and the view keeps what it last showed. Some Notices stand until what they say
+ends: the Machine away, a Wave with Tasks outside its plan (**Copy recovery**),
+a new Task saved before its Machine answered. They wait under the six-second
+ones.
 
 If the Machine stops answering for a few seconds, keep working: changes still
 show at once and go out when it answers, each sent once. After about ten

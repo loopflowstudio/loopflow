@@ -504,8 +504,8 @@ The toolbar above the workspace shows its Work ancestry. On the left it drills
 Wave → Task → Session: Wave and Task crumbs return to their details; the Task's
 issue ID links to Linear. The Task crumb keeps the exact conversation name
 without a sibling picker. Repository/Wave crumbs can choose among their Sessions. The pencil renames the Session in place through `lf session
-rename`; the shown name is the shared readback, and a rejected name stays in the
-field with its error. A remote Graph Session's name lives on its Machine and is not
+rename`; the new name shows when you save, and a rejected name returns with a
+Notice saying why. A remote Graph Session's name lives on its Machine and is not
 renamed here. Outside Task navigation, the Session shows its Graph membership
 beside the name. Task navigation keeps that provenance in inspection. On the right sit
 the Task's read-only worktree location and the Activity glyph.
@@ -884,6 +884,10 @@ reading carries the revisions it read at. `PendingChanges` patches shown rows
 until a reading at or past the answer's revisions arrives; it drops a patch on a
 refusal, never by comparing values or on a timer. Each change carries a request
 ID; a repeat within a day returns the stored answer without running again.
+`PendingChanges` is one per Machine (Desktop's windows share one), sends each
+change under its request ID, resends while the link is lost and holds the link
+state: a blip keeps changes in memory, away greys out change controls and
+stands one condition Notice. Readings are `Reading<Value>`, carrying `readAt`.
 Task creation (including Session adoption) and new Session threads additionally
 have creation receipts. `CreationSubmissions` saves the exact submitted payload,
 request ID, original Machine and protocol version before sending; the payload

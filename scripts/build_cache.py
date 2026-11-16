@@ -13,26 +13,20 @@ import tomllib
 VERBATIM_ENV_DEPS = "CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH,LOOPFLOW_BUILD_SOURCE_ROOT"
 
 
-def worktree_roots(repo: Path) -> list[str]:
+def worktree_roots(repo: Path) -> set[str]:
     result = subprocess.run(
         ["git", "worktree", "list", "--porcelain", "-z"],
         cwd=repo,
         check=True,
         capture_output=True,
     )
-    current = subprocess.run(
-        ["git", "rev-parse", "--show-toplevel"],
-        cwd=repo,
-        check=True,
-        capture_output=True,
-    ).stdout.removesuffix(b"\n")
-    roots = {str(Path(os.fsdecode(current)).resolve())}
+    roots = set()
     for field in result.stdout.split(b"\0"):
         if field.startswith(b"worktree "):
             path = Path(os.fsdecode(field[len(b"worktree ") :]))
             if path.exists():
                 roots.add(str(path.resolve()))
-    return sorted(roots)
+    return roots
 
 
 def refresh(repo: Path, config: Path, settings: dict | None = None) -> dict[str, str]:
@@ -50,11 +44,11 @@ def refresh(repo: Path, config: Path, settings: dict | None = None) -> dict[str,
             path = Path(old)
             if path.exists() and old not in roots:
                 try:
-                    roots.extend(worktree_roots(path))
+                    roots.update(worktree_roots(path))
                 except subprocess.CalledProcessError:
                     continue
         selected = dict(saved if settings is None else settings)
-        selected["basedirs"] = sorted(set(roots))
+        selected["basedirs"] = sorted(roots)
         encoded = json.dumps(selected, indent=2) + "\n"
         if not config.exists() or config.read_text() != encoded:
             with tempfile.NamedTemporaryFile(mode="w", dir=config.parent, delete=False) as output:

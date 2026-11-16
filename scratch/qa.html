@@ -96,8 +96,26 @@ embedded database bytes match. All 16 cases pass, including semantic Task-record
 refresh and runtime identity. The private daemon stopped and disposable sources/targets/cache were removed. Receipts:
 <code>/tmp/loo650-post-qa-cache-proof</code>.</p>
 
+<h2>7. Second pass, November 16: cache inventory and a help edit</h2>
+<p>Head 208c68858. The only source change since the report above is the uncommitted compress edit to
+<code>scripts/build_cache.py</code>, which drops the extra <code>git rev-parse</code> and keeps roots as a set.
+All checks below used a copy of the Machine's real <code>~/.cache/loopflow/sccache.json</code> (57 roots) under a private
+<code>XDG_CACHE_HOME</code>, so the real inventory was not written.</p>
+<ul>
+<li>The committed and edited scripts, run from <code>rust/</code> on identical copies, wrote byte-identical inventories and the same
+four <code>SCCACHE_*</code> variables. The inventory still lists this worktree and the main checkout.</li>
+<li>Outside any Git repository it prints <code>build cache roots: … exit status 128.; using the existing configuration</code> and still runs the command, as before.</li>
+<li><code>scripts/dev-lf --version</code>: the first run compiled only <code>loopflow</code> (the new HEAD changes its embedded revision, 15.0 s) and printed
+<code>lf 0.16.0+208c68858.dirty</code>. The second run's Cargo step was fresh in 0.10 s, while the whole run took 3.4 s: the section 5 first-exec delay.</li>
+<li>I changed <code>lf scratch</code>'s help text in <code>lf/mod.rs</code>. The build compiled only <code>loopflow</code> (13.4 s) and <code>lf help scratch</code> showed the edit.
+Reverting it rebuilt only <code>loopflow</code> again (13.7 s). Storage, execution and the foundation crates stayed fresh. Machine load was about 9.</li>
+<li><code>test_build_cache.py</code> and <code>test_dev_lf.py</code>: three pass. Ruff check, Ruff format and <code>git diff --check</code> pass.</li>
+</ul>
+<p>I did not repeat the fresh-worktree cross-root probe: no lower-crate source changed since the 16-case run in section 6.</p>
+
 <h2>What works, what I couldn't reach, what's still wrong</h2>
-<p><b>Works:</b> no-op, unrelated-Git-write and packed-branch sibling-commit builds are fresh; lower-crate edits still cascade; the CLI listing, Task creation,
+<p><b>Works:</b> no-op, unrelated-Git-write and packed-branch sibling-commit builds are fresh; a command-help edit rebuilds only the application;
+lower-crate edits still cascade; the compressed inventory refresh matches the previous output; the CLI listing, Task creation,
 command Graph and server protocol behave as on main; Swift protocol fixtures resolve.</p>
 <p><b>Not reached:</b> the hosted Desktop window; the iOS build that reads <code>ios.yml</code>; the
 full <code>tests/e2e/capture_history.py</code> run; and the gate/CI matrix.</p>

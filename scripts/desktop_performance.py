@@ -256,6 +256,14 @@ def _cli_volume(directory: Path) -> dict:
             key: sum(p["samples"][-1][key] for p in processes) if processes else None
             for key in counters
         },
+        "sql_profile_ms": sum(p["samples"][-1]["sql_ms"] for p in processes)
+        if processes
+        and all(
+            isinstance(p["samples"][-1].get("sql_ms"), (int, float))
+            and math.isfinite(p["samples"][-1]["sql_ms"])
+            for p in processes
+        )
+        else None,
         "processes": processes,
         "errors": errors,
         "limits": [
@@ -618,9 +626,9 @@ def _prepare_native_fixture(output: Path, cli: Path) -> Path:
     with sqlite3.connect(database_uri, uri=True) as database:
         session_ids = [row[0] for row in database.execute("SELECT id FROM agent_sessions")]
     records = [
-        json.loads(
-            _fixture_cli(cli, ["session", "card", session_id, "--json"], repo, environment)
-        )["session"]
+        json.loads(_fixture_cli(cli, ["session", "card", session_id, "--json"], repo, environment))[
+            "session"
+        ]
         for session_id in session_ids
     ]
     if len(records) != 1 or len(records[0]["task_ids"]) != 1:
@@ -1203,6 +1211,8 @@ def _run_native(
             if code != 0 or outcome:
                 metadata.update(outcome=outcome or "failed", exit_code=code)
                 return
+            if not _measurement_preflight(output, metadata):
+                return
             command = _native_command(test_filter, environment, optimized)
             bundle_index = command.index("--test-bundle-path") + 1
             metadata["command"] = command[bundle_index - 2 :]
@@ -1379,6 +1389,8 @@ def _run(
                     metadata.update(outcome=outcome, exit_code=code)
                 if code != 0 or outcome:
                     raise subprocess.CalledProcessError(code, BUILD_COMMAND)
+                if not _measurement_preflight(output, metadata):
+                    raise RuntimeError(metadata["reason"])
                 command = _test_command(test_filter, environment, optimized)
                 metadata["command"] = command
                 bundle = Path(command[2])
@@ -1392,7 +1404,7 @@ def _run(
                 metadata["exit_code"] = code
                 if outcome:
                     metadata["outcome"] = outcome
-            except (OSError, subprocess.SubprocessError) as error:
+            except (OSError, RuntimeError, subprocess.SubprocessError) as error:
                 metadata.setdefault("outcome", "unavailable")
                 metadata.setdefault("exit_code", None)
                 metadata["reason"] = str(error)
@@ -1549,11 +1561,117 @@ def _terminal_feedback(output: Path, cli: Path, baseline: Path | None, mounted: 
     return result
 
 
+def _measurement_preflight(output: Path, metadata: dict) -> bool:
+    code = _preflight(output / "preflight")
+    report = json.loads((output / "preflight/preflight.json").read_text())
+    metadata["preflight"] = report
+    if code:
+        metadata.update(outcome="unavailable", exit_code=None, reason=report["reason"])
+    return code == 0
+
+
+def _host_load(processes: str) -> dict:
+    # ps reports 100% per core. Keep executable names, never command arguments.
+    rows = []
+    for line in processes.splitlines():
+        fields = line.strip().split(maxsplit=1)
+        if len(fields) != 2:
+            continue
+        try:
+            cpu = float(fields[0])
+        except ValueError:
+            continue
+        if math.isfinite(cpu) and cpu >= 0:
+            rows.append((cpu, Path(fields[1]).name))
+    return {
+        "cpu_percent": round(sum(cpu for cpu, _ in rows), 2),
+        "top": [
+            {"cpu_percent": cpu, "executable": name} for cpu, name in sorted(rows, reverse=True)[:8]
+        ],
+    }
+
+
+def _preflight(output: Path, seconds: int = 60) -> int:
+    """Observe this host before a trial; never interrupt unrelated processes."""
+    output.mkdir(parents=True, exist_ok=False)
+    rows = []
+    reason = None
+    for _ in range(seconds):
+        try:
+            processes = subprocess.check_output(["ps", "-A", "-o", "pcpu=,comm="], text=True)
+        except (OSError, subprocess.SubprocessError):
+            reason = "Host CPU observation unavailable; no trial started"
+            break
+        load = _host_load(processes)
+        load.update(time=datetime.now(timezone.utc).isoformat(), load_average=os.getloadavg())
+        rows.append(load)
+        # This is the external load before starting the benchmark. Deliberate
+        # five/twenty-agent fixture load belongs to a later measurement window.
+        if load["cpu_percent"] > 10:
+            reason = (
+                "Background process CPU exceeds 0.1 core; "
+                "trial rejected without stopping other work"
+            )
+            break
+        if len(rows) < seconds:
+            time.sleep(1)
+    if seconds < 60 and reason is None:
+        reason = "Diagnostic sample only; fewer than 60 quiet samples"
+    native = None
+    if reason is None:
+        # These APIs only inspect access; neither requests a permission dialog.
+        probe_command = [
+            "xcrun",
+            "swift",
+            "-e",
+            "import AppKit; import CoreGraphics; import ApplicationServices; "
+            r'print("display=\(NSScreen.screens.count) '
+            r'capture=\(CGPreflightScreenCaptureAccess()) input=\(AXIsProcessTrusted())")',
+        ]
+        probe_log = output / "native-probe.log"
+        try:
+            with probe_log.open("w") as log:
+                code, outcome = _run_process(probe_command, os.environ.copy(), log, timeout=60)
+            capabilities = probe_log.read_text().strip()
+            native = {"exit_code": code, "outcome": outcome, "capabilities": capabilities}
+            if code or outcome or "display=0" in capabilities or "display=" not in capabilities:
+                reason = "Native display preflight unavailable; no permissions requested"
+        except OSError as error:
+            native = {"exit_code": None, "reason": str(error)}
+            reason = "Native capability probe unavailable; no permissions requested"
+    report = {
+        "schema": 1,
+        "host": platform.node(),
+        "os": platform.platform(),
+        "logical_cpus": os.cpu_count(),
+        "samples": rows,
+        "native": native,
+        "status": "rejected" if reason else "ready",
+        "reason": reason,
+        "quiet_threshold_cpu_percent": 10,
+        "limits": [
+            "ps CPU is a recent average, not a frame-time measurement",
+            "Thermal state, swap and whole-trial background load still need capture",
+            "Capture/input trust applies to the probe identity; the signed app may differ",
+            "Mounted controls and owned-window bitmap capture need no external "
+            "HID/screen-capture access",
+        ],
+    }
+    _write(output / "preflight.json", report)
+    print(output / "preflight.json")
+    return 1 if reason else 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     commands = parser.add_subparsers(dest="command", required=True)
+    preflight = commands.add_parser(
+        "preflight", help="Observe load and native access on this host; never stops other work"
+    )
+    preflight.add_argument("--output", type=Path, required=True)
+    preflight.add_argument("--seconds", type=int, default=60)
     feedback = commands.add_parser(
         "terminal-feedback",
         help="Prepare paired terminal fixtures and optional contained native diagnostics",
@@ -1656,6 +1774,10 @@ def main() -> int:
     )
     volume.add_argument("directory", type=Path)
     args = parser.parse_args()
+    if args.command == "preflight":
+        if args.seconds < 1:
+            parser.error("--seconds must be positive")
+        return _preflight(args.output.resolve(), args.seconds)
     if args.command == "terminal-feedback":
         return _terminal_feedback(
             args.output.resolve(), args.lf.resolve(), args.baseline, args.mounted

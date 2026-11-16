@@ -39,7 +39,7 @@ cargo test -p loopflow-execution --lib skills::catalog::   # workspace libraries
 ```
 
 Before the daemon has restarted, `status` says so instead: `this checkout loads
-at the daemon's next idle exit (idle 41s of 600s)`.
+at the daemon's next idle exit`, exit 3.
 
 The measured half is `scripts/benchmarks/crate-rebuild/results/loo-921.html`: a
 table of new-worktree-to-passing-test and repeated-edit medians per mode.
@@ -139,11 +139,12 @@ Unmeasured until this Task; the receipts must show it.
   no-op; `--revision` moves the pin.
 - `refresh` is today's inventory function, unchanged in behavior.
 - `status` prints wrapper path and whether it is the pin, the daemon on the
-  pinned socket (pid, executable, uptime; idle time is unmeasured), roots the daemon loaded
-  against roots on disk and whether this checkout is among them, Rust hit and
-  miss counts, cache size against its cap. `--json` for the harness. Exit 0 when
-  this checkout's root is loaded by the pinned daemon; 3 when it waits for idle;
-  1 when the wrapper is missing or not the pin.
+  pinned socket (pid, executable, uptime, configured idle timeout), roots the
+  daemon loaded against roots on disk and whether this checkout is among them,
+  Rust hit and miss counts, cache size against its cap. It refreshes the list
+  first. `--json` for the harness. Exit 0 when this checkout's root is loaded by
+  the pinned daemon; 3 when it is listed and waits for an idle exit; 1 when the
+  wrapper is missing or not the pin.
 
 The revision constant lives once, in `build_cache.py`.
 
@@ -196,7 +197,9 @@ plus the gzipped raw receipts, alongside LOO-650's.
   crates then skip the cache) with the measured numbers.
 - `SCCACHE_IDLE_TIMEOUT`: stays at sccache's 600 s unless the Machine check shows
   a registered root still unloaded when its first Cargo command starts; then
-  `install` sets the smallest sampled value that would have loaded it.
+  `install` sets the smallest sampled value that would have loaded it. **This
+  rule fired** (Concept review below); the value waits on the pinned-daemon gap
+  sample.
 - Concurrent-worktree capacity: reported as unmeasured. The report carries
   per-loop peak tree RSS and CPU-seconds as inputs, not a budget.
 
@@ -269,6 +272,10 @@ Not touched: `.cargo/` in the repository (none exists), CI workflows,
 
 ## Remaining implementation acceptance
 
+- Concept-review steps 1–4 and 6 below: pinned-daemon gap sample,
+  `SCCACHE_IDLE_TIMEOUT` from it, `status` without the unknown-only idle fields
+  and refreshing first, report limit on the capped shared cache. Step 5
+  (`--help` text) is done.
 - Three warm paired cohorts (2, 3 and 4), then `results/loo-921.{json,html}` and
   gzipped raw receipts, default selection and measured documentation.
 - The production shared-daemon new-root check after a natural idle exit. The
@@ -438,8 +445,7 @@ first Cargo command starts"). Direction, none of it needing a Rust build:
    second. After this, exit 3 has the one documented meaning and nobody runs
    `refresh` by hand. `refresh` stays as the hook's and `dev-lf`'s verb; drop it
    from the README's command block.
-5. `build_cache.py`'s docstring (its `--help` description) still describes only
-   the refresh; name the three verbs.
+5. Done: `build_cache.py --help` names the three verbs.
 6. The report states the limit its isolated cache hides: the shared cache sat at
    its 10 GiB cap during this work, so a warm row is what a surviving entry
    costs, not a promise that the entry survived.

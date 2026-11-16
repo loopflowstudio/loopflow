@@ -1,4 +1,4 @@
-"""Refresh derived worktree roots before a developer build; never restart sccache."""
+"""Install the pinned Machine sccache, refresh its roots, report its status."""
 
 import argparse
 import fcntl

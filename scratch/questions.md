@@ -23,9 +23,8 @@ Assumptions taken in kickoff; each is reversible by re-running `install`.
   invocations did not overlap; per-command counters stay exact.
 - **Three cohorts as the floor.** About 2.5 hours serial on this Machine. Five
   if background load allows.
-- **Idle timeout** stays 600 s unless slice 2 shows a root still unloaded at its
-  first build. Kickoff observation: the stock daemon had been up 55 minutes
-  under shared use, so no 600 s gap occurred in that time.
+- **Idle timeout**: kickoff kept 600 s unless a root stayed unloaded at its
+  first build. That happened; see the concept review entry below.
 - **Idle telemetry revision (2026-11-16):** pinned `ServerInfo` exposes basedirs
   and counters, but no last-request timestamp. `status` reports idle seconds as
   null with a reason rather than inventing a countdown. Natural-idle probes

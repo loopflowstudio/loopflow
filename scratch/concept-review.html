@@ -2,74 +2,86 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-650 · execution ownership</title>
+<title>LOO-650 · concept review</title>
 <style>
-:root{color-scheme:light dark;font:16px/1.45 system-ui,sans-serif}
-body{max-width:760px;margin:2rem auto;padding:0 1rem 2rem}
-header{font-size:.78rem;color:light-dark(#555,#bbb)}
-h1{font-size:1.6rem;line-height:1.2}h2{font-size:1.05rem;margin:1.2rem 0 .4rem}
-p{margin:.6rem 0}code{font:.85em ui-monospace,monospace;overflow-wrap:anywhere}
-aside{border-left:3px solid light-dark(#96471c,#edb58b);padding-left:1rem}
+:root{color-scheme:light dark;font:16px/1.5 system-ui,sans-serif;background:#faf9f6;color:#242424}
+body{max-width:760px;margin:2rem auto;padding:0 1rem 2rem}header{font-size:.78rem;color:#555}
+h1{font-size:1.6rem;line-height:1.2}h2{font-size:1.08rem;margin:1.3rem 0 .4rem}
+p{margin:.65rem 0}code{font:.85em ui-monospace,monospace;overflow-wrap:anywhere}
+aside{border-left:3px solid #96471c;padding-left:1rem}
 table{border-collapse:collapse;width:100%;font-size:.86rem}
-th,td{text-align:left;vertical-align:top;padding:.5rem .3rem;border-bottom:1px solid light-dark(#ccc,#555);overflow-wrap:anywhere}
-li{margin:.4rem 0}
+th,td{text-align:left;vertical-align:top;padding:.5rem .3rem;border-bottom:1px solid #ccc;overflow-wrap:anywhere}
+li{margin:.5rem 0}a{color:#285b9c}
+@media(prefers-color-scheme:dark){:root{background:#191919;color:#eee}header{color:#bbb}th,td{border-color:#555}aside{border-color:#edb58b}a{color:#9cc6ff}}
 @media(max-width:520px){body{margin-top:1rem}table{font-size:.76rem}}
 </style>
-<header>LOO-650 · concept-review · November 15, 2026<br>
-Reviewed checkout: <code>e3a159b6ee</code>. Built from <code>scratch/loo-650.md</code>,
-<code>scratch/publishing-discussion.md</code>, <code>scratch/measure.html</code>,
-<code>Cargo.toml</code>, <code>engine/{skill,task}.rs</code>,
-<code>task_graph.rs</code>, <code>lf/commands/list.rs</code>,
-<code>read_stream.rs</code>, <code>server/events.rs</code>,
-<code>linear/request_log.rs</code>, <code>ops/recovery.rs</code>,
-<code>build_info.rs</code> and rebuild-probe README.</header>
+<header>LOO-650 · concept-review · November 16, 2026<br>
+Reviewed checkout: <code>226ad44904</code>. Built from
+<code>scratch/{loo-650,publishing-discussion}.md</code>, <code>scripts/testing.md</code>,
+<code>scripts/{dev-lf,build_cache.py}</code>, execution <code>{Cargo.toml,README.md}</code>,
+execution <code>src/{build_identity,task_graph,engine/skill}.rs</code>, application
+<code>src/{build_info,lf/navigation,lf/commands/list}.rs</code>, and
+<code>scripts/benchmarks/crate-rebuild/results/loo-650.json</code>.</header>
 <main>
-<h1>Iterate to implement the execution compiler unit.</h1>
-<aside><strong>Biggest mismatch.</strong> Edit command help → rebuild the same
-library that owns execution. Native and Machine code now have domain owners,
-but remain in that compiler unit. The next pass must create the independent crate.</aside>
-<p><strong>Built:</strong> foundation and storage crates, shared operations,
-native/Machine module separation, root upkeep and dirty provenance verification.
-<strong>Proposed:</strong> <code>loopflow-execution</code> below CLI/server adapters.
-<strong>Measured:</strong> cross-root library reuse; whole-build timing inconclusive.</p>
+<h1>Advance to demo/review with the measured tradeoff visible.</h1>
+<aside><strong>Biggest mismatch resolved.</strong> Command help previously rebuilt
+execution. It now rebuilds the application alone. Saved-record edits still reach
+storage, execution and application: 2.6% slower median elapsed, with 38.7% less
+largest-process RSS.</aside>
+<p><strong>Existing on this branch:</strong> independent execution crate, typed
+adapter inputs, application-supplied checkout identity, cache-root upkeep and
+isolated debugging. <strong>Proposed changes:</strong> none. Technical demo/review,
+gate/CI, native packaging and merged verification remain.</p>
 <h2>Actions → concepts → APIs</h2>
 <table>
-<tr><th>Action / concept</th><th>Existing</th><th>Proposed</th></tr>
-<tr><td>Edit help / command adapter</td><td>Application and execution compile together</td><td>CLI → typed engine operation → execution crate; unchanged execution reused</td></tr>
-<tr><td>List skills / command catalogue</td><td><code>engine::skill::list</code> calls CLI listing</td><td>Clap supplies typed catalogue and invocation values; shared listing composes definitions</td></tr>
-<tr><td>Resume a saved Graph / landing semantics</td><td><code>landing_name</code> parses argv with Clap</td><td>Canonical parser supplies semantic answer; saved Graph and cursor stay unchanged</td></tr>
-<tr><td>Claim remote work / ownership route</td><td><code>engine::task</code> calls CLI routing</td><td>Domain routing and SSH preparation below adapters; uncertain replies keep receipts</td></tr>
-<tr><td>Watch a Task / reading occurrences</td><td>Shared reader imports server observer and wire events</td><td>Observer/event values beside readings; server keeps envelope and framing</td></tr>
-<tr><td>Run cached code / build identity</td><td>Consumers read embedded application build constants</td><td>Acquisition supplies running-build values; reused library cannot substitute another root</td></tr>
+<tr><th>Action / concept</th><th>Before extraction</th><th>Implemented</th></tr>
+<tr><td>Edit help / adapter</td><td>Execution compiles too</td><td>Clap and rendering stay in application; unchanged execution is reusable</td></tr>
+<tr><td>List skills / catalogue</td><td>Shared listing calls CLI</td><td>Adapter supplies entries and spellings to <code>engine::skill::list</code></td></tr>
+<tr><td>Resume Graph / landing semantics</td><td>Shared selector imports parser</td><td>Clap-backed <code>command_merges</code> supplies <code>landing_name</code>'s classifier</td></tr>
+<tr><td>Run cached code / identity</td><td>Shared code embeds application provenance</td><td>Application entry supplies <code>BuildIdentity</code>; lower code embeds no checkout identity</td></tr>
+<tr><td>Build worktree / cache</td><td>Root list needs upkeep</td><td><code>dev-lf</code> → <code>build_cache.refresh</code> → own target; roots apply after natural daemon idle</td></tr>
+<tr><td>Debug source / local artifacts</td><td>Cached debug paths can name another checkout</td><td><code>scripts/dev-lf --isolated-build --version</code> builds in <code>target/isolated</code> without wrappers/cache</td></tr>
 </table>
-<h2>One start, one receipt, the same conversation</h2>
-<p>Terminal or Desktop starts the same Task. Lose the reply after registration:
-the Process, creation key, native thread and pending input survive. Ending the
-request cannot end or repeat detached work. Resume retains the captured Graph;
-aliases, abbreviations and global flags still identify landing commands.</p>
-<p>A watch that falls behind requests a fresh reading. An unavailable scope keeps
-its previous membership. Rental recovery retains its effects and warnings;
-command labels follow invocation attribution. No new dispatcher, saved identity,
-Graph field or application-services framework.</p>
-<h2>Build and recover</h2>
-<p><code>scripts/dev-lf --version</code> refreshes roots before building. The
-existing daemon reloads on natural idle exit; bare Cargo does not refresh roots.
-Cache failure permits direct compilation. For local debug sources:
-<code>scripts/dev-lf --isolated-build --version</code>.</p>
-<p>The experimental cache remains a prerequisite for demonstrated cross-root
-reuse. Root upkeep alone validates neither production cache selection nor speedup.</p>
-<h2>Show next</h2>
-<p>Build execution alone with no application test dependency. Keep parser/help and
-served dispatch fixtures above it. Compare real command-help, execution and
-saved-record edit closures, including linking; then validate the selected cache
-and run five alternating matched baseline/candidate cohorts. Report median/range,
-CPU, RSS and cache receipts. Technical demo/review and merged verification remain.</p>
+<h2>Build, fail, recover</h2>
+<p><code>scripts/dev-lf --version</code> refreshes roots and builds this checkout.
+New roots may miss until the existing daemon exits idle. Ordinary Cargo remains
+available; direct compilation can use <code>RUSTC_WRAPPER= RUSTC_WORKSPACE_WRAPPER= cargo build -p loopflow --bin lf</code>.
+Explicit <code>SCCACHE_CONF</code> stays caller-owned. Targets stay separate;
+this change installs no Machine wrapper or configuration and restarts no shared daemon.</p>
+<p>Lose a reply after remote Task registration: creation receipts, Process,
+native thread and pending input survive. Request loss does not repeat detached
+work. Saved Graphs retain aliases, abbreviations, global flags and definition
+kinds through the canonical classifier. Unavailable readings retain membership;
+a fallen-behind watch resynchronizes. No new persisted Graph field or recovery
+lifecycle is introduced.</p>
+<p><strong>Counterexamples retained:</strong> a cache hit must report the running
+checkout, never its seed root. Deleted seed sources still require isolated source
+debugging. Dev-feature unification must not select a second fixture ledger.
+Cached libraries alone establish neither native packaging nor installed recovery.</p>
+<h2>Five alternating pairs</h2>
+<table>
+<tr><th>Median elapsed, seconds</th><th>Baseline → candidate</th></tr>
+<tr><td>Fresh worktree, warm cache</td><td>479.905 → 442.639</td></tr>
+<tr><td>Command help</td><td>64.172 → 27.412</td></tr>
+<tr><td>Execution</td><td>63.801 → 57.488</td></tr>
+<tr><td>Saved Task record</td><td>63.783 → 65.471</td></tr>
+</table>
+<p>All 42 builds, twelve runtime identity checks and six catalogue checks passed.
+All five candidate fresh roots retrieved lower libraries. Command edits compiled
+application; execution edits compiled execution/application; record edits compiled
+storage/execution/application. The selected experimental cache passed; stock
+0.19.0 did not provide the tested cross-root reuse.</p>
+<p><a href="../scripts/benchmarks/crate-rebuild/results/loo-650.html">Full measurements</a>
+include ranges, CPU and compiler/cache receipts. CPU excludes the cache daemon;
+RSS is the largest timed process. No Machine concurrency budget or total-Machine
+CPU saving is established.</p>
 <h2>Review questions</h2>
 <ol>
-<li>Is a product choice open? <strong>No.</strong> Existing commands, saved data,
-protocol and recovery define the cut.</li>
-<li>What should loop-or-next do? <strong>Iterate to implement.</strong> The design
-now names the crate and its remaining adapter inputs; no code changed in this review.</li>
+<li>Does this review require a product decision? <strong>No.</strong> The design
+permits the measured tradeoff and keeps command, data and recovery behavior.</li>
+<li>What should loop-or-next do? <strong>Advance.</strong> No design change or open
+product choice. Show command feedback, saved-record cost, root upkeep after idle,
+correct-checkout execution and isolated debugging at demo/review.</li>
 </ol>
 </main>
 </html>

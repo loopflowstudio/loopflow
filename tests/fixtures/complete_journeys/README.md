@@ -95,7 +95,13 @@ The ownership plan's Planned row is retained exactly as found, not corrected
 retroactively. State reports Create/Reopen pending and native timing unmeasured.
 
 `recovered-receipts.json` records the parent provider interruption and outer
-completed receipt. Child submission/settlement provenance and the four review
-assessments remain missing; these partial artifacts do not close the instruction
-demonstration. The active plan in `scratch/complete-journeys.md` names the work
+completed receipt. The retained child transcripts show the supplied implement/kickoff bodies
+being read (including follow-up reads after truncation), followed by edits and
+checks. State records implementation completion at ordinal 57, then another
+turn starts at 58 with no retained review outcome. Ownership ends in commentary
+at ordinal 62 without completion. Its lookup behavior passes, while Graph
+definitions and native exports remain pending; the historical Planned row is
+not the current coverage assessment. Ownership reporting/settlement and all
+four independent review assessments remain open. These runs do not compare old
+and new instructions or establish a prompting-quality gain. The active plan in `scratch/complete-journeys.md` names the work
 remaining. Completed patches and this README must stay out of fresh trial inputs.

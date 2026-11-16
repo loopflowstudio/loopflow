@@ -61,7 +61,7 @@ open and edit the body here. PR #1933 is open at
 prompt goldens; reconcile overlapping goldens without changing steer semantics.
 PR #1946 is open at `41509271e1c52ece4f0fb1187e968fe989ad4015`; its product
 scope and execution remain outside this change. No comments or mutations were
-made to those PRs. Realign rechecked all three heads: #1843 and #1933 are
+made to those PRs. The earlier realign rechecked all three heads: #1843 and #1933 are
 unchanged; #1946 moved. This does not establish its current implementation or
 performance. The local `origin/main` reference remains `9cafc410ee`; no new
 upstream source changes are present in this checkout.
@@ -116,8 +116,9 @@ symbols or exclusive tests are retired by this prose change.
 ## Finite migration coverage
 
 Skill-body rows, instruction delivery and executable fixture journeys are
-verified. Interrupted demonstration artifacts are recovered; instruction-use provenance and
-review/continuation outcomes remain open;
+verified. Child transcripts establish instruction reads and a completed state
+implementation turn; ownership settlement and independent review/continuation
+outcomes remain open;
 gate acceptance remains later. Paths below are relative to the
 builtin skill directory unless prefixed otherwise.
 
@@ -130,7 +131,7 @@ builtin skill directory unless prefixed otherwise.
 | Bounded review | `concept-review.md`; direct, pursue and pursue-auto | Replace unconditional broad repeat review; keep changed-decision review and open-choice handling | Unchanged contract ends briefly; changed model gets full review | Implemented |
 | Legible progress and continuation | `realign.md`, `loop-or-next.md`; Graph readers | Amend existing output, no new ledger/protocol | Repairs, scope discovery and shrinking coverage distinguishable; no false Advance | Implemented |
 | Instruction delivery | `skills/catalog.rs`, `skills/mod.rs`, `tests/golden_prompt.rs`, affected fixtures | Reuse existing selection/export paths; adjust tests only for changed delivery | Repo override, builtin fallback, assembled prompt and standalone export agree | Preview, export and goldens pass |
-| Behavioral demonstration | Two bounded LOO-650/906-derived scenarios | Add small reproducible scenario inputs/results, no eval framework | Changed instructions used to produce an early journey, honest remaining work, recovery and no unauthorized action | Authored replay passes; partial trial artifacts recovered, acceptance pending |
+| Behavioral demonstration | Two bounded LOO-650/906-derived scenarios | Add small reproducible scenario inputs/results, no eval framework | Changed instructions used to produce an early journey, honest remaining work, recovery and no unauthorized action | Authored replay passes; instruction reads verified; state turn completed; ownership settlement and review cases pending |
 
 ## This slice and demo
 
@@ -151,16 +152,16 @@ fixtures for every changed builtin, isolated preview/export inspection, and
 two executable fixture journeys. No runtime protocol or Graph changes.
 Remaining verification is recorded below; gate owns later suite acceptance.
 
-**Next bounded outcome:** finish the interrupted demonstration record. The
-previous implementation prepared and changed both disposable repositories;
-repeat neither implementation merely because its results were omitted from
-this plan. Recover the child submissions and completion receipts if available,
-reconcile ownership's stale coverage row, and run the four review/continuation
-inputs without their expected answers. If instruction-use provenance cannot be
-recovered, rerun only the affected scenario from its retained initial tree,
-with completed sources and scripted repairs withheld. Retain submitted context,
-patches, checks, remaining coverage and review outcomes. This is a bounded
-demonstration, not a benchmark or permission to operate the motivating Tasks.
+**Next bounded outcome:** finish the missing demonstration outcomes. Both child
+transcripts show implement/kickoff reads and executable consumer work; state has
+an implementation completion event. Do not repeat the state implementation.
+Ownership's checks close the lookup behavior, but its turn has no recorded completion and
+its own plan still says Planned. Finish that reporting demonstration from the
+retained changed tree with the original instructions; retain the new submission
+and settlement separately from the interrupted record. Run the four retained
+review/continuation inputs independently, without the expected answers or
+completed solutions. Retain their context and outcomes. No skill repair is
+justified until an observed instruction failure identifies one.
 
 Recovered on 2026-11-16 UTC from `/tmp/loo915-agents-18lrhucp/`:
 
@@ -177,18 +178,36 @@ Recovered on 2026-11-16 UTC from `/tmp/loo915-agents-18lrhucp/`:
 - `agent_trials/*/recovered/` retains the exact patches, plans, reports where
   present, and saved checks. Both disposable input files match the retained
   inputs byte-for-byte; all source hashes still match current effective files.
-  These are recovered filesystem artifacts, not yet verified child transcripts.
+  The child transcripts now connect the instruction reads, edits and checks;
+  they do not establish every later review outcome.
 - `lf session history --json session_7d0e30c793f4436eab4ce222853085cd`
   records provider completion as **interrupted**, while the outer terminal
   receipt says **completed**. Selected receipts are retained in
-  `agent_trials/recovered-receipts.json`. Neither proves child settlement or
-  instruction use. No review.txt was found in either disposable repository.
+  `agent_trials/recovered-receipts.json`. Those parent receipts do not settle
+  the children. No review.txt was found in either disposable repository.
 
-The scripted `run.py` replay remains fixture validation only: it hashes skills
-but applies fixed repairs. Recovered patches and check logs add observed work,
-but do not by themselves close the instruction demonstration. No observed
-instruction failure yet warrants changing a skill: interruption can explain the
-unfinished ownership report. Full-target acceptance remains unchanged.
+Reconciliation of the retained child transcripts on 2026-11-16 UTC:
+
+- Both `recovered/provenance.json` hashes match their source vendor records.
+  All retained effective-source hashes still match this checkout. Tool output
+  ordinal 18 and the follow-up read (ownership 26; state 23) together contain
+  every nonempty line of the supplied implement and kickoff bodies. Initial
+  output truncation therefore did not leave those instructions unread.
+- State transcript ordinal 57 records `task_complete` for implementation;
+  ordinal 58 starts another turn with no retained completion or review answer.
+  The implementation settled; the later review did not. Ownership ends at
+  ordinal 62 with commentary after passing checks, without a completion event.
+- Current ownership coverage is **lookup complete in the fixture; Graph
+  definitions and native exports pending**. The recovered Planned row remains
+  unchanged as a historical artifact. Correcting this account cannot count as
+  the interrupted child's final report.
+
+The scripted `run.py` replay remains fixture validation only: it applies fixed
+repairs. The child tool transcripts now establish instruction reads followed by
+consumer work, but neither case compares against old instructions. No measured
+prompting gain follows. Ownership interruption can explain its unfinished
+report; no observed instruction failure yet warrants changing a skill.
+Full-target acceptance remains unchanged.
 
 Demo: with the branch-built binary, `lf --context implement` shows the
 repository's journey instructions; the same preview in an isolated repository
@@ -280,16 +299,17 @@ pass counts or native responsiveness.
 - `cargo fmt --all -- --check` and fixture `cargo fmt --manifest-path tests/fixtures/complete_journeys/ownership/Cargo.toml -- --check` — pass.
 - `git diff --check` and `lf context` — pass; memory and scratch remain under both limits.
 
-Remaining demonstration: instruction-use provenance, ownership's final coverage
-account and independent review/continuation outcomes, as detailed above.
+Remaining demonstration: ownership reporting/settlement and the four independent
+review/continuation outcomes. Instruction reads and state implementation
+settlement are now verified; current ownership coverage is reconciled above.
 Remaining gate work: catalog precedence and standalone-export library checks,
 affected CI suites, clippy and package extraction per scripts/testing.md.
 No product decision or new scope is needed. Native responsiveness and fewer
 production passes remain unmeasured.
 
-Realign reused saved check results and inspected both recovered patches; no
+Realign reused saved check results and inspected the retained child transcripts; no
 runtime tests were rerun. The selected Wave memory was read in full and has no
 immediate child memories. Metrics files were not reread: no metric claim changed.
 
-- Artifact recovery/hash comparison — both submitted-input files match retained inputs; all effective-source hashes match. Saved checks pass; trial acceptance remains incomplete.
+- Transcript/hash inspection — raw child hashes and effective sources match; implement/kickoff read coverage verified, state implementation completion recorded, ownership completion absent. Saved checks reused; review acceptance remains incomplete.
 - `git diff --check` and `lf context` — pass after reconciliation; memory and scratch fit both targets.

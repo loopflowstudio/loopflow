@@ -45,10 +45,15 @@ fix; Infrastructure owns coordinated release, installation and installed proof.
   old skill bodies too: source hashes beside a passing run do not establish
   instruction use. Interrupted trial directories later yielded consumer patches
   and passing checks; one coverage table remained stale and review outcomes were
-  absent. The parent provider receipt says interrupted while its outer receipt
-  says completed. Retain partial artifacts, recover child submission/settlement
-  before claiming instruction use, and repeat only missing demonstrations.
-  Completed solutions and expected review answers stay out of trial inputs.
+  absent. Recovered child tool transcripts show implement/kickoff reads,
+  including follow-up reads after truncation, then consumer edits and checks.
+  State records implementation completion before an unfinished later turn;
+  ownership stops in commentary without completion. The parent provider receipt
+  says interrupted while its outer receipt says completed: neither settles each
+  child turn. Check turn-level records before repeating work; keep historical
+  stale plans intact and reconcile current coverage separately. Completed
+  solutions and expected review answers stay out of fresh trial inputs.
+  Instruction use in these cases does not establish a gain over old instructions.
 - A complete representative journey can leave named migration rows pending.
   Headless list consumers establish neither native responsiveness nor fewer
   production implementation passes. Keep those limits beside the result rather

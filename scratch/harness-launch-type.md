@@ -315,3 +315,7 @@ behave exactly as before.
 - `docs/dev/codebase.md` "Add a provider"
 
 The README's account paragraphs are left for LOO-913 (#1953) to delete, to avoid a conflict.
+
+Both describe the finished design, none of which exists yet (no `Launch`,
+`Admitted`, `Placement` or `launch_matrix` in the tree). They must not merge
+ahead of slice 4; implement corrects them to whatever it actually builds.

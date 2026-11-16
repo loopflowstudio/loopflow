@@ -8,12 +8,12 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 
-use loopflow::id::WaveId;
 use loopflow::lf::commands::waves::{Evidence, RoadmapSnapshot};
-use loopflow::store::sqlite::SqliteStore;
+use loopflow_execution::store::sqlite::SqliteStore;
 #[cfg(target_os = "macos")]
-use loopflow::work::task::{TaskEventKind, TaskPr, TaskPrId};
-use loopflow::work::wave::Wave;
+use loopflow_execution::work::task::{TaskEventKind, TaskPr, TaskPrId};
+use loopflow_execution::work::wave::Wave;
+use loopflow_model::id::WaveId;
 
 const PROJECT: &str = "95159066-9098-4d0b-8903-01459dc7ec14";
 
@@ -71,13 +71,14 @@ impl Machine {
     fn at(dir: tempfile::TempDir) -> Self {
         let repo = dir.path().join("repo");
         std::fs::create_dir_all(&repo).unwrap();
-        let store = loopflow::store::open_sqlite(&dir.path().join("loopflow.db")).unwrap();
+        let store =
+            loopflow_execution::store::open_sqlite(&dir.path().join("loopflow.db")).unwrap();
         let wave = Wave::new(
             WaveId::new(),
             "product".into(),
             repo.canonicalize().unwrap().display().to_string(),
         );
-        loopflow::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
+        loopflow_execution::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
         Self { dir, store, wave }
     }
 
@@ -152,7 +153,7 @@ impl Machine {
             created_at: now,
             updated_at: now,
         };
-        loopflow::store::ownership::place_task(
+        loopflow_execution::store::ownership::place_task(
             &self.store,
             &task.id,
             task.worktree.as_ref().unwrap(),
@@ -188,9 +189,9 @@ impl Machine {
         // This fixture registers Work before creating Git. Enroll that known
         // legacy checkout explicitly, just as recovery does for released Work.
         let id = self.store.repository_id(self.wave.repo()).unwrap().unwrap();
-        loopflow::repository::location::reconcile(
+        loopflow_execution::repository::location::reconcile(
             &self.store,
-            &loopflow::repository::discover(self.repo()).unwrap(),
+            &loopflow_execution::repository::discover(self.repo()).unwrap(),
             Some(&id),
             None,
         )
@@ -583,7 +584,7 @@ fn an_offline_comment_reaches_the_open_task_status() {
     };
     assert!(thread(&subscription, 0).pending_sync.is_empty());
     let output = home.run(&["task", "comment", "FIX-1", "Saved during outage", "--json"]);
-    let saved: loopflow::work::task::comment::TaskComments =
+    let saved: loopflow_execution::work::task::comment::TaskComments =
         serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(saved.pending_sync, [saved.comments[0].id.clone()]);
     let saved = loopflow::lf::commands::task_row::TaskThread::from(saved);
@@ -611,19 +612,20 @@ fn task_view_keeps_workflow_checkout_and_conversations_after_live_updates() {
     home.plan(1);
     let checkout = home.start(1);
     let task = home.store.task_by_issue("FIX-1").unwrap().unwrap();
-    crate::store::task_work::take_up_task_graph(
+    loopflow_execution::store::task_work::take_up_task_graph(
         &home.store,
         &task.id,
-        &crate::task_graph::CapturedGraph {
+        &loopflow_execution::task_graph::CapturedGraph {
             name: "feature".into(),
             steps: vec![],
         },
     )
     .unwrap();
-    let session = home
-        .store
-        .test_session("task-view", &crate::session_record::new_artifact_key());
-    crate::store::sessions::bind_session(
+    let session = home.store.test_session(
+        "task-view",
+        &loopflow_execution::session_record::new_artifact_key(),
+    );
+    loopflow_execution::store::sessions::bind_session(
         &home.store,
         session.id.as_str(),
         session.captured,
@@ -690,11 +692,11 @@ fn task_view_keeps_workflow_checkout_and_conversations_after_live_updates() {
         assert!(!screen.contains("No workflow taken up"), "{screen}");
     };
     check(&screens.recv_timeout(Duration::from_secs(30)).unwrap());
-    crate::store::sessions::rename_session(
+    loopflow_execution::store::sessions::rename_session(
         &home.store,
         session.id.as_str(),
         "Updated conversation",
-        crate::session::TitleSource::Human,
+        loopflow_execution::session::TitleSource::Human,
     )
     .unwrap();
     let deadline = Instant::now() + Duration::from_secs(30);
@@ -711,8 +713,8 @@ fn task_view_keeps_workflow_checkout_and_conversations_after_live_updates() {
 
 #[test]
 fn peer_planning_receipts_reach_an_open_watch() {
-    use loopflow::planning_git::PlanningDestination;
-    use loopflow::store::PeerPlanningStatus;
+    use loopflow_execution::planning_git::PlanningDestination;
+    use loopflow_execution::store::PeerPlanningStatus;
 
     let home = Machine::new();
     let subscription = home.subscribe(&["planning", "status"]);
@@ -830,13 +832,13 @@ fn planning_runs_git_per_repository_not_per_wave() {
             format!("gone-{index}"),
             gone.display().to_string(),
         );
-        loopflow::work::wave::bootstrap::upsert_wave(&home.store, &wave).unwrap();
+        loopflow_execution::work::wave::bootstrap::upsert_wave(&home.store, &wave).unwrap();
         let sibling = Wave::new(
             WaveId::new(),
             format!("sibling-{index}"),
             home.wave.repo().into(),
         );
-        loopflow::work::wave::bootstrap::upsert_wave(&home.store, &sibling).unwrap();
+        loopflow_execution::work::wave::bootstrap::upsert_wave(&home.store, &sibling).unwrap();
     }
     let grown = planning_git_commands(home.path());
 

@@ -48,9 +48,15 @@ impl Ssh {
         let machine = destination.shell_task(TASK);
         success(source.command(&["machine", "id"]));
         let source_store =
-            loopflow::store::open_sqlite(&source.home.path().join("loopflow.db")).unwrap();
-        loopflow::store::machines::add_machine(&source_store, &machine, "fixture", "fixture")
-            .unwrap();
+            loopflow_execution::store::open_sqlite(&source.home.path().join("loopflow.db"))
+                .unwrap();
+        loopflow_execution::store::machines::add_machine(
+            &source_store,
+            &machine,
+            "fixture",
+            "fixture",
+        )
+        .unwrap();
         let root = source.home.path();
         for name in ["host", "client", "unauthorized"] {
             let mut command = Command::new("ssh-keygen");

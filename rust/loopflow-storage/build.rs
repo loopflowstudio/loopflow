@@ -21,28 +21,8 @@ fn main() {
         .expect("write canonical authority fixture");
     println!("cargo:unmerged={}", unmerged.join(","));
     if let Some(root) = root {
-        for reference in ["refs/remotes/origin/main", "packed-refs", "shallow"] {
-            let output = std::process::Command::new("git")
-                .args(["rev-parse", "--git-path", reference])
-                .current_dir(root)
-                .output()
-                .expect("locate Git reference");
-            assert!(output.status.success(), "locate Git reference {reference}");
-            let path = PathBuf::from(
-                String::from_utf8(output.stdout)
-                    .expect("UTF-8 Git path")
-                    .trim(),
-            );
-            let path = if path.is_absolute() {
-                path
-            } else {
-                root.join(path)
-            };
-            let existing = path
-                .ancestors()
-                .find(|path| path.exists())
-                .expect("Git directory exists");
-            println!("cargo:rerun-if-changed={}", existing.display());
+        for path in migration_build::reference_watches(root) {
+            println!("cargo:rerun-if-changed={}", path.display());
         }
     }
 }

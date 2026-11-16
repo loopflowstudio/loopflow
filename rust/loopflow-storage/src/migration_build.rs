@@ -156,6 +156,45 @@ pub fn merged_order(git_root: &Path, directory: &Path) -> Vec<String> {
     order
 }
 
+/// The Git files whose change can move `origin/main` or its history. A
+/// missing file is watched through its nearest existing parent, but never the
+/// Git directory itself: Cargo scans a directory recursively, so every object
+/// any worktree writes would rebuild storage and everything above it.
+pub fn reference_watches(git_root: &Path) -> Vec<PathBuf> {
+    let mut watches = Vec::new();
+    for reference in ["refs/remotes/origin/main", "packed-refs", "shallow"] {
+        let output = Command::new("git")
+            .args(["rev-parse", "--git-path", reference])
+            .current_dir(git_root)
+            .output()
+            .expect("locate Git reference");
+        assert!(output.status.success(), "locate Git reference {reference}");
+        let path = PathBuf::from(
+            String::from_utf8(output.stdout)
+                .expect("UTF-8 Git path")
+                .trim(),
+        );
+        let path = if path.is_absolute() {
+            path
+        } else {
+            git_root.join(path)
+        };
+        let git_dir = path
+            .ancestors()
+            .nth(Path::new(reference).components().count())
+            .expect("Git directory")
+            .to_path_buf();
+        if let Some(existing) = path
+            .ancestors()
+            .take_while(|ancestor| *ancestor != git_dir)
+            .find(|ancestor| ancestor.exists())
+        {
+            watches.push(existing.to_path_buf());
+        }
+    }
+    watches
+}
+
 // Both source locations contribute to one first-addition history. A relocation
 // must not give an existing slug a new position in the upgrade frontier.
 fn migration_directories(relative: &Path) -> Vec<PathBuf> {
@@ -191,7 +230,7 @@ mod tests {
     use std::path::Path;
     use std::process::Command;
 
-    use super::{apply_catalog, merged_order, order_catalog, CatalogEntry};
+    use super::{apply_catalog, merged_order, order_catalog, reference_watches, CatalogEntry};
 
     fn write(directory: &Path, name: &str, sql: &str) {
         std::fs::write(directory.join(format!("{name}.sql")), sql).unwrap();
@@ -282,6 +321,32 @@ mod tests {
         assert_eq!(
             merged_order(&root, &root.join("migrations")),
             ["second", "first"]
+        );
+    }
+
+    #[test]
+    fn reference_watches_never_include_the_shared_git_directory() {
+        let repo = tempfile::tempdir().unwrap();
+        let root = repo.path().join("main");
+        std::fs::create_dir(&root).unwrap();
+        let root = root.canonicalize().unwrap();
+        git(&root, &["init", "--initial-branch=main"]);
+        git(&root, &["config", "user.email", "test@loopflow.studio"]);
+        git(&root, &["config", "user.name", "Test"]);
+        git(&root, &["commit", "--allow-empty", "-m", "initial"]);
+        git(&root, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
+        let worktree = repo.path().join("feature");
+        git(&root, &["worktree", "add", worktree.to_str().unwrap()]);
+        let common = root.join(".git");
+
+        assert_eq!(
+            reference_watches(&worktree.canonicalize().unwrap()),
+            [common.join("refs/remotes/origin/main")]
+        );
+        git(&root, &["pack-refs", "--all"]);
+        assert_eq!(
+            reference_watches(&root),
+            [common.join("refs/remotes"), common.join("packed-refs")]
         );
     }
 

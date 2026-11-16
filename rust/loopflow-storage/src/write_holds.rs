@@ -137,6 +137,8 @@ fn call_site() -> String {
                 "<loopflow::",
                 "loopflow_storage::",
                 "<loopflow_storage::",
+                "loopflow_execution::",
+                "<loopflow_execution::",
             ]
             .iter()
             .any(|prefix| name.starts_with(prefix))

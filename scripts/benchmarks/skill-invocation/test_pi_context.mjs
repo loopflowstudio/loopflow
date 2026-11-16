@@ -20,8 +20,8 @@ try {
   writeFileSync(callback, `#!/bin/sh\ncat '${sourceFile}'\n`, { mode: 0o700 });
   process.env.LF_BIN = callback;
   process.env.LF_CONTEXT_DELIVERY = "fixture";
-  const source = readFileSync(new URL("../../../rust/loopflow/src/harness/context_pi.mjs", import.meta.url), "utf8");
-  const server = readFileSync(new URL("../../../rust/loopflow/src/harness/server_connection.js", import.meta.url), "utf8");
+  const source = readFileSync(new URL("../../../rust/loopflow-execution/src/harness/context_pi.mjs", import.meta.url), "utf8");
+  const server = readFileSync(new URL("../../../rust/loopflow-execution/src/harness/server_connection.js", import.meta.url), "utf8");
   const path = join(root, "extension.mjs");
   writeFileSync(path, `const spec = ${JSON.stringify({ native: false, executable: callback })};\n${source}\n${server}`);
   const hooks = new Map();

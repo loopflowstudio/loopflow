@@ -133,7 +133,7 @@ so compilation cannot outlast its process-liveness fixtures.
 ## Implement: one focused test
 
 ```bash
-cargo test -p loopflow --lib skills::catalog::          # one library module
+cargo test -p loopflow-execution --lib skills::catalog::          # one library module
 cargo test -p loopflow --test integration context_tests:: # one integration module
 cargo test -p loopflow --test golden_prompt              # one standalone binary
 uv run pytest python/tests/test_gate_bounded.py          # one Python file
@@ -146,7 +146,7 @@ resume settings (`test(run::launch_policy_tests::)`), Task run and checkout
 previews (`test(ops::task::explain::tests::)`) and Machine dispatch and
 ownership (`test(ssh::dispatch_tests::) | test(task_ownership::tests::) | test(store::ownership_lifecycle_tests::)`) run
 as library rows
-(`cargo nextest run -p loopflow --lib -E '<filter>'`); run those before the
+(`cargo nextest run -p loopflow -p loopflow-execution --lib -E '<filter>'`); run those before the
 surface's full-Machine tests. The lists are in
 [the Rust tests README](../rust/loopflow/tests/README.md#decision-rows-and-full-machine-tests).
 
@@ -273,11 +273,23 @@ without `test-support`, then `cargo test -p loopflow --lib --no-run` with its
 dev dependency. Application acquisition and lifecycle tests stay above storage;
 prepared SQL invariants and migration checks stay in the storage crate.
 
-Cargo rebuilds changed libraries and their dependents. An edit to Task shipping
-rebuilds the application; unchanged lower-level libraries can be reused. Changes
-to a shared library also rebuild its callers. Binaries and test executables
-still require compilation and linking even when library compilations hit the
-cache. Use debug builds for local verification; never build `--release` to test.
+Cargo rebuilds changed libraries and their dependents. Command help or rendering
+rebuilds `loopflow`; execution and Task shipping edits rebuild `loopflow-execution`
+and `loopflow`; saved-record edits rebuild storage and both callers. Unchanged
+lower libraries can be reused. Binaries and test executables still compile and
+link even when library compilations hit the cache. Use debug builds for local
+verification; never build `--release` to test.
+
+Execution fixtures first compile with `cargo test -p loopflow-execution --lib --no-run`
+independently of the application. Its dev-only `test-support` feature exposes
+shared fixtures and inspection hooks to application tests. CLI parsing, server
+dispatch, help and presentation tests remain in `loopflow`.
+
+Application provenance watches the selected branch's reflog and existing refs,
+so a commit on a sibling branch leaves a packed application branch fresh.
+Without a branch reflog, a packed branch conservatively watches its ref parent
+until a commit creates a loose ref; sibling commits can then relink the application.
+Storage owns the `origin/main` watch and propagates catalogue changes to callers.
 
 Each worktree keeps its own target directory. Cargo serializes commands sharing
 one target directory, so run one Cargo command at a time in each worktree. Do
@@ -292,8 +304,8 @@ use sccache.
 
 Cross-worktree reuse needs sccache with Rust basedir normalization and verbatim
 environment-dependency tracking. Version 0.19.0 does not provide that reuse.
-The cache configuration must list each worktree's absolute root in
-`SCCACHE_BASEDIRS`; listing only their shared parent is insufficient. Use
+The cache configuration must list each worktree's absolute root in `basedirs`
+(or `SCCACHE_BASEDIRS`); listing only their shared parent is insufficient. Use
 `SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS` to keep checkout identity values such as
 `CARGO_MANIFEST_DIR`, `CARGO_MANIFEST_PATH` and `LOOPFLOW_BUILD_SOURCE_ROOT`
 verbatim when compiled code reads them.
@@ -302,13 +314,23 @@ Cache hits can retain another checkout's absolute debug-source paths. Use the
 isolated build above when those paths no longer resolve. The
 [crate rebuild probe](benchmarks/crate-rebuild/README.md) records source paths
 alongside runtime-identity checks. Use the isolated build for source debugging.
-Automatic cross-root reuse still needs shared-server root upkeep.
+`scripts/dev-lf` refreshes the derived worktree inventory before building.
 
-Use one machine-wide server for a shared local cache. Root configuration takes
-effect when that server starts; apply root changes when builds are idle. A new
-worktree can compile with cache misses until the server picks up its root. Do
-not restart the shared server during another build or run separate servers
-against the same local cache.
+Use one machine-wide server for a shared local cache. Before a developer build,
+`scripts/build_cache.py` reads `git worktree list --porcelain -z` and writes
+`~/.cache/loopflow/sccache.json` (under `XDG_CACHE_HOME` when set). Other settings
+follow the Machine's default sccache file. The current canonical root is included, and inventories from other repositories are retained.
+The script selects that file for the build and keeps checkout environment
+dependencies verbatim. It never stops or restarts the daemon: refreshed roots
+apply after its normal idle shutdown, when the next build starts it. Until then,
+a new root can compile with cache misses. Each worktree still owns its target.
+An explicit `SCCACHE_CONF` stays under its caller's control.
+
+Ordinary Cargo uses the Machine's configuration and whichever shared server is
+running; it does not run this inventory refresh. The isolated developer build
+bypasses it. Neither path installs a wrapper or changes the Machine's Cargo
+configuration. The [root upkeep probe](benchmarks/crate-rebuild/README.md) checks
+late-root reuse after an observed idle exit with correct runtime identity.
 
 If the configured wrapper is missing or the cache service fails, build directly:
 

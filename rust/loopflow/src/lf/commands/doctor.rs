@@ -1,53 +1,14 @@
 //! Diagnose current storage, execution records and the installation.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::Path;
 
 use anyhow::{anyhow, Result};
 
-use crate::lf::output::Colors;
-use crate::process::ProcessEntry;
-use crate::store::contention::read_contention;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
-#[serde(rename_all = "snake_case")]
-#[non_exhaustive]
-pub enum Status {
-    Ok,
-    Warn,
-    Fail,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
-pub struct Check {
-    pub name: &'static str,
-    pub status: Status,
-    pub detail: String,
-}
-
-impl Check {
-    pub(crate) fn ok(name: &'static str, detail: impl Into<String>) -> Self {
-        Self {
-            name,
-            status: Status::Ok,
-            detail: detail.into(),
-        }
-    }
-    pub(crate) fn warn(name: &'static str, detail: impl Into<String>) -> Self {
-        Self {
-            name,
-            status: Status::Warn,
-            detail: detail.into(),
-        }
-    }
-    fn fail(name: &'static str, detail: impl Into<String>) -> Self {
-        Self {
-            name,
-            status: Status::Fail,
-            detail: detail.into(),
-        }
-    }
-}
+use loopflow_execution::output::Colors;
+use loopflow_execution::process::diagnosis::{check_lineage, Check, Status};
+use loopflow_execution::process::ProcessEntry;
+use loopflow_execution::store::contention::read_contention;
 
 /// Exits non-zero when any check fails, so a caller can gate on it.
 /// What `lf doctor --json` prints.
@@ -91,7 +52,7 @@ pub fn run(json: bool) -> Result<()> {
 
 /// The store, Process evidence and installation checks `lf doctor` reports.
 pub fn report() -> Result<DoctorReport> {
-    let database_path = crate::store::database_path_from_env()?;
+    let database_path = loopflow_execution::store::database_path_from_env()?;
     let store_report = inspect_store(&database_path);
     let mut checks = vec![match &store_report.migration_error {
         Some(error) => Check::fail("store", error.clone()),
@@ -100,7 +61,7 @@ pub fn report() -> Result<DoctorReport> {
     // The remedy hint counts exactly what `lf monitor prune` would repair.
     let events = match loopflow_storage::sqlite::SqliteStore::open_processes_read_only(
         &database_path,
-        crate::store::token_key::encryption_key,
+        loopflow_execution::store::token_key::encryption_key,
     )
     .and_then(|store| {
         Ok((
@@ -130,10 +91,10 @@ pub fn report() -> Result<DoctorReport> {
     checks.push(check_running_binaries());
     checks.push(check_binary_freshness());
     checks.push(check_contention(
-        &crate::diagnostic_log::log_path(),
+        &loopflow_execution::diagnostic_log::log_path(),
         time::OffsetDateTime::now_utc().unix_timestamp() - CONTENTION_WINDOW_SECONDS,
     ));
-    checks.push(crate::desktop_exits::check());
+    checks.push(loopflow_execution::desktop_exits::check());
     Ok(DoctorReport {
         store: store_report,
         rows,
@@ -281,6 +242,7 @@ fn check_binary_freshness() -> Check {
             FRESHNESS,
             format!("cannot prove whether the running lf is current: {reason}"),
         ),
+        state => Check::warn(FRESHNESS, format!("cannot classify the running build: {state:?}")),
     }
 }
 
@@ -306,15 +268,17 @@ fn inspect_store(path: &Path) -> StoreReport {
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
         ) {
             Ok(connection) => {
-                match crate::store::migrations::latest_applied_version_sqlite(&connection) {
+                match loopflow_execution::store::migrations::latest_applied_version_sqlite(
+                    &connection,
+                ) {
                     Ok(version) => latest_applied_migration = version,
                     Err(error) => migration_error = Some(error.to_string()),
                 }
                 // A private home migrates itself on its next open.
-                let custom = crate::store::custom_home_selected();
-                let validation = crate::store::migrations::validate_sqlite(&connection).and_then(|()| {
-                    match crate::store::migrations::pending_shared_migration(&connection)? {
-                        Some(pending) if !custom => Err(crate::store::StoreError::InvalidData(format!(
+                let custom = loopflow_execution::store::custom_home_selected();
+                let validation = loopflow_execution::store::migrations::validate_sqlite(&connection).and_then(|()| {
+                    match loopflow_execution::store::migrations::pending_shared_migration(&connection)? {
+                        Some(pending) if !custom => Err(loopflow_execution::store::StoreError::InvalidData(format!(
                             "selected database is missing {pending}; run `lf install` to finish installing this build"
                         ))),
                         _ => Ok(()),
@@ -333,19 +297,19 @@ fn inspect_store(path: &Path) -> StoreReport {
     StoreReport {
         build_provenance: crate::build_info::provenance(),
         build_label: crate::build_info::label().map(str::to_string),
-        unmerged_migrations: crate::store::migrations::unmerged_migrations(),
+        unmerged_migrations: loopflow_execution::store::migrations::unmerged_migrations(),
         build_source_identity: crate::build_info::source_identity(),
         build_source_root: crate::build_info::source_root().map(|root| root.display().to_string()),
         build_source_revision: crate::build_info::source_revision().to_string(),
         database_path: path.display().to_string(),
-        latest_known_migration: crate::store::migrations::latest_known_version(),
+        latest_known_migration: loopflow_execution::store::migrations::latest_known_version(),
         latest_applied_migration,
         migration_error,
     }
 }
 
 fn check_installation(database_path: &Path) -> Vec<Check> {
-    let root = match crate::installation::root() {
+    let root = match loopflow_execution::installation::root() {
         Ok(root) => root,
         Err(error) => {
             return vec![Check::fail(
@@ -354,8 +318,8 @@ fn check_installation(database_path: &Path) -> Vec<Check> {
             )]
         }
     };
-    match crate::installation::read_state(&root) {
-        Ok(crate::installation::InstallationState::Legacy) => vec![
+    match loopflow_execution::installation::read_state(&root) {
+        Ok(loopflow_execution::installation::InstallationState::Legacy) => vec![
             Check::warn(
                 "install-selection",
                 "no versioned installation receipt; the next promotion will initialize it",
@@ -365,15 +329,15 @@ fn check_installation(database_path: &Path) -> Vec<Check> {
                 "published fallback has not been retained by the installation path yet",
             ),
         ],
-        Ok(crate::installation::InstallationState::Switching(receipt)) => vec![Check::fail(
+        Ok(loopflow_execution::installation::InstallationState::Switching(receipt)) => vec![Check::fail(
             "install-switch",
             format!(
                 "install switch {} is unsettled at {:?}; ordinary startup falls back to the prior install — recover or rerun the promotion to finish it",
                 receipt.id, receipt.phase
             ),
         )],
-        Ok(crate::installation::InstallationState::Settled(active)) => {
-            let selected = crate::installation::selection_for_current_executable();
+        Ok(loopflow_execution::installation::InstallationState::Settled(active)) => {
+            let selected = loopflow_execution::installation::selection_for_current_executable();
             let selection = match &selected {
                 Ok(Some(selection)) => Check::ok(
                     "install-selection",
@@ -399,7 +363,7 @@ fn check_installation(database_path: &Path) -> Vec<Check> {
                     "install-store",
                     format!("running store matches {}", database_path.display()),
                 )
-            } else if crate::store::custom_home_selected() {
+            } else if loopflow_execution::store::custom_home_selected() {
                 Check::ok(
                     "install-store",
                     "explicit disposable Machine; no upgrade or recovery contract",
@@ -415,18 +379,18 @@ fn check_installation(database_path: &Path) -> Vec<Check> {
                 )
             };
             let mut fallback_roles = vec![
-                crate::installation::ArtifactRole::Cli,
+                loopflow_execution::installation::ArtifactRole::Cli,
 
             ];
             if active
                 .selection
                 .artifact_set
-                .artifact(&crate::installation::ArtifactRole::App)
+                .artifact(&loopflow_execution::installation::ArtifactRole::App)
                 .is_some()
             {
                 fallback_roles.extend([
-                    crate::installation::ArtifactRole::App,
-                    crate::installation::ArtifactRole::AppHelper("lf".to_string()),
+                    loopflow_execution::installation::ArtifactRole::App,
+                    loopflow_execution::installation::ArtifactRole::AppHelper("lf".to_string()),
 
                 ]);
             }
@@ -442,6 +406,7 @@ fn check_installation(database_path: &Path) -> Vec<Check> {
             };
             vec![selection, store, fallback]
         }
+        Ok(state) => vec![Check::fail("install-selection", format!("unsupported installation state: {state:?}"))],
         Err(error) => vec![Check::fail("install-selection", error.to_string())],
     }
 }
@@ -485,33 +450,6 @@ fn check_identity(events: &[ProcessEntry]) -> Check {
     )
 }
 
-pub(crate) fn check_lineage(events: &[ProcessEntry], repairable: usize) -> Check {
-    let processes: HashMap<&str, &str> = events
-        .iter()
-        .map(|event| (event.id(), event.trace_id().as_str()))
-        .collect();
-    let dangling: HashSet<&str> = events
-        .iter()
-        .filter_map(|event| {
-            let parent = event.parent_lf_process_id()?.as_str();
-            (processes.get(parent).copied() != Some(event.trace_id().as_str())).then_some(parent)
-        })
-        .collect();
-    if dangling.is_empty() {
-        return Check::ok("lineage", "every parent process resolves");
-    }
-    let mut detail = format!(
-        "{} parent process id(s) are missing or belong to another trace",
-        dangling.len()
-    );
-    if repairable > 0 {
-        detail.push_str(&format!(
-            "; {repairable} AgentProcess parent(s) were never recorded, and `lf monitor prune` repairs them"
-        ));
-    }
-    Check::fail("lineage", detail)
-}
-
 fn print_checks(store: &StoreReport, checks: &[Check], rows: usize) {
     let colors = Colors::default();
     let build = store
@@ -544,6 +482,7 @@ fn print_checks(store: &StoreReport, checks: &[Check], rows: usize) {
             Status::Ok => ("ok  ", colors.green),
             Status::Warn => ("warn", colors.yellow),
             Status::Fail => ("FAIL", colors.red),
+            _ => ("warn", colors.yellow),
         };
         println!(
             "{color}{mark}{reset}  {bold}{name:<13}{reset} {detail}",
@@ -562,7 +501,7 @@ mod tests {
     use super::{
         check_attribution, check_contention, check_identity, check_lineage, inspect_store, Status,
     };
-    use crate::process::LfProcess;
+    use loopflow_execution::process::LfProcess;
 
     const DAY: i64 = 86_400;
 
@@ -571,7 +510,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("loopflow.db");
         let connection = rusqlite::Connection::open(&path).unwrap();
-        crate::store::migrations::apply_sqlite(&connection).unwrap();
+        loopflow_execution::store::migrations::apply_sqlite(&connection).unwrap();
         connection
             .execute(
                 "INSERT INTO schema_migrations (version, applied_at)
@@ -621,7 +560,7 @@ mod tests {
         let rows = &rows
             .iter()
             .cloned()
-            .map(crate::process::ProcessEntry::Lf)
+            .map(loopflow_execution::process::ProcessEntry::Lf)
             .collect::<Vec<_>>();
         [
             check_attribution(rows),
@@ -641,8 +580,8 @@ mod tests {
         assert_eq!(check_contention(&log, 0).status, Status::Ok);
         std::fs::write(
             &log,
-            "2026-10-27T04:19:02.000000Z  WARN loopflow::store::contention: held the store write lock \
-             held_seconds=9.12 call_site=loopflow::store::sqlite::retention::retain_history_in \
+            "2026-10-27T04:19:02.000000Z  WARN loopflow_execution::store::contention: held the store write lock \
+             held_seconds=9.12 call_site=loopflow_execution::store::sqlite::retention::retain_history_in \
              pid=7 lf=0.14.16 rev=d49c57c12\n",
         )
         .unwrap();

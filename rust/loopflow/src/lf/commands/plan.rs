@@ -5,13 +5,14 @@ use std::path::Path;
 use anyhow::{anyhow, Result};
 
 use crate::lf::RepoPlanCommand as PlanCommand;
-use crate::store::Store;
+use loopflow_execution::store::Store;
 
 /// `lf repo plan [key|journal]`; bare, the planning status.
 pub fn run(cmd: Option<&PlanCommand>, json: bool, subscribe: bool) -> Result<()> {
     let repo = status_repository(&std::env::current_dir()?)?;
     if cmd.is_none() && subscribe {
-        return subscribe_status(&repo, super::subscribe::Transport::Stdio).map(drop);
+        return subscribe_status(&repo, loopflow_execution::read_stream::Transport::Stdio)
+            .map(drop);
     }
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(run_async(&repo, cmd, json))
@@ -21,8 +22,11 @@ pub fn run(cmd: Option<&PlanCommand>, json: bool, subscribe: bool) -> Result<()>
 /// still has stored planning status.
 pub(crate) fn status_repository(directory: &Path) -> Result<std::path::PathBuf> {
     Ok(
-        match crate::repo::discover_repo_root(directory).ok().flatten() {
-            Some(root) => crate::git::worktrees::main_repo_root(&root)?,
+        match loopflow_execution::repo::discover_repo_root(directory)
+            .ok()
+            .flatten()
+        {
+            Some(root) => loopflow_execution::git::worktrees::main_repo_root(&root)?,
             None => directory.to_owned(),
         },
     )
@@ -30,28 +34,30 @@ pub(crate) fn status_repository(directory: &Path) -> Result<std::path::PathBuf> 
 
 /// Whether the repository containing `checkout` plans through a Git ref.
 pub fn plans_through_git(checkout: &Path) -> Result<bool> {
-    let repo = crate::git::worktrees::main_repo_root(checkout)?;
-    let config = crate::config::load_config(Some(&repo))?.unwrap_or_default();
+    let repo = loopflow_execution::git::worktrees::main_repo_root(checkout)?;
+    let config = loopflow_execution::config::load_config(Some(&repo))?.unwrap_or_default();
     Ok(matches!(
         config.planning_transport(),
-        crate::config::PlanningConfig::Git { .. }
+        loopflow_execution::config::PlanningConfig::Git { .. }
     ))
 }
 
 /// Exchange the repository's Git planning ref now. The exchange is per
 /// repository, so a Wave selection has no effect.
 pub fn refresh(checkout: &Path) -> Result<()> {
-    let repo = crate::git::worktrees::main_repo_root(checkout)?;
+    let repo = loopflow_execution::git::worktrees::main_repo_root(checkout)?;
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_store().await?;
         let repo_key = repo.to_string_lossy();
         // Acquisition records its own failure and never waits on publication.
         // A refresh waits out another process's publication, then sends this
         // Machine's pending changes out.
-        let acquired = crate::ops::planning_sync::acquire_repository(&store, &repo_key).await;
-        crate::ops::planning_sync::publish_repository_now(&store, &repo_key).await?;
+        let acquired =
+            loopflow_execution::ops::planning_sync::acquire_repository(&store, &repo_key).await;
+        loopflow_execution::ops::planning_sync::publish_repository_now(&store, &repo_key).await?;
         acquired?;
-        let destinations = crate::ops::planning_sync::peer_status(&store, &repo_key).await?;
+        let destinations =
+            loopflow_execution::ops::planning_sync::peer_status(&store, &repo_key).await?;
         let Some(active) = destinations.into_iter().find(|d| d.active) else {
             return Err(anyhow!(
                 "no Git planning destination is configured; see `lf config planning status`"
@@ -65,13 +71,13 @@ pub fn refresh(checkout: &Path) -> Result<()> {
 }
 
 async fn open_store() -> Result<Store> {
-    crate::store::open_existing_store()
+    loopflow_execution::store::open_existing_store()
         .await
         .map_err(|error| anyhow!("Machine registry cannot be opened: {error}"))?
         .ok_or_else(|| {
             anyhow!(
                 "Machine registry is missing at {}; initialize or restore it before planning setup",
-                crate::store::default_db_path().display()
+                loopflow_execution::store::default_db_path().display()
             )
         })
 }
@@ -106,10 +112,10 @@ async fn run_async(repo: &Path, cmd: Option<&PlanCommand>, status_json: bool) ->
 /// foreground providers exchange planning.
 pub(crate) fn subscribe_status(
     repo: &Path,
-    transport: super::subscribe::Transport,
-) -> Result<Option<super::subscribe::Subscription>> {
+    transport: loopflow_execution::read_stream::Transport,
+) -> Result<Option<loopflow_execution::read_stream::Subscription>> {
     let repo_key = repo.to_string_lossy().into_owned();
-    super::subscribe::start(
+    loopflow_execution::read_stream::start(
         (),
         move |store, ()| {
             let repo_key = repo_key.clone();
@@ -125,14 +131,14 @@ pub(crate) fn subscribe_status(
 pub(crate) struct PlanStatus {
     /// `git`, or the tracker's lowercased name.
     transport: String,
-    destinations: Vec<crate::store::PeerPlanningStatus>,
+    destinations: Vec<loopflow_execution::store::PeerPlanningStatus>,
 }
 
 /// Where a repository's planning is exchanged.
 enum Status {
     /// The tracker its config names; local saves wait while it is unavailable.
     Remote(&'static str),
-    Git(Vec<crate::store::PeerPlanningStatus>),
+    Git(Vec<loopflow_execution::store::PeerPlanningStatus>),
 }
 
 impl Status {
@@ -152,7 +158,8 @@ impl Status {
 }
 
 fn remote_transport(repo: &str) -> Result<Option<&'static str>> {
-    let config = crate::config::load_config(Some(Path::new(repo)))?.unwrap_or_default();
+    let config =
+        loopflow_execution::config::load_config(Some(Path::new(repo)))?.unwrap_or_default();
     Ok(config.planning_transport().remote_name())
 }
 
@@ -173,7 +180,7 @@ async fn status(store: Option<&Store>, repo: &str) -> Result<Status> {
         return Ok(Status::Remote(provider));
     }
     Ok(Status::Git(match store {
-        Some(store) => crate::ops::planning_sync::peer_status(store, repo).await?,
+        Some(store) => loopflow_execution::ops::planning_sync::peer_status(store, repo).await?,
         None => Vec::new(),
     }))
 }
@@ -181,12 +188,14 @@ async fn status(store: Option<&Store>, repo: &str) -> Result<Status> {
 /// The command binds the configured destination first, so a changed
 /// selection shows at once; the in-app read and the subscription show stored status.
 async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
-    crate::ops::planning_sync::configured_destination(store, repo).await?;
+    loopflow_execution::ops::planning_sync::configured_destination(store, repo).await?;
     let status = status(Some(store), repo).await?;
     if json {
         println!(
             "{}",
-            serde_json::to_string(&super::subscribe::selected_answer(&status.report())?)?
+            serde_json::to_string(&loopflow_execution::read_stream::selected_answer(
+                &status.report()
+            )?)?
         );
         return Ok(());
     }
@@ -251,7 +260,7 @@ async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
 }
 
 async fn print_journal(store: &Store, repo: &str, json: bool) -> Result<()> {
-    let journals = crate::ops::planning_sync::peer_journal(store, repo).await?;
+    let journals = loopflow_execution::ops::planning_sync::peer_journal(store, repo).await?;
     if json {
         println!("{}", serde_json::to_string(&journals)?);
         return Ok(());

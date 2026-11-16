@@ -44,7 +44,10 @@ pub(super) fn layout(
         return Ok((tools.task_view()?, 0, None));
     };
     anyhow::ensure!(
-        location.machine_id == crate::store::machines::local_machine(store)?.id.as_str(),
+        location.machine_id
+            == loopflow_execution::store::machines::local_machine(store)?
+                .id
+                .as_str(),
         "Task runs on Machine {}; no local tool was created",
         location.machine_id
     );
@@ -124,7 +127,7 @@ impl Tools<'_> {
         }
         let session = session.or(self.content.primary_session.as_deref());
         let task = session.is_none().then_some(self.content.work.id.as_str());
-        let store = crate::store::read_existing_registry()?;
+        let store = loopflow_execution::store::read_existing_registry()?;
         let context = super::super::work_context(self.cwd, task, None, session)?;
         let mut target = super::super::describe(
             store.as_ref(),
@@ -147,7 +150,7 @@ impl Tools<'_> {
             ]
         } else {
             let attachment = Attachment::new()?;
-            let lf = crate::os_process::resolve_lf_binary()?;
+            let lf = loopflow_execution::os_process::resolve_lf_binary()?;
             let argv = attachment.argv(target.resume_argv(&lf.to_string_lossy()));
             self.attachment = Some(attachment);
             argv
@@ -278,6 +281,8 @@ mod tests {
     #[test]
     fn selected_tools_and_hidden_splits_shape_the_task_layout() {
         let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let _restore = crate::test_ambient::EnvGuard::clear(&["LF_BIN"]);
+        std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
         let directory = tempfile::tempdir().unwrap();
         let cwd = directory.path().canonicalize().unwrap();
         std::fs::create_dir(cwd.join("src")).unwrap();

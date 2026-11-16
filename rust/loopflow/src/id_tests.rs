@@ -1,5 +1,5 @@
 mod canonical_tests {
-    use crate::linear::LinearIssueId;
+    use loopflow_execution::linear::LinearIssueId;
     use loopflow_model::durable::{MachineId, ProjectId, TaskId};
     use loopflow_model::id::{
         AgentProcessId, AgentSessionId, AttachmentToken, LfSessionId, TaskSelector, WaveId,

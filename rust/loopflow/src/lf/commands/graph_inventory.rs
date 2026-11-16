@@ -4,9 +4,9 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use clap::Args;
 
-use crate::durable::{GraphProcessDetail, GraphProcessFilter, GraphProcessPage};
-use crate::session::GraphProcessSummaryState;
-use crate::store::{open_store, storage_config_from_env};
+use loopflow_execution::durable::{GraphProcessDetail, GraphProcessFilter, GraphProcessPage};
+use loopflow_execution::session::GraphProcessSummaryState;
+use loopflow_execution::store::{open_store, storage_config_from_env};
 
 #[derive(Debug, Default, Args)]
 pub struct GraphProcessInventoryArgs {
@@ -77,16 +77,20 @@ pub fn page(directory: &Path, args: &GraphProcessInventoryArgs) -> Result<GraphP
         let repo = if args.all {
             None
         } else {
-            crate::repository::containing(directory)?.map(|repo| repo.to_string())
+            loopflow_execution::repository::containing(directory)?.map(|repo| repo.to_string())
         };
         let filter = GraphProcessFilter {
             task_id: args
                 .for_task
                 .as_deref()
                 .map(|task| {
-                    crate::store::children::resolve_task_id(&store.sqlite, task, repo.as_deref())
-                        .map_err(anyhow::Error::from)?
-                        .context("Task was not found")
+                    loopflow_execution::store::children::resolve_task_id(
+                        &store.sqlite,
+                        task,
+                        repo.as_deref(),
+                    )
+                    .map_err(anyhow::Error::from)?
+                    .context("Task was not found")
                 })
                 .transpose()?,
             wave_id: args

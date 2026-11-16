@@ -1,15 +1,16 @@
 use crate::test_linear_input::SeedLinear;
 use crate::test_support as support;
+use loopflow_execution::test_support::task_graph::{
+    connect_claude_account, connect_fixture_claude, HOLDING_CLAUDE,
+};
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::time::{Duration, Instant};
 
-use loopflow::store::{CredentialState, ProviderAccount, ProviderAccountId, RoutingState};
-use loopflow::work::task::{GithubPr, PrPublication};
+use loopflow_execution::work::task::{GithubPr, PrPublication};
 use loopflow_test_support::{MachineServer, TestRepo};
-use sha2::{Digest, Sha256};
 
 fn command(repo: &Path, home: &Path, args: &[&str]) -> Command {
     let mut command = Command::new(loopflow_test_support::lf_binary());
@@ -309,32 +310,6 @@ impl Drop for HeldGraph {
 
 /// A Claude stand-in for a held Graph step: it announces `ready` in LF_HOME,
 /// then waits there for `release` before it answers.
-pub(crate) const HOLDING_CLAUDE: &str = r#"#!/usr/bin/python3
-import json, os, sys, time
-if '--version' in sys.argv:
-    print('fixture')
-    sys.exit(0)
-home = os.environ['LF_HOME']
-streamed = '--input-format' in sys.argv
-message = json.loads(sys.stdin.readline()) if streamed else None
-with open(os.path.join(home, 'ready'), 'w') as ready:
-    ready.write('ready')
-if streamed:
-    with open(os.path.join(home, 'stream-ready'), 'w') as ready:
-        ready.write('ready')
-while not os.path.exists(os.path.join(home, 'release')):
-    time.sleep(0.02)
-if not streamed:
-    sys.exit(0)
-message['session_id'] = 'stand-in'
-print(json.dumps(message), flush=True)
-print(json.dumps({'type': 'system', 'subtype': 'init', 'session_id': 'stand-in'}), flush=True)
-print(json.dumps({'type': 'assistant', 'message': {'content': [{'type': 'text', 'text': 'Held.'}]}}), flush=True)
-print(json.dumps({'type': 'result', 'uuid': 'stand-in-result', 'session_id': 'stand-in', 'subtype': 'success', 'is_error': False, 'result': 'Held.'}), flush=True)
-for line in sys.stdin:
-    pass
-"#;
-
 /// The skill step `holding_task`'s stand-in holds until `release`.
 const HOLD_STEP: &str = "- step: {name: hold}\n";
 const HOLD_SKILL: (&str, &str) = (".lf/skills/hold.md", "Hold.");
@@ -344,7 +319,7 @@ const HOLD_SKILL: (&str, &str) = (".lf/skills/hold.md", "Hold.");
 fn holding_task() -> GraphTask {
     let task = GraphTask::with_tools(&[("claude", HOLDING_CLAUDE)]);
     connect_fixture_claude(task.home.path(), &task.registered.store);
-    crate::config::files::update(&task.home.path().join("config.yaml"), |value| {
+    loopflow_execution::config::files::update(&task.home.path().join("config.yaml"), |value| {
         value["agent"] = "claude".into();
         Ok(())
     })
@@ -361,7 +336,7 @@ fn running_graphs_belong_to_the_target_checkout_and_retain_their_caller() {
         task.ok(&["wt", "create", "caller"]);
         // Worktree discovery is read-only and does not select an ambient Home.
         let caller = {
-            loopflow::git::worktrees::list_worktrees(task.repo.path())
+            loopflow_execution::git::worktrees::list_worktrees(task.repo.path())
                 .unwrap()
                 .into_iter()
                 .find(|wt| wt.path != task.repo.path().canonicalize().unwrap())
@@ -400,8 +375,8 @@ fn running_graphs_belong_to_the_target_checkout_and_retain_their_caller() {
         assert_eq!(entries(), claimed);
         assert!(support::recorded_graphs(task.home.path()).is_empty());
 
-        let parent = loopflow::id::LfProcessId::new();
-        let trace = loopflow::id::TraceId::new();
+        let parent = loopflow_model::id::LfProcessId::new();
+        let trace = loopflow_model::id::TraceId::new();
         db.execute(
             "INSERT INTO processes(id,trace_id,cwd,command,started_at) VALUES(?1,?2,?3,'caller',1)",
             rusqlite::params![parent, trace, caller.to_str().unwrap()],
@@ -501,7 +476,7 @@ fn running_graphs_belong_to_the_target_checkout_and_retain_their_caller() {
             "{}",
             String::from_utf8_lossy(&inventory.stderr)
         );
-        let inventory: loopflow::durable::GraphProcessPage =
+        let inventory: loopflow_execution::durable::GraphProcessPage =
             serde_json::from_slice(&inventory.stdout).unwrap();
         assert_eq!(inventory.entries.len(), 1);
         assert_eq!(inventory.entries[0].summary.id, graph_process);
@@ -936,48 +911,6 @@ fn a_refused_bare_task_run_returns_its_refusal() {
 
 /// A headless Task requires an account record even when the provider is a
 /// stand-in. Its synthetic credential never leaves the network sandbox.
-pub(crate) fn connect_fixture_claude(home: &Path, store: &loopflow::store::Store) {
-    connect_claude_account(home, store, "fixture");
-}
-
-/// Connect a managed Claude account `name`, signed in as `name@example.com`.
-fn connect_claude_account(home: &Path, store: &loopflow::store::Store, name: &str) {
-    let account_home = home.join("accounts/claude").join(name);
-    fs::create_dir_all(&account_home).unwrap();
-    let credential = format!(
-        r#"{{"claudeAiOauth":{{"accessToken":"fixture-{name}","expiresAt":4102444800000}}}}"#
-    );
-    fs::write(account_home.join(".credentials.json"), &credential).unwrap();
-    tokio::runtime::Runtime::new()
-        .unwrap()
-        .block_on(store.upsert_provider_account(&ProviderAccount {
-            provider: "claude".into(),
-            account_id: ProviderAccountId::parse(name).unwrap(),
-            home: Some(account_home),
-            login_email: Some(
-                loopflow::profile::EmailAddress::parse(&format!("{name}@example.com")).unwrap(),
-            ),
-            observed_email: Some(format!("{name}@example.com")),
-            observed_subject: Some(name.into()),
-            observed_credential_digest: Some(format!(
-                "{:x}",
-                Sha256::digest(credential.as_bytes())
-            )),
-            observed_plan: None,
-            credential_state: CredentialState::Connected,
-            routing_state: RoutingState::Automatic,
-            plan: None,
-            paid_through: None,
-            utilization_percent: None,
-            cooldown_until: None,
-            cooldown_reason: None,
-            last_selected_at: None,
-            created_at: 1,
-            updated_at: 1,
-        }))
-        .unwrap();
-}
-
 /// A Claude stand-in that records each launch's arguments, home and the login
 /// that home carries: the stand-in Keychain on macOS, else its file.
 const CLAUDE_RECORDER: &str = r#"#!/usr/bin/python3
@@ -1262,7 +1195,8 @@ os.execv({binary}, [{binary}, *sys.argv[1:]])
     }
 
     fn select_wave_graph(&self, name: &str) {
-        let store = loopflow::store::open_sqlite(&self.home.path().join("loopflow.db")).unwrap();
+        let store =
+            loopflow_execution::store::open_sqlite(&self.home.path().join("loopflow.db")).unwrap();
         support::select_wave_graph(
             self.repo.path(),
             &store,
@@ -1478,7 +1412,8 @@ fn checkout_leaves_graph_selection_to_the_first_run() {
         .unwrap()
         .display()
         .to_string();
-    let sqlite = loopflow::store::open_sqlite(&fixture.home.path().join("loopflow.db")).unwrap();
+    let sqlite =
+        loopflow_execution::store::open_sqlite(&fixture.home.path().join("loopflow.db")).unwrap();
     let mut observation: crate::test_linear_input::IssueFixture =
         loopflow_test_support::retained_task_input(
             &fixture.registered.database,
@@ -1511,13 +1446,15 @@ fn checkout_leaves_graph_selection_to_the_first_run() {
     };
     select("before-checkout");
     fixture.ok(&["task", "checkout", "INF-124", "--name", "first-graph"]);
-    assert!(crate::store::task_work::task_work(&sqlite, &task.id)
-        .unwrap()
-        .graph
-        .is_none());
+    assert!(
+        loopflow_execution::store::task_work::task_work(&sqlite, &task.id)
+            .unwrap()
+            .graph
+            .is_none()
+    );
     select("at-first-run");
     fixture.task_run_ok(&["task", "run", "INF-124"]);
-    let captured = crate::store::task_work::task_work(&sqlite, &task.id)
+    let captured = loopflow_execution::store::task_work::task_work(&sqlite, &task.id)
         .unwrap()
         .graph
         .unwrap();
@@ -1528,7 +1465,7 @@ fn checkout_leaves_graph_selection_to_the_first_run() {
     );
     select("after-first-run");
     fixture.task_run_ok(&["task", "run", "INF-124"]);
-    let retained = crate::store::task_work::task_work(&sqlite, &task.id)
+    let retained = loopflow_execution::store::task_work::task_work(&sqlite, &task.id)
         .unwrap()
         .graph
         .unwrap();
@@ -1929,7 +1866,7 @@ fn a_run_stopped_by_a_usage_limit_is_not_started_again() {
     // The failing step ends having recorded that a limit left it nowhere to go.
     let reason = format!(
         "codex_error: You've hit your usage limit{}there is no `agents` list",
-        crate::ops::task_execution::STOPPED
+        loopflow_execution::ops::task_execution::STOPPED
     );
     let lf = task.home.path().join("lf-limit-fixture");
     fs::write(
@@ -2088,7 +2025,7 @@ fn a_run_that_failed_after_moving_agents_starts_again_at_the_step_that_failed() 
          ORDER BY p.rowid DESC LIMIT 1",
         [format!(
             "codex_error: You've hit your usage limit{}claude",
-            crate::ops::task_execution::MOVED_TO
+            loopflow_execution::ops::task_execution::MOVED_TO
         )],
     )
     .unwrap();
@@ -2743,7 +2680,7 @@ for line in sys.stdin:
 fn shipping_task() -> GraphTask {
     let task = GraphTask::with_tools(&[("claude", STAND_IN_CLAUDE)]);
     connect_fixture_claude(task.home.path(), &task.registered.store);
-    crate::config::files::update(&task.home.path().join("config.yaml"), |value| {
+    loopflow_execution::config::files::update(&task.home.path().join("config.yaml"), |value| {
         value["agent"] = "claude".into();
         Ok(())
     })
@@ -2771,7 +2708,7 @@ fn handoffs(task: &GraphTask) -> Vec<String> {
         .unwrap()
         .into_iter()
         .filter_map(|event| match event.kind {
-            loopflow::work::task::TaskEventKind::Progress { summary }
+            loopflow_execution::work::task::TaskEventKind::Progress { summary }
                 if summary.starts_with("Shipping: ") =>
             {
                 Some(summary)
@@ -3110,7 +3047,7 @@ sys.exit(3)
 fn task_ship_restarts_after_a_failure_wait_instead_of_on_every_read() {
     let task = GraphTask::with_tools(&[("claude", FAILING_CLAUDE)]);
     connect_fixture_claude(task.home.path(), &task.registered.store);
-    crate::config::files::update(&task.home.path().join("config.yaml"), |value| {
+    loopflow_execution::config::files::update(&task.home.path().join("config.yaml"), |value| {
         value["agent"] = "claude".into();
         Ok(())
     })
@@ -3188,7 +3125,7 @@ for line in sys.stdin:
 fn task_ship_blocked_at_verification_waits_there_without_building_again() {
     let task = GraphTask::with_tools(&[("claude", BLOCKED_CLAUDE)]);
     connect_fixture_claude(task.home.path(), &task.registered.store);
-    crate::config::files::update(&task.home.path().join("config.yaml"), |value| {
+    loopflow_execution::config::files::update(&task.home.path().join("config.yaml"), |value| {
         value["agent"] = "claude".into();
         Ok(())
     })

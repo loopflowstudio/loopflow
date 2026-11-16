@@ -44,7 +44,7 @@ Task Work ----> managed worktree ----> commits
 | landing checks and repair admission | exact recorded PR head plus landing generation |
 
 Task types live under [`store/work/task/`](../../rust/loopflow-storage/src/work/task). Operational Git,
-PR, CI, and landing workflows live under [`ops/`](../../rust/loopflow/src/ops).
+PR, CI, and landing workflows live under [`ops/`](../../rust/loopflow-execution/src/ops).
 The exact landing fence is modeled in
 [`pr_landing.rs`](../../rust/loopflow-storage/src/pr_landing.rs).
 

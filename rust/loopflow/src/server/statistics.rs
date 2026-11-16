@@ -14,14 +14,14 @@ const TICK: Duration = Duration::from_secs(10 * 60);
 pub(super) fn start() {
     let spawned = std::thread::Builder::new()
         .name("store-statistics".into())
-        .spawn(|| crate::journal::request::isolate(maintain));
+        .spawn(|| loopflow_execution::journal::request::isolate(maintain));
     if let Err(error) = spawned {
         tracing::warn!(%error, "store statistics are not maintained by this server");
     }
 }
 
 fn maintain() {
-    let path = crate::store::default_db_path();
+    let path = loopflow_execution::store::default_db_path();
     let mut due = SystemTime::now();
     loop {
         if SystemTime::now() >= due {
@@ -35,7 +35,7 @@ fn maintain() {
 }
 
 fn refresh(path: &Path) -> anyhow::Result<()> {
-    crate::store::open_sqlite(path)?.refresh_statistics()?;
+    loopflow_execution::store::open_sqlite(path)?.refresh_statistics()?;
     Ok(())
 }
 
@@ -45,7 +45,7 @@ mod tests {
     fn a_refresh_measures_a_seeded_store() {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("loopflow.db");
-        let store = crate::store::opening::open_ephemeral(&path).unwrap();
+        let store = loopflow_execution::store::opening::open_ephemeral(&path).unwrap();
         store
             .conn
             .lock()

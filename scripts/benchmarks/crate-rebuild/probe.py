@@ -69,7 +69,8 @@ def main() -> None:
             (tree / "Cargo.toml").write_text(
                 '[workspace]\nresolver="2"\n'
                 'members=["rust/loopflow-model", "rust/loopflow-definitions", '
-                '"rust/loopflow-terminal", "rust/loopflow-storage", "rust/loopflow-test-support", "rust/model-dependencies", "rust/storage-dependencies", "path-fixture"]\n'
+                '"rust/loopflow-terminal", "rust/loopflow-storage", "rust/loopflow-test-support", '
+                '"rust/model-dependencies", "rust/storage-dependencies", "path-fixture"]\n'
                 "[workspace.package]\n"
                 + package_fields
                 + "[profile.dev]\ndebug=1\nincremental=false\n"
@@ -226,6 +227,31 @@ def main() -> None:
             print(json.dumps(receipt), flush=True)
             _verify_receipts([receipt])
 
+        # Exercise the real build-script ref watches, including the shared Git
+        # directory, while each linked checkout keeps its own Cargo target.
+        repository = root / "repository"
+        run(["git", "clone", "--shared", "--no-checkout", str(ROOT), str(repository)])
+        shutil.move(repository / ".git", trees[0] / ".git")
+        shutil.rmtree(repository)
+        run(["git", "add", "--all"], trees[0])
+        run(
+            [
+                "git",
+                "-c",
+                "user.name=Cache fixture",
+                "-c",
+                "user.email=fixture@example.com",
+                "commit",
+                "-qm",
+                "source snapshot",
+            ],
+            trees[0],
+        )
+        main_revision = run(["git", "rev-parse", "origin/main"], ROOT).stdout.strip()
+        run(["git", "update-ref", "refs/remotes/origin/main", main_revision], trees[0])
+        shutil.rmtree(trees[1])
+        run(["git", "worktree", "add", "-qb", "cache-b", str(trees[1])], trees[0])
+
         try:
             run(["nice", "-n", "10", str(cache), "--start-server"])
             for label, tree in zip(("a", "b"), trees):
@@ -289,7 +315,7 @@ def main() -> None:
             # Roots are server-startup state. A newly added root misses until
             # our own idle server is refreshed; the same cache then serves it.
             third = root / "c"
-            shutil.copytree(trees[0], third, ignore=shutil.ignore_patterns("target"))
+            shutil.copytree(trees[0], third, ignore=shutil.ignore_patterns("target", ".git"))
             env["SCCACHE_BASEDIRS"] = os.pathsep.join(map(str, [trees[0], third]))
             run(
                 [

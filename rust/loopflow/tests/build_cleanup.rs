@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, SystemTime};
 
-use loopflow::git::{worktree_add, WorktreeBranch};
+use loopflow_execution::git::{worktree_add, WorktreeBranch};
 use loopflow_test_support::{lf_binary, TestRepo};
 use rusqlite::{params, Connection};
 use serde_json::Value;
@@ -483,7 +483,7 @@ print(json.dumps({
 fn build_cleanup_retains_unfinished_association_and_unknown_execution() {
     let fixture = Fixture::new();
     let conn = Connection::open(fixture.database()).unwrap();
-    let pending = loopflow::durable::TaskId::new();
+    let pending = loopflow_execution::durable::TaskId::new();
     conn.execute("INSERT INTO tasks(id,repository_id,project_id,issue_identifier,created_at,planning_completed) SELECT ?1,repository_id,project_id,'PROOF-2',1,0 FROM tasks WHERE id=?2",params![pending.as_str(),fixture.task]).unwrap();
     conn.execute("INSERT INTO task_checkouts(task_id,worktree) SELECT ?1,worktree || '/.' FROM task_checkouts WHERE task_id=?2",params![pending.as_str(),fixture.task]).unwrap();
     let retained = fixture.entry(&fixture.prune(&[]));
@@ -493,12 +493,12 @@ fn build_cleanup_retains_unfinished_association_and_unknown_execution() {
     );
     conn.execute("DELETE FROM tasks WHERE id=?1", [pending.as_str()])
         .unwrap();
-    let process = loopflow::id::LfProcessId::new();
+    let process = loopflow_model::id::LfProcessId::new();
     conn.execute(
         "INSERT INTO processes(id,trace_id,cwd,started_at) VALUES(?1,?2,?3,?4)",
         params![
             process,
-            loopflow::id::TraceId::new(),
+            loopflow_model::id::TraceId::new(),
             fixture.checkout.to_str().unwrap(),
             SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)

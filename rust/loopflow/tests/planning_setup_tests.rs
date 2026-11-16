@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::process::{Command, Output};
 
-use loopflow::store::{open_ephemeral_store, StorageConfig};
+use loopflow_execution::store::{open_ephemeral_store, StorageConfig};
 use loopflow_test_support::TestRepo;
 use serde_json::Value;
 

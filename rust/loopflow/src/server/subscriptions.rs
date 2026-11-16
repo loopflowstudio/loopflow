@@ -12,8 +12,9 @@ use tokio::task::AbortHandle;
 use super::outbox::{Materializing, Outbox, Retained};
 use super::service::{deliver, lock, reading_checkpoint, unavailable};
 use super::wire::{ServerMessage, SubscriptionEvent, MAX_BULK};
-use crate::engine::Error;
-use crate::lf::commands::{read::Read, subscribe::Subscription};
+use crate::lf::commands::read::Read;
+use loopflow_execution::engine::Error;
+use loopflow_execution::read_stream::Subscription;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct Key {
@@ -98,7 +99,7 @@ impl Subscriptions {
         // environment is fixed; paths and all wire arguments distinguish demand.
         let key = Key {
             read: serde_json::to_vec(&(&query, &select))?,
-            database: crate::store::database_path_from_env()?,
+            database: loopflow_execution::store::database_path_from_env()?,
             directory: std::env::current_dir()?,
         };
         let mut entries = lock(&self.0);
@@ -453,7 +454,7 @@ impl Producer {
             if let Some(pause) = &mut pause {
                 pause.wait();
             }
-            crate::journal::request::isolate(|| {
+            loopflow_execution::journal::request::isolate(|| {
                 query.subscribe(select, move || notify.notify_one())
             })
             .map(|subscription| Some(Arc::new(Held(Some(subscription)))))
@@ -487,7 +488,7 @@ impl Producer {
                 if let Some(pause) = &mut pause {
                     pause.wait();
                 }
-                let update = crate::journal::request::isolate(|| {
+                let update = loopflow_execution::journal::request::isolate(|| {
                     if force {
                         pull.checkpoint(generation);
                     }
@@ -519,8 +520,10 @@ impl Producer {
                 reason = frame["unavailable"].as_str().map(str::to_owned);
                 last = ends.ends_after(&frame["body"]);
                 // Internal generations never appear in a consumer's envelope.
-                let identity =
-                    crate::lf::commands::subscribe::identity(reason.as_deref(), frame.get("body"))?;
+                let identity = loopflow_execution::read_stream::identity(
+                    reason.as_deref(),
+                    frame.get("body"),
+                )?;
                 frame["answers"] = Value::Null;
                 reading = Some(Arc::new(Reading {
                     generation,
@@ -567,10 +570,10 @@ mod tests {
 
     use super::{Delivery, Member, Subscriptions};
     use crate::lf::commands::read::Read;
-    use crate::performance::subscription_measurement as meter;
     use crate::server::outbox::Outbox;
     use crate::server::service::subscription_measurement::pause;
     use crate::server::wire::ServerMessage;
+    use loopflow_execution::performance::subscription_measurement as meter;
     use loopflow_storage::sqlite::SqliteStore;
 
     async fn receive(messages: &mut mpsc::Receiver<crate::server::outbox::Frame>) -> ServerMessage {
@@ -630,10 +633,13 @@ mod tests {
     fn with_store<F: std::future::Future<Output = ()>>(body: impl FnOnce(SqliteStore) -> F) {
         let _env = loopflow_test_support::env_lock().lock().unwrap();
         let home = tempfile::tempdir().unwrap();
-        let _home =
-            crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+        let _home = loopflow_execution::config::environment::EnvVarGuard::set(
+            "LF_HOME",
+            home.path().to_str().unwrap(),
+        );
         let store =
-            crate::store::opening::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
+            loopflow_execution::store::opening::open_ephemeral(&home.path().join("loopflow.db"))
+                .unwrap();
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .max_blocking_threads(2)
@@ -746,7 +752,7 @@ mod tests {
             });
             Arc::new(Reading {
                 generation,
-                identity: crate::lf::commands::subscribe::identity(None, frame.get("body"))
+                identity: loopflow_execution::read_stream::identity(None, frame.get("body"))
                     .unwrap(),
                 frame,
                 _retained: Arc::new(Retained::empty()),
@@ -850,7 +856,7 @@ mod tests {
                 "condition": { "observed_at": at, "state": "ready" }, "title": "same"
             }});
             let identity =
-                crate::lf::commands::subscribe::identity(None, frame.get("body")).unwrap();
+                loopflow_execution::read_stream::identity(None, frame.get("body")).unwrap();
             Arc::new(Reading {
                 generation,
                 frame,
@@ -893,7 +899,7 @@ mod tests {
         let frame =
             serde_json::json!({"answers": null, "unavailable": "snapshot failed", "body": null});
         let identity =
-            crate::lf::commands::subscribe::identity(Some("snapshot failed"), None).unwrap();
+            loopflow_execution::read_stream::identity(Some("snapshot failed"), None).unwrap();
         let (latest, receiver) = tokio::sync::watch::channel(Latest {
             ready: true,
             events: 0,
@@ -903,8 +909,8 @@ mod tests {
                 identity,
                 _retained: Arc::new(super::Retained::empty()),
             })),
-            ended: Some(Err(Arc::new(crate::engine::Error::new(
-                crate::engine::ErrorCode::Unavailable,
+            ended: Some(Err(Arc::new(loopflow_execution::engine::Error::new(
+                loopflow_execution::engine::ErrorCode::Unavailable,
                 "snapshot failed",
             )))),
         });
@@ -942,7 +948,7 @@ mod tests {
         use std::sync::Mutex;
 
         let reason = Some("snapshot failed".to_owned());
-        let identity = crate::lf::commands::subscribe::identity(reason.as_deref(), None).unwrap();
+        let identity = loopflow_execution::read_stream::identity(reason.as_deref(), None).unwrap();
         let (latest, receiver) = tokio::sync::watch::channel(Latest {
             ready: true,
             events: 0,
@@ -985,8 +991,8 @@ mod tests {
             checkpoint: Some(9),
         };
         latest.send_modify(|value| {
-            value.ended = Some(Err(Arc::new(crate::engine::Error::new(
-                crate::engine::ErrorCode::Unavailable,
+            value.ended = Some(Err(Arc::new(loopflow_execution::engine::Error::new(
+                loopflow_execution::engine::ErrorCode::Unavailable,
                 "snapshot failed",
             ))));
         });
@@ -1048,7 +1054,10 @@ mod tests {
     fn production_sqlite_pulls_progress_with_saturated_outer_pool() {
         with_store(|store| {
             Box::pin(async move {
-                store.test_session("visible", &crate::session_record::new_artifact_key());
+                store.test_session(
+                    "visible",
+                    &loopflow_execution::session_record::new_artifact_key(),
+                );
                 let registry = Arc::new(Subscriptions::default());
                 let mut first = Consumer::new(&registry, "saturated", sessions(), None);
                 first.initial().await;
@@ -1233,7 +1242,7 @@ mod tests {
                 let id = loopflow_model::durable::TaskId::new();
                 let read = Read::TaskWait {
                     issue: id.to_string(),
-                    until: crate::ops::task::TaskWaitUntil::Terminal,
+                    until: loopflow_execution::ops::task::TaskWaitUntil::Terminal,
                 };
                 let mut first = Consumer::new(
                     &registry,
@@ -1245,7 +1254,7 @@ mod tests {
                 let repo = loopflow_test_support::TestRepo::new();
                 store
                     .create_task(&loopflow_storage::work::task::NewTask {
-                        repository_id: crate::repository::location::ensure_repository(
+                        repository_id: loopflow_execution::repository::location::ensure_repository(
                             &store,
                             repo.path().to_str().unwrap(),
                         )

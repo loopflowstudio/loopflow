@@ -26,6 +26,14 @@ Escalate from a focused behavior to affected suites when crossing a component
 boundary. CI and release own the full matrix. Run `scripts/test.py --all` only
 to reproduce a matrix failure or when release guidance requires it.
 
+## Developer build cache
+
+`scripts/dev-lf` calls `build_cache.py` before Cargo. Root inventory is derived
+from Git; other settings follow the Machine's default sccache file. The build selects it through `SCCACHE_CONF`; it takes effect after the shared
+server's normal idle exit. The script never restarts a server, shares a Cargo
+target or installs Machine configuration. An explicit cache configuration stays
+with its caller. See [build commands](testing.md#builds).
+
 ## Scheduled disk cleanup
 
 Reclaim disposable coding output with [opt-in hourly cleanup](disk-cleanup.md).

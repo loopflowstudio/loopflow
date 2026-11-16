@@ -2,8 +2,8 @@ use std::path::Path;
 
 use serde_json::Value;
 
-use crate::config::catalog::{definition, Category};
-use crate::lf::output::{column_width, truncate, Colors};
+use loopflow_execution::config::catalog::{definition, Category};
+use loopflow_execution::output::{column_width, truncate, Colors};
 
 #[derive(Debug, clap::Args)]
 pub struct ShowOptions {
@@ -21,13 +21,13 @@ pub struct ShowOptions {
 pub fn retained(replace: bool, keep: bool) -> anyhow::Result<()> {
     println!(
         "{}",
-        serde_json::to_string_pretty(&crate::config::remote::inspect(replace, keep)?)?
+        serde_json::to_string_pretty(&loopflow_execution::config::remote::inspect(replace, keep)?)?
     );
     Ok(())
 }
 
 pub fn print_user(json: bool) -> anyhow::Result<()> {
-    let name = crate::config::participant_name()?;
+    let name = loopflow_execution::config::participant_name()?;
     if json {
         println!("{}", serde_json::to_string(&name)?);
     } else if let Some(name) = name {
@@ -44,7 +44,7 @@ pub fn show(
     step: Option<&str>,
     options: &ShowOptions,
 ) -> anyhow::Result<()> {
-    let output = crate::engine::config::inspect(repo, wave, skill, graph, step)?;
+    let output = loopflow_execution::engine::config::inspect(repo, wave, skill, graph, step)?;
     if options.json {
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else {
@@ -168,7 +168,7 @@ fn short_path(locator: &str, repo: &Path) -> String {
     if let Ok(relative) = path.strip_prefix(&repo) {
         return relative.display().to_string();
     }
-    if let Ok(relative) = path.strip_prefix(crate::store::lf_home_dir()) {
+    if let Ok(relative) = path.strip_prefix(loopflow_execution::store::lf_home_dir()) {
         return format!("$LF_HOME/{}", relative.display());
     }
     if let Some(home) = dirs::home_dir() {
@@ -265,7 +265,7 @@ fn render(output: &[Value], repo: &Path, options: &ShowOptions, colors: &Colors)
         {
             out.push_str(&format!(
                 "\n  {}\n",
-                crate::error::LoadError::AgentSelection
+                loopflow_execution::error::LoadError::AgentSelection
             ));
         }
         if hidden > 0 {
@@ -319,11 +319,11 @@ pub fn catalog(json: bool) -> anyhow::Result<()> {
     if json {
         println!(
             "{}",
-            serde_json::to_string_pretty(&crate::config::catalog::definitions())?
+            serde_json::to_string_pretty(&loopflow_execution::config::catalog::definitions())?
         );
     } else {
         let mut previous_category = None;
-        for definition in crate::config::catalog::definitions() {
+        for definition in loopflow_execution::config::catalog::definitions() {
             if previous_category != Some(definition.category) {
                 println!("\n{}\n", definition.category.title());
                 previous_category = Some(definition.category);
@@ -338,7 +338,8 @@ pub fn catalog(json: bool) -> anyhow::Result<()> {
                     format!(" ({})", shorthands.join(", "))
                 },
                 definition.description,
-                if definition.lifecycle == crate::config::catalog::Lifecycle::Inactive {
+                if definition.lifecycle == loopflow_execution::config::catalog::Lifecycle::Inactive
+                {
                     " (inactive)"
                 } else {
                     ""

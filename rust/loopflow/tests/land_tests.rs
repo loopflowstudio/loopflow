@@ -4,11 +4,11 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::process::{Command, Stdio};
 
-use loopflow::git::worktrees::create_named_worktree;
-use loopflow::ops::{
+use loopflow_execution::git::worktrees::create_named_worktree;
+use loopflow_execution::ops::{
     arm as land, create_or_update_pr, submit, LandOptions, NullProgress, OpsError, PrOptions,
 };
-use loopflow::work::task::PrMergeMode;
+use loopflow_execution::work::task::PrMergeMode;
 use loopflow_test_support::TestRepo;
 use rusqlite::OptionalExtension;
 use support::{
@@ -203,8 +203,8 @@ fn initialize_landing_store(path: &std::path::Path) {
     let runtime = tokio::runtime::Runtime::new().unwrap();
     drop(
         runtime
-            .block_on(loopflow::store::open_ephemeral_store(
-                &loopflow::store::StorageConfig::sqlite(path.to_path_buf()),
+            .block_on(loopflow_execution::store::open_ephemeral_store(
+                &loopflow_execution::store::StorageConfig::sqlite(path.to_path_buf()),
             ))
             .unwrap(),
     );
@@ -517,7 +517,9 @@ fn final_preparation_keeps_published_history_and_merges_main_only_on_conflict() 
         }
         if conflicting {
             assert_ne!(repo.head_sha(), published_head);
-            assert!(loopflow::git::is_ancestor(repo.path(), &published_head, "HEAD").unwrap());
+            assert!(
+                loopflow_execution::git::is_ancestor(repo.path(), &published_head, "HEAD").unwrap()
+            );
             assert_eq!(
                 fs::read_to_string(repo.path().join("upstream.txt")).unwrap(),
                 "new upstream work"
@@ -1854,14 +1856,18 @@ fn persistent_submit_keeps_scratch_and_post_commit_edits() {
     let gh = gh_no_pr_script();
     let _env = EnvGuard::new(&[("gh", &gh)]);
     let repo = TestRepo::new();
-    let persistent = loopflow::git::worktrees::ensure_agent_worktree(
+    let persistent = loopflow_execution::git::worktrees::ensure_agent_worktree(
         repo.path(),
-        loopflow::git::worktrees::WorktreeSegment::parse("repo").unwrap(),
+        loopflow_execution::git::worktrees::WorktreeSegment::parse("repo").unwrap(),
     )
     .unwrap();
     fs::write(persistent.path.join("memory.md"), "accepted\n").unwrap();
-    loopflow::ops::commit_selected(&persistent.path, &["memory.md".into()], Some("Memory"))
-        .unwrap();
+    loopflow_execution::ops::commit_selected(
+        &persistent.path,
+        &["memory.md".into()],
+        Some("Memory"),
+    )
+    .unwrap();
     fs::create_dir_all(persistent.path.join("scratch/nested")).unwrap();
     fs::write(persistent.path.join("scratch/nested/plan.md"), "private\n").unwrap();
     fs::write(persistent.path.join("memory.md"), "next decision\n").unwrap();
@@ -2014,9 +2020,9 @@ git rev-parse HEAD > "$LF_TEST_REPAIR_PROOF"
     support::managed_codex_account(home.path());
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     // The Task's own Session stays open in the checkout for the whole landing.
-    let session = loopflow::id::LfProcessId::new();
+    let session = loopflow_model::id::LfProcessId::new();
     db.execute("INSERT INTO processes(id,trace_id,pid,cwd,command,started_at) VALUES(?1,?2,?3,?4,'task-session',?5)",
-        rusqlite::params![session, loopflow::id::TraceId::new(), std::process::id(), worktree.to_str().unwrap(), time::OffsetDateTime::now_utc().unix_timestamp()]).unwrap();
+        rusqlite::params![session, loopflow_model::id::TraceId::new(), std::process::id(), worktree.to_str().unwrap(), time::OffsetDateTime::now_utc().unix_timestamp()]).unwrap();
     let command = || {
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_lf"));
         for (name, _) in
@@ -2220,7 +2226,7 @@ git rev-parse HEAD > "$LF_TEST_REPAIR_PROOF"
         .block_on(fixture.store.task_state(&fixture.task.id))
         .unwrap();
     assert_eq!(
-        state == loopflow::durable::TaskState::Done,
+        state == loopflow_execution::durable::TaskState::Done,
         destination == "end",
         "the Graph must settle completion before returning, without a status command"
     );
@@ -2573,7 +2579,7 @@ esac
         runtime
             .block_on(fixture.store.task_state(&fixture.task.id))
             .unwrap(),
-        loopflow::durable::TaskState::Done
+        loopflow_execution::durable::TaskState::Done
     );
     for args in [&["land"][..], &["land", "--wait-and-fix"]] {
         let output = command().args(args).output().unwrap();
@@ -2592,7 +2598,7 @@ esac
         .block_on(fixture.store.active_task_pr(&fixture.task.id))
         .unwrap()
         .unwrap();
-    assert_eq!(pr.phase(), loopflow::work::task::PrPhase::Merged);
+    assert_eq!(pr.phase(), loopflow_execution::work::task::PrPhase::Merged);
     assert_eq!(
         read_retirement().1,
         due_at,

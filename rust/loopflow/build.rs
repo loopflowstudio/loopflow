@@ -1,26 +1,10 @@
-//! Embed application provenance and link native helpers.
+//! Embed application provenance.
 
 use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn main() {
-    println!("cargo:rerun-if-changed=src/installation/registration.m");
-    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
-        cc::Build::new()
-            .file("src/installation/registration.m")
-            .flag("-fobjc-arc")
-            .compile("server_registration");
-        println!("cargo:rustc-link-lib=framework=ServiceManagement");
-        println!("cargo:rustc-link-lib=framework=Foundation");
-    }
-
-    if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
-        println!("cargo:rerun-if-changed=src/journal/os_process/macos.c");
-        cc::Build::new()
-            .file("src/journal/os_process/macos.c")
-            .compile("loopflow_process_info");
-    }
     let manifest_dir =
         PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set"));
     let git_root = manifest_dir
@@ -177,45 +161,55 @@ fn emit_build_provenance(manifest_dir: &Path, git_root: Option<&Path>, unmerged:
         }
     }
     if let Some(root) = git_root {
-        let mut git_paths = vec![
-            "HEAD".to_string(),
-            "refs/tags".into(),
-            "packed-refs".into(),
-            "refs/remotes/origin/main".into(),
-        ];
+        let mut git_paths = vec!["HEAD".to_string(), "refs/tags".into(), "packed-refs".into()];
         if let Ok(output) = Command::new("git")
             .args(["symbolic-ref", "--quiet", "HEAD"])
             .current_dir(root)
             .output()
         {
             if output.status.success() {
-                git_paths.push(String::from_utf8_lossy(&output.stdout).trim().to_string());
-            }
-        }
-        for git_path in git_paths {
-            if let Ok(output) = Command::new("git")
-                .args(["rev-parse", "--git-path", &git_path])
-                .current_dir(root)
-                .output()
-            {
-                if output.status.success() {
-                    let path = String::from_utf8_lossy(&output.stdout);
-                    let path = Path::new(path.trim());
-                    let path = if path.is_absolute() {
-                        path.to_path_buf()
-                    } else {
-                        root.join(path)
-                    };
-                    // Missing inputs make every build dirty. A packed branch
-                    // needs its parent watched until a commit creates a loose ref.
-                    if git_path == "packed-refs" && !path.exists() {
-                        continue;
-                    }
-                    if let Some(path) = path.ancestors().find(|path| path.exists()) {
+                let reference = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                // A commit on a packed branch creates its loose ref. Watching
+                // the parent also sees every sibling branch; this checkout's
+                // branch reflog follows updates to just the selected ref.
+                let reflog = git_path(root, &format!("logs/{reference}"));
+                if let Some(reflog) = reflog.filter(|path| path.exists()) {
+                    println!("cargo:rerun-if-changed={}", reflog.display());
+                } else {
+                    // Repositories without a branch reflog still need to notice
+                    // their first loose ref, including an empty commit.
+                    if let Some(path) = git_path(root, &reference).and_then(|path| {
+                        path.ancestors()
+                            .find(|path| path.exists())
+                            .map(Path::to_path_buf)
+                    }) {
                         println!("cargo:rerun-if-changed={}", path.display());
                     }
                 }
+                git_paths.push(reference);
+            }
+        }
+        // Storage owns origin/main and propagates catalogue changes through
+        // its build metadata. Never broaden a missing input to shared refs.
+        for reference in git_paths {
+            if let Some(path) = git_path(root, &reference).filter(|path| path.exists()) {
+                println!("cargo:rerun-if-changed={}", path.display());
             }
         }
     }
+}
+
+fn git_path(root: &Path, reference: &str) -> Option<PathBuf> {
+    let output = Command::new("git")
+        .args(["rev-parse", "--git-path", reference])
+        .current_dir(root)
+        .output()
+        .ok()
+        .filter(|output| output.status.success())?;
+    let path = PathBuf::from(String::from_utf8(output.stdout).ok()?.trim());
+    Some(if path.is_absolute() {
+        path
+    } else {
+        root.join(path)
+    })
 }

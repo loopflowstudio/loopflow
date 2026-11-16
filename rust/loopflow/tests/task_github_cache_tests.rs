@@ -3,9 +3,11 @@ use crate::support;
 use std::fs;
 use std::process::Command;
 
-use loopflow::durable::WorkRef;
-use loopflow::ops::task::{task_interrupt, task_status};
-use loopflow::work::task::{GithubObservationResult, GithubPr, Observation, PrPublication};
+use loopflow_execution::durable::WorkRef;
+use loopflow_execution::ops::task::{task_interrupt, task_status};
+use loopflow_execution::work::task::{
+    GithubObservationResult, GithubPr, Observation, PrPublication,
+};
 use loopflow_test_support::TestRepo;
 use support::{register_task_with_pr, EnvGuard, RegisteredTask};
 use time::{Duration, OffsetDateTime};
@@ -114,7 +116,7 @@ fn reconciliation_skips_deleted_checkouts_without_losing_retained_work() {
     publish_task(&mut active);
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let mut retained = active.pr.clone();
-    retained.id = loopflow::work::task::TaskPrId::new();
+    retained.id = loopflow_execution::work::task::TaskPrId::new();
     retained.task_id = deleted.id.clone();
     retained.slug = deleted.workspace_slug.clone();
     retained.branch = deleted.branch.clone();
@@ -141,7 +143,7 @@ fn reconciliation_skips_deleted_checkouts_without_losing_retained_work() {
     let script = gh_success_script(log.to_str().unwrap());
     let _env = EnvGuard::with_lf_home(&[("gh", script.as_str())], home.path());
 
-    let report = loopflow::ops::pr_landing::reconcile_repository(repo.path()).unwrap();
+    let report = loopflow_execution::ops::pr_landing::reconcile_repository(repo.path()).unwrap();
 
     assert!(report.errors.is_empty(), "{report:?}");
     assert!(!checkout.exists());
@@ -184,7 +186,7 @@ fn graph_ql_exhaustion_never_blocks_task_control_or_forces_pr_enumeration() {
         home.path(),
     );
 
-    let report = loopflow::ops::pr_landing::reconcile_repository(repo.path()).unwrap();
+    let report = loopflow_execution::ops::pr_landing::reconcile_repository(repo.path()).unwrap();
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let observed = runtime
         .block_on(task.store.active_task_pr(&task.task.id))
@@ -260,7 +262,7 @@ fn rest_failure_is_retained_while_local_controls_continue() {
         home.path(),
     );
 
-    let report = loopflow::ops::pr_landing::reconcile_repository(repo.path()).unwrap();
+    let report = loopflow_execution::ops::pr_landing::reconcile_repository(repo.path()).unwrap();
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let observed = runtime
         .block_on(task.store.active_task_pr(&task.task.id))

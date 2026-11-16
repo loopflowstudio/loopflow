@@ -6,7 +6,7 @@ use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 
 use base64::prelude::*;
-use loopflow::store::{
+use loopflow_execution::store::{
     CredentialState, ProviderAccount, ProviderAccountId, RoutingState, StorageConfig,
 };
 use support::EnvGuard;
@@ -17,7 +17,7 @@ fn account_status_preserves_local_evidence_without_provider_executables() {
     let _env = EnvGuard::with_lf_home(&[], home.path());
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let store = runtime
-        .block_on(loopflow::store::open_ephemeral_store(
+        .block_on(loopflow_execution::store::open_ephemeral_store(
             &StorageConfig::sqlite(home.path().join("loopflow.db")),
         ))
         .unwrap();
@@ -112,7 +112,8 @@ fn account(account_id: &str, home: std::path::PathBuf) -> ProviderAccount {
         account_id: ProviderAccountId::parse(account_id).expect("account id"),
         home: Some(home),
         login_email: Some(
-            loopflow::profile::EmailAddress::parse(&format!("{account_id}@example.com")).unwrap(),
+            loopflow_execution::profile::EmailAddress::parse(&format!("{account_id}@example.com"))
+                .unwrap(),
         ),
         observed_email: None,
         observed_subject: None,
@@ -137,7 +138,7 @@ fn headless_connect_without_a_saved_profile_names_recovery_without_registering()
     let _env = EnvGuard::with_lf_home(&[], home.path());
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let store = runtime
-        .block_on(loopflow::store::open_ephemeral_store(
+        .block_on(loopflow_execution::store::open_ephemeral_store(
             &StorageConfig::sqlite(home.path().join("loopflow.db")),
         ))
         .unwrap();
@@ -212,7 +213,7 @@ esac
     let _env = EnvGuard::with_lf_home(&[("codex", codex)], home.path());
     let runtime = tokio::runtime::Runtime::new().expect("store runtime");
     let store = runtime
-        .block_on(loopflow::store::open_ephemeral_store(
+        .block_on(loopflow_execution::store::open_ephemeral_store(
             &StorageConfig::sqlite(home.path().join("loopflow.db")),
         ))
         .expect("account store");
@@ -252,7 +253,7 @@ esac
             "codex",
             &ProviderAccountId::parse("active").unwrap(),
             &[
-                loopflow::store::AccountLimitWindow {
+                loopflow_execution::store::AccountLimitWindow {
                     window: "weekly".into(),
                     used_percent: 34,
                     resets_at: None,
@@ -260,7 +261,7 @@ esac
                     model: None,
                     limited_until: None,
                 },
-                loopflow::store::AccountLimitWindow {
+                loopflow_execution::store::AccountLimitWindow {
                     window: "session".into(),
                     used_percent: 100,
                     resets_at: Some(1),
@@ -726,7 +727,7 @@ echo '{"id":3,"result":{"rateLimits":{}}}'
     let _env = EnvGuard::with_lf_home(&[("codex", codex)], home.path());
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let store = runtime
-        .block_on(loopflow::store::open_ephemeral_store(
+        .block_on(loopflow_execution::store::open_ephemeral_store(
             &StorageConfig::sqlite(home.path().join("loopflow.db")),
         ))
         .unwrap();
@@ -893,7 +894,7 @@ for line in sys.stdin:
     let _env = EnvGuard::with_lf_home(&[("codex", codex)], home.path());
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let store = runtime
-        .block_on(loopflow::store::open_ephemeral_store(
+        .block_on(loopflow_execution::store::open_ephemeral_store(
             &StorageConfig::sqlite(home.path().join("loopflow.db")),
         ))
         .unwrap();
@@ -946,7 +947,7 @@ fn managed_connect_requires_email_before_starting_browser() {
     let _env = EnvGuard::with_lf_home(&[], home.path());
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let store = runtime
-        .block_on(loopflow::store::open_ephemeral_store(
+        .block_on(loopflow_execution::store::open_ephemeral_store(
             &StorageConfig::sqlite(home.path().join("loopflow.db")),
         ))
         .unwrap();
@@ -1009,7 +1010,7 @@ done
     .unwrap();
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let store = runtime
-        .block_on(loopflow::store::open_ephemeral_store(
+        .block_on(loopflow_execution::store::open_ephemeral_store(
             &StorageConfig::sqlite(home.path().join("loopflow.db")),
         ))
         .unwrap();
@@ -1213,7 +1214,10 @@ fn codex_same_login_recovery_status_launch_and_reset() {
     let home = tempfile::tempdir().unwrap();
     let script = support::codex_socket_script(&format!(
         "#!/bin/sh\nexec python3 '{}' \"$@\"\n",
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/codex_access.py")
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../loopflow-execution/tests/support/codex_access.py"
+        )
     ));
     let _env = EnvGuard::with_lf_home(&[("codex", &script)], home.path());
     let repo = loopflow_test_support::TestRepo::new();
@@ -1248,7 +1252,7 @@ fn codex_same_login_recovery_status_launch_and_reset() {
     std::fs::write(native.join("history.jsonl"), "unrelated native history\n").unwrap();
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let store = runtime
-        .block_on(loopflow::store::open_ephemeral_store(
+        .block_on(loopflow_execution::store::open_ephemeral_store(
             &StorageConfig::sqlite(home.path().join("loopflow.db")),
         ))
         .unwrap();
@@ -1354,7 +1358,8 @@ fn codex_same_login_recovery_status_launch_and_reset() {
         serde_json::json!([first_turn, second_turn])
     );
     client.close();
-    let sessions = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
+    let sessions =
+        loopflow_execution::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     let prior = sessions.session(&session).unwrap().unwrap();
     assert!(prior.completed_at.is_some());
     let listing = run(&["history", "list", "--json"]);

@@ -1,6 +1,6 @@
 import Foundation
 
-/// A frame's first byte on an owner connection, as `rust/loopflow/src/transport/wire.rs` names it.
+/// A frame's first byte on an owner connection, as `rust/loopflow-execution/src/transport/wire.rs` names it.
 public enum OwnerTag: UInt8, Sendable {
     case reply = 0x01, snapshot = 0x02, out = 0x03, err = 0x04
     case request = 0x11, input = 0x12

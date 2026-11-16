@@ -225,18 +225,18 @@ Ref names are not access control; pick a remote whose readers should see the
 plan. When two people edit the same field, the later edit wins and the other
 value stays in `lf repo plan journal`, ready to copy back.
 
-### Linear, Asana or Notion
+### Linear or Asana
 
 ```bash
-lf account connect linear                  # or asana, or notion
+lf account connect linear                  # or asana
 lf wave plan connect --all --team-key LOO       # Linear: one Team per repository; Tasks become LOO-12
 ```
 
 ```yaml
-# .lf/config.yaml, for Asana or Notion
+# .lf/config.yaml, for Asana
 planning:
-  provider: asana                  # or notion
-  team: "<team-gid-or-url>"        # Asana team, or the Notion page holding the databases
+  provider: asana
+  team: "<team-gid-or-url>"        # the Asana team holding this repository's project
 ```
 
 Each Task is one item in the tracker, and the tracker is where coworkers work:
@@ -250,13 +250,36 @@ Each Task is one item in the tracker, and the tracker is where coworkers work:
 
 | You, in Loopflow… | Coworkers see… |
 |---|---|
-| create, update, steer, complete | the same change |
+| create, edit, steer, complete, reorder or delete | the same change |
 | start work on the Task | it moves to in progress |
 | open, land or abandon its PR | a link to the PR and its state |
 
-In Linear, a Wave is an Initiative and its planning is a Linear Project. Offline,
-commands save locally and deliver on the next connected command;
-`lf task sync LOO-12` retries one Task.
+Linear and Asana behave the same way. In Linear, a Wave is an Initiative and
+its planning is a Linear Project; in Asana, a Wave's planning is a team
+project.
+
+Every change saves on this machine first and joins one queue of deliveries to
+the tracker, sent in the order you made them. Each `lf` command sends a short
+batch from the queue, so a long backlog drains over several commands without
+using up the tracker's request allowance. Offline, commands still save and the
+queue waits:
+
+```text
+$ lf repo plan
+Planning: Linear. 3 changes waiting to send.
+  LOO-412  title     pending
+  LOO-412  comment   pending
+  LOO-398  complete  sent, waiting for Linear to confirm
+```
+
+A change marked as waiting to confirm was sent, but its answer never arrived.
+Loopflow reads the tracker before sending anything else for that Task, at most
+once every ten minutes, so the change lands once. `lf task sync LOO-398` looks
+now.
+
+When a coworker changed the same field in the tracker before your edit
+arrived, the tracker's value wins and the Task shows both; copy yours back
+with `lf task edit` if it should stand.
 
 A Wave not yet connected to an Initiative has nothing to exchange. Its Tasks
 stay local and `lf wave sync` shows them without asking Linear, until
@@ -460,11 +483,12 @@ and keeps the Session, checkout, PR and graph.
 position; retry it alone if it fails. `lf task reopen` keeps the same PR.
 `lf task abandon` cancels it, closes its PRs and deletes its branches.
 
-**Sync.** `lf task sync LOO-12` looks for its tracker creation now and re-sends
-it with its saved ID when absent; between syncs, every `lf` command looks for an
-uncertain creation once per window. `--retry-updates` retries saved field
-changes after reading the tracker again. `lf wave sync` refreshes from Linear
-first; a Wave with no Initiative skips the refresh and still succeeds.
+**Sync.** `lf task sync LOO-12` sends that Task's queued changes now, first
+reading the tracker for any change that was sent without an answer; between
+syncs, every `lf` command sends one short batch. `--retry-updates` also resends
+saved field changes after reading the tracker again. `lf wave sync`
+refreshes from the tracker first; a Wave with no Initiative skips the refresh
+and still succeeds.
 
 ```bash
 lf task sync LOO-403 --retry-updates

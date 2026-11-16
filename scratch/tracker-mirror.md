@@ -38,14 +38,14 @@ lf task create --title "Mirror demo" --json
 lf task edit <id> --title "Mirror demo, renamed"
 lf steer <id> "first comment"
 lf task complete <id>
-lf planning status --json          # one queue: 4 effects, seq order, kind, phase, provider, receipt
+lf repo plan --json                # one queue: 4 effects, seq order, kind, phase, provider, receipt
 lf task show <id> --json | jq .sync
 ```
 
 Switch `.lf/config.yaml` to `provider: asana` against the Asana stand-in and
 run the same five commands: the same queue rows, `provider: asana`, and
 `SELECT provider FROM pm_items` answers `asana`. Pull the network: every
-command saves, `lf planning status` lists the effects as pending, and the next
+command saves, `lf repo plan` lists the effects as pending, and the next
 connected command drains at most one bounded pass.
 
 ## Current architecture (at 470da475a1)
@@ -299,7 +299,7 @@ Deepest deletions first, then the queue, then the bridges. Commit at each.
 
 - Creating, editing, steering, completing, reordering and deleting a Task in a
   Linear- or Asana-configured repository each leave one `tracker_effects` row
-  that `lf planning status --json` shows and the next pass settles.
+  that `lf repo plan --json` shows and the next pass settles.
 - `grep -rn 'teamId\|stateId\|assigneeId' rust/loopflow-storage/src` is empty.
 - `grep -rln -i notion rust/*/src --include=*.rs | grep -v migrations` is empty;
   `grep -rn -i chapter rust/*/src --include=*.rs | grep -v migrations` lists
@@ -318,7 +318,7 @@ Deepest deletions first, then the queue, then the bridges. Commit at each.
 
 ## Wild success / failure
 
-Success: someone on Asana gets the same `lf planning status` and conflict
+Success: someone on Asana gets the same `lf repo plan` and conflict
 story as Linear, and a third bridge (GitHub Issues, Jira) is one `effects.rs`
 plus a stand-in. 167 forever-attempted edits stop existing because the
 lost-reply rule is one function with one test.
@@ -327,3 +327,13 @@ Failure: the change grows like LOO-691 (66 files, never split) and stalls;
 or the migration's copy double-sends through an older lf. Guards: slices land
 as commits that build; old rows are marked settled in the same migration.
 
+
+## User docs (written ahead of code)
+
+`docs/work.md` ("Linear or Asana", Reference "Sync"), `docs/glossary.md`,
+`docs/config.md`, `docs/dev/data.md`, `README.md`. The queue surfaces in the
+existing `lf repo plan` (there is no `lf planning` command); its text output
+is documented as one line per unsettled effect: owner, kind, `pending` or
+"sent, waiting for <tracker> to confirm". `lf task sync <id>` drains that
+owner now. Still to update with the code: `docs/dev/planning.md`,
+`docs/dev/reference.md:89`, `rust/loopflow-execution/src/ops/README.md:10`.

@@ -27,3 +27,7 @@
 - Wire `linear_id` → a neutral name crosses Rust, Swift and ~10 DTO fixtures.
   Planned as a follow-up Task, not here. Is a neutral name wanted at all while
   Linear is the only tracker in use?
+- `docs/work.md` says that after a field conflict "the tracker's value wins and
+  the Task shows both". Which surface shows the losing value: `lf task show`,
+  `lf repo plan`, Desktop's Task detail, or all three? `conflict_json` holds
+  it; no reader prints it to a person today.

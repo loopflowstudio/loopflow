@@ -123,7 +123,7 @@ You want to do something; here's how through `lf`.
 | see what agents cost, by Task, Wave or week | `lf session usage --weekly` |
 | run on your own machine over SSH | `lf --machine mini -b task run <ID>` |
 | rent a machine from Daytona, Modal, RunPod or AWS for one Task and give it back after | `lf task run <ID> --rent <template>` |
-| plan in Git with no tracker, or in Linear | `lf task list` |
+| plan in Git with no tracker, or in Linear or Asana | `lf task list` |
 | keep a longer objective moving with its own memory, plan and setup | `lf wave status` |
 | see which commands spend your Linear rate limit (after `logs: {linear_requests: true}` in `~/.lf/config.yaml`) | `lf session history linear` |
 | cut a release | `lf repo release run <version>` |

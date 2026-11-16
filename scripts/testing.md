@@ -343,8 +343,12 @@ daemon may have started with another value. Zero disables idle exit.
 Reading statistics also resets the idle timer: repeatedly running `status`
 postpones the exit. The API exposes neither the active timeout nor the last
 request time.
-Nothing here stops or restarts it: a stop drops other worktrees' compiles. Until
-then a new worktree's builds work and miss, and `status` reports the unloaded root:
+On a busy Machine that exit may not come: during LOO-921 the pinned daemon ran
+1h45m with no 300-second gap between cache file writes or hits, so roots listed
+in that time stayed unloaded. Nothing here stops or restarts it. Compiles run in
+each client, so a stop kills none, but a compile still running 10 seconds after
+it loses its cache write. Until the daemon restarts, a new worktree's builds
+work and miss, and `status` reports the unloaded root:
 
 ```text
 roots    60 of 61 loaded; this checkout loads at the daemon's next idle exit

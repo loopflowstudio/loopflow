@@ -36,8 +36,9 @@ uv run python scripts/build_cache.py status    # which wrapper and daemon, and w
 Plain `cargo` in any worktree then shares unchanged workspace libraries with
 the others. New worktrees list themselves through the `post-checkout` hook and
 `scripts/dev-lf` refreshes before building; a new root takes effect at the
-daemon's next idle exit. Nothing here stops a daemon, shares a Cargo target or
-writes configuration CI reads. `status` refreshes the list, then reads daemon
+daemon's next idle exit, which a busy Machine may not reach while builds keep
+coming. Nothing here stops a daemon, shares a Cargo target or writes
+configuration CI reads. `status` refreshes the list, then reads daemon
 statistics; that read resets the idle timer, so repeated checks postpone exit.
 A `SCCACHE_*` variable the caller sets wins. See
 [the shared compilation cache](testing.md#shared-compilation-cache).

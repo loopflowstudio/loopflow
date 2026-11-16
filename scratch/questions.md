@@ -53,9 +53,8 @@ Assumptions taken in kickoff; each is reversible by re-running `install`.
 - **Implementation correction (2026-11-16): no timeout from counter polling.**
   Pinned `src/server.rs:954–960` resets idle on every RPC, including stats and
   client-side storage calls. Polling prevents natural idle; compile counters
-  cannot recover all request gaps. Keep 600 s until passive request timestamps
-  covering an hour exist. This replaces the concept review's proposed polling
-  method, not the fired idle rule. No daemon restart or logging service added.
+  cannot recover all request gaps. Superseded as a missing input by the
+  cache-file mtime sample (Concept review 2); no logging service added.
 
 - **Concept review 2 (2026-11-16 12:11): one question stops the idle work.**
   Cache-file mtimes give a passive gap sample (upper bounds): pinned daemon up

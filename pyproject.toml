@@ -29,6 +29,7 @@ dev = [
     "pyte>=0.8.2",
     "pytest>=8.0",
     "ruff>=0.8",
+    "tomlkit>=0.13.3",
 ]
 
 [project.urls]

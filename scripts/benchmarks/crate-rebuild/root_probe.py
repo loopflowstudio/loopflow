@@ -11,7 +11,7 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from build_cache import refresh  # noqa: E402
+from build_cache import CACHE_ENV, VERBATIM_ENV_DEPS, refresh  # noqa: E402
 
 
 def main() -> None:
@@ -72,7 +72,12 @@ def main() -> None:
             ]
         )
         config = root / "sccache.json"
-        env.update(refresh(a, config))
+        refresh(a, config)
+        env.update(
+            CACHE_ENV,
+            SCCACHE_CONF=str(config),
+            SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=VERBATIM_ENV_DEPS,
+        )
         process = None
 
         def start() -> subprocess.Popen:
@@ -132,7 +137,7 @@ def main() -> None:
             process = start()
             build("first", a, a / "target", (0, 1))
             run(["git", "worktree", "add", "--detach", str(b)])
-            env.update(refresh(b, config))
+            refresh(b, config)
             build("before_idle", b, b / "target", (0, 1))
             # The production entry point never sends a stop/restart. Let this
             # fixture's daemon expire in exactly the same way.

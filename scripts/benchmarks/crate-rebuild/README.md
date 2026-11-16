@@ -6,9 +6,52 @@ uv run python scripts/benchmarks/crate-rebuild/probe.py --sccache /path/to/sccac
 uv run python scripts/benchmarks/crate-rebuild/cochange.py --revision HEAD --count 80
 uv run python scripts/benchmarks/crate-rebuild/run.py --base 3fbf3d2ca3 --candidate HEAD --sccache /path/to/sccache --output /tmp/lf-build-comparison
 uv run python scripts/benchmarks/crate-rebuild/report.py --input /tmp/lf-build-comparison --cache-validation /tmp/lf-root-proof --output scripts/benchmarks/crate-rebuild/results
+uv run python scripts/benchmarks/crate-rebuild/test_loop.py --output /tmp/lf-test-loop
+uv run python scripts/benchmarks/crate-rebuild/report.py --test-loop /tmp/lf-test-loop --output scripts/benchmarks/crate-rebuild/results
 ```
 
 [LOO-650 results](results/loo-650.html) include all five pairs and their raw receipts.
+[LOO-921 results](results/loo-921.html) time a new worktree through a passing focused test.
+
+## Edit-to-test loop
+
+`test_loop.py` answers what a person waits for: `git worktree add`, one edit,
+then a focused `cargo test` that passes. It uses the Machine's own Cargo
+configuration from [`build_cache.py install`](../../testing.md#shared-compilation-cache)
+(the pinned wrapper and the Machine's `jobs`), with a private cache directory
+and socket so every counter belongs to the run. One cold seed fills that cache
+and is not a sample.
+
+| Sample | cache mode (`incremental = false`) | repeated-edit mode (`CARGO_INCREMENTAL=1`) |
+|---|---|---|
+| new worktree, application edit, `cargo test -p loopflow --lib <filter>` passes | ✓ | ✓ |
+| two more application edits in that worktree, same test | ✓ | ✓ |
+| execution edit in that worktree, `cargo test -p loopflow-execution --lib <filter>` passes | ✓ | ✓ |
+| two more execution edits | ✓ | ✓ |
+| new worktree, execution edit, execution test | ✓ | |
+
+Each cohort runs every row once, alternating which mode goes first; three
+cohorts is the minimum. Edits are unique to their cohort, so none can retrieve
+an earlier edited artifact. Worktrees and targets are removed after their
+samples. Cargo commands run one at a time. After an exited run, `--resume` with
+the same output directory continues from the completed samples.
+
+Each sample records wall seconds, client CPU-seconds, the largest single
+process RSS, the peak summed RSS of the Cargo process tree, and the daemon's
+CPU-seconds beside the client's, not added to it. It records the command's Rust
+hits, misses and non-cacheable compiles; for each workspace compiler its kind
+(`lib`, `--test`, `bin`) and seconds; the test executables linked; Cargo
+`--timings` durations for everything outside the workspace; jobs, toolchain and
+load average before and after. A `--test` compile's seconds include its link.
+With more than one job, a workspace crate's hit or miss is stated only where no
+other compile overlapped it; the per-command counters are exact either way.
+
+The report gives the median and range per row and mode, and the sum *new
+worktree plus three edits* that decides whether incremental compilation stays
+off by default. It states concurrent-worktree capacity as unmeasured: the peak
+tree RSS and CPU-seconds describe one loop.
+
+## Cache probes and the revision comparison
 
 The probe builds the actual model, definition-content, terminal and storage crates in two separate
 source/target roots in linked Git worktrees, with a shared `origin/main` ref.
@@ -18,8 +61,9 @@ feature and byte-identical embedded database templates; copied databases still
 acquire independent Machine identities. Root-refresh reuse is checked with a
 fresh disposable target; existing dependency artifacts
 can retain their earlier path hashes. It does not build the application. Use sccache with Rust basedir normalization and verbatim
-environment-dependency tracking; 0.19.0 lacks these features. The first verified
-upstream revision is `ca81ec2a2566efc623692741440d99c710268841`.
+environment-dependency tracking; 0.19.0 lacks these features.
+`scripts/build_cache.py install` builds the verified revision and `status`
+prints its path for `--sccache`.
 
 The full comparison clones committed baseline and candidate revisions into
 independent source/target roots. Each label has its own cold-seeded private
@@ -56,8 +100,7 @@ time include compiler and linker CPU in the client process tree; storage-daemon
 overhead is excluded. These receipts do not establish total Machine CPU savings
 or a safe concurrent build budget. The comparison and owner probe do not configure Machine admission budgets.
 
-The root upkeep probe uses the same inventory/configuration function as
-`scripts/dev-lf`. It creates a linked worktree after starting its private server,
+The root upkeep probe uses the same root list as `build_cache.py refresh`. It creates a linked worktree after starting its private server,
 checks the expected miss while the old configuration remains active, waits for
 that exact server's natural idle exit, then checks a hit in a fresh independent
 target. It never sends a restart RPC or edits a root list. The tiny library checks

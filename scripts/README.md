@@ -28,11 +28,18 @@ to reproduce a matrix failure or when release guidance requires it.
 
 ## Developer build cache
 
-`scripts/dev-lf` calls `build_cache.py` before Cargo. Root inventory is derived
-from Git; other settings follow the Machine's default sccache file. The build selects it through `SCCACHE_CONF`; it takes effect after the shared
-server's normal idle exit. The script never restarts a server, shares a Cargo
-target or installs Machine configuration. An explicit cache configuration stays
-with its caller. See [build commands](testing.md#builds).
+```bash
+uv run python scripts/build_cache.py install   # once per Machine: pinned sccache, personal Cargo config, worktree hook
+uv run python scripts/build_cache.py status    # which wrapper and daemon, and whether this checkout's root is loaded
+uv run python scripts/build_cache.py refresh   # list this repository's worktrees for the daemon
+```
+
+Plain `cargo` in any worktree then shares unchanged workspace libraries with
+the others. New worktrees list themselves through the `post-checkout` hook and
+`scripts/dev-lf` refreshes before building; a new root takes effect at the
+daemon's next idle exit. Nothing here stops a daemon, shares a Cargo target or
+writes configuration CI reads. A `SCCACHE_*` variable the caller sets wins. See
+[the shared compilation cache](testing.md#shared-compilation-cache).
 
 ## Scheduled disk cleanup
 

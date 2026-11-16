@@ -5,6 +5,7 @@ import gzip
 import hashlib
 import html
 import json
+import statistics
 from pathlib import Path
 
 from run import _catalog_complete, _validate_closure
@@ -35,12 +36,145 @@ def _table(summary: list[dict], metric: str, scale: float = 1) -> str:
     )
 
 
+def _test_loop(source: Path, output: Path) -> None:
+    from test_loop import CASES, summarize, validate
+
+    config = json.loads((source / "configuration.json").read_text())
+    receipts = json.loads((source / "receipts.json").read_text())
+    validate(receipts, config["cohorts"])
+    summary = summarize(receipts)
+    totals = []
+    for owner, cases in (("app", CASES[:3]), ("execution", CASES[3:])):
+        for mode in ("cache", "incremental"):
+            values = [
+                sum(
+                    r["wall_seconds"]
+                    for r in receipts
+                    if r["cohort"] == cohort and r["mode"] == mode and r["case"] in cases
+                )
+                for cohort in range(1, config["cohorts"] + 1)
+            ]
+            totals.append(
+                {
+                    "owner": owner,
+                    "mode": mode,
+                    "median": statistics.median(values),
+                    "min": min(values),
+                    "max": max(values),
+                }
+            )
+    incremental = all(
+        next(r["median"] for r in totals if r["owner"] == owner and r["mode"] == "incremental")
+        < next(r["median"] for r in totals if r["owner"] == owner and r["mode"] == "cache")
+        for owner in ("app", "execution")
+    )
+    payload = {
+        "configuration": config,
+        "summary": summary,
+        "three_edit_totals": totals,
+        "default_incremental": incremental,
+        "concurrent_worktree_capacity": None,
+        "capacity_note": "Unmeasured; all Cargo commands ran serially",
+        "method": "Workspace wrapper records all compiler intervals. Cache deltas are "
+        "attributed to a compiler only when no other interval overlaps. "
+        "Two statistics RPCs per compiler are included in timings. "
+        "Test compiler time includes linking. Memory is sampled every second; "
+        "sampled peak can miss shorter peaks. Daemon CPU is separate.",
+        "driver_sha256": hashlib.sha256(
+            Path(__file__).with_name("test_loop.py").read_bytes()
+        ).hexdigest(),
+        "receipts": receipts,
+    }
+    output.mkdir(parents=True, exist_ok=True)
+    raw = json.dumps(payload, indent=2) + "\n"
+    (output / "loo-921-raw.json.gz").write_bytes(gzip.compress(raw.encode(), mtime=0))
+    compact = {
+        **payload,
+        "raw_receipts": "loo-921-raw.json.gz",
+        "receipts": [
+            {
+                k: v
+                for k, v in r.items()
+                if k not in ("stats_before", "stats_after", "memory_samples", "cargo_units")
+            }
+            for r in receipts
+        ],
+    }
+    (output / "loo-921.json").write_text(json.dumps(compact, indent=2) + "\n")
+
+    def table(metric: str, scale: float = 1) -> str:
+        rows = []
+        for case in CASES + ["execution_new"]:
+            cells = []
+            for mode in ("cache", "incremental"):
+                row = next((r for r in summary if r["case"] == case and r["mode"] == mode), None)
+                value = row[metric] if row else None
+                cells.append(
+                    f"<td>{value['median'] / scale:.2f} "
+                    f"[{value['min'] / scale:.2f}–{value['max'] / scale:.2f}]</td>"
+                    if value
+                    else "<td>unmeasured</td>"
+                )
+            rows.append(f"<tr><th>{case.replace('_', ' ')}</th>{''.join(cells)}</tr>")
+        return (
+            "<table><tr><th>Sample</th><th>Cache</th><th>Incremental</th></tr>"
+            + "".join(rows)
+            + "</table>"
+        )
+
+    totals_html = "".join(
+        f"<tr><th>{r['owner']}</th><td>{r['mode']}</td><td>{r['median']:.2f} "
+        f"[{r['min']:.2f}–{r['max']:.2f}]</td></tr>"
+        for r in totals
+    )
+    document = f"""<!doctype html><html lang="en"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width"><title>LOO-921 edit-to-test loop</title>
+<style>body{{font:16px/1.5 system-ui;max-width:1050px;margin:48px auto;padding:0
+24px;color:#20252b}}
+table{{width:100%;border-collapse:collapse;margin:24px 0}}th,td{{text-
+align:left;padding:10px;border-bottom:1px solid #ddd}}
+th{{background:#f4f5f6}}td{{font-variant-numeric:tabular-nums}}</style>
+<h1>A Rust edit through a passing test</h1>
+<p>{config["cohorts"]} alternating cohorts, Machine Cargo jobs unchanged.
+Median [minimum–maximum]. Each sample passes one focused test and includes its link.</p>
+<p>Revision <code>{html.escape(config["revision"])}</code>.<br>{html.escape(config["rustc"])}</p>
+<h2>Elapsed seconds</h2>{table("wall_seconds")}
+<h2>Three edits, elapsed seconds</h2><p>Application includes new-worktree creation and its first
+build.
+Execution follows the application tests in the same target; the separate execution-new row is
+measured
+only in cache mode. These totals each contain three semantic edits, including the first build.</p>
+<table><tr><th>Owner</th><th>Mode</th><th>Seconds</th></tr>{totals_html}</table>
+<p>Measured default: incremental <strong>{"on" if incremental else "off"}</strong>.
+Incremental must win both three-edit totals to become the default.</p>
+<h2>Client CPU-seconds</h2>{table("cpu_seconds")}
+<h2>Daemon CPU-seconds (separate)</h2>{table("daemon_cpu_seconds")}
+<h2>Largest process RSS, GiB</h2>{table("rss_bytes", 1024**3)}
+<h2>Peak sampled process-tree RSS, GiB</h2>{table("tree_rss_bytes", 1024**3)}
+<p>{html.escape(payload["method"])} Concurrent-worktree capacity is unmeasured.
+Cold seed commands are excluded. Each worktree owns its target; all samples use one private cache.
+New roots are registered before starting its daemon. Worktree creation is timed separately and added
+to the first build; setup overlaps no Cargo command. Registry build scripts and proc macros still
+build.</p>
+<p><a href="loo-921.json">Compiler closures and command counters</a> ·
+<a href="loo-921-raw.json.gz">Raw cache, memory and Cargo unit receipts</a> ·
+<a href="../README.md">Method</a></p></html>"""
+    (output / "loo-921.html").write_text(document)
+    print(output / "loo-921.html")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--input", type=Path, required=True)
-    parser.add_argument("--cache-validation", type=Path, required=True)
+    parser.add_argument("--input", type=Path)
+    parser.add_argument("--test-loop", type=Path)
+    parser.add_argument("--cache-validation", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
+    if args.test_loop:
+        _test_loop(args.test_loop.resolve(), args.output.resolve())
+        return
+    if not args.input or not args.cache_validation:
+        parser.error("--input and --cache-validation are required without --test-loop")
     source = args.input.resolve()
     receipts = json.loads((source / "receipts.json").read_text())
     expected = {(label, 0, "cold_seed") for label in ("base", "candidate")} | {

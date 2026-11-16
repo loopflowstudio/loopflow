@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from build_cache import configured_cache
 from cleanup_evidence import evidence_outcome
 from resource_envelope import _lock_recovery, load_policy
 
@@ -991,7 +992,19 @@ class Cleaner:
                     {"step": "sccache", "status": "retained", "reason": "server not running"}
                 )
                 return
-            stats = json.loads(self._command(["sccache", "--show-stats", "--stats-format", "json"]))
+            wrapper, cache_env = configured_cache()
+            stats = json.loads(
+                self._command(
+                    [
+                        "env",
+                        *(f"{key}={value}" for key, value in cache_env.items()),
+                        str(wrapper) if wrapper else "sccache",
+                        "--show-stats",
+                        "--stats-format",
+                        "json",
+                    ]
+                )
+            )
             limit = stats.get("max_cache_size")
             if not isinstance(limit, int) or limit > self.cache_caps["sccache_bytes"]:
                 raise RuntimeError("native sccache limit exceeds the configured cap or is unknown")

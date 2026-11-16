@@ -15,7 +15,11 @@ def main() -> None:
     if "--crate-name" in arguments:
         name = arguments[arguments.index("--crate-name") + 1]
     receipt = os.environ.get("LOOPFLOW_REBUILD_RECEIPTS")
-    if not receipt or not (name == "lf" or (name or "").startswith("loopflow")):
+    if not receipt or not (
+        os.environ.get("LOOPFLOW_REBUILD_ALL") == "1"
+        or name == "lf"
+        or (name or "").startswith("loopflow")
+    ):
         os.execv(cache, [cache, *arguments])
 
     def stats() -> dict:
@@ -27,12 +31,17 @@ def main() -> None:
         )
         return json.loads(result.stdout)["stats"]
 
+    started = time.time()
     before = stats()
     start = time.monotonic()
     result = subprocess.run([cache, *arguments])
     after = stats()
     item = {
-        "crate": name,
+        "crate": name or "unknown",
+        "pid": os.getpid(),
+        "started": started,
+        "finished": time.time(),
+        "kind": "test" if "--test" in arguments else "compile",
         "package": os.environ.get("CARGO_PKG_NAME"),
         "crate_type": arguments[arguments.index("--crate-type") + 1]
         if "--crate-type" in arguments

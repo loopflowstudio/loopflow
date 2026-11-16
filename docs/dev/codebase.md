@@ -115,12 +115,18 @@ uses outbound REST requests. Remote execution reaches the target Machine through
 
 ## Add a provider
 
-Follow the same composition order as a provider launch:
+A provider is one harness file. Core code never compares a harness name; it
+branches on what the harness declares.
 
-1. Add the provider kind and let its native client own authentication.
-2. Add one harness adapter that maps native output to the common stream.
-3. Preserve native session ids, cumulative usage, omissions, and finality.
-4. Add conformance fixtures for normal, tool, error, and retry output.
+1. Add `harness/<name>.rs` with a unit struct implementing `Harness`: its
+   `Capabilities`, `open` for the native interactive client and `driver` for
+   the headless stream. Its native client owns authentication.
+2. Add its `HarnessKind` variant and its line in `HarnessKind::harness()`.
+3. Map native output to the common stream. Keep native session ids,
+   cumulative usage, omissions and finality.
+4. Add conformance fixtures for normal, tool, error and retry output; the
+   `harness::launch_matrix` test picks the new variant up from
+   `HarnessKind::ALL`.
 5. Map the new edge in the checked architecture reference.
 
 Do not add a collector daemon, mandatory telemetry store, or synthetic final

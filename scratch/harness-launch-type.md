@@ -113,7 +113,7 @@ pub trait Harness: Sync {
 }
 
 pub struct Capabilities {
-    pub thread: ThreadNaming,          // Assigned | Reported, per Holder
+    pub thread: ThreadNaming,          // { caller, server }: Assigned | Reported
     pub same_turn_input: bool,         // send_current can succeed
     pub native_skills: Option<SkillDialect>,
     pub turn_limit: bool,              // Claude only today
@@ -138,7 +138,7 @@ pub struct Launch<'a> {
     pub config: &'a AgentConfig,     // what to run; no holder, no attachment
     pub placement: Placement,
     pub admitted: &'a Admitted,      // required
-    pub start: Start<'a>,            // New { thread: Option<&AgentSessionId> } | Resume { thread }
+    pub start: Start<'a>,            // New | Resume { thread: &AgentSessionId }
     pub context_file: Option<&'a Path>,
 }
 
@@ -189,6 +189,27 @@ and call this. `SessionCommandOutcome::result` and `bare_exit_code` take
 | `config/settings.rs:311-344` OpenCode model rule | `opencode.rs` |
 | `replay.rs:185-266` per-harness defaults | capabilities + `HarnessKind::ALL` |
 | Claude usage keys in two decoders | one `claude::usage(&Value)` |
+
+### Concept review (2026-11-16, headless)
+
+Settled by the design, for implement:
+
+- `Start::New` carries no thread. An Assigned thread id is the UUID in the
+  capture's artifact key (`run.rs:743-753` strips `run_` today), so `admit`
+  owns it: `Admitted::assigned_thread()`, and `harness::launch` passes it to
+  `open` when `capabilities().thread` is `Assigned` for the placement's
+  holder. Callers never choose or pass one; `run.rs`'s `names_thread` block
+  is deleted, not moved.
+- `ThreadNaming` is a pair `{ caller, server }` of `Assigned | Reported`,
+  because Pi differs by holder. It stays data, not a method.
+- "Whether it can be managed" (Task text) is not a capability. After LOO-913
+  every harness can be held; managed means `Holder::Server`, which
+  `Placement` already carries.
+- `install_hint` is copy, not behavior; keep it on `Capabilities` only
+  because it removes a name `match`.
+
+No open product choice. Implement still waits on #1953 (see
+`scratch/questions.md`).
 
 ## Delete, do not maintain
 
@@ -287,3 +308,10 @@ behave exactly as before.
 - gate: `uv run python scripts/test.py --reuse-passing --rust-filter 'test(harness::) | test(agent::) | test(transport::)'`; CI runs the suites.
 - gate: the two `rg` commands above.
 - demo/qa: real-terminal launches above (needs installed providers).
+
+## Docs written (write-docs)
+
+- `rust/loopflow-execution/src/harness/README.md` "One launch type per harness"
+- `docs/dev/codebase.md` "Add a provider"
+
+The README's account paragraphs are left for LOO-913 (#1953) to delete, to avoid a conflict.

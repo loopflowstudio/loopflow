@@ -4,6 +4,55 @@ Each provider (`claude.rs`, `codex.rs`, `opencode.rs`, `pi.rs`) gets launched,
 observed and recorded here. The provider owns the conversation; lf adds context
 at turn boundaries, interjects through hooks and records what happened.
 
+## One launch type per harness
+
+```rust
+let harness = HarnessKind::Codex.harness();
+let outcome = harness::launch(Launch {
+    config: &config,
+    placement,          // from transport::delegate
+    admitted: &admitted, // from admit(); never optional
+    start: Start::Resume { thread: &thread },
+    context_file: Some(&context),
+})?;
+```
+
+Every launch, interactive or headless, bare or held, goes through
+`harness::launch`. `transport::delegate` decides the `Placement` once: `Mode`
+(`Interactive` or `Headless`) and `Holder` (`Caller` or `Server`). In-process
+callers that never delegate, like commit messages and Graph steps, use
+`Placement::HEADLESS_CALLER`. `admit` creates the capture and claims the
+attachment before any harness is chosen, so a launch cannot start unattached.
+
+Each harness file answers the rest:
+
+| method | answers |
+|---|---|
+| `capabilities()` | who names the thread, same-turn input, native skills, turn limit, output schema, respawn after crash, install hint |
+| `open(&Launch)` | native interactive client: argv, hook and title flags, plus any companion lf keeps alive (Codex app-server, OpenCode server and observer) |
+| `driver(events, approval)` | headless stream `Driver`: start, input, interrupt, stop |
+
+`HarnessKind::harness()` is the only dispatch, and `HarnessKind::parse` and
+`as_str` are the only places a harness name appears outside its own file.
+Everything else branches on `Capabilities`.
+
+An interactive client with a companion waits in this process; any other client
+may `exec` into a held terminal.
+
+| harness | interactive client | names the thread |
+|---|---|---|
+| Claude | native TUI, prompt on stdin | lf (`--session-id`) |
+| Pi, bare | native TUI | lf (`--session-id`) |
+| Pi, held | native TUI with the lf extension | provider |
+| Codex, bare | `codex`, prompt in argv | provider (start hook) |
+| Codex, held | `codex --remote` after lf opens the app-server thread | provider |
+| OpenCode | `opencode --server … --session` beside a private server; waits | provider |
+
+`cargo test -p loopflow-execution --lib harness::launch_matrix -- --nocapture`
+runs every harness × mode × holder against the stand-in provider scripts and
+prints each cell's argv, hook flags, whether it `exec`ed or waited, and the
+thread lf recorded.
+
 A skill keeps one `LfProcess` across successive provider `AgentProcess` instances.
 Its shared `LfProcessRuntime` in [`process/runtime.rs`](../process/runtime.rs)
 holds the current attachment, provider, thread and outcome, with no

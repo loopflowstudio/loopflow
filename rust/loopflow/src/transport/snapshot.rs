@@ -11,17 +11,17 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 
-use crate::ghostty_vt::{self, Terminal};
+use loopflow_terminal::ghostty_vt::{self, Terminal};
 
 use super::output::Output;
-use crate::id::TerminalId;
+use loopflow_model::id::TerminalId;
 
 const HEADER: &str = "lf-terminal-snapshot/1 ghostty=";
 
 fn path(session: &str) -> PathBuf {
     crate::store::lf_home_dir().join("screens").join(format!(
         "{}.ghostsnp",
-        crate::id::canonical_session(session)
+        loopflow_model::id::canonical_session(session)
     ))
 }
 
@@ -90,7 +90,7 @@ fn stream(bytes: &[u8]) -> Option<&[u8]> {
 #[cfg(test)]
 mod tests {
     use super::stream;
-    use crate::ghostty_vt;
+    use loopflow_terminal::ghostty_vt;
 
     #[test]
     fn only_this_revisions_snapshots_read() {

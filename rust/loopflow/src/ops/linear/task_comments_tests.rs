@@ -218,7 +218,7 @@ async fn task_comments_read_and_publish_without_starting_work() {
     for name in ["product", "other"] {
         store
             .create_wave(&crate::work::wave::Wave::new(
-                crate::id::WaveId::new(),
+                loopflow_model::id::WaveId::new(),
                 name.into(),
                 repo.display().to_string(),
             ))

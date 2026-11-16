@@ -3,8 +3,8 @@
 use rusqlite::{params, OptionalExtension};
 
 use super::SqliteStore;
-use crate::id::TerminalId;
 use crate::store::StoreResult;
+use loopflow_model::id::TerminalId;
 
 impl SqliteStore {
     /// Record a terminal before its holder is asked to start it.

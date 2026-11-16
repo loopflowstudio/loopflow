@@ -7,9 +7,11 @@ use anyhow::Result;
 use serde_json::{json, Value};
 
 use super::fact::{self, Decoded, ProviderFact, ProviderTurn, Signal};
-use crate::chat::types::{ConversationEvent, ConversationItem, FileEdit, Lifecycle, TurnUsage};
 use crate::harness::lf_tag::LfTagParser;
 use crate::provider_account::RateLimitSignal;
+use loopflow_model::chat::types::{
+    ConversationEvent, ConversationItem, FileEdit, Lifecycle, TurnUsage,
+};
 
 /// One persistent Claude process's stream.
 #[derive(Debug, Default)]

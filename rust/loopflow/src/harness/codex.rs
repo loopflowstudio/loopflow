@@ -13,7 +13,7 @@
 //! - `turn/interrupt {threadId, turnId}` -> `{}`; the turn then ends with
 //!   `turn/completed` status "interrupted" (probed live).
 
-use crate::id::AgentSessionId;
+use loopflow_model::id::AgentSessionId;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -30,7 +30,6 @@ use tokio::task::JoinHandle;
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::agent::{build_codex_thread_start_params, AgentConfig};
-use crate::chat::types::ConversationEvent;
 use crate::harness::codex_decode::{self, CodexDecoder};
 use crate::harness::common::spawn_stderr_logger;
 use crate::harness::fact::{Decoded, ProviderFact};
@@ -42,6 +41,7 @@ use crate::os_process::{
 use crate::provider_account::{resolve_provider_account_exact, ProviderAccountRoute};
 use crate::provider_auth::Provider;
 use crate::store::ProviderAccountId;
+use loopflow_model::chat::types::ConversationEvent;
 
 fn build_thread_request(
     launch: &AgentConfig,
@@ -1328,7 +1328,7 @@ mod tests {
                 .unwrap();
         store.test_session("saved", &crate::session_record::new_artifact_key());
         let sql = rusqlite::Connection::open(ledger.home().join("loopflow.db")).unwrap();
-        let process = crate::id::LfProcessId::new();
+        let process = loopflow_model::id::LfProcessId::new();
         sql.execute(
             "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
             [process.as_str()],

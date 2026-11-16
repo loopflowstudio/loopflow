@@ -293,8 +293,8 @@ Test skill body.
             home.path().join(".lf").to_str().unwrap(),
         );
         let repo = loopflow_test_support::TestRepo::new();
-        let source = crate::builtins::get_builtin_skill("work").unwrap();
-        let (_, body) = crate::graph::split_frontmatter(source).unwrap();
+        let source = loopflow_definitions::builtins::get_builtin_skill("work").unwrap();
+        let (_, body) = loopflow_definitions::text::split_frontmatter(source).unwrap();
         let help = crate::lf::navigation::render_help(
             &["skill".to_owned(), "work".to_owned()],
             repo.path(),
@@ -431,7 +431,7 @@ Test skill body.
     fn context_delivery_keeps_distinct_scopes_and_one_operating_document() {
         let _home = crate::journal::TestLedgerGuard::new();
         let tmp = create_repo_fixture();
-        let operating = crate::builtins::LOOPFLOW_DOC;
+        let operating = loopflow_definitions::builtins::LOOPFLOW_DOC;
         fs::write(tmp.path().join("LOOPFLOW.md"), operating).unwrap();
         fs::create_dir_all(tmp.path().join("custom")).unwrap();
         fs::write(
@@ -723,7 +723,7 @@ Test skill body.
         assert!(prepared
             .config
             .system_prompt
-            .contains(crate::builtins::LOOPFLOW_DOC.trim()));
+            .contains(loopflow_definitions::builtins::LOOPFLOW_DOC.trim()));
         assert!(!prepared.config.system_prompt.contains("tmux attach -r"));
     }
 
@@ -747,7 +747,7 @@ Test skill body.
         assert!(!prepared
             .config
             .system_prompt
-            .contains(crate::builtins::LOOPFLOW_DOC.trim()));
+            .contains(loopflow_definitions::builtins::LOOPFLOW_DOC.trim()));
     }
 
     #[test]

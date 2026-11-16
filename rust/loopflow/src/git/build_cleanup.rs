@@ -106,7 +106,7 @@ fn ownership(worktree: &Path, registries: &[PathBuf]) -> Result<()> {
         let store = SqliteStore::open_processes_read_only(registry)
             .context("execution inspection unavailable")?;
         for owner in associated {
-            let task = crate::durable::TaskId::parse(&owner.task)?;
+            let task = loopflow_model::durable::TaskId::parse(&owner.task)?;
             let blockers = crate::ops::task_execution::task_execution_blockers(&store, &task)
                 .context("execution inspection unavailable")?;
             if !blockers.is_empty() {
@@ -429,8 +429,8 @@ mod tests {
         old(&checkout.join("target"));
         let db = temp.path().join("db");
         let store = SqliteStore::open_ephemeral(&db).unwrap();
-        let task = crate::durable::TaskId::new();
-        let wave = crate::id::WaveId::new();
+        let task = loopflow_model::durable::TaskId::new();
+        let wave = loopflow_model::id::WaveId::new();
         let project = crate::work::project::ProjectId::new();
         let conn = Connection::open(&db).unwrap();
         conn.execute(

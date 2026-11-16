@@ -15,10 +15,10 @@ use super::{fetch_task_refs, task_error};
 pub(crate) struct TaskSource {
     pub branch: String,
     pub commit: String,
-    pub task_id: crate::durable::TaskId,
-    #[serde(deserialize_with = "crate::id::deserialize_task_identifier")]
+    pub task_id: loopflow_model::durable::TaskId,
+    #[serde(deserialize_with = "loopflow_model::id::deserialize_task_identifier")]
     pub identifier: String,
-    #[serde(deserialize_with = "crate::id::deserialize_uuid_option")]
+    #[serde(deserialize_with = "loopflow_model::id::deserialize_uuid_option")]
     pub issue_id: Option<String>,
 }
 
@@ -72,7 +72,7 @@ pub(crate) fn source_for_task(issue: &str) -> OpsResult<Option<TaskSource>> {
     };
     let source: TaskSource = serde_json::from_str(&value.to_string_lossy())
         .map_err(|error| OpsError::Message(format!("invalid SSH Task source: {error}")))?;
-    let selector = crate::id::TaskSelector::parse(issue);
+    let selector = loopflow_model::id::TaskSelector::parse(issue);
     Ok((selector.matches(&source.identifier)
         || selector.matches(source.task_id.as_str())
         || source

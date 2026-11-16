@@ -256,7 +256,7 @@ impl Delivery {
                     outgoing,
                     ServerMessage::Response {
                         id: id.into(),
-                        trace_id: crate::id::TraceId::default(),
+                        trace_id: loopflow_model::id::TraceId::default(),
                         result: Value::Null,
                     },
                 )
@@ -1229,7 +1229,7 @@ mod tests {
         with_store(|store| {
             Box::pin(async move {
                 let registry = Arc::new(Subscriptions::default());
-                let id = crate::durable::TaskId::new();
+                let id = loopflow_model::durable::TaskId::new();
                 let read = Read::TaskWait {
                     issue: id.to_string(),
                     until: crate::ops::task::TaskWaitUntil::Terminal,

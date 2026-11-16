@@ -9,9 +9,9 @@ use serde::{Deserialize, Serialize};
 
 use super::{locate, read, ExpiryPolicy, Gap, Located, Source, Turn};
 use crate::harness::HarnessKind;
-use crate::id::AgentSessionId;
 use crate::store::sqlite::SqliteStore;
 use crate::store::ProviderAccountId;
+use loopflow_model::id::AgentSessionId;
 
 /// What the store kept of one provider conversation.
 #[derive(Debug, Clone, PartialEq)]

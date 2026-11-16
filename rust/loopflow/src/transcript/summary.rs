@@ -10,9 +10,9 @@ use serde::{Deserialize, Serialize};
 
 use super::{conversation_home, scan, ExpiryPolicy, Indexed, RetentionState};
 use crate::harness::HarnessKind;
-use crate::id::AgentSessionId;
 use crate::store::sqlite::SqliteStore;
 use crate::store::ProviderAccountId;
+use loopflow_model::id::AgentSessionId;
 
 const WEEK: i64 = 7 * 86_400;
 const NEXT_EXPIRIES: usize = 20;

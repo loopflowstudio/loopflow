@@ -163,7 +163,7 @@ pub struct ShellTab {
     pub id: String,
     pub location: Option<ViewLocation>,
     #[schemars(with = "Option<String>")]
-    pub lf_process_id: Option<crate::id::LfProcessId>,
+    pub lf_process_id: Option<loopflow_model::id::LfProcessId>,
 }
 
 /// References the Task's document owner; drafts are stored once on WorkPaneLayout.

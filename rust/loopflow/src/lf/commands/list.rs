@@ -77,7 +77,9 @@ fn collect_entries(tree: &Command, path: &[String], repo: &Path) -> Result<Vec<E
                 continue;
             }
             let description = match source.read() {
-                Ok(content) => crate::skills::skill_description(&content).unwrap_or_default(),
+                Ok(content) => {
+                    loopflow_definitions::text::skill_description(&content).unwrap_or_default()
+                }
                 Err(error) => format!("unavailable: {error}"),
             };
             entries.push(Entry {

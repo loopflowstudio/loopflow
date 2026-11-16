@@ -2,16 +2,16 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::durable::TaskId;
-use crate::id::{AgentSessionId, LfSessionId, WaveId};
+use loopflow_model::durable::TaskId;
+use loopflow_model::id::{AgentSessionId, LfSessionId, WaveId};
 
 /// Attribution captured before a native request, never from its delayed reply.
 /// This is observation context, not a capability to write to the provider.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SessionTurnOrigin {
     pub session_id: LfSessionId,
-    pub lf_process_id: crate::id::LfProcessId,
-    pub agent_process_id: crate::id::AgentProcessId,
+    pub lf_process_id: loopflow_model::id::LfProcessId,
+    pub agent_process_id: loopflow_model::id::AgentProcessId,
     pub captured_event: Option<i64>,
     pub task_id: Option<String>,
     pub wave_id: Option<String>,
@@ -326,9 +326,9 @@ pub(crate) struct SessionSummary {
     pub agent_process_evidence: crate::journal::ProcessIdentityEvidence,
     /// Available for a person, as of the read's clock.
     pub available: bool,
-    pub program_status: Option<crate::program_status::Records>,
+    pub program_status: Option<loopflow_model::program_status::Records>,
     /// None for a conversation Loopflow never attached to.
-    pub agent_process_id: Option<crate::id::AgentProcessId>,
+    pub agent_process_id: Option<loopflow_model::id::AgentProcessId>,
     pub task_terminal: bool,
     /// Its Task names it as the Task's primary conversation.
     pub task_primary: bool,

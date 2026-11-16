@@ -5,9 +5,9 @@ use rusqlite::OptionalExtension;
 use tempfile::TempDir;
 
 use super::LinearTestContext;
-use crate::id::WaveId;
 use crate::store::{open_ephemeral_store, CredentialType, ProviderToken, StorageConfig, Store};
 use crate::work::wave::Wave;
+use loopflow_model::id::WaveId;
 
 #[derive(Debug)]
 pub(crate) struct Fixture {

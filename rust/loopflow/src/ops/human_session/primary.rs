@@ -171,7 +171,7 @@ async fn start_in_background(
 
 pub(super) async fn task_conversation(
     store: &SharedStore,
-    task: &crate::durable::TaskId,
+    task: &loopflow_model::durable::TaskId,
 ) -> Result<Option<LfSession>> {
     if let Some(primary) = store.task_primary(task).await? {
         return Ok(Some(primary));

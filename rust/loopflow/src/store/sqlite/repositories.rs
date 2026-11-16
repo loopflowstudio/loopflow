@@ -2,8 +2,9 @@
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use std::path::{Path, PathBuf};
 
-use crate::durable::{RepositoryId, RepositoryIdentity, TaskExecutionRoute, TaskId};
+use crate::durable::TaskExecutionRoute;
 use crate::store::{StoreError, StoreResult};
+use loopflow_model::durable::{RepositoryId, RepositoryIdentity, TaskId};
 
 use super::SqliteStore;
 
@@ -385,12 +386,12 @@ impl SqliteStore {
 #[cfg(test)]
 mod tests {
     use super::SqliteStore;
-    use crate::durable::{MachineId, TaskId};
+    use loopflow_model::durable::{MachineId, TaskId};
 
     #[test]
     fn relocation_rolls_back_and_retains_nested_task_processes() {
-        use crate::durable::{ProjectId, TaskId};
-        use crate::id::{LfProcessId, TraceId, WaveId};
+        use loopflow_model::durable::{ProjectId, TaskId};
+        use loopflow_model::id::{LfProcessId, TraceId, WaveId};
         use rusqlite::params;
         let dir = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
@@ -472,9 +473,8 @@ mod tests {
 
     #[test]
     fn machine_defaults_route_unowned_tasks_until_one_is_claimed() {
-        use crate::durable::{
-            DefaultScope, MachineSetting, OwningMachineSource, TaskExecutionSource,
-        };
+        use crate::durable::{OwningMachineSource, TaskExecutionSource};
+        use loopflow_model::durable::{DefaultScope, MachineSetting};
         let _env = crate::journal::test_env_lock();
         let home = tempfile::tempdir().unwrap();
         let _home =
@@ -562,7 +562,7 @@ mod tests {
 
     #[test]
     fn a_waves_capacity_takes_its_new_tasks_until_a_nearer_machine_does() {
-        use crate::durable::{DefaultScope, MachineSetting};
+        use loopflow_model::durable::{DefaultScope, MachineSetting};
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
         let repo = home.path().canonicalize().unwrap();

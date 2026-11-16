@@ -31,11 +31,11 @@ fn io_error(error: std::io::Error) -> StoreError {
 }
 
 fn changes_uuid(value: &str) -> bool {
-    value != crate::id::canonical_uuid(value)
+    value != loopflow_model::id::canonical_uuid(value)
 }
 
 fn changes_session(value: &str) -> bool {
-    value != crate::id::canonical_session(value)
+    value != loopflow_model::id::canonical_session(value)
 }
 
 /// The caller owns the guards until SQLite commits or rolls back. Never wait for

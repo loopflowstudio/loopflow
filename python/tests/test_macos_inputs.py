@@ -40,8 +40,9 @@ def test_swift_change_runs_every_swift_job(path: str) -> None:
     [
         "scripts/loopflow-dev.py",
         "rust/loopflow/build.rs",
-        "rust/loopflow/ghostty-vt.json",
-        "rust/loopflow/ghostty-vt-patches/0004-vt-darwin-runtime.patch",
+        "rust/loopflow-terminal/build.rs",
+        "rust/loopflow-terminal/ghostty-vt.json",
+        "rust/loopflow-terminal/ghostty-vt-patches/0004-vt-darwin-runtime.patch",
     ],
 )
 def test_native_build_changes_run_both_desktop_builds(path: str) -> None:

@@ -737,7 +737,7 @@ pub fn resolve_layers(
             value: Value::Null,
         };
         if let Some(skill) = skill {
-            let portable = crate::definition::name::portable_name(&skill.name);
+            let portable = loopflow_definitions::name::portable_name(&skill.name);
             if let Some(value) = layer
                 .value
                 .get("skills")

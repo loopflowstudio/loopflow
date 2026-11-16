@@ -9,7 +9,6 @@
 use serde::{Deserialize, Serialize};
 
 use crate::durable::TaskState;
-use crate::id::LfProcessId;
 use crate::journal::ProcessIdentityEvidence;
 use crate::ops::error::OpsResult;
 use crate::ops::pr::PrReadFreshness;
@@ -17,6 +16,7 @@ use crate::pr_landing::{PrLanding, PrLandingState};
 use crate::store::sqlite::TaskShipping;
 use crate::task_graph::{TaskGraph, TaskGraphPosition, END};
 use crate::work::task::{PrPhase, Task};
+use loopflow_model::id::LfProcessId;
 
 use super::{block_on_task, task_error, task_store, SharedStore, TaskRunSelection};
 
@@ -640,11 +640,11 @@ pub(crate) fn restart_ships() -> OpsResult<()> {
 mod tests {
     use super::{next_step, shipping_snapshot, ShipStep, ShippingState};
     use crate::durable::TaskState;
-    use crate::id::LfProcessId;
     use crate::journal::ProcessIdentityEvidence;
     use crate::pr_landing::{NewPrLanding, PrLanding, PrLandingState};
     use crate::store::sqlite::TaskShipping;
     use crate::task_graph::{CapturedGraph, TaskGraph, TaskGraphPosition};
+    use loopflow_model::id::LfProcessId;
 
     fn feature_at(position: TaskGraphPosition) -> TaskGraph {
         let repo = tempfile::tempdir().unwrap();

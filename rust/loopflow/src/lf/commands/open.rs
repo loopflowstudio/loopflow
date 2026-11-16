@@ -366,7 +366,7 @@ fn work_context(
         _ => super::context::explain_in(directory, wave, task, None, None)?,
     };
     if let ContextFact::Bound { value, .. } = &resolution.task {
-        let task = crate::durable::TaskId::parse(value)?;
+        let task = loopflow_model::durable::TaskId::parse(value)?;
         if let Some(store) = crate::store::read_existing_registry()? {
             // The shared reader retains failures in the explanation; opening
             // refuses unavailable execution without losing the other Work facts.
@@ -413,7 +413,7 @@ fn describe(
     let repository_path = PathBuf::from(repo);
     let task = match &context.task {
         ContextFact::Bound { value, .. } => {
-            let id = crate::durable::TaskId::parse(value)?;
+            let id = loopflow_model::durable::TaskId::parse(value)?;
             let store = store.context("Task records are unavailable on this Machine")?;
             Some(
                 store
@@ -426,7 +426,7 @@ fn describe(
     };
     let wave = match (&task, &context.wave) {
         (None, ContextFact::Bound { value, .. }) => {
-            let id = crate::id::WaveId::parse(value)?;
+            let id = loopflow_model::id::WaveId::parse(value)?;
             let store = store.context("Wave records are unavailable on this Machine")?;
             Some(
                 store
@@ -488,7 +488,7 @@ fn describe(
             let scope = match (&task, &context.wave) {
                 (Some(task), _) => PrimaryScope::Task(task.id.clone()),
                 (None, ContextFact::Bound { value, .. }) => {
-                    PrimaryScope::Wave(crate::id::WaveId::parse(value)?)
+                    PrimaryScope::Wave(loopflow_model::id::WaveId::parse(value)?)
                 }
                 _ => PrimaryScope::Repository(crate::repository::CanonicalRepo::discover(
                     &repository_path,
@@ -496,9 +496,9 @@ fn describe(
             };
             // A Task's primary follows its claim; a Wave's or repository's
             // follows your Session Machine for it.
-            let setting = crate::durable::MachineSetting::Session;
+            let setting = loopflow_model::durable::MachineSetting::Session;
             let local = store.sqlite.local_machine()?.id;
-            let remote = |machine: crate::durable::MachineId| {
+            let remote = |machine: loopflow_model::durable::MachineId| {
                 (machine != local).then(|| machine.to_string())
             };
             let machine = match (&scope, &repository_id) {
@@ -510,7 +510,7 @@ fn describe(
                     store
                         .sqlite
                         .repository_owning_machine(
-                            &crate::durable::RepositoryId::from_raw(repository.clone()),
+                            &loopflow_model::durable::RepositoryId::from_raw(repository.clone()),
                             setting,
                         )?
                         .0,
@@ -556,8 +556,8 @@ fn describe(
 struct Registered {
     path: PathBuf,
     canonical: PathBuf,
-    id: Option<crate::durable::RepositoryId>,
-    locators: Vec<crate::durable::RepositoryId>,
+    id: Option<loopflow_model::durable::RepositoryId>,
+    locators: Vec<loopflow_model::durable::RepositoryId>,
 }
 
 fn registered(store: Option<&Store>) -> Result<Vec<Registered>> {
@@ -650,7 +650,7 @@ fn qualifier_for(
     registered: &[Registered],
     own: &Registered,
     short_name: &str,
-) -> Option<crate::durable::RepositoryId> {
+) -> Option<loopflow_model::durable::RepositoryId> {
     let shared = registered.iter().any(|repo| {
         repo.canonical != own.canonical
             && folder_name(&repo.path) == Some(short_name)

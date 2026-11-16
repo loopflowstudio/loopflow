@@ -7,11 +7,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use serde::{Deserialize, Serialize};
 use serde_yaml_ng::Value;
 
-use crate::builtins;
-use crate::definition::name::resolve_name;
 use crate::error::LoadError;
-use crate::graph::split_frontmatter;
 use crate::graph::Skill;
+use loopflow_definitions::builtins;
+use loopflow_definitions::name::resolve_name;
+use loopflow_definitions::text::split_frontmatter;
 
 static RETIRED_INTERACTIVE_WARNING: AtomicBool = AtomicBool::new(false);
 

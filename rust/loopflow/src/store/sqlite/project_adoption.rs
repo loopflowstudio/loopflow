@@ -2,9 +2,9 @@ use std::collections::HashSet;
 
 use rusqlite::params;
 
-use crate::durable::TaskId;
-use crate::id::WaveId;
 use crate::store::StoreResult;
+use loopflow_model::durable::TaskId;
+use loopflow_model::id::WaveId;
 
 use super::SqliteStore;
 

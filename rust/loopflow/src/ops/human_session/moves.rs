@@ -17,9 +17,7 @@ use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 
 use super::{provider_conversation, session_by_id, session_not_found};
-use crate::durable::{MachineId, RepositoryId, TaskId, TaskOwnershipEntry, WorkRef};
 use crate::harness::HarnessKind;
-use crate::id::{AgentSessionId, LfSessionId, WaveId};
 use crate::journal::ProcessIdentityEvidence;
 use crate::process::Departure;
 use crate::provider_auth::Provider;
@@ -31,6 +29,8 @@ use crate::store::sqlite::SqliteStore;
 use crate::store::SharedStore;
 use crate::transcript::{Located, Source};
 use crate::work::task::Task;
+use loopflow_model::durable::{MachineId, RepositoryId, TaskId, TaskOwnershipEntry, WorkRef};
+use loopflow_model::id::{AgentSessionId, LfSessionId, WaveId};
 
 /// One Session, or one Task with its Session, on its way from one Machine to another.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

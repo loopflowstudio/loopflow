@@ -27,7 +27,7 @@ pub struct BindReport {
 
 #[derive(Debug, Serialize)]
 pub struct BoundSession {
-    pub session_id: crate::id::LfSessionId,
+    pub session_id: loopflow_model::id::LfSessionId,
     pub task: String,
     pub wave: Option<String>,
     #[serde(with = "time::serde::rfc3339")]
@@ -77,7 +77,7 @@ impl Usage {
 /// One captured input reduced to what the comparison measures.
 #[derive(Debug)]
 struct Step {
-    session_id: crate::id::LfSessionId,
+    session_id: loopflow_model::id::LfSessionId,
     task: Option<String>,
     wave: Option<String>,
     ended_at: Option<i64>,

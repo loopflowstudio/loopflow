@@ -3,11 +3,11 @@
 use crate::work::edit::WorkValue as Edit;
 use rusqlite::TransactionBehavior;
 
-use crate::durable::ProjectId;
 use crate::store::planning_sync::PlanningChange;
 use crate::store::{StoreError, StoreResult};
 use crate::work::project::ProjectKR;
 use crate::work::wave::metrics::MetricTarget;
+use loopflow_model::durable::ProjectId;
 
 use super::planning_changes::PlanningChanges;
 use super::SqliteStore;
@@ -68,9 +68,9 @@ impl SqliteStore {
 
 #[cfg(test)]
 mod tests {
-    use crate::id::WaveId;
     use crate::store::sqlite::SqliteStore;
     use crate::work::wave::Wave;
+    use loopflow_model::id::WaveId;
 
     #[test]
     fn project_name_receipt_does_not_reconstruct_unrelated_order_evidence() {
@@ -273,7 +273,7 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         let wave = Wave::new(WaveId::new(), "product".into(), "/repo".into());
         store.create_wave(&wave).unwrap();
-        let project = crate::durable::ProjectId::new();
+        let project = loopflow_model::durable::ProjectId::new();
         let conn = store.conn.lock().unwrap();
         conn.execute("INSERT INTO projects(id,wave_id,created_at,updated_at,project_slug,project_name,description)
             VALUES(?1,?2,1,1,'product','Original','')",rusqlite::params![project.as_str(),wave.id()]).unwrap();
@@ -302,7 +302,7 @@ mod tests {
         for (name, mapping) in [("offline", None), ("connected", Some("linear-project"))] {
             let wave = Wave::new(WaveId::new(), name.into(), "/repo".into());
             store.create_wave(&wave).unwrap();
-            let project = crate::durable::ProjectId::new();
+            let project = loopflow_model::durable::ProjectId::new();
             store
                 .conn
                 .lock()
@@ -324,7 +324,7 @@ mod tests {
             assert_eq!(store.pending_project_changes(&project).unwrap(), changes);
         }
         assert!(store
-            .update_project_content(&crate::durable::ProjectId::new(), &[], &[])
+            .update_project_content(&loopflow_model::durable::ProjectId::new(), &[], &[])
             .is_err());
     }
 }

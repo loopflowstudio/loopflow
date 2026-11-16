@@ -65,7 +65,7 @@ LOOPFLOW_STREAM_LOG = DEV_LOG_DIR / f"{REPO_ROOT.name}.loopflow-run-debug.log"
 DEV_CONTROL_CONFIG = "LoopflowDevControl.json"
 # One pin for the Ghostty revision Desktop's framework and lf's terminal library
 # are built from; build.rs reads the same file to fetch and link libghostty-vt.
-GHOSTTY_VT_PIN = REPO_ROOT / "rust" / "loopflow" / "ghostty-vt.json"
+GHOSTTY_VT_PIN = REPO_ROOT / "rust" / "loopflow-terminal" / "ghostty-vt.json"
 GHOSTTY_REVISION = json.loads(GHOSTTY_VT_PIN.read_text())["revision"]
 GHOSTTY_ARTIFACT = "GhosttyKit-a60e9e2-lf8.xcframework.zip"
 # Rust target → Zig target for the libghostty-vt archives `lf` links.

@@ -19,8 +19,8 @@ pub struct ProviderTransition {
     pub kind: TransitionKind,
     pub from_provider_session: Option<String>,
     pub to_provider_session: String,
-    pub from_agent_process: Option<crate::id::AgentProcessId>,
-    pub to_agent_process: crate::id::AgentProcessId,
+    pub from_agent_process: Option<loopflow_model::id::AgentProcessId>,
+    pub to_agent_process: loopflow_model::id::AgentProcessId,
     pub original_running: Option<bool>,
     pub seed: Option<String>,
     pub observed_at: i64,
@@ -30,7 +30,7 @@ pub struct ProviderTransition {
 pub(crate) struct ProviderLineage {
     source_session: String,
     provider_session: Option<String>,
-    agent_process: Option<crate::id::AgentProcessId>,
+    agent_process: Option<loopflow_model::id::AgentProcessId>,
     original_running: Option<bool>,
 }
 
@@ -66,7 +66,7 @@ fn decode(payload: &str, at: i64) -> StoreResult<ProviderTransition> {
     if value["type"] == "provider_transition" {
         return Ok(serde_json::from_value(value["transition"].clone())?);
     }
-    let process: crate::id::AgentProcessId =
+    let process: loopflow_model::id::AgentProcessId =
         serde_json::from_value(value["agent_process_id"].clone())?;
     let forked = value["source"] == "fork";
     Ok(ProviderTransition {
@@ -88,7 +88,7 @@ fn decode(payload: &str, at: i64) -> StoreResult<ProviderTransition> {
 fn live_process(
     conn: &Connection,
     session: &str,
-) -> StoreResult<Option<crate::id::AgentProcessId>> {
+) -> StoreResult<Option<loopflow_model::id::AgentProcessId>> {
     Ok(conn
         .query_row(
             "SELECT p.id FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id
@@ -101,7 +101,7 @@ fn live_process(
 
 fn is_latest(
     previous: Option<&ProviderTransition>,
-    process: &crate::id::AgentProcessId,
+    process: &loopflow_model::id::AgentProcessId,
     thread: &str,
 ) -> bool {
     previous.is_some_and(|p| p.to_agent_process == *process && p.to_provider_session == thread)
@@ -243,8 +243,8 @@ impl SqliteStore {
 #[cfg(test)]
 mod tests {
     use super::{observe_in, TransitionKind};
-    use crate::id::LfProcessId;
     use crate::store::sqlite::SqliteStore;
+    use loopflow_model::id::LfProcessId;
 
     #[test]
     fn transition_fixture_and_released_history_keep_their_meaning() {

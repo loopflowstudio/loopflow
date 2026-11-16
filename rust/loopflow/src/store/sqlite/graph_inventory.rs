@@ -8,12 +8,13 @@ use std::path::PathBuf;
 
 use rusqlite::{params, Connection, OptionalExtension};
 
-use crate::durable::{GraphProcessFilter, GraphProcessInventoryEntry, GraphProcessPage, TaskId};
+use crate::durable::{GraphProcessFilter, GraphProcessInventoryEntry, GraphProcessPage};
 use crate::graph::compiled::CompiledGraph;
-use crate::id::{LfProcessId, WaveId};
 use crate::ops::graph_process::{GraphProcess, GraphProcessStep};
 use crate::session::{GraphProcessSummary, GraphProcessSummaryState};
 use crate::store::{StoreError, StoreResult};
+use loopflow_model::durable::TaskId;
+use loopflow_model::id::{LfProcessId, WaveId};
 
 use super::processes::{read_lf_process, PROCESS_SELECT};
 use super::SqliteStore;
@@ -581,7 +582,7 @@ impl SqliteStore {
                     crate::store::rows::now_unix(),
                     outcome.map(|_| crate::store::rows::now_unix()),
                     outcome,
-                    crate::id::TraceId::new()
+                    loopflow_model::id::TraceId::new()
                 ],
             )
             .unwrap();
@@ -644,7 +645,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         let repository = store.ensure_repository("/repo").unwrap();
-        let task = crate::durable::TaskId::new();
+        let task = loopflow_model::durable::TaskId::new();
         store
             .conn
             .lock()
@@ -691,12 +692,12 @@ mod tests {
     fn a_step_lands_after_its_graphs_mark_when_an_unrelated_rowid_is_reused() {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
-        let process = |parent: Option<&crate::id::LfProcessId>, pid: u32| {
+        let process = |parent: Option<&loopflow_model::id::LfProcessId>, pid: u32| {
             let process = crate::process::LfProcess {
-                id: crate::id::LfProcessId::new(),
+                id: loopflow_model::id::LfProcessId::new(),
                 pid: Some(pid),
                 os_started_at: None,
-                trace_id: crate::id::TraceId::new(),
+                trace_id: loopflow_model::id::TraceId::new(),
                 parent_lf_process_id: parent.cloned(),
                 via_agent: Some(false),
                 caller_session_id: None,
@@ -737,11 +738,13 @@ mod tests {
     fn a_task_run_finds_its_graph_after_a_conversation_started_beside_it() {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
-        let [carrier, conversation, graph] = std::array::from_fn(|_| crate::id::LfProcessId::new());
+        let [carrier, conversation, graph] =
+            std::array::from_fn(|_| loopflow_model::id::LfProcessId::new());
         let execute = |sql: &str, params: &[&dyn rusqlite::ToSql]| {
             store.conn.lock().unwrap().execute(sql, params).unwrap();
         };
-        let process = |id: &crate::id::LfProcessId, parent: Option<&crate::id::LfProcessId>| {
+        let process = |id: &loopflow_model::id::LfProcessId,
+                       parent: Option<&loopflow_model::id::LfProcessId>| {
             execute(
                 "INSERT INTO processes(id,trace_id,parent_lf_process_id,started_at) VALUES(?1,'fixture',?2,1)",
                 rusqlite::params![id, parent],
@@ -767,11 +770,11 @@ mod tests {
     fn step_input_is_the_steps_own_capture() {
         let directory = tempfile::tempdir().unwrap();
         let store = SqliteStore::new(&directory.path().join("loopflow.db")).unwrap();
-        let [step, nested] = std::array::from_fn(|_| crate::id::LfProcessId::new());
+        let [step, nested] = std::array::from_fn(|_| loopflow_model::id::LfProcessId::new());
         {
             let conn = store.conn.lock().unwrap();
-            let process = |id: &crate::id::LfProcessId,
-                           parent: Option<&crate::id::LfProcessId>,
+            let process = |id: &loopflow_model::id::LfProcessId,
+                           parent: Option<&loopflow_model::id::LfProcessId>,
                            argv: &[&str]| {
                 conn.execute(
                     "INSERT INTO processes(id,trace_id,parent_lf_process_id,command,started_at)
@@ -787,7 +790,7 @@ mod tests {
             conn.execute(
                 "INSERT INTO processes(id,trace_id,parent_lf_process_id,command,started_at)
                  VALUES(?1,'fixture',?2,'codex',1)",
-                rusqlite::params![crate::id::LfProcessId::new(), &step],
+                rusqlite::params![loopflow_model::id::LfProcessId::new(), &step],
             )
             .unwrap();
             conn.execute(
@@ -819,7 +822,9 @@ mod tests {
             ("nested-session", "nested-input")
         );
         assert_eq!(
-            store.process_input(&crate::id::LfProcessId::new()).unwrap(),
+            store
+                .process_input(&loopflow_model::id::LfProcessId::new())
+                .unwrap(),
             None
         );
     }
@@ -847,7 +852,7 @@ mod tests {
             .graph_inventory(&GraphProcessFilter::default(), None, all)
             .unwrap();
         assert_eq!(page.entries.len(), 3);
-        let state = |id: &crate::id::LfProcessId| {
+        let state = |id: &loopflow_model::id::LfProcessId| {
             page.entries
                 .iter()
                 .find(|entry| entry.summary.id == id.as_str())
@@ -928,12 +933,15 @@ mod tests {
             sources: Vec::new(),
         });
         let compiled = CompiledGraph::new("pursue", &[step]);
-        let wave = crate::id::WaveId::new();
-        let task = crate::durable::TaskId::new();
+        let wave = loopflow_model::id::WaveId::new();
+        let task = loopflow_model::durable::TaskId::new();
         let fixture = include_str!("../../../tests/fixtures/migrations/graph_rename_released.sql")
             .replace("{compiled}", &serde_json::to_string(&compiled).unwrap())
             .replace("{wave}", wave.as_str())
-            .replace("{project}", crate::durable::ProjectId::new().as_str())
+            .replace(
+                "{project}",
+                loopflow_model::durable::ProjectId::new().as_str(),
+            )
             .replace("{task}", task.as_str())
             .replace("{repo}", directory.path().to_str().unwrap());
         conn.execute_batch(&fixture).unwrap();

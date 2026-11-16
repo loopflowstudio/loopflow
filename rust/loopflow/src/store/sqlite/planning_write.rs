@@ -261,7 +261,7 @@ fn write_record(
         }
     }
     let previous_identifier = if table == "tasks" && columns.contains_key("issue_identifier") {
-        super::children::short_task_id(conn, &crate::durable::TaskId::from_raw(id))?
+        super::children::short_task_id(conn, &loopflow_model::durable::TaskId::from_raw(id))?
     } else {
         None
     };
@@ -285,7 +285,7 @@ fn write_record(
     if table == "tasks" && columns.contains_key("issue_identifier") {
         super::sessions::repair_task_titles_in(
             conn,
-            &crate::durable::TaskId::from_raw(id),
+            &loopflow_model::durable::TaskId::from_raw(id),
             previous_identifier.as_deref(),
         )?;
     }
@@ -391,7 +391,7 @@ pub(crate) fn observe<'a>(
 fn registered_repository_in(
     conn: &Connection,
     repo: &str,
-) -> StoreResult<crate::durable::RepositoryId> {
+) -> StoreResult<loopflow_model::durable::RepositoryId> {
     match super::repositories::repository_id_in(conn, repo)? {
         Some(id) => Ok(id),
         None => super::repositories::ensure_repository_in(conn, repo),
@@ -416,7 +416,8 @@ pub(crate) fn ensure_record(
     let missing = || StoreError::InvalidData("required planning identity is missing".into());
     match table {
         "waves" => {
-            crate::id::WaveId::parse(id).map_err(|e| StoreError::InvalidData(e.to_string()))?;
+            loopflow_model::id::WaveId::parse(id)
+                .map_err(|e| StoreError::InvalidData(e.to_string()))?;
             registered_repository_in(conn, repo)?;
             let name = edits
                 .iter()
@@ -563,8 +564,6 @@ pub(crate) fn create(conn: &Connection, repo: &str, edits: &[WorkEdit]) -> Store
 #[cfg(test)]
 mod tests {
     use super::{create, local};
-    use crate::durable::{ProjectId, TaskId};
-    use crate::id::WaveId;
     use crate::planning_git::PlanningDestination;
     use crate::store::sqlite::SqliteStore;
     use crate::work::edit::{WorkEdit, WorkValue, WorkValue as Edit};
@@ -572,6 +571,8 @@ mod tests {
     use crate::work::task::NewTask;
     use crate::work::task::TaskUpdate;
     use crate::work::wave::Wave;
+    use loopflow_model::durable::{ProjectId, TaskId};
+    use loopflow_model::id::WaveId;
 
     fn plan(store: &SqliteStore) -> TaskId {
         let wave = Wave::new(WaveId::new(), "planning".into(), "/repo".into());

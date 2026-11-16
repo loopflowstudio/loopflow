@@ -345,6 +345,8 @@ jobs:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
       - run: uv sync
+      - name: Fetch Cargo dependencies for offline build fixtures
+        run: cargo fetch --locked
       - name: Run Python tests without external networking
         run: uv run --no-sync python scripts/test_network.py uv run --no-sync pytest python/tests/
 

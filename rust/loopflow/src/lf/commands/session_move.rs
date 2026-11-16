@@ -7,11 +7,11 @@
 
 use anyhow::{anyhow, bail, Context, Result};
 
-use crate::durable::{Machine, MachineId, RepositoryId, TaskOwnership};
 use crate::ops::human_session::moves::{self, Move};
 use crate::session::LfSession;
 use crate::store::SharedStore;
 use crate::work::task::Task;
+use loopflow_model::durable::{Machine, MachineId, RepositoryId, TaskOwnership};
 
 /// `lf --machine M resume <session>`: move the Session, if this Machine knows
 /// it, to `target` unless it is already there. A Task's conversation moves only
@@ -96,7 +96,7 @@ struct StoppedRun {
     identifier: String,
     /// The step it was running, which runs again on arrival.
     from: Option<String>,
-    task: crate::durable::TaskId,
+    task: loopflow_model::durable::TaskId,
     /// Where it arrived, as the stage lines name it.
     place: String,
     /// This Machine's checkout of the Task's repository; the run is addressed
@@ -299,7 +299,7 @@ async fn relay_task(
 /// once it arrived, or when `to` claimed it itself.
 fn sender(
     store: &crate::store::sqlite::SqliteStore,
-    task: &crate::durable::TaskId,
+    task: &loopflow_model::durable::TaskId,
     to: &MachineId,
 ) -> Result<Option<MachineId>> {
     if let Some(check) = store.task_move_check(task)? {
@@ -314,7 +314,7 @@ fn sender(
         .into_iter()
         .rev()
         .find(|entry| {
-            entry.kind == crate::durable::OwnershipKind::Claim
+            entry.kind == loopflow_model::durable::OwnershipKind::Claim
                 && entry.machine_id.as_ref() == Some(to)
         })
         .and_then(|entry| entry.writer_machine_id)
@@ -324,7 +324,7 @@ fn sender(
 /// Whether `to` says the Task's last move arrived there; if so, this Machine
 /// records the arrival. Best-effort: a Machine out of reach, or one that
 /// cannot tell, answers no.
-pub(crate) fn arrived_on(task: &crate::durable::TaskId, to: &MachineId) -> Result<bool> {
+pub(crate) fn arrived_on(task: &loopflow_model::durable::TaskId, to: &MachineId) -> Result<bool> {
     tokio::runtime::Runtime::new()?.block_on(async {
         let asked = async {
             let target = super::ssh::resolve_target(to.as_str(), false).await?;

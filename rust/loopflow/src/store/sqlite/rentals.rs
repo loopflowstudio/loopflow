@@ -4,13 +4,13 @@
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use time::OffsetDateTime;
 
-use crate::durable::{MachineId, TaskId};
 use crate::rental::{
     self, Hardware, OnDemand, Ownership, Pool, PoolMachine, Provider, Rental, RentalId,
     RentalState, Usd,
 };
 use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
+use loopflow_model::durable::{MachineId, TaskId};
 
 use super::SqliteStore;
 

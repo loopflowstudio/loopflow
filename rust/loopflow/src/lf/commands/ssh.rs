@@ -482,7 +482,7 @@ async fn resolve_task_source(
                 if let Err(error) = crate::ops::planning_export::sync_export(
                     &store,
                     &repo,
-                    &crate::durable::WorkRef::Task(task.id),
+                    &loopflow_model::durable::WorkRef::Task(task.id),
                 )
                 .await
                 {
@@ -535,7 +535,7 @@ pub fn parse_remote_command(lf_args: &[String]) -> anyhow::Result<Cli> {
 pub(super) async fn resolve_target(
     target: &str,
     forward_agent: bool,
-) -> anyhow::Result<crate::durable::Machine> {
+) -> anyhow::Result<loopflow_model::durable::Machine> {
     let store = crate::store::open_existing_store()
         .await?
         .ok_or_else(|| anyhow!("machine commands need an initialized local store"))?;
@@ -574,7 +574,7 @@ fn build_preamble(cmd: &[String], extra_env: &[(&str, &str)]) -> String {
 /// `lf repo`, when the destination runs in its home directory.
 fn current_repository(
     directory: &std::path::Path,
-) -> anyhow::Result<Option<crate::durable::RepositoryId>> {
+) -> anyhow::Result<Option<loopflow_model::durable::RepositoryId>> {
     let Some(repo) = crate::repository::CanonicalRepo::containing(directory)? else {
         return Ok(None);
     };
@@ -650,7 +650,7 @@ fn run_ssh(dest: &str, forward_agent: bool, preamble: &str) -> anyhow::Result<()
 /// validate the request-bound reply. A request carrying input (a moved
 /// conversation) may check out its branch there, so it waits longer.
 pub(crate) async fn request(
-    machine: &crate::durable::Machine,
+    machine: &loopflow_model::durable::Machine,
     args: &[String],
     input: Option<&[u8]>,
 ) -> anyhow::Result<Vec<u8>> {

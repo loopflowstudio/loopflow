@@ -5,11 +5,11 @@ use fs2::FileExt;
 use rusqlite::{params, Connection};
 
 use super::{_migration_transaction, apply_pending_migrations, apply_sqlite};
-use crate::id::LfProcessId;
 use crate::journal::{ProcessIdentityEvidence, ProcessReceipt, PROCESS_RECEIPT_ROOT};
 use crate::store::canonical_ids::{preflight, session_fence_file};
 use crate::store::sqlite::SqliteStore;
 use crate::work::wave::metrics::MetricObservation;
+use loopflow_model::id::LfProcessId;
 
 const SESSION: &str = "SESSION_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 const PROCESS: &str = "BBBBBBBB-BBBB-4BBB-8BBB-BBBBBBBBBBBB";
@@ -751,7 +751,7 @@ fn canonical_ids_wave_associations_keep_uuid_punctuation() {
     super::validate_foreign_keys(&conn).unwrap();
     apply_sqlite(&conn).unwrap();
     for (index, spelling) in spellings.iter().enumerate() {
-        let expected = crate::id::canonical_uuid(spelling);
+        let expected = loopflow_model::id::canonical_uuid(spelling);
         let association: String = conn.query_row("SELECT m.wave_id FROM metric_instruments m JOIN waves w ON m.wave_id=w.id WHERE w.name=?1", [format!("Wave {index}")], |r|r.get(0)).unwrap();
         assert_eq!(association, expected);
     }

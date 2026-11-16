@@ -270,10 +270,11 @@ fn new_holder_process(pid: u32, os_started_at: i64) -> crate::process::LfProcess
     let name = format!("holder:{pid}:{os_started_at}");
     let id = uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, name.as_bytes());
     crate::process::LfProcess {
-        id: crate::id::LfProcessId::parse(&id.to_string()).expect("a UUID is an LfProcessId"),
+        id: loopflow_model::id::LfProcessId::parse(&id.to_string())
+            .expect("a UUID is an LfProcessId"),
         pid: Some(pid),
         os_started_at: Some(os_started_at),
-        trace_id: crate::id::TraceId::new(),
+        trace_id: loopflow_model::id::TraceId::new(),
         parent_lf_process_id: None,
         via_agent: Some(false),
         caller_session_id: None,

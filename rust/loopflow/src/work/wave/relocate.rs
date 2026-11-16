@@ -3,10 +3,10 @@ use std::path::Path;
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::id::WaveId;
 use crate::repository::CanonicalRepo;
 use crate::store::{Store, WaveLocatorUpdate};
 use crate::work::wave::{Wave, WaveLocator};
+use loopflow_model::id::WaveId;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WaveRelocationReceipt {

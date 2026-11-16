@@ -13,8 +13,8 @@ use anyhow::{anyhow, bail, Context};
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 
-use crate::durable::MachineId;
 use crate::store::sqlite::SqliteStore;
+use loopflow_model::durable::MachineId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

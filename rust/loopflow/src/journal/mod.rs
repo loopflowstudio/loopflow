@@ -18,9 +18,9 @@ use time::OffsetDateTime;
 use tracing::{debug, warn};
 
 use crate::git::worktrees::main_repo_root;
-use crate::id::{LfProcessId, TraceId};
 use crate::process::{AgentCaller, LfProcess, AGENT_CALLER_ENV};
 use crate::store::sqlite::SqliteStore;
+use loopflow_model::id::{LfProcessId, TraceId};
 
 const JOURNAL_ROOT: &str = ".lf/journal/traces";
 const JOURNAL_EXCLUDE_ENTRY: &str = ".lf/journal/";
@@ -1225,7 +1225,7 @@ pub(crate) fn lf_evidence(store: &SqliteStore, process: &LfProcessId) -> Process
 /// A provider OS process's liveness, by its own recorded identity.
 pub(crate) fn agent_evidence(
     store: &SqliteStore,
-    process: &crate::id::AgentProcessId,
+    process: &loopflow_model::id::AgentProcessId,
 ) -> ProcessIdentityEvidence {
     let Ok(Some(record)) = store.agent_process(process) else {
         return ProcessIdentityEvidence::Unknown;
@@ -1620,7 +1620,7 @@ mod tests {
         ProcessIdentityEvidence, TestLedgerGuard,
     };
     use crate::git::is_clean;
-    use crate::id::{LfProcessId, TraceId};
+    use loopflow_model::id::{LfProcessId, TraceId};
     use loopflow_test_support::{RunningParent, TestRepo};
     use std::path::PathBuf;
     use std::process::{Command, Stdio};

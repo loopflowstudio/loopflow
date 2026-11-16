@@ -708,7 +708,7 @@ mod tests {
                 select: None,
                 id: "terminal".into(),
                 operation: Operation::Server(ServerOperation::SessionAttach {
-                    session: crate::id::LfSessionId::from("session_missing"),
+                    session: loopflow_model::id::LfSessionId::from("session_missing"),
                     terminal_id: None,
                 }),
             }))
@@ -735,7 +735,7 @@ mod tests {
         };
         let big = serde_json::to_string(&ServerMessage::Response {
             id: "file".into(),
-            trace_id: crate::id::TraceId::default(),
+            trace_id: loopflow_model::id::TraceId::default(),
             result: serde_json::Value::String("x".repeat(2 * MAX_MESSAGE)),
         })
         .unwrap();
@@ -801,7 +801,7 @@ mod tests {
                     node: "phone".into(),
                     user: 1,
                 };
-                let held = crate::id::TerminalId::new();
+                let held = loopflow_model::id::TerminalId::new();
                 let listener =
                     tokio::net::UnixListener::bind(crate::transport::registry::entrance().unwrap())
                         .unwrap();

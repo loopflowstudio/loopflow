@@ -2,9 +2,9 @@
 use rusqlite::{params, Connection, OptionalExtension};
 
 use super::SqliteStore;
-use crate::durable::TaskId;
-use crate::id::TerminalId;
 use crate::store::{StoreError, StoreResult};
+use loopflow_model::durable::TaskId;
+use loopflow_model::id::TerminalId;
 
 pub(crate) const WORKSPACE_GRACE: i64 = 15 * 60;
 const VIEWED: &str = "Retained by an open Task Session viewer";
@@ -399,7 +399,7 @@ mod tests {
         for hold in [ViewerHold::Viewed(1200), ViewerHold::Absent(1201)] {
             let (_home, store, task) = fixture();
             let viewer = session_terminal(&store, &task, "passive");
-            let shell = crate::id::TerminalId::new();
+            let shell = loopflow_model::id::TerminalId::new();
             store.create_terminal(&shell, "build").unwrap();
             store
                 .create_desktop_shell("explicit", &task, "/repo.task", None)

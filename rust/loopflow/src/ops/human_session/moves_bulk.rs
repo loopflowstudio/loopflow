@@ -9,9 +9,9 @@ use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 
 use super::{is_running, list, new_thread, SessionRecord};
-use crate::id::LfSessionId;
 use crate::session::SessionFilter;
 use crate::store::SharedStore;
+use loopflow_model::id::LfSessionId;
 
 /// The `harness[:model]` a move continues the selected Sessions on.
 pub(crate) fn parse_target(agent: Option<&str>) -> Result<String> {

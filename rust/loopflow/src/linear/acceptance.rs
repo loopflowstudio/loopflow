@@ -3,8 +3,6 @@
 
 use super::observations::revision_nanos;
 use super::LinearProject;
-use crate::durable::ProjectId;
-use crate::id::WaveId;
 use crate::linear::LinearIssue;
 use crate::store::sqlite::{self, SqliteStore};
 use crate::store::sqlite::{
@@ -12,6 +10,8 @@ use crate::store::sqlite::{
 };
 use crate::store::{run_planning_write, PlanningLocks, Store, StoreError, StoreResult};
 use crate::work::edit::{Disposition, WorkValue as Edit};
+use loopflow_model::durable::ProjectId;
+use loopflow_model::id::WaveId;
 use rusqlite::{named_params, params, Connection, OptionalExtension, Transaction};
 use std::sync::Arc;
 
@@ -799,8 +799,8 @@ fn project_accepted_planning(
     drop(query);
     for (existing, body, observed_at, external, revision, mut edits, disposition) in observations {
         let id = existing.as_ref().map_or_else(
-            || crate::durable::TaskId::from_issue(&external),
-            crate::durable::TaskId::from_raw,
+            || loopflow_model::durable::TaskId::from_issue(&external),
+            loopflow_model::durable::TaskId::from_raw,
         );
         edits.push(Edit::Disposition(disposition.clone()));
         if existing.is_some() {
@@ -890,9 +890,9 @@ mod tests {
     use crate::test_linear_input::SeedLinearSqlite;
     use rusqlite::{params, Connection};
 
-    use crate::id::WaveId;
     use crate::store::sqlite::SqliteStore;
     use crate::store::PlanningState;
+    use loopflow_model::id::WaveId;
 
     #[test]
     fn explicit_null_detaches_but_unknown_linear_membership_retains_task() {

@@ -1369,7 +1369,7 @@ mod tests {
             }
         }
         // The same requested family reaches routing when reopening a recorded conversation.
-        let conversation: crate::id::AgentSessionId = "fixture-conversation".into();
+        let conversation: loopflow_model::id::AgentSessionId = "fixture-conversation".into();
         std::fs::create_dir_all(native.join("projects/fixture")).unwrap();
         std::fs::write(
             native.join("projects/fixture/fixture-conversation.jsonl"),

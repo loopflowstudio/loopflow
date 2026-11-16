@@ -268,7 +268,7 @@ definitions! {
     ondemands: BTreeMap<String, placement::OnDemandDeclaration> = "{}", Personal, Replace, HostLocal, NextLaunch, Machines, "Local rental templates and admission limits; active rentals keep their admitted budget";
     machine: placement::Placement = "{}", PersonalScoped, Merge, Portable, NextLaunch, Machines, "Preferred durable Machine IDs or local capacity; existing Task assignments survive";
     machines: BTreeMap<String, placement::MachineDeclaration> = "{}", Personal, Merge, Portable, NextRead, Machines, "Aliases for durable Machine identities";
-    connections: HashMap<crate::durable::MachineId, String> = "{}", Personal, Merge, HostLocal, NextRead, Machines, "This host's connection address for each durable Machine ID";
+    connections: HashMap<loopflow_model::durable::MachineId, String> = "{}", Personal, Merge, HostLocal, NextRead, Machines, "This host's connection address for each durable Machine ID";
     auth_browsers: BTreeMap<String, placement::AuthBrowsers> = "{}", Personal, Merge, HostLocal, DomainAction, Accounts, "Ordered local browser profiles for authentication; discovered browser identities stay local";
     account: BTreeMap<String, placement::AccountOrder> = "{}", PersonalScoped, Merge, Portable, NextLaunch, Accounts, "Allowed account references in order; each provider list replaces atomically";
     accounts: BTreeMap<String, BTreeMap<String, placement::AccountDeclaration>> = "{}", Personal, Merge, Portable, NextRead, Accounts, "Declared account identity, routing eligibility and subscription dates; credentials and observations stay local";

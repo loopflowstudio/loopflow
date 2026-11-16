@@ -20,7 +20,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 
 use super::{execution_context, shell_escape, DISCORD_TOKEN_ENV};
-use crate::id::LfProcessId;
+use loopflow_model::id::LfProcessId;
 
 const LAUNCHER_ENV: &str = "LF_LAUNCHER_FD";
 const RELEASED: &str = "released";

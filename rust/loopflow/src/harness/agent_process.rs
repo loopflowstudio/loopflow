@@ -1,6 +1,5 @@
 //! Launch and settle AgentProcesses in the inventory used by gates and live views.
 //! Unknown identity, duplicate PID/birth and unknown attachment life grant no signal authority.
-use crate::id::LfProcessId;
 use crate::journal::{
     agent_evidence, lf_evidence, process_identity_evidence, process_started_at, OsProcess,
     ProcessIdentityEvidence,
@@ -11,6 +10,7 @@ use crate::session::Holder;
 use crate::store::sqlite::SqliteStore;
 use crate::store::{StoreError, StoreResult};
 use anyhow::{anyhow, Result};
+use loopflow_model::id::LfProcessId;
 use std::collections::{HashMap, HashSet};
 
 /// The store, LfSession and frozen attachment one invocation launches and
@@ -499,7 +499,7 @@ pub struct AgentProcessReapReport {
 /// Exact bookkeeping disposition, including records that remain unresolved.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct AgentProcessCleanup {
-    pub id: crate::id::AgentProcessId,
+    pub id: loopflow_model::id::AgentProcessId,
     pub action: String,
     pub reason: String,
 }
@@ -816,9 +816,9 @@ fn descendant_group_leaders(pid: u32, processes: &[OsProcess]) -> Vec<(u32, i64)
 
 #[cfg(test)]
 mod tests {
-    use crate::id::LfProcessId;
     use crate::session::Holder;
     use crate::store::sqlite::SqliteStore;
+    use loopflow_model::id::LfProcessId;
     use std::os::unix::process::CommandExt;
     use std::process::{Command, Stdio};
 
@@ -829,7 +829,7 @@ mod tests {
         store: &SqliteStore,
         sql: &rusqlite::Connection,
         name: &str,
-    ) -> (String, LfProcessId, crate::id::AgentProcessId) {
+    ) -> (String, LfProcessId, loopflow_model::id::AgentProcessId) {
         let session = store.test_session(name, &crate::session_record::new_artifact_key());
         let ghost = store.test_lf_process();
         let attachment = store
@@ -942,7 +942,7 @@ mod tests {
         .unwrap();
         sql.execute(
             "UPDATE processes SET trace_id=?2 WHERE id=?1",
-            rusqlite::params![pruned, crate::id::TraceId::new()],
+            rusqlite::params![pruned, loopflow_model::id::TraceId::new()],
         )
         .unwrap();
         sql.execute(
@@ -1074,8 +1074,8 @@ mod tests {
                 account: crate::store::ProviderAccountId::parse("other").unwrap(),
             },
             Departure::Machine {
-                machine: crate::durable::MachineId::new(),
-                task: Some(crate::durable::TaskId::new()),
+                machine: loopflow_model::durable::MachineId::new(),
+                task: Some(loopflow_model::durable::TaskId::new()),
             },
         ];
         for departure in departures {

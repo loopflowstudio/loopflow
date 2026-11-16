@@ -3,11 +3,12 @@
 use anyhow::{ensure, Context, Result};
 
 use crate::durable::{
-    Machine, OwningMachineSource, RepositoryId, TaskExecutionRoute, TaskExecutionSource, TaskId,
-    TaskLocation, TaskLocationObservation,
+    OwningMachineSource, TaskExecutionRoute, TaskExecutionSource, TaskLocation,
+    TaskLocationObservation,
 };
 use crate::ops::context::{ContextExplanation, ContextFact};
 use crate::store::sqlite::SqliteStore;
+use loopflow_model::durable::{Machine, RepositoryId, TaskId};
 
 pub async fn observe(
     store: &SqliteStore,
@@ -147,9 +148,8 @@ pub fn explain(
 #[cfg(test)]
 mod tests {
     use super::validate_reply;
-    use crate::durable::{
-        Machine, MachineId, RepositoryId, TaskId, TaskLocation, TaskLocationObservation,
-    };
+    use crate::durable::{TaskLocation, TaskLocationObservation};
+    use loopflow_model::durable::{Machine, MachineId, RepositoryId, TaskId};
 
     #[test]
     fn peer_readings_bind_to_their_request_and_machine() {

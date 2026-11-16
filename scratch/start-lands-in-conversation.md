@@ -247,10 +247,13 @@ the answer is the only read. Two things to change, then the phone:
   `WorkDestinationTests`: answer arrives, `installConversation`'s prepare
   fails → no `startingTask`, selection is the Task, the workspace carries the
   error.
-- Small: `StartingTaskView.start` and `createTask` both close the palette;
-  `createTask` owns it (the failure test calls it directly). The doc comment
-  "One resolved opening…" now sits on `StartingTask`; move it back to
-  `LinkedSession`.
+- Small: `StartingTaskView.start` and `createTask` both close the palette.
+  `start` closes it synchronously inside `Perf.userAction`, beside
+  `Perf.acknowledged`; `createTask` runs in a `Task {}` a main-actor turn
+  later. Keep one close without leaving the click frame: either `start` sets
+  `startingTask` and closes the palette before spawning, or `createTask`'s
+  close stays and `start`'s goes only if the frame check still passes.
+  (Doc comment "One resolved opening…" is back on `LinkedSession`.)
 
 Remaining, in order:
 1. Phone. `RemoteMobileClient.createTask` goes record → `reconcile`, which

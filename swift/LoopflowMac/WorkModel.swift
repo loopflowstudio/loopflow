@@ -90,7 +90,6 @@ struct TaskReadings<Value> {
     }
 }
 
-/// One resolved opening: its companion must never outlive or drift from the Session.
 /// A New Task submission from the click until its conversation is installed.
 struct StartingTask: Equatable {
     let id: String
@@ -100,6 +99,7 @@ struct StartingTask: Equatable {
     var error: String?
 }
 
+/// One resolved opening: its companion must never outlive or drift from the Session.
 struct LinkedSession {
     let generation: Int
     let record: SessionRecord

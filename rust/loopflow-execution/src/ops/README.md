@@ -7,7 +7,7 @@ contract that spans processes and a shared request budget.
 ## Planning export
 
 `planning_export.rs` gives every locally saved Task and Project its Linear (or
-Asana, Notion) identity. Creation is idempotent by construction: the receipt in
+Asana) identity. Creation is idempotent by construction: the receipt in
 `task_creation_intents` / `project_transitions` holds the generated id and the
 exact input, a pass looks for that id before it ever sends a create, and a
 re-sent create carries the same id, which Linear accepts at most once.

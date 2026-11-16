@@ -1293,31 +1293,6 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
         TaskCommand::Save { .. } | TaskCommand::Abandon { .. } => {
             unreachable!("shared mutation dispatch precedes this command")
         }
-        TaskCommand::Sweep { apply, json } => {
-            let entries = loopflow_execution::ops::task::task_sweep(repo, *apply)?;
-            let incomplete = entries
-                .iter()
-                .any(|entry| entry.outcome.starts_with("incomplete:"));
-            if *json {
-                println!("{}", serde_json::to_string_pretty(&entries)?);
-            } else {
-                for entry in entries {
-                    println!(
-                        "{} / {}: {} — {}",
-                        entry.wave,
-                        entry.project,
-                        entry.issue.as_deref().unwrap_or("Project"),
-                        entry.outcome
-                    );
-                }
-            }
-            if incomplete {
-                anyhow::bail!(
-                    "chapter sweep has incomplete cancellations; see the reported retry commands"
-                );
-            }
-            Ok(())
-        }
         TaskCommand::Delete { issue } => {
             let identifier = loopflow_execution::ops::task::task_delete(repo, issue)?;
             println!("{identifier}: removed locally; execution history retained");
@@ -3094,7 +3069,7 @@ fn execute_command(
         }) => {
             if *planning {
                 let repo = loopflow_execution::repo::working_directory()?;
-                loopflow::lf::commands::ops::sync_planning(&repo, None, true, true, *json)
+                loopflow::lf::commands::ops::sync_planning(&repo, None, true, *json)
             } else {
                 loopflow::lf::commands::doctor::run(*json)
             }

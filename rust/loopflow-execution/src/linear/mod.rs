@@ -1025,15 +1025,6 @@ impl LinearClient {
     }
 
     pub async fn list_projects(&self, initiative_id: &str) -> LinearResult<Vec<LinearProject>> {
-        self.list_projects_including_archived(initiative_id, false)
-            .await
-    }
-
-    pub(crate) async fn list_projects_including_archived(
-        &self,
-        initiative_id: &str,
-        include_archived: bool,
-    ) -> LinearResult<Vec<LinearProject>> {
         let mut after = None;
         let mut projects = Vec::new();
         loop {
@@ -1044,7 +1035,7 @@ impl LinearClient {
                         "initiativeId": initiative_id,
                         "after": after,
                         "first": LIST_PROJECTS_PAGE_SIZE,
-                        "includeArchived": include_archived,
+                        "includeArchived": false,
                     }),
                 )
                 .await?;
@@ -1063,7 +1054,7 @@ impl LinearClient {
     }
 
     pub(crate) async fn ordered_items(&self, project: &str) -> LinearResult<Vec<OrderedIssue>> {
-        self.list_issue_nodes(project, false)
+        self.list_issue_nodes(project)
             .await?
             .into_iter()
             .enumerate()
@@ -1091,15 +1082,7 @@ impl LinearClient {
     }
 
     pub(crate) async fn list_items(&self, project_id: &str) -> LinearResult<Vec<LinearIssue>> {
-        self.list_items_including_archived(project_id, false).await
-    }
-
-    pub(crate) async fn list_items_including_archived(
-        &self,
-        project_id: &str,
-        include_archived: bool,
-    ) -> LinearResult<Vec<LinearIssue>> {
-        self.list_issue_nodes(project_id, include_archived)
+        self.list_issue_nodes(project_id)
             .await?
             .into_iter()
             .enumerate()
@@ -1107,11 +1090,7 @@ impl LinearClient {
             .collect()
     }
 
-    async fn list_issue_nodes(
-        &self,
-        project_id: &str,
-        include_archived: bool,
-    ) -> LinearResult<Vec<IssueNode>> {
+    async fn list_issue_nodes(&self, project_id: &str) -> LinearResult<Vec<IssueNode>> {
         let mut after = None;
         let mut issues = Vec::new();
 
@@ -1123,7 +1102,7 @@ impl LinearClient {
                         "projectId": project_id,
                         "after": after,
                         "first": LIST_ITEMS_PAGE_SIZE,
-                        "includeArchived": include_archived,
+                        "includeArchived": false,
                     }),
                 )
                 .await?;
@@ -1571,55 +1550,6 @@ impl LinearClient {
         let query = format!("mutation {name}($id: String!, $input: {input_type}!) {{ {operation}(id: $id,input: $input) {{ success {object} {{ {fields} }} }} }}");
         let response: Value = self.graphql(&query, json!({"id":id,"input":input})).await?;
         planning_response(&response[operation], project, id)
-    }
-
-    // Adoption resolves Project status and membership. Historical workflow prose
-    // grants no selection authority and is left intact.
-    pub(crate) async fn adopt_project(
-        &self,
-        project_id: &str,
-        initiative: &str,
-        team: &str,
-        promote: bool,
-        apply: bool,
-    ) -> LinearResult<LinearProject> {
-        let mut node = self.project_node(project_id).await?;
-        let promote = promote
-            && node.archived_at.is_none()
-            && matches!(
-                node.status.type_,
-                loopflow_storage::work::project::ProjectStatus::Backlog
-                    | loopflow_storage::work::project::ProjectStatus::Planned
-            );
-        if promote {
-            node.status.type_ = loopflow_storage::work::project::ProjectStatus::Started;
-        }
-        let mut project = node.into_observation()?;
-        crate::linear::validate_project_ownership("adoption", initiative, Some(team), &project)?;
-        if apply && promote {
-            let input = json!({
-                "statusId": self.project_status_id(loopflow_storage::work::project::ProjectStatus::Started).await?
-            });
-            let response: Value = self
-                .graphql(
-                    &format!("mutation AdoptProject($id: String!, $input: ProjectUpdateInput!) {{ projectUpdate(id: $id, input: $input) {{ success project {{ {PROJECT_RESPONSE_FIELDS} }} }} }}"),
-                    json!({"id":project_id,"input":input}),
-                )
-                .await?;
-            let PlanningResponse::Project {
-                project: confirmed, ..
-            } = planning_response(&response["projectUpdate"], true, project_id)?
-            else {
-                unreachable!("Project adoption returns a Project");
-            };
-            project.revision.clone_from(&confirmed.revision);
-            if *confirmed != project {
-                return Err(LinearError::Message(format!(
-                    "Project {project_id} changed during adoption; refresh and retry"
-                )));
-            }
-        }
-        Ok(project)
     }
 
     async fn project_node(&self, project_id: &str) -> LinearResult<ProjectNode> {
@@ -2737,66 +2667,6 @@ mod tests {
             Err(crate::linear::LinearError::RateLimited { .. })
         ));
         assert_eq!(requests.lock().await.len(), 1);
-    }
-
-    #[tokio::test]
-    async fn migration_adoption_accepts_a_started_project_without_flow() {
-        let original = "Original prose.\n\n## KRs\n- [ ] Preserve this proof\n";
-        let response = json!({"data":{"project": {
-            "id":"project-1", "name":"Summer work — customer requests",
-            "description":"Original description", "content":original,
-            "status":{"type":"started"}, "archivedAt":null,
-            "initiatives":{"nodes":[{"id":"initiative-1"}]},
-            "teams":{"nodes":[{"id":"team-1"}]}
-        }}});
-        let (base_url, requests) =
-            test_server::spawn(vec![json_response(StatusCode::OK, response)]).await;
-        let client = LinearClient::with_base_url("fixture".into(), Some("team-1".into()), base_url);
-        let adopted = client
-            .adopt_project("project-1", "initiative-1", "team-1", false, true)
-            .await
-            .unwrap();
-        assert_eq!(adopted.id, "project-1");
-        assert_eq!(adopted.name, "Summer work — customer requests");
-        assert_eq!(adopted.krs[0].text, "Preserve this proof");
-        assert_eq!(
-            adopted.status,
-            loopflow_storage::work::project::ProjectStatus::Started
-        );
-        assert_eq!(requests.lock().await.len(), 1);
-    }
-
-    #[tokio::test]
-    async fn project_adoption_uses_the_mutation_acknowledgement() {
-        let mut project = json!({"id":"project-1", "name":"Chapter", "description":"Summary",
-            "content":"## KRs\n- [ ] Preserve this proof\n", "status":{"type":"planned"},
-            "updatedAt":"2026-10-10T12:00:00Z", "archivedAt":null,
-            "initiatives":{"nodes":[{"id":"initiative-1"}]}, "teams":{"nodes":[{"id":"team-1"}]}});
-        let before = json!({"data":{"project":project}});
-        project["status"]["type"] = json!("started");
-        project["updatedAt"] = json!("2026-10-11T12:00:00Z");
-        let (url, requests) = test_server::spawn(vec![
-            json_response(StatusCode::OK, before),
-            json_response(
-                StatusCode::OK,
-                json!({"data":{"projectStatuses":{
-                    "nodes":[{"id":"started", "type":"started", "teamId":"team-1", "position":0.0}],
-                    "pageInfo":{"hasNextPage":false, "endCursor":null}
-                }}}),
-            ),
-            json_response(
-                StatusCode::OK,
-                json!({"data":{"projectUpdate":{"success":true,"project":project}}}),
-            ),
-        ])
-        .await;
-        let client = LinearClient::with_base_url("fixture".into(), Some("team-1".into()), url);
-        let adopted = client
-            .adopt_project("project-1", "initiative-1", "team-1", true, true)
-            .await
-            .unwrap();
-        assert_eq!(adopted.revision.as_deref(), Some("2026-10-11T12:00:00Z"));
-        assert_eq!(requests.lock().await.len(), 3);
     }
 
     /// A wrong argument on a Linear mutation must fail here, not ship a 400 on

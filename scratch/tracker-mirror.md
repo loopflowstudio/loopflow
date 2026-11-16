@@ -279,7 +279,8 @@ migration ≥ 30 days after this merges: a follow-up Task filed with this PR.
 
 Deepest deletions first, then the queue, then the bridges. Commit at each.
 
-1. **This slice — deletions.** Notion, Chapter mechanisms and `lf task
+1. **Done (slice 1 commit) — deletions.** `pm_issue_changes` deferred to slice 3
+   with the inbound removal path. Notion, Chapter mechanisms and `lf task
    sweep`, adoption, the `refresh_async` apply branch, the `pm_issue_changes`
    decision above. Check: `cargo build -p loopflow`; `cargo test -p
    loopflow-execution --lib asana_planning_tests`; `grep -rn -i notion rust/ --include=*.rs`

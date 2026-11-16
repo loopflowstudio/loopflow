@@ -13,7 +13,6 @@ pub enum Provider {
     OpenCodeZen,
     Linear,
     Asana,
-    Notion,
     Doppler,
 }
 
@@ -26,12 +25,11 @@ impl Provider {
             Self::OpenCodeZen => "opencodezen",
             Self::Linear => "linear",
             Self::Asana => "asana",
-            Self::Notion => "notion",
             Self::Doppler => "doppler",
         }
     }
 
-    pub fn all() -> [Self; 8] {
+    pub fn all() -> [Self; 7] {
         [
             Self::GitHub,
             Self::Claude,
@@ -39,7 +37,6 @@ impl Provider {
             Self::OpenCodeZen,
             Self::Linear,
             Self::Asana,
-            Self::Notion,
             Self::Doppler,
         ]
     }
@@ -52,7 +49,6 @@ impl Provider {
             Self::OpenCodeZen => "OpenCode Zen",
             Self::Linear => "Linear",
             Self::Asana => "Asana",
-            Self::Notion => "Notion",
             Self::Doppler => "Doppler",
         }
     }
@@ -62,7 +58,7 @@ impl Provider {
             Self::Claude => Some("ANTHROPIC_API_KEY"),
             Self::Codex => Some("OPENAI_API_KEY"),
             Self::OpenCodeZen => Some("OPENCODE_API_KEY"),
-            Self::GitHub | Self::Linear | Self::Asana | Self::Notion | Self::Doppler => None,
+            Self::GitHub | Self::Linear | Self::Asana | Self::Doppler => None,
         }
     }
 
@@ -76,9 +72,6 @@ impl Provider {
                 Some("Linear requires OAuth. Run 'lf account connect linear' to connect.")
             }
             Self::Asana => Some("Asana requires OAuth. Run 'lf account connect asana' to connect."),
-            Self::Notion => {
-                Some("Notion requires OAuth. Run 'lf account connect notion' to connect.")
-            }
             _ => None,
         }
     }
@@ -87,7 +80,7 @@ impl Provider {
     pub fn supports_automatic_refresh(self) -> bool {
         matches!(
             self,
-            Self::GitHub | Self::Codex | Self::Linear | Self::Asana | Self::Notion
+            Self::GitHub | Self::Codex | Self::Linear | Self::Asana
         )
     }
 }
@@ -110,7 +103,6 @@ impl FromStr for Provider {
             "opencodezen" | "opencode" | "zen" | "oc" => Ok(Self::OpenCodeZen),
             "linear" | "lin" => Ok(Self::Linear),
             "asana" => Ok(Self::Asana),
-            "notion" => Ok(Self::Notion),
             "doppler" => Ok(Self::Doppler),
             _ => Err(ParseProviderError {
                 input: value.trim().to_string(),

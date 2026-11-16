@@ -119,7 +119,7 @@ pub struct LinearIssue {
     pub assignee: Option<String>,
 }
 
-/// Asana and Notion have no short identifiers; their Tasks keep the local
+/// Asana has no short identifiers; their Tasks keep the local
 /// `lf-` identifier Loopflow assigned.
 pub fn local_identifier(id: &str) -> String {
     uuid::Uuid::parse_str(id)

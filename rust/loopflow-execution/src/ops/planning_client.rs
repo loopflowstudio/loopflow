@@ -12,7 +12,6 @@ use crate::linear::{
     LinearClient, LinearIssue, LinearIssueObservation, LinearProject, LinearResult,
     PlanningResponse, StateHistory,
 };
-use crate::notion::NotionClient;
 use crate::provider_auth::Provider;
 
 use super::{OpsError, OpsResult};
@@ -44,25 +43,21 @@ thread_local! {
     pub(crate) static SCOPE_READS: std::cell::RefCell<std::collections::BTreeMap<std::path::PathBuf, usize>> = const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
 }
 
-/// The team every repository Task belongs to: a Linear Team, an Asana team or
-/// the Notion page that holds the Tasks database.
+/// The team every repository Task belongs to: a Linear Team or an Asana team.
 pub fn repository_scope(repo: &Path) -> OpsResult<String> {
     #[cfg(any(test, feature = "test-support"))]
     SCOPE_READS.with_borrow_mut(|reads| *reads.entry(repo.to_path_buf()).or_default() += 1);
     match transport(repo) {
         Some(PlanningConfig::Asana { team }) => Ok(crate::asana::team_gid(&team)),
-        Some(PlanningConfig::Notion { team }) => Ok(crate::notion::notion_id(&team)),
         _ => super::linear::repository_team_id(repo),
     }
 }
 
 /// Where a Wave's Projects belong in the provider: its Linear Initiative, or
-/// for Asana and Notion the repository's team itself.
+/// for Asana the repository's team itself.
 pub(crate) fn wave_scope(repo: &Path, wave: &str) -> OpsResult<Option<String>> {
     match transport(repo) {
-        Some(PlanningConfig::Asana { .. } | PlanningConfig::Notion { .. }) => {
-            repository_scope(repo).map(Some)
-        }
+        Some(PlanningConfig::Asana { .. }) => repository_scope(repo).map(Some),
         _ => Ok(super::linear::read_initiative(repo, wave)),
     }
 }
@@ -83,7 +78,6 @@ fn repository_name(repo: &Path) -> String {
 pub(crate) enum PlanningClient {
     Linear(LinearClient),
     Asana(AsanaClient),
-    Notion(NotionClient),
 }
 
 impl PlanningClient {
@@ -91,7 +85,6 @@ impl PlanningClient {
     pub(crate) async fn for_repository(repo: &Path) -> OpsResult<Self> {
         match transport(repo) {
             Some(PlanningConfig::Asana { team }) => asana(repo, &team).await,
-            Some(PlanningConfig::Notion { team }) => notion(&team).await,
             _ => Ok(Self::Linear(super::linear::linear_client(repo).await?)),
         }
     }
@@ -100,7 +93,6 @@ impl PlanningClient {
     pub(crate) async fn for_items(repo: &Path) -> OpsResult<Self> {
         match transport(repo) {
             Some(PlanningConfig::Asana { team }) => asana(repo, &team).await,
-            Some(PlanningConfig::Notion { team }) => notion(&team).await,
             _ => Ok(Self::Linear(
                 super::linear::issue_client().await?.for_repository(repo),
             )),
@@ -110,17 +102,15 @@ impl PlanningClient {
     /// Linear-only planning: Project edits and order, Initiatives, attachments
     /// and relations.
     pub fn linear(&self) -> OpsResult<&LinearClient> {
-        let provider = match self {
-            Self::Linear(client) => return Ok(client),
-            Self::Asana(_) => "Asana",
-            Self::Notion(_) => "Notion",
-        };
-        Err(OpsError::Message(format!(
-            "{provider} mirrors a Project when it is created; later Project edits stay local"
-        )))
+        match self {
+            Self::Linear(client) => Ok(client),
+            Self::Asana(_) => Err(OpsError::Message(
+                "Asana mirrors a Project when it is created; later Project edits stay local".into(),
+            )),
+        }
     }
 
-    /// Create an Asana or Notion Project from its export receipt input
+    /// Create an Asana Project from its export receipt input
     /// (`id`, `name`, `description`), answering the provider revision.
     pub async fn create_project(&self, input: &serde_json::Value) -> LinearResult<Option<String>> {
         match self {
@@ -128,27 +118,24 @@ impl PlanningClient {
                 "Linear Projects are created through their Initiative".into(),
             )),
             Self::Asana(client) => client.create_project(input).await,
-            Self::Notion(client) => client.create_project(input).await,
         }
     }
 
-    /// The revision of the Asana or Notion Project carrying Loopflow ID `id`.
+    /// The revision of the Asana Project carrying Loopflow ID `id`.
     pub(crate) async fn project_revision(&self, id: &str) -> LinearResult<Option<Option<String>>> {
         match self {
             Self::Linear(_) => Ok(None),
             Self::Asana(client) => client.project_revision(id).await,
-            Self::Notion(client) => client.project_revision(id).await,
         }
     }
 
-    /// Asana and Notion comments carry no caller identity, so a Loopflow comment
+    /// Asana comments carry no caller identity, so a Loopflow comment
     /// is its visible text as the provider reads it back. Delivery and read-back
     /// claim a comment by this text. Linear comments keep their Loopflow IDs.
     pub(crate) fn claimed_comment(&self, body: &str) -> Option<String> {
         match self {
             Self::Linear(_) => None,
             Self::Asana(_) => Some(crate::asana::comment_markdown(&visible_text(body))),
-            Self::Notion(_) => Some(crate::notion::comment_markdown(&visible_text(body))),
         }
     }
 
@@ -166,7 +153,7 @@ impl PlanningClient {
             (Self::Linear(client), StateScope::Team(team)) => {
                 client.team_state_id(team, target).await
             }
-            (Self::Asana(_) | Self::Notion(_), _) => Ok(target.to_string()),
+            (Self::Asana(_), _) => Ok(target.to_string()),
         }
     }
 
@@ -177,7 +164,6 @@ impl PlanningClient {
         match self {
             Self::Linear(client) => client.find_export_issue(id).await,
             Self::Asana(client) => Ok(client.task(id).await?.map(|task| (task, None))),
-            Self::Notion(client) => Ok(client.task(id).await?.map(|task| (task, None))),
         }
     }
 
@@ -188,11 +174,10 @@ impl PlanningClient {
         match self {
             Self::Linear(client) => client.issue_ownership(id).await,
             Self::Asana(client) => Ok(client.task(id).await?.map(|task| (task, None))),
-            Self::Notion(client) => Ok(client.task(id).await?.map(|task| (task, None))),
         }
     }
 
-    /// Asana and Notion keep no readable state history.
+    /// Asana keep no readable state history.
     pub(crate) async fn state_history_since(
         &self,
         id: &str,
@@ -205,7 +190,7 @@ impl PlanningClient {
                     .state_history_since(id, base_revision, base_state)
                     .await
             }
-            Self::Asana(_) | Self::Notion(_) => Ok(StateHistory::Unknown),
+            Self::Asana(_) => Ok(StateHistory::Unknown),
         }
     }
 
@@ -213,7 +198,6 @@ impl PlanningClient {
         match self {
             Self::Linear(client) => client.deliver_planning_creation(false, input).await,
             Self::Asana(client) => client.create_task(&input).await,
-            Self::Notion(client) => client.create_task(&input).await,
         }
     }
 
@@ -225,7 +209,6 @@ impl PlanningClient {
         match self {
             Self::Linear(client) => client.deliver_planning_field(id, false, input).await,
             Self::Asana(client) => client.update_task(id, &input).await,
-            Self::Notion(client) => client.update_task(id, &input).await,
         }
     }
 
@@ -233,17 +216,15 @@ impl PlanningClient {
         match self {
             Self::Linear(client) => client.set_item_state(id, state).await,
             Self::Asana(client) => client.set_state(id, state).await,
-            Self::Notion(client) => client.set_state(id, state).await,
         }
     }
 
     /// Whether the provider holds the item in its trash, and the revision read.
-    /// Asana and Notion remove deleted tasks from reads, so they report only live tasks.
+    /// Asana remove deleted tasks from reads, so they report only live tasks.
     pub(crate) async fn issue_trash(&self, id: &str) -> LinearResult<Option<(bool, String)>> {
         let task = match self {
             Self::Linear(client) => return client.issue_trash(id).await,
             Self::Asana(client) => client.task(id).await?,
-            Self::Notion(client) => client.task(id).await?,
         };
         Ok(task.map(|task| (false, task.revision.unwrap_or_default())))
     }
@@ -252,7 +233,6 @@ impl PlanningClient {
         match self {
             Self::Linear(client) => client.delete_issue(id).await,
             Self::Asana(client) => client.delete_task(id).await,
-            Self::Notion(client) => client.delete_task(id).await,
         }
     }
 
@@ -261,21 +241,18 @@ impl PlanningClient {
         match self {
             Self::Linear(client) => client.sync_comment(id, issue, body).await,
             Self::Asana(client) => client.sync_comment(issue, &text).await,
-            Self::Notion(client) => client.sync_comment(issue, &text).await,
         }
     }
 
     /// Whether the provider positively reports the item deleted: Linear's trash,
-    /// Asana's missing task, or Notion's archived page (found through the
-    /// Task's page URL). A lookup that merely finds nothing is not evidence.
-    pub async fn removed(&self, id: &str, url: Option<&str>) -> LinearResult<bool> {
+    /// Asana's missing task. A lookup that merely finds nothing is not evidence.
+    pub async fn removed(&self, id: &str) -> LinearResult<bool> {
         match self {
             Self::Linear(client) => Ok(client
                 .issue_trash(id)
                 .await?
                 .is_some_and(|(trashed, _)| trashed)),
             Self::Asana(client) => Ok(client.task(id).await?.is_none()),
-            Self::Notion(client) => client.removed(url).await,
         }
     }
 
@@ -296,7 +273,6 @@ impl PlanningClient {
                     .await
             }
             Self::Asana(client) => client.changes(since, live, finished).await?,
-            Self::Notion(client) => client.changes(since, live, finished).await?,
         };
         Ok(changes
             .into_iter()
@@ -308,7 +284,6 @@ impl PlanningClient {
         match self {
             Self::Linear(client) => client.observe_issue(id).await,
             Self::Asana(client) => client.observe(id).await,
-            Self::Notion(client) => client.observe(id).await,
         }
     }
 }
@@ -333,19 +308,6 @@ async fn asana(repo: &Path, team: &str) -> OpsResult<PlanningClient> {
     Ok(PlanningClient::Asana(AsanaClient::new(
         token, team, repository,
     )))
-}
-
-async fn notion(team: &str) -> OpsResult<PlanningClient> {
-    let token = super::linear::resolve_planning_token(Provider::Notion).await?;
-    #[cfg(any(test, feature = "test-support"))]
-    if let Ok(url) =
-        super::linear::LINEAR_TEST_CONTEXT.try_with(|context| context.graphql_url.clone())
-    {
-        return Ok(PlanningClient::Notion(NotionClient::with_base_url(
-            token, team, url,
-        )));
-    }
-    Ok(PlanningClient::Notion(NotionClient::new(token, team)))
 }
 
 /// A comment without Loopflow's hidden `<!-- loopflow-… -->` markers, which

@@ -22,7 +22,7 @@ mod lifecycle;
 mod lifecycle_tests;
 pub mod retirement;
 pub use lifecycle::{notice_retained_task, record_abandoned_pr};
-pub use lifecycle::{task_abandon, task_delete, task_repository, task_sweep};
+pub use lifecycle::{task_abandon, task_delete, task_repository};
 mod delivery;
 pub use delivery::{
     attach_task_github_pr, clear_task_pr_merge_before_head_mutation, fetch_task_refs,
@@ -2453,7 +2453,7 @@ fn pr_link_state_label(pr: &TaskPr) -> String {
 }
 
 /// Idempotently show the PR on the Task's planning item and record the outcome
-/// on the PR: a Linear attachment and managed comment, or for Asana and Notion one
+/// on the PR: a Linear attachment and managed comment, or for Asana one
 /// comment per PR state. Best-effort: a degraded writeback lands in
 /// `linear_link_error` and leaves the GitHub result intact; the next publication
 /// command retries. Does nothing for a PR with no GitHub URL yet.

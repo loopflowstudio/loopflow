@@ -42,9 +42,8 @@ pub(crate) async fn refresh_task_comments(store: &SharedStore, task: &Task) -> O
     }
     let client = super::planning_client::PlanningClient::for_items(&repository).await?;
     // A coworker deleted the item: remove the Task from the plan, keeping its work.
-    let url = store.sqlite.task_issue_url(&task.id).map_err(message)?;
     if client
-        .removed(issue.as_str(), url.as_deref())
+        .removed(issue.as_str())
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?
     {
@@ -59,7 +58,7 @@ pub(crate) async fn refresh_task_comments(store: &SharedStore, task: &Task) -> O
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?;
     claim_local_comments(store, &task, &client, &mut observation)?;
-    // Linear's team feed accepts provider edits into Work. Asana and Notion have
+    // Linear's team feed accepts provider edits into Work. Asana has
     // none, so this exact read is their acceptance: a renamed or completed task
     // updates the Task, and an unsent local edit stays as a visible conflict.
     if !matches!(client, super::planning_client::PlanningClient::Linear(_)) {
@@ -90,7 +89,7 @@ pub(crate) async fn refresh_task_comments(store: &SharedStore, task: &Task) -> O
     Ok(())
 }
 
-/// Asana and Notion comments carry no caller identity. A comment showing a
+/// Asana comments carry no caller identity. A comment showing a
 /// Loopflow comment's visible text is that comment: delivery settles and nothing
 /// echoes back.
 fn claim_local_comments(
@@ -130,8 +129,8 @@ pub(crate) async fn check_before_write(repo: &std::path::Path) -> OpsResult<()> 
     Ok(())
 }
 
-/// Bring the repository's planning scope (a Linear Team, Asana project or
-/// Notion database) up to date: items people created or edited there become or
+/// Bring the repository's planning scope (a Linear Team or Asana project) up
+/// to date: items people created or edited there become or
 /// update Tasks. Freshness belongs to the scope, even when several repositories
 /// or processes share it.
 pub(crate) async fn check_repository(store: &Store, repository: &str) -> OpsResult<bool> {
@@ -269,7 +268,7 @@ async fn check_scope(store: &Store, repository: &str, fresh_for: i64) -> OpsResu
 }
 
 /// Seconds a finished scope delta answers reads. Linear's stretches as its
-/// shared budget falls; Asana and Notion keep the healthy window.
+/// shared budget falls; Asana keeps the healthy window.
 fn fresh_for(repository: &str) -> i64 {
     if super::planning_client::is_linear(repository) {
         crate::linear::delta_fresh_secs()

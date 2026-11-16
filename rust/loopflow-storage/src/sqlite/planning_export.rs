@@ -380,8 +380,7 @@ impl PlanningExport {
             .ok_or_else(|| StoreError::InvalidData("creation Project status is missing".into()))
     }
 
-    /// The created Project as an Asana or Notion mirror holds it. Those
-    /// providers show its name and summary; status, KRs and targets stay the
+    /// The created Project as an Asana mirror holds it. Asana shows its name and summary; status, KRs and targets stay the
     /// creation values Loopflow owns, so acceptance reads them from the receipt.
     pub fn mirrored_project(
         &self,

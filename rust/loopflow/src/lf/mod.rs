@@ -1218,7 +1218,6 @@ impl TaskCommand {
             | Self::Wait { .. } => false,
             Self::Retire { .. } => true,
             Self::Report { .. } => true,
-            Self::Sweep { apply, .. } => *apply,
             Self::Sync { .. }
             | Self::Checkout { .. }
             | Self::Run { .. }
@@ -2479,13 +2478,6 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
         #[arg(long)]
         json: bool,
     },
-    /// Preview open issues outside current chapters; apply safe cancellations explicitly
-    Sweep {
-        #[arg(long)]
-        apply: bool,
-        #[arg(long)]
-        json: bool,
-    },
     /// Cancel unfinished placed work, clean up delivery, then trash the Linear issue
     Delete { issue: String },
     /// Update a Task's title or notes, before or after placement
@@ -2572,7 +2564,7 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
 impl TaskCommand {
     pub fn selector(&self) -> Option<&str> {
         match self {
-            Self::List { .. } | Self::Create { .. } | Self::Sweep { .. } => None,
+            Self::List { .. } | Self::Create { .. } => None,
             Self::Retire { issue }
             | Self::Status { issue, .. }
             | Self::View { issue, .. }
@@ -2607,7 +2599,7 @@ impl TaskCommand {
 
     pub fn selector_mut(&mut self) -> Option<&mut String> {
         match self {
-            Self::List { .. } | Self::Create { .. } | Self::Sweep { .. } => None,
+            Self::List { .. } | Self::Create { .. } => None,
             Self::Retire { issue }
             | Self::Status { issue, .. }
             | Self::View { issue, .. }

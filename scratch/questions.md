@@ -22,6 +22,17 @@
 - **`~/.lf/chapter-locks/` keeps its name** until the contract Task: an older
   lf on the same store locks the same inode.
 
+- **"Chapter" names stay where they name the current Project**
+  (`chapter_metric_portfolio`, `MetricContractIssueDto::ChapterUnavailable`,
+  "unset for this chapter", `wave new-chapter`). AGENTS.md defines Chapter as
+  the In Progress Project's shared name, and `chapter_unavailable` is a wire
+  tag Swift decodes. Slice 1 deleted the mechanisms (sweep, adoption), not the
+  word.
+- **GOAL.md name/summary no longer reach the Initiative.** The only writer was
+  `refresh_async`'s apply branch, reachable only from a test; it and
+  `LinearSyncOptions.plan` are gone. Wave `field` effects (slice 3) restore it
+  with a receipt.
+
 ## Open
 
 - Wire `linear_id` → a neutral name crosses Rust, Swift and ~10 DTO fixtures.

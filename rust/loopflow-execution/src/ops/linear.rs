@@ -4,7 +4,6 @@
 //! facts through the shared writer; ordinary readers consume saved Work.
 
 use super::planning_sync::{lock_wave_planning, planning_store};
-use crate::linear::LinearIssue;
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::path::Path;
@@ -72,7 +71,6 @@ pub enum LinearRefresh {
 #[derive(Debug, Clone, Default)]
 pub struct LinearSyncOptions {
     pub wave: Option<String>,
-    pub plan: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -460,9 +458,6 @@ pub mod test_fixture;
 mod asana_planning_tests;
 
 #[cfg(test)]
-mod notion_planning_tests;
-
-#[cfg(test)]
 pub(crate) mod task_planning_tests;
 
 #[cfg(test)]
@@ -473,8 +468,6 @@ mod oauth_tests;
 
 #[cfg(test)]
 mod task_comments_tests;
-
-mod adoption;
 
 // ── snapshot freshness policy ────────────────────────────────────────
 
@@ -1516,7 +1509,6 @@ async fn refresh_async(
     };
     let mut actions = Vec::new();
     let mut diagnostics = Vec::new();
-    let mut blocking = Vec::new();
     let team_id = selected_linear_team(repo)?;
 
     if let Some(store) = open_existing_store()
@@ -1549,8 +1541,7 @@ async fn refresh_async(
 
     if team_id.is_none() {
         let message = ".lf/config.yaml has no `repo.plan.team`; run `lf wave plan connect <wave> --team-key <KEY>`".to_string();
-        diagnostics.push(message.clone());
-        blocking.push(message);
+        diagnostics.push(message);
     }
 
     let mut initiative_waves: BTreeMap<String, Vec<String>> = BTreeMap::new();
@@ -1570,8 +1561,7 @@ async fn refresh_async(
                 "Linear Initiative {initiative} is bound by multiple local Waves: {}",
                 owners.join(", ")
             );
-            diagnostics.push(message.clone());
-            blocking.push(message);
+            diagnostics.push(message);
         }
     }
 
@@ -1601,7 +1591,6 @@ async fn refresh_async(
     let default_branch = crate::git::get_default_branch(repo)?;
     let summary_revision =
         crate::git::rev_parse(repo, &format!("refs/heads/{default_branch}^{{commit}}"))?;
-    let mut wave_updates = Vec::new();
     let mut seen_projects: BTreeMap<String, String> = BTreeMap::new();
     for wave in &waves {
         let goal = format!(".lf/wave/{wave}/GOAL.md");
@@ -1609,22 +1598,19 @@ async fn refresh_async(
             let message = format!(
                 "{goal} is missing on default branch {default_branch}; cannot sync its summary"
             );
-            diagnostics.push(message.clone());
-            blocking.push(message);
+            diagnostics.push(message);
             continue;
         };
         let summary = crate::work::wave::config::wave_summary(&content);
         let summary = crate::linear::linear_description(&summary);
         let Some(initiative_id) = read_initiative(repo, wave) else {
-            blocking.push(format!("wave/{wave} has no Linear Initiative"));
             continue;
         };
         let expected_initiative_name = title_case(wave);
         let Some(actual) = initiatives_by_id.get(&initiative_id) else {
             let message =
                 format!("wave/{wave} points at missing Linear Initiative {initiative_id}");
-            diagnostics.push(message.clone());
-            blocking.push(message);
+            diagnostics.push(message);
             continue;
         };
         let name = (actual.name != expected_initiative_name).then_some(expected_initiative_name);
@@ -1665,8 +1651,7 @@ async fn refresh_async(
                     "Linear Project `{}` ({}) appears under both wave/{existing_wave} and wave/{wave}",
                     project.name, project.id
                 );
-                diagnostics.push(message.clone());
-                blocking.push(message);
+                diagnostics.push(message);
             }
             if project.initiative_ids.as_slice() != [initiative_id.as_str()] {
                 let message = format!(
@@ -1675,8 +1660,7 @@ async fn refresh_async(
                     project.id,
                     project.initiative_ids.join(", ")
                 );
-                diagnostics.push(message.clone());
-                blocking.push(message);
+                diagnostics.push(message);
             }
             if let Some(team_id) = &team_id {
                 if project.team_ids.as_slice() != [team_id.as_str()] {
@@ -1686,8 +1670,7 @@ async fn refresh_async(
                         project.id,
                         project.team_ids.join(", ")
                     );
-                    diagnostics.push(message.clone());
-                    blocking.push(message);
+                    diagnostics.push(message);
                 }
             }
             let name = &project.name;
@@ -1696,8 +1679,7 @@ async fn refresh_async(
                 let message = format!(
                     "Linear Projects `{existing}` and `{name}` in wave/{wave} both derive slug `{slug}`"
                 );
-                diagnostics.push(message.clone());
-                blocking.push(message);
+                diagnostics.push(message);
             }
 
             let items = client.list_items(&project.id).await.map_err(linear_error)?;
@@ -1713,8 +1695,7 @@ async fn refresh_async(
                         "Linear task {} resolves to Project {:?}, expected {}",
                         item.identifier, item.project_id, project.id
                     );
-                    diagnostics.push(message.clone());
-                    blocking.push(message);
+                    diagnostics.push(message);
                 }
                 if let Some(team_id) = &team_id {
                     if item.team_id.as_deref() != Some(team_id.as_str()) {
@@ -1722,8 +1703,7 @@ async fn refresh_async(
                             "Linear task {} belongs to Team {}, expected repository Team {team_id}. Run `lf reteam`.",
                             item.identifier, item.team_id.as_deref().unwrap_or("unmapped")
                         );
-                        diagnostics.push(message.clone());
-                        blocking.push(message);
+                        diagnostics.push(message);
                     }
                 }
             }
@@ -1731,35 +1711,6 @@ async fn refresh_async(
         actions.push(format!(
             "refresh wave/{wave} Linear observations from Linear Initiative {initiative_id}"
         ));
-        // Apply the checked binding and fields, not a later reread of the goal.
-        wave_updates.push((wave, initiative_id, name, summary));
-    }
-
-    if !options.plan && !blocking.is_empty() {
-        return Err(OpsError::Message(format!(
-            "Linear ownership validation failed before mutation: {}",
-            blocking.join("; ")
-        )));
-    }
-
-    if !options.plan {
-        let team_id = team_id.expect("non-plan sync requires repository Team");
-        for (wave, initiative, name, summary) in wave_updates {
-            if name.is_some() || summary.is_some() {
-                client
-                    .update_wave(&initiative, name.as_deref(), summary.as_deref())
-                    .await
-                    .map_err(linear_error)?;
-            }
-            let ctx = LinearRepository {
-                client: client.clone(),
-                repo_id: repo_id.clone(),
-                team_id: team_id.clone(),
-            };
-            let store = planning_store().await?;
-            adoption::adopt_legacy_projects(repo, &store, wave, &ctx, &initiative, true).await?;
-            refresh_inventory(repo, wave, &ctx, &initiative).await?;
-        }
     }
 
     Ok(LinearSyncResult {
@@ -1974,15 +1925,6 @@ pub(super) async fn checked_projects_with_store(
         }
     }
 
-    for adopted in
-        adoption::adopt_legacy_projects(repo, store, wave, ctx, initiative, false).await?
-    {
-        if let Some(project) = projects.iter_mut().find(|project| project.id == adopted.id) {
-            *project = adopted;
-        } else {
-            projects.push(adopted);
-        }
-    }
     projects.retain(|project| !project_is_foreign(project, &ctx.team_id));
     for project in &projects {
         validate_project_ownership(project, wave, initiative, &ctx.team_id)?;
@@ -2102,103 +2044,6 @@ fn block_on_linear<T>(future: impl Future<Output = OpsResult<T>>) -> OpsResult<T
 
 fn linear_error(err: LinearError) -> OpsError {
     OpsError::Message(err.to_string())
-}
-
-#[derive(Debug)]
-pub(crate) struct ChapterSweep {
-    pub candidates: Vec<(String, String, LinearIssue)>,
-    pub skipped_projects: Vec<(String, LinearProject)>,
-}
-
-/// Read every linked Initiative, including archived predecessor Projects.
-pub(crate) async fn chapter_sweep_candidates(repo: &Path) -> OpsResult<ChapterSweep> {
-    let store = planning_store().await?;
-    let mut candidates = Vec::new();
-    let mut skipped_projects = Vec::new();
-    let mut skipped_ids = BTreeSet::new();
-    for name in list_linear_waves(repo)? {
-        let (ctx, initiative) = resolve_context(repo, &name).await?;
-        let locator = crate::work::wave::discover(repo, &name)
-            .map_err(|error| OpsError::Message(error.to_string()))?;
-        let wave = store
-            .get_wave_at(&locator)
-            .await
-            .map_err(|error| OpsError::Message(error.to_string()))?
-            .ok_or_else(|| OpsError::Message(format!("{name}: current chapter is unavailable")))?;
-        let chapter = super::project::current_project(&store, &wave)?;
-        for project in ctx
-            .client
-            .list_projects_including_archived(&initiative, true)
-            .await
-            .map_err(|error| OpsError::Message(error.to_string()))?
-        {
-            if project_is_foreign(&project, &ctx.team_id) {
-                if skipped_ids.insert(project.id.clone()) {
-                    skipped_projects.push((name.clone(), project));
-                }
-                continue;
-            }
-            validate_project_ownership(&project, &name, &initiative, &ctx.team_id)?;
-            if chapter
-                .linear_id
-                .as_ref()
-                .is_some_and(|id| id.as_str() == project.id)
-            {
-                continue;
-            }
-            for item in ctx
-                .client
-                .list_items_including_archived(&project.id, true)
-                .await
-                .map_err(|error| OpsError::Message(error.to_string()))?
-            {
-                if item.completed
-                    || matches!(
-                        item.state.as_deref(),
-                        Some("completed" | "canceled" | "duplicate")
-                    )
-                {
-                    continue;
-                }
-                if item.state.is_none() || item.team_id.as_deref() != Some(ctx.team_id.as_str()) {
-                    return Err(OpsError::Message(format!(
-                        "{} has unresolved state or ownership; sweep was not applied",
-                        item.identifier
-                    )));
-                }
-                candidates.push((name.clone(), project.name.clone(), item));
-            }
-        }
-    }
-    Ok(ChapterSweep {
-        candidates,
-        skipped_projects,
-    })
-}
-
-pub(crate) async fn require_outside_current_chapter(repo: &Path, issue: &str) -> OpsResult<Task> {
-    let resolved = acquire_task(repo, issue, LinearRefresh::Force).await?;
-    let store = planning_store().await?;
-    let Some(wave_id) = &resolved.wave_id else {
-        return Ok(resolved);
-    };
-    let wave = store
-        .get_wave(wave_id)
-        .await
-        .map_err(|error| OpsError::Message(error.to_string()))?
-        .ok_or_else(|| OpsError::Message("current Wave is unavailable".into()))?;
-    let chapter = super::project::current_project(&store, &wave)?;
-    if Some(&chapter.id) == resolved.project_id.as_ref()
-        || matches!(
-            resolved.state.as_deref(),
-            Some("completed" | "canceled" | "duplicate")
-        )
-    {
-        return Err(OpsError::Message(
-            "issue moved to the current chapter or is already terminal".into(),
-        ));
-    }
-    Ok(resolved)
 }
 
 #[cfg(test)]

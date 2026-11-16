@@ -2093,34 +2093,6 @@ esac
                     json!("unstarted")
                 );
                 assert!(!checkout.exists());
-                // A reopened PR on an already-abandoned record must be excluded
-                // by preview as well as apply, even after its checkout is gone.
-                std::fs::remove_file(repo.join(".git/pr-closed")).unwrap();
-                runtime.block_on(async {
-                    let mut state = state.lock().await;
-                    state.current_project_id = Some("prior-project".into());
-                    state.issues[0]["project"]["id"] = json!("prior-project");
-                    mark_issue_updated(&mut state.issues[0]);
-                });
-                for apply in [false, true] {
-                    let entries = crate::ops::task::task_sweep(&repo, apply).unwrap();
-                    assert_eq!(entries.len(), 1);
-                    assert!(entries[0].outcome.contains("open PR"), "{:?}", entries);
-                    assert_eq!(
-                        runtime.block_on(async {
-                            state.lock().await.issues[0]["state"]["type"].clone()
-                        }),
-                        json!("unstarted")
-                    );
-                    assert!(!repo.join(".git/pr-closed").exists());
-                }
-                std::fs::write(repo.join(".git/pr-closed"), "").unwrap();
-                runtime.block_on(async {
-                    let mut state = state.lock().await;
-                    state.current_project_id = None;
-                    state.issues[0]["project"]["id"] = json!("project-1");
-                    mark_issue_updated(&mut state.issues[0]);
-                });
             } else {
                 // Cleanup failure cannot undo cancellation; retry retains the PR and checkout.
                 std::fs::write(repo.join(".git/fail-close"), "").unwrap();
@@ -2195,7 +2167,7 @@ esac
 }
 
 #[test]
-fn foreign_projects_do_not_block_sweep_refresh_or_sync() {
+fn foreign_projects_do_not_block_refresh() {
     let _lock = crate::journal::test_env_lock();
     let _restore = PlanningEnvironment::isolate();
     let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -2244,29 +2216,26 @@ fn foreign_projects_do_not_block_sweep_refresh_or_sync() {
             "Cancel only repository work",
         )
         .unwrap();
-        for plan in [true, false] {
-            let result = super::refresh(
-                &repo,
-                &super::LinearSyncOptions {
-                    wave: Some("product".into()),
-                    plan,
-                },
-                &NullProgress,
-            )
-            .unwrap();
-            assert_eq!(
-                result
-                    .diagnostics
-                    .iter()
-                    .filter(|message| message.contains("foreign-project"))
-                    .count(),
-                1
-            );
-            assert!(!result
-                .actions
+        let result = super::refresh(
+            &repo,
+            &super::LinearSyncOptions {
+                wave: Some("product".into()),
+            },
+            &NullProgress,
+        )
+        .unwrap();
+        assert_eq!(
+            result
+                .diagnostics
                 .iter()
-                .any(|action| action.contains("Technical Architecture")));
-        }
+                .filter(|message| message.contains("foreign-project"))
+                .count(),
+            1
+        );
+        assert!(!result
+            .actions
+            .iter()
+            .any(|action| action.contains("Technical Architecture")));
         runtime.block_on(async {
             let provider = state.lock().await;
             assert_eq!(provider.extra_projects, vec![foreign.clone()]);
@@ -2278,176 +2247,6 @@ fn foreign_projects_do_not_block_sweep_refresh_or_sync() {
             );
             assert_eq!(projects[0].name, "Chapter");
         });
-        runtime.block_on(async {
-            let mut provider = state.lock().await;
-            provider.current_project_id = Some("prior-project".into());
-            provider.issues[0]["project"]["id"] = json!("prior-project");
-            mark_issue_updated(&mut provider.issues[0]);
-            // Duplicate foreign membership still yields one preview entry.
-            provider.extra_projects.push(foreign.clone());
-        });
-        let preview = crate::ops::task::task_sweep(&repo, false).unwrap();
-        assert_eq!(preview.len(), 2);
-        assert_eq!(preview[0].issue, None);
-        assert_eq!(preview[0].project, foreign["name"].as_str().unwrap());
-        assert!(preview[0].outcome.contains("foreign-project"));
-        assert_eq!(
-            serde_json::to_value(&preview).unwrap()[0]["issue"],
-            json!(null)
-        );
-        assert_eq!(preview[1].issue.as_deref(), Some("FIX-1"));
-        assert!(preview[1].outcome.starts_with("would cancel"));
-        assert_eq!(
-            runtime.block_on(async { state.lock().await.issues[0]["state"]["type"].clone() }),
-            json!("unstarted")
-        );
-        let applied = crate::ops::task::task_sweep(&repo, true).unwrap();
-        assert_eq!(applied.len(), 2);
-        assert_eq!(applied[1].outcome, "canceled");
-        assert_eq!(
-            runtime.block_on(async { state.lock().await.issues[0]["state"]["type"].clone() }),
-            json!("canceled")
-        );
-        let saved = fixture
-            .store
-            .sqlite
-            .task_by_issue("FIX-1")
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            fixture
-                .store
-                .sqlite
-                .work_status(&loopflow_model::durable::WorkRef::Task(saved.id.clone()))
-                .unwrap(),
-            WorkStatus::Abandoned
-        );
-        assert!(fixture
-            .store
-            .sqlite
-            .pending_task_state(&saved.id)
-            .unwrap()
-            .is_none());
-        let repeated = crate::ops::task::task_sweep(&repo, true).unwrap();
-        assert_eq!(repeated.len(), 1);
-        assert_eq!(repeated[0].issue, None);
-        // Missing or shared ownership must not silently disappear from reads.
-        for teams in [json!([]), json!([{"id":"team-1"}, {"id":"other-team"}])] {
-            runtime.block_on(async {
-                let mut provider = state.lock().await;
-                let mut ambiguous = foreign.clone();
-                ambiguous["initiatives"]["nodes"] = json!([{"id":"initiative-1"}]);
-                ambiguous["teams"]["nodes"] = teams;
-                provider.extra_projects = vec![ambiguous];
-            });
-            let error = crate::ops::task::task_sweep(&repo, false)
-                .unwrap_err()
-                .to_string();
-            assert!(
-                error.contains("expected exactly one repository Team"),
-                "{error}"
-            );
-        }
-    });
-    server.abort();
-}
-
-#[test]
-fn task_sweep_previews_old_chapters_and_preserves_current_and_terminal_issues() {
-    let _lock = crate::journal::test_env_lock();
-    let _restore = PlanningEnvironment::isolate();
-    let runtime = tokio::runtime::Runtime::new().unwrap();
-    let fixture = runtime.block_on(Fixture::new());
-    std::env::set_var("LF_HOME", fixture.directory.path());
-    let (repo, _wave) = runtime.block_on(fixture.planning_repo());
-    runtime.block_on(fixture.seed(now() + 86_400));
-    let selected = "00000000-0000-4000-8000-000000000001";
-    let state = Arc::new(tokio::sync::Mutex::new(PlanningState {
-        initial_project_id: Some(selected.into()),
-        ..PlanningState::default()
-    }));
-    let (url, server) = runtime.block_on(serve(state.clone()));
-    LINEAR_TEST_CONTEXT.sync_scope(fixture.context(&url), || {
-        seed_provider_task(&runtime, &state, &repo, "Planning work", "Retain evidence").unwrap();
-        runtime
-            .block_on(crate::ops::project::bind_project(
-                &repo, "product", selected,
-            ))
-            .unwrap();
-        assert!(crate::ops::task::task_sweep(&repo, true)
-            .unwrap()
-            .is_empty());
-        runtime.block_on(async {
-            let mut state = state.lock().await;
-            state.current_project_id = Some("prior-project".into());
-            state.issues[0]["project"]["id"] = json!("prior-project");
-            mark_issue_updated(&mut state.issues[0]);
-        });
-        let bin = fixture.directory.path().join("bin");
-        std::fs::create_dir(&bin).unwrap();
-        let gh = bin.join("gh");
-        std::fs::write(&gh, "#!/bin/sh\necho '{\"state\":\"OPEN\"}'\n").unwrap();
-        std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let path = std::env::var_os("PATH").unwrap();
-        std::env::set_var(
-            "PATH",
-            std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(&path))).unwrap(),
-        );
-        runtime.block_on(async {
-            state.lock().await.attachments =
-                vec!["https://github.com/loopflowstudio/fixture/pull/99".into()];
-        });
-        let excluded = crate::ops::task::task_sweep(&repo, true).unwrap();
-        assert!(excluded[0].outcome.contains("untracked and OPEN"));
-        assert_eq!(
-            runtime.block_on(async { state.lock().await.issues[0]["state"]["type"].clone() }),
-            json!("unstarted")
-        );
-        runtime.block_on(async {
-            state.lock().await.attachments.clear();
-        });
-        std::env::set_var("PATH", path);
-        let preview = crate::ops::task::task_sweep(&repo, false).unwrap();
-        assert_eq!(preview.len(), 1);
-        assert!(preview[0].outcome.starts_with("would cancel"));
-        assert_eq!(
-            runtime.block_on(async { state.lock().await.issues[0]["state"]["type"].clone() }),
-            json!("unstarted")
-        );
-        for terminal in ["completed", "canceled", "duplicate"] {
-            runtime.block_on(async {
-                state.lock().await.issues[0]["state"]["type"] = json!(terminal);
-                mark_issue_updated(&mut state.lock().await.issues[0]);
-            });
-            assert!(crate::ops::task::task_sweep(&repo, true)
-                .unwrap()
-                .is_empty());
-        }
-        runtime.block_on(async {
-            state.lock().await.issues[0]["state"]["type"] = json!("unstarted");
-            mark_issue_updated(&mut state.lock().await.issues[0]);
-        });
-        // Membership changes after candidate enumeration still prevent writes.
-        runtime.block_on(async {
-            state.lock().await.move_on_attachment_read = true;
-        });
-        let moved = crate::ops::task::task_sweep(&repo, true).unwrap();
-        assert!(moved[0].outcome.contains("current chapter"));
-        assert_eq!(
-            runtime.block_on(async { state.lock().await.issues[0]["state"]["type"].clone() }),
-            json!("unstarted")
-        );
-        runtime.block_on(async {
-            let mut state = state.lock().await;
-            state.current_project_id = Some("prior-project".into());
-            state.issues[0]["project"]["id"] = json!("prior-project");
-            mark_issue_updated(&mut state.issues[0]);
-        });
-        let applied = crate::ops::task::task_sweep(&repo, true).unwrap();
-        assert_eq!(applied[0].outcome, "canceled");
-        assert!(crate::ops::task::task_sweep(&repo, true)
-            .unwrap()
-            .is_empty());
     });
     server.abort();
 }
@@ -4058,160 +3857,6 @@ fn planning_export_removal_during_uncertain_creation_retains_identity() {
 
 #[path = "planning_order_tests.rs"]
 mod planning_order_tests;
-
-#[test]
-fn wave_summary_sync_reads_committed_default_branch() {
-    let _lock = crate::journal::test_env_lock();
-    let _restore = PlanningEnvironment::isolate();
-    let runtime = tokio::runtime::Runtime::new().unwrap();
-    let fixture = runtime.block_on(Fixture::new());
-    std::env::set_var("LF_HOME", fixture.directory.path());
-    let (repo, _) = runtime.block_on(planning_repo(&fixture));
-    runtime.block_on(fixture.seed(now() + 86_400));
-    let git = |repo: &Path, args: &[&str]| {
-        let output = std::process::Command::new("git")
-            .args(args)
-            .current_dir(repo)
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    };
-    git(&repo, &["branch", "-M", "trunk"]);
-    git(
-        &repo,
-        &[
-            "symbolic-ref",
-            "refs/remotes/origin/HEAD",
-            "refs/remotes/origin/trunk",
-        ],
-    );
-    let commit = |repo: &Path| {
-        git(repo, &["add", "."]);
-        git(
-            repo,
-            &[
-                "-c",
-                "user.name=Fixture",
-                "-c",
-                "user.email=fixture@example.invalid",
-                "commit",
-                "-qm",
-                "fixture goal",
-            ],
-        );
-    };
-    commit(&repo);
-    let checkout = fixture.directory.path().join("checkout");
-    git(
-        &repo,
-        &[
-            "worktree",
-            "add",
-            "-qb",
-            "summary",
-            checkout.to_str().unwrap(),
-        ],
-    );
-    let goal = repo.join(".lf/wave/product/GOAL.md");
-    let write = |text: &str| {
-        std::fs::write(
-            &goal,
-            format!("---\nlinear:\n  initiative: initiative-1\n---\n\n## Objective\n\n{text}\n"),
-        )
-        .unwrap();
-    };
-    let state = Arc::new(tokio::sync::Mutex::new(PlanningState::default()));
-    let (url, server) = runtime.block_on(serve(state.clone()));
-    LINEAR_TEST_CONTEXT.sync_scope(fixture.context(&url), || {
-        let sync = |plan| {
-            crate::ops::linear::refresh(
-                &checkout,
-                &crate::ops::linear::LinearSyncOptions {
-                    wave: Some("product".into()),
-                    plan,
-                },
-                &crate::ops::NullProgress,
-            )
-        };
-        std::fs::write(
-            checkout.join(".lf/wave/product/GOAL.md"),
-            "---\nlinear:\n  initiative: initiative-1\n---\n\n## Objective\n\nEdited directly.\n",
-        )
-        .unwrap();
-        commit(&checkout);
-        sync(false).unwrap();
-        assert_eq!(
-            runtime.block_on(async { state.lock().await.wave_summary.clone() }),
-            "Keep working."
-        );
-        // Even a dirty default checkout must not publish unmerged text.
-        write("Edited directly.");
-        sync(false).unwrap();
-        assert_eq!(
-            runtime.block_on(async { state.lock().await.wave_summary.clone() }),
-            "Keep working."
-        );
-        commit(&repo);
-        sync(false).unwrap();
-        assert_eq!(
-            runtime.block_on(async { state.lock().await.wave_summary.clone() }),
-            "Edited directly."
-        );
-        // No duplicate provider effect for unchanged normalized text.
-        sync(false).unwrap();
-        assert_eq!(
-            runtime.block_on(async { state.lock().await.wave_updates }),
-            2
-        );
-        write("Plan only.");
-        commit(&repo);
-        sync(true).unwrap();
-        assert_eq!(
-            runtime.block_on(async { state.lock().await.wave_summary.clone() }),
-            "Edited directly."
-        );
-        std::fs::remove_file(&goal).unwrap();
-        commit(&repo);
-        assert!(sync(false).unwrap_err().to_string().contains("missing"));
-        assert_eq!(
-            runtime.block_on(async { state.lock().await.wave_updates }),
-            2
-        );
-        write("Rejected update.");
-        commit(&repo);
-        runtime.block_on(async { state.lock().await.reject_wave_update = true });
-        assert!(sync(false)
-            .unwrap_err()
-            .to_string()
-            .contains("summary update refused"));
-        assert_eq!(
-            runtime.block_on(async { state.lock().await.wave_summary.clone() }),
-            "Edited directly."
-        );
-        assert_eq!(
-            runtime.block_on(async { state.lock().await.wave_updates }),
-            3
-        );
-        runtime.block_on(async { state.lock().await.reject_wave_update = false });
-        write("");
-        commit(&repo);
-        sync(false).unwrap();
-        assert_eq!(
-            runtime.block_on(async { state.lock().await.wave_summary.clone() }),
-            ""
-        );
-        assert!(
-            std::fs::read_to_string(checkout.join(".lf/wave/product/GOAL.md"))
-                .unwrap()
-                .contains("Edited directly.")
-        );
-    });
-    server.abort();
-}
 
 #[test]
 fn linear_rate_limit_retries_field_without_losing_saved_identity() {

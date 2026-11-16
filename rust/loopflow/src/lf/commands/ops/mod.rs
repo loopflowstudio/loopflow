@@ -436,7 +436,6 @@ pub fn sync_planning(
     repo: &std::path::Path,
     wave: Option<&str>,
     all: bool,
-    plan: bool,
     json: bool,
 ) -> Result<()> {
     let wave = if all {
@@ -446,7 +445,7 @@ pub fn sync_planning(
     };
     let result = loopflow_execution::ops::linear::refresh(
         repo,
-        &loopflow_execution::ops::linear::LinearSyncOptions { wave, plan },
+        &loopflow_execution::ops::linear::LinearSyncOptions { wave },
         &CliProgress,
     )?;
     if json {

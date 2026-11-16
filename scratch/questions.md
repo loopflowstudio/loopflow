@@ -110,3 +110,15 @@
   alias/abbreviation/global-flag behavior when supplying typed catalogue values;
   no prefix-based command classifier is selected. Application provenance must
   enter the reusable execution library as an input, not as compiled root bytes.
+
+- November 15 delivery observation: `lf task hold LOO-917` stopped Graph
+  `9b4c441a-9a09-40ce-889b-0d56276bd191` and disabled auto-merge, but left its
+  native `land --wait-and-fix` step `3ae30c73-d6a2-4ac3-a10f-379b425d0717`
+  running as orphan PID 67960 (start 1794795959, foundation checkout cwd). It
+  prevented the next ship with “live or unresolved execution”. The exact
+  recorded PID/start/cwd/argv matched before SIGTERM; it exited 130, and the
+  next ship started. This runtime-control defect is outside the crate cut.
+  Cheapest regression producer: hold a disposable Task whose Graph command
+  waits, then assert its recorded command process exits and a new ship starts.
+
+- November 15: a broad compiler-process inspection accidentally printed an unrelated Cursor API credential from process arguments. The value was not used or copied; it needs rotation. Further inspection is restricted to known PIDs.

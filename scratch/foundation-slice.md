@@ -35,4 +35,4 @@ retirement checks keep the native package flow. Existing reuse/source-identity
 probes and isolated debug builds remain available. Reuse can retain another
 checkout's debug paths; isolated developer builds are the source-debug escape.
 No whole-build speedup, production cache validation or safe concurrency budget
-is claimed. Publish this independently reviewable foundation; no merge is authorized.
+is claimed. Publish this independently reviewable foundation; shipping is authorized after technical checks pass.

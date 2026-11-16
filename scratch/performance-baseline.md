@@ -279,3 +279,22 @@ a focused pre-AppKit startup regression test exercises this case.
 - Startup regression `LaunchJournalTests/startupIntervalCanBeginBeforeAppKit`: passed. Updated Dev bundle revision `22d6885a6504d06094d64af0e1134763374c86d5` launches against the live store.
 - Live Kata Backlog → Working click, observation `E4D04DD2-0B56-4532-861D-0A106EEFEE4B`, recorded original AppKit input time and repository context. No frame was acquired; outcome remains unmeasured. This is not a latency baseline.
 - System Settings → Screen & System Audio Recording has no Loopflow Dev entry. New access has not been granted. Confirmation requested under the computer-use tool policy before adding this app. No phone capture session was started.
+
+## App-journal live trials, 2026-11-16
+
+Jack Heart: “Yes go for it” (macOS capture grant); “i opened settings”.
+
+Loopflow Dev capture access is on, and the app was quit/reopened through System Settings. All 30 board observations completed: five per direction/repository. Original AppKit event timestamps and ScreenCaptureKit acquisition times come from the app journal; CUA only supplied native clicks and checked the selected section. No Task or prompt was submitted; conversation input ownership was not taken.
+
+| Repository | Direction | n | Ack median ms | Usable median ms | Usable range ms |
+|---|---|---:|---:|---:|---:|
+| kata | backlog_to_working | 5 | 81.8 | 109.9 | 103.0–128.1 |
+| kata | working_to_backlog | 5 | 93.6 | 121.8 | 108.9–128.2 |
+| loopflow | backlog_to_working | 5 | 107.2 | 138.5 | 120.3–153.0 |
+| loopflow | working_to_backlog | 5 | 134.0 | 165.4 | 154.6–167.1 |
+| manabot | backlog_to_working | 5 | 106.2 | 136.6 | 127.4–264.0 |
+| manabot | working_to_backlog | 5 | 122.0 | 148.7 | 140.2–185.9 |
+
+Build `22d6885a6504d06094d64af0e1134763374c86d5`; macOS 26.0.1; live `~/.lf` store. After-run load averages: [54.73291015625, 75.42529296875, 100.28369140625]. Before-run load was not sampled. These are ordinary-use visual upper bounds including acquisition cost, not a speedup comparison or a quiet-host baseline. P95 remains unmeasured (n=5 per case).
+
+Raw records, conditions and summary: `~/.lf/performance/live/20261116-app-journal/`. Updated HTML: `/tmp/loo916-live-performance.html`. Phone ReplayKit capture and the other experience drivers remain unverified/unmeasured.

@@ -231,7 +231,6 @@ the next green run closes it.
 | `403. A required agreement is missing or has expired` | The Account Holder accepts the new agreement at developer.apple.com. No code change; retrying fails until then. |
 | `401. Unauthenticated` | `NOTARY_KEY_ID`, `NOTARY_ISSUER` or `NOTARY_KEY` is wrong. Fix it in Doppler `loopflow`/`prd` and copy it to the Actions secrets. |
 
-Release candidates also run `cargo package --locked -p loopflow`. This compiles
-the extracted crates.io archive before tagging, so repository-only embedded
-files cannot pass on the strength of native binaries. Publication keeps the
-same locked dependencies.
+Loopflow ships native packages for all four targets. Workspace crates are private
+path dependencies; release publication and recovery verify native artifacts,
+installer, DMGs, appcasts and website without a crates.io stage.

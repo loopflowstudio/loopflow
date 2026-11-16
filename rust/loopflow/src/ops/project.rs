@@ -129,7 +129,7 @@ async fn resolve_project(store: &Store, repo: &Path, selector: &str) -> OpsResul
     let repo = crate::repository::CanonicalRepo::discover(repo)
         .map_err(project_error)?
         .to_string();
-    if let Ok(id) = crate::durable::ProjectId::parse(selector) {
+    if let Ok(id) = loopflow_model::durable::ProjectId::parse(selector) {
         let project = store
             .get_project_by_project(id.as_str())
             .await
@@ -161,7 +161,7 @@ async fn resolve_project(store: &Store, repo: &Path, selector: &str) -> OpsResul
         project
             .linear_id
             .as_ref()
-            .is_some_and(|id| id.as_str() == crate::id::canonical_uuid(selector))
+            .is_some_and(|id| id.as_str() == loopflow_model::id::canonical_uuid(selector))
     }) {
         return Ok(project.clone());
     }
@@ -265,7 +265,7 @@ pub async fn edit(
     Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
 pub struct WaveGraph {
-    pub wave_id: Option<crate::id::WaveId>,
+    pub wave_id: Option<loopflow_model::id::WaveId>,
     pub wave: Option<String>,
     pub default: GraphDefault,
 }
@@ -301,7 +301,7 @@ pub async fn wave_graph(
 
 fn read_saved(
     store: &Store,
-    id: &crate::durable::ProjectId,
+    id: &loopflow_model::durable::ProjectId,
 ) -> OpsResult<(Project, PlanningSyncStatus)> {
     let project = store
         .sqlite

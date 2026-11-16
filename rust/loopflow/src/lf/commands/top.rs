@@ -10,7 +10,6 @@ use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::id::LfProcessId;
 use crate::journal::{
     prune_process_receipts_at, read_process_receipts_at, recorded_process_evidence,
     recorded_process_receipt, OsProcess, ProcessIdentityEvidence, ProcessReceipt,
@@ -18,6 +17,7 @@ use crate::journal::{
 use crate::lf::output::truncate;
 use crate::store::rows::unix_to_datetime;
 use crate::store::sqlite::SqliteStore;
+use loopflow_model::id::LfProcessId;
 
 const SCHEMA_VERSION: u32 = 1;
 const COMMAND_WIDTH: usize = 82;
@@ -676,8 +676,8 @@ fn format_duration(seconds: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::{collect_activity, ActivityNodeKind, OsProcess};
-    use crate::id::{AgentProcessId, LfProcessId, TraceId};
     use crate::process::{AgentProcess, ProcessEntry};
+    use loopflow_model::id::{AgentProcessId, LfProcessId, TraceId};
 
     #[test]
     fn activity_fold_keeps_unknown_parents_and_rejects_cycles() {
@@ -760,9 +760,9 @@ mod tests {
         )
         .unwrap();
 
-        let wave = crate::id::WaveId::new();
-        let project = crate::durable::ProjectId::new();
-        let task = crate::durable::TaskId::new();
+        let wave = loopflow_model::id::WaveId::new();
+        let project = loopflow_model::durable::ProjectId::new();
+        let task = loopflow_model::durable::TaskId::new();
         sql.execute(
             "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'proof','/repo',1)",
             [&wave],

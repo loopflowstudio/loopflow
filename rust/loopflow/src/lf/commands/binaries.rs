@@ -16,11 +16,11 @@ use anyhow::{Context, Result};
 use serde::Serialize;
 use time::OffsetDateTime;
 
-use crate::id::LfProcessId;
 use crate::journal::{
     lf_process_evidence, recorded_process_receipt, OsProcess, ProcessIdentityEvidence,
 };
 use crate::store::sqlite::SqliteStore;
+use loopflow_model::id::LfProcessId;
 
 const VERSION_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -364,8 +364,8 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use super::{group, parse_version, superseded_summary, BinaryInventory, RunningLfProcess};
-    use crate::id::LfProcessId;
     use crate::store::sqlite::SqliteStore;
+    use loopflow_model::id::LfProcessId;
 
     fn process(pid: u32) -> RunningLfProcess {
         RunningLfProcess {
@@ -446,7 +446,7 @@ mod tests {
                 "INSERT INTO processes(id,kind,trace_id,parent_lf_process_id,started_at,pid,os_started_at,
                      agent_provider,agent_interactive,attached_lf_process_id)
                  VALUES(?1,'agent',?2,?2,?3,?4,?3,'claude',1,?2)",
-                rusqlite::params![crate::id::AgentProcessId::new(), launcher, me.started_at, me.pid],
+                rusqlite::params![loopflow_model::id::AgentProcessId::new(), launcher, me.started_at, me.pid],
             )
             .unwrap();
         assert!(listed(&store).is_empty());

@@ -1,13 +1,14 @@
 //! Saved selection and layout intent share one transaction and one Work snapshot.
 mod panes;
 use super::SqliteStore;
-use crate::durable::{RepositoryId, TaskSection, TaskState};
+use crate::durable::{TaskSection, TaskState};
 use crate::store::{StoreError, StoreResult};
 use crate::work::selection::{
     move_into_place, Arrangement, ArrangementEdit, ArrangementMode, Dashboard, DashboardId,
     DashboardReading, Selection, SelectionExpression, SelectionId, SelectionResolution,
     SelectionState, SelectionWork, SlotLayout, WorkWorkspaceKey, WorkWorkspaceKind,
 };
+use loopflow_model::durable::RepositoryId;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -252,10 +253,10 @@ fn task_selection_in(
                 .flat_map(|status| &status.records)
             {
                 match report.state {
-                    crate::program_status::State::Working => {
+                    loopflow_model::program_status::State::Working => {
                         activity.states.insert(SelectionState::Busy);
                     }
-                    crate::program_status::State::Blocked => {
+                    loopflow_model::program_status::State::Blocked => {
                         activity.states.insert(SelectionState::Blocked);
                     }
                     _ => {}
@@ -372,7 +373,7 @@ fn plan_in(
                 .unavailable
                 .push("Work is unavailable; retained intent only".into());
         } else if key.kind == WorkWorkspaceKind::Task {
-            let task_id = crate::durable::TaskId::parse(&key.id).map_err(invalid)?;
+            let task_id = loopflow_model::durable::TaskId::parse(&key.id).map_err(invalid)?;
             let task = super::children::task_on(conn, &task_id)?.ok_or(StoreError::NotFound)?;
             content.identifier = Some(task.identifier);
             content.title = task.title;
@@ -577,7 +578,7 @@ impl SqliteStore {
                         wave.key.id
                     )),
                     expression: crate::work::selection::SelectionExpression::Wave {
-                        wave: crate::id::WaveId::parse(&wave.key.id).map_err(invalid)?,
+                        wave: loopflow_model::id::WaveId::parse(&wave.key.id).map_err(invalid)?,
                     },
                 },
                 None,
@@ -936,11 +937,11 @@ impl SqliteStore {
 #[cfg(test)]
 mod tests {
     use super::SqliteStore;
-    use crate::durable::RepositoryId;
     use crate::work::selection::{
         Arrangement, ArrangementMode, DashboardId, Selection, SelectionExpression, SelectionId,
         WorkWorkspaceKind,
     };
+    use loopflow_model::durable::RepositoryId;
 
     fn fixture() -> (tempfile::TempDir, SqliteStore, RepositoryId) {
         let dir = tempfile::tempdir().unwrap();
@@ -1908,12 +1909,12 @@ mod tests {
                 "selection-surface",
             )
             .unwrap();
-        let report = crate::program_status::Records {
+        let report = loopflow_model::program_status::Records {
             seen: true,
-            records: vec![crate::program_status::Report {
-                state: crate::program_status::State::Blocked,
+            records: vec![loopflow_model::program_status::Report {
+                state: loopflow_model::program_status::State::Blocked,
                 id: None,
-                kind: Some(crate::program_status::Kind::Question),
+                kind: Some(loopflow_model::program_status::Kind::Question),
                 progress: None,
                 app: None,
                 title: None,

@@ -25,7 +25,8 @@ _EVERY_JOB = (".github/workflows/", "scripts/macos_inputs.py")
 _DESKTOP_BUILD_INPUTS = (
     "scripts/loopflow-dev.py",
     "rust/loopflow/build.rs",
-    "rust/loopflow/ghostty-vt",
+    "rust/loopflow-terminal/build.rs",
+    "rust/loopflow-terminal/ghostty-vt",
 )
 IOS_INPUTS = (
     "swift/Loopflow/",

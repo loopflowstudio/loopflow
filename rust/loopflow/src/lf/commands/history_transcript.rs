@@ -6,7 +6,6 @@ use std::collections::BTreeSet;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-use crate::chat::types::{ConversationItem, Lifecycle};
 use crate::harness::HarnessKind;
 use crate::lf::commands::WorkFilter;
 use crate::store::sqlite::SqliteStore;
@@ -16,6 +15,7 @@ use crate::transcript::{
     self, Conversation, Located, Request, RequestSource, RetentionState, SessionTranscript, Source,
     Turn, TurnItem,
 };
+use loopflow_model::chat::types::{ConversationItem, Lifecycle};
 
 const SNIPPET_CHARS: usize = 80;
 const ANSWER_CHARS: usize = 160;

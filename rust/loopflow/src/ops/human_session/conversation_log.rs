@@ -8,11 +8,11 @@ use std::fs;
 use anyhow::{anyhow, bail, Context, Result};
 use serde_json::Value;
 
-use crate::chat::types::{ConversationItem, Lifecycle};
 use crate::harness::HarnessKind;
 use crate::session::LfSession;
 use crate::store::sqlite::SqliteStore;
 use crate::transcript::{self, RequestSource, Turn, TurnItem};
+use loopflow_model::chat::types::{ConversationItem, Lifecycle};
 
 const TOOL_INPUT_CHARS: usize = 200;
 const ERROR_TAIL_CHARS: usize = 400;

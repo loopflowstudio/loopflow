@@ -2,12 +2,12 @@ use std::collections::BTreeMap;
 use std::fs;
 
 use crate::agent::AgentConfig;
-use crate::chat::types::{ConversationEvent, TurnUsage};
 use crate::process::LfProcessRuntime;
 use crate::session_record::{
     read_provider_session, AgentProcessRequest, SessionCaptureManifest, SessionCaptureSpec,
     SubjectAttribution, TerminalReceipt,
 };
+use loopflow_model::chat::types::{ConversationEvent, TurnUsage};
 
 #[test]
 fn native_usage_reads_each_providers_counter_once_by_its_shape() {
@@ -15,7 +15,7 @@ fn native_usage_reads_each_providers_counter_once_by_its_shape() {
     let event = |seq, thread: &str, kind, payload| crate::session::SessionEvent {
         seq,
         session_id: "session".into(),
-        agent_session: Some(crate::id::AgentSessionId::from(thread)),
+        agent_session: Some(loopflow_model::id::AgentSessionId::from(thread)),
         provider_turn: Some("turn".into()),
         kind,
         agent_process_id: None,
@@ -860,7 +860,7 @@ fn history_keeps_only_how_a_turn_ended() {
     });
     capture.record_conversation(ConversationEvent::TurnCompleted {
         turn_id: turn(),
-        status: crate::chat::types::Lifecycle::Completed,
+        status: loopflow_model::chat::types::Lifecycle::Completed,
     });
     capture.finish("completed").unwrap();
 
@@ -1061,15 +1061,15 @@ fn attached_session(
     crate::store::sqlite::SqliteStore,
     crate::process::SessionAttachment,
     std::process::Child,
-    crate::id::LfProcessId,
+    loopflow_model::id::LfProcessId,
 ) {
     let path = ledger.home().join("loopflow.db");
     let store = crate::store::sqlite::SqliteStore::open_ephemeral(&path).unwrap();
     store.test_session("conversation", &crate::session_record::new_artifact_key());
-    let first = crate::id::LfProcessId::new();
-    let second = crate::id::LfProcessId::new();
+    let first = loopflow_model::id::LfProcessId::new();
+    let second = loopflow_model::id::LfProcessId::new();
     let sql = rusqlite::Connection::open(&path).unwrap();
-    let trace = crate::id::TraceId::new();
+    let trace = loopflow_model::id::TraceId::new();
     for process in [&first, &second] {
         sql.execute(
             "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?2,1)",
@@ -1325,7 +1325,7 @@ fn recording_failure_cannot_forget_the_thread_or_account_used_by_retry() {
             capture.claim_session_attachment()?;
             let primary = crate::store::ProviderAccountId::parse("primary").unwrap();
             let fallback = crate::store::ProviderAccountId::parse("fallback").unwrap();
-            let thread = crate::id::AgentSessionId::from("observed-thread");
+            let thread = loopflow_model::id::AgentSessionId::from("observed-thread");
             let sql = rusqlite::Connection::open(crate::session_record::row_database(
                 &capture.artifact_dir(),
             )?)?;

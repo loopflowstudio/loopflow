@@ -6,7 +6,7 @@ pub(crate) mod hold;
 pub(crate) mod identity;
 pub mod selection;
 
-use crate::id::AgentSessionId;
+use loopflow_model::id::AgentSessionId;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -16,7 +16,6 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-use crate::id::WaveId;
 use crate::profile::{ProviderRoute, RouteScope};
 use crate::provider_auth::Provider;
 use crate::repository::CanonicalRepo;
@@ -25,6 +24,7 @@ use crate::store::{
     StoreError,
 };
 use crate::store::{CredentialState, RoutingState};
+use loopflow_model::id::WaveId;
 
 const DEFAULT_COOLDOWN_SECS: i64 = 15 * 60;
 pub(crate) const RESET_GRACE_SECS: i64 = 5;

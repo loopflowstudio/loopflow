@@ -4,10 +4,10 @@ use std::collections::{HashMap, HashSet};
 use anyhow::Result;
 use serde_json::Value;
 
-use crate::id::LfProcessId;
 use crate::server::wire::SubscriptionEvent;
 use crate::store::sqlite::SqliteStore;
 use crate::work::task::{TaskEventKind, TaskId};
+use loopflow_model::id::LfProcessId;
 
 const MAX_EVENTS: usize = 256;
 
@@ -149,10 +149,10 @@ fn task_ids(value: &Value, tasks: &mut HashSet<TaskId>) -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::Observer;
-    use crate::durable::{Author, WorkRef};
     use crate::server::wire::SubscriptionEvent;
     use crate::store::sqlite::SqliteStore;
     use crate::work::task::{TaskEventKind, TaskId, TaskPrId};
+    use loopflow_model::durable::{Author, WorkRef};
     use serde_json::json;
 
     fn fixture() -> (tempfile::TempDir, SqliteStore, TaskId) {

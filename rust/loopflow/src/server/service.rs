@@ -740,7 +740,7 @@ pub(super) async fn session<C: Carrier>(
                         let ticket = tickets.issue(admission.clone(), Purpose::Terminal(held.clone()));
                         ServerMessage::Response {
                             id,
-                            trace_id: crate::id::TraceId::default(),
+                            trace_id: loopflow_model::id::TraceId::default(),
                             result: serde_json::to_value(SessionAttached {
                                 ticket,
                                 terminal_id: held,
@@ -884,7 +884,7 @@ async fn start_held(
     match tokio::task::spawn_blocking(move || terminals.start(start)).await {
         Ok(Ok(terminal_id)) => ServerMessage::Response {
             id,
-            trace_id: crate::id::TraceId::default(),
+            trace_id: loopflow_model::id::TraceId::default(),
             result: serde_json::to_value(SessionStarted { terminal_id })
                 .expect("a terminal ID serializes"),
         },
@@ -905,7 +905,7 @@ async fn start_held(
 /// Session, in its directory, with this server's environment and its own
 /// `LF_HOME` and `LF_BIN`.
 fn continuing(
-    session: crate::id::LfSessionId,
+    session: loopflow_model::id::LfSessionId,
     request: String,
     rows: u16,
     cols: u16,
@@ -965,7 +965,7 @@ fn continuing(
 fn ticket_response(id: String, ticket: String) -> ServerMessage {
     ServerMessage::Response {
         id,
-        trace_id: crate::id::TraceId::default(),
+        trace_id: loopflow_model::id::TraceId::default(),
         result: serde_json::json!({ "ticket": ticket }),
     }
 }
@@ -1191,7 +1191,7 @@ async fn request(
     let completion = tests::take_request_completion(&id);
     let write = matches!(operation, Operation::Write(_));
     let started = Instant::now();
-    let trace_id = crate::id::TraceId::default();
+    let trace_id = loopflow_model::id::TraceId::default();
     let result = match operation {
         Operation::Server(ServerOperation::SessionBoundary(boundary)) => {
             session_boundary(boundary, reservation.clone()).await
@@ -1252,7 +1252,7 @@ async fn operate(
     operation: Operation,
     id: &str,
     instance: &str,
-    trace_id: &crate::id::TraceId,
+    trace_id: &loopflow_model::id::TraceId,
     reservation: Arc<Reservation>,
     remote_control: Option<mpsc::Sender<Control>>,
 ) -> Result<serde_json::Value, Error> {
@@ -1378,7 +1378,7 @@ async fn effect(
     target: serde_json::Value,
     id: &str,
     instance: &str,
-    trace_id: &crate::id::TraceId,
+    trace_id: &loopflow_model::id::TraceId,
     run: impl FnOnce() -> Result<serde_json::Value> + Send + 'static,
 ) -> Result<serde_json::Value, Error> {
     let (id, instance, trace_id) = (id.to_owned(), instance.to_owned(), trace_id.clone());
@@ -1685,7 +1685,7 @@ mod tests {
                 "big",
                 serde_json::to_string(&ServerMessage::Response {
                     id: "big".into(),
-                    trace_id: crate::id::TraceId::default(),
+                    trace_id: loopflow_model::id::TraceId::default(),
                     result: value.clone(),
                 })
                 .unwrap(),
@@ -1758,7 +1758,7 @@ mod tests {
         with_empty_home(async {
             let tickets = Arc::new(Tickets::default());
             let clients = Clients::default();
-            let terminal = crate::id::TerminalId::new();
+            let terminal = loopflow_model::id::TerminalId::new();
             let listener = Arc::new(
                 tokio::net::UnixListener::bind(crate::transport::registry::entrance().unwrap())
                     .unwrap(),
@@ -2498,8 +2498,8 @@ mod tests {
     #[test]
     fn typed_events_share_connection_order_survive_selection_and_stop_on_cancel() {
         with_empty_home(async {
-            use crate::durable::{Author, WorkRef};
             use crate::work::task::TaskId;
+            use loopflow_model::durable::{Author, WorkRef};
             let path = crate::store::database_path_from_env().unwrap();
             let store = crate::store::sqlite::SqliteStore::open_ephemeral(&path).unwrap();
             rusqlite::Connection::open(&path)
@@ -2745,7 +2745,7 @@ mod tests {
                 std::path::PathBuf::from(std::env::var_os("LF_HOME").unwrap()).join("loopflow.db");
             let store = crate::store::sqlite::SqliteStore::open_ephemeral(&path).unwrap();
             let repo = loopflow_test_support::TestRepo::new();
-            let task = crate::durable::TaskId::new();
+            let task = loopflow_model::durable::TaskId::new();
             store
                 .create_task(&crate::work::task::NewTask {
                     repository_id: store
@@ -3122,7 +3122,7 @@ mod tests {
         let task = store
             .create_task(&crate::work::task::NewTask {
                 repository_id: store.ensure_repository(path.to_str().unwrap()).unwrap(),
-                id: crate::durable::TaskId::new(),
+                id: loopflow_model::durable::TaskId::new(),
                 project_id: None,
                 title: title.into(),
                 description: String::new(),
@@ -3256,7 +3256,9 @@ mod tests {
 
             let missing = tokio::task::spawn_blocking(|| {
                 super::continuing(
-                    crate::id::LfSessionId::from("session_00000000000040008000000000000099"),
+                    loopflow_model::id::LfSessionId::from(
+                        "session_00000000000040008000000000000099",
+                    ),
                     "phone-continue".into(),
                     40,
                     60,

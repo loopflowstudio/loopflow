@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 use fs2::FileExt;
 use sha2::{Digest, Sha256};
 
-use crate::durable::TaskId;
 use crate::store::{StoreError, StoreResult};
+use loopflow_model::durable::TaskId;
 
 use super::SqliteStore;
 

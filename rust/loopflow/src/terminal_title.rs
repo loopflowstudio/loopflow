@@ -56,7 +56,7 @@ pub(crate) fn workspace_name(identifier: &str, title: &str) -> String {
 /// `Available · Design`. Both come from their shared readers; nothing new is judged.
 fn standing(
     store: &SqliteStore,
-    task: &crate::durable::TaskId,
+    task: &loopflow_model::durable::TaskId,
     conversation: Option<&str>,
 ) -> StoreResult<Option<String>> {
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
@@ -277,7 +277,7 @@ impl TerminalTitle {
         title.host.is_some().then_some(title)
     }
 
-    fn viewing(held: &crate::id::TerminalId) -> Option<Self> {
+    fn viewing(held: &loopflow_model::id::TerminalId) -> Option<Self> {
         let load = || -> anyhow::Result<Option<Self>> {
             let store =
                 SqliteStore::open_processes_read_only(&crate::store::database_path_from_env()?)?;
@@ -389,7 +389,7 @@ impl Drop for TerminalTitle {
 /// link its Session after the viewer attaches, so the viewer keeps looking.
 #[derive(Debug)]
 pub(crate) struct ViewerTitle {
-    held: crate::id::TerminalId,
+    held: loopflow_model::id::TerminalId,
     title: Option<TerminalTitle>,
     /// Until when to look; executions without a Session never get one.
     looking: Option<Instant>,
@@ -406,7 +406,7 @@ pub(crate) struct TitleReader {
 
 #[derive(Debug)]
 struct TitleRequest {
-    held: crate::id::TerminalId,
+    held: loopflow_model::id::TerminalId,
     answer: mpsc::SyncSender<String>,
 }
 
@@ -442,7 +442,7 @@ impl TitleReader {
 /// Host-specific names remain with each viewer, including remote viewers.
 #[derive(Debug)]
 pub(crate) struct OutputTitle {
-    held: crate::id::TerminalId,
+    held: loopflow_model::id::TerminalId,
     reader: TitleReader,
     answer: mpsc::SyncSender<String>,
     names: mpsc::Receiver<String>,
@@ -450,7 +450,7 @@ pub(crate) struct OutputTitle {
 }
 
 impl OutputTitle {
-    pub(crate) fn new(held: &crate::id::TerminalId, reader: &TitleReader) -> Self {
+    pub(crate) fn new(held: &loopflow_model::id::TerminalId, reader: &TitleReader) -> Self {
         let (answer, names) = mpsc::sync_channel(1);
         Self {
             held: held.clone(),
@@ -482,7 +482,7 @@ impl OutputTitle {
 
 fn output_title(
     store: &SqliteStore,
-    held: &crate::id::TerminalId,
+    held: &loopflow_model::id::TerminalId,
 ) -> anyhow::Result<Option<String>> {
     let Some(id) = store.terminal_session(held)? else {
         return Ok(None);
@@ -501,7 +501,7 @@ fn output_title(
 }
 
 impl ViewerTitle {
-    pub(crate) fn new(held: &crate::id::TerminalId) -> Self {
+    pub(crate) fn new(held: &loopflow_model::id::TerminalId) -> Self {
         Self {
             held: held.clone(),
             title: None,
@@ -618,7 +618,7 @@ mod tests {
         let store = crate::store::sqlite::SqliteStore::open_ephemeral(&path).unwrap();
         let session =
             store.test_session("conversation", &crate::session_record::new_artifact_key());
-        let process = crate::id::LfProcessId::new();
+        let process = loopflow_model::id::LfProcessId::new();
         rusqlite::Connection::open(&path)
             .unwrap()
             .execute(
@@ -629,7 +629,7 @@ mod tests {
         let attachment = store
             .claim_session_attachment(&session.id, None, &process, true)
             .unwrap();
-        let terminal = crate::id::TerminalId::new();
+        let terminal = loopflow_model::id::TerminalId::new();
         store.create_terminal(&terminal, "build").unwrap();
         rusqlite::Connection::open(&path)
             .unwrap()

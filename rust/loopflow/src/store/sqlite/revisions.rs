@@ -97,8 +97,8 @@ mod tests {
     use rusqlite::params;
 
     use super::{SqliteStore, StoreRevisions};
-    use crate::durable::TaskId;
-    use crate::id::{LfProcessId, TraceId, WaveId};
+    use loopflow_model::durable::TaskId;
+    use loopflow_model::id::{LfProcessId, TraceId, WaveId};
 
     /// Tables no workspace surface reads. A new table belongs here or in a
     /// domain; `session_events` is covered except for transcript and usage rows.

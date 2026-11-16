@@ -9,8 +9,8 @@ pub mod setup;
 use serde::Serialize;
 use time::OffsetDateTime;
 
-use crate::id::WaveId;
 use crate::repository::{CanonicalRepo, CanonicalRepoError};
+use loopflow_model::id::WaveId;
 
 /// A Wave's mutable readable address inside one canonical repository.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

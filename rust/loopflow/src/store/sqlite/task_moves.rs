@@ -8,9 +8,9 @@
 //! records a move it `checked` it can take, naming the Machine it comes from.
 use rusqlite::{params, Connection, OptionalExtension};
 
-use crate::durable::{MachineId, OwnershipEntryId, TaskId};
 use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
+use loopflow_model::durable::{MachineId, OwnershipEntryId, TaskId};
 
 use super::SqliteStore;
 
@@ -214,9 +214,9 @@ pub(super) fn move_in_flight_in(
 #[cfg(test)]
 mod tests {
     use super::MoveStage;
-    use crate::durable::{MachineId, TaskId};
     use crate::store::sqlite::SqliteStore;
     use crate::work::task::NewTask;
+    use loopflow_model::durable::{MachineId, TaskId};
 
     #[test]
     fn a_sent_move_stays_until_it_arrives_and_then_keeps_no_payload() {

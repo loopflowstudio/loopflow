@@ -30,12 +30,12 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::chat::types::{ConversationItem, Lifecycle};
 use crate::harness::HarnessKind;
-use crate::id::AgentSessionId;
 use crate::provider_account::activation::native_home;
 use crate::provider_auth::Provider;
 use crate::store::sqlite::SqliteStore;
+use loopflow_model::chat::types::{ConversationItem, Lifecycle};
+use loopflow_model::id::AgentSessionId;
 
 pub(crate) use claude::is_user_input;
 
@@ -666,7 +666,7 @@ impl Calls {
             cached_input_tokens: cache_read,
             output_tokens: output,
         });
-        let usage = crate::chat::types::TurnUsage {
+        let usage = loopflow_model::chat::types::TurnUsage {
             input_tokens: Some(input),
             output_tokens: Some(output),
             total_input_tokens: Some(total),

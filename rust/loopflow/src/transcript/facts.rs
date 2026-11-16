@@ -17,9 +17,9 @@ use serde_json::{json, Value};
 use super::live::TurnState;
 use super::{seconds, Source, Turn};
 use crate::harness::HarnessKind;
-use crate::id::AgentSessionId;
 use crate::store::sqlite::SqliteStore;
 use crate::store::StoreResult;
+use loopflow_model::id::AgentSessionId;
 
 /// How long after a turn's last transcript row its live completion may have
 /// been recorded.
@@ -230,7 +230,7 @@ mod tests {
                 "input_tokens":4,"output_tokens":1100,"total_input_tokens":41200,
                 "cache_read_tokens":38000,"cache_write_tokens":3196,"model":"claude-opus-5-5"}})
         );
-        let reading: crate::chat::types::TurnUsage =
+        let reading: loopflow_model::chat::types::TurnUsage =
             serde_json::from_value(usage[0].2["usage"].clone()).unwrap();
         assert_eq!(reading.cost_usd, None);
         assert_eq!(

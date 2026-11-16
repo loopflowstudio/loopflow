@@ -25,7 +25,7 @@ pub struct MetricIdentity {
 impl MetricIdentity {
     pub fn new(wave_id: &str, metric_id: impl Into<String>) -> Self {
         Self {
-            wave_id: crate::id::canonical_uuid(wave_id),
+            wave_id: loopflow_model::id::canonical_uuid(wave_id),
             metric_id: metric_id.into(),
         }
     }
@@ -340,8 +340,8 @@ pub fn load_metric_contract(path: &Path, wave_id: &str) -> Result<MetricContract
         path: path.display().to_string(),
         message: error.to_string(),
     })?;
-    let (frontmatter, markdown) =
-        crate::graph::split_frontmatter(&content).ok_or(MetricError::MissingContractFrontmatter)?;
+    let (frontmatter, markdown) = loopflow_definitions::text::split_frontmatter(&content)
+        .ok_or(MetricError::MissingContractFrontmatter)?;
     let frontmatter: MetricContractFrontmatter = serde_yaml_ng::from_str(frontmatter)
         .map_err(|error| MetricError::InvalidContractFrontmatter(error.to_string()))?;
     if frontmatter.schema != 1 {

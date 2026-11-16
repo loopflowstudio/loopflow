@@ -65,7 +65,7 @@ pub fn assemble(
         };
 
         if let Some(WorkBinding {
-            work: crate::durable::WorkRef::Task(id),
+            work: loopflow_model::durable::WorkRef::Task(id),
             ..
         }) = &binding
         {

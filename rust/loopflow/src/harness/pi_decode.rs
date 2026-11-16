@@ -7,8 +7,8 @@ use anyhow::Result;
 use serde_json::{json, Value};
 
 use super::fact::{Decoded, ProviderFact, ProviderTurn, Signal};
-use crate::chat::types::{ConversationEvent, ConversationItem, Lifecycle, TurnUsage};
-use crate::id::AgentSessionId;
+use loopflow_model::chat::types::{ConversationEvent, ConversationItem, Lifecycle, TurnUsage};
+use loopflow_model::id::AgentSessionId;
 
 /// One Loopflow turn in a Pi conversation.
 #[derive(Debug)]

@@ -181,8 +181,8 @@ fn a_panic_during_recording_still_settles_the_execution() {
 /// Opus on the same account. That retry resumes the thread it saved.
 #[test]
 fn a_retry_on_another_model_keeps_its_thread() {
-    let thread: crate::id::AgentSessionId = "thread".into();
-    let other: crate::id::AgentSessionId = "other".into();
+    let thread: loopflow_model::id::AgentSessionId = "thread".into();
+    let other: loopflow_model::id::AgentSessionId = "other".into();
     assert!(super::retry_keeps_its_thread(
         Some(&thread),
         Some(&thread),

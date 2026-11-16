@@ -6,9 +6,9 @@ use std::time::{Duration, Instant};
 
 use super::super::wire::{frame, parse_position, Decoder, Incoming, Own, Request, Tag};
 use super::{connect, Registry, Start};
-use crate::id::{LfSessionId, TerminalId};
 use crate::journal::TestLedgerGuard;
 use crate::server::holder::{serve, Place};
+use loopflow_model::id::{LfSessionId, TerminalId};
 
 /// Stands in for the executable hash both the holder and the server compute.
 const BUILD: &str = "feedfacefeedfacefeedfacefeedfacefeedfacefeedfacefeedfacefeedface";

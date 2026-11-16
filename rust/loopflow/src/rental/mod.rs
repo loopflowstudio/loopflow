@@ -19,8 +19,8 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::durable::{DurableDataError, MachineId, TaskId};
-use crate::id::prefixed_uuid_id;
+use loopflow_model::durable::{DurableDataError, MachineId, TaskId};
+use loopflow_model::id::prefixed_uuid_id;
 
 prefixed_uuid_id!(
     RentalId,
@@ -694,7 +694,7 @@ pub fn resolve_unconfirmed<P>(
 /// An owned machine as placement sees it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PoolMachine {
-    pub machine: crate::durable::Machine,
+    pub machine: loopflow_model::durable::Machine,
     pub ownership: Ownership,
     /// Unfinished Tasks this machine owns.
     pub tasks: Vec<TaskId>,

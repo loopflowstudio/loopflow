@@ -203,7 +203,7 @@ pub struct AuthBrowserBinding {
 /// repository, then default.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum RouteScope {
-    Wave(crate::id::WaveId),
+    Wave(loopflow_model::id::WaveId),
     Repo(CanonicalRepo),
     Default,
 }

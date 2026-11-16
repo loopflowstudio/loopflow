@@ -22,7 +22,7 @@ pub fn private_path(repo: &Path) -> Result<PathBuf> {
 }
 
 pub(crate) fn wave_key(repo: &Path, name: &str) -> Result<Option<String>> {
-    if let Ok(id) = crate::id::WaveId::parse(name) {
+    if let Ok(id) = loopflow_model::id::WaveId::parse(name) {
         return Ok(Some(id.to_string()));
     }
     let config = crate::work::wave::config::try_read_wave_config(repo, name)?;
@@ -119,7 +119,7 @@ impl Destination {
         if source == ConfigSource::Repository {
             if let Some(wave) = wave
                 .as_deref()
-                .filter(|wave| crate::id::WaveId::parse(wave).is_ok())
+                .filter(|wave| loopflow_model::id::WaveId::parse(wave).is_ok())
             {
                 anyhow::bail!(
                     "Wave {wave} has no authored shared destination in {}",
@@ -174,7 +174,7 @@ pub(crate) fn wave_name(repo: &Path, selector: &str) -> Result<String> {
                 .any(|part| part == ".." || part.is_empty()),
         "invalid Wave name"
     );
-    let Ok(id) = crate::id::WaveId::parse(selector) else {
+    let Ok(id) = loopflow_model::id::WaveId::parse(selector) else {
         return Ok(selector.into());
     };
     let root = repo.join(".lf/wave");
@@ -597,7 +597,7 @@ pub fn import(
 pub(crate) fn copy_wave(
     source: &Path,
     target: &Path,
-    id: &crate::id::WaveId,
+    id: &loopflow_model::id::WaveId,
 ) -> Result<Option<Value>> {
     let source = private_path(source)?;
     let target = private_path(target)?;
@@ -634,7 +634,7 @@ pub(crate) fn copy_wave(
 
 pub(crate) fn finish_wave_move(
     source: &Path,
-    id: &crate::id::WaveId,
+    id: &loopflow_model::id::WaveId,
     copied: &Value,
 ) -> Result<()> {
     let path = private_path(source)?;
@@ -1028,7 +1028,7 @@ mod tests {
         let _home =
             crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
         let repo = loopflow_test_support::TestRepo::new();
-        let first = crate::id::WaveId::new();
+        let first = loopflow_model::id::WaveId::new();
         repo.create_file(".lf/wave/old/config.yaml", &format!("id: {first}\n"));
         set(
             repo.path(),
@@ -1046,7 +1046,7 @@ mod tests {
         .unwrap();
         repo.create_file(
             ".lf/wave/old/config.yaml",
-            &format!("id: {}\n", crate::id::WaveId::new()),
+            &format!("id: {}\n", loopflow_model::id::WaveId::new()),
         );
         let selected = |name| {
             crate::config::load_wave_config(Some(repo.path()), Some(name))
@@ -1063,7 +1063,7 @@ mod tests {
         let _env = loopflow_test_support::env_lock().lock().unwrap();
         let source = loopflow_test_support::TestRepo::new();
         let target = loopflow_test_support::TestRepo::new();
-        let id = crate::id::WaveId::new();
+        let id = loopflow_model::id::WaveId::new();
         let key = format!("waves.{id}.agent");
         let source_path = private_path(source.path()).unwrap();
         let target_path = private_path(target.path()).unwrap();

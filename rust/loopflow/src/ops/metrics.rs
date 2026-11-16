@@ -369,12 +369,12 @@ mod tests {
     use tempfile::tempdir;
     use time::Duration;
 
-    use crate::id::WaveId;
     use crate::store::StorageConfig;
     use crate::work::project::ProjectKR;
     use crate::work::wave::metrics::{
         load_metric_contract, MetricEvidenceDto, MetricObservation, MetricStage,
     };
+    use loopflow_model::id::WaveId;
 
     use super::*;
     use crate::linear::LinearProject;

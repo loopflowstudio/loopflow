@@ -4,10 +4,10 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use super::planning_write;
 use super::SqliteStore;
-use crate::durable::ProjectId;
-use crate::id::WaveId;
 use crate::store::{PlanningLocks, StoreError, StoreResult};
 use crate::work::project::Project;
+use loopflow_model::durable::ProjectId;
+use loopflow_model::id::WaveId;
 
 pub(super) fn read_in(conn: &Connection, wave: &WaveId) -> StoreResult<Option<String>> {
     Ok(conn.query_row(
@@ -26,7 +26,10 @@ pub(crate) fn read_project_binding(
 
 // Selection accepts exact saved identities; display names and slugs never select a plan.
 fn resolve_project_id(conn: &Connection, wave: &WaveId, project: &str) -> StoreResult<ProjectId> {
-    let canonical = crate::id::canonical_prefixed(&crate::id::canonical_uuid(project), "proj_");
+    let canonical = loopflow_model::id::canonical_prefixed(
+        &loopflow_model::id::canonical_uuid(project),
+        "proj_",
+    );
     let project = canonical.as_str();
     let id: Option<String> = conn
         .query_row(
@@ -232,7 +235,7 @@ impl SqliteStore {
     pub(crate) fn record_project_activation(
         &self,
         wave: &WaveId,
-        process: Option<&crate::id::LfProcessId>,
+        process: Option<&loopflow_model::id::LfProcessId>,
     ) -> StoreResult<()> {
         let Some(process) = process else {
             return Ok(());
@@ -383,9 +386,9 @@ fn readiness_in(conn: &Connection, wave: &WaveId) -> StoreResult<ProjectReadines
 #[cfg(test)]
 mod tests {
     use super::{read_project_binding, write_project_binding, ProjectReadinessState};
-    use crate::id::WaveId;
     use crate::store::{sqlite::SqliteStore, PlanningLocks};
     use crate::work::wave::Wave;
+    use loopflow_model::id::WaveId;
 
     #[test]
     fn project_creation_rolls_back_and_reuses_retained_identity() {
@@ -503,9 +506,9 @@ mod tests {
 
 #[cfg(test)]
 mod activation_tests {
-    use crate::id::{LfProcessId, TraceId, WaveId};
     use crate::store::sqlite::SqliteStore;
     use crate::work::wave::Wave;
+    use loopflow_model::id::{LfProcessId, TraceId, WaveId};
 
     #[test]
     fn readiness_retains_exact_unknown_and_failed_activation_outcomes() {

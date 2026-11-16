@@ -6,11 +6,11 @@
 //! agent the waiting step was explicitly given, not the one of whoever's read
 //! happened to trigger it.
 
-use crate::durable::TaskId;
 use crate::journal::ProcessIdentityEvidence;
 use crate::ops::task_execution::task_execution_blockers;
 use crate::store::sqlite::{AgentLimitRecovery, SqliteStore};
 use crate::store::StoreResult;
+use loopflow_model::durable::TaskId;
 
 use super::super::error::OpsResult;
 use super::{block_on_task, task_error, task_store};

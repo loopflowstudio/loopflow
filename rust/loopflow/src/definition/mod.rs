@@ -1,4 +1,4 @@
-pub mod name;
+pub use loopflow_definitions::name;
 
 use std::path::Path;
 

@@ -54,7 +54,7 @@ macro_rules! validated_string_id {
                         $label
                     )));
                 }
-                Ok(Self(crate::id::canonical_uuid(&value)))
+                Ok(Self(loopflow_model::id::canonical_uuid(&value)))
             }
 
             pub fn as_str(&self) -> &str {
@@ -62,7 +62,7 @@ macro_rules! validated_string_id {
             }
 
             pub(crate) fn from_raw(value: impl Into<String>) -> Self {
-                Self(crate::id::canonical_uuid(&value.into()))
+                Self(loopflow_model::id::canonical_uuid(&value.into()))
             }
         }
     };
@@ -309,9 +309,9 @@ pub(crate) enum StateHistory {
 pub(crate) struct LinearIssue {
     /// Provider revision; absent only in historical planning.
     pub revision: Option<String>,
-    #[serde(deserialize_with = "crate::id::deserialize_uuid")]
+    #[serde(deserialize_with = "loopflow_model::id::deserialize_uuid")]
     pub id: String,
-    #[serde(deserialize_with = "crate::id::deserialize_task_identifier")]
+    #[serde(deserialize_with = "loopflow_model::id::deserialize_task_identifier")]
     pub identifier: String,
     /// Provider branch name used to find existing Git work.
     pub branch_name: Option<String>,
@@ -371,7 +371,7 @@ pub(crate) struct LinearIssueObservation {
 /// an integration's display name alone does not.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct LinearComment {
-    #[serde(deserialize_with = "crate::id::deserialize_uuid")]
+    #[serde(deserialize_with = "loopflow_model::id::deserialize_uuid")]
     pub id: String,
     /// Provider creation time; display order. `revision` orders direction.
     pub created_at: Option<String>,
@@ -2171,7 +2171,7 @@ struct IssueIdentifierPayload {
 
 #[derive(Deserialize)]
 struct IssueIdentifierNode {
-    #[serde(deserialize_with = "crate::id::deserialize_task_identifier")]
+    #[serde(deserialize_with = "loopflow_model::id::deserialize_task_identifier")]
     identifier: String,
 }
 
@@ -2204,7 +2204,7 @@ struct AttachmentPayload {
 
 #[derive(Deserialize)]
 struct IdNode {
-    #[serde(deserialize_with = "crate::id::deserialize_uuid")]
+    #[serde(deserialize_with = "loopflow_model::id::deserialize_uuid")]
     id: String,
 }
 
@@ -2251,7 +2251,7 @@ struct IssueCommentsNode {
 
 #[derive(Deserialize)]
 struct CommentNode {
-    #[serde(deserialize_with = "crate::id::deserialize_uuid")]
+    #[serde(deserialize_with = "loopflow_model::id::deserialize_uuid")]
     id: String,
     #[serde(rename = "createdAt", default)]
     created_at: Option<String>,
@@ -2287,7 +2287,7 @@ impl From<CommentNode> for LinearComment {
 
 #[derive(Deserialize)]
 struct CommentUser {
-    #[serde(deserialize_with = "crate::id::deserialize_uuid")]
+    #[serde(deserialize_with = "loopflow_model::id::deserialize_uuid")]
     id: String,
     #[serde(rename = "displayName")]
     display_name: Option<String>,
@@ -2320,9 +2320,9 @@ struct IssueFields {
     due_date: Option<String>,
     #[serde(rename = "updatedAt")]
     updated_at: String,
-    #[serde(deserialize_with = "crate::id::deserialize_uuid")]
+    #[serde(deserialize_with = "loopflow_model::id::deserialize_uuid")]
     id: String,
-    #[serde(deserialize_with = "crate::id::deserialize_task_identifier")]
+    #[serde(deserialize_with = "loopflow_model::id::deserialize_task_identifier")]
     identifier: String,
     #[serde(rename = "branchName")]
     branch_name: Option<String>,
@@ -2467,7 +2467,7 @@ struct WorkflowStatesConnection {
 
 #[derive(Deserialize)]
 struct WorkflowStateNode {
-    #[serde(deserialize_with = "crate::id::deserialize_uuid")]
+    #[serde(deserialize_with = "loopflow_model::id::deserialize_uuid")]
     id: String,
     position: f64,
 }
@@ -2484,7 +2484,7 @@ struct TeamsConnection {
 
 #[derive(Deserialize)]
 struct TeamNode {
-    #[serde(deserialize_with = "crate::id::deserialize_uuid")]
+    #[serde(deserialize_with = "loopflow_model::id::deserialize_uuid")]
     id: String,
     name: String,
     key: String,
@@ -2511,7 +2511,7 @@ struct ProjectStatusNode {
 
 #[derive(Deserialize)]
 struct ProjectStatusChoice {
-    #[serde(deserialize_with = "crate::id::deserialize_uuid")]
+    #[serde(deserialize_with = "loopflow_model::id::deserialize_uuid")]
     id: String,
     #[serde(rename = "type")]
     type_: crate::work::project::ProjectStatus,
@@ -2535,7 +2535,7 @@ struct ProjectStatusesConnection {
 
 #[derive(Deserialize)]
 struct ProjectNode {
-    #[serde(deserialize_with = "crate::id::deserialize_uuid")]
+    #[serde(deserialize_with = "loopflow_model::id::deserialize_uuid")]
     id: String,
     #[serde(rename = "updatedAt")]
     revision: Option<String>,
@@ -2629,7 +2629,7 @@ struct InitiativesData {
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct InitiativeNode {
-    #[serde(deserialize_with = "crate::id::deserialize_uuid")]
+    #[serde(deserialize_with = "loopflow_model::id::deserialize_uuid")]
     pub id: String,
     pub name: String,
     pub description: Option<String>,
@@ -3790,7 +3790,7 @@ mod retained_relation_tests;
 /// Retained Linear facts, including foreign and not-yet-associated Projects.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct LinearProject {
-    #[serde(deserialize_with = "crate::id::deserialize_uuid")]
+    #[serde(deserialize_with = "loopflow_model::id::deserialize_uuid")]
     pub id: String,
     pub revision: Option<String>,
     pub slug: String,
@@ -3802,11 +3802,11 @@ pub(crate) struct LinearProject {
     pub metric_targets: Vec<MetricTarget>,
     pub status: ProjectStatus,
     pub krs: Vec<ProjectKR>,
-    #[serde(deserialize_with = "crate::id::deserialize_uuid_vec")]
+    #[serde(deserialize_with = "loopflow_model::id::deserialize_uuid_vec")]
     pub initiative_ids: Vec<String>,
     /// Stable ids of the Linear teams this Project belongs to. A managed Project
     /// must carry exactly the repository Team.
-    #[serde(deserialize_with = "crate::id::deserialize_uuid_vec")]
+    #[serde(deserialize_with = "loopflow_model::id::deserialize_uuid_vec")]
     pub team_ids: Vec<String>,
 }
 #[cfg(test)]

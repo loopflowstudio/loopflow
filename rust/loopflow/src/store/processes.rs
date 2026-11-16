@@ -1,7 +1,7 @@
 use std::num::NonZeroU32;
 
-use crate::id::LfProcessId;
 use crate::process::{LfProcess, ProcessCursor, ProcessEntry, ProcessFilter, ProcessPage};
+use loopflow_model::id::LfProcessId;
 
 use super::{run_sqlite, Store, StoreResult};
 

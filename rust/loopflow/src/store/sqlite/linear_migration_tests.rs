@@ -1,7 +1,7 @@
-use crate::id::WaveId;
 use crate::store::sqlite::SqliteStore;
 use crate::store::{FrontierAdvance, PlanningState, Store};
 use crate::test_linear_input::SeedLinear;
+use loopflow_model::id::WaveId;
 use rusqlite::{params, Connection};
 use serde_json::json;
 #[tokio::test]

@@ -426,7 +426,7 @@ fn ci_fix_message(
 
 /// A reservation still held by the caller was never handed to a ci-fix run;
 /// a long-lived watcher must be able to retry its own unacknowledged launch.
-fn repair_live(store: &SharedStore, process: Option<&crate::id::LfProcessId>) -> bool {
+fn repair_live(store: &SharedStore, process: Option<&loopflow_model::id::LfProcessId>) -> bool {
     process.is_some_and(|process| {
         Some(process) != crate::journal::current_lf_process_id().as_ref()
             && crate::journal::lf_evidence(&store.sqlite, process)
@@ -1106,7 +1106,7 @@ async fn cleanup_landed_pr(store: &SharedStore, landing: &PrLanding) -> OpsResul
             .map_err(|error| OpsError::Message(error.to_string()))?
             .ok_or_else(|| OpsError::Message(format!("landing Task {task_id} disappeared")))?;
         if crate::ops::task::task_work_status(store, &task).await?
-            == crate::durable::WorkStatus::Done
+            == loopflow_model::durable::WorkStatus::Done
         {
             return crate::ops::task::retirement::schedule(store, &task).await;
         }
@@ -1443,7 +1443,6 @@ mod tests {
         ci_incident, decide_merge, next_attempt, reconcile_pr_landing, wait_for_landing,
         wait_with_io, LandingIo, LandingObservation, NextAttempt, ObservePr, RepairCi,
     };
-    use crate::durable::TaskId;
     use crate::ops::error::{OpsError, OpsResult};
     use crate::ops::pr::{
         ManualRemoval, MergeGateReading, MergeRequest, MergeRequestRemoval, PrInfo,
@@ -1452,6 +1451,7 @@ mod tests {
     use crate::pr_landing::{NewPrLanding, PrLanding, PrLandingState};
     use crate::store::{SharedStore, StorageConfig};
     use crate::work::task::{CiCheck, LinearWritebackState, Observation, Task, TaskPr, TaskPrId};
+    use loopflow_model::durable::TaskId;
     use std::path::{Path, PathBuf};
 
     fn github_landing_fixture() -> (PrLanding, PrInfo) {

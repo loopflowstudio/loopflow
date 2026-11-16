@@ -1,9 +1,9 @@
 use std::path::{Path, PathBuf};
 
-use crate::durable::WorkRef;
-use crate::id::WaveId;
 use crate::store::SharedStore;
 use crate::work::project::Project;
+use loopflow_model::durable::WorkRef;
+use loopflow_model::id::WaveId;
 
 use crate::work::task::{Task, TaskPr};
 use crate::work::wave::Wave;
@@ -347,8 +347,6 @@ mod tests {
     use time::OffsetDateTime;
 
     use super::{resolve_work_binding, resolve_work_selection, WorkSelection};
-    use crate::durable::{ProjectId, TaskId, WorkRef};
-    use crate::id::WaveId;
     use crate::linear::LinearProject;
     use crate::linear::{LinearIssueId, LinearProjectId};
     use crate::store::SharedStore;
@@ -358,6 +356,8 @@ mod tests {
     use crate::work::project::ProjectKR;
     use crate::work::task::{LinearWritebackState, Observation, Task, TaskPr, TaskPrId};
     use crate::work::wave::Wave;
+    use loopflow_model::durable::{ProjectId, TaskId, WorkRef};
+    use loopflow_model::id::WaveId;
     use std::path::PathBuf;
 
     async fn test_store() -> (tempfile::TempDir, SharedStore) {
@@ -944,7 +944,7 @@ mod tests {
         store
             .save_steer(
                 &WorkRef::Task(task.id.clone()),
-                crate::durable::Author::User,
+                loopflow_model::durable::Author::User,
                 "ADVANCER ONLY",
             )
             .await

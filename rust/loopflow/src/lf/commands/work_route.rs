@@ -1,11 +1,12 @@
 //! Work chooses execution; SSH transports the ordinary command unchanged.
 use std::path::Path;
 
-use crate::durable::{MachineId, RepositoryId, RepositoryIdentity, TaskExecutionRoute, TaskId};
+use crate::durable::TaskExecutionRoute;
 use crate::lf::{Cli, Commands, SessionCommand, TaskCommand};
 use crate::ops::human_session::moves::conversation_task;
 use crate::store::sqlite::SqliteStore;
 use anyhow::{anyhow, Result};
+use loopflow_model::durable::{MachineId, RepositoryId, RepositoryIdentity, TaskId};
 
 pub fn identity(
     bind: Option<&RepositoryId>,
@@ -449,7 +450,7 @@ fn moved_session(cli: &Cli, args: &[String]) -> Result<Option<Forward>> {
     let Some(store) = read_registry()? else {
         return Ok(None);
     };
-    let id = crate::id::canonical_session(id);
+    let id = loopflow_model::id::canonical_session(id);
     let machine = match conversation_task(&store, &id)? {
         Some(task) => {
             let runs_on = store.task_execution_route(&task)?.machine_id;
@@ -535,7 +536,10 @@ fn primary_session(cli: &Cli, args: &[String], directory: &Path) -> Result<Optio
             };
             (
                 store
-                    .wave_owning_machine(&wave_id, crate::durable::MachineSetting::Session)?
+                    .wave_owning_machine(
+                        &wave_id,
+                        loopflow_model::durable::MachineSetting::Session,
+                    )?
                     .0,
                 format!("Wave {wave}"),
             )
@@ -546,7 +550,10 @@ fn primary_session(cli: &Cli, args: &[String], directory: &Path) -> Result<Optio
             };
             (
                 store
-                    .repository_owning_machine(repository, crate::durable::MachineSetting::Session)?
+                    .repository_owning_machine(
+                        repository,
+                        loopflow_model::durable::MachineSetting::Session,
+                    )?
                     .0,
                 "this repository".to_string(),
             )
@@ -731,11 +738,11 @@ mod tests {
     use std::path::Path;
 
     use super::{launch_task, repository_path, resolve, resolve_task, without_placement};
-    use crate::durable::{RepositoryId, TaskId};
     use crate::lf::Cli;
     use crate::store::sqlite::SqliteStore;
     use crate::work::task::NewTask;
     use clap::Parser;
+    use loopflow_model::durable::{RepositoryId, TaskId};
 
     #[test]
     fn routing_resolves_task_prefixes_within_historical_repository_locators() {

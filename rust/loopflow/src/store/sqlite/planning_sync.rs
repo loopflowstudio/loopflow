@@ -6,9 +6,9 @@ use serde_json::Value;
 
 use super::children::ids_json;
 use super::SqliteStore;
-use crate::durable::{ProjectId, TaskId};
 use crate::store::planning_sync::{PlanningSyncChange, PlanningSyncState, PlanningSyncStatus};
 use crate::store::StoreResult;
+use loopflow_model::durable::{ProjectId, TaskId};
 
 impl SqliteStore {
     pub fn task_planning_sync(&self, task: &TaskId) -> StoreResult<PlanningSyncStatus> {

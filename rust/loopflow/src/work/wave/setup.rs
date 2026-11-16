@@ -9,10 +9,11 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::config::{config_layers, ConfigSource};
-use crate::durable::{MachineSetting, OwningMachineSource};
+use crate::durable::OwningMachineSource;
 use crate::provider_auth::Provider;
 use crate::store::SharedStore;
 use crate::work::wave::Wave;
+use loopflow_model::durable::MachineSetting;
 
 /// One effective setting; `value` is absent when nothing chooses one.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]

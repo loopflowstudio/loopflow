@@ -211,7 +211,7 @@ pub(super) async fn read_local_task(
     resolution: &mut ContextExplanation,
 ) -> anyhow::Result<crate::work::task::Task> {
     let id = match &resolution.task {
-        ContextFact::Bound { value, .. } => crate::durable::TaskId::parse(value)?,
+        ContextFact::Bound { value, .. } => loopflow_model::durable::TaskId::parse(value)?,
         ContextFact::Unbound => {
             anyhow::bail!("No Task selected; name a Task or run from its checkout")
         }

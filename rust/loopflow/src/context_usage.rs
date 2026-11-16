@@ -130,7 +130,7 @@ impl SourceUsage {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 pub struct StepContext {
     pub input: String,
-    pub session_id: crate::id::LfSessionId,
+    pub session_id: loopflow_model::id::LfSessionId,
     pub skill: Option<String>,
     pub harness: String,
     pub observed_at: i64,

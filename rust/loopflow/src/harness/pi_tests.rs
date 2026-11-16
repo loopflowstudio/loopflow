@@ -9,7 +9,7 @@ use super::pi::PiHarness;
 use super::pi_decode::Turn;
 use super::{Harness, SendCurrentOutcome};
 use crate::agent::AgentConfig;
-use crate::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
+use loopflow_model::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
 
 async fn completed(rx: &mut mpsc::UnboundedReceiver<ConversationEvent>) -> Vec<ConversationEvent> {
     tokio::time::timeout(Duration::from_secs(10), async {
@@ -530,7 +530,7 @@ fn bare_pi_names_its_thread_and_resumes_it_by_that_id() {
         cwd: Some(agent_dir.path().into()),
         ..Default::default()
     };
-    let id: crate::id::AgentSessionId = "8f0c5e2a-0000-4000-8000-944455556666".into();
+    let id: loopflow_model::id::AgentSessionId = "8f0c5e2a-0000-4000-8000-944455556666".into();
     let start = crate::agent::build_session_command(
         &config,
         crate::agent::ProviderInvocation::Terminal {

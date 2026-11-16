@@ -9,13 +9,13 @@ use std::collections::HashMap;
 
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 
-use crate::durable::{
-    MachineId, MachineRef, MachineSetting, OwnershipEntryId, OwnershipKind, OwningMachineSource,
-    ProjectId, RepositoryId, TaskExecutionSource, TaskId, TaskOwner, TaskOwnership,
-    TaskOwnershipEntry,
-};
+use crate::durable::{OwningMachineSource, TaskExecutionSource};
 use crate::store::{StoreError, StoreResult};
 use crate::work::task::comment::{TaskComment, TaskCommentAuthor};
+use loopflow_model::durable::{
+    MachineId, MachineRef, MachineSetting, OwnershipEntryId, OwnershipKind, ProjectId,
+    RepositoryId, TaskId, TaskOwner, TaskOwnership, TaskOwnershipEntry,
+};
 
 use super::SqliteStore;
 
@@ -562,7 +562,8 @@ fn move_in(
 /// Published text names only what the entry carries: a public name, else the
 /// Machine id. Local labels and hostnames never leave this Machine.
 fn describe(entry: &TaskOwnershipEntry) -> String {
-    let who = crate::durable::person_text(entry.person.as_deref(), entry.person_key.as_deref());
+    let who =
+        loopflow_model::durable::person_text(entry.person.as_deref(), entry.person_key.as_deref());
     let place = entry
         .machine_label
         .clone()
@@ -824,7 +825,7 @@ fn notify_superseded_in(
         ("task", task.as_str()),
         &format!("ownership:{}", entry.id),
         "local",
-        &crate::durable::Author::Named("Loopflow".into()),
+        &loopflow_model::durable::Author::Named("Loopflow".into()),
         &text,
     )?;
     super::children::insert_task_event_in(
@@ -1089,15 +1090,16 @@ impl SqliteStore {
 #[cfg(test)]
 mod tests {
     use super::{local_label, log_in, read_log, Reading};
-    use crate::durable::{
-        MachineId, MachineRef, OwnershipEntryId, OwnershipKind, OwningMachineSource, RepositoryId,
-        TaskExecutionSource, TaskId, TaskOwner, TaskOwnershipEntry,
-    };
+    use crate::durable::{OwningMachineSource, TaskExecutionSource};
     use crate::planning_git::PlanningDestination;
     use crate::store::sqlite::task_moves::MoveStage;
     use crate::store::sqlite::SqliteStore;
     use crate::work::task::comment::{TaskComment, TaskCommentAuthor};
     use crate::work::task::NewTask;
+    use loopflow_model::durable::{
+        MachineId, MachineRef, OwnershipEntryId, OwnershipKind, RepositoryId, TaskId, TaskOwner,
+        TaskOwnershipEntry,
+    };
     use loopflow_test_support::TestRepo;
 
     fn published_bodies(store: &SqliteStore, task: &TaskId) -> Vec<String> {

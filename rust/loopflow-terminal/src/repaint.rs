@@ -5,12 +5,12 @@ use crate::ghostty_vt::{Error, Terminal};
 /// Input modes a repaint or a program may have set in a viewer's terminal:
 /// Kitty keyboard flags, modifyOtherKeys, application keys, focus and mouse reporting, bracketed
 /// paste; then a visible cursor, plain style and the viewer's configured colors.
-pub(super) const RESET_MODES: &[u8] =
+pub const RESET_MODES: &[u8] =
     b"\x1b[<65535u\x1b[>4;0m\x1b[?1l\x1b>\x1b[?1004l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l\x1b[?25h\x1b[0m\x1b]104\x1b\\\x1b]110\x1b\\\x1b]111\x1b\\\x1b]112\x1b\\";
 
 /// Origin and scroll-margin resets home the cursor. Keep its position so the
 /// next shell prompt follows the command's output instead of overwriting it.
-pub(super) const RESET_DRAWING: &[u8] =
+pub const RESET_DRAWING: &[u8] =
     b"\x1b[s\x1b[?6l\x1b[?7h\x1b[r\x1b[u\x1b(B\x1b)B\x0f\x1b]8;;\x1b\\";
 
 /// Scrollback rows a repaint carries at most. The whole repaint travels in one
@@ -21,7 +21,7 @@ const HISTORY_BYTES: usize = 768 * 1024;
 /// Bytes that make a viewer's terminal show the held terminal's screen: its scrollback
 /// above, then the active screen with its styles, hyperlinks, cursor, modes and
 /// keyboard state. The viewer's own history is kept beneath.
-pub(super) fn repaint(terminal: &Terminal) -> Result<Vec<u8>, Error> {
+pub fn repaint(terminal: &Terminal) -> Result<Vec<u8>, Error> {
     let mut bytes = b"\x1b[0m\x1b[?25h".to_vec();
     if !terminal.received_output() {
         // Nothing to redraw: the held terminal's first output flows from the viewer's cursor.
@@ -75,7 +75,7 @@ fn history(terminal: &Terminal) -> Result<Vec<u8>, Error> {
 /// xterm-family terminals 1049-reset also restores the cursor saved on entry,
 /// which moves the cursor above whatever was printed since.
 #[derive(Debug, Default)]
-pub(super) struct AlternateScreen {
+pub struct AlternateScreen {
     pub entered: bool,
     tail: Vec<u8>,
 }

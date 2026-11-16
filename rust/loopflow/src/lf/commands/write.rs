@@ -34,7 +34,7 @@ impl SessionOpenIntent {
 #[schemars(inline)]
 pub(crate) enum TaskMoveResult {
     Wave(Box<crate::ops::task::TaskEdit>),
-    Machine(Box<crate::durable::TaskOwnership>),
+    Machine(Box<loopflow_model::durable::TaskOwnership>),
 }
 
 // Each result type supplies both its response variant and its schema. Dispatch
@@ -150,7 +150,7 @@ writes! {
 
     /// `lf task claim <issue> --json`.
     #[serde(rename = "task.claim")]
-    TaskClaim { directory: PathBuf, issue: String } => crate::durable::TaskOwnership;
+    TaskClaim { directory: PathBuf, issue: String } => loopflow_model::durable::TaskOwnership;
     { issue, .. } => task::ownership(
         directory,
         issue,
@@ -159,7 +159,7 @@ writes! {
 
     /// `lf task unassign <issue> --json`.
     #[serde(rename = "task.unassign")]
-    TaskUnassign { directory: PathBuf, issue: String } => crate::durable::TaskOwnership;
+    TaskUnassign { directory: PathBuf, issue: String } => loopflow_model::durable::TaskOwnership;
     { issue, .. } => task::ownership(
         directory,
         issue,
@@ -313,7 +313,7 @@ writes! {
         agent_process: Option<String>,
         stream: String,
         sequence: i64,
-        records: crate::program_status::Records,
+        records: loopflow_model::program_status::Records,
     } => super::session::StatusRecorded;
     {
         id, terminal, agent_process, stream, sequence, records, ..

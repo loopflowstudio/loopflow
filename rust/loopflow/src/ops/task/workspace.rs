@@ -13,8 +13,8 @@ use notify::{RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 
 use super::{file_context, file_store};
-use crate::durable::{MachineId, TaskId};
 use crate::store::sqlite::TaskCheckout;
+use loopflow_model::durable::{MachineId, TaskId};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskFilesFrame {

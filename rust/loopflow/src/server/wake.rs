@@ -242,7 +242,7 @@ mod tests {
         home: tempfile::TempDir,
         store: SqliteStore,
         adapter: SteerAdapter,
-        task: crate::durable::TaskId,
+        task: loopflow_model::durable::TaskId,
         delivery: PathBuf,
     }
 
@@ -274,7 +274,7 @@ mod tests {
                 || Ok(()),
             )
             .unwrap();
-        let task = crate::durable::TaskId::new();
+        let task = loopflow_model::durable::TaskId::new();
         store
             .create_task(&crate::work::task::NewTask {
                 repository_id: store.ensure_repository("/wake").unwrap(),

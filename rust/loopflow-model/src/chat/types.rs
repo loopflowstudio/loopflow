@@ -2,8 +2,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[non_exhaustive]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum ConversationStatus {
     Starting,
     Active,
@@ -14,8 +14,8 @@ pub enum ConversationStatus {
 
 /// Lifecycle of a turn or item, shared across the wire and the harness.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[non_exhaustive]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum Lifecycle {
     Pending,
     Running,
@@ -285,7 +285,7 @@ impl ConversationEvent {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::TurnUsage;
 
     #[test]
     fn turn_usage_round_trips_through_json() {

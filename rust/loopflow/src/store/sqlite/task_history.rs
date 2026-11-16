@@ -233,7 +233,7 @@ fn recover_filing_in(conn: &Connection, intent: &RetainedFiling) -> StoreResult<
                     |row| row.get::<_, String>(0),
                 )?,
             )?,
-            project_id: Some(crate::durable::ProjectId::from_raw(project_id)),
+            project_id: Some(loopflow_model::durable::ProjectId::from_raw(project_id)),
             title: intent.title.clone(),
             description: intent.notes.clone(),
             due_date: intent.due.clone(),
@@ -248,11 +248,11 @@ fn recover_filing_in(conn: &Connection, intent: &RetainedFiling) -> StoreResult<
 #[cfg(test)]
 mod tests {
     use super::{RetainedFiling, SqliteStore};
-    use crate::durable::{ProjectId, TaskId};
-    use crate::id::WaveId;
     use crate::store::sqlite::planning_changes::PlanningChanges;
     use crate::work::task::TaskEventKind;
     use crate::work::wave::Wave;
+    use loopflow_model::durable::{ProjectId, TaskId};
+    use loopflow_model::id::WaveId;
     use rusqlite::params;
     use serde_json::json;
 

@@ -121,7 +121,12 @@ pub(super) fn run_with_io(
     let runtime = tokio::runtime::Runtime::new()?;
     if let Some(id) = super::work_route::resumed_session(cli).filter(|_| !preview) {
         // Resuming a Session that lives here, or moved elsewhere, moves it (or its Task) there first.
-        loopflow_execution::ops::session_move::move_session(id, target, forward_agent)?;
+        loopflow_execution::ops::session_move::move_session(
+            id,
+            target,
+            forward_agent,
+            super::write::run_task,
+        )?;
     }
     let source = if preview || resident_operation {
         None
@@ -161,7 +166,12 @@ pub(super) fn run_with_io(
                 target.id
             ));
         };
-        loopflow_execution::ops::session_move::move_task(task, target.id.as_str(), None)?;
+        loopflow_execution::ops::session_move::move_task(
+            task,
+            target.id.as_str(),
+            None,
+            super::write::run_task,
+        )?;
     }
     // A Machine names no checkout: the destination resolves the repository's
     // own checkout from its identity. A path/name stays the caller's selection.

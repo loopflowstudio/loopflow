@@ -4163,6 +4163,73 @@ tee -a '{record}/input' | env -i HOME='{remote}' PATH=/usr/bin:/bin bash -c "$re
     assert_eq!(recorded, 1);
 }
 
+/// A served `task.run` for a Task mini runs is mini's `task.run`: the laptop
+/// starts nothing and returns mini's answer.
+#[test]
+fn a_served_run_for_a_task_mini_runs_starts_it_there() {
+    use loopflow::lf::commands::write::Write as Mutation;
+    use loopflow::server::wire::Operation;
+    use loopflow_execution::machine::client::Connection;
+
+    let fixture = preview_machines();
+    let (plan, task) = task_on_mini(&fixture);
+    let welcome: Value = serde_json::from_str(include_str!(
+        "../../loopflow-execution/tests/fixtures/dto/server/welcome.json"
+    ))
+    .unwrap();
+    let mut running: Value = serde_json::from_str(include_str!(
+        "../../loopflow-execution/tests/fixtures/dto/server/task_running.json"
+    ))
+    .unwrap();
+    running["id"] = "1".into();
+    running["result"]["issue"] = task.as_str().into();
+    // Mini's `lf server stdio` records the request and answers that its run
+    // started; every other command runs mini's real lf.
+    let record = fixture.root.path().join("stdio");
+    fs::create_dir_all(&record).unwrap();
+    let remote_lf = fixture.root.path().join("remote/.local/bin/lf");
+    let working = fs::read_to_string(&remote_lf).unwrap();
+    executable(
+        &remote_lf,
+        &working.replacen(
+            "exec ",
+            &format!(
+                "case \"$*\" in *'server stdio') cat > '{}/input'; cat <<'ANSWER'\n{welcome}\n{running}\nANSWER\nexit 0;; esac\nexec ",
+                record.display()
+            ),
+            1,
+        ),
+    );
+
+    let (server, socket) = served(&fixture);
+    let mut connection = Connection::open_at(Path::new(&socket)).unwrap();
+    connection
+        .set_read_timeout(Some(std::time::Duration::from_secs(20)))
+        .unwrap();
+    let started = connection
+        .request(Operation::Write(Mutation::TaskRun {
+            directory: plan.local_path.clone(),
+            issue: task.to_string(),
+            graph: None,
+            from: None,
+            agent: None,
+            approve: false,
+        }))
+        .unwrap()
+        .result;
+    drop(server);
+
+    assert_eq!(started, running["result"]);
+    let input = fs::read_to_string(record.join("input")).unwrap();
+    let request: Value = serde_json::from_str(input.lines().nth(1).unwrap()).unwrap();
+    assert_eq!(request["operation"]["kind"], "task.run");
+    assert_eq!(request["operation"]["issue"], task.as_str());
+    assert_eq!(
+        live_graph(&fixture.root.path().join("local/loopflow.db"), &task),
+        None
+    );
+}
+
 #[test]
 fn an_lf_without_the_typed_entry_names_its_version_and_update() {
     let fixture = preview_machines();

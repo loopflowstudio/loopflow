@@ -120,10 +120,12 @@ No `dispatch` module yet. `Write::run` routes and `Write::run_here` runs here
 
 - **Route.** `Write::remote` (`write.rs:1144`) covers
   task.run/ship/hold/claim/unassign, reading `remote_task` and
-  `remote_ownership_writer`. `session.resume` routes inline in
-  `Write::prepare_session` (`write.rs:1214`) through `work_route::forward`,
-  whose `Forward` now carries the Wave and repository it resolved.
-  `session.new` never forwards there, so it never routes.
+  `remote_ownership_writer`, and session.resume, through `work_route::forward`,
+  whose `Forward` carries the Wave and repository it resolved. It returns one
+  `Remote` (resolved `Machine`, repository, the write naming exact Work);
+  `execute` asks it only when routed, and `prepare_session` adds only
+  `move_session` before `Remote::call` and `prepared_remotely` after.
+  `session.new` never forwards, so it never routes.
 - **Engine.** `engine::task::{run, ship, hold, ownership}` are local-only;
   `remote`, `remote_on`, `RemoteTaskOperation` are deleted.
 - **No re-forwarding.** An operation that arrived on `lf server stdio` runs
@@ -290,19 +292,16 @@ Departures not covered above:
 - `Write::cli` became `Write::session_spelling`: local Session preparation
   still reads Clap's arguments until PR 2. `ssh::run_with_io` keeps its IO
   for `mutation::run`'s CLI forward.
+- Two CLI paths had routed only through the deleted engine `remote_on`, and
+  now ask `Write::remote`: `lf task claim/unassign` for a Task whose move from
+  here was sent (mini answers whether it arrived), and the Graph a move
+  continues on arrival. `ops::session_move::{move_task, move_session}` take
+  the application's `write::run_task` as a `ContinueRun` function pointer,
+  since execution cannot name `Write`.
 
 ## Remaining for PR 1
 
-- **One `Remote` for every forwarded write** (concept review, 2026-11-16).
-  Task writes go `Write::remote` → `Remote::call`; `session.resume` builds its
-  own Write, environment and `ssh::call` inside `prepare_session`. Fold it
-  into `Write::remote`, returning a `Remote` whose `write` carries the
-  forward's Task and Wave. `prepare_session` keeps only `move_session` before
-  `call` and `prepared_remotely` after. Drop `remote`'s `routed` parameter:
-  `execute` asks only when routed. `work_route::forward(&cli, &args)` and
-  `session_spelling` stay until PR 2.
-- A served `task.run` to a `preview_machines()` peer test (needs a Graph run
-  on mini). Hold, claim/unassign and resume already cover `Remote::call`.
+Nothing known; gate next.
 
 A fourth lf-to-lf channel the inventory missed: `machine::ssh::request`
 (`loopflow-execution/src/machine/ssh.rs:45`) launches `lf <argv>` with its own
@@ -338,8 +337,9 @@ matches it, or changes the docs with it.
 
 ## Checks
 
-- `cargo test -p loopflow --test integration machine_commands::{a_hold_for,an_lf_without,a_served_resume,served_ownership,bare_connect,remote_session_open}`: 6 pass (implement).
+- `cargo test -p loopflow --test integration machine_commands::`: 58 pass, including `a_served_run_for_a_task_mini_runs_starts_it_there` (stub mini stdio) and the move continuation's real Graph on mini (implement).
 - `cargo test -p loopflow --lib server::stdio:: lf::commands::write::tests:: adapter_tests:: lf::tests::`; `-p loopflow-execution --lib engine::task:: machine::ssh::`: pass (implement).
 - `documented_commands::`, `cli_discovery::`, `served_reads server_operations_match_their_lf_commands`: pass (implement).
+- `cargo nextest run -p loopflow -p loopflow-execution --lib -E 'test(lf::commands::write::tests::) | test(adapter_tests::) | test(session_move::)'`: 15 pass (implement).
 - `cargo clippy --all-targets -- -D warnings`: clean (implement); gate reruns.
 - Loopback sshd (`tests/transport/ssh_shells.rs`): CI.

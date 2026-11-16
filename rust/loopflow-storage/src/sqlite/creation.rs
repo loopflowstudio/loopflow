@@ -175,10 +175,12 @@ impl SqliteStore {
     /// answers `started` from then on.
     pub fn record_setup_launch(&self, id: &str, launch: &serde_json::Value) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn.execute("UPDATE creation_receipts SET milestone='started',launch=?2,
+        Ok(conn.execute(
+            "UPDATE creation_receipts SET milestone='started',launch=?2,
             result=json_set(result,'$.milestone','started'),updated_at=?3
             WHERE request_id=?1 AND milestone='admitted'",
-            params![id,serde_json::to_string(launch)?,crate::rows::now_unix()])? == 1)
+            params![id, serde_json::to_string(launch)?, crate::rows::now_unix()],
+        )? == 1)
     }
 }
 

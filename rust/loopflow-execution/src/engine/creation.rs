@@ -217,7 +217,9 @@ fn admit(
 ) -> Result<Created> {
     let task = receipt.task.clone();
     let graph = step("take_up_graph", || take_up_graph(store, input, &task))?;
-    step("claim", || crate::store::ownership::claim_task(&store.sqlite, &task.id))?;
+    step("claim", || {
+        crate::store::ownership::claim_task(&store.sqlite, &task.id)
+    })?;
     let session = step("record_conversation", || {
         runtime.block_on(crate::ops::human_session::primary::admit_task(
             store,

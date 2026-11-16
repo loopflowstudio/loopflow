@@ -17,7 +17,11 @@ pub(super) async fn finish(
     session: LfSession,
     request_id: &str,
 ) -> Result<LfSession> {
-    if let Some(request) = session.request.as_deref().and_then(|text| text.lines().next()) {
+    if let Some(request) = session
+        .request
+        .as_deref()
+        .and_then(|text| text.lines().next())
+    {
         println!("{request}");
     }
     let started = Instant::now();
@@ -25,10 +29,7 @@ pub(super) async fn finish(
         .instrument(tracing::info_span!("conversation_setup", step = "checkout"))
         .await
         .inspect_err(|error| println!("Checkout failed: {error:#}"))?;
-    println!(
-        "Checkout ready  {:.1} s",
-        started.elapsed().as_secs_f64()
-    );
+    println!("Checkout ready  {:.1} s", started.elapsed().as_secs_f64());
     // The agent starts once the checkout exists, whatever happens to the Graph.
     match start_graph(store, &session, request_id)
         .instrument(tracing::info_span!("conversation_setup", step = "graph"))
@@ -51,7 +52,10 @@ async fn start_graph(store: &SharedStore, session: &LfSession, request_id: &str)
         .task_id
         .as_ref()
         .context("the conversation has no Task")?;
-    let task = store.get_task(task).await?.context("the Task is unavailable")?;
+    let task = store
+        .get_task(task)
+        .await?
+        .context("the Task is unavailable")?;
     let row = crate::store::task_work::task_graph_row(&store.sqlite, &task.id)?
         .context("the Task has no Graph")?;
     let launch = match &row.run {
@@ -66,8 +70,7 @@ async fn start_graph(store: &SharedStore, session: &LfSession, request_id: &str)
                 "run".into(),
                 task.identifier.clone(),
             ];
-            let process =
-                crate::os_process::detached::start_lf(&session.cwd, &argv, &[], &|_| {})?;
+            let process = crate::os_process::detached::start_lf(&session.cwd, &argv, &[], &|_| {})?;
             serde_json::json!({ "lf_process_id": process })
         }
     };

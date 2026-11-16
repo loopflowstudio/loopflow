@@ -904,3 +904,67 @@ fn local_planning_migration_preserves_released_links_and_orphan_deletion_evidenc
         );
     assert!(store.task_by_issue("LOO-2").unwrap().is_none());
 }
+
+#[test]
+fn an_admitted_creation_is_found_by_its_conversation_until_setup_launches() {
+    use loopflow_storage::sqlite::creation::RecoveryDisposition;
+    let directory = tempfile::tempdir().unwrap();
+    let store =
+        crate::store::opening::open_ephemeral(&directory.path().join("loopflow.db")).unwrap();
+    let task = store
+        .create_task(&NewTask {
+            repository_id: local_repository(&store),
+            due_date: None,
+            id: TaskId::new(),
+            project_id: None,
+            title: "Start in the conversation".into(),
+            description: "Start in the conversation".into(),
+        })
+        .unwrap();
+    store.conn.lock().unwrap().execute(
+        "INSERT INTO creation_receipts(request_id,kind,fingerprint,run,task_id,milestone,result,created_at,updated_at)
+         VALUES('req','task.create','f',1,?1,'filed','{\"milestone\":\"filed\"}',1,1)",
+        [task.id.as_str()],
+    ).unwrap();
+    assert_eq!(store.admitted_task_creation("session").unwrap(), None);
+    store
+        .admit_creation(
+            "req",
+            "session",
+            &serde_json::json!({"milestone": "admitted"}),
+        )
+        .unwrap();
+    assert_eq!(
+        store.admitted_task_creation("session").unwrap().as_deref(),
+        Some("req")
+    );
+    let admitted = store.creation_receipt("req").unwrap().unwrap();
+    assert_eq!(admitted.disposition, RecoveryDisposition::Complete);
+    assert_eq!(admitted.session_id.as_deref(), Some("session"));
+    let plan: String = store
+        .conn
+        .lock()
+        .unwrap()
+        .query_row(
+            "EXPLAIN QUERY PLAN SELECT request_id FROM creation_receipts
+             WHERE session_id='session' AND milestone='admitted' AND kind='task.create'",
+            [],
+            |row| row.get(3),
+        )
+        .unwrap();
+    assert!(
+        plan.contains("creation_receipts_admitted_session"),
+        "{plan}"
+    );
+
+    let launch = serde_json::json!({"lf_process_id": "process"});
+    assert!(store.record_setup_launch("req", &launch).unwrap());
+    // A reopened conversation finds nothing left to launch.
+    assert!(!store.record_setup_launch("req", &launch).unwrap());
+    assert_eq!(store.admitted_task_creation("session").unwrap(), None);
+    let started = store.creation_receipt("req").unwrap().unwrap();
+    assert_eq!(started.milestone, "started");
+    assert_eq!(started.result.unwrap()["milestone"], "started");
+    assert_eq!(started.launch, Some(launch));
+    assert_eq!(started.disposition, RecoveryDisposition::Complete);
+}

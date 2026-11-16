@@ -13,3 +13,8 @@
 - Docs say `lf wt prune` leaves `<repo>.ready` alone, `--all` included, and
   that deleting it by hand is safe. The simpler reading of "check cleanup leaves
   it alone"; `--all` removing it would also be defensible.
+- `lf -a X task create --run`: the agent override reaches the held
+  conversation and its Graph only through inherited environment; creation no
+  longer passes `--agent` to a `task run` argv. Not checked live.
+- Repeats before `admitted` redo admission rather than reading one committed
+  transaction; taken as simpler than merging five store writers.

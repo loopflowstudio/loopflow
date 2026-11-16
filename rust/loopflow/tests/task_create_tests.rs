@@ -164,6 +164,100 @@ fn task_create_answers_and_its_conversation_starts_the_graph_across_a_server_res
     assert_eq!(counts, (1, 1, 1));
 }
 
+#[test]
+fn task_create_answers_before_the_checkout_its_conversation_makes() {
+    use loopflow::lf::commands::write::Write as Change;
+    use loopflow::server::wire::Operation;
+    let task = CreationFixture::new();
+    task.repo.push();
+    // Every fetch waits for the test; the answer must not.
+    let release = task.home.path().join("release-fetch");
+    let git = task.home.path().join("bin/git");
+    fs::write(
+        &git,
+        format!(
+            "#!/bin/sh\nfor arg in \"$@\"; do [ \"$arg\" = fetch ] && while [ ! -e '{}' ]; do sleep 0.05; done; done\nexec /usr/bin/git \"$@\"\n",
+            release.display()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&git, fs::Permissions::from_mode(0o755)).unwrap();
+    let service = Service::start(&task);
+    let id = uuid::Uuid::new_v4().to_string();
+    let answer = service
+        .connect()
+        .request(Operation::Write(Change::TaskCreate {
+            directory: task.repo.path().into(),
+            request_id: id.clone(),
+            request: Some("Answer before the checkout".into()),
+            title: None,
+            session: None,
+            run: true,
+            wave: None,
+            graph: Some("feature".into()),
+        }))
+        .unwrap()
+        .result;
+    assert_eq!(answer["milestone"], "admitted", "{answer}");
+    assert_eq!(answer["graph"], "feature");
+    let session = answer["session_id"].as_str().unwrap().to_owned();
+    let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
+    let graphs = || -> i64 {
+        db.query_row("SELECT count(*) FROM graph_processes", [], |row| row.get(0))
+            .unwrap()
+    };
+    assert_eq!(graphs(), 0, "the Graph waits for the checkout");
+    // The Task has its Graph before any checkout exists.
+    assert!(!db
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM task_checkouts WHERE task_id=?1)",
+            [answer["task"]["id"].as_str().unwrap()],
+            |row| row.get::<_, bool>(0),
+        )
+        .unwrap());
+    assert!(db
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM task_graphs WHERE task_id=?1)",
+            [answer["task"]["id"].as_str().unwrap()],
+            |row| row.get::<_, bool>(0),
+        )
+        .unwrap());
+
+    // A repeat during setup answers the same Task and conversation.
+    let repeat = task.run(&[
+        "task",
+        "create",
+        "Answer before the checkout",
+        "--run",
+        "--graph",
+        "feature",
+        "--request-id",
+        &id,
+        "--json",
+    ]);
+    assert!(
+        repeat.status.success(),
+        "{}",
+        String::from_utf8_lossy(&repeat.stderr)
+    );
+    let repeated: serde_json::Value = serde_json::from_slice(&repeat.stdout).unwrap();
+    assert_eq!(repeated["task"]["id"], answer["task"]["id"]);
+    assert_eq!(repeated["session_id"], session.as_str());
+
+    fs::write(&release, "").unwrap();
+    task.wait_for_graph_start();
+    task.wait_for_graphs();
+    assert_eq!(graphs(), 1);
+    let milestone: String = db
+        .query_row(
+            "SELECT milestone FROM creation_receipts WHERE request_id=?1",
+            [id.as_str()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(milestone, "started");
+}
+
 impl CreationFixture {
     fn new() -> Self {
         let fixture = Self {
@@ -237,7 +331,10 @@ impl CreationFixture {
             .unwrap()
             == 0
         {
-            assert!(Instant::now() < deadline, "the conversation started no Graph");
+            assert!(
+                Instant::now() < deadline,
+                "the conversation started no Graph"
+            );
             std::thread::sleep(Duration::from_millis(20));
         }
     }

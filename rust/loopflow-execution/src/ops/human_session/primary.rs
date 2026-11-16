@@ -104,7 +104,10 @@ async fn record_task_primary(
     request: Option<String>,
 ) -> Result<(LfSession, bool)> {
     if let Some(session) = task_conversation(store, &task.id).await? {
-        return Ok((store.choose_task_primary(&task.id, &session.id).await?, false));
+        return Ok((
+            store.choose_task_primary(&task.id, &session.id).await?,
+            false,
+        ));
     }
     let candidate = LfSession {
         task_id: Some(task.id.clone()),
@@ -171,12 +174,14 @@ async fn start_in_background(
     if Path::new(&session.cwd) != worktree.as_path() {
         return Ok(None);
     }
-    Ok(hold(store, &session.id, Path::new(&session.cwd), wave).await?.then(|| session.id.to_string()))
+    Ok(hold(store, &session.id, Path::new(&session.cwd), wave)
+        .await?
+        .then(|| session.id.to_string()))
 }
 
 /// Start a new Task's recorded conversation in a held terminal, where it
-/// makes its checkout and starts its Graph. `false` when no agent is selected
-/// or installed: opening the conversation then does the same.
+/// makes its checkout and starts its Graph before its provider. Setup needs
+/// no agent; a missing one is reported in the terminal once setup is done.
 pub(crate) async fn hold_task_conversation(
     store: &SharedStore,
     task: &loopflow_storage::work::task::Task,
@@ -186,15 +191,6 @@ pub(crate) async fn hold_task_conversation(
         Some(id) => store.get_wave(id).await?,
         None => None,
     };
-    let config =
-        crate::config::load_wave_config(Some(&session.cwd), wave.as_ref().map(|wave| wave.slug()))?
-            .unwrap_or_default();
-    let Ok(agent) = config.agent() else {
-        return Ok(false);
-    };
-    if !crate::agent::check_cli_available(&crate::config::parse_agent(agent).0) {
-        return Ok(false);
-    }
     hold(store, &session.id, &session.cwd, wave).await
 }
 

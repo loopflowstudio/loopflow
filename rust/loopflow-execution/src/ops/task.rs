@@ -1811,7 +1811,8 @@ pub fn task_create(
         {
             tracing::debug!(%error,"planning acquisition pending; creating from retained planning");
         }
-        let task = file_task_in(&store, repo, &main, wave, title, report, adoption, receipt).await?;
+        let task =
+            file_task_in(&store, repo, &main, wave, title, report, adoption, receipt).await?;
         super::planning_sync::sync_after_save(&store, &main.to_string_lossy()).await;
         store
             .get_task(&task.id)
@@ -1869,9 +1870,9 @@ async fn file_task_in(
 ) -> OpsResult<Task> {
     let input = resolve_task_create_input(title.as_deref(), report.as_deref())?;
     {
-        let source = adoption::resolve_source(&store, repo, &adoption).await?;
+        let source = adoption::resolve_source(store, repo, &adoption).await?;
         if let Some(task) = source.task.as_ref() {
-            if let Some(selected) = select_task_creation_wave(&store, &main, wave).await? {
+            if let Some(selected) = select_task_creation_wave(store, main, wave).await? {
                 if task.wave_id.as_ref() != Some(selected.id()) {
                     return Err(task_error(format!(
                         "{} already belongs to different planning; use `lf task move` or file separate work without --session or --worktree",
@@ -1880,8 +1881,8 @@ async fn file_task_in(
                 }
             }
             let task = adoption::save(
-                &store,
-                &main,
+                store,
+                main,
                 task.id.clone(),
                 None,
                 source,
@@ -1897,7 +1898,7 @@ async fn file_task_in(
                 .ok_or_else(|| task_error("Promoted Task is missing"));
         }
         if let Some(name) = wave {
-            let locator = crate::work::wave::discover(&main, name).map_err(task_error)?;
+            let locator = crate::work::wave::discover(main, name).map_err(task_error)?;
             if store
                 .get_wave_at(&locator)
                 .await
@@ -1907,11 +1908,11 @@ async fn file_task_in(
                 super::wave_lifecycle::add(repo, name, None).await?;
             }
         }
-        let selected = select_task_creation_wave(&store, &main, wave).await?;
+        let selected = select_task_creation_wave(store, main, wave).await?;
         let (creation_project, acquisition) = match selected {
             Some(wave) => {
                 let acquisition = super::planning_sync::lock_wave_planning(&wave).await?;
-                let project = super::project::current_project(&store, &wave)?.id;
+                let project = super::project::current_project(store, &wave)?.id;
                 (Some(project), Some(acquisition))
             }
             None => (None, None),
@@ -1928,8 +1929,8 @@ async fn file_task_in(
             description: input.report,
         };
         let task = adoption::save(
-            &store,
-            &main,
+            store,
+            main,
             creation.id.clone(),
             Some(creation),
             source,

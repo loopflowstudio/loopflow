@@ -188,6 +188,37 @@ A second creation path for Desktop beside the CLI; a client-side Task row
 fabricated from the request; a polling wait for checkout inside the terminal;
 keeping `lf task run` as a fallback launcher for creation.
 
+## Status (2026-11-16)
+
+Slice 1 built (`engine/creation.rs::admit`, `ops/human_session/setup.rs`):
+the answer is `admitted` with Task, Graph and Session before any fetch;
+the held `lf session resume` prints the request, `Checkout ready  N s`,
+`Graph <name> started`, then execs the provider. Differences from the
+approach above:
+- Admission is sequential writes under the creation lock (file, take up,
+  claim, Session, receipt `admitted` + `session_id`), not one transaction. A
+  repeat before `admitted` is `filed`+run → Continue and redoes only
+  idempotent writes.
+- Setup launches `lf task run <ID>` detached (the carrier that retries and
+  settles completion), not `lf graph run`, and records it with
+  `record_setup_launch` (`admitted` → `started`, result milestone too). It
+  finds its creation via `admitted_task_creation(session)`, indexed by
+  migration `creation_receipt_sessions.sql`.
+- The conversation is held even with no agent selected: setup needs none.
+- A viewer of a held terminal (`connect`, `held_elsewhere`) skips setup and
+  attaches; only the holder does setup.
+- `-b` creation keeps `run_requested` + `start_creation` (no conversation).
+
+Remaining, in order:
+1. Answer carries the Session's `SessionRecord` and the Task's overview
+   (docs in `rust/loopflow/src/server/README.md` and `tests/fixtures/dto/README.md`
+   already say so; DTO fixture + Swift decode needed).
+2. Slice 2 (Desktop, phone).
+3. Checkout without network for a new branch: `fetch_task_refs`, the base
+   fetch and `assert_assignee` still run inside setup (off the answer path,
+   on the typing path); with slice 3.
+4. Slices 3–5.
+
 ## Slices
 
 1. **Admission + conversation setup (Rust).** One transaction, held

@@ -1,0 +1,2336 @@
+{
+  "as_of": "2026-11-08",
+  "history_window": {
+    "start_inclusive": "2026-08-10T00:00:00Z",
+    "end_exclusive": "2026-11-08T00:00:00Z"
+  },
+  "method": [
+    "Git main ancestry filtered by committer epoch; first-parent count reported as main commits.",
+    "Concentration uses nonmerge ancestors, excludes names explicitly containing [bot], normalizes exact same names/emails. Accounts are not verified people.",
+    "Latest 30 main PRs merged before cutoff in each repository. Formal premerge reviews exclude authors and known bot accounts. Local review and ordinary comments not counted.",
+    "100 evenly spaced commits per repository sampled for changed path counts, including docs/generated/lock files. Not a code-quality score.",
+    "Qualitative source samples deliberately include positive and negative implementation/tests, not random defect estimates. No applications or test suites executed."
+  ],
+  "repositories": {
+    "paseo": {
+      "head": "27872a8e86a48a31ee1ed8ec202b4715ecd4155e",
+      "last_main_commit_before_cutoff": "d92495487fcb93f72eaa3f40250e51e276daa589",
+      "main_commits_90d": 1574,
+      "main_commits_30d": 639,
+      "attribution": {
+        "excluded_bot_names": [
+          "paseo-ai[bot]",
+          "paseo-bot[bot]"
+        ],
+        "windows": {
+          "90d": {
+            "all_nonmerge": 1578,
+            "bot_attributed": 523,
+            "nonbot_commits": 1055,
+            "nonbot_authorship": {
+              "identities": 105,
+              "top": [
+                [
+                  "Mohamed Boudra",
+                  887
+                ],
+                [
+                  "Christoph Leiter",
+                  11
+                ],
+                [
+                  "Matt Cowger",
+                  10
+                ],
+                [
+                  "Omer Cohen",
+                  9
+                ],
+                [
+                  "Elowen",
+                  7
+                ],
+                [
+                  "Okan YILDIRIM",
+                  5
+                ],
+                [
+                  "Gustavo Ambrozio",
+                  5
+                ],
+                [
+                  "Dominic",
+                  4
+                ],
+                [
+                  "babo-jeonguk",
+                  3
+                ],
+                [
+                  "Jiawen Geng",
+                  3
+                ],
+                [
+                  "Bae Seongmin",
+                  3
+                ],
+                [
+                  "Caique Maurano",
+                  3
+                ],
+                [
+                  "fxlelouarn",
+                  2
+                ],
+                [
+                  "QTom",
+                  2
+                ],
+                [
+                  "Galaxy Roaming",
+                  2
+                ]
+              ],
+              "top1_pct": 84.08,
+              "top3_pct": 86.07,
+              "n80": 1,
+              "effective": 1.41,
+              "raw_emails": 106
+            }
+          },
+          "30d": {
+            "all_nonmerge": 639,
+            "bot_attributed": 300,
+            "nonbot_commits": 339,
+            "nonbot_authorship": {
+              "identities": 42,
+              "top": [
+                [
+                  "Mohamed Boudra",
+                  283
+                ],
+                [
+                  "Elowen",
+                  6
+                ],
+                [
+                  "Okan YILDIRIM",
+                  4
+                ],
+                [
+                  "Dominic",
+                  4
+                ],
+                [
+                  "babo-jeonguk",
+                  3
+                ],
+                [
+                  "QTom",
+                  2
+                ],
+                [
+                  "Jiawen Geng",
+                  2
+                ],
+                [
+                  "Brandon Elliott",
+                  1
+                ],
+                [
+                  "Patrick Wang",
+                  1
+                ],
+                [
+                  "Abdulhakeem Adetunji Mustapha",
+                  1
+                ],
+                [
+                  "geoqiao",
+                  1
+                ],
+                [
+                  "fxlelouarn",
+                  1
+                ],
+                [
+                  "Monarch Maisuriya",
+                  1
+                ],
+                [
+                  "Tahir Khan",
+                  1
+                ],
+                [
+                  "luke",
+                  1
+                ]
+              ],
+              "top1_pct": 83.48,
+              "top3_pct": 86.43,
+              "n80": 1,
+              "effective": 1.43,
+              "raw_emails": 42
+            }
+          }
+        }
+      },
+      "pr_sample": {
+        "sample_size": 30,
+        "merge_date_min": "2026-11-06T15:15:11Z",
+        "merge_date_max": "2026-11-07T21:28:12Z",
+        "mergers": {
+          "paseo-bot": 23,
+          "boudra": 7
+        },
+        "human_review_authors": {
+          "boudra": 25
+        },
+        "bot_review_authors": {
+          "greptile-apps": 18,
+          "paseo-bot": 67
+        },
+        "prs_with_human_review": 5,
+        "prs_with_bot_review": 22,
+        "prs_with_any_review": 22,
+        "human_approval_reviews": 0,
+        "selfmerge": 27,
+        "nonselfmerge": 3,
+        "numbers": [
+          9046,
+          9038,
+          9029,
+          9025,
+          9033,
+          9022,
+          9019,
+          9015,
+          8358,
+          9009,
+          9010,
+          9007,
+          9008,
+          9004,
+          8906,
+          8983,
+          8972,
+          8973,
+          8957,
+          8975,
+          8956,
+          8948,
+          8946,
+          8942,
+          8939,
+          8932,
+          8943,
+          8944,
+          8927,
+          8905
+        ]
+      },
+      "cadence": {
+        "first30": {
+          "start": "2026-08-10T00:00:00+00:00",
+          "end_exclusive": "2026-09-09T00:00:00+00:00",
+          "count": 481,
+          "per_day": 16.03,
+          "active_days": 29
+        },
+        "middle30": {
+          "start": "2026-09-09T00:00:00+00:00",
+          "end_exclusive": "2026-10-09T00:00:00+00:00",
+          "count": 458,
+          "per_day": 15.27,
+          "active_days": 27
+        },
+        "last30": {
+          "start": "2026-10-09T00:00:00+00:00",
+          "end_exclusive": "2026-11-08T00:00:00+00:00",
+          "count": 639,
+          "per_day": 21.3,
+          "active_days": 30
+        }
+      },
+      "formal_premerge_reviews": {
+        "prs": 30,
+        "with_nonbot_review": 5,
+        "with_nonbot_nonauthor_review": 0,
+        "with_nonbot_nonauthor_approval": 0,
+        "details": [
+          {
+            "number": 9046,
+            "author": "paseo-bot",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 9038,
+            "author": "paseo-bot",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 9029,
+            "author": "paseo-bot",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 9025,
+            "author": "paseo-bot",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 9033,
+            "author": "paseo-bot",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 9022,
+            "author": "paseo-bot",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 9019,
+            "author": "Brandon168",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 9015,
+            "author": "paseo-bot",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 8358,
+            "author": "boudra",
+            "human_reviews_before_merge": [
+              "boudra",
+              "boudra",
+              "boudra"
+            ],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 9009,
+            "author": "boudra",
+            "human_reviews_before_merge": [
+              "boudra",
+              "boudra"
+            ],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 9010,
+            "author": "paseo-bot",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 9007,
+            "author": "boudra",
+            "human_reviews_before_merge": [
+              "boudra",
+              "boudra",
+              "boudra"
+            ],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 9008,
+            "author": "paseo-bot",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 9004,
+            "author": "imink",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 8906,
+            "author": "boudra",
+            "human_reviews_before_merge": [
+              "boudra",
+              "boudra",
+              "boudra",
+              "boudra",
+              "boudra",
+              "boudra",
+              "boudra",
+              "boudra",
+              "boudra",
+              "boudra",
+              "boudra"
+            ],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 8983,
+            "author": "paseo-bot",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 8972,
+            "author": "paseo-bot",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 8973,
+            "author": "paseo-bot",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 8957,
+            "author": "paseo-bot",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 8975,
+            "author": "paseo-bot",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 8956,
+            "author": "amustapha",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 8948,
+            "author": "paseo-bot",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 8946,
+            "author": "paseo-bot",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 8942,
+            "author": "paseo-bot",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 8939,
+            "author": "paseo-bot",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 8932,
+            "author": "paseo-bot",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 8943,
+            "author": "boudra",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 8944,
+            "author": "boudra",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 8927,
+            "author": "paseo-bot",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 8905,
+            "author": "boudra",
+            "human_reviews_before_merge": [
+              "boudra",
+              "boudra",
+              "boudra",
+              "boudra",
+              "boudra",
+              "boudra"
+            ],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          }
+        ]
+      }
+    },
+    "t3": {
+      "head": "af65a55dc77f7a2adaae28a9a80032a2f4d61da1",
+      "last_main_commit_before_cutoff": "a9e709f15f825cacac1b6d665fa1920c328d68b7",
+      "main_commits_90d": 7297,
+      "main_commits_30d": 4647,
+      "attribution": {
+        "excluded_bot_names": [
+          "dependabot[bot]",
+          "t3-code-bot[bot]",
+          "t3-code[bot]"
+        ],
+        "windows": {
+          "90d": {
+            "all_nonmerge": 7297,
+            "bot_attributed": 105,
+            "nonbot_commits": 7192,
+            "nonbot_authorship": {
+              "identities": 733,
+              "top": [
+                [
+                  "Julius Marminge",
+                  2428
+                ],
+                [
+                  "Theo Browne",
+                  841
+                ],
+                [
+                  "maria",
+                  498
+                ],
+                [
+                  "Victor Vogel",
+                  251
+                ],
+                [
+                  "Alex Southwell",
+                  245
+                ],
+                [
+                  "Yash Singh",
+                  193
+                ],
+                [
+                  "shivam",
+                  165
+                ],
+                [
+                  "oliver",
+                  136
+                ],
+                [
+                  "Bilal Bakr",
+                  103
+                ],
+                [
+                  "Wout Stiens",
+                  84
+                ],
+                [
+                  "Alex",
+                  81
+                ],
+                [
+                  "Utkarsh Patil",
+                  70
+                ],
+                [
+                  "Tristan Knight",
+                  57
+                ],
+                [
+                  "Dara Adedeji",
+                  57
+                ],
+                [
+                  "MarcoDotIO",
+                  53
+                ]
+              ],
+              "top1_pct": 33.76,
+              "top3_pct": 52.38,
+              "n80": 32,
+              "effective": 7.27,
+              "raw_emails": 747
+            }
+          },
+          "30d": {
+            "all_nonmerge": 4647,
+            "bot_attributed": 20,
+            "nonbot_commits": 4627,
+            "nonbot_authorship": {
+              "identities": 579,
+              "top": [
+                [
+                  "Julius Marminge",
+                  1525
+                ],
+                [
+                  "Theo Browne",
+                  437
+                ],
+                [
+                  "Victor Vogel",
+                  251
+                ],
+                [
+                  "Alex Southwell",
+                  213
+                ],
+                [
+                  "maria",
+                  197
+                ],
+                [
+                  "Yash Singh",
+                  147
+                ],
+                [
+                  "shivam",
+                  137
+                ],
+                [
+                  "oliver",
+                  73
+                ],
+                [
+                  "Alex",
+                  71
+                ],
+                [
+                  "MarcoDotIO",
+                  53
+                ],
+                [
+                  "Scott Norteman",
+                  47
+                ],
+                [
+                  "Lakshmi Tanmay",
+                  41
+                ],
+                [
+                  "Wout Stiens",
+                  38
+                ],
+                [
+                  "Tristan Knight",
+                  38
+                ],
+                [
+                  "Utkarsh Patil",
+                  34
+                ]
+              ],
+              "top1_pct": 32.96,
+              "top3_pct": 47.83,
+              "n80": 41,
+              "effective": 7.83,
+              "raw_emails": 588
+            }
+          }
+        }
+      },
+      "pr_sample": {
+        "sample_size": 30,
+        "merge_date_min": "2026-11-07T07:54:57Z",
+        "merge_date_max": "2026-11-07T22:20:13Z",
+        "mergers": {
+          "juliusmarminge": 3,
+          "Yash-Singh1": 26,
+          "shivamhwp": 1
+        },
+        "human_review_authors": {
+          "Yash-Singh1": 6,
+          "Iweisc": 1,
+          "StiensWout": 4,
+          "voltcrash": 5,
+          "maria-rcks": 1,
+          "shivamhwp": 3
+        },
+        "bot_review_authors": {
+          "macroscopeapp": 36,
+          "coderabbitai": 39
+        },
+        "prs_with_human_review": 11,
+        "prs_with_bot_review": 28,
+        "prs_with_any_review": 28,
+        "human_approval_reviews": 3,
+        "selfmerge": 5,
+        "nonselfmerge": 25,
+        "numbers": [
+          32239,
+          32551,
+          27941,
+          32666,
+          27450,
+          32315,
+          32401,
+          32400,
+          32186,
+          32448,
+          19660,
+          19659,
+          32446,
+          26324,
+          27397,
+          19585,
+          32389,
+          32391,
+          22160,
+          32395,
+          32408,
+          32405,
+          32403,
+          32409,
+          32411,
+          29280,
+          30011,
+          29586,
+          32398,
+          30322
+        ]
+      },
+      "cadence": {
+        "first30": {
+          "start": "2026-08-10T00:00:00+00:00",
+          "end_exclusive": "2026-09-09T00:00:00+00:00",
+          "count": 1357,
+          "per_day": 45.23,
+          "active_days": 30
+        },
+        "middle30": {
+          "start": "2026-09-09T00:00:00+00:00",
+          "end_exclusive": "2026-10-09T00:00:00+00:00",
+          "count": 1293,
+          "per_day": 43.1,
+          "active_days": 30
+        },
+        "last30": {
+          "start": "2026-10-09T00:00:00+00:00",
+          "end_exclusive": "2026-11-08T00:00:00+00:00",
+          "count": 4647,
+          "per_day": 154.9,
+          "active_days": 30
+        }
+      },
+      "formal_premerge_reviews": {
+        "prs": 30,
+        "with_nonbot_review": 11,
+        "with_nonbot_nonauthor_review": 5,
+        "with_nonbot_nonauthor_approval": 3,
+        "details": [
+          {
+            "number": 32239,
+            "author": "PixPMusic",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 32551,
+            "author": "PixPMusic",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 27941,
+            "author": "arifali123",
+            "human_reviews_before_merge": [
+              "Yash-Singh1"
+            ],
+            "independent_before_merge": [
+              "Yash-Singh1"
+            ],
+            "independent_approvals_before_merge": [
+              "Yash-Singh1"
+            ]
+          },
+          {
+            "number": 32666,
+            "author": "only21mil",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 27450,
+            "author": "juliusmarminge",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 32315,
+            "author": "Iweisc",
+            "human_reviews_before_merge": [
+              "Iweisc"
+            ],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 32401,
+            "author": "felixlaga",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 32400,
+            "author": "felixlaga",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 32186,
+            "author": "flamboh",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 32448,
+            "author": "Yash-Singh1",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 19660,
+            "author": "StiensWout",
+            "human_reviews_before_merge": [
+              "StiensWout"
+            ],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 19659,
+            "author": "StiensWout",
+            "human_reviews_before_merge": [
+              "StiensWout",
+              "StiensWout",
+              "Yash-Singh1",
+              "Yash-Singh1"
+            ],
+            "independent_before_merge": [
+              "Yash-Singh1",
+              "Yash-Singh1"
+            ],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 32446,
+            "author": "Yash-Singh1",
+            "human_reviews_before_merge": [
+              "Yash-Singh1"
+            ],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 26324,
+            "author": "not-compromised",
+            "human_reviews_before_merge": [
+              "Yash-Singh1"
+            ],
+            "independent_before_merge": [
+              "Yash-Singh1"
+            ],
+            "independent_approvals_before_merge": [
+              "Yash-Singh1"
+            ]
+          },
+          {
+            "number": 27397,
+            "author": "voltcrash",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 19585,
+            "author": "StiensWout",
+            "human_reviews_before_merge": [
+              "StiensWout"
+            ],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 32389,
+            "author": "StiensWout",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 32391,
+            "author": "StiensWout",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 22160,
+            "author": "voltcrash",
+            "human_reviews_before_merge": [
+              "voltcrash",
+              "Yash-Singh1"
+            ],
+            "independent_before_merge": [
+              "Yash-Singh1"
+            ],
+            "independent_approvals_before_merge": [
+              "Yash-Singh1"
+            ]
+          },
+          {
+            "number": 32395,
+            "author": "wSedlacek",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 32408,
+            "author": "felixlaga",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 32405,
+            "author": "felixlaga",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 32403,
+            "author": "felixlaga",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 32409,
+            "author": "StiensWout",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 32411,
+            "author": "StiensWout",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 29280,
+            "author": "voltcrash",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 30011,
+            "author": "voltcrash",
+            "human_reviews_before_merge": [
+              "voltcrash",
+              "voltcrash"
+            ],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 29586,
+            "author": "voltcrash",
+            "human_reviews_before_merge": [
+              "voltcrash",
+              "voltcrash",
+              "maria-rcks"
+            ],
+            "independent_before_merge": [
+              "maria-rcks"
+            ],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 32398,
+            "author": "Yash-Singh1",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 30322,
+            "author": "shivamhwp",
+            "human_reviews_before_merge": [
+              "shivamhwp",
+              "shivamhwp",
+              "shivamhwp"
+            ],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          }
+        ]
+      }
+    },
+    "orca": {
+      "head": "5fc3b26766a9fc3ba95d8bc72600325f036f0db4",
+      "last_main_commit_before_cutoff": "aa30c8140a7f696ee06f7ee3282a2ab0280f52eb",
+      "main_commits_90d": 11630,
+      "main_commits_30d": 6721,
+      "attribution": {
+        "excluded_bot_names": [
+          "buf0-bot[bot]",
+          "github-actions[bot]"
+        ],
+        "windows": {
+          "90d": {
+            "all_nonmerge": 11630,
+            "bot_attributed": 98,
+            "nonbot_commits": 11532,
+            "nonbot_authorship": {
+              "identities": 352,
+              "top": [
+                [
+                  "Neil",
+                  4723
+                ],
+                [
+                  "OrcaWin",
+                  1886
+                ],
+                [
+                  "Brennan Benson",
+                  1742
+                ],
+                [
+                  "Jinwoo Hong",
+                  1394
+                ],
+                [
+                  "Kelvin Amoaba",
+                  629
+                ],
+                [
+                  "Jinjing",
+                  576
+                ],
+                [
+                  "Wooseong Kim",
+                  26
+                ],
+                [
+                  "BingZ",
+                  23
+                ],
+                [
+                  "mmarabel",
+                  17
+                ],
+                [
+                  "Pr1p",
+                  15
+                ],
+                [
+                  "hwantage",
+                  11
+                ],
+                [
+                  "erish",
+                  8
+                ],
+                [
+                  "Vyacheslav Scherbinin",
+                  7
+                ],
+                [
+                  "Naveen Chatlapalli",
+                  7
+                ],
+                [
+                  "\u017dan Mlakar",
+                  7
+                ]
+              ],
+              "top1_pct": 40.96,
+              "top3_pct": 72.42,
+              "n80": 4,
+              "effective": 4.21,
+              "raw_emails": 364
+            }
+          },
+          "30d": {
+            "all_nonmerge": 6721,
+            "bot_attributed": 17,
+            "nonbot_commits": 6704,
+            "nonbot_authorship": {
+              "identities": 238,
+              "top": [
+                [
+                  "Neil",
+                  2618
+                ],
+                [
+                  "OrcaWin",
+                  1430
+                ],
+                [
+                  "Brennan Benson",
+                  812
+                ],
+                [
+                  "Jinwoo Hong",
+                  634
+                ],
+                [
+                  "Kelvin Amoaba",
+                  588
+                ],
+                [
+                  "Jinjing",
+                  244
+                ],
+                [
+                  "Wooseong Kim",
+                  16
+                ],
+                [
+                  "BingZ",
+                  14
+                ],
+                [
+                  "Pr1p",
+                  13
+                ],
+                [
+                  "Vyacheslav Scherbinin",
+                  7
+                ],
+                [
+                  "Naveen Chatlapalli",
+                  7
+                ],
+                [
+                  "\u017dan Mlakar",
+                  7
+                ],
+                [
+                  "mmarabel",
+                  6
+                ],
+                [
+                  "Anmol",
+                  6
+                ],
+                [
+                  "Blue Daydreaming",
+                  6
+                ]
+              ],
+              "top1_pct": 39.05,
+              "top3_pct": 72.49,
+              "n80": 4,
+              "effective": 4.34,
+              "raw_emails": 243
+            }
+          }
+        }
+      },
+      "pr_sample": {
+        "sample_size": 30,
+        "merge_date_min": "2026-11-07T22:02:39Z",
+        "merge_date_max": "2026-11-07T23:45:45Z",
+        "mergers": {
+          "AmoabaKelvin": 24,
+          "OrcaWin": 5,
+          "Jinwoo-H": 1
+        },
+        "human_review_authors": {
+          "AmoabaKelvin": 4
+        },
+        "bot_review_authors": {
+          "coderabbitai": 42
+        },
+        "prs_with_human_review": 3,
+        "prs_with_bot_review": 16,
+        "prs_with_any_review": 16,
+        "human_approval_reviews": 0,
+        "selfmerge": 30,
+        "nonselfmerge": 0,
+        "numbers": [
+          39470,
+          39402,
+          39391,
+          39422,
+          39350,
+          39438,
+          39448,
+          39423,
+          39403,
+          39474,
+          39379,
+          39342,
+          39345,
+          39608,
+          39409,
+          39412,
+          39387,
+          39355,
+          39415,
+          39357,
+          39313,
+          39397,
+          39419,
+          39464,
+          39356,
+          39408,
+          39343,
+          39604,
+          39600,
+          39595
+        ]
+      },
+      "cadence": {
+        "first30": {
+          "start": "2026-08-10T00:00:00+00:00",
+          "end_exclusive": "2026-09-09T00:00:00+00:00",
+          "count": 2308,
+          "per_day": 76.93,
+          "active_days": 30
+        },
+        "middle30": {
+          "start": "2026-09-09T00:00:00+00:00",
+          "end_exclusive": "2026-10-09T00:00:00+00:00",
+          "count": 2601,
+          "per_day": 86.7,
+          "active_days": 30
+        },
+        "last30": {
+          "start": "2026-10-09T00:00:00+00:00",
+          "end_exclusive": "2026-11-08T00:00:00+00:00",
+          "count": 6721,
+          "per_day": 224.03,
+          "active_days": 30
+        }
+      },
+      "formal_premerge_reviews": {
+        "prs": 30,
+        "with_nonbot_review": 2,
+        "with_nonbot_nonauthor_review": 0,
+        "with_nonbot_nonauthor_approval": 0,
+        "details": [
+          {
+            "number": 39470,
+            "author": "AmoabaKelvin",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 39402,
+            "author": "AmoabaKelvin",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 39391,
+            "author": "AmoabaKelvin",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 39422,
+            "author": "AmoabaKelvin",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 39350,
+            "author": "AmoabaKelvin",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 39438,
+            "author": "AmoabaKelvin",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 39448,
+            "author": "AmoabaKelvin",
+            "human_reviews_before_merge": [
+              "AmoabaKelvin"
+            ],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 39423,
+            "author": "AmoabaKelvin",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 39403,
+            "author": "AmoabaKelvin",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 39474,
+            "author": "AmoabaKelvin",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 39379,
+            "author": "AmoabaKelvin",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 39342,
+            "author": "AmoabaKelvin",
+            "human_reviews_before_merge": [
+              "AmoabaKelvin",
+              "AmoabaKelvin"
+            ],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 39345,
+            "author": "AmoabaKelvin",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 39608,
+            "author": "OrcaWin",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 39409,
+            "author": "AmoabaKelvin",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 39412,
+            "author": "AmoabaKelvin",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 39387,
+            "author": "AmoabaKelvin",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 39355,
+            "author": "AmoabaKelvin",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 39415,
+            "author": "AmoabaKelvin",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 39357,
+            "author": "AmoabaKelvin",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 39313,
+            "author": "AmoabaKelvin",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 39397,
+            "author": "Jinwoo-H",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 39419,
+            "author": "AmoabaKelvin",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 39464,
+            "author": "AmoabaKelvin",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 39356,
+            "author": "OrcaWin",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 39408,
+            "author": "AmoabaKelvin",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 39343,
+            "author": "AmoabaKelvin",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 39604,
+            "author": "OrcaWin",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 39600,
+            "author": "OrcaWin",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 39595,
+            "author": "OrcaWin",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          }
+        ]
+      }
+    },
+    "paradev": {
+      "head": "b77bc046ee98bbc3ac05c7ae792e630d7e7b73d0",
+      "last_main_commit_before_cutoff": "dd62f08d8588dd913ce78c78e498cb36798bca47",
+      "main_commits_90d": 2010,
+      "main_commits_30d": 646,
+      "attribution": {
+        "excluded_bot_names": [
+          "dependabot[bot]",
+          "superset-app[bot]"
+        ],
+        "windows": {
+          "90d": {
+            "all_nonmerge": 2010,
+            "bot_attributed": 25,
+            "nonbot_commits": 1985,
+            "nonbot_authorship": {
+              "identities": 53,
+              "top": [
+                [
+                  "Satya Patel",
+                  878
+                ],
+                [
+                  "Kiet",
+                  722
+                ],
+                [
+                  "Avi Peltz",
+                  146
+                ],
+                [
+                  "Harshith Mullapudi",
+                  142
+                ],
+                [
+                  "superset-home",
+                  27
+                ],
+                [
+                  "Serhii Kucherenko",
+                  4
+                ],
+                [
+                  "andy",
+                  4
+                ],
+                [
+                  "TheBlondeAlex",
+                  4
+                ],
+                [
+                  "Owen Schoeniger",
+                  4
+                ],
+                [
+                  "Pascal Ordano",
+                  3
+                ],
+                [
+                  "Manu Rajput",
+                  3
+                ],
+                [
+                  "Ymir",
+                  2
+                ],
+                [
+                  "Hayden D'Souza",
+                  2
+                ],
+                [
+                  "Vardhman Bengani",
+                  2
+                ],
+                [
+                  "Sahil Jagtap",
+                  2
+                ]
+              ],
+              "top1_pct": 44.23,
+              "top3_pct": 87.96,
+              "n80": 2,
+              "effective": 2.95,
+              "raw_emails": 54
+            }
+          },
+          "30d": {
+            "all_nonmerge": 646,
+            "bot_attributed": 21,
+            "nonbot_commits": 625,
+            "nonbot_authorship": {
+              "identities": 12,
+              "top": [
+                [
+                  "Kiet",
+                  260
+                ],
+                [
+                  "Satya Patel",
+                  215
+                ],
+                [
+                  "Harshith Mullapudi",
+                  59
+                ],
+                [
+                  "Avi Peltz",
+                  55
+                ],
+                [
+                  "superset-home",
+                  26
+                ],
+                [
+                  "Serhii Kucherenko",
+                  4
+                ],
+                [
+                  "Sherwood Callaway",
+                  1
+                ],
+                [
+                  "akshat sharma",
+                  1
+                ],
+                [
+                  "Tsavo Knott",
+                  1
+                ],
+                [
+                  "shubhankiit",
+                  1
+                ],
+                [
+                  "Donglin Zhuang",
+                  1
+                ],
+                [
+                  "andy",
+                  1
+                ]
+              ],
+              "top1_pct": 41.6,
+              "top3_pct": 85.44,
+              "n80": 3,
+              "effective": 3.23,
+              "raw_emails": 12
+            }
+          }
+        }
+      },
+      "pr_sample": {
+        "sample_size": 30,
+        "merge_date_min": "2026-11-05T02:12:26Z",
+        "merge_date_max": "2026-11-07T16:19:52Z",
+        "mergers": {
+          "superset-home": 3,
+          "Kitenite": 17,
+          "harshithmullapudi": 9,
+          "AviPeltz": 1
+        },
+        "human_review_authors": {
+          "superset-home": 1,
+          "harshithmullapudi": 37,
+          "AviPeltz": 18
+        },
+        "bot_review_authors": {
+          "cubic-dev-ai": 47,
+          "coderabbitai": 73
+        },
+        "prs_with_human_review": 6,
+        "prs_with_bot_review": 30,
+        "prs_with_any_review": 30,
+        "human_approval_reviews": 0,
+        "selfmerge": 29,
+        "nonselfmerge": 1,
+        "numbers": [
+          9491,
+          9437,
+          9431,
+          9396,
+          9436,
+          9435,
+          9429,
+          9415,
+          9427,
+          9384,
+          9413,
+          9399,
+          9410,
+          9412,
+          9409,
+          9361,
+          9408,
+          9407,
+          9405,
+          9406,
+          9403,
+          9404,
+          9401,
+          9400,
+          9354,
+          9385,
+          9373,
+          9380,
+          9382,
+          9379
+        ]
+      },
+      "cadence": {
+        "first30": {
+          "start": "2026-08-10T00:00:00+00:00",
+          "end_exclusive": "2026-09-09T00:00:00+00:00",
+          "count": 751,
+          "per_day": 25.03,
+          "active_days": 30
+        },
+        "middle30": {
+          "start": "2026-09-09T00:00:00+00:00",
+          "end_exclusive": "2026-10-09T00:00:00+00:00",
+          "count": 613,
+          "per_day": 20.43,
+          "active_days": 30
+        },
+        "last30": {
+          "start": "2026-10-09T00:00:00+00:00",
+          "end_exclusive": "2026-11-08T00:00:00+00:00",
+          "count": 646,
+          "per_day": 21.53,
+          "active_days": 30
+        }
+      },
+      "formal_premerge_reviews": {
+        "prs": 30,
+        "with_nonbot_review": 6,
+        "with_nonbot_nonauthor_review": 0,
+        "with_nonbot_nonauthor_approval": 0,
+        "details": [
+          {
+            "number": 9491,
+            "author": "superset-home",
+            "human_reviews_before_merge": [
+              "superset-home"
+            ],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 9437,
+            "author": "Kitenite",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 9431,
+            "author": "Kitenite",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 9396,
+            "author": "harshithmullapudi",
+            "human_reviews_before_merge": [
+              "harshithmullapudi",
+              "harshithmullapudi",
+              "harshithmullapudi",
+              "harshithmullapudi",
+              "harshithmullapudi",
+              "harshithmullapudi",
+              "harshithmullapudi",
+              "harshithmullapudi",
+              "harshithmullapudi",
+              "harshithmullapudi",
+              "harshithmullapudi",
+              "harshithmullapudi",
+              "harshithmullapudi",
+              "harshithmullapudi",
+              "harshithmullapudi",
+              "harshithmullapudi",
+              "harshithmullapudi",
+              "harshithmullapudi",
+              "harshithmullapudi",
+              "harshithmullapudi",
+              "harshithmullapudi"
+            ],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 9436,
+            "author": "Kitenite",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 9435,
+            "author": "Kitenite",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 9429,
+            "author": "Kitenite",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 9415,
+            "author": "Kitenite",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 9427,
+            "author": "Kitenite",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 9384,
+            "author": "AviPeltz",
+            "human_reviews_before_merge": [
+              "AviPeltz",
+              "AviPeltz",
+              "AviPeltz",
+              "AviPeltz",
+              "AviPeltz",
+              "AviPeltz",
+              "AviPeltz",
+              "AviPeltz",
+              "AviPeltz",
+              "AviPeltz",
+              "AviPeltz",
+              "AviPeltz",
+              "AviPeltz",
+              "AviPeltz",
+              "AviPeltz",
+              "AviPeltz",
+              "AviPeltz",
+              "AviPeltz"
+            ],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 9413,
+            "author": "Kitenite",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 9399,
+            "author": "harshithmullapudi",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 9410,
+            "author": "harshithmullapudi",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 9412,
+            "author": "Kitenite",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 9409,
+            "author": "harshithmullapudi",
+            "human_reviews_before_merge": [
+              "harshithmullapudi",
+              "harshithmullapudi",
+              "harshithmullapudi",
+              "harshithmullapudi",
+              "harshithmullapudi",
+              "harshithmullapudi",
+              "harshithmullapudi",
+              "harshithmullapudi",
+              "harshithmullapudi",
+              "harshithmullapudi"
+            ],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 9361,
+            "author": "harshithmullapudi",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 9408,
+            "author": "harshithmullapudi",
+            "human_reviews_before_merge": [
+              "harshithmullapudi",
+              "harshithmullapudi",
+              "harshithmullapudi",
+              "harshithmullapudi"
+            ],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 9407,
+            "author": "harshithmullapudi",
+            "human_reviews_before_merge": [
+              "harshithmullapudi",
+              "harshithmullapudi"
+            ],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 9405,
+            "author": "harshithmullapudi",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 9406,
+            "author": "Kitenite",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 9403,
+            "author": "Kitenite",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 9404,
+            "author": "Kitenite",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 9401,
+            "author": "Kitenite",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 9400,
+            "author": "Kitenite",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 9354,
+            "author": "harshithmullapudi",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 9385,
+            "author": "superset-home",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 9373,
+            "author": "Kitenite",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 9380,
+            "author": "Kitenite",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 9382,
+            "author": "Kitenite",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 9379,
+            "author": "Kitenite",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          }
+        ]
+      }
+    },
+    "loopflow": {
+      "head": "1c757e9fe2028c0073414dc6826395931a5aa743",
+      "last_main_commit_before_cutoff": "9e11b23077378039477ed1fd03b757c68fcd617f",
+      "main_commits_90d": 601,
+      "main_commits_30d": 313,
+      "attribution": {
+        "excluded_bot_names": [
+          "dependabot[bot]"
+        ],
+        "windows": {
+          "90d": {
+            "all_nonmerge": 601,
+            "bot_attributed": 19,
+            "nonbot_commits": 582,
+            "nonbot_authorship": {
+              "identities": 1,
+              "top": [
+                [
+                  "Jack Heart",
+                  582
+                ]
+              ],
+              "top1_pct": 100.0,
+              "top3_pct": 100.0,
+              "n80": 1,
+              "effective": 1.0,
+              "raw_emails": 1
+            }
+          },
+          "30d": {
+            "all_nonmerge": 313,
+            "bot_attributed": 6,
+            "nonbot_commits": 307,
+            "nonbot_authorship": {
+              "identities": 1,
+              "top": [
+                [
+                  "Jack Heart",
+                  307
+                ]
+              ],
+              "top1_pct": 100.0,
+              "top3_pct": 100.0,
+              "n80": 1,
+              "effective": 1.0,
+              "raw_emails": 1
+            }
+          }
+        }
+      },
+      "pr_sample": {
+        "sample_size": 30,
+        "merge_date_min": "2026-11-03T23:36:54Z",
+        "merge_date_max": "2026-11-07T20:10:05Z",
+        "mergers": {
+          "jacklionheart": 30
+        },
+        "human_review_authors": {},
+        "bot_review_authors": {},
+        "prs_with_human_review": 0,
+        "prs_with_bot_review": 0,
+        "prs_with_any_review": 0,
+        "human_approval_reviews": 0,
+        "selfmerge": 30,
+        "nonselfmerge": 0,
+        "numbers": [
+          1814,
+          1842,
+          1816,
+          1841,
+          1811,
+          1791,
+          1840,
+          1829,
+          1721,
+          1834,
+          1831,
+          1835,
+          1830,
+          1833,
+          1827,
+          1826,
+          1825,
+          1823,
+          1817,
+          1824,
+          1780,
+          1822,
+          1807,
+          1821,
+          1805,
+          1820,
+          1818,
+          1815,
+          1809,
+          1803
+        ]
+      },
+      "cadence": {
+        "first30": {
+          "start": "2026-08-10T00:00:00+00:00",
+          "end_exclusive": "2026-09-09T00:00:00+00:00",
+          "count": 60,
+          "per_day": 2.0,
+          "active_days": 15
+        },
+        "middle30": {
+          "start": "2026-09-09T00:00:00+00:00",
+          "end_exclusive": "2026-10-09T00:00:00+00:00",
+          "count": 228,
+          "per_day": 7.6,
+          "active_days": 17
+        },
+        "last30": {
+          "start": "2026-10-09T00:00:00+00:00",
+          "end_exclusive": "2026-11-08T00:00:00+00:00",
+          "count": 313,
+          "per_day": 10.43,
+          "active_days": 29
+        }
+      },
+      "formal_premerge_reviews": {
+        "prs": 30,
+        "with_nonbot_review": 0,
+        "with_nonbot_nonauthor_review": 0,
+        "with_nonbot_nonauthor_approval": 0,
+        "details": [
+          {
+            "number": 1814,
+            "author": "jacklionheart",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 1842,
+            "author": "jacklionheart",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 1816,
+            "author": "jacklionheart",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 1841,
+            "author": "jacklionheart",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 1811,
+            "author": "jacklionheart",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 1791,
+            "author": "jacklionheart",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 1840,
+            "author": "jacklionheart",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 1829,
+            "author": "jacklionheart",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 1721,
+            "author": "jacklionheart",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 1834,
+            "author": "jacklionheart",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 1831,
+            "author": "jacklionheart",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 1835,
+            "author": "jacklionheart",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 1830,
+            "author": "jacklionheart",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 1833,
+            "author": "jacklionheart",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 1827,
+            "author": "jacklionheart",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 1826,
+            "author": "jacklionheart",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 1825,
+            "author": "jacklionheart",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 1823,
+            "author": "jacklionheart",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 1817,
+            "author": "jacklionheart",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 1824,
+            "author": "jacklionheart",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 1780,
+            "author": "jacklionheart",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 1822,
+            "author": "jacklionheart",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 1807,
+            "author": "jacklionheart",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 1821,
+            "author": "jacklionheart",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 1805,
+            "author": "jacklionheart",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 1820,
+            "author": "jacklionheart",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 1818,
+            "author": "jacklionheart",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 1815,
+            "author": "jacklionheart",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 1809,
+            "author": "jacklionheart",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          },
+          {
+            "number": 1803,
+            "author": "jacklionheart",
+            "human_reviews_before_merge": [],
+            "independent_before_merge": [],
+            "independent_approvals_before_merge": []
+          }
+        ]
+      }
+    }
+  }
+}

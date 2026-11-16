@@ -1,0 +1,162 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Engineering craft across five agent platforms</title><style>
+:root{color-scheme:light dark;--bg:#faf9f6;--fg:#242824;--muted:#60655f;--line:#d9ddd5;--link:#185f56;--code:#eef0e9}
+@media(prefers-color-scheme:dark){:root{--bg:#181d1b;--fg:#e6e9e2;--muted:#aab5aa;--line:#3b473e;--link:#8ed0bc;--code:#222b25}}
+*{box-sizing:border-box}body{background:var(--bg);color:var(--fg);font:17px/1.65 system-ui,-apple-system,sans-serif;margin:0;padding:48px 24px 100px}main{max-width:900px;margin:auto}h1{font-family:Georgia,serif;font-size:clamp(2rem,5vw,3.3rem);line-height:1.12;letter-spacing:-.035em;font-weight:500;margin:0 0 1.3em}h2{font-size:1.45rem;line-height:1.25;margin:3em 0 1em;border-top:1px solid var(--line);padding-top:1em}p,li{max-width:78ch}p{margin:1.1em 0}a{color:var(--link);text-underline-offset:.2em;overflow-wrap:anywhere}strong{font-weight:650}table{border-collapse:collapse;font-size:.87rem;line-height:1.5;width:100%;margin:1.6em 0;display:block;overflow-x:auto}th,td{text-align:left;vertical-align:top;padding:.8em;border-bottom:1px solid var(--line);min-width:95px}th{font-weight:650}code{font: .88em ui-monospace,SFMono-Regular,monospace;background:var(--code);padding:.13em .3em;border-radius:3px}pre{background:var(--code);padding:1.3em;overflow-x:auto;line-height:1.6}pre code{padding:0}ol{padding-left:1.4em}li{margin:.8em 0}main>p:first-of-type{color:var(--muted);font-size:.86rem}footer{border-top:1px solid var(--line);margin-top:3em;padding-top:1em;color:var(--muted);font-size:.85rem}@media(max-width:600px){body{padding:28px 16px 64px}table{font-size:.8rem}th,td{padding:.6em}pre{font-size:.75rem}}
+</style></head><body><main><h1>Engineering craft across Paseo, Loopflow, T3, Orca and Paradev</h1>
+<p>Research snapshot: November 8, 2026. Commit statistics cover August 10 through November 7 UTC; code inspection includes the November 8 snapshots. No Task. Sources: five Git histories, 150 recent merged PR records, selected production code and tests. Companion evidence and detailed audits are linked below.</p>
+<p><strong>T3 and Paseo show the strongest craft in the sampled code. T3 leads on explicit correctness and recovery mechanisms; Paseo on direct, product-focused engineering. Paradev is a capable commercial product codebase. Loopflow combines serious systems craft with unstable integration during foundational changes. Orca has the most concerning overall structure and strongest signs of output outrunning architectural control.</strong></p>
+<p>For overall sampled code quality, the defensible grouping is <strong>T3 / Paseo first; Paradev / Loopflow in a mixed middle; Orca last</strong>. This is a qualitative judgment about the inspected code, not a measured defect-rate ranking. Within the middle, Paradev is more locally straightforward; Loopflow has stronger examples of domain modeling and structural deletion, but more troubling evidence about core operational behavior. None is uniformly excellent or uniformly junk.</p>
+<h2>Distribution of work</h2>
+<p>These counts distinguish contribution breadth from actual engineering headcount. An agent can commit as a person; a shared account can represent several people. Obvious bot-labelled identities are excluded from concentration percentages, but remain in total main-commit counts. Exact name/email aliases are normalized.</p>
+<table>
+<thead>
+<tr>
+<th>Repository</th>
+<th style="text-align:right">Main commits in 90 days</th>
+<th style="text-align:right">Largest nonbot author share</th>
+<th style="text-align:right">Top three share</th>
+<th style="text-align:right">Author identities accounting for 80%</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>T3</td>
+<td style="text-align:right">7,297</td>
+<td style="text-align:right">34%</td>
+<td style="text-align:right">52%</td>
+<td style="text-align:right">32</td>
+</tr>
+<tr>
+<td>Orca</td>
+<td style="text-align:right">11,630</td>
+<td style="text-align:right">41%</td>
+<td style="text-align:right">72%</td>
+<td style="text-align:right">4</td>
+</tr>
+<tr>
+<td>Paradev</td>
+<td style="text-align:right">2,010</td>
+<td style="text-align:right">44%</td>
+<td style="text-align:right">88%</td>
+<td style="text-align:right">2</td>
+</tr>
+<tr>
+<td>Paseo</td>
+<td style="text-align:right">1,574</td>
+<td style="text-align:right">84%</td>
+<td style="text-align:right">86%</td>
+<td style="text-align:right">1</td>
+</tr>
+<tr>
+<td>Loopflow</td>
+<td style="text-align:right">601</td>
+<td style="text-align:right">100%</td>
+<td style="text-align:right">100%</td>
+<td style="text-align:right">1</td>
+</tr>
+</tbody>
+</table>
+<p>T3 is decisively the most distributed contributor network. Orca has enormous activity concentrated in a small core. Paradev looks like a compact core with recurring areas of ownership. Paseo is much closer to an auteur-led project than its contributor count suggests: Mohamed Boudra accounts for 84% of nonbot-attributed commits, while two bot identities contribute another 523. Loopflow's nonbot commits all resolve to one author identity. These are contribution patterns, not geographic conclusions. Email-only counting changes T3's 80% threshold from 32 to 33, leaving the ordering intact. <a href="agent-platform-craft-evidence-2026-11-08.json">Recorded measurements</a></p>
+<p><strong>Integration is more concentrated than contribution.</strong> In the latest 30 merged main PRs before the cutoff, T3 has 25 merged by someone other than their author, but 26 of the 30 merges come from one account, Yash-Singh1. Paseo has three non-self-merges, Paradev one, Orca and Loopflow zero. T3 has five PRs with recorded nonauthor, nonbot-account formal review before merge; the other samples have zero. This cannot see local agent review, ordinary comments, pairing or offline review. Orca's sample spans only 103 minutes, Loopflow's four days, so this is a recent integration snapshot, not a quarterly review-rate estimate.</p>
+<h2>T3: strongest explicit correctness machinery</h2>
+<p>T3's good abstractions do real work. Its event sink groups receipts, events, projections and queued effects transactionally, orders publication, and handles cancellation after commit. Its effect outbox distinguishes work safe to replay from work tied to a dead process, records worker ownership and preserves ordering within a thread. These mechanisms address recognizable failure modes rather than merely decorating the code with types. <a href="https://github.com/pingdotgg/t3code/blob/af65a55dc/apps/server/src/orchestration-v2/EventSink.ts#L285">EventSink</a>, <a href="https://github.com/pingdotgg/t3code/blob/af65a55dc/apps/server/src/orchestration-v2/EffectOutbox.ts">EffectOutbox</a></p>
+<p>The tests provide unusually concrete support. One command-replay regression seeds <strong>25,000 SQLite events</strong>, checks the returned events, and checks that the query uses the command index. A usage-limit recovery test exercises the production persistence/reconciliation service and repeats the retry to check that the visible continuation is not duplicated. This is better evidence than a large passing-test count. <a href="https://github.com/pingdotgg/t3code/commit/9fba2093e50f208c52d9041c70a793296e311477">Replay regression</a>, <a href="https://github.com/pingdotgg/t3code/commit/240446e2d9625600b0c841faf6bddf367bd26967">Recovery test and implementation</a></p>
+<p>The cost is heavy coordination. The production <code>Orchestrator.ts</code> is <strong>14,607 lines</strong>, with tests elsewhere; <code>ChatView.tsx</code> is 4,075. Typed services clarify many contracts while leaving a very large central decision-maker. The V2 replacement merged roughly 1,900 files and was followed by foundational restart and replay fixes. It was developed over May–October with 823 branch commits, so its size is evidence of integration risk, not an overnight generation binge. <a href="https://github.com/pingdotgg/t3code/blob/af65a55dc/apps/server/src/orchestration-v2/Orchestrator.ts">Orchestrator</a>, <a href="https://github.com/pingdotgg/t3code/pull/2829">V2 replacement</a>, <a href="https://github.com/pingdotgg/t3code/commit/5108c978b1d9a8bd029e5ea96781d8cbc90b3877">Restart follow-up</a></p>
+<p><strong>Team inference:</strong> a broad contributor network under a much smaller architectural and integration center. The history combines many narrowly scoped compatibility fixes with major coordinated architecture. Best candidate for the strongest formal engineering; not the simplest codebase.</p>
+<h2>Paseo: strongest everyday product craft</h2>
+<p>Paseo's history repeatedly attends to things a person notices while using the tool: lost history after reload, chat movement, keyboard clearance, narrow layouts, foreground reconnects and terminal replay. That alone could be superficial polish. The implementation samples show stronger substance.</p>
+<p>The new diff-stream assembler is a small owner with explicit begin/body/end semantics: it rejects inconsistent revisions, ignores stale frames, commits a complete snapshot atomically and reuses unchanged objects. Tests exercise supersession and inheritance of unchanged data; daemon journeys use actual Git repositories and patch contents. The associated PR even records a slower cold-computation sample alongside its wire-size improvement. This is a convincing combination of useful behavior, comprehensible ownership and honest tradeoffs. <a href="https://github.com/getpaseo/paseo/blob/fcde2072abf5378db17db7b805c840df1e68bdde/packages/client/src/diff/stream.ts">Diff stream implementation and tests</a>, <a href="https://github.com/getpaseo/paseo/pull/8907">Change and reported measurements</a></p>
+<p>Paseo also deletes what it replaces: its terminal-renderer cleanup removes the old renderer, settings and drift-check machinery, about 1,800 lines. That matters more than adding another abstraction beside the old one. <a href="https://github.com/getpaseo/paseo/commit/6376f2bf409405b9857c03262381655433a6d0ee">Terminal cleanup</a></p>
+<p>It still has significant lifecycle debt. A foreground heartbeat change was followed by a documented 40-second dead-connection detection case; whole-turn history changes required compatibility and presentation repairs shortly after landing. Current client and agent-manager production modules are about <strong>8,000 and 6,000 lines</strong>, respectively. The small, good components sit inside large coordinators. <a href="https://github.com/getpaseo/paseo/commit/f539ccf1c00f17c2f4b8925fcd1d11d40118583e">Foreground repair</a>, <a href="https://github.com/getpaseo/paseo/commit/ef58ace424089c220b6d42bd618234a2159e3db3">History repair</a>, <a href="https://github.com/getpaseo/paseo/blob/27872a8e/packages/client/src/daemon-client.ts">Client</a></p>
+<p><strong>Team inference:</strong> an exacting central product maintainer, assisted by automation and outside contributors, shaping a multi-device tool through repeated use. Best candidate for product-focused craft and relatively direct local code. Its polish does not establish superior runtime reliability.</p>
+<h2>Paradev: a commercial product team with competent internals</h2>
+<p>Paradev's change mix is visibly commercial: cloud workspaces, onboarding, pricing, billing, organization integrations, migration paths and marketing ship alongside infrastructure. Its cadence is steadier than the recent acceleration in T3 and Orca. Recurring author lanes suggest a small team dividing product, chat/host and cloud/business work; they do not prove organizational titles.</p>
+<p>The sampled internals are generally understandable. Interrupted-chat handling separates a pure reducer for unfinished events, transactional journal writes, and host-level recovery decisions. Browser-extension work separates browsing contexts and checks CRX signatures. A real HTTP/CRX fixture test corrupts a download and verifies that nothing is installed. <a href="https://github.com/ParadevAI/Paradev/blob/b77bc046ee98bbc3ac05c7ae792e630d7e7b73d0/packages/chat-runtime/src/journal/strandedEvents/strandedEvents.ts">Interrupted-event reducer</a>, <a href="https://github.com/ParadevAI/Paradev/commit/4b972edd">Browser-extension implementation</a>, <a href="https://github.com/ParadevAI/Paradev/blob/b77bc046ee98bbc3ac05c7ae792e630d7e7b73d0/apps/desktop/src/main/lib/browser/extension-host/web-store.test.ts">Download tests</a></p>
+<p>Quality is uneven within those same areas. Other security tests assert that patch source contains certain strings; they do not establish runtime denial of an unauthorized request. The 1,242-line <code>LiveSession</code> accumulates interacting queue, steering, replay, cancellation and background-work state. It is locally clearer than Orca's runtime, but carries familiar state-machine pressure. <a href="https://github.com/ParadevAI/Paradev/blob/b77bc046ee98bbc3ac05c7ae792e630d7e7b73d0/packages/chat-runtime/src/sessions/liveSession/liveSession.ts">LiveSession</a></p>
+<p>Browser-extension follow-ups were substantial, but landed before the next version bump. Counting each as a shipped regression would be wrong. One separate revert explicitly says three security PRs merged without sign-off: a concrete process lapse, not evidence that all their work is careless. <a href="https://github.com/ParadevAI/Paradev/commit/4cccb5b3">Extension follow-ups</a>, <a href="https://github.com/ParadevAI/Paradev/commit/e34fb4e2">Next version bump</a>, <a href="https://github.com/ParadevAI/Paradev/commit/c61f8f1a">Sign-off revert</a></p>
+<p><strong>Team inference:</strong> a compact, pragmatic startup team optimizing a business and a product together. More disciplined local code than a “feature factory” label would imply, with integration debt and uneven tests.</p>
+<h2>Loopflow: strong systems thinking, costly foundational churn</h2>
+<p>Loopflow has concrete craft beyond its style guide. It gives agent processes a distinct ID type so the compiler can catch ownership mistakes. It captures a Task's Graph as a definition independent of the run cursor. Its migration checks use real Git histories and SQLite schemas. It removes obsolete mechanisms across code, commands, release artifacts and documentation. <a href="https://github.com/loopflowstudio/loopflow/pull/1840">Process IDs</a>, <a href="https://github.com/loopflowstudio/loopflow/pull/1827">Migration checks</a></p>
+<p>The best recent example removes the Codex relay from the conversation's byte path and records through a side observer. Store loss now affects recording rather than transport. It deletes more code than it adds, and probes use real Codex against a local synthetic model endpoint. The reader-floor removal likewise deletes update vetoes, catalog machinery and hidden commands together. <a href="https://github.com/loopflowstudio/loopflow/pull/1831">Direct Codex connection</a>, <a href="https://github.com/loopflowstudio/loopflow/pull/1830">Reader-floor deletion</a></p>
+<p>The preceding failures matter. The store-loss repair explicitly records that a November 4 installation advanced the store under live sessions and the relay lost conversations. Automatic Desktop conversations then needed a follow-up after 14 of 23 were stuck at trust dialogs and board loading exceeded the intended bound. The follow-up still records providers accumulating after pagination and about 6.96 GB used in its 23-provider run. Those are the PR's reported observations, not measurements repeated in this study. <a href="https://github.com/loopflowstudio/loopflow/pull/1833">Lost-conversation repair</a>, <a href="https://github.com/loopflowstudio/loopflow/pull/1842">Automatic-conversation follow-up</a></p>
+<p>Tests can be ambitious without being affordable: recently introduced world-level Swift suites were removed after rebuilding expensive worlds pushed CI beyond its time limit. That is an honest correction, and also an initial test-design failure. <a href="https://github.com/loopflowstudio/loopflow/pull/1645">World-test removal</a></p>
+<p><strong>Team inference:</strong> one operator using automation to build an increasingly complete operating system for their own work. The feedback loop turns operational pain into models, code, tests and rules. It also lets changes to storage, installation and session ownership outpace integrated acceptance. Loopflow's engineering ambition and its achieved stability should be graded separately. This assessment uses repository evidence, not the extra private incident history available in this checkout.</p>
+<h2>Orca: the strongest warning about uncontrolled complexity</h2>
+<p>Orca's central concern is structural, not its commit rate. Mechanically following superclass imports from <code>OrcaRuntimeWithAgentTransitions</code> reaches the root through <strong>202 classes/modules and 201 inheritance edges</strong>. These files total 37,684 lines including imports and comments. Terminal lifecycle, browser routing, mobile tabs, workspaces and orchestration all contribute to one inherited runtime. Short files do not make these independent components. <a href="https://github.com/stablyai/orca/blob/5fc3b26766a9fc3ba95d8bc72600325f036f0db4/src/main/runtime/orca-runtime.ts">Runtime entry</a>, <a href="https://github.com/stablyai/orca/blob/5fc3b26766a9fc3ba95d8bc72600325f036f0db4/src/main/runtime/construction/orca-runtime-agent-transitions.ts">Chain start</a>, <a href="https://github.com/stablyai/orca/blob/5fc3b26766a9fc3ba95d8bc72600325f036f0db4/src/main/runtime/construction/runtime-construction-services.ts">Chain root</a>, <a href="agent-platform-craft-orca-chain-2026-11-08.json">Recorded chain</a></p>
+<p>That is stronger evidence of poor maintainability than thousands of quick commits. File-splitting and reorganization campaigns may improve navigation while leaving the connected mutable system intact. Orca has the strongest mismatch here between local tidiness and global simplicity.</p>
+<p>Its massive test-pruning campaign is also revealing. Actual deleted examples include source-string checks and mock-return plumbing; a sampled purge removes over 21,000 lines. Deleting those tests is a correction worth crediting. Their accumulated volume is evidence that the development process previously rewarded low-information output. It is not proof that every removed test was useless or that agents authored them. <a href="https://github.com/stablyai/orca/commit/5fc3b2676">Test purge</a>, <a href="https://github.com/stablyai/orca/blob/5fc3b26766a9fc3ba95d8bc72600325f036f0db4/docs/agents-md-refs/test-antipatterns.md">Test policy</a></p>
+<p>There is real craft inside Orca. A duplicate-send fix puts the claim at the shared queue owner and tests remount behavior. Terminal transport work bounds recovery snapshots and tests a fast terminal on a slow link. Failure receipts retain relevant output and redact secrets. These are useful systems improvements, not empty churn. <a href="https://github.com/stablyai/orca/commit/fca1d7b13">Duplicate-send fix</a>, <a href="https://github.com/stablyai/orca/commit/4e66fb551">Backpressure simulation</a>, <a href="https://github.com/stablyai/orca/commit/14492c79c">Failure receipts</a></p>
+<p><strong>Team inference:</strong> a small dominant core operating parallel feature, repair and optimization campaigns over a very broad platform matrix. Of these five, Orca is closest to the requested “slop factory” category at the whole-codebase level: output and maintenance volume have outrun structural clarity. That judgment is about the resulting code and process, not the competence or motives of individual engineers. Its current cleanup work is a countertrend.</p>
+<h2>How autonomous the development flows appear</h2>
+<p><strong>Paseo has the clearest publicly visible bot-operated maintenance loop. Loopflow has the most explicit end-to-end workflow machinery. T3 and Paradev look like supervised agent teams with substantial delegated follow-through. Orca shows coordinated high-volume campaigns, but the evidence does not establish that its high output means more independent decision-making.</strong> Autonomy over implementation is much easier to demonstrate than autonomy over scope, risk or release decisions.</p>
+<table>
+<thead>
+<tr>
+<th>Project</th>
+<th>What the evidence supports</th>
+<th>What still appears directed or is unknown</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Paseo</td>
+<td>Bot-authored fixes, its own two-pass review bot, status updates and bot merges; agent release babysitting after go-ahead</td>
+<td>Private authorization of each bot run is unknown; release scope and publication are explicitly person-directed unless standing authorization exists</td>
+</tr>
+<tr>
+<td>Loopflow</td>
+<td>Graphs cover implementation, review, repair, gate and landing; CI-fix retries and release scheduling are built in; actual PR commits follow those stages</td>
+<td>Repository Wave defaults include human demo/verification steps; no evidence that agents independently choose product direction</td>
+</tr>
+<tr>
+<td>T3</td>
+<td>Agents are told to watch PR events and repair valid findings; automated reviewer infrastructure and nightly releases</td>
+<td>Developer request required before opening PRs; integration concentrated in maintainer accounts; stable release promotion separate</td>
+</tr>
+<tr>
+<td>Orca</td>
+<td>Numbered fleet follow-up sweeps, design variants, queued repair campaigns and hourly preview builds</td>
+<td>Examples include a person choosing the design; stable release is maintainer-managed; configured agent-review service does not establish current use</td>
+</tr>
+<tr>
+<td>Paradev</td>
+<td>Automatic read-only issue triage, Task-to-worker commands, cloud-workspace agent review and main-triggered production deployment</td>
+<td>Instructions reserve push/PR/reply decisions for authorization; desktop releases default to drafts, with explicit headless completion options</td>
+</tr>
+</tbody>
+</table>
+<p>Paseo provides a particularly strong observed example. An external draft-loss report appeared November 8 at 03:59Z; a bot opened a fix at 04:27, posted its own review at 04:29, communicated status back to the report, then merged at 06:10. No human conversation appeared in the inspected PR comments. This establishes a bot-operated chain, though not whether a private human instruction started or approved it. Separately, the release playbook has the agent create a heartbeat every ten minutes and own publication/retries/verification after a release go-ahead. <a href="https://github.com/getpaseo/paseo/issues/9072">Issue #9072</a>, <a href="https://github.com/getpaseo/paseo/pull/9079">PR #9079</a>, <a href="https://github.com/getpaseo/paseo/blob/27872a8e/docs/release.md#L440">Release playbook</a></p>
+<p>Loopflow's autonomy is unusually legible in both specification and execution. <code>auto</code> composes pursuit and delivery; delivery runs gate then <code>land --wait-and-fix</code>. The CI-fix agent is instructed to inspect the exact failed head, repair, verify and re-arm the same PR. PR1831's branch history visibly proceeds through concept review, compression, realignment, demo, gate and repeated CI fixes. All those commits use the same person's Git identity. The repository's <code>code</code> and <code>feature</code> defaults retain interactive demo/verification, so the existence of <code>auto</code> does not mean every Task runs unattended. A scheduled release graph and daily bootstrap exist; repeated release-repair commits establish that this machinery has been exercised, not that its present scheduler state was checked here. <a href="https://github.com/loopflowstudio/loopflow/blob/1c757e9fe2028c0073414dc6826395931a5aa743/rust/loopflow/src/builtins/task/graph/auto.yaml">Auto graph</a>, <a href="https://github.com/loopflowstudio/loopflow/blob/1c757e9fe2028c0073414dc6826395931a5aa743/rust/loopflow/src/builtins/task/graph/deliver.yaml">Delivery graph</a>, <a href="https://github.com/loopflowstudio/loopflow/pull/1831/commits">Observed PR stages</a></p>
+<p>T3 explicitly expects development through T3 and prescribes event-driven PR babysitting: watch, wake on checks/comments/conflicts, validate findings, repair and continue. The same instructions require a developer request before PR creation. Nightly publication checks run twice hourly and publish new work after a six-hour interval; stable promotion is separate. Its ambitious contribution-triage procedure must not be mistaken for proven deployment: CONTRIBUTING explicitly distinguishes the intended rollout from operating automation. <a href="https://github.com/pingdotgg/t3code/blob/af65a55dc/AGENTS.md#L147">Agent instructions</a>, <a href="https://github.com/pingdotgg/t3code/blob/af65a55dc/.github/workflows/release.yml">Release workflow</a>, <a href="https://github.com/pingdotgg/t3code/blob/af65a55dc/CONTRIBUTING.md">Contribution policy</a></p>
+<p>Paradev demonstrates why account labels are insufficient. Its create-PR command assigns <code>superset-home</code> to launch a cloud review workspace and publish a review Page/comment. On PR9432 that account reported a specific resume-mode/model bug, tests and browser checks; later changes carry those fields. This is agent review through an ordinary-looking account, outside the formal review statistic above. Automatic issue triage is read-only; it is not an agent independently deciding to implement every reported issue. Successful main-push deployments were observed, but production-environment approval settings were not inspected. <a href="https://github.com/ParadevAI/Paradev/blob/b77bc046ee98bbc3ac05c7ae792e630d7e7b73d0/.agents/commands/create-pr.md">Create-PR procedure</a>, <a href="https://github.com/ParadevAI/Paradev/pull/9432">Review example</a>, <a href="https://github.com/ParadevAI/Paradev/blob/b77bc046ee98bbc3ac05c7ae792e630d7e7b73d0/.github/workflows/triage-issue.yml">Issue triage</a></p>
+<p>Orca PR39470 identifies numbered items in a fleet follow-up sweep; PR39379 refers to a person's choice among design variants. That supports parallel delegated work with centralized product judgment. Hourly Mac preview release runs were observed under an ordinary account; stable releases remain manually dispatched. Its Pullfrog workflow exists, but recent sampled runs were older/cancelled, so it cannot establish a currently active autonomous review loop. <a href="https://github.com/stablyai/orca/pull/39470">Fleet sweep</a>, <a href="https://github.com/stablyai/orca/pull/39379">Design selection</a>, <a href="https://github.com/stablyai/orca/actions/runs/42474268910">Hourly build workflow and observed run</a>, <a href="https://github.com/stablyai/orca/blob/5fc3b26766a9fc3ba95d8bc72600325f036f0db4/.github/workflows/release-cut.yml">Release cut</a>, <a href="https://github.com/stablyai/orca/blob/5fc3b26766a9fc3ba95d8bc72600325f036f0db4/.github/workflows/pullfrog.yml">Pullfrog workflow</a></p>
+<p><strong>The shared pattern is autonomous execution under concentrated taste and authority.</strong> No inspected evidence establishes autonomous product direction across an entire project. The useful question is how far a delegated outcome travels before another human decision is required, and whether the loop can recover without quietly lowering its quality bar.</p>
+<h2>What dogfooding helps explain</h2>
+<p>Assuming each platform is used to build itself, the history suggests different feedback loops:</p>
+<pre><code class="language-text">Paseo     repeated interaction → notice friction → refine interaction
+T3        broad contributions → integration center → formal recovery contracts
+Paradev   adoption and business needs → product slice → integration follow-ups
+Loopflow  operator failure → new system model → repair and simplify the machinery
+Orca      parallel expansion → compatibility repairs → cleanup campaigns
+</code></pre>
+<p>These are interpretations, not proof of internal working practices. Dogfooding makes frequently used paths highly visible. It can leave first-run setup, older installations, less-used operating systems and recovery after unusual failures underexercised. The builder's environment can be both an excellent test bed and a narrow one.</p>
+<h2>Better comparisons than commit volume</h2>
+<ol>
+<li><strong>Does a change reduce what a maintainer must understand?</strong> Deleting a relay or an obsolete renderer can eliminate a failure mode. Splitting one runtime across 200 inherited pieces changes file size without giving it independent ownership.</li>
+<li><strong>What does a test prove?</strong> Prefer interrupted recovery, duplicate suppression, real query plans and tampered-download behavior over snapshots of source strings or mocked return values.</li>
+<li><strong>How much repair follows a feature, and when does it ship?</strong> A feature-to-repair sequence is informative; a raw fix percentage confuses polish, compatibility work and pre-release integration with escaped defects.</li>
+<li><strong>Who can contribute versus who can integrate?</strong> T3 is broad in authorship yet concentrated at merge time. Paseo's contributor tail and bot identities obscure strong central authorship. Local agent review remains invisible in GitHub review counts.</li>
+<li><strong>What is the unit of change?</strong> In 100 evenly spaced commits per repository, median changed paths are T3 2, Paseo 4, Paradev 7, Orca 7.5 and Loopflow 9.5. These include docs/generated files and are not code-size or quality scores. They help explain why raw commit counts exaggerate throughput differences.</li>
+</ol>
+<p>The consecutive 30-day counts are Paseo 481 / 458 / 639; T3 1,357 / 1,293 / 4,647; Orca 2,308 / 2,601 / 6,721; Paradev 751 / 613 / 646; Loopflow 60 / 228 / 313. These count nonmerge commits reachable from main by committer date. Almost all are mainline squash commits; Paseo has a small merge-history difference. They describe acceleration, not productivity.</p>
+<h2>Scope and sources</h2>
+<p>Approximately 23,000 mainline commits were analyzed mechanically. Qualitative inspection deliberately selected positive and negative examples around persistence, reconnects, lifecycle ownership, performance, browser isolation and code removal; it is not a random defect census. No full applications or test suites were executed, so this study does not rank observed uptime, security, visual polish or customer satisfaction. Test mechanisms were read, not merely inferred from test names. Reported run measurements remain attributed to their PRs.</p>
+<p>Snapshots: Paseo <code>27872a8e86a48a31ee1ed8ec202b4715ecd4155e</code>; T3 <code>af65a55dc</code> (full SHA in evidence); Orca <code>5fc3b26766a9fc3ba95d8bc72600325f036f0db4</code>; Paradev <code>b77bc046ee98bbc3ac05c7ae792e630d7e7b73d0</code>; Loopflow <code>1c757e9fe2028c0073414dc6826395931a5aa743</code>.</p>
+<p>The <a href="agent-platform-craft-evidence-2026-11-08.json">measurement record</a> retains frozen heads, attribution counts, date windows, PR sample numbers, actors and formal-review observations. The <a href="agent-platform-craft-orca-chain-2026-11-08.json">Orca superclass listing</a> retains each observed class, parent and path. Source links above pin the qualitative examples.</p>
+<p>Questions a deeper comparison could resolve:</p>
+<ol>
+<li>Which system best survives the same end-to-end failure exercise: restart mid-turn, reconnect, upgrade, resume and ship?</li>
+<li>Which refactors reduce cross-module ownership and state complexity six weeks later?</li>
+<li>Does contributor breadth translate into independent subsystem stewardship, or mostly contributions through a few integrators?</li>
+</ol>
+<footer>Source and history audit · 8 November 2026 · <a href="agent-platform-craft-2026-11-08.md">Markdown source</a></footer></main></body></html>

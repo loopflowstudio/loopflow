@@ -1,0 +1,1214 @@
+[
+  {
+    "class": "OrcaRuntimeWithAgentTransitions",
+    "base": "OrcaRuntimeWithWindowlessTerminalActivity",
+    "path": "src/main/runtime/construction/orca-runtime-agent-transitions.ts",
+    "lines": 187
+  },
+  {
+    "class": "OrcaRuntimeWithWindowlessTerminalActivity",
+    "base": "OrcaRuntimeWithWslMoveTerminalFacts",
+    "path": "src/main/runtime/sidebar-inputs/orca-runtime-windowless-terminal-activity.ts",
+    "lines": 121
+  },
+  {
+    "class": "OrcaRuntimeWithWslMoveTerminalFacts",
+    "base": "OrcaRuntimeWithClientTerminalScrollback",
+    "path": "src/main/runtime/workspaces/metadata/runtime-wsl-move-terminal-facts.ts",
+    "lines": 31
+  },
+  {
+    "class": "OrcaRuntimeWithClientTerminalScrollback",
+    "base": "OrcaRuntimeWithMigrationCatalog",
+    "path": "src/main/runtime/terminal/output/runtime-client-scrollback.ts",
+    "lines": 29
+  },
+  {
+    "class": "OrcaRuntimeWithMigrationCatalog",
+    "base": "OrcaRuntimeWithResolveExitWaiters",
+    "path": "src/main/runtime/hosts/migration/runtime-migration-catalog.ts",
+    "lines": 179
+  },
+  {
+    "class": "OrcaRuntimeWithResolveExitWaiters",
+    "base": "OrcaRuntimeWithBindPtyIncarnationHandle",
+    "path": "src/main/runtime/terminal/wait/terminal-wait-settlements.ts",
+    "lines": 200
+  },
+  {
+    "class": "OrcaRuntimeWithBindPtyIncarnationHandle",
+    "base": "OrcaRuntimeWithBuildPtyTerminalSummary",
+    "path": "src/main/runtime/terminal/identity/terminal-handle-bindings.ts",
+    "lines": 314
+  },
+  {
+    "class": "OrcaRuntimeWithBuildPtyTerminalSummary",
+    "base": "OrcaRuntimeWithMailboxTerminalIdentity",
+    "path": "src/main/runtime/terminal/query/pty-terminal-summary.ts",
+    "lines": 305
+  },
+  {
+    "class": "OrcaRuntimeWithMailboxTerminalIdentity",
+    "base": "OrcaRuntimeWithGetPtyRecordForPaneKey",
+    "path": "src/main/runtime/orchestration/mailbox/routing/mailbox-terminal-identity.ts",
+    "lines": 83
+  },
+  {
+    "class": "OrcaRuntimeWithGetPtyRecordForPaneKey",
+    "base": "OrcaRuntimeWithPruneMobileSessionTabGroupLayout",
+    "path": "src/main/runtime/orchestration/mailbox/routing/terminal-pane-mail-routing.ts",
+    "lines": 310
+  },
+  {
+    "class": "OrcaRuntimeWithPruneMobileSessionTabGroupLayout",
+    "base": "OrcaRuntimeWithScheduleMobileSessionTabsChanged",
+    "path": "src/main/runtime/session-lifecycle/projection/prune-mobile-session-tab-group-layout.ts",
+    "lines": 314
+  },
+  {
+    "class": "OrcaRuntimeWithScheduleMobileSessionTabsChanged",
+    "base": "OrcaRuntimeWithStoredMobileSnapshotHasStalePreservedTab",
+    "path": "src/main/runtime/session-tabs/session-tabs-change-publication.ts",
+    "lines": 322
+  },
+  {
+    "class": "OrcaRuntimeWithStoredMobileSnapshotHasStalePreservedTab",
+    "base": "OrcaRuntimeWithMergePreservedHeadlessMobileSessionTabs",
+    "path": "src/main/runtime/session-tabs/mobile-session-publication-preservation.ts",
+    "lines": 258
+  },
+  {
+    "class": "OrcaRuntimeWithMergePreservedHeadlessMobileSessionTabs",
+    "base": "OrcaRuntimeWithSyncMobileSessionTabs",
+    "path": "src/main/runtime/session-tabs/mobile-session-preservation.ts",
+    "lines": 248
+  },
+  {
+    "class": "OrcaRuntimeWithSyncMobileSessionTabs",
+    "base": "OrcaRuntimeWithWriteOrchestrationPointerPty",
+    "path": "src/main/runtime/session-tabs/mobile-session-reconciliation.ts",
+    "lines": 277
+  },
+  {
+    "class": "OrcaRuntimeWithWriteOrchestrationPointerPty",
+    "base": "OrcaRuntimeWithRefreshFloatingWorkspacePtyLiveness",
+    "path": "src/main/runtime/orchestration/terminal-authority/write-orchestration-pointer-pty.ts",
+    "lines": 154
+  },
+  {
+    "class": "OrcaRuntimeWithRefreshFloatingWorkspacePtyLiveness",
+    "base": "OrcaRuntimeWithRefreshPtyWorktreeRecordsWithControllerInventory",
+    "path": "src/main/runtime/terminal/lifecycle/floating-session-liveness.ts",
+    "lines": 197
+  },
+  {
+    "class": "OrcaRuntimeWithRefreshPtyWorktreeRecordsWithControllerInventory",
+    "base": "OrcaRuntimeWithPtyControllerInventoryListing",
+    "path": "src/main/runtime/terminal/lifecycle/pty-controller-inventory-refresh.ts",
+    "lines": 285
+  },
+  {
+    "class": "OrcaRuntimeWithPtyControllerInventoryListing",
+    "base": "OrcaRuntimeWithRefreshPtyWorktreeRecordsFromController",
+    "path": "src/main/runtime/terminal/lifecycle/pty-controller-inventory-listing.ts",
+    "lines": 108
+  },
+  {
+    "class": "OrcaRuntimeWithRefreshPtyWorktreeRecordsFromController",
+    "base": "OrcaRuntimeWithRecordPtyWorktree",
+    "path": "src/main/runtime/terminal/lifecycle/pty-worktree-refresh.ts",
+    "lines": 20
+  },
+  {
+    "class": "OrcaRuntimeWithRecordPtyWorktree",
+    "base": "RuntimeWorkspaceRepoScanRefresh",
+    "path": "src/main/runtime/terminal/identity/pty-worktree-record.ts",
+    "lines": 292
+  },
+  {
+    "class": "RuntimeWorkspaceRepoScanRefresh",
+    "base": "RuntimeWorkspaceCatalog",
+    "path": "src/main/runtime/workspaces/catalog/workspace-repo-scan-refresh.ts",
+    "lines": 267
+  },
+  {
+    "class": "RuntimeWorkspaceCatalog",
+    "base": "OrcaRuntimeWithReadKittyFile",
+    "path": "src/main/runtime/workspaces/catalog/workspace-catalog.ts",
+    "lines": 289
+  },
+  {
+    "class": "OrcaRuntimeWithReadKittyFile",
+    "base": "RuntimeWorkspaceSelectors",
+    "path": "src/main/runtime/files/paths/orca-runtime-read-kitty-file.ts",
+    "lines": 51
+  },
+  {
+    "class": "RuntimeWorkspaceSelectors",
+    "base": "RuntimeProjectLaunchContext",
+    "path": "src/main/runtime/workspaces/workspace-selectors.ts",
+    "lines": 309
+  },
+  {
+    "class": "RuntimeProjectLaunchContext",
+    "base": "RuntimeWorktreeLineageOperations",
+    "path": "src/main/runtime/workspaces/startup/runtime-project-launch-context.ts",
+    "lines": 15
+  },
+  {
+    "class": "RuntimeWorktreeLineageOperations",
+    "base": "OrcaRuntimeWithResolveBrowserNetworkExecutionHostForWorktree",
+    "path": "src/main/runtime/workspaces/lineage/runtime-worktree-lineage-operations.ts",
+    "lines": 61
+  },
+  {
+    "class": "OrcaRuntimeWithResolveBrowserNetworkExecutionHostForWorktree",
+    "base": "OrcaRuntimeWithBrowserWorkspaceRouting",
+    "path": "src/main/runtime/terminal/launch/terminal-workspace-scope.ts",
+    "lines": 325
+  },
+  {
+    "class": "OrcaRuntimeWithBrowserWorkspaceRouting",
+    "base": "OrcaRuntimeWithTransitionGraphReloadToTerminalState",
+    "path": "src/main/runtime/browser/client-pages/runtime-browser-workspace-routing.ts",
+    "lines": 84
+  },
+  {
+    "class": "OrcaRuntimeWithTransitionGraphReloadToTerminalState",
+    "base": "OrcaRuntimeWithHasTerminalsForWorktree",
+    "path": "src/main/runtime/session-graph/session-graph-authority.ts",
+    "lines": 243
+  },
+  {
+    "class": "OrcaRuntimeWithHasTerminalsForWorktree",
+    "base": "OrcaRuntimeWithSessionTitleAuthority",
+    "path": "src/main/runtime/session-graph/session-graph-reload-lifecycle.ts",
+    "lines": 241
+  },
+  {
+    "class": "OrcaRuntimeWithSessionTitleAuthority",
+    "base": "OrcaRuntimeWithStopTerminalsForProject",
+    "path": "src/main/runtime/session-tabs/session-title-publisher.ts",
+    "lines": 62
+  },
+  {
+    "class": "OrcaRuntimeWithStopTerminalsForProject",
+    "base": "OrcaRuntimeWithStopExactTerminalsForWorktree",
+    "path": "src/main/runtime/terminal/stop/project-terminal-stop.ts",
+    "lines": 307
+  },
+  {
+    "class": "OrcaRuntimeWithStopExactTerminalsForWorktree",
+    "base": "OrcaRuntimeWithTerminalSleepSnapshot",
+    "path": "src/main/runtime/terminal/stop/worktree-terminal-stop-targets.ts",
+    "lines": 255
+  },
+  {
+    "class": "OrcaRuntimeWithTerminalSleepSnapshot",
+    "base": "OrcaRuntimeWithSleepResolvedWorktreeTerminals",
+    "path": "src/main/runtime/terminal/stop/worktree-terminal-sleep-snapshot.ts",
+    "lines": 46
+  },
+  {
+    "class": "OrcaRuntimeWithSleepResolvedWorktreeTerminals",
+    "base": "OrcaRuntimeWithAgentGeneratedTabTitles",
+    "path": "src/main/runtime/terminal/stop/worktree-terminal-sleep.ts",
+    "lines": 308
+  },
+  {
+    "class": "OrcaRuntimeWithAgentGeneratedTabTitles",
+    "base": "OrcaRuntimeWithWorktreeSleepResumeRecording",
+    "path": "src/main/runtime/terminal/layout/agent-generated-tab-titles-runtime.ts",
+    "lines": 55
+  },
+  {
+    "class": "OrcaRuntimeWithWorktreeSleepResumeRecording",
+    "base": "OrcaRuntimeWithStopTerminalsForWorktree",
+    "path": "src/main/runtime/terminal/stop/worktree-sleep-resume-recording.ts",
+    "lines": 232
+  },
+  {
+    "class": "OrcaRuntimeWithStopTerminalsForWorktree",
+    "base": "OrcaRuntimeWithResolveTerminalSplitSourceAuthority",
+    "path": "src/main/runtime/terminal/stop/worktree-terminal-stop.ts",
+    "lines": 338
+  },
+  {
+    "class": "OrcaRuntimeWithResolveTerminalSplitSourceAuthority",
+    "base": "OrcaRuntimeWithSplitPaneInMain",
+    "path": "src/main/runtime/terminal/launch/terminal-split-source-authority.ts",
+    "lines": 238
+  },
+  {
+    "class": "OrcaRuntimeWithSplitPaneInMain",
+    "base": "OrcaRuntimeWithSplitPtyBackedTerminal",
+    "path": "src/main/runtime/terminal/launch/terminal-split-in-main.ts",
+    "lines": 162
+  },
+  {
+    "class": "OrcaRuntimeWithSplitPtyBackedTerminal",
+    "base": "OrcaRuntimeWithSplitTerminal",
+    "path": "src/main/runtime/terminal/launch/terminal-split-surface.ts",
+    "lines": 231
+  },
+  {
+    "class": "OrcaRuntimeWithSplitTerminal",
+    "base": "OrcaRuntimeWithStopExplicitlyClosedTabPtys",
+    "path": "src/main/runtime/terminal/launch/terminal-split.ts",
+    "lines": 116
+  },
+  {
+    "class": "OrcaRuntimeWithStopExplicitlyClosedTabPtys",
+    "base": "OrcaRuntimeWithExplicitCloseTabPtyStops",
+    "path": "src/main/runtime/session-tabs/explicit-terminal-close-stops.ts",
+    "lines": 307
+  },
+  {
+    "class": "OrcaRuntimeWithExplicitCloseTabPtyStops",
+    "base": "OrcaRuntimeWithFocusTerminal",
+    "path": "src/main/runtime/session-tabs/explicit-terminal-close-pty-stops.ts",
+    "lines": 64
+  },
+  {
+    "class": "OrcaRuntimeWithFocusTerminal",
+    "base": "OrcaRuntimeWithWaitForLeafPtyId",
+    "path": "src/main/runtime/terminal/focus/focus-terminal.ts",
+    "lines": 200
+  },
+  {
+    "class": "OrcaRuntimeWithWaitForLeafPtyId",
+    "base": "OrcaRuntimeWithRestoreLivePairedRendererSessionOwnedMobileTerminals",
+    "path": "src/main/runtime/terminal/view/renderer-terminal-snapshot.ts",
+    "lines": 159
+  },
+  {
+    "class": "OrcaRuntimeWithRestoreLivePairedRendererSessionOwnedMobileTerminals",
+    "base": "OrcaRuntimeWithWaitForMobileTerminalSurface",
+    "path": "src/main/runtime/session-tabs/renderer-session-terminal-rescue.ts",
+    "lines": 167
+  },
+  {
+    "class": "OrcaRuntimeWithWaitForMobileTerminalSurface",
+    "base": "OrcaRuntimeWithCreateRuntimeOwnedMobileSessionTerminal",
+    "path": "src/main/runtime/terminal/view/mobile-terminal-surface.ts",
+    "lines": 223
+  },
+  {
+    "class": "OrcaRuntimeWithCreateRuntimeOwnedMobileSessionTerminal",
+    "base": "OrcaRuntimeWithResolveMobileSessionTerminalCommand",
+    "path": "src/main/runtime/terminal/launch/mobile-terminal-owned-create.ts",
+    "lines": 308
+  },
+  {
+    "class": "OrcaRuntimeWithResolveMobileSessionTerminalCommand",
+    "base": "OrcaRuntimeWithRunCreateMobileSessionTerminal",
+    "path": "src/main/runtime/terminal/launch/mobile-terminal-startup.ts",
+    "lines": 169
+  },
+  {
+    "class": "OrcaRuntimeWithRunCreateMobileSessionTerminal",
+    "base": "OrcaRuntimeWithMobileChatForkCreate",
+    "path": "src/main/runtime/terminal/launch/mobile-terminal-renderer-create.ts",
+    "lines": 308
+  },
+  {
+    "class": "OrcaRuntimeWithMobileChatForkCreate",
+    "base": "OrcaRuntimeWithCreateMobileSessionTerminal",
+    "path": "src/main/runtime/terminal/launch/mobile-terminal-chat-fork-create.ts",
+    "lines": 241
+  },
+  {
+    "class": "OrcaRuntimeWithCreateMobileSessionTerminal",
+    "base": "OrcaRuntimeWithFailedStartPanes",
+    "path": "src/main/runtime/terminal/launch/mobile-terminal-create.ts",
+    "lines": 199
+  },
+  {
+    "class": "OrcaRuntimeWithFailedStartPanes",
+    "base": "OrcaRuntimeWithCreateTerminal",
+    "path": "src/main/runtime/terminal/launch/failed-start-pane.ts",
+    "lines": 215
+  },
+  {
+    "class": "OrcaRuntimeWithCreateTerminal",
+    "base": "OrcaRuntimeWithTerminalCreateDeduplication",
+    "path": "src/main/runtime/terminal/launch/terminal-create.ts",
+    "lines": 312
+  },
+  {
+    "class": "OrcaRuntimeWithTerminalCreateDeduplication",
+    "base": "OrcaRuntimeWithCreateAgentSession",
+    "path": "src/main/runtime/terminal/launch/terminal-create-deduplication.ts",
+    "lines": 278
+  },
+  {
+    "class": "OrcaRuntimeWithCreateAgentSession",
+    "base": "OrcaRuntimeWithGetAgentSessionExecutionNamespace",
+    "path": "src/main/runtime/session-construction/agent-session/orca-runtime-create-agent-session.ts",
+    "lines": 281
+  },
+  {
+    "class": "OrcaRuntimeWithGetAgentSessionExecutionNamespace",
+    "base": "OrcaRuntimeWithResolveWorktreeRemovalTarget",
+    "path": "src/main/runtime/session-construction/agent-session/get-agent-session-execution-namespace.ts",
+    "lines": 187
+  },
+  {
+    "class": "OrcaRuntimeWithResolveWorktreeRemovalTarget",
+    "base": "RuntimeAgentLaunchPreparation",
+    "path": "src/main/runtime/workspaces/workspace-removal-target.ts",
+    "lines": 244
+  },
+  {
+    "class": "RuntimeAgentLaunchPreparation",
+    "base": "RuntimeTerminalNames",
+    "path": "src/main/runtime/terminal/launch/runtime-agent-launch-preparation.ts",
+    "lines": 28
+  },
+  {
+    "class": "RuntimeTerminalNames",
+    "base": "OrcaRuntimeWithRemoveManagedWorktree",
+    "path": "src/main/runtime/terminal/title/runtime-terminal-names.ts",
+    "lines": 78
+  },
+  {
+    "class": "OrcaRuntimeWithRemoveManagedWorktree",
+    "base": "RuntimeWorkspaceMetadata",
+    "path": "src/main/runtime/workspaces/removal/workspace-removal.ts",
+    "lines": 305
+  },
+  {
+    "class": "RuntimeWorkspaceMetadata",
+    "base": "RuntimeWorktreeReviewBase",
+    "path": "src/main/runtime/workspaces/workspace-metadata.ts",
+    "lines": 112
+  },
+  {
+    "class": "RuntimeWorktreeReviewBase",
+    "base": "RuntimeRemoteFetchOperations",
+    "path": "src/main/runtime/workspaces/metadata/runtime-worktree-review-base.ts",
+    "lines": 32
+  },
+  {
+    "class": "RuntimeRemoteFetchOperations",
+    "base": "RuntimeProvisionedWorkspaceAdoption",
+    "path": "src/main/runtime/repositories/runtime-remote-fetch-operations.ts",
+    "lines": 53
+  },
+  {
+    "class": "RuntimeProvisionedWorkspaceAdoption",
+    "base": "OrcaRuntimeWithCreateManagedWorktree",
+    "path": "src/main/runtime/workspaces/creation/runtime-provisioned-workspace-adoption.ts",
+    "lines": 56
+  },
+  {
+    "class": "OrcaRuntimeWithCreateManagedWorktree",
+    "base": "OrcaRuntimeWithGetWorktreeTerminalProvisioningHost",
+    "path": "src/main/runtime/workspaces/creation/workspace-creation.ts",
+    "lines": 301
+  },
+  {
+    "class": "OrcaRuntimeWithGetWorktreeTerminalProvisioningHost",
+    "base": "OrcaRuntimeWithActivateManagedWorktree",
+    "path": "src/main/runtime/workspaces/startup/workspace-terminal-provisioning.ts",
+    "lines": 184
+  },
+  {
+    "class": "OrcaRuntimeWithActivateManagedWorktree",
+    "base": "OrcaRuntimeWithForegroundInspection",
+    "path": "src/main/runtime/workspaces/startup/workspace-activation.ts",
+    "lines": 296
+  },
+  {
+    "class": "OrcaRuntimeWithForegroundInspection",
+    "base": "OrcaRuntimeWithListManagedWorktrees",
+    "path": "src/main/runtime/workspaces/startup/workspace-foreground-inspection.ts",
+    "lines": 48
+  },
+  {
+    "class": "OrcaRuntimeWithListManagedWorktrees",
+    "base": "RuntimeWorkspacePortOperations",
+    "path": "src/main/runtime/workspaces/managed-workspace-operations.ts",
+    "lines": 198
+  },
+  {
+    "class": "RuntimeWorkspacePortOperations",
+    "base": "RuntimeWorkspaceSleepOperations",
+    "path": "src/main/runtime/workspaces/ports/runtime-workspace-port-operations.ts",
+    "lines": 70
+  },
+  {
+    "class": "RuntimeWorkspaceSleepOperations",
+    "base": "OrcaRuntimeWithRestoreStructuredAgentSessionTabsOnce",
+    "path": "src/main/runtime/workspaces/sleep/runtime-workspace-sleep-operations.ts",
+    "lines": 107
+  },
+  {
+    "class": "OrcaRuntimeWithRestoreStructuredAgentSessionTabsOnce",
+    "base": "OrcaRuntimeWithGetStructuredAgentSessionCreateSupport",
+    "path": "src/main/runtime/session-tabs/structured-session-tab-restoration.ts",
+    "lines": 298
+  },
+  {
+    "class": "OrcaRuntimeWithGetStructuredAgentSessionCreateSupport",
+    "base": "StructuredSessionWorkspaceScope",
+    "path": "src/main/runtime/session-tabs/structured-session-create-support.ts",
+    "lines": 316
+  },
+  {
+    "class": "StructuredSessionWorkspaceScope",
+    "base": "OrcaRuntimeWithStructuredSessionAccountHome",
+    "path": "src/main/runtime/session-tabs/structured-session-workspace-scope.ts",
+    "lines": 154
+  },
+  {
+    "class": "OrcaRuntimeWithStructuredSessionAccountHome",
+    "base": "OrcaRuntimeWithStructuredSessionCliWriterHost",
+    "path": "src/main/runtime/session-tabs/structured-session-account-home.ts",
+    "lines": 72
+  },
+  {
+    "class": "OrcaRuntimeWithStructuredSessionCliWriterHost",
+    "base": "OrcaRuntimeWithGetWorktreePs",
+    "path": "src/main/runtime/session-tabs/structured-session-cli-writer-host.ts",
+    "lines": 112
+  },
+  {
+    "class": "OrcaRuntimeWithGetWorktreePs",
+    "base": "RuntimeChatWorkerEvents",
+    "path": "src/main/runtime/workspaces/process-listing/workspace-process-listing.ts",
+    "lines": 312
+  },
+  {
+    "class": "RuntimeChatWorkerEvents",
+    "base": "RuntimeStructuredAgentHost",
+    "path": "src/main/runtime/orchestration/workers/turn-stops/chat-worker-runtime-events.ts",
+    "lines": 23
+  },
+  {
+    "class": "RuntimeStructuredAgentHost",
+    "base": "OrcaRuntimeWithStartTuiIdleVisibleReadProbe",
+    "path": "src/main/runtime/agent-session/installation/runtime-structured-agent-host.ts",
+    "lines": 132
+  },
+  {
+    "class": "OrcaRuntimeWithStartTuiIdleVisibleReadProbe",
+    "base": "OrcaRuntimeWithCreateAgentPromptRenderGate",
+    "path": "src/main/runtime/terminal/wait/terminal-wait-visible-probe.ts",
+    "lines": 173
+  },
+  {
+    "class": "OrcaRuntimeWithCreateAgentPromptRenderGate",
+    "base": "OrcaRuntimeWithSubmitTerminalAgentPrompt",
+    "path": "src/main/runtime/terminal/input/terminal-agent-prompt-render.ts",
+    "lines": 223
+  },
+  {
+    "class": "OrcaRuntimeWithSubmitTerminalAgentPrompt",
+    "base": "OrcaRuntimeWithWriteTerminalAgentPrompt",
+    "path": "src/main/runtime/terminal/input/terminal-agent-prompt-submit.ts",
+    "lines": 98
+  },
+  {
+    "class": "OrcaRuntimeWithWriteTerminalAgentPrompt",
+    "base": "OrcaRuntimeWithResubmitHeldAgentPrompt",
+    "path": "src/main/runtime/terminal/input/terminal-agent-prompt.ts",
+    "lines": 310
+  },
+  {
+    "class": "OrcaRuntimeWithResubmitHeldAgentPrompt",
+    "base": "OrcaRuntimeWithTitlelessPaneAgentIdentity",
+    "path": "src/main/runtime/terminal/input/terminal-agent-prompt-resubmit.ts",
+    "lines": 108
+  },
+  {
+    "class": "OrcaRuntimeWithTitlelessPaneAgentIdentity",
+    "base": "OrcaRuntimeWithResolveAuthoritativeTerminalWaitPermission",
+    "path": "src/main/runtime/terminal/wait/titleless-pane-agent-identity.ts",
+    "lines": 33
+  },
+  {
+    "class": "OrcaRuntimeWithResolveAuthoritativeTerminalWaitPermission",
+    "base": "OrcaRuntimeWithAgentPromptRequestCorrelation",
+    "path": "src/main/runtime/terminal/wait/terminal-wait-permission.ts",
+    "lines": 330
+  },
+  {
+    "class": "OrcaRuntimeWithAgentPromptRequestCorrelation",
+    "base": "OrcaRuntimeWithSerializeAgentPromptSubmission",
+    "path": "src/main/runtime/terminal/input/orca-runtime-agent-prompt-request-correlation.ts",
+    "lines": 129
+  },
+  {
+    "class": "OrcaRuntimeWithSerializeAgentPromptSubmission",
+    "base": "OrcaRuntimeWithPluginHookedTerminalInput",
+    "path": "src/main/runtime/terminal/input/terminal-agent-status-and-submission.ts",
+    "lines": 319
+  },
+  {
+    "class": "OrcaRuntimeWithPluginHookedTerminalInput",
+    "base": "OrcaRuntimeWithControllerKnowsPtyIsLive",
+    "path": "src/main/runtime/terminal/input/terminal-plugin-hooked-input.ts",
+    "lines": 77
+  },
+  {
+    "class": "OrcaRuntimeWithControllerKnowsPtyIsLive",
+    "base": "OrcaRuntimeWithResolveTerminalPane",
+    "path": "src/main/runtime/terminal/input/terminal-input-dispatch.ts",
+    "lines": 329
+  },
+  {
+    "class": "OrcaRuntimeWithResolveTerminalPane",
+    "base": "OrcaRuntimeWithRestoredHandlePaneStart",
+    "path": "src/main/runtime/terminal/recovery/resolve-terminal-pane.ts",
+    "lines": 305
+  },
+  {
+    "class": "OrcaRuntimeWithRestoredHandlePaneStart",
+    "base": "OrcaRuntimeWithGetTerminalInteractiveWait",
+    "path": "src/main/runtime/terminal/surface/restored-handle-pane-start.ts",
+    "lines": 77
+  },
+  {
+    "class": "OrcaRuntimeWithGetTerminalInteractiveWait",
+    "base": "OrcaRuntimeWithAdoptTerminalOrphansFromInventory",
+    "path": "src/main/runtime/terminal/wait/terminal-interactive-wait.ts",
+    "lines": 322
+  },
+  {
+    "class": "OrcaRuntimeWithAdoptTerminalOrphansFromInventory",
+    "base": "OrcaRuntimeWithSubscribeToTerminalResize",
+    "path": "src/main/runtime/terminal/adoption/adopt-terminal-orphans-from-inventory.ts",
+    "lines": 281
+  },
+  {
+    "class": "OrcaRuntimeWithSubscribeToTerminalResize",
+    "base": "OrcaRuntimeWithApplyMobileDisplayMode",
+    "path": "src/main/runtime/terminal/layout/terminal-resize-listeners.ts",
+    "lines": 275
+  },
+  {
+    "class": "OrcaRuntimeWithApplyMobileDisplayMode",
+    "base": "OrcaRuntimeWithHandleMobileUnsubscribe",
+    "path": "src/main/runtime/terminal/layout/terminal-display-mode.ts",
+    "lines": 122
+  },
+  {
+    "class": "OrcaRuntimeWithHandleMobileUnsubscribe",
+    "base": "OrcaRuntimeWithHandleMobileSubscribeInternal",
+    "path": "src/main/runtime/terminal/layout/mobile-terminal-unsubscribe.ts",
+    "lines": 131
+  },
+  {
+    "class": "OrcaRuntimeWithHandleMobileSubscribeInternal",
+    "base": "OrcaRuntimeWithHandleMobileSubscribe",
+    "path": "src/main/runtime/terminal/layout/mobile-terminal-subscribe-internal.ts",
+    "lines": 143
+  },
+  {
+    "class": "OrcaRuntimeWithHandleMobileSubscribe",
+    "base": "OrcaRuntimeWithApplyLayout",
+    "path": "src/main/runtime/terminal/layout/mobile-terminal-subscribe.ts",
+    "lines": 24
+  },
+  {
+    "class": "OrcaRuntimeWithApplyLayout",
+    "base": "OrcaRuntimeWithPickMostRecentActor",
+    "path": "src/main/runtime/terminal/layout/terminal-layout-application.ts",
+    "lines": 180
+  },
+  {
+    "class": "OrcaRuntimeWithPickMostRecentActor",
+    "base": "OrcaRuntimeWithReclaimTerminalForDesktop",
+    "path": "src/main/runtime/terminal/layout/terminal-layout-queue.ts",
+    "lines": 150
+  },
+  {
+    "class": "OrcaRuntimeWithReclaimTerminalForDesktop",
+    "base": "OrcaRuntimeWithMobileTookFloor",
+    "path": "src/main/runtime/terminal/layout/terminal-desktop-reclaim.ts",
+    "lines": 141
+  },
+  {
+    "class": "OrcaRuntimeWithMobileTookFloor",
+    "base": "OrcaRuntimeWithMarkPtyLivenessUnverifiable",
+    "path": "src/main/runtime/terminal/layout/mobile-terminal-activity.ts",
+    "lines": 108
+  },
+  {
+    "class": "OrcaRuntimeWithMarkPtyLivenessUnverifiable",
+    "base": "OrcaRuntimeWithOnPtyExit",
+    "path": "src/main/runtime/terminal/layout/terminal-input-floor.ts",
+    "lines": 288
+  },
+  {
+    "class": "OrcaRuntimeWithOnPtyExit",
+    "base": "OrcaRuntimeWithOnClientDisconnected",
+    "path": "src/main/runtime/terminal/lifecycle/pty-exit-lifecycle.ts",
+    "lines": 340
+  },
+  {
+    "class": "OrcaRuntimeWithOnClientDisconnected",
+    "base": "OrcaRuntimeWithHasRecentTerminalOutputPath",
+    "path": "src/main/runtime/terminal/layout/terminal-client-disconnect.ts",
+    "lines": 159
+  },
+  {
+    "class": "OrcaRuntimeWithHasRecentTerminalOutputPath",
+    "base": "OrcaRuntimeWithGetOrchestrationDispatchAuthority",
+    "path": "src/main/runtime/terminal/output/terminal-output-path.ts",
+    "lines": 163
+  },
+  {
+    "class": "OrcaRuntimeWithGetOrchestrationDispatchAuthority",
+    "base": "OrcaRuntimeWithVerifyOrchestrationCompatibilityCaller",
+    "path": "src/main/runtime/terminal/output/terminal-orchestration-authority.ts",
+    "lines": 327
+  },
+  {
+    "class": "OrcaRuntimeWithVerifyOrchestrationCompatibilityCaller",
+    "base": "OrcaRuntimeWithSerializeHeadlessTerminalBuffer",
+    "path": "src/main/runtime/orchestration/terminal-authority/verify-orchestration-compatibility-caller.ts",
+    "lines": 210
+  },
+  {
+    "class": "OrcaRuntimeWithSerializeHeadlessTerminalBuffer",
+    "base": "OrcaRuntimeWithRestoredAgentDialogScreen",
+    "path": "src/main/runtime/terminal/output/headless-buffer-snapshot.ts",
+    "lines": 200
+  },
+  {
+    "class": "OrcaRuntimeWithRestoredAgentDialogScreen",
+    "base": "OrcaRuntimeWithVisibleSnapshotPreview",
+    "path": "src/main/runtime/terminal/output/restored-agent-dialog-screen.ts",
+    "lines": 73
+  },
+  {
+    "class": "OrcaRuntimeWithVisibleSnapshotPreview",
+    "base": "OrcaRuntimeWithCaptureProviderTerminalBuffer",
+    "path": "src/main/runtime/terminal/output/terminal-visible-state.ts",
+    "lines": 278
+  },
+  {
+    "class": "OrcaRuntimeWithCaptureProviderTerminalBuffer",
+    "base": "OrcaRuntimeWithSerializeTerminalBufferFromAvailableState",
+    "path": "src/main/runtime/terminal/output/provider-buffer-capture.ts",
+    "lines": 275
+  },
+  {
+    "class": "OrcaRuntimeWithSerializeTerminalBufferFromAvailableState",
+    "base": "OrcaRuntimeWithCreatePtyHeadlessTerminalState",
+    "path": "src/main/runtime/terminal/output/terminal-buffer-selection.ts",
+    "lines": 177
+  },
+  {
+    "class": "OrcaRuntimeWithCreatePtyHeadlessTerminalState",
+    "base": "OrcaRuntimeWithMaybeHydrateHeadlessFromRenderer",
+    "path": "src/main/runtime/terminal/output/headless-terminal-state.ts",
+    "lines": 269
+  },
+  {
+    "class": "OrcaRuntimeWithMaybeHydrateHeadlessFromRenderer",
+    "base": "OrcaRuntimeWithSerializeMainTerminalBuffer",
+    "path": "src/main/runtime/terminal/output/headless-terminal-hydration.ts",
+    "lines": 293
+  },
+  {
+    "class": "OrcaRuntimeWithSerializeMainTerminalBuffer",
+    "base": "OrcaRuntimeWithNotifyRemoteTerminalViewPresenceChanged",
+    "path": "src/main/runtime/terminal/output/terminal-buffer-operations.ts",
+    "lines": 311
+  },
+  {
+    "class": "OrcaRuntimeWithNotifyRemoteTerminalViewPresenceChanged",
+    "base": "OrcaRuntimeWithRecordAgentPromptLifecycleState",
+    "path": "src/main/runtime/terminal/layout/terminal-view-presence.ts",
+    "lines": 284
+  },
+  {
+    "class": "OrcaRuntimeWithRecordAgentPromptLifecycleState",
+    "base": "OrcaRuntimeWithCreateTerminalSideEffectCommandCodeDetector",
+    "path": "src/main/runtime/terminal/output/terminal-output-generation.ts",
+    "lines": 256
+  },
+  {
+    "class": "OrcaRuntimeWithCreateTerminalSideEffectCommandCodeDetector",
+    "base": "OrcaRuntimeWithApplyTrackedPtyTitle",
+    "path": "src/main/runtime/terminal/output/terminal-derived-agent-facts.ts",
+    "lines": 300
+  },
+  {
+    "class": "OrcaRuntimeWithApplyTrackedPtyTitle",
+    "base": "OrcaRuntimeWithGetUnpersistedTrackedTitleForPty",
+    "path": "src/main/runtime/terminal/output/terminal-title-observation.ts",
+    "lines": 316
+  },
+  {
+    "class": "OrcaRuntimeWithGetUnpersistedTrackedTitleForPty",
+    "base": "OrcaRuntimeWithEmitDaemonPtyTransientFact",
+    "path": "src/main/runtime/terminal/output/terminal-title-tracker.ts",
+    "lines": 209
+  },
+  {
+    "class": "OrcaRuntimeWithEmitDaemonPtyTransientFact",
+    "base": "OrcaRuntimeWithScheduleWaitBlockedCheck",
+    "path": "src/main/runtime/terminal/output/terminal-transient-facts.ts",
+    "lines": 225
+  },
+  {
+    "class": "OrcaRuntimeWithScheduleWaitBlockedCheck",
+    "base": "OrcaRuntimeWithOnPtyData",
+    "path": "src/main/runtime/terminal/wait/terminal-wait-blocked-checks.ts",
+    "lines": 235
+  },
+  {
+    "class": "OrcaRuntimeWithOnPtyData",
+    "base": "OrcaRuntimeWithPreparePtyExecutionContext",
+    "path": "src/main/runtime/terminal/output/pty-output-ingestion.ts",
+    "lines": 323
+  },
+  {
+    "class": "OrcaRuntimeWithPreparePtyExecutionContext",
+    "base": "OrcaRuntimeWithRegisterPty",
+    "path": "src/main/runtime/terminal/launch/terminal-execution-context.ts",
+    "lines": 56
+  },
+  {
+    "class": "OrcaRuntimeWithRegisterPty",
+    "base": "OrcaRuntimeWithInvalidateAllHandlesForPty",
+    "path": "src/main/runtime/terminal/lifecycle/pty-registration.ts",
+    "lines": 296
+  },
+  {
+    "class": "OrcaRuntimeWithInvalidateAllHandlesForPty",
+    "base": "OrcaRuntimeWithResolveKnownWorkspaceFileTarget",
+    "path": "src/main/runtime/terminal/lifecycle/pty-handle-invalidation.ts",
+    "lines": 197
+  },
+  {
+    "class": "OrcaRuntimeWithResolveKnownWorkspaceFileTarget",
+    "base": "RuntimePreallocatedTerminalHandles",
+    "path": "src/main/runtime/workspaces/known-workspace-file-target.ts",
+    "lines": 107
+  },
+  {
+    "class": "RuntimePreallocatedTerminalHandles",
+    "base": "RuntimeMobileSessionTabSubscriptions",
+    "path": "src/main/runtime/terminal/identity/preallocated-terminal-handles.ts",
+    "lines": 139
+  },
+  {
+    "class": "RuntimeMobileSessionTabSubscriptions",
+    "base": "RuntimeWorkspaceFileTargets",
+    "path": "src/main/runtime/session-tabs/mobile-session-tab-subscriptions.ts",
+    "lines": 44
+  },
+  {
+    "class": "RuntimeWorkspaceFileTargets",
+    "base": "RuntimeMarkdownTabOperations",
+    "path": "src/main/runtime/workspaces/workspace-file-session-targets.ts",
+    "lines": 105
+  },
+  {
+    "class": "RuntimeMarkdownTabOperations",
+    "base": "RuntimeMobileSessionTabOrder",
+    "path": "src/main/runtime/files/paths/runtime-markdown-tab-operations.ts",
+    "lines": 87
+  },
+  {
+    "class": "RuntimeMobileSessionTabOrder",
+    "base": "RuntimeHeadlessTerminalTabTitles",
+    "path": "src/main/runtime/session-tabs/mobile-session-tab-order.ts",
+    "lines": 110
+  },
+  {
+    "class": "RuntimeHeadlessTerminalTabTitles",
+    "base": "RuntimeHeadlessTabGroups",
+    "path": "src/main/runtime/session-tabs/headless-terminal-tab-titles.ts",
+    "lines": 40
+  },
+  {
+    "class": "RuntimeHeadlessTabGroups",
+    "base": "RuntimeHeadlessTabProperties",
+    "path": "src/main/runtime/session-tabs/headless-tab-group-moves.ts",
+    "lines": 214
+  },
+  {
+    "class": "RuntimeHeadlessTabProperties",
+    "base": "OrcaRuntimeWithHeadlessPaneMoveToNewTab",
+    "path": "src/main/runtime/session-tabs/headless-tab-properties.ts",
+    "lines": 300
+  },
+  {
+    "class": "OrcaRuntimeWithHeadlessPaneMoveToNewTab",
+    "base": "OrcaRuntimeWithCloseHeadlessMobileTerminalTab",
+    "path": "src/main/runtime/session-tabs/headless-pane-move-to-new-tab.ts",
+    "lines": 159
+  },
+  {
+    "class": "OrcaRuntimeWithCloseHeadlessMobileTerminalTab",
+    "base": "OrcaRuntimeWithMainLayoutTabMoves",
+    "path": "src/main/runtime/session-tabs/headless-terminal-tab-close.ts",
+    "lines": 253
+  },
+  {
+    "class": "OrcaRuntimeWithMainLayoutTabMoves",
+    "base": "OrcaRuntimeWithMainLayoutRenames",
+    "path": "src/main/runtime/session-tabs/main-layout-session-tab-move.ts",
+    "lines": 125
+  },
+  {
+    "class": "OrcaRuntimeWithMainLayoutRenames",
+    "base": "OrcaRuntimeWithMainLayoutAgentLaunchTabs",
+    "path": "src/main/runtime/session-tabs/main-layout-renames.ts",
+    "lines": 196
+  },
+  {
+    "class": "OrcaRuntimeWithMainLayoutAgentLaunchTabs",
+    "base": "OrcaRuntimeWithCloseStructuredAgentSessionTab",
+    "path": "src/main/runtime/session-tabs/main-layout-agent-launch-tabs.ts",
+    "lines": 139
+  },
+  {
+    "class": "OrcaRuntimeWithCloseStructuredAgentSessionTab",
+    "base": "OrcaRuntimeWithStructuredSessionTabProjection",
+    "path": "src/main/runtime/session-tabs/structured-session-tab-close.ts",
+    "lines": 326
+  },
+  {
+    "class": "OrcaRuntimeWithStructuredSessionTabProjection",
+    "base": "OrcaRuntimeWithCloseMobileSessionTab",
+    "path": "src/main/runtime/session-tabs/restored-chat-tab-changes.ts",
+    "lines": 123
+  },
+  {
+    "class": "OrcaRuntimeWithCloseMobileSessionTab",
+    "base": "OrcaRuntimeWithCloseMobileRowInMainLayout",
+    "path": "src/main/runtime/session-lifecycle/close/close-mobile-session-tab.ts",
+    "lines": 320
+  },
+  {
+    "class": "OrcaRuntimeWithCloseMobileRowInMainLayout",
+    "base": "OrcaRuntimeWithRefuseUnattributedMobileSessionTabClose",
+    "path": "src/main/runtime/session-lifecycle/close/close-mobile-row-in-main-layout.ts",
+    "lines": 87
+  },
+  {
+    "class": "OrcaRuntimeWithRefuseUnattributedMobileSessionTabClose",
+    "base": "OrcaRuntimeWithResumeAgentSessionInWorkspace",
+    "path": "src/main/runtime/session-lifecycle/close/refuse-unattributed-mobile-session-tab-close.ts",
+    "lines": 30
+  },
+  {
+    "class": "OrcaRuntimeWithResumeAgentSessionInWorkspace",
+    "base": "OrcaRuntimeWithAgentSessionResumeOwnership",
+    "path": "src/main/runtime/session-lifecycle/projection/resume-agent-session-in-workspace.ts",
+    "lines": 204
+  },
+  {
+    "class": "OrcaRuntimeWithAgentSessionResumeOwnership",
+    "base": "OrcaRuntimeWithApplyMobileSessionTabNavigation",
+    "path": "src/main/runtime/session-lifecycle/projection/agent-session-resume-ownership.ts",
+    "lines": 217
+  },
+  {
+    "class": "OrcaRuntimeWithApplyMobileSessionTabNavigation",
+    "base": "OrcaRuntimeWithPerformMobileSessionPtyRecordsRefresh",
+    "path": "src/main/runtime/session-lifecycle/projection/apply-mobile-session-tab-navigation.ts",
+    "lines": 254
+  },
+  {
+    "class": "OrcaRuntimeWithPerformMobileSessionPtyRecordsRefresh",
+    "base": "OrcaRuntimeWithRestoredPaneStart",
+    "path": "src/main/runtime/session-lifecycle/projection/perform-mobile-session-pty-records-refresh.ts",
+    "lines": 319
+  },
+  {
+    "class": "OrcaRuntimeWithRestoredPaneStart",
+    "base": "OrcaRuntimeWithBuildHeadlessMobileSessionBrowserTabs",
+    "path": "src/main/runtime/session-lifecycle/projection/restored-pane-materialize.ts",
+    "lines": 333
+  },
+  {
+    "class": "OrcaRuntimeWithBuildHeadlessMobileSessionBrowserTabs",
+    "base": "OrcaRuntimeWithPersistTerminalSurfaceRetirements",
+    "path": "src/main/runtime/session-lifecycle/projection/build-headless-mobile-session-browser-tabs.ts",
+    "lines": 332
+  },
+  {
+    "class": "OrcaRuntimeWithPersistTerminalSurfaceRetirements",
+    "base": "OrcaRuntimeWithTouchMobileSessionTabsForWorktree",
+    "path": "src/main/runtime/session-tabs/terminal-surface-retirements.ts",
+    "lines": 200
+  },
+  {
+    "class": "OrcaRuntimeWithTouchMobileSessionTabsForWorktree",
+    "base": "OrcaRuntimeWithPublishPtyBackedMobileSessionTerminal",
+    "path": "src/main/runtime/session-tabs/mobile-session-membership.ts",
+    "lines": 184
+  },
+  {
+    "class": "OrcaRuntimeWithPublishPtyBackedMobileSessionTerminal",
+    "base": "OrcaRuntimeWithHasLiveOrPersistedServeOrSshOwnedPtyBinding",
+    "path": "src/main/runtime/session-tabs/pty-backed-session-publication.ts",
+    "lines": 225
+  },
+  {
+    "class": "OrcaRuntimeWithHasLiveOrPersistedServeOrSshOwnedPtyBinding",
+    "base": "OrcaRuntimeWithReconcileHeadlessMobileSessionBrowserTabs",
+    "path": "src/main/runtime/session-lifecycle/close/has-live-or-persisted-serve-or-ssh-owned-pty-binding.ts",
+    "lines": 163
+  },
+  {
+    "class": "OrcaRuntimeWithReconcileHeadlessMobileSessionBrowserTabs",
+    "base": "OrcaRuntimeWithHydrateHeadlessMobileSessionTabsFromWorkspaceSession",
+    "path": "src/main/runtime/session-lifecycle/projection/reconcile-headless-mobile-session-browser-tabs.ts",
+    "lines": 291
+  },
+  {
+    "class": "OrcaRuntimeWithHydrateHeadlessMobileSessionTabsFromWorkspaceSession",
+    "base": "RuntimeSessionTabsInventoryPublication",
+    "path": "src/main/runtime/session-tabs/mobile-session-hydration.ts",
+    "lines": 311
+  },
+  {
+    "class": "RuntimeSessionTabsInventoryPublication",
+    "base": "OrcaRuntimeWithCollectMobileVisibleGraphChangedWorktrees",
+    "path": "src/main/runtime/session-tabs/session-tabs-inventory-publication.ts",
+    "lines": 65
+  },
+  {
+    "class": "OrcaRuntimeWithCollectMobileVisibleGraphChangedWorktrees",
+    "base": "OrcaRuntimeWithSyncWindowGraph",
+    "path": "src/main/runtime/session-tabs/session-tabs-inventory.ts",
+    "lines": 332
+  },
+  {
+    "class": "OrcaRuntimeWithSyncWindowGraph",
+    "base": "OrcaRuntimeWithAdmitWindowPublisher",
+    "path": "src/main/runtime/session-graph/session-window-graph.ts",
+    "lines": 312
+  },
+  {
+    "class": "OrcaRuntimeWithAdmitWindowPublisher",
+    "base": "OrcaRuntimeWithAttachWindow",
+    "path": "src/main/runtime/session-graph/session-window-publisher.ts",
+    "lines": 45
+  },
+  {
+    "class": "OrcaRuntimeWithAttachWindow",
+    "base": "OrcaRuntimeWithNotifySshStateChanged",
+    "path": "src/main/runtime/session-graph/session-graph-promotion.ts",
+    "lines": 236
+  },
+  {
+    "class": "OrcaRuntimeWithNotifySshStateChanged",
+    "base": "RuntimeEmulatorBinding",
+    "path": "src/main/runtime/workspaces/workspace-host-notifications.ts",
+    "lines": 153
+  },
+  {
+    "class": "RuntimeEmulatorBinding",
+    "base": "RuntimeBrowserHostBindings",
+    "path": "src/main/runtime/emulator/runtime-emulator-binding.ts",
+    "lines": 12
+  },
+  {
+    "class": "RuntimeBrowserHostBindings",
+    "base": "RuntimeWorkspaceNavigation",
+    "path": "src/main/runtime/browser/installation/runtime-browser-host-bindings.ts",
+    "lines": 27
+  },
+  {
+    "class": "RuntimeWorkspaceNavigation",
+    "base": "RuntimeWorkspaceCatalogEvents",
+    "path": "src/main/runtime/workspaces/startup/runtime-workspace-navigation.ts",
+    "lines": 81
+  },
+  {
+    "class": "RuntimeWorkspaceCatalogEvents",
+    "base": "OrcaRuntimeWithGetStatus",
+    "path": "src/main/runtime/workspaces/catalog/runtime-workspace-catalog-events.ts",
+    "lines": 35
+  },
+  {
+    "class": "OrcaRuntimeWithGetStatus",
+    "base": "RuntimeWorkspaceChangeEvents",
+    "path": "src/main/runtime/hosts/runtime-status.ts",
+    "lines": 187
+  },
+  {
+    "class": "RuntimeWorkspaceChangeEvents",
+    "base": "NativeChatLaunchDraftOwner",
+    "path": "src/main/runtime/workspaces/catalog/runtime-workspace-change-events.ts",
+    "lines": 61
+  },
+  {
+    "class": "NativeChatLaunchDraftOwner",
+    "base": "RuntimeNotifierBinding",
+    "path": "src/main/runtime/agent-session/launch/native-chat-launch-draft-owner.ts",
+    "lines": 26
+  },
+  {
+    "class": "RuntimeNotifierBinding",
+    "base": "OrcaRuntimeWithPtyController",
+    "path": "src/main/runtime/client/events/runtime-notifier-binding.ts",
+    "lines": 15
+  },
+  {
+    "class": "OrcaRuntimeWithPtyController",
+    "base": "OrcaRuntimeWithGetRuntimeId",
+    "path": "src/main/runtime/terminal/lifecycle/orca-runtime-pty-controller.ts",
+    "lines": 32
+  },
+  {
+    "class": "OrcaRuntimeWithGetRuntimeId",
+    "base": "TerminalListHostScope",
+    "path": "src/main/runtime/workspaces/session-hosts/get-runtime-id.ts",
+    "lines": 61
+  },
+  {
+    "class": "TerminalListHostScope",
+    "base": "RuntimeFederationOperations",
+    "path": "src/main/runtime/terminal/query/terminal-list-host-scope.ts",
+    "lines": 117
+  },
+  {
+    "class": "RuntimeFederationOperations",
+    "base": "OrcaRuntimeWithHasExactPersistedTerminalSurfaceIdentity",
+    "path": "src/main/runtime/orchestration/federation/runtime-federation-operations.ts",
+    "lines": 50
+  },
+  {
+    "class": "OrcaRuntimeWithHasExactPersistedTerminalSurfaceIdentity",
+    "base": "RuntimeArtifactOperations",
+    "path": "src/main/runtime/workspaces/persisted-surfaces/has-exact-persisted-terminal-surface-identity.ts",
+    "lines": 95
+  },
+  {
+    "class": "RuntimeArtifactOperations",
+    "base": "LegacyWorkerTerminalSurface",
+    "path": "src/main/runtime/artifacts/runtime-artifact-operations.ts",
+    "lines": 52
+  },
+  {
+    "class": "LegacyWorkerTerminalSurface",
+    "base": "OrcaRuntimeWithRestoredTerminalPlacement",
+    "path": "src/main/runtime/orchestration/terminal-authority/legacy-worker-terminal-surface.ts",
+    "lines": 161
+  },
+  {
+    "class": "OrcaRuntimeWithRestoredTerminalPlacement",
+    "base": "LegacyWorkerRuntimeRecovery",
+    "path": "src/main/runtime/workspaces/persisted-surfaces/restored-terminal-placement.ts",
+    "lines": 243
+  },
+  {
+    "class": "LegacyWorkerRuntimeRecovery",
+    "base": "RuntimeWorkspaceSessionFlush",
+    "path": "src/main/runtime/orchestration/terminal-authority/legacy-worker-runtime-recovery.ts",
+    "lines": 41
+  },
+  {
+    "class": "RuntimeWorkspaceSessionFlush",
+    "base": "RuntimeOrchestrationDatabaseAccess",
+    "path": "src/main/runtime/workspaces/session-hosts/runtime-workspace-session-flush.ts",
+    "lines": 16
+  },
+  {
+    "class": "RuntimeOrchestrationDatabaseAccess",
+    "base": "OrcaRuntimeWithAutomationApiOperations",
+    "path": "src/main/runtime/orchestration/db/runtime-orchestration-database-access.ts",
+    "lines": 73
+  },
+  {
+    "class": "OrcaRuntimeWithAutomationApiOperations",
+    "base": "OrcaRuntimeWithCrewOperations",
+    "path": "src/main/runtime/workspaces/persisted-surfaces/automation-api-operations.ts",
+    "lines": 157
+  },
+  {
+    "class": "OrcaRuntimeWithCrewOperations",
+    "base": "OrcaRuntimeWithOrchestrationDatabaseBinding",
+    "path": "src/main/runtime/workspaces/persisted-surfaces/crew-operations.ts",
+    "lines": 49
+  },
+  {
+    "class": "OrcaRuntimeWithOrchestrationDatabaseBinding",
+    "base": "OrcaRuntimeWithPtyForegroundProcessReads",
+    "path": "src/main/runtime/workspaces/persisted-surfaces/orchestration-database-binding.ts",
+    "lines": 33
+  },
+  {
+    "class": "OrcaRuntimeWithPtyForegroundProcessReads",
+    "base": "OrcaRuntimeWithStateFields",
+    "path": "src/main/runtime/client/runtime-client-state.ts",
+    "lines": 237
+  },
+  {
+    "class": "OrcaRuntimeWithStateFields",
+    "base": "OrcaRuntimeWithLinearCommands",
+    "path": "src/main/runtime/construction/runtime-construction.ts",
+    "lines": 324
+  },
+  {
+    "class": "OrcaRuntimeWithLinearCommands",
+    "base": "OrcaRuntimeWithRepositoryCommands",
+    "path": "src/main/runtime/integrations/linear/linear-commands.ts",
+    "lines": 25
+  },
+  {
+    "class": "OrcaRuntimeWithRepositoryCommands",
+    "base": "OrcaRuntimeWithFileCommands",
+    "path": "src/main/runtime/construction/runtime-repository-command-state.ts",
+    "lines": 181
+  },
+  {
+    "class": "OrcaRuntimeWithFileCommands",
+    "base": "OrcaRuntimeWithPreservedBranchCleanup",
+    "path": "src/main/runtime/construction/runtime-file-command-state.ts",
+    "lines": 178
+  },
+  {
+    "class": "OrcaRuntimeWithPreservedBranchCleanup",
+    "base": "OrcaRuntimeWithTerminalDrivers",
+    "path": "src/main/runtime/construction/runtime-host-services.ts",
+    "lines": 377
+  },
+  {
+    "class": "OrcaRuntimeWithTerminalDrivers",
+    "base": "OrcaRuntimeWithFitOverrideListeners",
+    "path": "src/main/runtime/terminal/driver/terminal-driver-resources.ts",
+    "lines": 336
+  },
+  {
+    "class": "OrcaRuntimeWithFitOverrideListeners",
+    "base": "OrcaRuntimeWithStopRequestedPtyIds",
+    "path": "src/main/runtime/terminal/lifecycle/terminal-view-resources.ts",
+    "lines": 226
+  },
+  {
+    "class": "OrcaRuntimeWithStopRequestedPtyIds",
+    "base": "OrcaRuntimeWithAgentOrchestrationDependencies",
+    "path": "src/main/runtime/construction/runtime-service-state.ts",
+    "lines": 325
+  },
+  {
+    "class": "OrcaRuntimeWithAgentOrchestrationDependencies",
+    "base": "OrcaRuntimeWithRuntimeId",
+    "path": "src/main/runtime/orchestration/crew/runtime-agent-orchestration-dependencies.ts",
+    "lines": 24
+  },
+  {
+    "class": "OrcaRuntimeWithRuntimeId",
+    "base": "RuntimeConstructionServices",
+    "path": "src/main/runtime/construction/runtime-identity-state.ts",
+    "lines": 379
+  },
+  {
+    "class": "RuntimeConstructionServices",
+    "path": "src/main/runtime/construction/runtime-construction-services.ts",
+    "stop": "no extends",
+    "lines": 302
+  }
+]

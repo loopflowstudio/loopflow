@@ -315,17 +315,40 @@ Deepest deletions first, then the queue, then the bridges. Commit at each.
    `loopflow_storage::planning::{TrackerItem, TrackerObservation,
    TrackerComment, TrackerProject, StateHistory}`; `PlanningResponse` dies with
    the old drains.
-3. **Next.** Migration + writer enqueues + `rules.rs` + bounded `drain.rs`,
-   built to "Concept review (2026-11-16)" above;
-   delete the old drains and storage GraphQL. Focused tests per kind on the
-   Linear fake: lost reply, conflict adopt, deletion retire, order evidence;
-   plus `a_pass_with_nothing_unsettled_sends_no_request` and
-   `a_pass_sends_at_most_twenty_requests` (100 pending effects).
+3. **Queue, rules, drain: built** (two commits after aed51ad6a8).
+   - `migrations/tracker_effects.sql`: table, partial unsettled index,
+     owner indexes, revision triggers (`looked_at` NULL ↔ value only),
+     canonical identity triggers; copies each attempted receipt and the newest
+     unsent value per subject for bound or creating owners, then marks every
+     old receipt settled (creations: attempted, `export_observed_at` = max int).
+     Dry run on a backup of `~/.lf/loopflow.db` (2026-11-16): 77 effects
+     (17 comment, 8 create, 1 delete, 39 field, 12 state), 0 sendable old rows.
+   - `sqlite/tracker_effects.rs`: records, `enqueue` (coalescing),
+     `owner_tracker`, `enqueue_tracker_creations` (connect-time, comments
+     queued behind the create), unsettled read, attempt/reject/error/look/settle.
+   - `ops/tracker/rules.rs` (per kind + `lost_reply`), `ops/tracker/drain.rs`
+     (bounded pass, per-owner lock file kept), `ops/tracker.rs` (`Tracker`
+     with only its test arm; `#[cfg_attr(not(test), allow(..))]` on
+     `enqueue`/`owner_tracker`/`impl Tracker` until writers and bridges land).
+   **Remaining, one cut with slice 4** (found while building: moving the
+   writers before a bridge can send would stop delivery, so these go together):
+   - Writers: `PlanningChanges::record`/`save`, state, comment, order,
+     deletion and creation writers call `tracker_effects::enqueue`; the
+     `prepare_planning_export` path and `attach_in`'s receipt updates move to
+     `create` effects (attach = acknowledge the create by the Task's uuid).
+   - Inbound readers of pending receipts (`reconcile_edits`,
+     `observe_attempts`, `observe_task_deletion`, acceptance) read
+     `tracker_effects` (`phase`, `subject`, `kind`); list of other readers below.
+   - `Tracker::{Linear, Asana}` arms with `send`/`look`/`idempotent`
+     (Linear create and comment: our id) in `linear/effects.rs`,
+     `asana/effects.rs`; Observed built from `TrackerItem`/`TrackerProject`.
+   - `sync_after_save`, `sync_scope` and `lf task sync` call `drain`
+     (`Bound::PASS`, `first`; `Bound::NOW`, `only`); delete the four drains,
+     storage GraphQL, `PlanningClient`; move `lock_delivery` into `drain.rs`.
+   - `lf repo plan` lists unsettled effects; `lf task show` `sync.conflict`.
+   - Tests on the Linear fake per kind; existing `asana_planning_tests`,
+     `task_comments_tests`, `planning_order_tests` move onto the queue.
    Found while sizing it:
-   - `tracker_effects` needs `canonical_<table>_{insert,update}` identity
-     triggers like `task_changes` (template: `bounded_identity_triggers.sql`;
-     `task_` for `task_id`, `proj_` for `project_id`, `uuid` for `id`, and the
-     `value_json`/`base_json`/`conflict_json` json_tree arms).
    - Old-table readers outside the deleted writers, each to move onto
      `tracker_effects`: `task_changes` in `ops/task.rs`, `task/snapshot.rs`,
      `sqlite/children.rs` ×2, `revisions.rs`, `task_content.rs`, `bin/lf.rs`,
@@ -350,6 +373,10 @@ Deepest deletions first, then the queue, then the bridges. Commit at each.
 6. `planning.md`, `docs/work.md`, README; file the contract and DTO Tasks.
 
 ## Checks run
+
+- `cargo test -p loopflow-storage --lib -- tracker_effects planning_update_triggers revisions::` → 13 pass (upgrade fixture included).
+- `cargo test -p loopflow-execution --lib ops::tracker::` → 12 pass (rules per kind; drain: 0 requests when empty, 20 of 100, window hold, look settles, conflict adopts, wrong bridge retires).
+- `cargo clippy -p loopflow-storage -p loopflow-execution -p loopflow --all-targets -- -D warnings` → clean after the drain commit.
 
 - `cargo clippy -p loopflow-storage -p loopflow-execution -p loopflow --all-targets -- -D warnings` → clean (after slice 2 + renames).
 - `cargo nextest run -p loopflow-execution --lib -E 'test(asana_planning_tests) | test(task_comments_tests) | test(tracker_observe) | test(linear_observation) | test(planning_order_tests) | test(foreign_projects_do_not_block_refresh) | test(provider_auth::) | test(task_planning_tests::task_abandon)'` → pass.

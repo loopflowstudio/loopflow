@@ -41,6 +41,17 @@
   is configured, including Tasks made before connect. Slice 3 keeps that with
   a connect-time `create` enqueue at the start of a drain pass.
 
+- **Effect ids are fresh UUIDs.** Bridges derive idempotency keys from the
+  owner (a Task's uuid is its Linear issue id, as today) and the subject
+  (comment id), so a retired and re-queued `create` cannot collide on `id`.
+- **Copied rows are `provider='linear'`.** Released rows never recorded their
+  bridge; every row on this Machine is Linear. An Asana store's copied effects
+  would retire with "queued for Linear" on the first pass.
+- **Copied comment deliveries start `attempted`.** The old table has no attempt
+  flag; Linear resends with the comment id and Asana matches visible text.
+- **A pending `order` looks before it sends** (one request): moves need the
+  provider's complete list.
+
 ## Open
 
 - Connecting a tracker to a repository with existing Tasks: export all of

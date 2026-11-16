@@ -2450,76 +2450,62 @@ fn pr_link_state_label(pr: &TaskPr) -> String {
     }
 }
 
-/// Idempotently show the PR on the Task's planning item and record the outcome
-/// on the PR: a Linear attachment and managed comment, or for Asana one
-/// comment per PR state. Best-effort: a degraded writeback lands in
-/// `linear_link_error` and leaves the GitHub result intact; the next publication
-/// command retries. Does nothing for a PR with no GitHub URL yet.
+/// Show the PR on the Task's tracker item: a queued `link`, drained now with
+/// the Task first. A link that has not settled leaves its reason in
+/// `linear_link_error` and the GitHub result intact; the next pass retries it.
+/// Does nothing for a PR with no GitHub URL yet or a Task no bridge carries.
 pub(super) async fn link_pr_to_planning(store: &SharedStore, task: &Task, pr: &mut TaskPr) {
-    let Some(issue_id) = task.linear_id.as_ref() else {
-        return;
-    };
     let Some(github) = pr.github().cloned() else {
         return;
     };
-    let state = pr_link_state_label(pr);
-    let title = format!("GitHub PR #{}", github.number);
-    let body = format!("[GitHub PR #{}]({}) — {}", github.number, github.url, state);
-    let repo = match repository_for_task(store, task) {
-        Ok(repo) => repo,
-        Err(error) => {
-            pr.linear_link_error = Some(error.to_string());
-            return;
-        }
-    };
-    if crate::ops::tracker::configured(&repo) != Some(loopflow_storage::provider::Provider::Linear)
-    {
-        let posted = async {
-            let tracker = super::tracker::Tracker::for_items(&repo).await?;
-            let super::tracker::Tracker::Asana(client) = &tracker else {
-                return Ok(());
-            };
-            let text = tracker.claimed_comment(&body).unwrap_or_default();
-            client
-                .sync_comment(issue_id.as_str(), &text)
-                .await
-                .map_err(|error| task_error(error.to_string()))
-        }
-        .await;
-        if let Err(error) = &posted {
-            tracing::warn!(
-                issue = task.identifier,
-                pr = github.number,
-                "planning link degraded; the GitHub PR is published and the next publish retries: {error}"
-            );
-        }
-        pr.linear_link_error = posted.err().map(|error| error.to_string());
-        return;
+    let error = async {
+        let repo = repository_for_task(store, task)?;
+        let Some(id) = store
+            .sqlite
+            .enqueue_pr_link(
+                &task.id,
+                &github.url,
+                github.number,
+                &pr_link_state_label(pr),
+                pr.linear_comment_id.as_deref(),
+            )
+            .map_err(task_error)?
+        else {
+            return Ok(None);
+        };
+        let owner = loopflow_storage::sqlite::tracker_effects::EffectOwner::Task(task.id.clone());
+        super::tracker::drain::drain_repository(
+            store,
+            &repo.to_string_lossy(),
+            super::tracker::drain::Scope::First(&owner),
+            super::tracker::drain::Bound::PASS,
+        )
+        .await?;
+        let effect = store.sqlite.tracker_effect(&id).map_err(task_error)?;
+        Ok::<_, OpsError>(match effect {
+            Some(effect)
+                if effect.phase
+                    == loopflow_storage::sqlite::tracker_effects::EffectPhase::Acknowledged =>
+            {
+                None
+            }
+            Some(effect) => Some(effect.error.unwrap_or_else(|| {
+                "PR link is waiting to be sent; `lf repo plan` lists it".into()
+            })),
+            None => None,
+        })
     }
-    let prior = crate::ops::linear::PrLinkageIds {
-        attachment_id: pr.linear_attachment_id.clone(),
-        comment_id: pr.linear_comment_id.clone(),
-    };
-    let request = crate::ops::linear::PrLinkRequest {
-        issue_id: issue_id.as_str().to_string(),
-        url: github.url.clone(),
-        title,
-        subtitle: state,
-        body,
-    };
-    let outcome = crate::ops::linear::link_pr_async(&repo, &request, &prior).await;
-    // Say so at publish time. The PR line in `lf task status` carries the durable
-    // reading, but an operator running `lf pr open` should not have to go looking.
-    if let Some(error) = &outcome.error {
+    .await
+    .unwrap_or_else(|error| Some(error.to_string()));
+    // Say so at publish time; the PR line in `lf task status` keeps the reading.
+    if let Some(error) = &error {
         tracing::warn!(
             issue = task.identifier,
             pr = github.number,
-            "Linear link degraded; the GitHub PR is published and the next publish retries: {error}"
+            "tracker link pending; the GitHub PR is published and the next pass retries: {error}"
         );
     }
-    pr.linear_attachment_id = outcome.ids.attachment_id;
-    pr.linear_comment_id = outcome.ids.comment_id;
-    pr.linear_link_error = outcome.error;
+    pr.linear_link_error = error;
 }
 
 // ---------------------------------------------------------------------------

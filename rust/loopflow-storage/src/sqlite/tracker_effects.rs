@@ -948,7 +948,7 @@ impl SqliteStore {
         &self,
         task: &TaskId,
         url: &str,
-        number: u64,
+        number: u32,
         state: &str,
         comment_id: Option<&str>,
     ) -> StoreResult<Option<String>> {

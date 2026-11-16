@@ -839,3 +839,131 @@ fn next_move(
     after.insert(position, moved);
     Ok(Some((issues[source].item.id.clone(), input, after)))
 }
+
+#[cfg(test)]
+mod tests {
+    use axum::http::StatusCode;
+    use serde_json::{json, Value};
+
+    use super::pr_comment_id;
+    use crate::linear::test_server::{self, json_response};
+    use crate::linear::LinearClient;
+    use crate::ops::tracker::Sent;
+    use crate::store::Store;
+    use loopflow_model::durable::TaskId;
+    use loopflow_storage::sqlite::tracker_effects::Settlement;
+
+    const URL: &str = "https://github.com/acme/repo/pull/7";
+
+    fn reply(data: Value) -> test_server::QueuedResponse {
+        json_response(StatusCode::OK, json!({ "data": data }))
+    }
+
+    /// Queue the PR link in `state` and send it through a Linear stand-in that
+    /// answers `comment`; returns what the bridge said and the request bodies.
+    async fn send(
+        store: &Store,
+        task: &TaskId,
+        state: &str,
+        comment: Value,
+    ) -> (Sent, Vec<String>) {
+        let id = store
+            .sqlite
+            .enqueue_pr_link(task, URL, 7, state, None)
+            .unwrap()
+            .unwrap();
+        let effect = store.sqlite.tracker_effect(&id).unwrap().unwrap();
+        let (base, requests) = test_server::spawn(vec![
+            reply(json!({"attachmentLinkURL": {"attachment": {"id": "att-1"}}})),
+            reply(json!({"attachmentUpdate": {"attachment": {"id": "att-1"}}})),
+            reply(comment),
+        ])
+        .await;
+        let client = LinearClient::with_base_url("secret".into(), None, base);
+        let sent = client
+            .send_effect(store, std::path::Path::new("/repo"), &effect)
+            .await;
+        if let Sent::Acknowledged {
+            revision,
+            remote_id,
+        } = &sent
+        {
+            store
+                .sqlite
+                .settle_tracker_effect(
+                    &id,
+                    &Settlement::Acknowledged {
+                        revision: revision.clone(),
+                        remote_id: remote_id.clone(),
+                    },
+                )
+                .unwrap();
+        }
+        let bodies = requests
+            .lock()
+            .await
+            .iter()
+            .map(|r| r.body.clone())
+            .collect();
+        (sent, bodies)
+    }
+
+    #[tokio::test]
+    async fn a_pr_link_posts_one_comment_and_refreshes_it_on_merge() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("store.db");
+        let store = Store {
+            sqlite: crate::store::opening::open_ephemeral(&path).unwrap(),
+        };
+        let task = TaskId::new();
+        store
+            .sqlite
+            .create_task(&loopflow_storage::work::task::NewTask {
+                repository_id: loopflow_storage::test_fixture::repository(&store.sqlite, "/repo"),
+                id: task.clone(),
+                project_id: None,
+                title: "Title".into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap();
+        rusqlite::Connection::open(&path)
+            .unwrap()
+            .execute(
+                "UPDATE tasks SET external_issue_id=?2 WHERE id=?1",
+                [task.as_str(), &uuid::Uuid::new_v4().to_string()],
+            )
+            .unwrap();
+        let comment = pr_comment_id(&task, URL).unwrap();
+
+        let (sent, opened) = send(
+            &store,
+            &task,
+            "Open",
+            json!({"commentCreate": {"comment": {"id": comment}}}),
+        )
+        .await;
+        assert_eq!(
+            sent,
+            Sent::Acknowledged {
+                revision: None,
+                remote_id: Some("att-1".into())
+            }
+        );
+        // `subtitle` on attachmentLinkURL is the 400 that shipped in #1010.
+        let link: Value = serde_json::from_str(&opened[0]).unwrap();
+        assert!(link["variables"].get("subtitle").is_none());
+        assert!(opened[2].contains("commentCreate") && opened[2].contains(&comment));
+
+        let (_, merged) = send(
+            &store,
+            &task,
+            "Merged",
+            json!({"commentUpdate": {"comment": {"id": comment}}}),
+        )
+        .await;
+        assert!(merged[1].contains("Merged"));
+        assert!(merged[2].contains("commentUpdate") && merged[2].contains(&comment));
+        assert!(!merged.iter().any(|body| body.contains("commentCreate")));
+    }
+}

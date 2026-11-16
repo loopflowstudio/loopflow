@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-931 concept review</title>
+<style>
+  :root { --bg:#fbfaf7; --fg:#1e1d1a; --dim:#6b675e; --line:#dedad0; --code:#f1eee6; --new:#2f6f4f; --old:#9a4a2c; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#17171a; --fg:#e8e6e1; --dim:#9c988f; --line:#33332f; --code:#222226; --new:#7fc49d; --old:#e0937a; } }
+  body { background:var(--bg); color:var(--fg); font:16px/1.55 -apple-system, "Iowan Old Style", Georgia, serif; margin:0; }
+  main { max-width:44rem; margin:0 auto; padding:2.5rem 1.25rem 4rem; }
+  h1 { font-size:1.5rem; margin:0 0 .25rem; }
+  h2 { font-size:1.1rem; margin:2.2rem 0 .6rem; }
+  .meta { color:var(--dim); font-size:.9rem; }
+  code, pre { font:13px/1.45 ui-monospace, Menlo, monospace; background:var(--code); border-radius:4px; }
+  code { padding:0 .25em; }
+  pre { padding:.8rem 1rem; overflow-x:auto; }
+  table { border-collapse:collapse; width:100%; font-size:.92rem; }
+  th, td { text-align:left; vertical-align:top; padding:.4rem .5rem; border-bottom:1px solid var(--line); }
+  .old { color:var(--old); } .new { color:var(--new); }
+  .callout { border-left:3px solid var(--old); padding:.2rem 0 .2rem 1rem; margin:1rem 0; }
+  ol li { margin-bottom:.5rem; }
+</style>
+</head>
+<body><main>
+<h1>LOO-931: one change path, conditions under events</h1>
+<p class="meta">Task LOO-931 · step concept-review (headless) · 2026-11-16 · built from
+<code>scratch/show-changes-at-once.md</code>, <code>scratch/questions.md</code>,
+<code>swift/Loopflow/Services/PendingChanges.swift</code>, <code>Notice.swift</code>,
+<code>swift/LoopflowMac/WorkModel.swift</code>, <code>swift/LoopflowiOS/TaskListView.swift</code>,
+<code>WaveStandupBoard.swift</code></p>
+
+<p><strong>Decision needed: none.</strong> Everything below follows from the brief's model, so it goes back
+to implement as direction. The one choice left open from kickoff (phone Abandon) is still in question 1.</p>
+
+<h2>The biggest mismatch</h2>
+<div class="callout">
+<p>"Pending change" is one concept in the brief and three pieces of code in the build. Desktop
+(<code>WorkModel.change / request / send</code>) and phone (<code>TaskFeed</code>) each write the
+send → answer → refuse → Notice switch. Only Desktop resends on a lost link. A reading's revisions sit in
+<code>WorkModel.readAt[part]</code>, mirrored inside <code>PendingChanges.readings</code>.</p>
+</div>
+
+<h2>Actions → concepts → APIs</h2>
+<table>
+<tr><th>Someone does</th><th>Built</th><th>Proposed</th></tr>
+<tr><td>Complete, Abandon, Claim, Move…</td>
+<td class="old">app adds patch, app sends, app switches on answer, app posts Notice</td>
+<td class="new"><code>pendingChanges.make(.complete(task:), issue:, verb:, write:)</code>; the app only passes its send closure</td></tr>
+<tr><td>Start, Auto-Ship, Stop Auto-Ship</td>
+<td class="old">"requested" after the Machine answers</td>
+<td class="new">"requested" in the click; a refusal posts over it</td></tr>
+<tr><td>Move LOO-3 to another Wave</td>
+<td class="old">list moves; Wave counts stay (planning rows take removal only)</td>
+<td class="new"><code>apply(to: [RoadmapTask], readAt:)</code> patches disposition, owner, Wave, section; counts follow</td></tr>
+<tr><td>Machine stops for 10 s</td>
+<td class="old">Desktop resends forever, controls stay live; phone refuses at once</td>
+<td class="new">link state (connected, blip, away) beside the changes, one per Machine; away greys controls and posts one condition</td></tr>
+<tr><td>A Task outside the plan</td>
+<td class="old">planned: an event toast per board load</td>
+<td class="new">a condition Notice per Wave while the reading lists it · Copy recovery</td></tr>
+</table>
+
+<h2>Notice: one slot, two kinds</h2>
+<p>Built, a new Notice replaces the current one. Proposed, events replace events; conditions stay underneath:</p>
+<pre>away posted        →  shows "Machine is away"
+Complete refused   →  shows "LOO-4 couldn't be completed: its PR #12 is open"
+six seconds later  →  shows "Machine is away" again
+Machine returns    →  clear(key: "away") → nothing shown</pre>
+<p>Without this, any event posted while away hides "away" for good.</p>
+
+<h2>What goes</h2>
+<p><code>WorkModel.change</code>, <code>request</code>, <code>send</code>, <code>Sent</code>, <code>WorkModel.readAt</code>,
+<code>TaskFeed</code>'s send copies, <code>PendingChanges.removes(task:at:)</code>, <code>shown(_ tasks:)</code>,
+<code>WorkReading</code>, <code>TaskListReading</code>, <code>MobileTaskReading</code>, <code>WavePlanningNotice</code>.</p>
+
+<h2>Questions</h2>
+<ol>
+<li>Phone Abandon. The brief says Complete and Abandon on "Desktop and phone", then lists what the phone gains
+without Abandon. Built: no phone Abandon.
+<br>a) leave it Desktop-only · b) add a swipe Abandon beside Complete</li>
+<li>A Task outside the plan as a condition Notice.
+<br>a) condition per Wave, as proposed · b) keep the inline board line (the brief lists it among the surfaces to replace)</li>
+<li>Several windows on one Machine.
+<br>a) one <code>PendingChanges</code> per Machine, shared by windows, as proposed · b) per window, the other window catches up at its next reading</li>
+</ol>
+</main></body>
+</html>

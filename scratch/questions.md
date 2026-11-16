@@ -7,7 +7,7 @@
 - Next-Task rule: LOO-906 wrapped to the top of the list; main picks the row
   below, else above. Planned: below, else above, else the empty state (the
   brief says "or show the empty state", replacing main's fallback to the Wave).
-- `WavePlanningNotice` is about the plan, not an action someone took. Planned:
+- `WavePlanningNotice` is about the plan, not an action someone took. Revised in the concept review: a condition Notice per Wave while the reading lists the Task, replacing the earlier plan of
   it becomes a Notice raised once per board load with "Copy recovery", as the
   brief lists it among the five.
 - Protocol 7 with `min_revision` 7 refuses older phones against a newer

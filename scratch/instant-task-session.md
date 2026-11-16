@@ -399,51 +399,40 @@ acquire a No Wave label.
 
 ### Task action cut · 2026-11-15
 
-Domain results/recovery (`ede0429321`) and execution-input reads (`0a9a313d54`)
-remain built. The current client cut replaces aggregate lifecycle fields with
-independently supported disposition (including nullable completion time and pending
-completion identity), SQL ownership identity/known unowned, publication, and
-retained execution inputs. Graph running, Auto-Ship carrier running, held position,
-checkout and approval remain distinct. Both transports carry the same typed
-membership body; the existing SQLite owner persists normalized facts, incorporation,
-query effects, exact commands and reload floors. Old aggregate caches become cold under their prior support's migrated reload
-floor; independent parent values/incorporation survive. Filtered activity is
-replaced by `work.activity/2` raw captures. Pending IDs, receipts, payloads and
-original Machine stay intact.
+Built: domain results/recovery (`ede0429321`), execution-input reads
+(`0a9a313d54`) and the vertical client cut (`c055cc55ca`). Independently supported
+disposition (nullable completion time, pending completion identity), SQL ownership
+identity/known unowned, publication and retained execution inputs replace aggregate
+lifecycle fields. Graph running, Auto-Ship carrier running, held position, checkout
+and approval stay distinct. Both transports carry one typed membership body; the
+SQLite owner persists facts, incorporation, effects, exact commands and reload
+floors. Old aggregate caches become cold under migrated floors; independent parent
+values survive. `work.activity/2` raw captures replace filtered activity.
 
-Claim projects ownership intent without inventing a person/Machine owner DTO;
-Unassign projects known unowned. Reopen evaluates ordered projected disposition,
-including an earlier local Complete. Completed/completing work clears completion,
-time, pending identity, approval and carrier; an already-open no-op keeps approval
-and carrier. Unknown predicates leave destination incomplete until supported input.
-A committed no-op's absent planning change distinguishes it from a withdrawal;
-it preserves approval/carrier values but never certifies stale or missing inputs.
-Reopen also leaves conflicting retained inputs incomplete. Execution/ownership incorporate only
-their own field/stage fences, and cannot absorb one another's edits. Lifecycle and
-section are derived presentation, never another persisted aggregate authority.
-Raw conversation activity survives terminal disposition; rendering masks it until
-Reopen without inventing external activity or input readiness.
+Claim projects ownership intent without inventing an owner DTO; Unassign projects
+known unowned. Reopen evaluates ordered projected disposition, including an earlier
+local Complete: completed/completing work clears completion, time, pending identity,
+approval and carrier; an already-open no-op keeps approval and carrier but never
+certifies stale or missing inputs; unknown or conflicting predicates leave the
+destination incomplete. Execution and ownership incorporate only their own stage
+fences. Lifecycle and section are derived presentation. Raw conversation activity
+survives terminal disposition and is masked until Reopen.
 
-Desktop header/hover/menu and phone Task actions enter synchronous shared edits,
-using the existing save-before-send outbox and canonical Task resource lane. No
-ownership/Reopen refresh barrier or stale-planning guard remains. Navigation,
-Session lifetime and drafts stay with their existing owners. Other delivery/Graph
-callers still need `performTaskAction`; removing that entire helper belongs to their
-cut. Flat remove/insert state effects, state-absence maps, wire lifecycle decoding and
-their exclusive mutation tests are removed; semantic stages/reload domains remain. The prior design/counterexamples remain at
-`d80de2ee6c1b3c65cf292d009b42db048fe3f4bb:scratch/instant-task-session.md`
+Desktop header/hover/menu and phone actions enter synchronous shared edits through
+the save-before-send outbox and canonical Task lane; no ownership/Reopen refresh
+barrier or stale-planning guard remains. Prior design: `d80de2ee6c1b:scratch/instant-task-session.md`
 (Task action cut).
 
-Acceptance still binding: owned/unowned completed Tasks with/without checkout,
-held/running positions and independent carriers; unstarted owned/unowned;
-Claim → Unassign → Claim; Complete → Reopen → Complete; publication before held
-save/network on both hosts; offline restart and original-ID recovery; no-op,
-unknown-predicate → no-op, refusal and reordered two-client readings. No later
-selection, draft, native readiness or Session may change. Shared query tests cover
-the raw-input matrix, no-op/unknown/refusal, original-ID recovery, two-client order,
-restart, conflicting input support and aggregate upgrade. Both hosts' production
-controls publish before held saves, including Reopen before Done. Native latency
-remains unmeasured; gate owns the recorded LEAK and broader suites. Three product questions below do not block this cut.
+Acceptance map: `ClientWorkQueryTests` (Reopen no-op/unknown predicate, ordered
+Claim/Complete/Reopen with refusal, restart original-ID recovery, two-client either
+order, conflicting support, runtime membership not borrowing ownership);
+`DesktopWorkInteractionTests` and `MobileWorkInteractionTests` (publish before disk,
+selections/routes kept, Reopen before Done); Rust `task_ownership` refusal tests.
+
+Next vertical cut: Start, Ship and Stop Auto-Ship (`WorkModel.startTask`,
+`shipTask`, `stopShipping`) still call `performTaskAction`. Move them onto the shared
+owner projecting accepted intent only (never predicted Graph/PR success), then delete
+`performTaskAction`. Three product questions below do not block it.
 
 Checks for this cut:
 - `cargo nextest run -p loopflow --lib -E 'test(work::selection_tests::) | test(lifecycle_time_tracks_complete_reopen_complete_in_one_supported_snapshot) | test(server::schema::tests::)'` — 30 passed, run `9330150a-6f26-4ed9-97a3-48179ab07df8`.

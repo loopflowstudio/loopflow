@@ -203,7 +203,8 @@
             }
           ],
           "name": null,
-          "pinned": false
+          "pinned": false,
+          "viewer": null
         }
       ],
       "work": null,

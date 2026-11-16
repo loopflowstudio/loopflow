@@ -121,13 +121,13 @@ public struct TaskRuntimeSnapshot: Decodable, Sendable, Hashable {
 }
 
 /// A Machine for display. A missing id is an unknown Machine.
-public struct MachineRef: Decodable, Sendable, Hashable {
+public struct MachineRef: Codable, Sendable, Hashable {
     public let id: String?
     public let label: String?
 }
 
 /// The person and Machine that own a Task.
-public struct TaskOwner: Decodable, Sendable, Hashable {
+public struct TaskOwner: Codable, Sendable, Hashable {
     public let person: String?
     /// The owner's lowercase Git email: the display fallback when they have no
     /// name, not their identity.
@@ -149,6 +149,14 @@ public struct TaskOwner: Decodable, Sendable, Hashable {
         personKey = try container.decodeIfPresent(String.self, forKey: .personKey)
         personId = try container.decode(String?.self, forKey: .personId)
         machine = try container.decode(MachineRef.self, forKey: .machine)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(person, forKey: .person)
+        try container.encodeIfPresent(personKey, forKey: .personKey)
+        try container.encode(personId, forKey: .personId)
+        try container.encode(machine, forKey: .machine)
     }
 
     /// "Jack Heart on mini"; "Machine unknown" when the Machine was never recorded.

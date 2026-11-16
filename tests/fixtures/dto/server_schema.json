@@ -15857,6 +15857,17 @@
         "slots": {
           "$ref": "#/$defs/SlotLayout",
           "description": "The page geometry visible members fill, in projection order."
+        },
+        "viewer": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskOwner"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Who a Claim run on this Machine names as owner; `None` without a Git\n`user.email` in the repository, which claiming needs."
         }
       },
       "required": [
@@ -15871,7 +15882,8 @@
         "arrangement",
         "projection",
         "slots",
-        "contents"
+        "contents",
+        "viewer"
       ],
       "type": "object"
     },

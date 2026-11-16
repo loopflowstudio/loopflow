@@ -10,8 +10,9 @@ public enum PendingCommand: Equatable, Sendable {
     case abandon(task: String)
     /// Working if it was started, else Backlog.
     case reopen(task: String)
-    /// Working if it was started.
-    case claim(task: String)
+    /// `owner` is the repository reading's `viewer`: who the Machine names. Working
+    /// if it was started; with no viewer, the section moves only.
+    case claim(task: String, owner: TaskOwner?)
     /// Backlog.
     case unassign(task: String)
     /// Leaves every list filtered to another Wave; nil leaves it in none.
@@ -20,7 +21,7 @@ public enum PendingCommand: Equatable, Sendable {
 
     public var task: String? {
         switch self {
-        case .complete(let task), .abandon(let task), .reopen(let task), .claim(let task), .unassign(let task),
+        case .complete(let task), .abandon(let task), .reopen(let task), .claim(let task, _), .unassign(let task),
              .move(let task, _): task
         case .renameSession: nil
         }
@@ -257,9 +258,11 @@ public final class PendingChanges {
                     states.subtracting([.done]).union([.open, Self.started(states) ? .working : .backlog])
                 }
             case .claim:
-                contents.updateStates(of: matches) { states in Self.started(states) ? states.union([.working]) : states }
+                contents.updateStates(of: matches) { states in
+                    Self.started(states) ? states.subtracting([.backlog]).union([.working]) : states
+                }
             case .unassign:
-                contents.updateStates(of: matches) { $0.union([.backlog]) }
+                contents.updateStates(of: matches) { $0.subtracting([.working]).union([.backlog]) }
             case .renameSession:
                 break
             }
@@ -284,7 +287,7 @@ public final class PendingChanges {
                 tasks.append(moved)
             }
             guard let index = tasks.firstIndex(where: { $0.task.identifier == issue }) else { continue }
-            let started = tasks[index].runtime != nil
+            let started = tasks[index].lifecycle != .unstarted
             switch change.command {
             case .complete:
                 tasks[index].lifecycle = .done
@@ -292,9 +295,12 @@ public final class PendingChanges {
             case .abandon:
                 tasks.remove(at: index)
             case .reopen:
-                tasks[index].lifecycle = started ? .idle : .unstarted
-                tasks[index].section = started && tasks[index].runtime?.owner != nil ? .working : .backlog
-            case .claim:
+                // A finished Task was started when it has a checkout.
+                let checkedOut = tasks[index].reference.workspace != nil
+                tasks[index].lifecycle = checkedOut ? .idle : .unstarted
+                tasks[index].section = checkedOut && tasks[index].runtime?.owner != nil ? .working : .backlog
+            case .claim(_, let owner):
+                if let owner { tasks[index].runtime?.owner = owner }
                 if started { tasks[index].section = .working }
             case .unassign:
                 tasks[index].runtime?.owner = nil

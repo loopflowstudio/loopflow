@@ -788,6 +788,34 @@ struct WorkModelStreamTests {
         await feed.send(try fixture.frame("checkpoint", sequence: 2, answers: request.id, body: "null"))
     }
 
+    @Test("A held Claim shows the owner the repository reading names, before the reply")
+    func claimShowsItsOwnerInTheClick() async throws {
+        let fixture = try WorkTestFixture.load()
+        let feed = WorkFeed()
+        let query = RegistryQuery(subscribeWork: { await feed.open() }) { args, _ in
+            guard args.starts(with: ["task", "claim"]) else { throw RegistryQueryError("unexpected read: \(args)") }
+            try await Task.sleep(for: .seconds(60))
+            return ""
+        }
+        let model = WorkModel(query: query, repoPath: "/src/loopflow")
+        let keeping = Task { await model.keepWorkCurrent() }
+        defer { keeping.cancel() }
+        try await feed.opened(1)
+        let scope = try await feed.request(1)
+        await feed.send(try fixture.planningFrame(sequence: 1, answers: scope.id))
+        var plan = try #require(JSONSerialization.jsonObject(with: loadFixtureData("view_plan.json")) as? [String: Any])
+        plan["repo_path"] = "/src/loopflow"
+        let body = String(decoding: try JSONSerialization.data(withJSONObject: plan), as: UTF8.self)
+        await feed.send(try fixture.frame("task_list", sequence: 2, answers: scope.id, body: body))
+        try await eventually { model.taskListReading.value != nil }
+        let found = try #require(model.task(id: "issue-now"))
+        #expect(found.task.runtime?.owner == nil)
+        model.assignTask(found.task, claimed: true)
+        let claimed = try #require(model.visibleTasks.first { $0.id == "issue-now" })
+        #expect(claimed.runtime?.owner?.person == "Ada")
+        #expect(claimed.runtime?.owner?.machine.label == "laptop")
+    }
+
     @Test("Only the requested checkpoint confirms a write, including an unchanged result")
     func unchangedConfirmation() async throws {
         let fixture = try WorkTestFixture.load()

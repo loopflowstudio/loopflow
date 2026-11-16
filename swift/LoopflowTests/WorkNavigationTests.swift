@@ -1196,7 +1196,7 @@ struct WorkNavigationTests {
             resolution: WorkSelectionResolution(attention: [], members: members + [hidden], unavailable: []),
             arrangement: WorkArrangement(order: members + [hidden], hidden: [hidden], mode: .touched),
             projection: WorkArrangementProjection(visible: members, suppressed: []), slots: DashboardSlotLayout(root: .slot(0)),
-            contents: review)
+            contents: review, viewer: nil)
         model.applySelectionPlans([
             fixtureViewPlan(owner: .init(repository: "repo", kind: .repository, id: "repo"),
                             members: [content(.task, "issue-review"), content(.task, "issue-now")]),

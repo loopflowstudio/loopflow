@@ -2634,7 +2634,8 @@ final class WorkModel {
     func assignTask(_ task: RoadmapTask, claimed: Bool) {
         let issue = task.task.identifier
         if claimed {
-            change(task, .claim(task: issue), .taskClaim(directory: directory(task), issue: issue), "claimed")
+            change(task, .claim(task: issue, owner: viewer(for: task)),
+                   .taskClaim(directory: directory(task), issue: issue), "claimed")
         } else {
             change(task, .unassign(task: issue), .taskUnassign(directory: directory(task), issue: issue), "unassigned")
         }
@@ -2729,6 +2730,13 @@ final class WorkModel {
     }
 
     private func directory(_ task: RoadmapTask) -> String { WaveOrigin.resolve(task.task.repo) ?? "/" }
+
+    /// Who a Claim makes owner, as a reading of the Task's repository says.
+    private func viewer(for task: RoadmapTask) -> TaskOwner? {
+        let repo = repoIdentity(task.task.repo)
+        return taskListReadings.values.lazy.compactMap(\.reading.value)
+            .first { repoIdentity($0.repositoryPath) == repo }?.viewer
+    }
 
     /// Complete and Abandon select the next row below, else the one above, else nothing.
     private func moveSelection(past task: RoadmapTask) {

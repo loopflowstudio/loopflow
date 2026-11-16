@@ -160,7 +160,7 @@ struct PendingChangesTests {
 
     @Test func aCommandThatChangedNothingDropsAtOnce() async throws {
         let changes = changes()
-        changes.make(.claim(task: "LOO-1"), subject: "LOO-1", verb: "claimed",
+        changes.make(.claim(task: "LOO-1", owner: nil), subject: "LOO-1", verb: "claimed",
                      write: .taskClaim(directory: "/repo", issue: "LOO-1"), notices: notices)
         changes.read("tasks", try plan())
         await machine.answer(Revisions([:]))
@@ -190,7 +190,8 @@ struct PendingChangesTests {
         let working = { (rows: [RoadmapTask]) in rows.filter { $0.section == .working }.map(\.task.identifier) }
         changes.make(.complete(task: "LOO-1"), subject: "LOO-1", verb: "completed",
                      write: .taskComplete(directory: "/repo", issue: "LOO-1"), notices: notices)
-        changes.make(.claim(task: "LOO-3"), subject: "LOO-3", verb: "claimed",
+        let ada = try JSONDecoder().decode(TaskOwner.self, from: Data(#"{"person":"Ada","person_key":"ada@example.com","person_id":null,"machine":{"id":"home_1","label":"laptop"}}"#.utf8))
+        changes.make(.claim(task: "LOO-3", owner: ada), subject: "LOO-3", verb: "claimed",
                      write: .taskClaim(directory: "/repo", issue: "LOO-3"), notices: notices)
         changes.make(.unassign(task: "LOO-2"), subject: "LOO-2", verb: "unassigned",
                      write: .taskUnassign(directory: "/repo", issue: "LOO-2"), notices: notices)
@@ -200,6 +201,7 @@ struct PendingChangesTests {
         #expect(working(product) == ["LOO-3", "LOO-4"])
         #expect(product.first { $0.task.identifier == "LOO-1" }?.section == .done)
         #expect(product.first { $0.task.identifier == "LOO-2" }?.runtime?.owner == nil)
+        #expect(product.first { $0.task.identifier == "LOO-3" }?.runtime?.owner == ada)
         #expect(product.first { $0.task.identifier == "LOO-4" }?.task.waveId == "product")
         #expect(changes.apply(to: [rows[3]], readAt: at(4), wave: "other").isEmpty)
     }

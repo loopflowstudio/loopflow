@@ -4,6 +4,8 @@
 # Read timing records from ordinary launches.
 uv run python scripts/benchmarks/desktop-performance/timings.py
 uv run python scripts/benchmarks/desktop-performance/timings.py --json
+uv run python scripts/benchmarks/desktop-performance/timings.py --html /tmp/loopflow-performance.html
+open /tmp/loopflow-performance.html
 
 # Observe the running app without sending input.
 uv run python scripts/benchmarks/desktop-performance/record_live.py record --seconds 60
@@ -27,6 +29,28 @@ The app retains bounded launch/read journals under
 `<Home>/desktop-cache/timings/`. `timings.py` reads those journals without
 launching the app. Records contain durations, command names and app versions,
 not arguments, prompts or output.
+
+Ordinary Desktop navigation also appends `interactions.ndjson` in that directory:
+hierarchy/filter changes, Task/Wave/Session opening, Workflow arrival and retained
+workspace controls. Each observation has a random correlation, start and terminal
+outcome. Superseded and unfinished observations remain counts, outside successful
+latency percentiles. A pending interaction and an interrupted one are not yet
+distinguished. These endpoints retain the signposts' meanings: observed view state
+or a queued main-thread callback, not verified provider input or displayed pixels.
+Terminal key-to-draw and Markdown spans remain in signposts, outside this journal.
+
+The HTML report reads the live Machine's retained journals, with app-version
+selection, median bars, P95/max and failure counts. Missing metrics stay unmeasured.
+Versions can contain several build revisions. Slow frame wait/apply samples are
+selected at 100 ms combined latency; their distribution excludes fast readings.
+No host-load adjustment or controlled-comparison claim follows from these records.
+The installed app needs a build containing interaction journaling to record it;
+older journals cannot supply missing historical navigation measurements.
+
+Desktop already logs five-minute memory/descriptor/thread vitals, memory-pressure
+events and main-thread hangs in `logs/lf.log`. That is separate from the timing
+journals and does not supply per-interaction host CPU/load context. Synthetic
+worlds and quiet-host comparisons complement these ordinary-use observations.
 
 `record_live.py` collects signposts, process RSS/CPU samples and, when available,
 Instruments hitch/hang traces. `--no-xctrace` keeps signposts and resource samples

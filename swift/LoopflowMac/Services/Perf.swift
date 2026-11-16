@@ -44,6 +44,17 @@ enum Perf {
     private struct Pending {
         let state: OSSignpostIntervalState
         let id: String
+        let observation: String
+        let scenario: String
+        let started: ContinuousClock.Instant
+
+        func record(_ name: String, phase: String) {
+            // Frame delivery has its own slow-reading journal; idle refreshes
+            // must not fill the interaction history.
+            guard name != "work_frame_apply" else { return }
+            LaunchJournal.home.interaction(name, scenario: scenario, observation: observation,
+                                           phase: phase, ms: started.elapsedMs)
+        }
     }
 
     @MainActor private static var pending: [String: Pending] = [:]
@@ -55,12 +66,16 @@ enum Perf {
         let key = "\(name)"
         if let stale = pending.removeValue(forKey: key) {
             signposter.endInterval(name, stale.state, "superseded")
+            stale.record(key, phase: "superseded")
         }
         let state = signposter.beginInterval(
             name, id: signposter.makeSignpostID(),
             "scenario=\(scenario, privacy: .public) id=\(id, privacy: .public) \(detail, privacy: .public)"
         )
-        pending[key] = Pending(state: state, id: id)
+        let observation = Pending(state: state, id: id, observation: UUID().uuidString,
+                                  scenario: scenario, started: .now)
+        pending[key] = observation
+        observation.record(key, phase: "begin")
     }
 
     /// End the pending interval for `id`; another id or none pending is a no-op.
@@ -70,6 +85,7 @@ enum Perf {
         guard let current = pending[key], current.id == id else { return }
         pending.removeValue(forKey: key)
         signposter.endInterval(name, current.state, "ready")
+        current.record(key, phase: "ready")
     }
 
     /// End on the next main-queue callback after the view observes the change.

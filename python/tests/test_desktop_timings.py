@@ -85,3 +85,45 @@ def test_report_separates_saved_from_fresh_launches_and_counts_failures(tmp_path
 
 def test_report_without_recordings_says_so(tmp_path: Path) -> None:
     assert "No launches recorded yet" in timings.render(timings.summarize(tmp_path))
+
+
+def test_live_interactions_keep_superseded_and_unfinished_out_of_latency(tmp_path: Path) -> None:
+    records = []
+    for index in range(20):
+        base = {"app": "new", "name": "navigation", "scenario": "task", "observation": str(index)}
+        records += [
+            {**base, "phase": "begin", "ms": 0},
+            {**base, "phase": "ready", "ms": index + 1},
+        ]
+    base = {"app": "new", "name": "navigation", "scenario": "task"}
+    records += [
+        {**base, "observation": "pending", "phase": "begin", "ms": 0},
+        {**base, "observation": "replaced", "phase": "begin", "ms": 0},
+        {**base, "observation": "replaced", "phase": "superseded", "ms": 9000},
+    ]
+    _write(tmp_path / "interactions.ndjson", records)
+    report = timings.summarize(tmp_path)
+    assert report["versions"]["new"]["interactions"]["navigation / task"] == {
+        "samples": 20,
+        "median_ms": 10.5,
+        "p95_ms": 19,
+        "max_ms": 20,
+        "superseded": 1,
+        "unfinished": 1,
+    }
+    assert "superseded 1; unfinished 1" in timings.render(report)
+
+
+def test_html_shows_real_values_missing_tails_and_escapes_labels(tmp_path: Path) -> None:
+    _write(
+        tmp_path / "reads.ndjson",
+        [
+            {"app": '<script>"', "event": "read", "verb": "task show", "ok": True, "ms": 123.4},
+        ],
+    )
+    document = timings.render_html(timings.summarize(tmp_path))
+    assert "123.4" in document
+    assert "Unmeasured" in document
+    assert "&lt;script&gt;&quot;" in document
+    assert 'value="<script>' not in document
+    assert "Host load was not recorded" in document

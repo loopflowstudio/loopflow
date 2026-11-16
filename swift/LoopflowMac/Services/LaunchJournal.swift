@@ -1,9 +1,10 @@
 // LaunchJournal — timings of real launches and their `lf` reads, kept in the
 // Machine so a report needs no trace and no staged benchmark.
 //
-// Two bounded NDJSON files under `<Machine>/desktop-cache/timings/`: `launches`
+// Bounded NDJSON files under `<Machine>/desktop-cache/timings/`: `launches`
 // holds one line per launch milestone, `reads` one line per `lf` read and per
-// workspace refresh. Lines carry durations, verbs and the app version; never
+// workspace refresh; `interactions` retains ordinary navigation spans and
+// superseded/unfinished observations. Lines carry durations, verbs and the app version; never
 // arguments, output or error text. Each append is one write on a utility queue.
 // Report: scripts/benchmarks/desktop-performance/timings.py.
 //
@@ -117,6 +118,19 @@ final class LaunchJournal: @unchecked Sendable {
             record("read", "verb", verb, ms: ms, ok: ok)
             tally.reads[verb, default: 0] += 1
             if !ok { tally.failed += 1 }
+        }
+    }
+
+    /// Ordinary navigation spans. The correlation is a random observation ID,
+    /// never a Task identity, terminal input or document content.
+    func interaction(_ name: String, scenario: String, observation: String,
+                     phase: String, ms: Double) {
+        let at = Date().timeIntervalSince1970
+        queue.async { [self] in
+            guard let launch else { return }
+            append(["event": "interaction", "name": name, "scenario": scenario,
+                    "observation": observation, "phase": phase, "ms": Self.rounded(ms),
+                    "at": at, "launch": launch, "app": app], to: "interactions")
         }
     }
 

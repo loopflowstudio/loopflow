@@ -8,7 +8,25 @@ Jack Heart: “lets start with the perofrmance benchmark”; “so that we can u
 benchmark to prove each subsequent step”. Quiet mini preferred; current Mac may
 be used when suitably idle. No OS upgrade or merge requested.
 
-## Outcome
+## Live measurements first (2026-11-15)
+
+Jack Heart: “I think what I value more is measurements that are run on my live
+store, on my live machine, and ideally they log to disk or to some sort of
+perflog.” “Whenever I use the apps we're actually getting live measurements from
+how things are loading when I actually interact with the app.”
+
+“I would first want to just say: \"Okay are we able to measure the interactions
+that matter in actual live usage of the app?\" Then we can drive agent-driven
+usage of the app to get some initial figures because we're not going to have
+historical figures to start”. “And then I would say the benchmark or the fake
+world stuff can be done to drive CI tests and maybe but it's probably second”.
+
+Priority: persist ordinary interaction observations, make them readable, then
+collect agent-driven live usage. Synthetic worlds and isolated-host CI follow.
+Keep loaded-host samples; host context must not add synchronous interaction work
+or turn real latency into an adjusted estimate. No merge approval.
+
+## Controlled comparisons
 
 Use the existing native workspace/hierarchy/Session-return and committed-write
 journeys as a fixed baseline for later reactivity changes. Keep measurement
@@ -64,3 +82,45 @@ The coverage table is an inventory, not a claim that every ADEMark or mobile
 journey is automated. Capture the first valid native baseline before using a
 later rewrite slice to claim improved responsiveness. Reuse the exact measurement
 contract; changing the harness requires a new baseline on both builds.
+
+## History audit and current gaps
+
+- `eb5134a95e` / `9ca9495370`: navigation/input/scroll catalog and live recorder;
+  a subsequent correction identifies queued callbacks rather than compositor
+  completion. Keep hitches/hangs separate. Early catalog assertions were reduced;
+  historical coverage descriptions must not be treated as current tests.
+- `464ac18f01` (LOO-376, #1432): ordinary launch/read/refresh disk journals.
+  `0ff8e90e55` (#1436): release launches against a private real Home copy.
+  `c418953634` (#1454): first launch of a new binary separately from relaunch;
+  ad-hoc bundle copies did not establish notarized-installation startup cost.
+- `5b62453be7` and current `agent-input.md`: Claude/Codex × cached/resumed/fresh,
+  exact Session input response, provider/helper timing and hook-review delay.
+- `022a253f78`: phone launch-to-saved/current-list, filter, Session first screen,
+  input-to-next-output. Signposts/log lines are not a persistent disk dashboard.
+- Product goal / Infrastructure memory: October 7 retired numeric performance
+  targets and soak acceptance during product changes. Existing report budgets
+  are historical; do not reactivate them as new gates.
+- DesktopVitals already emits five-minute footprint/thread/fd readings, memory
+  pressure and main-thread hang observations into logs/lf.log. Do not add a second
+  watchdog. No per-interaction host load or general frame-hitch distribution yet.
+- ADEMark pinned source remains the README's `119a5f7b...`: Track A1–A12 and
+  C2–C6 name relevant UX/resource/recovery measurements. Existing harnesses are
+  partial implementations, with no qualified native baseline in this extraction.
+  In particular: five-stream typing, replay-to-first-visible-word, 20-thread
+  scaling, attributed footprint/energy, 2k-message frame drops, 30-minute real-work
+  memory slope and native fault/recovery journeys remain gaps. Mobile remains
+  partial. Fixed replay/host gates are controlled-run requirements, not reasons
+  to discard ordinary-use observations.
+
+## Live report/check observations
+
+- 2026-11-15: local retained 0.15.3 journal has 28 launch records; saved usable
+  proxy n=26, median 566.0 ms, P95 4283.4 ms. No host load context; pooled builds
+  within a version. Slow-reading percentiles sample only wait+apply >=100 ms.
+- Generated `/tmp/loo916-live-performance.html` from the live Machine journals;
+  opened through the system file opener. New navigation journal needs an updated
+  app build; it is not active in the installed app yet.
+- `swift test --package-path swift --jobs 2 --filter LaunchJournalTests`: 9 passed,
+  build passed. Existing warnings in ServerClient.swift and TaskWorkView.swift.
+- `uv run pytest python/tests/test_desktop_timings.py -q`: 4 passed. Ruff format,
+  Ruff check and git diff --check pass for the live reporting change.

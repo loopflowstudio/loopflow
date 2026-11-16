@@ -343,37 +343,23 @@ fn _record_agent_move(agent: &str, failure: AgentFailure, reason: &str, next: &s
 /// A provider refused the step and no agent it may use is left: the stop
 /// and what would let it move, where Task status and `lf task run` read it.
 /// The caller puts the advice in the run's final error, so it prints once.
-fn _record_limit_stop(
-    provider: &str,
-    reason: &str,
-    launch: &AgentConfig,
-    rungs: &[String],
-) -> String {
-    let advice = _limit_stop_advice(provider, launch, rungs);
+fn _record_stop(provider: &str, reason: &str, advice: &str) {
     _record_limit_recovery(
         provider,
         &format!("{reason}{}{advice}", crate::ops::task_execution::STOPPED),
         None,
     );
-    advice
 }
 
 /// The provider revoked the login: no model of it can go on until someone
-/// signs in again, so the step stops with how.
-fn _record_sign_in_stop(provider: &str, reason: &str) -> String {
+/// signs in again.
+fn _sign_in_advice(provider: &str) -> String {
     let sign_in = match provider {
         "claude" => "run `claude`, then /login",
         "codex" => "run `codex login`",
         _ => "sign in with its own client",
     };
-    let advice =
-        format!("The {provider} login was revoked; sign in again on this Machine: {sign_in}");
-    _record_limit_recovery(
-        provider,
-        &format!("{reason}{}{advice}", crate::ops::task_execution::STOPPED),
-        None,
-    );
-    advice
+    format!("The {provider} login was revoked; sign in again on this Machine: {sign_in}")
 }
 
 /// `rungs` is the whole order the step could walk; it stops after the last.
@@ -1090,29 +1076,20 @@ fn _run_with_retries(
         }
         // Without a native thread, retry the same input.
         let delay = match failure {
-            AgentFailure::CredentialInvalidated => {
-                // Every model of a provider shares its dead login; only
-                // another provider in the order can go on.
+            AgentFailure::UsageLimit
+            | AgentFailure::CredentialInvalidated
+            | AgentFailure::ModelUnavailable => {
                 let reason = _failure_reason(&result, failure);
-                let other = rungs
+                // A revoked login is every model of its provider; only
+                // another provider in the order can go on.
+                let revoked = failure == AgentFailure::CredentialInvalidated;
+                let next = rungs
                     .iter()
                     .enumerate()
                     .skip(rung + 1)
-                    .find(|(_, next)| parse_agent(next).0 != provider);
-                let Some((index, next)) = other else {
-                    let advice = _record_sign_in_stop(&provider, &reason);
-                    result.stderr = format!("{reason}\n{advice}");
-                    return Ok(result);
-                };
-                rung = index;
-                _record_agent_move(attempt.agent()?, failure, &reason, next);
-                attempt = _climb(&attempt, next, process, launch);
-                Duration::ZERO
-            }
-            AgentFailure::UsageLimit | AgentFailure::ModelUnavailable => {
-                let reason = _failure_reason(&result, failure);
-                if let Some(next) = rungs.get(rung + 1) {
-                    rung += 1;
+                    .find(|(_, next)| !revoked || parse_agent(next).0 != provider);
+                if let Some((index, next)) = next {
+                    rung = index;
                     _record_agent_move(attempt.agent()?, failure, &reason, next);
                     attempt = _climb(&attempt, next, process, launch);
                     Duration::ZERO
@@ -1131,7 +1108,12 @@ fn _run_with_retries(
                     }
                     delay
                 } else {
-                    let advice = _record_limit_stop(&provider, &reason, launch, &rungs);
+                    let advice = if revoked {
+                        _sign_in_advice(&provider)
+                    } else {
+                        _limit_stop_advice(&provider, launch, &rungs)
+                    };
+                    _record_stop(&provider, &reason, &advice);
                     result.stderr = format!("{reason}\n{advice}");
                     return Ok(result);
                 }

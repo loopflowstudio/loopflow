@@ -234,20 +234,6 @@ wording are complete. Gate owns
 the full changed-path suites and final review; publication follows in the caller's
 delivery step. No merge or landing belongs to this implementation step.
 
-Concept re-review — 2026-11-15: the interrupted workspace already contains the
-refusal-display repair and its focused CLI contract test. A rejection signal
-classifies the refusal; the provider's result or exit finishes the turn so its
-multiline refusal and reset instructions reach the final error. Exhaustion adds
-pin/fallback advice through the existing stop record, without adding account
-state, reset polling or another dispatch. This meets the existing design; no
-new product choice or implement direction remains. Gate is next. The review
-page at `scratch/concept-review.html` now reflects this state.
-
-Re-review check: `cargo test -p loopflow --test session_launch_contract
-pinned_headless_refusal_shows_provider_message_reset_and_next_step` — 1 passed
-in 6.69s with inherited `LF_*` removed and stdin closed; gate retains broader
-suites. `git diff --check` passed after the review-page update.
-
 Follow-up 3845de owns bulk rollover and richer recovery: preview, busy-turn
 handling, retained drafts/approvals, same-thread restart, correlated rejected-turn
 retry and uncertain delivery. LOO-811 / PR #1862 is an unmerged reference; do not
@@ -255,25 +241,7 @@ merge or operate it. Task-interactive automatic recovery is outside this cut.
 
 ## Acceptance and checks
 
-Resumed compression removes the async-only receipt-writing interface left by
-account writes: `FactWriter::write` and `CodexStream::{inbound,outbound}` now
-complete synchronously, retaining `dispatch::off_reactor` for store work. Their
-callers no longer await immediate results or build a test runtime to record a
-snapshot. Service browser preferences no longer carry an unused account parameter.
-Release-note generation no longer classifies retired account-cooldown errors;
-`ReleaseNotesDegradation::Cooldown` remains solely to read archived NOTES.md
-markers, covered by `archived_account_cooldown_notes_remain_readable`.
-
-Resumed compression check: `cargo nextest run -p loopflow --lib --test integration --test release_tests --test session_launch_contract -E 'test(harness::fact_writer::) | test(harness::conformance_tests::) | test(harness::dispatch_tests::) | test(archived_account_cooldown_notes_remain_readable) | test(a_failed_ship_restarts_later_each_time_and_says_why) | test(release_notes_falls_back_for_every_provider_degradation_class) | test(auth_tests::service_auth_survives_subscription_removal) | test(native_auth_owns_launches_with_a_populated_catalog) | test(pinned_headless_refusal_shows_provider_message_reset_and_next_step)' --test-threads 1` — 35 passed; inherited `LF_*` removed and stdin closed. The existing 16MB unwind-table linker warning recurred. Gate/CI own broader suites.
-
-Resumed compression static checks: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, and `git diff --check` — passed. `lf context` remains below both scratch limits.
-
-
-Compression: `cargo nextest run -p loopflow --lib --test integration --test session_launch_contract --test agent_tests -E 'test(harness::claude_decode::) | test(harness::codex_decode::) | test(agent::tests::) | test(config::migrate::tests::) | test(ops::human_session::provider_conversation::tests::) | test(transcript::tests::old_account_transcripts_resume_with_native_auth_without_copying_credentials) | test(native_auth_owns_launches_with_a_populated_catalog) | test(model_unavailable_result_falls_through_or_stops_without_spending_quota) | test(session_steers::) | test(session_lifecycle_tests::task_conversation_starts_at_launch_not_creation) | test(auth_tests::service_auth_survives_subscription_removal)' --test-threads 1` — 103 passed; inherited `LF_*` removed and stdin closed. The lifecycle selector matched no row in these four binaries; it needs its standalone binary. The linker emitted its 16MB unwind-table warning; compilation and all selected tests passed.
-
-`cargo nextest run -p loopflow --test session_lifecycle_tests -E 'test(task_conversation_starts_at_launch_not_creation) | test(personal_task_launch_resume_and_skill_graph_keep_native_identity) | test(finished_headless_runs_leave_the_open_list_and_keep_their_history) | test(standalone_graph_launches_in_a_completed_tasks_checkout)' --test-threads 1` — all four affected lifecycle checks passed without managed-login fixture setup.
-
-Compression final checks: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` passed. `lf context` is below both scratch limits; gate/CI keep the broader suites listed below.
+Earlier compression passes: focused nextest selections over decoders, retry, receipts, lifecycle and auth passed (103 + 35 + 4 rows); details in git history of this file.
 
 Use isolated HOME/LF_HOME, provider stand-ins and no paid inference, refresh,
 production account changes or live credential export. The stand-in records inputs,
@@ -343,9 +311,6 @@ Native-auth behavior is written in place and checked against implementation:
 The website check now asserts the native-auth/retry contract. Product docs omit
 private extraction and policy research. Saved copy corrections remain in place.
 
-The write-docs preview command returned “No Desktop Files view attached; nothing
-opened.” Docs remained at their paths; no alternate editor was opened.
-
 ## Private extraction context
 
 The standalone port is at `/Users/jack/src/subscription-switcher`, initial main
@@ -356,13 +321,8 @@ public product docs.
 
 Requested: “meanwhile, a lot of my codex task sessions are on a 1% account right
 now. can we basicallg restart yhem all now (they should all go onto the one with
-balance that you are on)”. Selected unfinished Codex Task Sessions on
-`manabot-eng`; explicit native resume onto `jack@loopflow.studio` in Rex, no
-message sent. Verified all 11 active on the funded account, each with a new process and
-the same native thread; zero unfinished Task Sessions remain on the low account. Initial piped resume lacked a terminal; restored in Rex.
-
-A full `--all --headless --limit 0` inventory found 15 more, restarted and
-verified the same way (detail in git history).
+balance that you are on)”. 26 unfinished Codex Task Sessions resumed natively on
+the funded account, same threads, no message sent (detail in git history).
 
 ## Authentication concept review — 2026-11-16
 
@@ -476,3 +436,8 @@ All ten held against the code.
 10. Removed the Task-status account branch, `Departure::Account`, `lf account --cached` (CLI, served `account.list`, Swift, skills) and runtime/`CaptureHandoff` account fields.
 
 Also: `cli_discovery::help_for_a_provider…` now uses `linear`.
+
+Compress after review fixes: `_run_with_retries` handles usage-limit, revoked
+login and unavailable model in one branch (a revoked login only skips to another
+provider); `_record_stop` + `_sign_in_advice` replace the two stop recorders.
+`cargo test -p loopflow-execution --lib agent::tests::` — 36 passed; clippy clean.

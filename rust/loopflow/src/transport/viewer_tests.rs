@@ -39,8 +39,15 @@ fn snapshot_preview_fixture() {
         resume_fixture(&case);
         return;
     }
-    let preview = ViewerTerminal::preview(Some(SESSION)).unwrap();
+    let mut preview = ViewerTerminal::preview(Some(SESSION)).unwrap();
     assert!(preview.is_some());
+    if case == "cancel" {
+        preview
+            .as_mut()
+            .unwrap()
+            .write(1, b"\x1b]777;preview-ready\x07")
+            .unwrap();
+    }
     // This thread stands in for the server's held-terminal entrance.
     let terminal = TerminalId::new();
     let listener = UnixListener::bind(registry::entrance().unwrap()).unwrap();
@@ -383,7 +390,9 @@ fn preview_case(case: &str) -> (tempfile::TempDir, Vec<u8>) {
         // SAFETY: poll receives one live descriptor.
         if unsafe { libc::poll(&mut fd, 1, 20) } > 0 {
             let mut bytes = [0; 16384];
-            let n = master.read(&mut bytes).unwrap();
+            // Exercise cancellation with a preview split across PTY reads.
+            let chunk = if case == "cancel" { 1 } else { bytes.len() };
+            let n = master.read(&mut bytes[..chunk]).unwrap();
             display.write(&bytes[..n]);
             output.extend_from_slice(&bytes[..n]);
         }
@@ -392,7 +401,13 @@ fn preview_case(case: &str) -> (tempfile::TempDir, Vec<u8>) {
             std::fs::write(home.path().join("typed"), "1").unwrap();
             typed = true;
         }
-        if case == "cancel" && !cancelled && home.path().join("pending").exists() {
+        if case == "cancel"
+            && !cancelled
+            && home.path().join("pending").exists()
+            && output
+                .windows(b"\x1b]777;preview-ready\x07".len())
+                .any(|w| w == b"\x1b]777;preview-ready\x07")
+        {
             assert!(display.alternate_screen());
             assert!(display.text().unwrap().contains("saved preview"));
             assert_eq!(display.foreground(0, 0), [0x12, 0x34, 0x56]);

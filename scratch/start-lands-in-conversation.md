@@ -186,7 +186,9 @@ launching `lf --batch task run`), adoption with `--session`/`--worktree`,
 
 A second creation path for Desktop beside the CLI; a client-side Task row
 fabricated from the request; a polling wait for checkout inside the terminal;
-keeping `lf task run` as a fallback launcher for creation.
+`lf task run` on creation's answer path. (Setup starting the Graph through a
+detached `lf task run` is the one Task-run carrier, not a fallback: its
+`start_in_background` finds the held conversation opened and skips.)
 
 ## Status (2026-11-16)
 
@@ -208,6 +210,29 @@ approach above:
 - A viewer of a held terminal (`connect`, `held_elsewhere`) skips setup and
   attaches; only the holder does setup.
 - `-b` creation keeps `run_requested` + `start_creation` (no conversation).
+
+Concept review (2026-11-16), next implement direction:
+- **Admission becomes the one transaction the brief states** ("records the
+  Task and its primary Session in one transaction"). Today a reading between
+  `file_task` and `admit_receipt` shows the Task unstarted with no Session
+  (Backlog on another window or the phone), and a crash there leaves it so.
+  `promote_task_prepared` already writes Task, Session and receipt in one
+  IMMEDIATE transaction with ownership facts; load the Graph, acquire claim
+  facts and build the Session candidate before it, and write take-up, claim,
+  Session and the receipt at `admitted` inside it. Then `admit`'s separate
+  `take_up_graph`/`claim`/`record_conversation`/`admit_receipt` steps,
+  `primary::admit_task` and the admits' `filed`+run → Continue branch go
+  away; a receipt for a conversation-admitting create is never `filed`.
+  Supersedes the last item in `questions.md`.
+- **The planning continuation runs on `journal::request::spawn_blocking`**,
+  as the approach says, not a bare `std::thread` carrying the span: served
+  creation keeps request attribution for `sync_planning` and the assignee
+  check.
+- Recorded consequence: setup's "start the Graph" obligation lives on the
+  receipt (`admitted` + `session_id`). Nothing prunes `creation_receipts`
+  today; whatever later expires request IDs ("for a day") must keep
+  `admitted` rows, or a conversation first opened after expiry never starts
+  its Graph.
 
 Remaining, in order:
 1. Answer carries the Session's `SessionRecord` and the Task's overview

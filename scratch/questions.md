@@ -16,5 +16,3 @@
 - `lf -a X task create --run`: the agent override reaches the held
   conversation and its Graph only through inherited environment; creation no
   longer passes `--agent` to a `task run` argv. Not checked live.
-- Repeats before `admitted` redo admission rather than reading one committed
-  transaction; taken as simpler than merging five store writers.

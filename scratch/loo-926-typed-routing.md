@@ -112,37 +112,30 @@ client of one typed request.
   requires every receiving invocation to check it, and env is safe here:
   there is one caller per process.
 
-### One executor
+### One executor, one route (as built in PR 1)
 
-`dispatch::execute(operation) -> Result<Value, Error>` comes out of
-`service.rs::operate`'s Read/Write arms. The server, `lf server stdio` and
-(PR 2) the CLI call it. The server keeps its wrappers (`isolate`,
-`Cache::capture`, `effect` telemetry, `served`) around the call; the other
-callers don't need them.
+No `dispatch` module yet. `Write::run` routes and `Write::run_here` runs here
+(`write.rs:64`); the server calls `run`, `lf server stdio` calls `run_here` or
+`Read::read`. PR 2's CLI dispatcher is where a shared `execute` earns a name.
 
-### One route decision, in the application crate
-
-`dispatch::route(&Operation) -> Destination { Here, Machine(TaskExecutionRoute | Machine) }`
-reads the records `engine::task::remote` and `work_route::forward` read today:
-
-- `remote_task`, and `remote_ownership_writer` for claim/unassign;
-- `moved_session`, `primary_session` for session prepare.
-
-Then `Here` calls `execute`, and `Machine` calls `machine::call(route, &operation)`.
-
-- **Engine.** `engine::task::{run, ship, hold, ownership}` become local-only.
-  `remote`, `remote_on`, `RemoteTaskOperation` and the remote use of
-  `spell_*` are deleted.
+- **Route.** `Write::remote` (`write.rs:1144`) covers
+  task.run/ship/hold/claim/unassign, reading `remote_task` and
+  `remote_ownership_writer`. `session.resume` routes inline in
+  `Write::prepare_session` (`write.rs:1214`) through `work_route::forward`,
+  whose `Forward` now carries the Wave and repository it resolved.
+  `session.new` never forwards there, so it never routes.
+- **Engine.** `engine::task::{run, ship, hold, ownership}` are local-only;
+  `remote`, `remote_on`, `RemoteTaskOperation` are deleted.
 - **No re-forwarding.** An operation that arrived on `lf server stdio` runs
-  `Here`, never re-routed. This replaces the three `LF_EXPECTED_MACHINE_ID`
-  guards in `work_route.rs:285,373,436` and fixes "may delegate again".
+  here, never re-routed.
 
 ### One SSH launch
 
 `machine::ssh::call(target, repo, messages) -> Vec<ServerMessage>` in
 `loopflow-execution`, generic over JSON:
 
-- `resolve_target` + probe;
+- `resolve_target`, no up-front probe: the destination checks
+  `LF_EXPECTED_MACHINE_ID`, and the version is read only after exit 2;
 - `forwarding_environment`;
 - `build_preamble(["lf", "--repo-id", id, "server", "stdio"])`;
 - `run_ssh_io` with the messages on stdin;
@@ -150,8 +143,8 @@ Then `Here` calls `execute`, and `Machine` calls `machine::call(route, &operatio
   skew error.
 
 `run_remote`, `Write::prepare_session`'s SSH half and the "destination said"
-copies fold into it. `prepare_launch` gets one call site. LOO-913 (#1953)
-deletes it; see Decisions.
+copies fold into it. `prepare_launch` stays in `write::Remote::call` (run,
+ship) and the CLI's `ssh::run`; LOO-913 (#1953) deletes both, see Decisions.
 
 ### Directory on the destination
 
@@ -195,9 +188,9 @@ Deletions first:
    (`write.rs:1428`).
 2. Add `machine::ssh::call` and `lf server stdio` (`ServerCommand::Stdio`;
    help in Clap, `docs/dev/machines.md` and `docs/dev/server.md` updated).
-3. Extract `dispatch::execute` from `service.rs::operate`. Add `dispatch::route`
-   and `Operation::at`. `Write::run`'s task.run/ship/hold/claim/unassign and
-   session.new/resume arms go through `route`.
+3. `Write::run` routes (`Write::remote`, `prepare_session`) and
+   `Write::run_here` executes; `Operation::at` rewrites `directory` on the
+   stdio entry.
 4. Tests (`tests/machine_commands.rs`):
    - `served_ownership_routes_to_its_writer_and_never_falls_back_locally`
      (:3968) passes unchanged.
@@ -288,21 +281,8 @@ Each one goes in a named PR below.
 
 ## PR 1 as built (2026-11-16)
 
-Where it departs from the approach above:
+Departures not covered above:
 
-- **No `dispatch` module.** `Write::run` routes and `Write::run_here` runs
-  here; the server calls `run`, `lf server stdio` calls `run_here` or
-  `Read::read`. PR 2's CLI dispatcher is where a shared `execute` earns a name.
-- **Route.** `Write::remote` covers task.run/ship/hold/claim/unassign
-  (`remote_task`, `remote_ownership_writer`). `session.resume` routes through
-  `work_route::forward`, whose `Forward` now carries the Wave and repository it
-  resolved; `session.new` never forwards there, so it never routes.
-- **`Operation::at`** is the stdio entry rewriting the request's `directory`
-  field to its checkout before decoding.
-- **`prepare_launch`** sits in `write::Remote::call` (run, ship), not in the
-  generic `machine::ssh::call`; the CLI's `ssh::run` keeps the other call.
-- **No up-front probe.** Identity is checked on the destination by
-  `LF_EXPECTED_MACHINE_ID`; the version probe runs only after exit 2.
 - **CLI `lf task hold <id>`** routes typed: the engine used to route it, and
   CLI `work_route` never did.
 - A served `task.run` to a peer starts detached there and returns at
@@ -311,39 +291,32 @@ Where it departs from the approach above:
   still reads Clap's arguments until PR 2. `ssh::run_with_io` keeps its IO
   for `mutation::run`'s CLI forward.
 
-Remaining for PR 1: a served `task.run` to a `preview_machines()` peer test
-(needs a Graph run on mini); hold, claim/unassign and resume cover
-`Remote::call`.
+## Remaining for PR 1
 
-## Concept review (2026-11-16): next implement direction
+- **One `Remote` for every forwarded write** (concept review, 2026-11-16).
+  Task writes go `Write::remote` → `Remote::call`; `session.resume` builds its
+  own Write, environment and `ssh::call` inside `prepare_session`. Fold it
+  into `Write::remote`, returning a `Remote` whose `write` carries the
+  forward's Task and Wave. `prepare_session` keeps only `move_session` before
+  `call` and `prepared_remotely` after. Drop `remote`'s `routed` parameter:
+  `execute` asks only when routed. `work_route::forward(&cli, &args)` and
+  `session_spelling` stay until PR 2.
+- A served `task.run` to a `preview_machines()` peer test (needs a Graph run
+  on mini). Hold, claim/unassign and resume already cover `Remote::call`.
 
-Two things the design already implies, read off the built PR 1:
-
-- **One `Remote` for every forwarded write.** Task writes route through
-  `Write::remote` → `Remote::call`; `session.resume` routes inline in
-  `Write::prepare_session` (`write.rs:1214`), building its own Write,
-  environment and `ssh::call`. Same concept ("this write belongs to Machine
-  M, addressed as the destination names it"), two shapes. Fold
-  `session.resume` into `Write::remote`: it returns a `Remote` whose `write`
-  carries the forward's Task and Wave. `prepare_session` keeps only the
-  `move_session` step before `call` and `prepared_remotely` after. The
-  `work_route::forward(&cli, &args)` lookup and `session_spelling` stay
-  until PR 2. Drop `remote`'s `routed` parameter: `execute` asks only when
-  routed.
-- **A fourth lf-to-lf channel the inventory missed.** `machine::ssh::request`
-  (`ssh.rs:45`) launches `lf <argv>` with its own preamble, beside the new
-  `ssh::call` in the same file. Callers: `session_move.rs` (`session send`,
-  `session receive` with a stdin body, `--planning-key`), `task_location.rs`
-  (`task location --request --json`) and `open/workspace.rs`
-  (`--arrive-task`, `--into`). None has an `Operation` kind, so typing them
-  changes the wire and belongs to PR 2: each becomes a Read/Write sent with
-  `ssh::call`, and `ssh::request` is deleted. PR 1 changes nothing here.
+A fourth lf-to-lf channel the inventory missed: `machine::ssh::request`
+(`loopflow-execution/src/machine/ssh.rs:45`) launches `lf <argv>` with its own
+preamble beside `ssh::call`. Callers: `session_move.rs` (`session send`,
+`session receive` with a stdin body, `--planning-key`), `task_location.rs`
+(`task location --request --json`), `open/workspace.rs:636` (`--arrive-task`,
+`--into`). None has an `Operation` kind, so typing them changes the wire:
+PR 2, listed there.
 
 ## Done when
 
 - A Task write whose Task runs on another Machine (run, ship, hold, claim,
-  unassign) reaches it as typed JSON. So does a session.new/resume that
-  belongs to another Machine.
+  unassign) reaches it as typed JSON. So does a session.resume that
+  belongs to another Machine (`session.new` never forwards).
 - An older destination fails with its version and the update command.
 - `rg 'fn run_remote|fn remote_on|RemoteTaskOperation|\.cli\(\)' rust/*/src`
   finds nothing (`fn cli(` also matches unrelated cmux and Rex helpers).

@@ -1,7 +1,8 @@
 # LOO-936: record only what the product reads, history apart from state
 
-Status: 2026-11-16, slice 1 implemented (uncommitted until checkpoint);
-slices 2–5 remain. The inventory below is the review a person reads before
+Status: 2026-11-16, slice 1 committed (`0cdba4ed89`); slices 2–5 remain.
+Old `provider_session_observed`/`provider_account_selected` rows still sit in
+live stores (tests seed them); slice 5's move pass deletes them. The inventory below is the review a person reads before
 code changes (brief: "Start with an inventory a person reviews before code
 changes").
 

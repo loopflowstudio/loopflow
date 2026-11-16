@@ -1,10 +1,19 @@
 #if os(macOS)
+import AppKit
 import Foundation
 import Testing
 @testable import LoopflowMac
 
 @Suite("Launch journal")
 struct LaunchJournalTests {
+    @Test @MainActor
+    func startupIntervalCanBeginBeforeAppKit() {
+        #expect(NSApp == nil)
+        Perf.begin(.coldStart, "startup", id: "startup-before-appkit")
+        #expect(Perf.isPending(.coldStart))
+        Perf.end(.coldStart, id: "startup-before-appkit", inputReady: false)
+    }
+
     @Test("A launch records each milestone once, with the app version and no arguments")
     func launchRecord() throws {
         let directory = try temporaryDirectory()

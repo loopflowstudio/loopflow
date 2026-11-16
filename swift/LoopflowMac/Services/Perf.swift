@@ -135,8 +135,8 @@ enum Perf {
                 context: Interaction.Context(thermalState: ProcessInfo.processInfo.thermalState.rawValue,
                                              liveSessions: liveSessions, repository: repository), sink: journal.append)
         } else { interaction = nil }
-        let eventWindow = NSApp.currentEvent?.window
-        let window = eventWindow?.canBecomeMain == true ? eventWindow : NSApp.mainWindow ?? NSApp.keyWindow
+        let eventWindow = NSApp?.currentEvent?.window
+        let window = eventWindow?.canBecomeMain == true ? eventWindow : NSApp?.mainWindow ?? NSApp?.keyWindow
         pending[key] = Pending(state: state, id: id, interaction: interaction, window: window)
     }
 

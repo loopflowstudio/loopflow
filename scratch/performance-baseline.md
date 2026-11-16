@@ -268,3 +268,10 @@ under the computer-use tool policy. No merge approval.
 - Simulator `InteractionInputTests`: 2 passed (native event clock, disabled capture stays unmeasured). Final ReplayKit lifecycle build passed.
 - Measured server read/write tests: 2 passed, including an actual disposable repository configuration write. Final Clippy/schema checks pending.
 - Final `cargo clippy --all-targets --jobs 2 -- -D warnings`: passed after extending measured writes over request-journal work. `cargo fmt` and `git diff --check`: passed.
+- Final shared/Mac `InteractionTests`, receipt transport and protocol mirror tests: 32 passed in 3 suites; app build passed. Schema tests: 8 passed; measured read/write tests: 2 passed.
+
+Live Dev launch caught a startup crash in Perf.begin: App.init runs before NSApp
+exists, and the window lookup force-unwrapped it. Crash report
+`~/Library/Logs/DiagnosticReports/Loopflow Dev-2026-11-16-124101.ips` identifies
+Perf.begin → LoopflowApp.init. The lookup now permits no AppKit application;
+a focused pre-AppKit startup regression test exercises this case.

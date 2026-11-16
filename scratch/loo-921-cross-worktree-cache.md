@@ -278,7 +278,8 @@ Not touched: `.cargo/` in the repository (none exists), CI workflows,
 
 **Stopped for disk capacity (2026-11-16).** `df -h /tmp` reported 28 GiB free
 while the benchmark ran, below the repository's 32 GiB reserve, and later 26 GiB
-with its compilers stopped. Only the interrupted experiment target was removed.
+with its compilers stopped, then 21 GiB at the final check. Only the interrupted
+experiment target was removed.
 The private daemon and experiment Cargo process group are stopped. The shared
 Machine daemon was not signalled. The driver now checks the existing policy
 before and during builds, stopping only its own process group on shortage.

@@ -50,6 +50,9 @@ pub(crate) async fn accept_linear_issue(
 ) -> StoreResult<()> {
     let repo = repo.to_string();
     run_planning_write(&store.sqlite, acquisition, move |store| {
+        if store.repository_id(&repo)?.is_none() {
+            crate::repository::location::ensure_repository(&store, &repo)?;
+        }
         accept_linear_issue_in(
             &store,
             &repo,

@@ -43,7 +43,10 @@ The probes and full comparison own a private local cache and daemon and stop it 
 completion. They never reset the Machine's cache or share mutable targets. Raw
 Cargo JSON, native time logs and cache receipts remain in the output directory.
 The full comparison retains its source copies, targets and caches on failure
-and prints their directory, so a measurement error need not discard built work.
+and prints their directory. After an exited run, pass `--resume` with the same
+revisions, cache binary and output directory to continue its retained sources
+and receipts. Completed timing samples are retained and their closures checked;
+completed identity/catalogue checks are not repeated.
 Nonfresh Cargo artifacts include cache retrieval; inspect sccache hit/miss deltas
 to distinguish retrieval from compilation. Client-side compilation lets native
 time include compiler and linker CPU in the client process tree; storage-daemon

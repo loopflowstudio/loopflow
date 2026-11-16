@@ -166,6 +166,19 @@ def _summarize(receipts: list[dict]) -> list[dict]:
     return rows
 
 
+def _catalog_complete(output: Path) -> bool:
+    path = output / "catalog-refresh.json"
+    if not path.exists():
+        return False
+    rows = json.loads(path.read_text())
+    return (
+        [row["case"] for row in rows]
+        == ["before", "unmerged", "main_advanced", "packed", "loose_after_packed", "source_package"]
+        and len({row["schema_sha256"] for row in rows}) == 1
+        and rows[-1]["catalog"] == rows[2]["catalog"]
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base", required=True)
@@ -174,13 +187,16 @@ def main() -> None:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--jobs", type=int, default=1, choices=[1])
     parser.add_argument("--cohorts", type=int, default=5)
+    parser.add_argument(
+        "--resume", action="store_true", help="Continue retained sources and receipts"
+    )
     args = parser.parse_args()
     if args.cohorts < 1:
         parser.error("--cohorts must be positive")
     cache = args.sccache.resolve()
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
-    if (output / "receipts.json").exists():
+    if (output / "receipts.json").exists() and not args.resume:
         parser.error("output already has receipts; choose a fresh directory")
     env = {
         key: value
@@ -202,7 +218,7 @@ def main() -> None:
         SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS="CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH,LOOPFLOW_BUILD_SOURCE_ROOT",
         LOOPFLOW_REBUILD_CACHE=str(cache),
     )
-    receipts = []
+    receipts = json.loads((output / "receipts.json").read_text()) if args.resume else []
 
     def run(argv: list[str], cwd: Path = ROOT) -> str:
         result = subprocess.run(
@@ -215,30 +231,42 @@ def main() -> None:
     def stats() -> dict:
         return json.loads(run([str(cache), "--show-stats", "--stats-format", "json"]))["stats"]
 
-    (output / "configuration.json").write_text(
-        json.dumps(
-            {
-                "cache_binary": str(cache),
-                "cache_sha256": hashlib.sha256(cache.read_bytes()).hexdigest(),
-                "cache_version": run([str(cache), "--version"]).strip(),
-                "rustc": run(["rustc", "--version"]).strip(),
-                "machine": list(os.uname()),
-                "cpus": os.cpu_count(),
-                "jobs": args.jobs,
-                "cohorts": args.cohorts,
-                "client_side": True,
-                "max_frame_length": env["SCCACHE_MAX_FRAME_LENGTH"],
-                "instrumentation": (
-                    "two cache-stat RPCs per workspace rustc invocation; "
-                    "included in elapsed/client CPU"
-                ),
-                "memory": "largest timed process RSS; cache daemon excluded from CPU/RSS",
-            },
-            indent=2,
+    if not args.resume:
+        (output / "configuration.json").write_text(
+            json.dumps(
+                {
+                    "cache_binary": str(cache),
+                    "cache_sha256": hashlib.sha256(cache.read_bytes()).hexdigest(),
+                    "cache_version": run([str(cache), "--version"]).strip(),
+                    "rustc": run(["rustc", "--version"]).strip(),
+                    "machine": list(os.uname()),
+                    "cpus": os.cpu_count(),
+                    "jobs": args.jobs,
+                    "cohorts": args.cohorts,
+                    "client_side": True,
+                    "max_frame_length": env["SCCACHE_MAX_FRAME_LENGTH"],
+                    "instrumentation": (
+                        "two cache-stat RPCs per workspace rustc invocation; "
+                        "included in elapsed/client CPU"
+                    ),
+                    "memory": "largest timed process RSS; cache daemon excluded from CPU/RSS",
+                },
+                indent=2,
+            )
+            + "\n"
         )
-        + "\n"
+    retained = json.loads((output / "frontiers.json").read_text()) if args.resume else []
+    if args.resume:
+        prior = json.loads((output / "configuration.json").read_text())
+        if prior["rustc"] != run(["rustc", "--version"]).strip():
+            raise RuntimeError("resume requires the same Rust compiler")
+        if prior["cache_sha256"] != hashlib.sha256(cache.read_bytes()).hexdigest():
+            raise RuntimeError("resume requires the same cache binary")
+    temporary = (
+        str(Path(retained[0]["tree"]).parent)
+        if retained
+        else tempfile.mkdtemp(prefix="lf650-build-", dir="/tmp")
     )
-    temporary = tempfile.mkdtemp(prefix="lf650-build-", dir="/tmp")
     root = Path(temporary).resolve()
     try:
         wrapper = root / "sccache"
@@ -256,35 +284,51 @@ def main() -> None:
         for label, revision in (("base", args.base), ("candidate", args.candidate)):
             sha = run(["git", "rev-parse", "--verify", revision + "^{commit}"]).strip()
             trees = [root / f"{label}-{i}" for i in range(args.cohorts + 1)]
-            for tree in trees:
-                run(["git", "clone", "--shared", "--no-checkout", "--quiet", str(ROOT), str(tree)])
-                run(["git", "checkout", "--quiet", "--detach", sha], tree)
-                run(
-                    [
-                        "git",
-                        "fetch",
-                        "--quiet",
-                        str(ROOT),
-                        "refs/remotes/origin/main:refs/remotes/origin/main",
-                    ],
-                    tree,
-                )
+            if args.resume:
+                rows = [row for row in retained if Path(row["tree"]).name.startswith(label + "-")]
+                if len(rows) != len(trees) or any(row["revision"] != sha for row in rows):
+                    raise RuntimeError("resume revisions or cohort count differ")
+            else:
+                for tree in trees:
+                    run(
+                        [
+                            "git",
+                            "clone",
+                            "--shared",
+                            "--no-checkout",
+                            "--quiet",
+                            str(ROOT),
+                            str(tree),
+                        ]
+                    )
+                    run(["git", "checkout", "--quiet", "--detach", sha], tree)
+                    run(
+                        [
+                            "git",
+                            "fetch",
+                            "--quiet",
+                            str(ROOT),
+                            "refs/remotes/origin/main:refs/remotes/origin/main",
+                        ],
+                        tree,
+                    )
             snapshots[label] = (sha, trees)
-        (output / "frontiers.json").write_text(
-            json.dumps(
-                [
-                    {
-                        "tree": str(t),
-                        "revision": sha,
-                        "origin_main": run(["git", "rev-parse", "origin/main"], t).strip(),
-                    }
-                    for sha, trees in snapshots.values()
-                    for t in trees
-                ],
-                indent=2,
+        if not args.resume:
+            (output / "frontiers.json").write_text(
+                json.dumps(
+                    [
+                        {
+                            "tree": str(t),
+                            "revision": sha,
+                            "origin_main": run(["git", "rev-parse", "origin/main"], t).strip(),
+                        }
+                        for sha, trees in snapshots.values()
+                        for t in trees
+                    ],
+                    indent=2,
+                )
+                + "\n"
             )
-            + "\n"
-        )
         inputs = {}
         for label, (_, trees) in snapshots.items():
             tree = trees[0]
@@ -315,6 +359,18 @@ def main() -> None:
             for label in order:
                 sha, trees = snapshots[label]
                 tree = trees[cohort]
+                cases = (
+                    ("cold_seed",)
+                    if cohort == 0
+                    else ("warm_root", "command_help", "execution", "task_record")
+                )
+                completed = {
+                    r["case"] for r in receipts if r["label"] == label and r["cohort"] == cohort
+                }
+                identity_path = output / f"{cohort}_{label}_identity.json"
+                if set(cases) <= completed and identity_path.exists():
+                    if cohort != 0 or label != "candidate" or _catalog_complete(output):
+                        continue
                 env["SCCACHE_DIR"] = str(root / f"{label}-cache")
                 try:
                     run(["nice", "-n", "10", str(cache), "--start-server"])
@@ -324,114 +380,127 @@ def main() -> None:
                         else ("warm_root", "command_help", "execution", "task_record")
                     )
                     for case in cases:
-                        source = (
-                            _edit(tree, case, cohort)
-                            if case not in ("cold_seed", "warm_root")
-                            else None
+                        receipt = next(
+                            (
+                                r
+                                for r in receipts
+                                if r["label"] == label
+                                and r["cohort"] == cohort
+                                and r["case"] == case
+                            ),
+                            None,
                         )
-                        stem = f"{cohort}_{label}_{case}"
-                        compiler_path = output / f"{stem}_compilers.jsonl"
-                        env["LOOPFLOW_REBUILD_RECEIPTS"] = str(compiler_path)
-                        before, load = stats(), os.getloadavg()
-                        start = time.monotonic()
-                        with (
-                            (output / f"{stem}.jsonl").open("w") as stdout,
-                            (output / f"{stem}.log").open("w") as stderr,
-                        ):
-                            result = subprocess.run(
-                                [
-                                    "/usr/bin/time",
-                                    "-l" if os.uname().sysname == "Darwin" else "-v",
-                                    "nice",
-                                    "-n",
-                                    "10",
-                                    "cargo",
-                                    "build",
-                                    "--locked",
-                                    "-p",
-                                    "loopflow",
-                                    "--bin",
-                                    "lf",
-                                    "--jobs",
-                                    "1",
-                                    "--message-format=json",
-                                ],
-                                cwd=tree,
-                                env=env,
-                                stdout=stdout,
-                                stderr=stderr,
-                                stdin=subprocess.DEVNULL,
+                        if receipt is None:
+                            source = (
+                                _edit(tree, case, cohort)
+                                if case not in ("cold_seed", "warm_root")
+                                else None
                             )
-                        elapsed = time.monotonic() - start
-                        env.pop("LOOPFLOW_REBUILD_RECEIPTS")
-                        after = stats()
-                        log = (output / f"{stem}.log").read_text()
-                        if result.returncode:
-                            raise RuntimeError(f"build failed: see {output / (stem + '.log')}")
-                        artifacts = [
-                            json.loads(line)
-                            for line in (output / f"{stem}.jsonl").read_text().splitlines()
-                            if line.startswith("{")
-                        ]
-                        compilers = [
-                            json.loads(line) for line in compiler_path.read_text().splitlines()
-                        ]
-                        receipt = {
-                            "label": label,
-                            "revision": sha,
-                            "cohort": cohort,
-                            "case": case,
-                            "exit_code": result.returncode,
-                            "wall_seconds": round(elapsed, 3),
-                            **_timing(log),
-                            "load_before": load,
-                            "load_after": os.getloadavg(),
-                            "edited_source": str(source.relative_to(tree)) if source else None,
-                            "workspace_compilers": compilers,
-                            "nonfresh_libraries": sorted(
-                                {
-                                    a["target"]["name"]
-                                    for a in artifacts
-                                    if a.get("reason") == "compiler-artifact"
-                                    and not a["fresh"]
-                                    and set(a["target"]["kind"])
-                                    & {"lib", "rlib", "dylib", "cdylib", "staticlib"}
-                                }
-                            ),
-                            "stats_before": before,
-                            "stats_after": after,
-                        }
-                        for key in ("cache_hits", "cache_misses"):
-                            receipt["rust_" + key] = after[key]["counts"].get("Rust", 0) - before[
-                                key
-                            ]["counts"].get("Rust", 0)
-                        for counter in (
-                            "cache_write_errors",
-                            "cache_read_errors",
-                            "cache_timeouts",
-                        ):
-                            if after[counter] != before[counter]:
-                                raise RuntimeError(f"cache failure in {stem}: {counter}")
-                        receipts.append(receipt)
-                        (output / "receipts.json").write_text(json.dumps(receipts, indent=2) + "\n")
-                        (output / "summary.json").write_text(
-                            json.dumps(_summarize(receipts), indent=2) + "\n"
-                        )
-                        print(
-                            json.dumps(
-                                {
-                                    k: receipt[k]
-                                    for k in (
-                                        "label",
-                                        "cohort",
-                                        "case",
-                                        "wall_seconds",
-                                        "workspace_compilers",
-                                    )
-                                }
-                            ),
-                            flush=True,
-                        )
+                            stem = f"{cohort}_{label}_{case}"
+                            compiler_path = output / f"{stem}_compilers.jsonl"
+                            env["LOOPFLOW_REBUILD_RECEIPTS"] = str(compiler_path)
+                            before, load = stats(), os.getloadavg()
+                            start = time.monotonic()
+                            with (
+                                (output / f"{stem}.jsonl").open("w") as stdout,
+                                (output / f"{stem}.log").open("w") as stderr,
+                            ):
+                                result = subprocess.run(
+                                    [
+                                        "/usr/bin/time",
+                                        "-l" if os.uname().sysname == "Darwin" else "-v",
+                                        "nice",
+                                        "-n",
+                                        "10",
+                                        "cargo",
+                                        "build",
+                                        "--locked",
+                                        "-p",
+                                        "loopflow",
+                                        "--bin",
+                                        "lf",
+                                        "--jobs",
+                                        "1",
+                                        "--message-format=json",
+                                    ],
+                                    cwd=tree,
+                                    env=env,
+                                    stdout=stdout,
+                                    stderr=stderr,
+                                    stdin=subprocess.DEVNULL,
+                                )
+                            elapsed = time.monotonic() - start
+                            env.pop("LOOPFLOW_REBUILD_RECEIPTS")
+                            after = stats()
+                            log = (output / f"{stem}.log").read_text()
+                            if result.returncode:
+                                raise RuntimeError(f"build failed: see {output / (stem + '.log')}")
+                            artifacts = [
+                                json.loads(line)
+                                for line in (output / f"{stem}.jsonl").read_text().splitlines()
+                                if line.startswith("{")
+                            ]
+                            compilers = [
+                                json.loads(line) for line in compiler_path.read_text().splitlines()
+                            ]
+                            receipt = {
+                                "label": label,
+                                "revision": sha,
+                                "cohort": cohort,
+                                "case": case,
+                                "exit_code": result.returncode,
+                                "wall_seconds": round(elapsed, 3),
+                                **_timing(log),
+                                "load_before": load,
+                                "load_after": os.getloadavg(),
+                                "edited_source": str(source.relative_to(tree)) if source else None,
+                                "workspace_compilers": compilers,
+                                "nonfresh_libraries": sorted(
+                                    {
+                                        a["target"]["name"]
+                                        for a in artifacts
+                                        if a.get("reason") == "compiler-artifact"
+                                        and not a["fresh"]
+                                        and set(a["target"]["kind"])
+                                        & {"lib", "rlib", "dylib", "cdylib", "staticlib"}
+                                    }
+                                ),
+                                "stats_before": before,
+                                "stats_after": after,
+                            }
+                            for key in ("cache_hits", "cache_misses"):
+                                receipt["rust_" + key] = after[key]["counts"].get(
+                                    "Rust", 0
+                                ) - before[key]["counts"].get("Rust", 0)
+                            for counter in (
+                                "cache_write_errors",
+                                "cache_read_errors",
+                                "cache_timeouts",
+                            ):
+                                if after[counter] != before[counter]:
+                                    raise RuntimeError(f"cache failure in {stem}: {counter}")
+                            receipts.append(receipt)
+                            (output / "receipts.json").write_text(
+                                json.dumps(receipts, indent=2) + "\n"
+                            )
+                            (output / "summary.json").write_text(
+                                json.dumps(_summarize(receipts), indent=2) + "\n"
+                            )
+                            print(
+                                json.dumps(
+                                    {
+                                        k: receipt[k]
+                                        for k in (
+                                            "label",
+                                            "cohort",
+                                            "case",
+                                            "wall_seconds",
+                                            "workspace_compilers",
+                                        )
+                                    }
+                                ),
+                                flush=True,
+                            )
                         if case != "cold_seed":
                             expected = {"loopflow"}
                             if label == "candidate":
@@ -441,8 +510,8 @@ def main() -> None:
                                     expected.add("loopflow_storage")
                             actual = {
                                 c["crate"]
-                                for c in compilers
-                                if c["crate_type"] == "lib" and c["cache_misses"]
+                                for c in receipt["workspace_compilers"]
+                                if c["crate_type"] in ("lib", "rlib") and c["cache_misses"]
                             }
                             if actual != expected or receipt["rust_cache_misses"] != len(expected):
                                 raise RuntimeError(
@@ -481,7 +550,9 @@ def main() -> None:
                         "loopflow::build_info::source_revision()); }"
                     )
                     manifest = tree / "rust/loopflow/Cargo.toml"
-                    original_manifest = manifest.read_text()
+                    original_manifest = run(
+                        ["git", "show", sha + ":rust/loopflow/Cargo.toml"], ROOT
+                    )
                     with manifest.open("a") as stream:
                         stream.write(
                             '\n[[bin]]\nname="loo650-identity"\npath="src/bin/loo650_identity.rs"\n'

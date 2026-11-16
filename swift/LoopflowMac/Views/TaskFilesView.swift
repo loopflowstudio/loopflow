@@ -162,9 +162,13 @@ struct TaskFilesView: View {
                     if store.showsChanges {
                         ForEach(store.changedPaths, id: \.self) { path in row(path, label: path, mode: .diff) }
                     }
-                    if store.isRefreshingChanges, store.changes == nil { ProgressView().controlSize(.small) }
+                    if store.isRefreshingChanges, store.changes == nil {
+                        HStack { ProgressView().controlSize(.small); Text("Loading files…").font(.caption) }
+                    }
                     if let reason = store.changesError {
                         Text(reason).font(.caption).foregroundStyle(palette.warning)
+                        Button("Retry") { Task { await store.refreshChanges() } }
+                            .buttonStyle(.plain)
                     } else if store.changes != nil, store.scratchPaths.isEmpty, store.changedPaths.isEmpty {
                         Text(store.search.isEmpty ? "No scratch or changed files" : "No matching files")
                             .font(.caption).foregroundStyle(palette.textSecondary)

@@ -6,6 +6,36 @@ import ViewInspector
 @testable import LoopflowMac
 
 struct CreationSubmissionTests {
+    @MainActor @Test(arguments: [ColorScheme.light, .dark])
+    func interruptedResetCanBeDismissedWithoutSendingItAgain(scheme: ColorScheme) async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let server = Server()
+        await server.unknown("reset")
+        let client = CreationSubmissions(directory: root, machine: { "machine" },
+            lookup: { await server.lookup($0) }, send: { try await server.send($0) })
+        try await client.save(SubmittedCreation(requestID: "reset", destination: "machine",
+            payload: Data(#"{"kind":"session.new","directory":"/projects/manabot"}"#.utf8),
+            version: ServerProtocol.revision, submittedAt: Date()))
+        let recovery = CreationRecovery(submissions: client)
+        await recovery.refresh()
+        let item = try #require(recovery.items.first)
+        let resource = try #require(item.resource)
+        #expect(resource.repositoryName == "manabot")
+        #expect(!item.complete)
+        let (dismissed, acknowledge) = AsyncStream<Void>.makeStream()
+        let inspector = RecoveredCreationInspector(resource: resource, complete: false, presented: {
+            await recovery.presented([item.id])
+            acknowledge.yield(())
+        })
+        try inspector.environment(\.colorScheme, scheme).inspect().find(button: "Dismiss notice").tap()
+        for await _ in dismissed { break }
+        await recovery.refresh()
+        #expect(recovery.items.isEmpty)
+        #expect(try await client.pending().isEmpty)
+        #expect(await server.submissions == 0)
+    }
+
     private actor Server {
         private var receipts: [String: String] = [:]
         private(set) var creations = 0
@@ -230,13 +260,47 @@ struct CreationSubmissionTests {
 
 @MainActor
 struct ProviderTransitionTests {
-    @Test func theConnectionRowNamesTheObservedForkAndDatesSourceLiveness() throws {
+    @Test(arguments: [ProviderTransitionKind.retained, .resumed, .started])
+    func ordinaryConnectionsLeaveTheTerminalUnobstructed(kind: ProviderTransitionKind) throws {
+        let transition = try fixture(kind: kind, from: kind == .started ? nil : "earlier")
+        let ready = ServerConnectionReading(generation: 1, state: .connected, input: true,
+            nativeReady: true, message: nil, transition: transition)
+        #expect(ready.title == nil)
+        #expect(ready.acceptsInput)
+        let readonly = ServerConnectionReading(generation: 1, state: .connected, input: false,
+            nativeReady: true, message: nil, transition: transition)
+        #expect(readonly.title == "Read-only. Move here to type.")
+        let opening = ServerConnectionReading(generation: 1, state: .connected, input: true,
+            nativeReady: false, message: nil, transition: transition)
+        #expect(opening.title == ServerConnectionReading.openingTitle)
+        #expect(!opening.acceptsInput)
+    }
+
+    @Test(arguments: [ProviderTransitionKind.started, .forked])
+    func changingProviderThreadsKeepsItsNotice(kind: ProviderTransitionKind) throws {
+        let transition = try fixture(kind: kind, from: "earlier")
+        let reading = ServerConnectionReading(generation: 1, state: .connected, input: true,
+            nativeReady: true, message: nil, transition: transition)
+        #expect(reading.title == transition.explanation)
+        #expect(reading.acceptsInput)
+    }
+
+    private func fixture(kind: ProviderTransitionKind, from: String?) throws -> ProviderTransition {
+        let path = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent("tests/fixtures/dto/provider_transition.json")
+        let value = try JSONDecoder().decode(ProviderTransition.self, from: Data(contentsOf: path))
+        return ProviderTransition(kind: kind, fromProviderSession: from, toProviderSession: value.toProviderSession,
+            fromAgentProcess: value.fromAgentProcess, toAgentProcess: value.toAgentProcess,
+            originalRunning: value.originalRunning, seed: value.seed, observedAt: value.observedAt)
+    }
+
+    @Test func theConnectionNoticeNamesTheObservedForkAndDatesSourceLiveness() throws {
         let path = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().appendingPathComponent("tests/fixtures/dto/provider_transition.json")
         let transition = try JSONDecoder().decode(ProviderTransition.self, from: Data(contentsOf: path))
-        let row = ProviderTransitionRow(transition: transition)
-        #expect(try row.inspect().find(text: "Forked from earlier; original was running at fork").string() == transition.explanation)
+        #expect(transition.explanation == "Forked from earlier; original was running at fork")
         let reading = ServerConnectionReading(generation: 2, state: .connected, input: false, nativeReady: true, message: nil, transition: transition)
+        #expect(reading.title?.contains(transition.explanation) == true)
         #expect(reading.title?.contains("Read-only") == true)
         #expect(!reading.acceptsInput)
     }

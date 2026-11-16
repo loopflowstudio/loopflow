@@ -26,12 +26,20 @@ struct ServerConnectionReading: Decodable, Equatable {
     static let openingTitle = "Opening… Input paused."
     var acceptsInput: Bool { state == .connected && input && nativeReady }
     var canMoveHere: Bool { state == .connected && !input }
+    private var transitionNotice: String? {
+        guard let transition else { return nil }
+        switch transition.kind {
+        case .retained, .resumed: return nil
+        case .started: return transition.fromProviderSession == nil ? nil : transition.explanation
+        case .forked: return transition.explanation
+        }
+    }
     var title: String? {
         switch state {
         case .connecting: return Self.openingTitle
         case .connected:
-            if input { return nativeReady ? transition?.explanation : Self.openingTitle }
-            return [transition?.explanation, "Read-only. Move here to type."].compactMap { $0 }.joined(separator: " ")
+            if input { return nativeReady ? transitionNotice : Self.openingTitle }
+            return [transitionNotice, "Read-only. Move here to type."].compactMap { $0 }.joined(separator: " ")
         case .moving: return "Moving input here… Input paused."
         case .reconnecting: return "Reconnecting… Input paused; last screen may be stale."
         case .unavailable: return message ?? "Session unavailable. Input paused; last screen may be stale."

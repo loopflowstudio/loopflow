@@ -32,6 +32,7 @@ final class CreationRecovery {
         let task: String?
         let session: String?
         let receipt: String
+        var repositoryName: String { URL(fileURLWithPath: directory).lastPathComponent }
     }
     enum Presentation: Hashable {
         case task(String)
@@ -119,6 +120,9 @@ struct CreationRecoveryView: View {
         VStack(alignment: .leading) {
             ForEach(recovery.items) { item in
                 HStack {
+                    if let resource = item.resource {
+                        Text(resource.repositoryName).fontWeight(.semibold)
+                    }
                     Text(item.text).textSelection(.enabled)
                     if item.resource != nil { Button(item.complete ? "Show result" : "Inspect") { inspecting = item } }
                 }
@@ -126,16 +130,18 @@ struct CreationRecoveryView: View {
         }
         .padding(recovery.items.isEmpty ? 0 : 12)
         .sheet(item: $inspecting) { item in
-            if let resource = item.resource { RecoveredCreationInspector(resource: resource, presented: {
-                if item.complete { await recovery.presented([item.id]) }
-            }) }
+            if let resource = item.resource {
+                RecoveredCreationInspector(resource: resource, complete: item.complete,
+                    presented: { await recovery.presented([item.id]) })
+            }
         }
         .task { recovery.start() }
     }
 }
 
-private struct RecoveredCreationInspector: View {
+struct RecoveredCreationInspector: View {
     let resource: CreationRecovery.Resource
+    let complete: Bool
     let presented: () async -> Void
     @State private var detail: Result<String, Error>?
     @Environment(\.dismiss) private var dismiss
@@ -143,10 +149,14 @@ private struct RecoveredCreationInspector: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(resource.task == nil ? "Recovered Session" : "Recovered Task").font(.headline)
+            Text(resource.repositoryName).foregroundStyle(.secondary)
+            if !complete {
+                Text("Review the current work before dismissing this notice. Dismissing does not repeat or undo the request.")
+            }
             ScrollView {
                 Group {
                     switch detail {
-                    case .success(let text): Text(text).task { await presented() }
+                    case .success(let text): Text(text).task { if complete { await presented() } }
                     case .failure(let error): Text(error.localizedDescription)
                     case nil: Text("Reading current work…")
                     }
@@ -157,7 +167,14 @@ private struct RecoveredCreationInspector: View {
             DisclosureGroup("Receipt") {
                 ScrollView { Text(resource.receipt).font(.system(.caption, design: .monospaced)).textSelection(.enabled) }
             }
-            Button("Done") { dismiss() }
+            HStack {
+                Button(complete ? "Done" : "Keep notice") { dismiss() }
+                if !complete {
+                    Button("Dismiss notice") {
+                        Task { await presented(); dismiss() }
+                    }
+                }
+            }
         }
         .padding(20).frame(minWidth: 600, minHeight: 400)
         .task {

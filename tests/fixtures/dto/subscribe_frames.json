@@ -285,7 +285,8 @@
       "unavailable": null,
       "body": {
         "transport": "git",
-        "destinations": []
+        "destinations": [],
+        "effects": []
       }
     }
   }

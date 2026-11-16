@@ -6253,11 +6253,18 @@
       "type": "object"
     },
     "PlanStatus": {
-      "description": "What `repo.plan` answers: the transport, and for Git the\ndestinations with their import and publication evidence.",
+      "description": "What `repo.plan` answers: the transport, for Git the destinations with\ntheir import and publication evidence, and for a tracker its queue.",
       "properties": {
         "destinations": {
           "items": {
             "$ref": "#/$defs/PeerPlanningStatus"
+          },
+          "type": "array"
+        },
+        "effects": {
+          "description": "Changes waiting for the tracker, in send order.",
+          "items": {
+            "$ref": "#/$defs/QueuedEffect"
           },
           "type": "array"
         },
@@ -6268,7 +6275,8 @@
       },
       "required": [
         "transport",
-        "destinations"
+        "destinations",
+        "effects"
       ],
       "type": "object"
     },
@@ -7436,6 +7444,70 @@
         "url",
         "created",
         "pr"
+      ],
+      "type": "object"
+    },
+    "QueuedEffect": {
+      "description": "One change waiting for the tracker.",
+      "properties": {
+        "change": {
+          "description": "What changes, as a person names it: `title`, `complete`, `comment`.",
+          "type": "string"
+        },
+        "error": {
+          "description": "Why the last request did not settle it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "description": "`create`, `field`, `order`, `state`, `comment`, `delete` or `link`.",
+          "type": "string"
+        },
+        "owner": {
+          "description": "The Task identifier or Project name people read.",
+          "type": "string"
+        },
+        "owner_id": {
+          "type": "string"
+        },
+        "owner_kind": {
+          "description": "`task`, `project` or `wave`.",
+          "type": "string"
+        },
+        "phase": {
+          "description": "`pending`, or `attempted`: sent with its reply unknown.",
+          "type": "string"
+        },
+        "provider": {
+          "description": "The tracker it is addressed to.",
+          "type": "string"
+        },
+        "seq": {
+          "description": "Send order across the repository.",
+          "format": "int64",
+          "type": "integer"
+        },
+        "subject": {
+          "description": "The field or comment the change addresses.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "seq",
+        "owner_kind",
+        "owner_id",
+        "owner",
+        "kind",
+        "change",
+        "subject",
+        "phase",
+        "provider",
+        "error"
       ],
       "type": "object"
     },

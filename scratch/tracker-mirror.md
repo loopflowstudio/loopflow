@@ -409,7 +409,8 @@ Deepest deletions first, then the queue, then the bridges. Commit at each.
 - `cargo nextest run -p loopflow --lib -E 'test(local_planning::)' -j 4` → 32 pass. At default parallelism several fixtures' `lf` calls failed with empty stderr and passed alone.
 - `cargo clippy -p loopflow-storage -p loopflow-execution -p loopflow --all-targets -- -D warnings` → clean.
 - Offline demo (temp `LF_HOME`, Linear config, no origin): create, edit, complete → `lf repo plan` lists `create`, `title`, `complete` pending with the bridge error.
-- Not run: `binary(task_abandonment)` (ported), `test(documented_commands::)`, `binary(two_people)`, `test(transport::)`; gate/CI.
+- `cargo nextest run -p loopflow --test integration -E 'test(task_abandonment)'` → pass (ported onto the queue).
+- Not run: `test(documented_commands::)`, `binary(two_people)`, `test(transport::)`; gate/CI.
 
 ## Done when
 

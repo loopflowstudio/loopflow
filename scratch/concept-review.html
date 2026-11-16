@@ -16,8 +16,10 @@ li{margin:.5rem 0}a{color:#285b9c}
 @media(max-width:520px){body{margin-top:1rem}table{font-size:.76rem}}
 </style>
 <header>LOO-650 · concept-review · November 16, 2026<br>
-Reviewed checkout: <code>226ad44904</code>. Built from
-<code>scratch/{loo-650,publishing-discussion}.md</code>, <code>scripts/testing.md</code>,
+Reviewed checkout: <code>1b5609a16a</code> plus current compress/QA and packed-ref fixes. Built from
+<code>scratch/{loo-650,publishing-discussion,questions}.md</code>, <code>scratch/qa.html</code>,<br>
+<code>rust/loopflow/build.rs</code>, storage <code>{build.rs,src/migration_build.rs}</code>,
+<code>python/tests/test_build_provenance.py</code>, <code>scripts/testing.md</code>,
 <code>scripts/{dev-lf,build_cache.py}</code>, execution <code>{Cargo.toml,README.md}</code>,
 execution <code>src/{build_identity,task_graph,engine/skill}.rs</code>, application
 <code>src/{build_info,lf/navigation,lf/commands/list}.rs</code>, and
@@ -36,10 +38,11 @@ gate/CI, native packaging and merged verification remain.</p>
 <table>
 <tr><th>Action / concept</th><th>Before extraction</th><th>Implemented</th></tr>
 <tr><td>Edit help / adapter</td><td>Execution compiles too</td><td>Clap and rendering stay in application; unchanged execution is reusable</td></tr>
-<tr><td>List skills / catalogue</td><td>Shared listing calls CLI</td><td>Adapter supplies entries and spellings to <code>engine::skill::list</code></td></tr>
+<tr><td>List skills / catalogue</td><td>Shared listing calls CLI</td><td>Adapter combines shared definitions with its command catalogue and spellings</td></tr>
 <tr><td>Resume Graph / landing semantics</td><td>Shared selector imports parser</td><td>Clap-backed <code>command_merges</code> supplies <code>landing_name</code>'s classifier</td></tr>
 <tr><td>Run cached code / identity</td><td>Shared code embeds application provenance</td><td>Application entry supplies <code>BuildIdentity</code>; lower code embeds no checkout identity</td></tr>
 <tr><td>Build worktree / cache</td><td>Root list needs upkeep</td><td><code>dev-lf</code> → <code>build_cache.refresh</code> → own target; roots apply after natural daemon idle</td></tr>
+<tr><td>Commit in a sibling worktree / selected revision</td><td>Missing Git inputs watch shared directories and relink unrelated code</td><td>Application watches selected branch reflog and existing refs; storage owns migration-history watches below the Git directory</td></tr>
 <tr><td>Debug source / local artifacts</td><td>Cached debug paths can name another checkout</td><td><code>scripts/dev-lf --isolated-build --version</code> builds in <code>target/isolated</code> without wrappers/cache</td></tr>
 </table>
 <h2>Build, fail, recover</h2>
@@ -58,6 +61,17 @@ lifecycle is introduced.</p>
 checkout, never its seed root. Deleted seed sources still require isolated source
 debugging. Dev-feature unification must not select a second fixture ledger.
 Cached libraries alone establish neither native packaging nor installed recovery.</p>
+<h2>QA follow-up: implementation complete</h2>
+<p>Three provenance tests pass, covering packed branches in main and linked
+checkouts: sibling commits leave the build fresh; external selected-ref updates
+and own empty commits refresh identity. Both sibling cases fail on the old script.
+The post-fix linked-worktree cache probe passes all 16 cases; lower owner artifacts
+hit in the second root and database bytes match. The private daemon stopped.</p>
+<p><strong>Limits retained:</strong> without a branch reflog, the conservative
+parent watch can still relink after sibling commits. A full clone becoming shallow
+without a ref change waits for the next ref change to regenerate its catalogue.
+QA also observed macOS first-exec latency with a main-based debug binary; changing
+<code>LF_BIN</code> selection is not proposed here.</p>
 <h2>Five alternating pairs</h2>
 <table>
 <tr><th>Median elapsed, seconds</th><th>Baseline → candidate</th></tr>
@@ -66,7 +80,8 @@ Cached libraries alone establish neither native packaging nor installed recovery
 <tr><td>Execution</td><td>63.801 → 57.488</td></tr>
 <tr><td>Saved Task record</td><td>63.783 → 65.471</td></tr>
 </table>
-<p>All 42 builds, twelve runtime identity checks and six catalogue checks passed.
+<p>The recorded comparison predates the QA fixes; no new timing comparison is claimed.
+All 42 builds, twelve runtime identity checks and six catalogue checks passed.
 All five candidate fresh roots retrieved lower libraries. Command edits compiled
 application; execution edits compiled execution/application; record edits compiled
 storage/execution/application. The selected experimental cache passed; stock

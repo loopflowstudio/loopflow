@@ -144,3 +144,20 @@ pub fn discover(path: &[String], repo: &Path) -> Result<Vec<Entry>> {
     }
     Ok(entries)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Entry;
+
+    #[test]
+    fn entries_match_the_shared_fixture_without_defaults() {
+        let message: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/dto/server/skill_entries.json"
+        ))
+        .unwrap();
+        let entries: Vec<Entry> = serde_json::from_value(message["result"].clone()).unwrap();
+        assert_eq!(serde_json::to_value(&entries).unwrap(), message["result"]);
+        assert_eq!(entries[0].invocation, "lf debug [message]");
+        assert!(serde_json::from_str::<Entry>(r#"{"name":"debug","kind":"skill"}"#).is_err());
+    }
+}

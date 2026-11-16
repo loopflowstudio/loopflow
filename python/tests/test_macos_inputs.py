@@ -40,6 +40,7 @@ def test_swift_change_runs_every_swift_job(path: str) -> None:
     [
         "scripts/loopflow-dev.py",
         "rust/loopflow/build.rs",
+        "rust/loopflow-execution/build.rs",
         "rust/loopflow-terminal/build.rs",
         "rust/loopflow-terminal/ghostty-vt.json",
         "rust/loopflow-terminal/ghostty-vt-patches/0004-vt-darwin-runtime.patch",
@@ -62,7 +63,19 @@ def test_wire_fixtures_and_swift_scripts_run_swift_test(path: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "path", ["tests/fixtures/dto/work_first_entry.json", "rust/loopflow/src/server/wire.rs"]
+    "path",
+    [
+        "tests/fixtures/dto/work_first_entry.json",
+        "rust/loopflow-execution/tests/fixtures/dto/server/hello.json",
+        "rust/loopflow/src/server/wire.rs",
+        "rust/loopflow-execution/src/machine/wire.rs",
+        "rust/loopflow-execution/src/machine/mobile.rs",
+        "rust/loopflow-execution/src/machine/schema.rs",
+        "rust/loopflow-execution/src/read_stream.rs",
+        "rust/loopflow-execution/src/read_stream/events.rs",
+        "rust/loopflow-execution/src/terminal_holder/wire.rs",
+        "rust/loopflow-execution/src/transport/wire.rs",
+    ],
 )
 def test_shared_protocol_changes_reach_desktop_and_ios(path: str) -> None:
     assert _jobs(path) == {SWIFT_TEST, LOOPFLOW_UI_TEST}
@@ -72,7 +85,7 @@ def test_shared_protocol_changes_reach_desktop_and_ios(path: str) -> None:
     "path",
     [
         "rust/loopflow-execution/src/app_process.rs",
-        "rust/loopflow-execution/src/store/copy.rs",
+        "rust/loopflow-storage/src/copy.rs",
         "rust/loopflow/src/lf/commands/install/published.rs",
     ],
 )

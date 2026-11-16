@@ -8,8 +8,8 @@ Start from a behavior, not a directory. Follow its request until it crosses a
 named domain boundary; then switch to the next area's owner.
 
 ```bash
-rg "LfProcessRuntime" rust/loopflow/src
-rg "WorkRef" rust/loopflow/src
+rg "LfProcessRuntime" rust/loopflow-execution/src
+rg "WorkRef" rust/loopflow-execution/src
 uv run python scripts/check_architecture.py
 ```
 
@@ -17,14 +17,14 @@ uv run python scripts/check_architecture.py
 
 | Territory | Main paths | Owns |
 | --- | --- | --- |
-| CLI and presentation | `rust/loopflow/src/lf/`, `src/bin/` | Command grammar, dispatch and text/JSON output |
-| Shared operations | `engine/`, `ops/` | Typed Work operations, execution launches, delivery and planning |
-| Client access | `server/` | Protocol admission, multiplexing, subscriptions and terminal bridges |
-| Execution | `agent/`, `graph/`, `prompt/`, `skills/`, `harness/` | Skill/Graph discovery, prompts, provider processes and streams |
-| Tracked Work | `work/`, `pm/` | Wave, Project and Task facts, delivery identity and planning-provider models |
-| Persistence | `store/`, `journal/` | SQLite, migrations, domain rows and command/conversation history |
-| Provider accounts | `provider_auth/`, `provider_account/` | Login, encrypted tokens, account homes and routes |
-| Installation | `installation/`, `installation.rs` | Selected artifacts, server registration, update and rollback |
+| CLI and presentation | `rust/loopflow/src/{lf,bin}/` | Command grammar, dispatch and text/JSON output |
+| Shared operations | `rust/loopflow-execution/src/{engine,ops}/` | Typed Work operations, execution launches, delivery and planning |
+| Client access | `rust/loopflow/src/server/`, `rust/loopflow-execution/src/machine/` | Server admission and dispatch; shared Machine clients and wire types |
+| Execution | `rust/loopflow-execution/src/{agent,graph,prompt,skills,harness}/` | Skill/Graph discovery, prompts, provider processes and streams |
+| Tracked Work | `rust/loopflow-execution/src/work/`, `rust/loopflow-storage/src/work/` | Wave, Project and Task facts, delivery identity and planning-provider models |
+| Persistence | `rust/loopflow-storage/src/`, `rust/loopflow-execution/src/{store,journal}/` | Synchronous records and SQL; acquisition and command/conversation history |
+| Provider accounts | `rust/loopflow-execution/src/{provider_auth,provider_account}/` | Login, encrypted tokens, account homes and routes |
+| Installation | `rust/loopflow-execution/src/installation{.rs,/}` | Selected artifacts, server registration, update and rollback |
 | Native app | `swift/Loopflow/`, `swift/LoopflowMac/` | Shared DTOs/services and macOS presentation |
 | Tests | Rust, Python and Swift test roots | Cross-module, wire, migration, CLI and app checks |
 

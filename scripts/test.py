@@ -689,7 +689,7 @@ SUITES: list[Suite] = [
             _touches(
                 c,
                 "swift/",
-                "rust/loopflow-execution/src/store/sqlite/sessions.rs",
+                "rust/loopflow-storage/src/sqlite/sessions.rs",
                 "rust/loopflow-execution/src/naming.rs",
                 "rust/loopflow-terminal/ghostty-vt",
             )
@@ -700,6 +700,7 @@ SUITES: list[Suite] = [
                 "scripts/desktop-headless.sb",
                 "scripts/loopflow-dev.py",
                 "rust/loopflow/build.rs",
+                "rust/loopflow-execution/build.rs",
                 "rust/loopflow-terminal/build.rs",
             )
         ),
@@ -720,6 +721,7 @@ SUITES: list[Suite] = [
         trigger_desc="store, worktrees, or tests/e2e/",
         match=lambda c: _touches(
             c,
+            "rust/loopflow-storage/src/",
             "rust/loopflow-execution/src/store",
             "rust/loopflow-execution/src/git/worktrees",
             "tests/e2e/",
@@ -742,6 +744,7 @@ SUITES: list[Suite] = [
                 "swift/project.yml",
                 "scripts/loopflow-dev.py",
                 "rust/loopflow/build.rs",
+                "rust/loopflow-execution/build.rs",
                 "rust/loopflow-terminal/build.rs",
             )
         ),

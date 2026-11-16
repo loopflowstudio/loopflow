@@ -285,6 +285,12 @@ independently of the application. Its dev-only `test-support` feature exposes
 shared fixtures and inspection hooks to application tests. CLI parsing, server
 dispatch, help and presentation tests remain in `loopflow`.
 
+Application provenance watches the selected branch's reflog and existing refs,
+so a commit on a sibling branch leaves a packed application branch fresh.
+Without a branch reflog, a packed branch conservatively watches its ref parent
+until a commit creates a loose ref; sibling commits can then relink the application.
+Storage owns the `origin/main` watch and propagates catalogue changes to callers.
+
 Each worktree keeps its own target directory. Cargo serializes commands sharing
 one target directory, so run one Cargo command at a time in each worktree. Do
 not point sibling worktrees at a shared mutable target directory.

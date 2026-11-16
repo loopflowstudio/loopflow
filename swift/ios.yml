@@ -46,7 +46,7 @@ targets:
     platform: iOS
     sources:
       - path: LoopflowiOSTests
-      - path: ../rust/loopflow/tests/fixtures/dto/server
+      - path: ../rust/loopflow-execution/tests/fixtures/dto/server
         type: folder
         buildPhase: resources
     dependencies:

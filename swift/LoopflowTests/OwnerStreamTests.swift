@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import Loopflow
 
-/// The owner protocol from `rust/loopflow/src/transport/wire.rs`, read from Rust's fixtures.
+/// The owner protocol from `rust/loopflow-execution/src/transport/wire.rs`, read from Rust's fixtures.
 struct OwnerStreamTests {
     @Test func heartbeatUsesOwnerProtocolWithoutTakingControlOrConsumingAttachmentReply() throws {
         var stream = try observed()

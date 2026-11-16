@@ -12,13 +12,14 @@ model, definitions, storage and terminal libraries and never on `loopflow`.
 
 The application owns Clap, server dispatch and build provenance. Its entry points
 supply `BuildIdentity` before execution. Landing selection takes the application's
-canonical argv classifier; listing receives its command catalogue and invocation
-spellings. Captured Graph JSON and native protocol values keep their wire shape.
+canonical argv classifier; the adapter combines shared definition entries with
+its command catalogue and invocation spellings. Captured Graph JSON and native
+protocol values keep their wire shape.
 
-`test-support` exposes shared fixtures and inspection hooks only for dev
-dependencies. It exposes inspection and explicit fixture overrides; compiled
-CLI behavior keeps its ordinary defaults even when Cargo unifies dev features.
-Parser, help, dispatch and presentation assertions stay with the application. Execution's unit tests compile independently of that application.
+`test-support` exposes shared fixtures, inspection and explicit overrides to dev
+dependencies. CLI behavior keeps its ordinary defaults when Cargo unifies dev
+features. Parser, help, dispatch and presentation assertions stay with the
+application; execution's unit tests compile independently.
 
 [Build and cache guidance](../../scripts/testing.md#builds) describes independent
 worktree targets, optional cross-root reuse and isolated source debugging.

@@ -5,7 +5,7 @@ import Loopflow
 ///
 /// A running wave publishes `.lf/wave/<name>/.wave-endpoint` and its journal to the
 /// ORIGIN repo — the main checkout — never to a worktree. Mirrors Rust
-/// `wave_origin` in `rust/loopflow/src/work/wave/context.rs` (keep the two in
+/// `wave_origin` in `rust/loopflow-execution/src/work/wave/context.rs` (keep the two in
 /// skill): a linked worktree's root resolves to the checkout that holds its
 /// shared Git directory; the main checkout, a non-git path and a plain
 /// subdirectory of a repo resolve unchanged.

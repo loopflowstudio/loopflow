@@ -1033,7 +1033,7 @@ types. A Swift String round trip alone cannot prove that a Rust producer accepts
 an identity value.
 
 Session fixtures share `AMBIENT_TASK_ENV` in
-`rust/loopflow/tests/support/ambient.rs`. Its guard clears inherited control Machine,
+`rust/loopflow-execution/tests/support/ambient.rs`. Its guard clears inherited control Machine,
 captured-input identity/directory, Task authority, and review Session identity under the
 suite's environment lock and restores them afterward. Prove isolation from a
 live Session without shell-level scrubbing:

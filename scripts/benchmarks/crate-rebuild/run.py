@@ -407,11 +407,6 @@ def main() -> None:
                 env["SCCACHE_DIR"] = str(root / f"{label}-cache")
                 try:
                     run(["nice", "-n", "10", str(cache), "--start-server"])
-                    cases = (
-                        ("cold_seed",)
-                        if cohort == 0
-                        else ("warm_root", "command_help", "execution", "task_record")
-                    )
                     for case in cases:
                         receipt = next(
                             (

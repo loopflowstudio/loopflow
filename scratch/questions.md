@@ -34,3 +34,14 @@ are in `loo-650.md`.
 
 
 - November 15: a broad compiler-process inspection accidentally printed an unrelated Cursor API credential from process arguments. The value was not used or copied; it needs rotation. Further inspection is restricted to known PIDs.
+
+- November 16 packed-ref repair: use the selected branch's existing reflog to
+  notice its commits without watching sibling refs. With no branch reflog and
+  the branch packed, retain the conservative ref-parent watch so empty commits
+  still refresh provenance. This reversible choice keeps Git configuration
+  caller-owned; that uncommon configuration can still relink on sibling commits.
+- The first post-QA cache probe failed before storage compiled: a synthetic
+  one-commit Git seed lost first-parent migration order (schema generation
+  stopped at `CREATE INDEX graph_processes_task`). The probe now retains real
+  repository history and `origin/main`, then commits its copied source snapshot.
+  The failure concerns probe setup, not a timed cohort or production catalogue.

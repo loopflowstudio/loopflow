@@ -1,4 +1,3 @@
-use crate::lf::commands::util::find_repo_root;
 use crate::lf::{PrCommand, ReleaseCommand, WtCommand};
 use anyhow::{anyhow, Result};
 use loopflow_execution::git::current_branch;
@@ -17,6 +16,7 @@ use loopflow_execution::ops::{
     release_promote, release_publish, release_regress, release_status, release_tag, Progress,
 };
 use loopflow_execution::output::{column_width, Colors};
+use loopflow_execution::repo::find_repo_root;
 use loopflow_execution::skills::sync_skills;
 use loopflow_execution::skills::SkillSyncOptions;
 use loopflow_execution::work::wave::context::planning_wave;

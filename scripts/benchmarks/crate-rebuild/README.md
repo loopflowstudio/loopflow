@@ -11,9 +11,9 @@ uv run python scripts/benchmarks/crate-rebuild/report.py --input /tmp/lf-build-c
 [LOO-650 results](results/loo-650.html) include all five pairs and their raw receipts.
 
 The probe builds the actual model, definition-content, terminal and storage crates in two separate
-source/target roots. It requires a cold miss, identical-root B hit, semantic-edit
-miss and correct checkout identity from a path-sensitive fixture. A semantic Task-record
-edit must rebuild only storage. Storage reuse also covers its `test-support`
+source/target roots in linked Git worktrees, with a shared `origin/main` ref.
+It requires a cold miss, identical-root B hit, semantic-edit miss and correct checkout
+identity from a path-sensitive fixture. A semantic Task-record edit must rebuild only storage. Storage reuse also covers its `test-support`
 feature and byte-identical embedded database templates; copied databases still
 acquire independent Machine identities. Root-refresh reuse is checked with a
 fresh disposable target; existing dependency artifacts

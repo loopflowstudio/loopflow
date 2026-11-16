@@ -318,7 +318,7 @@ fn in_repo_runtime<T>(
     command: &[String],
     run: impl FnOnce(&std::path::Path) -> anyhow::Result<T>,
 ) -> anyhow::Result<T> {
-    let repo_root = loopflow::lf::commands::util::find_repo_root()?;
+    let repo_root = loopflow_execution::repo::find_repo_root()?;
     with_runtime(&repo_root, command, || run(&repo_root))
 }
 
@@ -331,7 +331,7 @@ fn in_directory_runtime<T>(
 }
 
 fn run_default_agent(cli: &Cli, command: &[String]) -> anyhow::Result<()> {
-    let repo_root = loopflow::lf::commands::util::find_repo_root()?;
+    let repo_root = loopflow_execution::repo::find_repo_root()?;
     let moved = loopflow_execution::git::worktrees::move_default_agent_to_worktree(&repo_root)?;
     match moved {
         Some(worktree) => {

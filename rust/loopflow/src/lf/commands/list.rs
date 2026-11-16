@@ -20,7 +20,6 @@ pub fn list_children(path: &[String], repo: &Path) -> Result<Vec<Entry>> {
             entry.invocation = definition_invocation(&tree, &entry.name, kind);
         }
     }
-    let mut commands = Vec::new();
     if path.is_empty()
         || !(path == ["wave"]
             || path == ["graph"]
@@ -33,7 +32,7 @@ pub fn list_children(path: &[String], repo: &Path) -> Result<Vec<Entry>> {
         {
             let mut child_path = canonical.clone();
             child_path.push(child.get_name().to_string());
-            commands.push(Entry {
+            entries.push(Entry {
                 name: child.get_name().to_string(),
                 kind: "command".to_string(),
                 source: "builtin".to_string(),
@@ -45,7 +44,8 @@ pub fn list_children(path: &[String], repo: &Path) -> Result<Vec<Entry>> {
             });
         }
     }
-    Ok(loopflow_execution::engine::skill::list(entries, commands))
+    entries.sort_by(|a, b| (&a.kind, &a.name).cmp(&(&b.kind, &b.name)));
+    Ok(entries)
 }
 
 pub fn show(path: &[String], repo: &Path, json: bool) -> Result<()> {

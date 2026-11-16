@@ -251,14 +251,13 @@ fn session_exit_retires_orphans_and_headless_runs_but_preserves_primary_and_task
         let saved = store.session(id).unwrap().unwrap();
         assert_eq!(saved.completed_at.is_some(), retired);
         assert_eq!(saved.captured, session.captured);
+        // An exit with nowhere to go writes no history: its outcome is the
+        // Process's, and it completes no turn.
         let history = store.session_history(id, 0, 100).unwrap();
-        assert!(history
-            .iter()
-            .any(|event| event.payload["type"] == "attachment_exit"
-                && event.payload["outcome"] == outcome));
         assert!(!history
             .iter()
-            .any(|event| event.kind == SessionEventKind::Completed));
+            .any(|event| event.kind == SessionEventKind::Completed
+                || event.payload["type"] == "attachment_exit"));
     }
     assert!(!crate::store::session_projection::session_summaries(
         &store,

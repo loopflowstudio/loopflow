@@ -1,7 +1,7 @@
 use loopflow_model::chat::types::TurnUsage;
 use loopflow_model::id::AgentSessionId;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
@@ -44,8 +44,8 @@ impl ProviderSessionRef {
     }
 }
 
-/// What SQLite history keeps of a capture: its provider attempts, accounts and
-/// sessions, how each turn ended, and each silence longer than
+/// What SQLite history keeps of a capture: its provider attempts, how each
+/// turn ended, and each silence longer than
 /// [`SILENCE_SECONDS`]. Provider text and usage have no variant: the provider's
 /// transcript holds the conversation and native rows hold usage. Facts keep the
 /// `events.jsonl:{seq}` source their receipt keys and migrations already index.
@@ -61,15 +61,6 @@ pub enum CaptureFact {
     ProviderAttemptFinished {
         attempt_key: String,
         outcome: String,
-    },
-    ProviderAccountSelected {
-        attempt_key: String,
-        account_id: Option<crate::ProviderAccountId>,
-    },
-    ProviderSessionObserved {
-        attempt_key: String,
-        #[serde(rename = "provider_session_id")]
-        agent_session: AgentSessionId,
     },
     Conversation {
         event: TurnEnd,
@@ -642,68 +633,26 @@ pub fn project_provider_history(
     Ok(records)
 }
 
-/// Project typed input and provider history from the existing Session owner.
-/// No current assignment, provider or completion can rewrite an earlier input.
-/// Read the current conversation’s published provider identity.
+/// Read the current conversation’s published provider identity: the newest
+/// `provider-session:*` reference among the input's observations.
 pub fn provider_session_from_history(
     history: impl IntoIterator<Item = serde_json::Value>,
 ) -> std::io::Result<Option<ProviderSessionRef>> {
-    let mut published = None;
-    let mut events = Vec::new();
-    for observation in history {
-        let Some(source) = observation["source"].as_str() else {
-            continue;
-        };
-        let evidence = &observation["evidence"];
-        if source.starts_with("provider-session:") {
-            published = Some(evidence.clone());
-        } else if let Some(ordinal) = source.strip_prefix("events.jsonl:") {
-            let ordinal = ordinal.parse::<u64>().map_err(std::io::Error::other)?;
-            events.push((ordinal, evidence.clone()));
-        }
-    }
-    if let Some(reference) = published {
-        let reference: ProviderSessionRef =
-            serde_json::from_value(reference).map_err(std::io::Error::other)?;
-        reference.validate()?;
-        return Ok(Some(reference));
-    }
-    events.sort_by_key(|(ordinal, _)| *ordinal);
-    provider_session_from_events(events.into_iter().map(|(_, event)| event).collect())
-}
-
-pub fn provider_session_from_events(
-    events: Vec<serde_json::Value>,
-) -> std::io::Result<Option<ProviderSessionRef>> {
-    let mut provider_session = None;
-    let mut accounts = HashMap::new();
-    for envelope in events.iter().filter_map(read_fact) {
-        match envelope.fact {
-            CaptureFact::ProviderAttemptStarted {
-                attempt_key,
-                account_id,
-                ..
-            }
-            | CaptureFact::ProviderAccountSelected {
-                attempt_key,
-                account_id,
-            } => {
-                accounts.insert(attempt_key, account_id);
-            }
-            CaptureFact::ProviderSessionObserved {
-                attempt_key,
-                agent_session,
-            } => {
-                provider_session = Some(ProviderSessionRef {
-                    schema_version: SCHEMA_VERSION,
-                    agent_session,
-                    account_id: accounts.get(&attempt_key).cloned().flatten(),
-                });
-            }
-            _ => {}
-        }
-    }
-    Ok(provider_session)
+    let Some(reference) = history
+        .into_iter()
+        .filter(|observation| {
+            observation["source"]
+                .as_str()
+                .is_some_and(|source| source.starts_with("provider-session:"))
+        })
+        .last()
+    else {
+        return Ok(None);
+    };
+    let reference: ProviderSessionRef =
+        serde_json::from_value(reference["evidence"].clone()).map_err(std::io::Error::other)?;
+    reference.validate()?;
+    Ok(Some(reference))
 }
 
 /// The resume reference: the newest one names the native conversation and

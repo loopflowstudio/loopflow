@@ -388,9 +388,7 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
             WHERE history.session_id=s.id AND history.captured_event=s.current_capture
             AND history.kind='observed'
             AND CASE WHEN json_valid(history.payload) THEN
-                (instr(history.receipt_key,':provider-session:')>0
-                 OR (instr(history.receipt_key,':events.jsonl:')>0
-                     AND json_extract(history.payload,'$.evidence.type')='provider_session_observed'))
+                instr(history.receipt_key,':provider-session:')>0
             AND json_extract(history.payload,'$.evidence.schema_version')=1
             AND length(json_extract(history.payload,'$.evidence.provider_session_id'))>0 END),
         EXISTS(SELECT 1 FROM held_terminals t WHERE t.id=a.held_terminal_id AND t.ended_at IS NULL)

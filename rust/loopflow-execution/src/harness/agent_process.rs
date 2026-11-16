@@ -905,19 +905,8 @@ mod tests {
         let applied = super::repair_unrecorded_ancestry_in(&store, Some(&resumer), false).unwrap();
         assert_eq!(applied.records[0].action, "repaired");
         assert!(applied.errors.is_empty());
-        let fact: serde_json::Value = sql
-            .query_row(
-                "SELECT payload FROM session_events WHERE session_id=?1
-                 AND json_extract(payload,'$.type')='agent_process_ancestry_repaired'",
-                [&session],
-                |row| row.get::<_, String>(0),
-            )
-            .map(|payload| serde_json::from_str(&payload).unwrap())
-            .unwrap();
-        assert_eq!(fact["agent_process_id"], agent.as_str());
-        assert_eq!(fact["unrecorded_parent_lf_process_id"], ghost.as_str());
-        assert_eq!(fact["released_attached_lf_process_id"], ghost.as_str());
-        assert_eq!(events(&sql), before + 1);
+        // The repair is a log line, not Session history.
+        assert_eq!(events(&sql), before);
         assert!(lineage(&store).status == crate::process::diagnosis::Status::Ok);
 
         let rerun = super::repair_unrecorded_ancestry_in(&store, Some(&resumer), false).unwrap();
@@ -1377,15 +1366,12 @@ mod tests {
             assert!(process.outcome.is_none());
             let current = store.session_attachment(&session.id).unwrap().unwrap();
             assert_eq!(current.lf_process_id.is_none(), ended);
+            // An exit with nowhere to go is the Process's outcome, not history.
             let history = store.session_history(&session.id, 0, 0).unwrap();
-            let exits: Vec<_> = history
+            assert!(!history
                 .iter()
-                .filter(|event| event.payload["type"] == "attachment_exit")
-                .collect();
-            assert_eq!(exits.len(), usize::from(ended));
-            if ended {
-                assert_eq!(exits[0].payload["outcome"], "interrupted");
-            } else {
+                .any(|event| event.payload["type"] == "attachment_exit"));
+            if !ended {
                 assert_eq!(current, attachment);
             }
         }

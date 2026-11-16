@@ -14,7 +14,7 @@ tmux show-environment -g | grep -E '^(LF|LOOPFLOW)_'       # what new tmux sessi
 
 | Variable | Set by | Read by | Policy |
 |---|---|---|---|
-| `LF_HOME` | A person, for an experiment; every lf launch path for its children; cron and CI-watch launchd plists; test fixtures | `store::lf_home_dir`, Desktop's observation client | Selects the data directory. Unset means `~/.lf`. The database is always `$LF_HOME/loopflow.db`. |
+| `LF_HOME` | A person, for an experiment; every lf launch path for its children; cron and CI-watch launchd plists; test fixtures | `store::lf_home_dir`, Desktop's observation client | Selects the data directory. Unset means `~/.lf`. The store is always `$LF_HOME/loopflow.db`, with its history beside it in `$LF_HOME/history.db`. |
 | `LF_BIN` | Desktop and lf launch paths, test fixtures | CLI dispatch and child launch | Explicit executable selection for private `LF_HOME` launches. Ordinary Sessions and agents receive the stable installed entry, or the Desktop helper that launched them; main-Machine dispatch ignores inherited selections. It grants no migration or process-control authority. |
 
 Without a private `LF_HOME`, source commands forward to the installed CLI,

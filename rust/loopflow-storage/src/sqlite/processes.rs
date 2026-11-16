@@ -147,22 +147,26 @@ impl SessionTransfer<'_> {
             true,
             start,
         )?;
-        // The former thread and all account/native observations remain history.
-        // Never clear a saved thread merely because a new harness omitted it.
-        tx.execute(
-            "INSERT INTO session_events(session_id,kind,receipt_key,lf_process_id,observed_at,payload,captured_event)
-             SELECT id,'observed',?2,?3,?4,json_object('type','agent_process_replaced',
-                'agent_process_id',?5,'next_agent_process_id',?6,
-                'provider_thread',provider_thread,'next_provider_thread',?7),current_capture
-             FROM agent_sessions WHERE id=?1",
-            params![session, format!("agent-process:{}:replacement", expected.agent_process_id),
-                expected.lf_process_id, now, expected.agent_process_id, next.agent_process_id, resume_thread],
+        // The former thread goes to the log. Never clear a saved thread merely
+        // because a new harness omitted it.
+        let previous_thread: Option<String> = tx.query_row(
+            "SELECT provider_thread FROM agent_sessions WHERE id=?1",
+            [session],
+            |row| row.get(0),
         )?;
         tx.execute(
             "UPDATE agent_sessions SET provider_thread=?2 WHERE id=?1",
             params![session, resume_thread],
         )?;
         tx.commit()?;
+        tracing::info!(
+            session,
+            agent_process = ?expected.agent_process_id,
+            next_agent_process = ?next.agent_process_id,
+            previous_thread = previous_thread.as_deref(),
+            next_thread = resume_thread.map(AgentSessionId::as_str),
+            "agent process replaced"
+        );
         Ok(next)
     }
 
@@ -180,21 +184,21 @@ impl SessionTransfer<'_> {
             return Err(attachment_changed());
         }
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
-        let mut payload = serde_json::json!({
-            "type": "attachment_exit", "outcome": outcome, "attachment_token": expected.token
-        });
+        // Only a departure has a reader: the next attachment asks where the
+        // conversation went. An exit without one is the Process's own outcome.
         if let Some(departure) = departure {
-            payload["departure"] = serde_json::to_value(departure)
-                .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+            let payload = serde_json::json!({
+                "type": "attachment_exit", "outcome": outcome, "attachment_token": expected.token,
+                "departure": serde_json::to_value(departure)
+                    .map_err(|error| StoreError::InvalidData(error.to_string()))?,
+            });
+            tx.execute(
+                "INSERT INTO session_events(session_id,kind,receipt_key,lf_process_id,observed_at,payload,captured_event)
+                 SELECT id,'observed',?2,?3,?4,?5,current_capture FROM agent_sessions WHERE id=?1",
+                params![session, format!("attachment:{}:exit", expected.token), expected.lf_process_id,
+                    now, payload.to_string()],
+            )?;
         }
-        let exit_seq: i64 = tx.query_row(
-            "INSERT INTO session_events(session_id,kind,receipt_key,lf_process_id,observed_at,payload,captured_event)
-             SELECT id,'observed',?2,?3,?4,?5,current_capture FROM agent_sessions WHERE id=?1
-             RETURNING seq",
-            params![session, format!("attachment:{}:exit", expected.token), expected.lf_process_id,
-                now, payload.to_string()],
-            |row| row.get(0),
-        )?;
         // A departure continues the Session elsewhere; only an exit without a
         // destination completes it. A headless run is history once it stops
         // working, whatever Work or Graph it served; attaching a later turn
@@ -215,15 +219,14 @@ impl SessionTransfer<'_> {
         )?;
         tx.execute(
             "UPDATE processes SET attached_lf_process_id=NULL,attachment_token=?3,
-                attachment_exit_seq=?4,endpoint=CASE WHEN ?2 THEN NULL ELSE endpoint END,
-                completed_at=CASE WHEN ?2 THEN COALESCE(completed_at,?5) ELSE completed_at END,
+                endpoint=CASE WHEN ?2 THEN NULL ELSE endpoint END,
+                completed_at=CASE WHEN ?2 THEN COALESCE(completed_at,?4) ELSE completed_at END,
                 spawn_state=CASE WHEN ?2 THEN 'exited' ELSE spawn_state END,
-                outcome=CASE WHEN ?2 AND ?6='interrupted' THEN ?6 ELSE outcome END WHERE id=?1",
+                outcome=CASE WHEN ?2 AND ?5='interrupted' THEN ?5 ELSE outcome END WHERE id=?1",
             params![
                 expected.agent_process_id,
                 closed,
                 AttachmentToken::new(),
-                exit_seq,
                 now,
                 outcome
             ],
@@ -661,8 +664,7 @@ pub(super) fn attach_in(
         )?;
     }
     tx.execute(
-        "UPDATE processes SET attached_lf_process_id=?2,attachment_token=?3,attachment_exit_seq=NULL
-         WHERE id=?1",
+        "UPDATE processes SET attached_lf_process_id=?2,attachment_token=?3 WHERE id=?1",
         params![
             attached.agent_process_id,
             attached.lf_process_id,
@@ -1379,8 +1381,8 @@ impl SqliteStore {
         Ok(rows)
     }
 
-    /// Release ancestry that was never recorded, keeping the id it named in a
-    /// Session fact. Returns false when the row no longer has the signature.
+    /// Release ancestry that was never recorded, logging the id it named.
+    /// Returns false when the row no longer has the signature.
     pub fn release_agent_ancestry(
         &self,
         agent: &UnrecordedAncestry,
@@ -1407,26 +1409,15 @@ impl SqliteStore {
         if released == 0 {
             return Ok(false);
         }
-        if let Some(session) = &agent.session_id {
-            tx.execute(
-                "INSERT INTO session_events(session_id,kind,receipt_key,lf_process_id,agent_process_id,
-                    observed_at,payload,captured_event)
-                 SELECT id,'observed',?2,?3,?4,?5,json_object('type','agent_process_ancestry_repaired',
-                    'agent_process_id',?4,'unrecorded_parent_lf_process_id',?6,
-                    'released_attached_lf_process_id',?7,'evidence','trace_rooted_at_agent'),current_capture
-                 FROM agent_sessions WHERE id=?1",
-                params![
-                    session,
-                    format!("agent-process:{}:ancestry-repair", agent.agent_process_id),
-                    repairer,
-                    agent.agent_process_id,
-                    time::OffsetDateTime::now_utc().unix_timestamp(),
-                    agent.parent_lf_process_id,
-                    agent.attached_lf_process_id,
-                ],
-            )?;
-        }
         tx.commit()?;
+        tracing::info!(
+            session = agent.session_id.as_deref(),
+            agent_process = ?agent.agent_process_id,
+            unrecorded_parent = ?agent.parent_lf_process_id,
+            released_attachment = ?agent.attached_lf_process_id,
+            repairer = ?repairer,
+            "agent process ancestry released: trace rooted at agent"
+        );
         Ok(true)
     }
 

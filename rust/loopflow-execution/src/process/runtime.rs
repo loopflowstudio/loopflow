@@ -455,7 +455,6 @@ impl RuntimeState {
         self.recorder.observe_provider(
             self.agent_session.as_ref(),
             self.account_id.as_ref(),
-            account_changed,
             thread_changed,
         )
     }

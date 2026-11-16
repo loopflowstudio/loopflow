@@ -1015,7 +1015,7 @@ mod tests {
     }
 
     #[test]
-    fn provider_identity_uses_original_event_order_and_fresh_publications() {
+    fn provider_identity_is_the_newest_published_reference() {
         let home = tempfile::tempdir().unwrap();
         let store = crate::test_fixture::open(&home.path().join("store.db")).unwrap();
         store.test_session("conversation", "run_00000000000000000000000000000001");
@@ -1038,61 +1038,16 @@ mod tests {
                 )
                 .unwrap();
         };
-        let event = |seq, fields: serde_json::Value| {
-            let mut value =
-                json!({"schema_version":1,"seq":seq,"observed_at":"2026-09-29T00:00:00Z"});
-            value
-                .as_object_mut()
-                .unwrap()
-                .extend(fields.as_object().unwrap().clone());
-            value
-        };
-        // The thread arrives in SQL before its earlier account selection.
+        // Account and thread facts in the event stream are not a resume
+        // reference; only a published `provider-session:*` is.
         retain(
             "events.jsonl:2",
-            event(
-                2,
-                json!({"type":"provider_session_observed","attempt_key":"second","provider_session_id":"second-thread"}),
-            ),
+            json!({"schema_version":1,"seq":2,"observed_at":"2026-09-29T00:00:00Z",
+                "type":"provider_session_observed","attempt_key":"second","provider_session_id":"second-thread"}),
         );
-        retain(
-            "events.jsonl:1",
-            event(
-                1,
-                json!({"type":"provider_account_selected","attempt_key":"second","account_id":"recorded"}),
-            ),
-        );
-        let reference = store.input_provider_session(&input).unwrap().unwrap();
-        assert_eq!(reference.agent_session, "second-thread".into());
-        assert_eq!(reference.account_id.unwrap().as_str(), "recorded");
-        // Importing an older thread later cannot replace that pair.
-        retain(
-            "events.jsonl:0",
-            event(
-                0,
-                json!({"type":"provider_session_observed","attempt_key":"first","provider_session_id":"first-thread"}),
-            ),
-        );
-        let reference = store.input_provider_session(&input).unwrap().unwrap();
-        assert_eq!(reference.agent_session, "second-thread".into());
-        assert_eq!(reference.account_id.unwrap().as_str(), "recorded");
-        retain(
-            "events.jsonl:3",
-            event(
-                3,
-                json!({"type":"provider_session_observed","attempt_key":"unknown","provider_session_id":"unknown-account"}),
-            ),
-        );
-        assert_eq!(
-            store
-                .input_provider_session(&input)
-                .unwrap()
-                .unwrap()
-                .account_id,
-            None
-        );
-        // A late import has no native observation timestamp and cannot overwrite
-        // an already published fresh identity, including its unknown account.
+        assert_eq!(store.input_provider_session(&input).unwrap(), None);
+        // A legacy `provider-session.json` import is not a publication and
+        // cannot replace the newest one, including its unknown account.
         retain(
             "provider-session:fresh",
             json!({"schema_version":1,"provider_session_id":"fresh-thread","account_id":null}),

@@ -327,30 +327,22 @@ impl SessionRecorder {
         }
     }
 
+    /// Publish the conversation `lf resume` reopens. A failed write is retried
+    /// at the next observation even when nothing changed.
     pub fn observe_provider(
         &mut self,
         session: Option<&AgentSessionId>,
         account: Option<&crate::store::ProviderAccountId>,
-        account_changed: bool,
         thread_changed: bool,
     ) -> std::io::Result<()> {
-        let retry = self.provider_observation_pending;
+        if !(thread_changed || self.provider_observation_pending) {
+            return Ok(());
+        }
+        let Some(session) = session else {
+            return Ok(());
+        };
         self.provider_observation_pending = true;
-        if account_changed || retry {
-            self.record_fact(CaptureFact::ProviderAccountSelected {
-                attempt_key: self.attempt_key(),
-                account_id: account.cloned(),
-            })?;
-        }
-        if thread_changed || retry {
-            if let Some(session) = session {
-                write_provider_session(&self.dir, session, account.cloned())?;
-                self.record_fact(CaptureFact::ProviderSessionObserved {
-                    attempt_key: self.attempt_key(),
-                    agent_session: session.clone(),
-                })?;
-            }
-        }
+        write_provider_session(&self.dir, session, account.cloned())?;
         self.provider_observation_pending = false;
         Ok(())
     }

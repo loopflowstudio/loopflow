@@ -53,7 +53,7 @@ fn history_times_provider_work_from_its_first_recorded_attempt() {
 }
 
 #[test]
-fn provider_account_observation_precedes_session_and_preserves_attempts() {
+fn each_attempt_publishes_its_conversation_with_the_account_it_ran_on() {
     let _lock = crate::journal::test_env_lock();
     let _ambient = crate::test_ambient::EnvGuard::new();
     let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
@@ -62,20 +62,11 @@ fn provider_account_observation_precedes_session_and_preserves_attempts() {
         .map(crate::process::LfProcessRuntime::new)
         .unwrap();
     let dir = capture.artifact_dir();
-    let facts = || {
-        crate::session_record::row_store(&dir)
-            .unwrap()
-            .input_events(&capture.artifact_key())
-            .unwrap()
-    };
     let first = crate::store::ProviderAccountId::parse("primary").unwrap();
     let second = crate::store::ProviderAccountId::parse("fallback").unwrap();
     capture.mark_spawn_requested();
     capture.observe_provider(None, Some(first.clone()));
-
-    assert!(!dir.join("terminal.json").exists());
     assert!(read_provider_session(&dir).unwrap().is_none());
-    assert!(facts().iter().any(|fact| fact["account_id"] == "primary"));
 
     capture.observe_provider(Some("first-session".into()), Some(first.clone()));
     capture.observe_provider(Some("first-session".into()), Some(first.clone()));
@@ -90,11 +81,6 @@ fn provider_account_observation_precedes_session_and_preserves_attempts() {
         .fail_and_begin_attempt("proof".into(), None, Some(second.clone()))
         .unwrap();
     capture.observe_provider(Some("second-session".into()), Some(second.clone()));
-    assert!(!dir.join("provider-session.json").exists());
-    rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap().execute(
-        "DELETE FROM session_events WHERE kind='observed' AND json_extract(payload,'$.input_id')=?1 AND json_extract(payload,'$.source') LIKE 'provider-session:%'",
-        [capture.artifact_key().as_str()],
-    ).unwrap();
     let recovered = read_provider_session(&dir).unwrap().unwrap();
     assert_eq!(recovered.agent_session, "second-session".into());
     assert_eq!(recovered.account_id, Some(second));
@@ -107,39 +93,22 @@ fn provider_account_observation_precedes_session_and_preserves_attempts() {
     capture.observe_provider(Some("ambient-session".into()), None);
     capture.finish("completed").unwrap();
 
-    let events = facts();
-    let accounts: Vec<_> = events
-        .iter()
-        .filter(|event| event["type"] == "provider_account_selected")
-        .map(|event| (event["attempt_key"].clone(), event["account_id"].clone()))
-        .collect();
-    assert_eq!(
-        accounts,
-        vec![
-            (serde_json::json!("attempt-1"), serde_json::json!("primary")),
-            (
-                serde_json::json!("attempt-2"),
-                serde_json::json!("fallback")
-            ),
-            (serde_json::json!("attempt-3"), serde_json::Value::Null),
-        ]
-    );
-    assert_eq!(
-        events
-            .iter()
-            .filter(|event| event["type"] == "provider_session_observed")
-            .count(),
-        3
-    );
     let ambient = read_provider_session(&dir).unwrap().unwrap();
     assert_eq!(ambient.agent_session, "ambient-session".into());
     assert_eq!(ambient.account_id, None);
     assert!(!dir.join("provider-session.json").exists());
-    rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap().execute(
-        "DELETE FROM session_events WHERE kind='observed' AND json_extract(payload,'$.input_id')=?1 AND json_extract(payload,'$.source') LIKE 'provider-session:%'",
-        [capture.artifact_key().as_str()],
-    ).unwrap();
-    assert_eq!(read_provider_session(&dir).unwrap(), Some(ambient));
+    // The published reference is the only record of which conversation and
+    // account each attempt used; history keeps no second copy.
+    let types: Vec<_> = crate::session_record::row_store(&dir)
+        .unwrap()
+        .input_events(&capture.artifact_key())
+        .unwrap()
+        .into_iter()
+        .map(|event| event["type"].clone())
+        .collect();
+    assert!(!types
+        .iter()
+        .any(|kind| kind == "provider_account_selected" || kind == "provider_session_observed"));
 }
 
 #[test]

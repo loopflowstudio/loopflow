@@ -883,8 +883,8 @@ fn sigint_records_session_interruption_and_retires_the_orphan() {
         .as_array()
         .unwrap()
         .iter()
-        .any(|event| event["payload"]["type"] == "attachment_exit"
-            && event["payload"]["outcome"] == "interrupted"));
+        .any(|event| event["payload"]["source"] == "terminal.json"
+            && event["payload"]["evidence"]["outcome"] == "interrupted"));
 }
 
 #[test]

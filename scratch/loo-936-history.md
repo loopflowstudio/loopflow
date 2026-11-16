@@ -1,8 +1,9 @@
 # LOO-936: record only what the product reads, history apart from state
 
-Status: kickoff plan, 2026-11-16. No code yet. The inventory below is the
-review a person reads before code changes (brief: "Start with an inventory a
-person reviews before code changes").
+Status: 2026-11-16, slice 1 implemented (uncommitted until checkpoint);
+slices 2–5 remain. The inventory below is the review a person reads before
+code changes (brief: "Start with an inventory a person reviews before code
+changes").
 
 ## What the live store showed (2026-11-16, `~/.lf/loopflow.db`, read-only)
 
@@ -104,8 +105,8 @@ with its own write lock, WAL and revision row.
    value, the rule planning triggers already follow
    (`planning_update_triggers_compare_every_column`). Nothing that reads the
    stamp is a subscription: retirement reads it on its own clock.
-6. **Retention** (in the existing hourly `lf top --prune` pass,
-   `store/retention.rs`): `process_history` 30 days; `session_history` 90 days
+6. **Retention** (`lf process prune`, `store/retention.rs`, run by the
+   Machine server on a clock; today nothing schedules it): `process_history` 30 days; `session_history` 90 days
    (weekly usage and Task history read back weeks); `captured` inputs in main
    are kept (they anchor Sessions; 21k rows, 5 MB). Deleting history is one
    `DELETE … WHERE observed_at < ?` per table in batches, then incremental
@@ -179,13 +180,16 @@ lf history list --caller <session>                  # agent-issued commands as b
 
 ## Slices (one PR)
 
-1. **Deletions first.** Stop writing `provider_account_selected`,
-   `provider_session_observed`, `agent_process_replaced`,
-   `agent_process_ancestry_repaired`, departure-less `attachment_exit`,
-   `attachment_exit_seq`; delete `provider_session_from_history`'s fallback,
-   the `task_update` trigger JSON arm, `compact_usage` and its cursor once the
-   move merges per-receipt usage. Held-terminal trigger. Focused test:
-   heartbeat leaves `processes` revision unchanged. **This slice.**
+1. **Deletions first. Done.** No longer written: `provider_account_selected`,
+   `provider_session_observed` (the `provider-session:*` reference is the
+   one record), `agent_process_replaced` and
+   `agent_process_ancestry_repaired` (now `tracing::info!`), departure-less
+   `attachment_exit`, `processes.attachment_exit_seq`. Deleted:
+   `provider_session_from_events` and the fallback, the two `CaptureFact`
+   variants, `has_provider_history`'s events arm. Migration
+   `history_apart_from_state.sql`: held-terminal update trigger ignores
+   heartbeat re-stamps; `task_update_session_events_*` lose the
+   `task_update` JSON arm. `compact_usage` waits for slice 3 (usage moves).
 2. History file: open, schema, write connection, recording gap.
 3. Move session history kinds; state columns on `agent_sessions`; repoint
    readers (`session_events.rs`, `sessions.rs` `pending_inputs`,
@@ -193,17 +197,15 @@ lf history list --caller <session>                  # agent-issued commands as b
    `task_work.rs`, `machine_records.rs`).
 4. Move finished Processes; `FORGETTABLE` widened; `lf history`, Task Work
    list, `lf doctor`, PR-landing blockers read `process_history`.
-5. Retention, move pass for existing rows, `history` revision for Session
+5. Retention on the Machine server's clock, move pass for existing rows, `history` revision for Session
    History subscriptions, `data.md` (it says "Loopflow keeps no copy of the
    stream"; `output` is a copy with four readers — fix the doc).
 
 ## Delete — do not maintain
 
-`retention.rs` `compact_usage`, `Cursor`, `.usage-cursor` file;
-`provider_session_from_history` account/session fallback; writers at
-`processes.rs:152`, `:191` (departure-less), `:218`, `:1412`; the
-`task_update` arm of `task_update_session_events_*`; `store_revision_usage_insert`
-and the `usage` field of `StoreRevisions` once usage rows leave main.
+Remaining: `retention.rs` `compact_usage`, `Cursor`, `.usage-cursor` file
+(slice 3); `store_revision_usage_insert` and the `usage` field of
+`StoreRevisions` once usage rows leave main. Slice 1 removed the rest.
 
 ## Forbidden outcomes
 
@@ -230,3 +232,13 @@ Renaming `session_events` (now only inputs) and `agent_sessions`: LOO-937.
 Tables, columns, store size (main and history), public functions in
 `loopflow-storage`, SQL call sites outside it, rows into main per hour,
 `processes` and `sessions` revisions per second.
+
+## Docs written (intended behavior)
+
+`docs/dev/data.md` (owner table, final-answer copy, new "State and history"
+section, write-lock note), `docs/telemetry.md` (retention paragraph, prune
+wording), `docs/troubleshooting.md` (what survives, disk, orphaned prune),
+`docs/index.md` (file layout), `docs/dev/environment.md`,
+`docs/dev/machines.md` (`history.db` beside `loopflow.db`). Slice 5 checks
+them against the code; the docs also promise `lf doctor` reports
+`history.db` size and oldest row.

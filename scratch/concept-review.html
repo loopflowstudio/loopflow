@@ -16,52 +16,57 @@ li{margin:.4rem 0}
 @media(max-width:520px){body{margin-top:1rem}table{font-size:.76rem}}
 </style>
 <header>LOO-650 · concept-review · November 15, 2026<br>
-Checkout reviewed: <code>4771dfab90</code>. Sources: <code>scratch/loo-650.md</code>,
+Checkout reviewed: <code>d529e8a24a</code>. Sources: <code>scratch/loo-650.md</code>,
 <code>scratch/publishing-discussion.md</code>, <code>scratch/measure.html</code>,
-<code>engine/{mod,account,launch,pr}.rs</code>, <code>lf/commands/graph.rs</code>,
-<code>ops/task/ship.rs</code>, application <code>build.rs</code>, storage and rebuild-probe READMEs.</header>
+<code>engine/{mod,task,skill,repo,session}.rs</code>,
+<code>lf/commands/{util,list,subscribe}.rs</code>, <code>harness/{context,agent_process}.rs</code>,
+<code>server/mod.rs</code>, <code>scripts/build_cache.py</code> and rebuild-probe README.</header>
 <main>
-<h1>Next cut: shared operations below CLI and server.</h1>
-<aside><strong>Biggest mismatch.</strong> The shared engine calls CLI handlers.
-Changing command presentation still shares a compiler unit with execution and
-recovery. Storage is now independent; another small leaf alone leaves this coupling.</aside>
-<p><strong>Built:</strong> model, definitions, terminal and synchronous storage
-crates; independent storage fixtures; cross-root reuse. <strong>Measured:</strong>
-one whole-build comparison, timing inconclusive. The prior page’s unfinished
-storage extraction is complete.</p>
+<h1>Finish the execution crate below both adapters.</h1>
+<aside><strong>Biggest mismatch.</strong> Shared operations moved below CLI handlers,
+but command presentation and execution still compile as one library. Native resume,
+shared readings and Machine-client calls still reach adapter-owned code.</aside>
+<p><strong>Built:</strong> four private crates; shared account, sync and launch
+operations; automatic developer-entry root upkeep; clean-to-dirty provenance check.
+<strong>Proposed:</strong> the independent execution compiler unit.
+<strong>Measured:</strong> cross-root reuse, with whole-build timing inconclusive.</p>
 <h2>Actions → concepts → APIs</h2>
 <table>
-<tr><th>Action / concept</th><th>Existing</th><th>Proposed</th></tr>
-<tr><td>Change a login / provider selection</td><td><code>engine::account</code> constructs <code>lf::AccountCommand</code></td><td>CLI and server call one typed account operation; parsing and rendering stay outside</td></tr>
-<tr><td>Run work / execution Process</td><td><code>engine::launch</code> uses CLI Graph log/release helpers</td><td>Execution owns launch bookkeeping and receipts; request lifetime stays separate</td></tr>
-<tr><td>Submit or land / delivery receipt</td><td><code>engine::pr</code> calls CLI sync/retry orchestration</td><td>One shared orchestration, same exact-head and uncertain-result handling</td></tr>
-<tr><td>Build a new worktree / derived cache roots</td><td>Private refresh probe passes; shared upkeep is missing</td><td>One owner refreshes the shared daemon while idle; normal builds need no manual root editing</td></tr>
+<tr><th>Action / concept</th><th>Existing</th><th>Proposed ownership</th></tr>
+<tr><td>Edit command help / adapter</td><td>Recompiles the application and execution together</td><td>CLI parsing/rendering → shared engine operations → execution; unchanged execution reused</td></tr>
+<tr><td>Resume work / native conversation</td><td>Runtime calls CLI util/open helpers</td><td>Session/process/host operations own resume; adapters retain argv and presentation</td></tr>
+<tr><td>Watch or route a Task / reading</td><td>Engine calls CLI subscription and routing code</td><td>Shared reading and routing below adapters; stdin/NDJSON and socket framing at edges</td></tr>
+<tr><td>List skills / catalogue</td><td>Shared listing reads Clap navigation</td><td>Adapter supplies typed command catalogue; shared composition retains complete listing</td></tr>
+<tr><td>Start managed work / Machine connection</td><td>Harness imports server client/address/wire</td><td>Client and protocol below service dispatch; managed readiness unchanged</td></tr>
 </table>
-<h2>Proposed implementation direction</h2>
-<p>Move operation implementations and results below both adapters, removing their
-old bodies. Trace the production dependency closure before choosing the execution
-crate’s membership. Keep saved facts in storage, resolved launch settings above it,
-and command parsing and presentation in the CLI. Add no new Work lifecycle or
-parallel resolver. A lower-crate-only edit must also refresh dirty build identity.</p>
-<h2>Normal → failure → recovery</h2>
-<p>A terminal or Desktop starts the same Task operation and retains its cursor,
-native thread and input. A lost launch reply retains the creation key and receipt;
-retry cannot launch twice. Ending a served request cannot stop its detached
-execution. Preserve request-local directory and I/O, uncertain outcomes, once-only
-usage and waited landing.</p>
-<p>A new root may miss until idle refresh. Refresh cannot interrupt another build;
-cache failure permits direct compilation. Keep separate targets, correct checkout
-identity and <code>scripts/dev-lf --isolated-build</code> for source debugging.</p>
+<h2>Keep one operation and one receipt</h2>
+<p>A terminal or Desktop starts the same Task and retains its cursor, native thread
+and input. A lost launch reply keeps the creation key and receipt; retry cannot
+launch twice. Ending a request or watch cannot stop its detached execution.
+Preserve request-local directory and I/O, uncertain outcomes, once-only usage and
+waited landing. No new Work record or execution dispatcher.</p>
+<p>Keep CLI/server fixtures above the cut and compile the execution owner alone.
+Move implementations to their owners and delete old bodies. Keep wire results
+shared; render them at the terminal edge. A Machine recording gap must still leave
+the provider conversation running.</p>
+<h2>Build and recover</h2>
+<p><code>scripts/dev-lf --version</code> refreshes derived roots before building.
+A new root can miss until the daemon exits naturally; the next daemon reads the
+updated configuration. Bare Cargo does not refresh roots. No restart, shared
+target or new scheduler. Cache failure permits direct compilation;
+<code>scripts/dev-lf --isolated-build --version</code> supplies local debug sources.</p>
+<p>The verified experimental cache remains a prerequisite for demonstrated reuse.
+Root upkeep alone does not establish a production cache installation or speedup.</p>
 <h2>Show next</h2>
-<p>Independent shared-owner compilation, terminal/served recovery checks, command
-versus runtime rebuild sets, and late-root reuse under the production cache.
-Repeat alternating whole-build trials before claiming savings. Interactive demo
-and review remain before merge.</p>
+<p>Independent execution build and terminal/served recovery checks; actual compiler
+and cache closures after command, execution and saved-record edits. Validate the
+chosen cache, then run five alternating baseline/candidate cohorts and report
+median/range including link cost. Demo and review remain before merge.</p>
 <h2>Review questions</h2>
 <ol>
-<li>Does a product choice remain? No. Commands, saved data and recovery stay the same.</li>
-<li>What changes for loop-or-next? <strong>Design changed: iterate to implement</strong>
-shared operation ownership, then the substantial execution/application cut.</li>
+<li>Does a product choice remain? No: commands, saved data and recovery keep their behavior.</li>
+<li>What follows? <strong>Design changed: iterate to implement</strong> the execution cut,
+including shared readings/routing, native resume and the Machine client.</li>
 </ol>
 </main>
 </html>

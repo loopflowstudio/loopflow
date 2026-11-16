@@ -1,5 +1,11 @@
 # Open choices
 
+- November 15 concept review: complete the existing engine/domain operation
+  closure below CLI and server dispatch. Move native resume and the Machine
+  client with their execution owners; keep Clap catalogue acquisition above and
+  pass typed catalogue values to shared listing. This reversible design direction
+  changes no commands, receipts or execution policy; no product question is open.
+
 - November 15 implementation: the selected cache upkeep entry is `scripts/dev-lf`
   before Cargo. Configuration reload follows the existing server's natural idle
   exit; no shared-daemon restart or new schedule. Ordinary Cargo does not refresh

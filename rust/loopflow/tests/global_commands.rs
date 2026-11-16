@@ -236,7 +236,7 @@ fn machine_commands_and_catalog_work_without_git_or_a_repository() {
         vec!["list"],
         vec!["graph", "show", "pursue"],
         vec!["help", "graph", "pursue"],
-        vec!["account", "--cached"],
+        vec!["account"],
         vec!["wave", "list", "--json"],
         vec!["monitor", "ps", "--json"],
     ] {

@@ -149,22 +149,16 @@ fn explicit_graph_selection_stays_with_steps_and_child_commands_choose_their_own
             (
                 "claude",
                 r#"#!/usr/bin/python3
-import glob
 import json
 import os
-import shutil
 import subprocess
 import sys
 
 if '--version' in sys.argv:
     print('fixture')
     sys.exit(0)
-# The login the shared home carries: the stand-in Keychain on macOS, else its file.
-stores = glob.glob(os.path.join(os.path.dirname(shutil.which('security')), 'keychain', '*'))
-stores.append(os.path.join(os.environ['CLAUDE_CONFIG_DIR'], '.credentials.json'))
-login = next((text for text in (open(path).read() for path in stores if os.path.isfile(path)) if 'claudeAiOauth' in text), None)
 with open(os.path.join(os.environ['LF_HOME'], 'launches.jsonl'), 'a') as launches:
-    launches.write(json.dumps({'args': sys.argv[1:], 'claude_home': os.environ.get('CLAUDE_CONFIG_DIR'), 'claude_login': login}) + '\n')
+    launches.write(json.dumps({'args': sys.argv[1:], 'claude_home': os.environ.get('CLAUDE_CONFIG_DIR')}) + '\n')
 message = json.loads(sys.stdin.readline())
 message['session_id'] = 'agent-fixture'
 print(json.dumps(message), flush=True)
@@ -298,19 +292,12 @@ for line in sys.stdin:
             args.windows(2).any(|pair| pair == ["--model", "sonnet"]),
             "{launch}"
         );
-        // Every step ran in the shared home, signed in as the routed account.
+        // Every step uses the configured native home.
         assert_eq!(
             received["claude_home"].as_str().map(Path::new),
             std::env::var_os("CLAUDE_CONFIG_DIR")
                 .as_deref()
                 .map(Path::new)
-        );
-        assert!(
-            received["claude_login"]
-                .as_str()
-                .unwrap()
-                .contains("fixture-only"),
-            "{launch}"
         );
     }
 

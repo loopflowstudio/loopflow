@@ -21,7 +21,7 @@ fn service_auth_survives_subscription_removal() {
         output
     };
     run(&["account", "connect", "opencode", "--api-key"]);
-    let output = run(&["account", "opencode", "--cached", "--json"]);
+    let output = run(&["account", "opencode", "--json"]);
     let status: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(status["accounts"][0]["provider"], "opencodezen");
     assert_eq!(status["accounts"][0]["state"], "active");
@@ -39,7 +39,7 @@ fn service_auth_survives_subscription_removal() {
         .block_on(store.get_provider_token("opencodezen"))
         .unwrap()
         .is_none());
-    let all = run(&["account", "--cached", "--json"]);
+    let all = run(&["account", "--json"]);
     let status: serde_json::Value = serde_json::from_slice(&all.stdout).unwrap();
     let providers: Vec<_> = status["accounts"]
         .as_array()

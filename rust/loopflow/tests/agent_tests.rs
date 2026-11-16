@@ -183,20 +183,23 @@ fn launch_captures_stderr() {
 
 #[test]
 fn model_unavailable_result_falls_through_or_stops_without_spending_quota() {
-    for (case, fallbacks, expected_launches, stop) in [
-        ("fallback", vec!["claude:opus"], "fable\nopus\n", None),
+    for (case, wait_for_capacity, fallbacks, expected_launches, stop) in [
         (
-            "pinned",
-            vec![],
-            "fable\n",
-            Some("No fallback remains. Change an `agent` or `-a` pin"),
-        ),
-        (
-            "exhausted",
+            "fallback",
+            true,
             vec!["claude:opus"],
             "fable\nopus\n",
-            Some("Nothing is left in its order after claude:fable, claude:opus"),
+            false,
         ),
+        ("pinned", true, vec![], "fable\n", true),
+        (
+            "exhausted",
+            true,
+            vec!["claude:opus"],
+            "fable\nopus\n",
+            true,
+        ),
+        ("bare", false, vec!["claude:opus"], "fable\n", true),
     ] {
         let home = TempDir::new().unwrap();
         let script = claude_script(
@@ -219,12 +222,16 @@ text = 'Fable 5 is currently unavailable. Switch to another model.' if failed el
             ]),
             ..base_launch()
         };
-        let result = run_agent(&launch, &base_process()).unwrap();
+        let process = ProcessConfig {
+            wait_for_capacity,
+            ..base_process()
+        };
+        let result = run_agent(&launch, &process).unwrap();
         assert_eq!(
             std::fs::read_to_string(launches).unwrap(),
             expected_launches
         );
-        if stop.is_some() {
+        if stop {
             assert_ne!(result.exit_code, 0);
             assert_eq!(result.failure, Some(AgentFailure::ModelUnavailable));
         } else {

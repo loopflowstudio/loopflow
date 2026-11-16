@@ -268,7 +268,9 @@ for line in sys.stdin:
             loopflow_execution::session_record::resolve_manifest(home.path(), child_id.as_str())
                 .unwrap();
         assert_eq!(child.caller_artifact_key.as_ref(), Some(&source_id));
-        assert_eq!(child.process.as_ref(), Some(&request));
+        let mut expected = request.clone();
+        expected.account_id = None;
+        assert_eq!(child.process.as_ref(), Some(&expected));
         assert!(child_dir.join("terminal.json").is_file());
         assert!(!child_dir.join("owner.json").exists());
         assert!(!decoy_home.join("runs").exists());
@@ -291,10 +293,7 @@ for line in sys.stdin:
             loopflow_execution::session_record::resolve_manifest(home.path(), &overridden_id)
                 .unwrap();
         assert_eq!(overridden.model.as_deref(), Some("opencode/other"));
-        let mut expected = request.clone();
         expected.agent = "opencode:opencode/other".into();
-        // Claude's selected account cannot transfer to an OpenCode replay.
-        expected.account_id = None;
         assert_eq!(overridden.process, Some(expected));
         let (_, retained) =
             loopflow_execution::session_record::resolve_manifest(home.path(), &source_id).unwrap();

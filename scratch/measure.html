@@ -1,9 +1,62 @@
-<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LOO-650 build measurements</title><style>body{font:16px/1.5 system-ui,sans-serif;color:#222;background:#fafafa;max-width:1100px;margin:40px auto;padding:0 24px}h1{font-size:28px}table{border-collapse:collapse;width:100%;margin:24px 0;background:white}th,td{padding:10px 12px;border-bottom:1px solid #ddd;text-align:left;vertical-align:top;font-variant-numeric:tabular-nums}code{font-size:13px;overflow-wrap:anywhere}.verdict{border-left:4px solid #a56a19;padding:10px 16px;background:#fff4df}.scroll{overflow-x:auto}small{color:#555}</style>
-<h1>Storage extraction: timing inconclusive</h1>
-<p class="verdict">One serial observation per case and revision. Earlier baseline observations varied materially. Five alternating repetitions and a production cache configuration are still needed before a speedup claim.</p>
-<p>Baseline <code>3fbf3d2ca31e41d3a8d548f0ffa0feaff78d82a7</code>; candidate <code>b71c361516</code>. Normal development builds, unchanged third-party versions and profiles, one Cargo job, separate source/target roots and private cold caches. Rust 1.98.1; 16-core arm64 Mac. Both revisions use the same experimental sccache binary and client-side mode. CPU excludes its daemon; RSS is the largest process in the timed client tree, not concurrent Machine memory.</p>
-<div class="scroll"><table><thead><tr><th>Workload</th><th>Elapsed seconds<br>baseline → candidate</th><th>CPU seconds<br>baseline → candidate</th><th>Largest RSS, GB<br>baseline → candidate</th><th>Candidate Rust<br>hits / misses</th></tr></thead><tbody><tr><th>Cold source/target</th><td>727.7 → 663.0</td><td>717.0 → 662.9</td><td>6.1 → 5.3</td><td>0 / 265</td></tr><tr><th>Fresh root, warm cache</th><td>568.7 → 494.6</td><td>566.7 → 482.8</td><td>6.1 → 5.4</td><td>264 / 1</td></tr><tr><th>Shipping edit</th><td>70.7 → 57.4</td><td>122.6 → 94.2</td><td>6.1 → 5.4</td><td>1 / 1</td></tr><tr><th>Task-record edit</th><td>72.2 → 70.6</td><td>126.8 → 109.5</td><td>6.1 → 5.4</td><td>0 / 2</td></tr></tbody></table></div>
-<p>The shipping edit retrieved unchanged storage and compiled the application. The Task-record edit compiled storage and the application. All eight requested builds succeeded; there were no cache read/write errors. Six real Cargo catalogue checks passed: initial, unmerged, origin/main-only advancement, packed refs, a new loose ref and source package without Git. Every case retained canonical schema SHA-256 <code>0a506f2e3be6d80483304b52c6eca2b5ab3ce2ca87b66e5fae28bf9b49f4f596</code>.</p>
-<p>The isolated cache probe passed 16 cases, including ordinary storage and test-support reuse, identical database templates, semantic invalidation, correct runtime paths and late-root refresh. A separate untimed one-second profile of a confirmed cache hit sampled the active file-digest worker in <code>Digest::update_from_file</code> / BLAKE3 (<code>sccache/src/util.rs</code>). Its share of the full path is not isolated.</p>
-<h2>Measurement decisions</h2><div class="scroll"><table><thead><tr><th>Commit</th><th>Observed value</th><th>Verdict</th><th>Hypothesis</th><th>Limiter</th></tr></thead><tbody><tr><td><code>b71c361516</code></td><td>Shipping: 70.7 → 57.5 s elapsed; 122.6 → 94.2 s CPU. Task record: 72.2 → 70.6 s elapsed.</td><td>Inconclusive timing; categorical reuse passed.</td><td>Separate synchronous storage avoids compiling it for application-only edits and fresh roots.</td><td>One pair per workload, variable background load, experimental cache configuration; no median/range estimate. Ownership changes implement the accepted design; numerical savings remain unclaimed.</td></tr></tbody></table></div>
-<p><small>Source frontier: <code>9cafc410eeab03d772b8cac7d641d6bd7edfd435</code>. Cache SHA-256: <code>9d864b14017a948388011bd36e4ca445ec986d85846aced6d293c8bfd8e4ef67</code>. Raw JSON, time logs and configuration: <code>/tmp/loo650-owned-storage-build-comparison</code>. Reuse proof: <code>/tmp/loo650-storage-owned-fixture-proof</code>. Untimed profile: <code>/tmp/loo650-cache-profile</code>. Private daemons stopped. Native package matrix, the execution crate cut, alternating timing cohorts and interactive demo/review remain open; root upkeep is implemented at <code>scripts/dev-lf</code> after this report.</small></p></html>
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<title>LOO-650 rebuild measurements</title>
+<style>
+body {font:16px/1.5 system-ui,sans-serif;max-width:1050px;margin:48px auto;
+padding:0 24px;color:#20252b}
+h1 {font-size:32px;letter-spacing:-.03em} h2 {margin-top:40px;font-size:22px}
+code,td {font-variant-numeric:tabular-nums} code {font-size:.9em}
+table {width:100%;border-collapse:collapse;margin:16px 0 28px}
+th,td {padding:10px;border-bottom:1px solid #ddd;text-align:left}
+thead {background:#f4f5f6} small {color:#626970;white-space:nowrap} a {color:#145b90}
+</style>
+<h1>Rebuild only affected code</h1>
+<p>Five alternating paired cohorts; each sample includes the executable link.
+Values are <strong>median [minimum–maximum]</strong>. Lower is better.</p>
+<p>Command-help elapsed fell 57.3%,
+execution elapsed fell 9.9%, and fresh-worktree
+elapsed fell 7.8%.
+Saved-record edits cost 2.6% more elapsed
+and 2.8% more client CPU, while largest RSS
+fell 38.7%. The cut improves feedback and peak
+memory with a small saved-record cost increase.</p>
+<p>Baseline <code>3fbf3d2ca31e41d3a8d548f0ffa0feaff78d82a7</code><br>Candidate <code>6b9878ffd869ec49f0e1a1f25b7fd102254c18b5</code></p>
+<h2>Elapsed seconds</h2><table><thead><tr><th>Case</th><th>Baseline</th><th>Candidate</th></tr></thead><tbody><tr><th>Fresh worktree, warm cache</th><td>479.90 <small>[477.40–489.79]</small></td><td>442.64 <small>[441.76–447.75]</small></td></tr><tr><th>Command help edit</th><td>64.17 <small>[63.61–64.47]</small></td><td>27.41 <small>[27.30–29.64]</small></td></tr><tr><th>Execution edit</th><td>63.80 <small>[63.67–64.16]</small></td><td>57.49 <small>[56.65–57.98]</small></td></tr><tr><th>Saved Task record edit</th><td>63.78 <small>[63.50–63.83]</small></td><td>65.47 <small>[65.12–70.86]</small></td></tr></tbody></table>
+<h2>Client CPU seconds</h2><table><thead><tr><th>Case</th><th>Baseline</th><th>Candidate</th></tr></thead><tbody><tr><th>Fresh worktree, warm cache</th><td>467.36 <small>[465.59–474.54]</small></td><td>409.62 <small>[409.35–412.70]</small></td></tr><tr><th>Command help edit</th><td>98.25 <small>[98.22–98.43]</small></td><td>42.28 <small>[42.06–44.72]</small></td></tr><tr><th>Execution edit</th><td>98.42 <small>[98.19–98.71]</small></td><td>88.82 <small>[88.38–89.66]</small></td></tr><tr><th>Saved Task record edit</th><td>98.42 <small>[98.29–98.48]</small></td><td>101.15 <small>[101.02–104.89]</small></td></tr></tbody></table>
+<h2>Largest process RSS, GiB</h2><table><thead><tr><th>Case</th><th>Baseline</th><th>Candidate</th></tr></thead><tbody><tr><th>Fresh worktree, warm cache</th><td>5.55 <small>[5.54–5.56]</small></td><td>2.10 <small>[2.10–2.11]</small></td></tr><tr><th>Command help edit</th><td>5.53 <small>[5.53–5.55]</small></td><td>2.10 <small>[2.09–2.12]</small></td></tr><tr><th>Execution edit</th><td>5.54 <small>[5.54–5.55]</small></td><td>3.39 <small>[3.39–3.40]</small></td></tr><tr><th>Saved Task record edit</th><td>5.53 <small>[5.53–5.54]</small></td><td>3.39 <small>[3.38–3.39]</small></td></tr></tbody></table>
+<h2>Workspace compiler closure</h2>
+<table><tr><th>Edit</th><th>Baseline misses</th><th>Candidate misses</th></tr>
+<tr><th>Command help</th><td>application</td><td>application</td></tr>
+<tr><th>Execution</th><td>application</td><td>execution + application</td></tr>
+<tr><th>Saved record</th><td>application</td><td>storage + execution + application</td></tr></table>
+<p>Every fresh candidate worktree retrieves model, definitions, terminal, storage
+and execution from its cache. The application compiles its own checkout identity.
+Subsequent edit cases reuse unchanged libraries as Cargo-fresh artifacts or cache
+hits. Receipts distinguish both from compiler misses. Non-cacheable
+third-party build steps and links remain in the whole-build costs above.</p>
+<h2>Method and limits</h2>
+<p>Independent targets and cold-seeded caches; one Cargo job. Cohort order alternates
+candidate/base, base/candidate. Edits have unique cohort suffixes. Two cold seeds
+are calibration and are excluded from the medians. Profiles match. The registry dependency delta is
+8 removed and
+0 added version/checksum tuples.
+Machine: 16 logical CPUs, arm64,
+Darwin 25.0.0.
+Compiler: rustc 1.98.1 (48a229cea 2026-09-01) (Homebrew).</p>
+<p>The selected experimental sccache binary is pinned by SHA-256
+<code>9d864b14017a948388011bd36e4ca445ec986d85846aced6d293c8bfd8e4ef67</code>. Installed sccache 0.19.0 lacks the
+required Rust basedir and verbatim environment-dependency support. Root upkeep
+passed through an observed natural idle exit; no Machine cache configuration or
+shared daemon was changed.</p>
+<p>The wrapper adds two statistics RPCs per workspace compiler; that overhead is
+included. CPU covers the timed client process tree, excluding the cache daemon.
+RSS is its largest process, not concurrent Machine memory. These observations do
+not establish total Machine CPU savings or a safe concurrency budget. The validator
+was resumed after recognizing Cargo’s rlib spelling; completed samples were retained.</p>
+<p>All twelve source copies passed runtime root/revision checks. Catalogue checks
+retained the canonical schema through Git reference and source-package changes.
+Retrieved execution and storage rlibs can retain the seed checkout’s debug-source
+paths; use <code>scripts/dev-lf --isolated-build</code> when those paths no longer resolve.</p>
+<p><a href="../scripts/benchmarks/crate-rebuild/results/loo-650.json">Compiler, resource and correctness receipts</a> ·
+<a href="../scripts/benchmarks/crate-rebuild/results/loo-650-raw.json.gz">Full cache/resource receipts (compressed JSON)</a> ·
+<a href="../scripts/benchmarks/crate-rebuild/README.md">Reproduce the comparison</a></p></html>

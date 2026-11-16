@@ -5,7 +5,10 @@ uv run python scripts/benchmarks/crate-rebuild/root_probe.py --sccache /path/to/
 uv run python scripts/benchmarks/crate-rebuild/probe.py --sccache /path/to/sccache --output /tmp/lf-cache-proof
 uv run python scripts/benchmarks/crate-rebuild/cochange.py --revision HEAD --count 80
 uv run python scripts/benchmarks/crate-rebuild/run.py --base 3fbf3d2ca3 --candidate HEAD --sccache /path/to/sccache --output /tmp/lf-build-comparison
+uv run python scripts/benchmarks/crate-rebuild/report.py --input /tmp/lf-build-comparison --cache-validation /tmp/lf-root-proof --output scripts/benchmarks/crate-rebuild/results
 ```
+
+[LOO-650 results](results/loo-650.html) include all five pairs and their raw receipts.
 
 The probe builds the actual model, definition-content, terminal and storage crates in two separate
 source/target roots. It requires a cold miss, identical-root B hit, semantic-edit

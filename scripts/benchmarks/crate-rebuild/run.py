@@ -166,6 +166,36 @@ def _summarize(receipts: list[dict]) -> list[dict]:
     return rows
 
 
+def _validate_closure(receipt: dict) -> None:
+    case = receipt["case"]
+    if case == "cold_seed":
+        return
+    expected = {"loopflow"}
+    if receipt["label"] == "candidate":
+        if case in ("execution", "task_record"):
+            expected.add("loopflow_execution")
+        if case == "task_record":
+            expected.add("loopflow_storage")
+    actual = {
+        c["crate"]
+        for c in receipt["workspace_compilers"]
+        if c["crate_type"] in ("lib", "rlib") and c["cache_misses"]
+    }
+    if case == "warm_root" and receipt["label"] == "candidate":
+        expected_hits = {
+            "loopflow_model",
+            "loopflow_definitions",
+            "loopflow_terminal",
+            "loopflow_storage",
+            "loopflow_execution",
+        }
+        hits = {c["crate"] for c in receipt["workspace_compilers"] if c["cache_hits"]}
+        if hits != expected_hits:
+            raise RuntimeError(f"wrong reusable library closure: {hits}")
+    if actual != expected or receipt["rust_cache_misses"] != len(expected):
+        raise RuntimeError(f"wrong compiler closure: expected {expected}, got {actual}")
+
+
 def _catalog_complete(output: Path) -> bool:
     path = output / "catalog-refresh.json"
     if not path.exists():
@@ -219,6 +249,9 @@ def main() -> None:
         LOOPFLOW_REBUILD_CACHE=str(cache),
     )
     receipts = json.loads((output / "receipts.json").read_text()) if args.resume else []
+
+    for receipt in receipts:
+        _validate_closure(receipt)
 
     def run(argv: list[str], cwd: Path = ROOT) -> str:
         result = subprocess.run(
@@ -501,22 +534,7 @@ def main() -> None:
                                 ),
                                 flush=True,
                             )
-                        if case != "cold_seed":
-                            expected = {"loopflow"}
-                            if label == "candidate":
-                                if case in ("execution", "task_record"):
-                                    expected.add("loopflow_execution")
-                                if case == "task_record":
-                                    expected.add("loopflow_storage")
-                            actual = {
-                                c["crate"]
-                                for c in receipt["workspace_compilers"]
-                                if c["crate_type"] in ("lib", "rlib") and c["cache_misses"]
-                            }
-                            if actual != expected or receipt["rust_cache_misses"] != len(expected):
-                                raise RuntimeError(
-                                    f"wrong compiler closure: expected {expected}, got {actual}"
-                                )
+                        _validate_closure(receipt)
                         run([str(tree / "target/debug/lf"), "--version"], tree)
                         if case == "warm_root":
                             paths = []

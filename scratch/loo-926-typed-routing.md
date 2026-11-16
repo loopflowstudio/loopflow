@@ -193,17 +193,19 @@ Deletions first:
 3. `Write::run` routes (`Write::remote`, `prepare_session`) and
    `Write::run_here` executes; `Operation::at` rewrites `directory` on the
    stdio entry.
-4. Tests (`tests/machine_commands.rs`):
+4. Tests (`tests/machine_commands.rs`), all present:
    - `served_ownership_routes_to_its_writer_and_never_falls_back_locally`
-     (:3968) passes unchanged.
-   - New: a recording `ssh` stub shows argv `lf --repo-id … server stdio` and
-     stdin `hello` + `request{kind:"task.claim"}`.
-   - New: a `remote()` stub answering exit 2 to `server stdio` yields the skew
-     error with the update command.
-   - New: served `task.run` for a Task routed to a `preview_machines()` peer
-     returns the peer's run (no test covers remote run/ship today).
-   - Update the `remote()` argv-line assertions that covered engine-routed
-     operations.
+     passes unchanged.
+   - `a_hold_for_a_task_mini_runs_travels_as_the_typed_operation`: argv
+     `lf --repo-id … server stdio`, stdin `hello` + `request{kind:"task.hold"}`,
+     one stdio Process recorded on mini.
+   - `an_lf_without_the_typed_entry_names_its_version_and_update`: exit 2
+     yields the skew error with the update command.
+   - `a_served_run_for_a_task_mini_runs_starts_it_there`: served `task.run`
+     to a `preview_machines()` peer returns the peer's answer, and nothing
+     starts here. Mini's stdio is stubbed; a real Graph on mini's stdio entry
+     runs in the move-continuation tests.
+   - `a_served_resume_opens_the_session_on_your_session_machine_as_a_typed_operation`.
 
 Still argv in PR 1:
 

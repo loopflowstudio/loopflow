@@ -352,3 +352,4 @@ matches it, or changes the docs with it.
 - `cargo nextest run -p loopflow -p loopflow-execution --lib -E 'test(lf::commands::write::tests::) | test(adapter_tests::) | test(session_move::)'`: 15 pass (implement).
 - `cargo clippy --all-targets -- -D warnings`: clean (implement); gate reruns.
 - Loopback sshd (`tests/transport/ssh_shells.rs`): CI.
+- QA (two private Machines, stand-in ssh; `scratch/qa.html`): typed hold/claim/unassign/run/ship reach mini; older lf, older protocol, crashing and unreachable mini each name the cause. After the QA fixes: `machine_commands::` 60 pass, `--lib server::` 87, `machine::ssh::` 4, clippy clean.

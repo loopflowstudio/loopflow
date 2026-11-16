@@ -773,6 +773,15 @@ key, and the move's check then refused; start mini's home over. A marker file th
 stand-in checks per host (exit 255, "Connection refused") makes either side
 unreachable without touching the other's store.
 
+Typed writes travel as `exec 'lf' '--repo-id' … 'server' 'stdio'` with
+`hello` and one `request` on stdin: have the stand-in `ssh` `tee` its stdin
+to a file to read them. Swap mini's `~/.local/bin/lf` symlink to the installed
+release (no `server stdio`), to a wrapper that rewrites the hello's revision
+with `sed`, or to one that exits 101 to check each failure the sender names.
+Refresh a copied binary with `cp` to a new name, then `mv`: `cp` over a
+binary a running server uses invalidates its signature and macOS kills every
+later exec with status 137.
+
 ## Test-only changes
 
 When the change moves or cuts tests, the people it is for are developers

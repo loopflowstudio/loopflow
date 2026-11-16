@@ -78,10 +78,14 @@ pub async fn request(
     let output = tokio::time::timeout(bound, exchange)
         .await
         .context("Machine command unavailable: peer timed out")??;
+    let said = String::from_utf8_lossy(&output.stderr);
     anyhow::ensure!(
         output.status.success(),
         "Machine command unavailable: {}",
-        String::from_utf8_lossy(&output.stderr).trim()
+        match said.trim() {
+            "" => format!("ssh {}", output.status),
+            said => said.to_owned(),
+        }
     );
     Ok(output.stdout)
 }
@@ -151,7 +155,17 @@ pub fn call(
             }
             answer
         }
-        // A refused hello: the revisions differ.
+        // A refused hello: the revisions differ. An older receiver is named,
+        // as when it has no `server stdio` at all.
+        [ServerMessage::Error {
+            code: ErrorCode::Incompatible,
+            data: Some(data),
+            ..
+        }, ..]
+            if data["update"] == "server" =>
+        {
+            return Err(Error::new(ErrorCode::Incompatible, outdated(machine)).into())
+        }
         [refused @ ServerMessage::Error { .. }, ..] => refused,
         [ServerMessage::Welcome(_)] => {
             return Err(failed(
@@ -163,16 +177,21 @@ pub fn call(
             ))
         }
         _ => {
-            return match ran {
+            use crate::process::CommandExit;
+            return match ran.map_err(|failure| failure.downcast::<CommandExit>()) {
                 // Clap's usage error: this `lf` has no `server stdio`.
-                Err(exit)
-                    if exit
-                        .downcast_ref::<crate::process::CommandExit>()
-                        .is_some_and(|exit| exit.0 == 2) =>
-                {
+                Err(Ok(CommandExit(2))) => {
                     Err(Error::new(ErrorCode::Incompatible, outdated(machine)).into())
                 }
-                Err(failure) => Err(failed(failure)),
+                // Not a code to pass on: the operation may have run there.
+                Err(Ok(CommandExit(code))) => Err(failed(
+                    Error::outcome_unknown(&anyhow::anyhow!(
+                        "lf on {} exited with status {code} before answering",
+                        machine.route
+                    ))
+                    .into(),
+                )),
+                Err(Err(failure)) => Err(failed(failure)),
                 Ok(()) => Err(failed(anyhow::anyhow!(
                     "{} did not answer the operation",
                     machine.route

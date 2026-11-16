@@ -1140,6 +1140,16 @@ fn refused_operation(line: &str) -> Option<(String, Error)> {
         );
         return Some((id, refusal.with(serde_json::json!({ "kind": kind }))));
     }
+    Some((id, refused_request(operation)))
+}
+
+/// Why `operation`, which no operation type accepted, was refused: the
+/// fields its kind takes, or that this build has no such kind.
+pub(super) fn refused_request(operation: &serde_json::Value) -> Error {
+    let kind = operation
+        .get("kind")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
     let refusals = [
         serde_json::from_value::<crate::lf::commands::read::Read>(operation.clone()).err(),
         serde_json::from_value::<crate::lf::commands::write::Write>(operation.clone()).err(),
@@ -1156,7 +1166,7 @@ fn refused_operation(line: &str) -> Option<(String, Error)> {
             format!("this server has no operation `{kind}`; update the selected installation"),
         ),
     };
-    Some((id, refusal.with(serde_json::json!({ "kind": kind }))))
+    refusal.with(serde_json::json!({ "kind": kind }))
 }
 
 /// Hand the connection to the owner protocol. Tokio uses bounded copy buffers;

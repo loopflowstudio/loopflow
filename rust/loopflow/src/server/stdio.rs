@@ -108,7 +108,7 @@ fn answer(id: String, directory: &Path, mut operation: serde_json::Value) -> Ser
     if let Some(sent) = operation.get_mut("directory") {
         *sent = serde_json::json!(directory);
     }
-    let result = match serde_json::from_value::<Operation>(operation) {
+    let result = match serde_json::from_value::<Operation>(operation.clone()) {
         Ok(Operation::Read(read)) => read
             .read()
             .map_err(|error| Error::refused(&error, ErrorCode::Unavailable)),
@@ -120,7 +120,7 @@ fn answer(id: String, directory: &Path, mut operation: serde_json::Value) -> Ser
             ErrorCode::Invalid,
             "this operation needs the resident server; `lf server stdio` answers reads and writes",
         )),
-        Err(error) => Err(Error::new(ErrorCode::Invalid, error.to_string())),
+        Err(_) => Err(super::service::refused_request(&operation)),
     };
     match result {
         Ok(result) => ServerMessage::Response {
@@ -174,6 +174,8 @@ mod tests {
                 "operation": {"kind": "task.wait", "issue": "LOO-1", "until": "done"}}),
             json!({"type": "request", "id": "3", "select": null,
                 "operation": {"kind": "mobile.status"}}),
+            json!({"type": "request", "id": "4", "select": null,
+                "operation": {"kind": "task.unknown"}}),
         ]);
         assert_eq!(answers[0]["type"], "welcome");
         assert_eq!(answers[1]["type"], "response");
@@ -188,6 +190,10 @@ mod tests {
                 .unwrap()
                 .contains("resident server"));
         }
+        assert_eq!(
+            answers[4]["message"],
+            "this server has no operation `task.unknown`; update the selected installation"
+        );
     }
 
     #[test]

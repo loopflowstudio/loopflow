@@ -8,6 +8,50 @@ use std::process::{Command, Output, Stdio};
 use loopflow_test_support::{MachineServer, TestRepo};
 use serde_json::Value;
 
+#[test]
+fn pinned_headless_refusal_shows_provider_message_reset_and_next_step() {
+    let fixture = Fixture::new("claude:opus");
+    let provider = fixture.home.path().join("bin/claude");
+    let source = fs::read_to_string(&provider).unwrap().replace(
+        "'subtype':'success','result':'done'",
+        "'subtype':'error_during_execution','is_error':True,'result':\"You've hit your limit.\\nResets 3pm (America/Los_Angeles).\"",
+    ).replace(
+        "    message = json.loads(sys.stdin.readline())",
+        "    with open(os.environ['HOME']+'/dispatches', 'a') as out:\n        out.write('dispatch\\n')\n    message = json.loads(sys.stdin.readline())",
+    ).replace(
+        "    print(json.dumps({'type':'result'",
+        "    print(json.dumps({'type':'rate_limit_event','rate_limit_info':{'status':'rejected','rate_limit_type':'five_hour'}}), flush=True)\n    print(json.dumps({'type':'result'",
+    );
+    fs::write(provider, source).unwrap();
+
+    let output = fixture
+        .command()
+        .args(["-b", "-a", "claude:opus", ":", "say done"])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    let (_, final_error) = stderr
+        .split_once("error:")
+        .or_else(|| stderr.split_once("Error:"))
+        .expect(&stderr);
+    assert!(final_error.contains("provider usage limit"), "{stderr}");
+    assert!(final_error.contains("You've hit your limit."), "{stderr}");
+    assert!(
+        final_error.contains("Resets 3pm (America/Los_Angeles)."),
+        "{stderr}"
+    );
+    assert!(
+        final_error.contains("Change an `agent` or `-a` pin"),
+        "{stderr}"
+    );
+    assert_eq!(
+        fs::read_to_string(fixture.home.path().join("dispatches")).unwrap(),
+        "dispatch\n"
+    );
+}
+
 struct Fixture {
     /// Task and Wave launches start their agent only once it answers.
     _server: MachineServer,
@@ -705,7 +749,6 @@ fn task_conversation_preparation_is_passive_and_connect_uses_shared_launch_setti
 fn another_agent_resumes_a_failed_codex_bootstrap_on_its_own_input() {
     let fixture = Fixture::new("codex");
     let machine = fixture.home.path().join("machine");
-    support::register_codex_account(&machine);
     fixture.create_wave();
     fs::write(machine.join("fail-server"), "").unwrap();
     let failed = fixture
@@ -821,8 +864,6 @@ fn linked_worktree_metadata_is_accessible_on_launch_and_resume() {
 #[test]
 fn codex_headless_start_receives_current_policy_on_the_wire() {
     let fixture = Fixture::new("codex:first-model");
-    let machine = fixture.home.path().join("machine");
-    support::register_codex_account(&machine);
     fixture.create_wave();
     let script = support::codex_app_server_script("done", "").replace(
         "read -r thread_start",
@@ -892,7 +933,6 @@ fn live_taskless_provider_switch_preserves_identity_and_accepts_terminal_input()
     )
     .unwrap();
     let machine = fixture.home.path().join("machine");
-    support::register_codex_account(&machine);
     let store = loopflow::store::sqlite::SqliteStore::new(&machine.join("loopflow.db")).unwrap();
     let before = store.session(&session).unwrap().unwrap();
     assert!(before.completed_at.is_none());
@@ -958,7 +998,6 @@ fn provider_switch_imports_session_history_with_current_policy() {
         .to_string(),
     )
     .unwrap();
-    support::register_codex_account(&fixture.home.path().join("machine"));
     let script = support::codex_app_server_script("done", "")
         .replace(
             "read -r thread_start",

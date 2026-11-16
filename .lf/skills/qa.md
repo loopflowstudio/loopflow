@@ -469,23 +469,13 @@ OpenCode's `opencode.db-wal` writes.
 ## Turn and tool hooks
 
 A Session launched in a Task's checkout is Task work. Headless (`-b`) there
-confines the agent and needs a managed login (`claude=<email>`), which a private
-home cannot get without real OAuth (`--import` checks the token against
-Anthropic). To drive real headless Task runs anyway, run a throwaway
-`rust/loopflow/examples/*.rs` that calls `upsert_provider_account` the way
-`tests/session_steers.rs`'s `connect_fixture_account` does, against the private
-store, then delete it. Put `tests/support/mod.rs`'s `FAKE_SECURITY` first on
-`PATH` as `security` and set `USER`: signing the login in goes through the
-Keychain. Never run `lf account` there: it checks the token with Anthropic and
-marks the fixture login "needs a login"; register it again if it did. A
-stand-in's usage-limit result cools the only login for 15 minutes, so the
-step waits for capacity rather than stopping. Starting a private server
-resumes every Task whose Auto-Ship was approved: abandon old QA Tasks first.
-Do not repeat this with release 0.15.3: its
-launch from a private home tries to write a Claude Keychain item. Dead
-AgentProcesses are reaped by `lf process prune`, not by `lf session list`.
-Otherwise launch interactively (`-i`) in a PTY. `lf account connect claude --api-key` with a placeholder
-`ANTHROPIC_API_KEY` satisfies account selection for that launch. A stand-in
+confines the agent and runs on the native login, like every other launch:
+with the real `HOME`, a private `LF_HOME` and that home's `lf server run`,
+`lf -b --task <id> -a claude:haiku : '<msg>'` in the Task checkout answers.
+Starting a private server resumes every Task whose Auto-Ship was approved:
+abandon old QA Tasks first. Dead AgentProcesses are reaped by
+`lf process prune`, not by `lf session list`.
+Interactive (`-i`) launches run in a PTY. A stand-in
 `claude` on `PATH` can read `--settings` and run each hook command exactly as
 installed, with Claude's callback JSON on stdin; release its turns with marker
 files so steers and server changes can happen between them. Run `lf` commands
@@ -525,7 +515,7 @@ per character, and drain output between writes of more than a few KB.
 
 Real providers on their existing logins: keep the real `HOME` with a private
 `LF_HOME`. Plain `lf -b` and `lf -i` launch there, as does `lf -i --task <id>`
-in a Task checkout; only `-b` in a Task checkout asks for a managed login. In a
+in a Task checkout, and `-b` there. In a
 private home with no Linear, `lf task update` needs the full `task_…` ID; the
 short identifier resolves through Linear.
 
@@ -806,22 +796,22 @@ swift/.build/debug/LoopflowSwiftPackageTests.xctest/Contents/MacOS/LoopflowSwift
 helper is in the Xcode toolchain's `usr/libexec/swift/pm/`. Timestamp each
 run to show the overlap.
 
-## Account capacity and routing
+## Native logins and provider refusals
 
-A private home gets Claude logins without OAuth or `lf account`: per login, a
-`provider_accounts` row (`credential_state='connected'`, `observed_email`,
-`observed_subject`, `observed_credential_digest` = sha256 of the exact
-`.credentials.json` bytes under `$LF_HOME/accounts/claude/<id>/`) plus
-`accounts.claude.<id>: {login_email, routing_state: automatic}` in
-`$LF_HOME/config.yaml`. Raw SQL works on a store the installed `lf` created,
-so its recorder can write the "before" rows and the branch then upgrades them.
-A stand-in `claude` that prints a `rate_limit_event` line between `init` and an
-`is_error` `result` records a limit through a real `lf -b -a claude:<model>`.
-`--only-account` and `--account` bypass capacity, so use them to record a
-limit and plain routing to check it; `lf account --cached` marks the login a
-launch switched to `● active`. `-b` runs are not resumable Sessions: launch
-`-i` in a PTY (the stand-in prints and exits) and `lf -i session resume`.
-The Claude usage endpoint override (`LF_TEST_CLAUDE_USAGE_URL`) exists only
-under `cfg(test)`, so a branch binary's poll reaches Anthropic; the poll path
-is checked by `cargo test -p loopflow --lib claude_usage_reconciliation_`.
+lf selects no login: Claude and Codex read their own homes. To check that an
+old managed account changes nothing, seed `provider_accounts` and
+`provider_session_accounts` rows by raw SQL in the private store and put
+released `account:`/`accounts:` keys in `$LF_HOME/config.yaml`; launches must
+stay on the native login, print no "unknown setting" warning and leave those
+rows and files byte-for-byte. `lf session list` then shows "historical
+account: <id>". With `isolated=1` and the transcript only under the account's
+`home/projects/`, a resume copies the transcript (never credentials) into the
+native home; with no transcript anywhere it refuses with "its transcript is
+missing". For a quota refusal, put a stand-in `claude` first on `PATH` that
+prints `init`, a `rate_limit_event` with `status: rejected`, then an
+`is_error` `result`, and configure `agents: [claude, codex]`: unpinned `lf -b`
+prints "Continuing on codex" and real Codex answers; `-a claude:opus` stops
+with "agent stopped after provider usage limit". When replacing a copied
+`lf` that a server is running, `rm` it first: copying over the file in place
+makes macOS SIGKILL the next exec (exit 137, no output).
 Name the PTY driver anything but `pty.py`: it shadows the stdlib module.

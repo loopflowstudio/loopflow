@@ -218,7 +218,7 @@ text = 'Fable 5 is currently unavailable. Switch to another model.' if failed el
             ]),
             ..base_launch()
         };
-        let result = run_agent(&launch, &ProcessConfig { ..base_process() }).unwrap();
+        let result = run_agent(&launch, &base_process()).unwrap();
         assert_eq!(
             std::fs::read_to_string(launches).unwrap(),
             expected_launches
@@ -256,7 +256,6 @@ fn launch_nonzero_exit() {
     assert_ne!(result.exit_code, 0);
 }
 
-/// A store routing Codex through `first`, then `second`, each with a login.
 #[test]
 fn launch_missing_binary_returns_error() {
     let _env = EnvGuard::new_isolated(&[]);

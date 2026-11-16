@@ -3181,8 +3181,11 @@ pub enum AccountCommand {
 }
 fn parse_service_provider(raw: &str) -> Result<String, String> {
     match raw.parse::<crate::provider_auth::Provider>() {
-        Ok(crate::provider_auth::Provider::Claude | crate::provider_auth::Provider::Codex) => {
-            Err("authenticate with the native client".to_owned())
+        Ok(crate::provider_auth::Provider::Claude) => {
+            Err("Claude signs in natively: run `claude`, then /login".to_owned())
+        }
+        Ok(crate::provider_auth::Provider::Codex) => {
+            Err("Codex signs in natively: run `codex login`".to_owned())
         }
         Ok(_) => Ok(raw.to_owned()),
         Err(error) => Err(error.to_string()),
@@ -3381,6 +3384,10 @@ mod tests {
             vec!["lf", "machine", "credentials", "renew"],
         ] {
             assert!(Cli::try_parse_from(&args).is_err(), "{args:?}");
+        }
+        for (provider, login) in [("claude", "/login"), ("codex", "codex login")] {
+            let error = Cli::try_parse_from(["lf", "account", "connect", provider]).unwrap_err();
+            assert!(error.to_string().contains(login), "{error}");
         }
         for service in ["github", "linear", "asana", "notion", "doppler", "opencode"] {
             assert!(Cli::try_parse_from(["lf", "account", "connect", service]).is_ok());

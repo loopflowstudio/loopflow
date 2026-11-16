@@ -830,8 +830,14 @@ fn run_headless_prompt(
         eprintln!("The agent's turn was interrupted.");
         Err(crate::process::CommandExit(130).into())
     } else if let Some(failure) = &result.failure {
+        let reason = result.stderr.trim();
+        let reason = if reason.is_empty() {
+            String::new()
+        } else {
+            format!("\n{reason}")
+        };
         Err(anyhow!(
-            "agent stopped after {failure}. Check {} for details.",
+            "agent stopped after {failure}.{reason}\nCheck {} for details.",
             runtime.artifact_dir().display()
         ))
     } else {

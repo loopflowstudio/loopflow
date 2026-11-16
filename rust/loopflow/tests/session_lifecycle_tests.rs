@@ -293,7 +293,6 @@ fn task_conversation_starts_at_launch_not_creation() {
         )
         .unwrap();
         if headless {
-            support::register_codex_account(fixture.home.path());
             let binary = fixture.home.path().join("bin/codex");
             std::fs::write(
                 &binary,
@@ -664,7 +663,7 @@ fn personal_task_launch_resume_and_skill_graph_keep_native_identity() {
             .unwrap(),
         native
     );
-    support::managed_codex_account(fixture.home.path());
+    support::seed_store(fixture.home.path());
     // A bare run stops before the interactive review step; it may return as
     // its Graph registers, so wait for it to stop there.
     let run = fixture
@@ -1931,7 +1930,7 @@ fn unavailable_store_starts_no_provider() {
 #[test]
 fn finished_headless_runs_leave_the_open_list_and_keep_their_history() {
     let fixture = Fixture::new(false);
-    support::managed_codex_account(fixture.home.path());
+    support::seed_store(fixture.home.path());
     let provider = fixture.home.path().join("bin/codex");
     std::fs::write(
         &provider,
@@ -2201,7 +2200,7 @@ fn custom_router_returns_a_captured_path_without_an_in_turn_command() {
 fn standalone_graph_launches_in_a_completed_tasks_checkout() {
     let fixture = Fixture::new(false);
     support::install_native_codex(&fixture.home.path().join("bin"));
-    support::managed_codex_account(fixture.home.path());
+    support::seed_store(fixture.home.path());
     let checkout = fixture.repo.create_named_worktree("finished-work");
     std::fs::create_dir_all(checkout.join(".lf/graphs")).unwrap();
     std::fs::create_dir_all(checkout.join(".lf/skills")).unwrap();

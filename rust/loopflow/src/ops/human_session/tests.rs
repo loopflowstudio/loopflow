@@ -783,7 +783,6 @@ fn session_page_preserves_the_continuation_and_required_entries() {
     assert!(serde_json::from_str::<super::SessionPage>(r#"{"next":null}"#).is_err());
 }
 
-/// A Machine with stored Codex logins, whose shared home `sign_in` moves.
 #[test]
 fn no_raw_leaves_raw_conversations_out_of_the_list() {
     use clap::Parser;

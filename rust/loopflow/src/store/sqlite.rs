@@ -11,87 +11,10 @@ use crate::provider_auth::Provider;
 use crate::store::rows::{map_wave_row, now_unix};
 use crate::store::token_crypto;
 use crate::store::{
-    AccountLimitRow, CredentialState, ProviderAccount, ProviderAccountId, ProviderTokenReplacement,
-    RoutingState, StoreError, StoreResult, WaveLocatorUpdate,
+    CredentialState, ProviderAccount, ProviderAccountId, ProviderTokenReplacement, StoreError,
+    StoreResult, WaveLocatorUpdate,
 };
 use crate::work::wave::{Wave, WaveLocator};
-
-// The bucket a limit row describes: the name and scope a poll writes for a
-// known Claude row, otherwise the row's own.
-fn canonical_claude_window(window: &str, model: Option<&str>) -> Option<(String, Option<String>)> {
-    let window = window
-        .split_once(": ")
-        .filter(|(status, _)| {
-            matches!(
-                *status,
-                "rejected" | "blocked" | "limited" | "rate_limit_reached"
-            )
-        })
-        .map_or(window, |(_, name)| name);
-    if model.is_none() {
-        match window {
-            "weekly" | "seven_day" => return Some(("seven_day".into(), None)),
-            "session" | "five_hour" => return Some(("five_hour".into(), None)),
-            _ => {}
-        }
-        if let Some(family) = window.strip_prefix("weekly:") {
-            if crate::config::CLAUDE_MODEL_FAMILIES.contains(&family) {
-                return Some((format!("seven_day_{family}"), Some(family.into())));
-            }
-        }
-    }
-    let model = model.filter(|model| crate::config::CLAUDE_MODEL_FAMILIES.contains(model))?;
-    let stated = crate::agent::subscription_limit_text(window)
-        .is_some_and(|limit| !limit.credits && limit.model.as_deref() == Some(model));
-    (window == "seven_day_overage_included"
-        || window.strip_prefix("seven_day_") == Some(model)
-        || stated)
-        .then(|| (format!("seven_day_{model}"), Some(model.into())))
-}
-
-fn limit_bucket(provider: &str, window: &str, model: Option<&str>) -> (String, Option<String>) {
-    (provider == "claude")
-        .then(|| canonical_claude_window(window, model))
-        .flatten()
-        .unwrap_or_else(|| (window.to_owned(), model.map(str::to_owned)))
-}
-
-// Historical aliases can coexist with canonical observations. Prefer the newer
-// reading; at equal second-resolution timestamps retain the stricter reading.
-fn reconcile_legacy_account_windows(limits: Vec<AccountLimitRow>) -> Vec<AccountLimitRow> {
-    let mut winners = std::collections::HashMap::new();
-    let buckets: Vec<_> = limits
-        .iter()
-        .map(|row| limit_bucket(&row.provider, &row.window, row.model.as_deref()))
-        .collect();
-    for (index, (row, bucket)) in limits.iter().zip(&buckets).enumerate() {
-        let rank = (
-            row.observed_at,
-            row.limited_until,
-            row.used_percent,
-            bucket.0 == row.window,
-        );
-        let winner = winners
-            .entry((&row.provider, &row.account_id, bucket))
-            .or_insert((rank, index));
-        if rank > winner.0 {
-            *winner = (rank, index);
-        }
-    }
-    let kept: std::collections::HashSet<_> =
-        winners.into_values().map(|(_, index)| index).collect();
-    limits
-        .into_iter()
-        .zip(buckets)
-        .enumerate()
-        .filter(|(index, _)| kept.contains(index))
-        .map(|(_, (mut row, (window, model)))| {
-            row.window = window;
-            row.model = model;
-            row
-        })
-        .collect()
-}
 
 mod admission;
 mod children;
@@ -546,32 +469,9 @@ fn read_provider_account(row: &rusqlite::Row) -> StoreResult<ProviderAccount> {
         observed_subject: row.get(11)?,
         observed_plan: row.get(12)?,
         observed_credential_digest: row.get(13)?,
-        // Authored preferences are applied from one configuration read per operation.
+        // Historical labels are applied from one configuration read per operation.
         login_email: None,
-        routing_state: RoutingState::Automatic,
-        plan: None,
-        paid_through: None,
     })
-}
-
-fn read_account_limit_row(row: &rusqlite::Row) -> rusqlite::Result<StoreResult<AccountLimitRow>> {
-    let account_id = row.get::<_, String>(1)?;
-    let account_id = match ProviderAccountId::parse(&account_id) {
-        Ok(account_id) => account_id,
-        Err(error) => return Ok(Err(StoreError::InvalidData(error))),
-    };
-    Ok(Ok(AccountLimitRow {
-        provider: row.get(0)?,
-        account_id,
-        window: row.get(2)?,
-        used_percent: row.get(3)?,
-        resets_at: row.get(4)?,
-        plan: row.get(5)?,
-        observed_at: row.get(6)?,
-        source: row.get(7)?,
-        model: row.get(8)?,
-        limited_until: row.get(9)?,
-    }))
 }
 
 fn read_access_profile(row: &rusqlite::Row) -> rusqlite::Result<StoreResult<AccessProfile>> {
@@ -1202,25 +1102,6 @@ impl SqliteStore {
                     .map_err(|error| StoreError::InvalidData(error.to_string()))
             })
             .collect()
-    }
-
-    pub fn provider_account_limits(
-        &self,
-        provider: Option<&str>,
-    ) -> StoreResult<Vec<crate::store::AccountLimitRow>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut statement = conn.prepare(
-            "SELECT provider, account_id, window, used_percent, resets_at, plan, observed_at, source, model, limited_until
-             FROM provider_account_limits
-             WHERE ?1 IS NULL OR provider = ?1
-             ORDER BY provider, account_id, window",
-        )?;
-        let rows = statement.query_map([provider], read_account_limit_row)?;
-        let mut limits = Vec::new();
-        for row in rows {
-            limits.push(row??);
-        }
-        Ok(reconcile_legacy_account_windows(limits))
     }
 
     // -- Session moves --------------------------------------------------------

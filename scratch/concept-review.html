@@ -2,88 +2,68 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-913 — Native login and Session history</title>
+<title>LOO-913 — Provider refusal and recovery</title>
 <style>
-:root { color-scheme: light dark; font: 17px/1.5 system-ui, sans-serif; background: light-dark(#faf8f3,#191b1e); color: light-dark(#242a30,#e7e6e1); }
-body { max-width: 760px; margin: 36px auto; padding: 0 22px 40px; }
-h1 { font-size: 1.9rem; line-height: 1.15; margin: 12px 0 20px; }
-h2 { font-size: 1.12rem; margin: 28px 0 8px; }
-p { margin: 10px 0; }
-header, small { font-size: .8rem; color: light-dark(#59616b,#abb3bb); }
-code, pre { font: .87rem/1.5 ui-monospace, monospace; }
-pre { padding: 14px; background: light-dark(#efeee8,#23272c); white-space: pre-wrap; overflow-wrap: anywhere; border-left: 3px solid light-dark(#6b6550,#b9ad80); }
-table { border-collapse: collapse; width: 100%; font-size: .88rem; }
-th, td { text-align: left; vertical-align: top; padding: 9px 6px; border-bottom: 1px solid light-dark(#d5d3cd,#41464d); }
-th:first-child, td:first-child { padding-left: 0; }
-.decision { border-left: 3px solid light-dark(#996440,#d9a576); padding-left: 15px; }
-li { margin: 10px 0; }
-@media(max-width: 540px) { body { margin-top: 20px; padding-inline: 14px; } table { font-size: .76rem; } code { font-size: .8rem; } }
+:root{color-scheme:light dark;font:17px/1.5 system-ui,sans-serif;background:light-dark(#faf8f3,#191b1e);color:light-dark(#242a30,#e7e6e1)}
+body{max-width:760px;margin:32px auto;padding:0 20px 40px}h1{font-size:1.8rem;line-height:1.2}h2{font-size:1.12rem;margin-top:28px}header{font-size:.8rem;color:light-dark(#59616b,#abb3bb)}
+pre{padding:14px;background:light-dark(#efeee8,#23272c);white-space:pre-wrap;overflow-wrap:anywhere;border-left:3px solid #998060}code,pre{font:.86rem/1.5 ui-monospace,monospace}
+table{border-collapse:collapse;width:100%;font-size:.87rem}th,td{text-align:left;vertical-align:top;padding:9px 6px;border-bottom:1px solid light-dark(#d5d3cd,#41464d)}li{margin:10px 0}@media(max-width:540px){body{padding-inline:12px}table{font-size:.75rem}}
 </style>
 <header>LOO-913 · concept-review · 2026-11-15<br>
-Built from scratch/subscription-removal.md, docs/subscriptions.md,
-docs/config.md, agent/mod.rs, transcript/mod.rs, ops/human_session.rs,
-lf/commands/session.rs and session_launch_contract.rs.</header>
-<h1>Show an old account as history.</h1>
-<div class="decision">
-<p><strong>Next implement direction:</strong> replace “on saved-B” with
-“historical account: saved-B” in Session displays. The native client may now
-be using login A. Keep the saved attribution; it cannot identify today's login.</p>
-<p>No open product choice. The existing design already requires this distinction.</p>
-</div>
+Built from scratch/subscription-removal.md, scratch/qa.html, docs/subscriptions.md,
+agent/mod.rs, harness/claude.rs, harness/claude_decode.rs,
+lf/commands/run.rs and tests/session_launch_contract.rs.</header>
+<h1>Advance to gate.</h1>
+<p>No open product choice. The existing repair meets the design: an exhausted
+headless run shows the provider's refusal and reset instructions, followed by a
+way to change its pin or configured fallbacks. No further implementation is proposed.</p>
+<h2>The mismatch, before and after</h2>
+<p><strong>QA observation before the repair:</strong> the final error named
+“provider usage limit” and a run directory; the provider's reset information
+remained in that directory.</p>
+<pre>lf -b -a claude:opus : 'say done'
 
+Final error now includes:
+agent stopped after provider usage limit.
+… You've hit your limit.
+Resets 3pm (America/Los_Angeles).
+No fallback remains. Change an `agent` or `-a` pin …</pre>
+<p><strong>Implemented and checked:</strong> the isolated stand-in emits a rejection
+event followed by a multiline error result. The focused CLI test passes and
+asserts the refusal, reset time and pin advice in the final error, with exactly
+one input dispatch. This is fixture output, not a live quota observation.</p>
 <h2>Actions → concepts → APIs</h2>
 <table>
-<thead><tr><th>Action</th><th>Before removal</th><th>Implemented in this checkout</th></tr></thead>
-<tbody>
-<tr><td>Sign in, launch</td><td>Saved account order → selection and activation</td><td>Native login → Claude/Codex start; <code>AgentConfig</code> has no account authority</td></tr>
-<tr><td>Resume old work</td><td>Saved account + native thread → account route</td><td>Session + native thread → <code>adopt_native</code>; transcript-only copy when needed</td></tr>
-<tr><td>Provider refuses input</td><td>Account cooldown → rotation or reset wait</td><td>Recorded refusal + headless policy → <code>_fallthrough_rungs</code>; interactive input needs a deliberate retry or move</td></tr>
-<tr><td>Read Session list</td><td>Saved account → “on saved-B”</td><td><strong>Still misleading.</strong> Retained <code>SessionRecord.account</code> is historical; display wording needs the proposed change</td></tr>
-</tbody>
+<tr><th>Action</th><th>Concept</th><th>Implemented path</th></tr>
+<tr><td>Sign in and launch</td><td>Native login owns authentication</td><td>Claude/Codex start with native configuration; no account selection</td></tr>
+<tr><td>Receive a refusal</td><td>Rejection classifies; result or exit completes</td><td><code>TurnRejected</code> → provider error; Claude reader retains the pending result and its instructions</td></tr>
+<tr><td>Exhaust a headless order</td><td>Stop with the provider's explanation</td><td><code>_run_with_retries</code> → stop record + advice → <code>run_headless_prompt</code> final error</td></tr>
+<tr><td>Recover deliberately</td><td>Authentication and continuation remain separate</td><td>Change native login/capacity or agent configuration, then retry; Task status retains the stop reason</td></tr>
+<tr><td>Resume older work</td><td>Session history survives login changes</td><td>Transcript-only adoption; retained attribution displays as “historical account”</td></tr>
 </table>
-
-<h2>One interaction</h2>
-<p><strong>Implemented:</strong> sign in through the native client, then resume the old thread.</p>
-<pre>codex login
-lf resume &lt;session-id&gt;
-lf session list
-
-Current list:  … active … Design … on saved-B
-Proposed:      … active … Design … historical account: saved-B</pre>
-<p>The Session and native thread survive. Native authentication supplies the login.
-Stored account rows and credentials stay intact. A new Session with no account
-attribution gets no account suffix and makes no claim about the native identity.</p>
-
-<h2>Failure and recovery</h2>
-<table>
-<thead><tr><th>Case</th><th>Behavior already implemented</th></tr></thead>
-<tbody>
-<tr><td>Headless refusal, bare or Task</td><td>Try configured model/harness order; keep receipts and seed history when changing harness. Exhaustion stops with the provider error and next-step advice.</td></tr>
-<tr><td>Interactive refusal, bare or Task</td><td>Keep provider, thread and refusal visible. No automatic follow-up input. Retry deliberately or use <code>lf -a claude resume &lt;session-id&gt;</code>.</td></tr>
-<tr><td>Old isolated transcript missing</td><td>Report missing history; retain stored attribution and original thread selection. Never copy credentials or silently substitute a new thread.</td></tr>
-<tr><td>Remote native login missing</td><td>Destination client reports its login error. Sign in there, then launch again; no Claude/Codex credential transfer.</td></tr>
-</tbody>
-</table>
-<p>A bare harness pin keeps that harness; bare Claude may try its other models.
-A model pin stays on that model. Quota snapshots and successful answers mentioning
-limits do not authorize fallback.</p>
-
-<h2>Counterexample that exposes the mismatch</h2>
-<p>An old Session has saved-B attribution. Native resume runs the same thread
-using login A. “On saved-B” now misstates the launch, although retaining saved-B
-is correct for history. Fix the label and field documentation; keep the wire key
-and stored value. No identity lookup, new selector or migration is needed.</p>
-<p>Usage docs and init/operator skills already direct Claude/Codex sign-in to
-native clients and retain <code>lf account</code> for service authentication.</p>
-
+<h2>Normal, failed and recovered</h2>
+<p>A normal answer completes once. A quota snapshot or answer prose mentioning
+limits does not authorize fallback. A classified headless refusal traverses only
+the configured model/harness order; a model pin stops. A bare harness pin keeps
+that harness and its existing model fallthrough.</p>
+<p>Interactive refusal keeps the thread and provider visible and sends no automatic
+follow-up input, with or without a Task. After native authentication or capacity
+recovers, retry deliberately. A stopped Task is inspected with
+<code>lf task status &lt;ID&gt;</code> and continued with
+<code>lf task run &lt;ID&gt;</code>. Earlier receipts and conversation history survive.</p>
+<h2>Counterexample retained</h2>
+<p>A rejection event can arrive before the provider explains its reset time.
+Completing the turn on that event loses the explanation. The repair waits for
+the result or native exit. It adds no reset timer, quota polling, account lifecycle
+or extra dispatch. Existing provider-error and receipt records carry the information.</p>
 <h2>Review questions, resolved by the working design</h2>
 <ol>
-<li>Does Task membership permit automatic interactive retry? <strong>No.</strong>
-Headless policy owns continuation; Task membership owns reporting.</li>
-<li>Does an old account label select or identify the current native login?
-<strong>No.</strong> It is historical attribution. Display correction is proposed.</li>
-<li>What goes next? <strong>Iterate to implement</strong> the historical wording,
-check old attributed and new unattributed Session displays, then return to gate.
-No code changed during this review.</li>
+<li>Does refusal recovery require another product concept? <strong>No.</strong>
+Keep the provider message on the existing error and stop-record paths.</li>
+<li>Does Task membership authorize interactive replay? <strong>No.</strong>
+Headless policy controls automatic continuation.</li>
+<li>What goes next? <strong>Advance to gate.</strong> Broader suites and final
+review remain there; publication is a later delivery step. No code changed in
+this concept review.</li>
 </ol>
 </html>

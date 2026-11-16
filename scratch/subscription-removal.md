@@ -121,6 +121,21 @@ not a second routing implementation.
 
 ## Delete — do not maintain
 
+Compression removed unused `RateLimitSignal` quota normalization, Codex snapshot
+facts, account-window readers/reconciliation, `ProviderAccount` routing decisions
+and `SpentLimit` model/credit scope. Claude's `ProviderFact::TurnRejected` retains
+the refusal needed for fallback; token usage and completion receipts stay on
+their normal path. Legacy preference export lives only in `config/migrate.rs`.
+Launch fixtures no longer seed managed logins as a prerequisite; dedicated
+native-auth/adoption fixtures retain historical-account coverage. Native-home
+lookup dropped its unused override parameter. No compression deletion targets
+remain; stored rows and credentials are untouched.
+
+The first focused run found `answer_prose_cannot_supply_provider_errors_or_resume_identity`
+failing because a transient failure without a native thread rewrote the initial
+request. `_run_with_retries` now leaves that input unchanged; a known thread
+still gets continuation input, and a provider move still imports history.
+
 1. `ContextMoment::{Limit,RecordLimit}`, StopFailure settings, detached
    `os_process::detached_context_block`, limit recorder and their exclusive tests.
    The existing uncommitted deletion is retained; finish its dangling imports,
@@ -207,10 +222,30 @@ raw fixture insertion is test-only. Native stderr failures now remain visible
 when a provider exits before emitting its first structured event. Detached
 launches inherit native provider homes and API-key environment.
 
+QA found that exhausted pinned runs hid the provider's refusal and reset text.
+The stop path now retains every diagnostic line with fallback advice, and the
+CLI includes them in its final error. Claude's rejection event no longer ends
+the turn before its result supplies the refusal; normal provider completion or
+exit ends it. The obsolete decoder `reset_turn` helper is deleted.
+
 The native-auth implementation, its focused acceptance and the attribution
 wording are complete. Gate owns
 the full changed-path suites and final review; publication follows in the caller's
 delivery step. No merge or landing belongs to this implementation step.
+
+Concept re-review — 2026-11-15: the interrupted workspace already contains the
+refusal-display repair and its focused CLI contract test. A rejection signal
+classifies the refusal; the provider's result or exit finishes the turn so its
+multiline refusal and reset instructions reach the final error. Exhaustion adds
+pin/fallback advice through the existing stop record, without adding account
+state, reset polling or another dispatch. This meets the existing design; no
+new product choice or implement direction remains. Gate is next. The review
+page at `scratch/concept-review.html` now reflects this state.
+
+Re-review check: `cargo test -p loopflow --test session_launch_contract
+pinned_headless_refusal_shows_provider_message_reset_and_next_step` — 1 passed
+in 6.69s with inherited `LF_*` removed and stdin closed; gate retains broader
+suites. `git diff --check` passed after the review-page update.
 
 Follow-up 3845de owns bulk rollover and richer recovery: preview, busy-turn
 handling, retained drafts/approvals, same-thread restart, correlated rejected-turn
@@ -218,6 +253,12 @@ retry and uncertain delivery. LOO-811 / PR #1862 is an unmerged reference; do no
 merge or operate it. Task-interactive automatic recovery is outside this cut.
 
 ## Acceptance and checks
+
+Compression: `cargo nextest run -p loopflow --lib --test integration --test session_launch_contract --test agent_tests -E 'test(harness::claude_decode::) | test(harness::codex_decode::) | test(agent::tests::) | test(config::migrate::tests::) | test(ops::human_session::provider_conversation::tests::) | test(transcript::tests::old_account_transcripts_resume_with_native_auth_without_copying_credentials) | test(native_auth_owns_launches_with_a_populated_catalog) | test(model_unavailable_result_falls_through_or_stops_without_spending_quota) | test(session_steers::) | test(session_lifecycle_tests::task_conversation_starts_at_launch_not_creation) | test(auth_tests::service_auth_survives_subscription_removal)' --test-threads 1` — 103 passed; inherited `LF_*` removed and stdin closed. The lifecycle selector matched no row in these four binaries; it needs its standalone binary. The linker emitted its 16MB unwind-table warning; compilation and all selected tests passed.
+
+`cargo nextest run -p loopflow --test session_lifecycle_tests -E 'test(task_conversation_starts_at_launch_not_creation) | test(personal_task_launch_resume_and_skill_graph_keep_native_identity) | test(finished_headless_runs_leave_the_open_list_and_keep_their_history) | test(standalone_graph_launches_in_a_completed_tasks_checkout)' --test-threads 1` — all four affected lifecycle checks passed without managed-login fixture setup.
+
+Compression final checks: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` passed. `lf context` is below both scratch limits; gate/CI keep the broader suites listed below.
 
 Use isolated HOME/LF_HOME, provider stand-ins and no paid inference, refresh,
 production account changes or live credential export. The stand-in records inputs,
@@ -245,6 +286,8 @@ Cross-harness continuation retains previous history and outcomes.
 Checks use isolated homes and stand-ins, with inherited `LF_*` removed at the
 runner boundary and stdin closed. No paid provider or production login is used.
 
+- `cargo test -p loopflow --test session_launch_contract pinned_headless_refusal_shows_provider_message_reset_and_next_step` — passed; final CLI error retains the multiline refusal, reset time and pin/fallback advice after a rejection event, with exactly one input dispatch.
+- `cargo nextest run -p loopflow --lib --test agent_tests -E 'test(agent::tests::native_retry_policy_matrix) | test(agent::tests::a_pinned_agent_refused_at_launch_fails_with_its_limit) | test(model_unavailable_result_falls_through_or_stops_without_spending_quota)'` — 3 passed after the refusal-display fix; linker repeated its existing 16MB unwind-table warning. Gate owns broader suites and final review.
 - `cargo nextest run -p loopflow --test session_launch_contract -E 'test(native_auth_owns_launches_with_a_populated_catalog)' --test-threads 1` — passed; all four provider/Task cases, native API keys, passive quota snapshots and native missing-login diagnostics.
 - `cargo nextest run -p loopflow --lib -E 'test(agent::tests::native_retry_policy_matrix) | test(harness::fact_writer::tests::a_codex_turn_retains_its_request_peak) | test(detached_lf_keeps_native_authentication_environment) | test(lf::tests::native_login_controls_are_absent_and_service_auth_remains) | test(server::schema::tests::)' --test-threads 1` — 12 selected rows passed; retry policy, receipts, native env, CLI and generated schema.
 - `cargo nextest run -p loopflow --lib --test integration --test golden_prompt --test agent_tests -E 'test(transcript::tests::old_account_transcripts_resume_with_native_auth_without_copying_credentials) | test(documented_commands::) | test(auth_tests::service_auth_survives_subscription_removal) | test(session_cli_tests::session_cli_uses_one_truthful_resolution_contract) | binary(golden_prompt) | test(model_unavailable_result_falls_through_or_stops_without_spending_quota)' --test-threads 1` — 9 passed; transcript-only adoption, unchanged native credentials, historical attribution, service auth, docs, Sessions, prompts and real model fallback.
@@ -252,7 +295,7 @@ runner boundary and stdin closed. No paid provider or production login is used.
 - `scripts/test_desktop.sh --filter 'ServerProtocolTests|DTOFixtureTests' -Xswiftc -gnone` — 77 passed; Desktop compiled and tests ran with WindowServer denied.
 - `uv run python scripts/check_architecture.py` — passed; complete owner/table/provider/process coverage.
 - `uv run --project website python scripts/render_architecture_html.py` — regenerated the architecture page.
-- `cargo fmt --all -- --check` and `cargo clippy --all-targets -- -D warnings` — passed.
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` — passed after the refusal-display fix.
 - `uv run pytest python/tests/test_release_automation.py -k 'cron_bootstrap or release_cron'` — 8 passed; cron no longer requires a managed login. `py_compile` on the edited native/planning probes and `bash -n scripts/bootstrap-cron-host.sh` passed.
 - `EXPLAIN QUERY PLAN UPDATE provider_session_accounts SET isolated=0 WHERE provider=?1 AND provider_session_id=?2` on 10,000 synthetic rows — primary-key index lookup; no scan.
 - `cargo package --locked --allow-dirty -p loopflow` — passed; the extracted archive builds independently.

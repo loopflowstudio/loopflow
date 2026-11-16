@@ -606,7 +606,7 @@ fi
             Some(home.path()),
         );
         fs::create_dir_all(home.path().join(".lf")).unwrap();
-        support::managed_codex_account(&home.path().join(".lf"));
+        support::seed_store(&home.path().join(".lf"));
         let options = LandOptions {
             strict: true,
             local: false,
@@ -1582,7 +1582,7 @@ fn land_generates_copy_when_cached_pr_copy_is_stale() {
         Some(home.path()),
     );
     fs::create_dir_all(home.path().join(".lf")).unwrap();
-    support::managed_codex_account(&home.path().join(".lf"));
+    support::seed_store(&home.path().join(".lf"));
     let repo = TestRepo::new();
     repo.create_branch("feature");
     repo.create_file("feature.txt", "feature");
@@ -2011,7 +2011,7 @@ git rev-parse HEAD > "$LF_TEST_REPAIR_PROOF"
     .unwrap();
     fs::set_permissions(&launcher, fs::Permissions::from_mode(0o755)).unwrap();
     let fixture = register_task_with_pr(home.path(), &worktree, "waited-repair", &base);
-    support::managed_codex_account(home.path());
+    support::seed_store(home.path());
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     // The Task's own Session stays open in the checkout for the whole landing.
     let session = loopflow::id::LfProcessId::new();

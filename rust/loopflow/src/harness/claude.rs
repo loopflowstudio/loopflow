@@ -290,24 +290,16 @@ impl ClaudeHarness {
                                 .expect("claude provider session id lock poisoned") =
                                 Some(session_id);
                         }
-                        Decoded::Fact(ProviderFact::RateLimit(signal))
-                            if signal.limited && turn_in_progress.load(Ordering::SeqCst) =>
+                        Decoded::Fact(ProviderFact::TurnRejected { reason })
+                            if turn_in_progress.load(Ordering::SeqCst) =>
                         {
                             let _ = events.send(ConversationEvent::Error {
                                 code: "provider_rate_limited".to_string(),
-                                message: signal.reason,
+                                message: reason,
                                 evidence: None,
                             });
-                            pending_results.store(0, Ordering::SeqCst);
-                            let _ = events.send(ConversationEvent::TurnCompleted {
-                                turn_id: turn_id(),
-                                status: Lifecycle::Failed,
-                            });
-                            turn_in_progress.store(false, Ordering::SeqCst);
-                            decoder
-                                .lock()
-                                .expect("claude decoder lock poisoned")
-                                .reset_turn();
+                            // The result still carries the provider's refusal
+                            // and reset instructions. Let it finish the turn.
                         }
                         // One provider turn ended. Only close the runner turn
                         // once every queued steer turn has also drained.

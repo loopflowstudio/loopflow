@@ -157,8 +157,8 @@ pub(crate) fn home(harness: HarnessKind) -> PathBuf {
     let user = || dirs::home_dir().unwrap_or_default();
     let set = |name: &str| std::env::var_os(name).filter(|value| !value.is_empty());
     match harness {
-        HarnessKind::Claude => native_home(Provider::Claude, None),
-        HarnessKind::Codex => native_home(Provider::Codex, None),
+        HarnessKind::Claude => native_home(Provider::Claude),
+        HarnessKind::Codex => native_home(Provider::Codex),
         HarnessKind::Pi => set("PI_CODING_AGENT_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|| user().join(".pi/agent")),
@@ -170,14 +170,13 @@ pub(crate) fn home(harness: HarnessKind) -> PathBuf {
 }
 
 /// The caller's provider home, or the provider default.
-pub(crate) fn native_home(provider: Provider, launch_home: Option<&std::ffi::OsStr>) -> PathBuf {
+pub(crate) fn native_home(provider: Provider) -> PathBuf {
     let variable = match provider {
         Provider::Claude => "CLAUDE_CONFIG_DIR",
         _ => "CODEX_HOME",
     };
-    launch_home
+    std::env::var_os(variable)
         .map(PathBuf::from)
-        .or_else(|| std::env::var_os(variable).map(PathBuf::from))
         .filter(|home| !home.as_os_str().is_empty())
         .unwrap_or_else(|| {
             dirs::home_dir()
@@ -193,7 +192,7 @@ pub(crate) fn native_home(provider: Provider, launch_home: Option<&std::ffi::OsS
 /// Bring an older isolated transcript into the native home without touching auth.
 pub(crate) fn adopt_native(provider: Provider, id: &AgentSessionId) -> Result<()> {
     let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
-    let to = native_home(provider, None);
+    let to = native_home(provider);
     let from = conversation_home(&store, provider, id)?;
     if from.as_deref() == Some(to.as_path()) {
         return Ok(());
@@ -243,7 +242,7 @@ pub(crate) fn conversation_home(
     id: &AgentSessionId,
 ) -> Result<Option<PathBuf>> {
     let Some(account) = store.provider_session_account_home(provider, id)? else {
-        return Ok(Some(native_home(provider, None)));
+        return Ok(Some(native_home(provider)));
     };
     Ok(store
         .get_provider_account(provider.as_str(), &account)?

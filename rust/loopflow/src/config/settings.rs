@@ -523,6 +523,10 @@ fn _normalize_preferences(value: &mut Value) {
     }
 }
 
+/// Account routing preferences the released lf still reads from personal
+/// files. This lf ignores them without a warning; LOO-919 deletes this list.
+const RETIRED_SETTINGS: &[&[&str]] = &[&["account"], &["accounts"]];
+
 fn _filter_file_settings(
     value: &mut Value,
     path: &mut Vec<String>,
@@ -563,6 +567,10 @@ fn _filter_file_settings(
                 definition.accepts(&preference.iter().map(String::as_str).collect::<Vec<_>>())
             });
         if known && !selector && value.is_null() {
+            path.pop();
+            return false;
+        }
+        if !known && RETIRED_SETTINGS.contains(&parts.as_slice()) {
             path.pop();
             return false;
         }

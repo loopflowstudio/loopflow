@@ -2450,7 +2450,7 @@ fn classify_release_notes_degradation(err: &CommandError) -> Option<ReleaseNotes
     if mentions_agent_cli && missing_binary {
         return Some(ReleaseNotesDegradation::MissingCli);
     }
-    if combined.contains("account subscription limit")
+    if combined.contains("provider usage limit")
         || combined.contains("usage limit reached")
         || combined.contains("usage limit has been reached")
         || combined.contains("you've hit your usage limit")
@@ -2460,7 +2460,7 @@ fn classify_release_notes_degradation(err: &CommandError) -> Option<ReleaseNotes
     {
         return Some(ReleaseNotesDegradation::Quota);
     }
-    if combined.contains("account credential invalidated")
+    if combined.contains("provider credential invalidated")
         || combined.contains("no authenticated")
         || combined.contains("not authenticated")
         || combined.contains("not logged in")

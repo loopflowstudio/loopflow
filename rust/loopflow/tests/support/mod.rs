@@ -6,7 +6,6 @@ use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use base64::prelude::*;
 use loopflow::id::WaveId;
 use loopflow::linear::{LinearIssueId, LinearProjectId};
 use loopflow::store::{StorageConfig, Store};
@@ -272,57 +271,6 @@ fi
     )
 }
 
-#[allow(dead_code)] // Shared synthetic account for provider-backed CLI proofs.
-pub fn register_codex_account(home: &Path) {
-    register_codex_login(home, "fixture");
-}
-
-/// A connected synthetic Codex login `<name>@example.com`, account id `<name>`.
-#[allow(dead_code)]
-pub fn register_codex_login(home: &Path, name: &str) {
-    let account_home = home.join("accounts/codex").join(name);
-    fs::create_dir_all(&account_home).unwrap();
-    let email = format!("{name}@example.com");
-    let email = email.as_str();
-    let claims =
-        BASE64_URL_SAFE_NO_PAD.encode(serde_json::json!({"email": email, "sub": name}).to_string());
-    fs::write(
-        account_home.join("auth.json"),
-        serde_json::json!({"tokens": {
-            "access_token": "synthetic-fixture-token",
-            "id_token": format!("h.{claims}.s")
-        }})
-        .to_string(),
-    )
-    .unwrap();
-    seed_store(home);
-    let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    seed_historical_account(
-        home,
-        &loopflow::store::ProviderAccount {
-            provider: "codex".into(),
-            account_id: loopflow::store::ProviderAccountId::parse(name).unwrap(),
-            home: Some(account_home),
-            login_email: Some(loopflow::profile::EmailAddress::parse(email).unwrap()),
-            observed_email: None,
-            observed_subject: None,
-            observed_credential_digest: None,
-            observed_plan: None,
-            credential_state: loopflow::store::CredentialState::Connected,
-            routing_state: loopflow::store::RoutingState::Automatic,
-            plan: None,
-            paid_through: None,
-            utilization_percent: None,
-            cooldown_until: None,
-            cooldown_reason: None,
-            last_selected_at: None,
-            created_at: now,
-            updated_at: now,
-        },
-    )
-    .unwrap();
-}
-
 /// A launch routes by the process directory: the checkout it runs in, never
 /// the developer's, whose private route belongs to their Machine.
 #[allow(dead_code)] // Shared helper compiled into multiple test crates.
@@ -341,51 +289,6 @@ impl Drop for InDirectory {
     fn drop(&mut self) {
         env::set_current_dir(&self.0).unwrap();
     }
-}
-
-/// A connected synthetic Claude login `<name>@example.com`, account id `<name>`.
-/// Its token is `<name>-token`, so a stand-in Keychain shows who is signed in.
-/// Signing in on macOS needs `FAKE_SECURITY` first on PATH and `USER` set.
-#[allow(dead_code)]
-pub fn register_claude_login(home: &Path, name: &str) {
-    let account_home = home.join("accounts/claude").join(name);
-    fs::create_dir_all(&account_home).unwrap();
-    let credential = serde_json::json!({"claudeAiOauth": {
-        "accessToken": format!("{name}-token"),
-        "expiresAt": 4102444800000i64
-    }})
-    .to_string();
-    fs::write(account_home.join(".credentials.json"), &credential).unwrap();
-    let email = format!("{name}@example.com");
-    seed_store(home);
-    let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    seed_historical_account(
-        home,
-        &loopflow::store::ProviderAccount {
-            provider: "claude".into(),
-            account_id: loopflow::store::ProviderAccountId::parse(name).unwrap(),
-            home: Some(account_home),
-            login_email: Some(loopflow::profile::EmailAddress::parse(&email).unwrap()),
-            observed_email: Some(email),
-            observed_subject: Some(name.into()),
-            observed_credential_digest: Some({
-                use sha2::Digest;
-                format!("{:x}", sha2::Sha256::digest(credential.as_bytes()))
-            }),
-            observed_plan: None,
-            credential_state: loopflow::store::CredentialState::Connected,
-            routing_state: loopflow::store::RoutingState::Automatic,
-            plan: None,
-            paid_through: None,
-            utilization_percent: None,
-            cooldown_until: None,
-            cooldown_reason: None,
-            last_selected_at: None,
-            created_at: now,
-            updated_at: now,
-        },
-    )
-    .unwrap();
 }
 
 pub struct EnvGuard {
@@ -915,57 +818,4 @@ pub fn recorded_graphs(home: &Path) -> Vec<(Option<String>, Vec<serde_json::Valu
             (outcome, steps)
         })
         .collect()
-}
-
-/// Managed skill execution in a Task checkout needs a connected agent account.
-#[allow(dead_code)] // Shared fixture compiled into multiple test crates.
-pub fn managed_codex_account(home: &Path) {
-    let account_home = home.join("fixture-codex");
-    std::fs::create_dir(&account_home).unwrap();
-    let claims =
-        BASE64_URL_SAFE_NO_PAD.encode(r#"{"email":"fixture@example.com","sub":"fixture"}"#);
-    std::fs::write(
-        account_home.join("auth.json"),
-        serde_json::json!({"tokens":{"access_token":"fixture","id_token":format!("h.{claims}.s")}})
-            .to_string(),
-    )
-    .unwrap();
-    seed_store(home);
-    let account_id = loopflow::store::ProviderAccountId::parse("fixture").unwrap();
-    seed_historical_account(
-        home,
-        &loopflow::store::ProviderAccount {
-            provider: "codex".into(),
-            account_id: account_id.clone(),
-            home: Some(account_home),
-            login_email: Some(
-                loopflow::profile::EmailAddress::parse("fixture@example.com").unwrap(),
-            ),
-            observed_email: None,
-            observed_subject: None,
-            observed_credential_digest: None,
-            observed_plan: None,
-            credential_state: loopflow::store::CredentialState::Connected,
-            routing_state: loopflow::store::RoutingState::Automatic,
-            plan: None,
-            paid_through: None,
-            utilization_percent: None,
-            cooldown_until: None,
-            cooldown_reason: None,
-            last_selected_at: None,
-            created_at: 1,
-            updated_at: 1,
-        },
-    )
-    .unwrap();
-}
-
-#[allow(dead_code)] // Shared historical seed used by standalone test binaries.
-pub fn seed_historical_account(
-    home: &Path,
-    account: &loopflow::store::ProviderAccount,
-) -> rusqlite::Result<usize> {
-    let db = rusqlite::Connection::open(home.join("loopflow.db"))?;
-    db.execute("INSERT INTO provider_accounts(provider,account_id,home,credential_state,utilization_percent,cooldown_until,cooldown_reason,created_at,updated_at,observed_email,observed_subject) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
-        rusqlite::params![account.provider,account.account_id.as_str(),account.home.as_ref().map(|p|p.to_string_lossy()),account.credential_state.as_str(),account.utilization_percent,account.cooldown_until,account.cooldown_reason,account.created_at,account.updated_at,account.observed_email,account.observed_subject])
 }

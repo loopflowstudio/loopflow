@@ -9,7 +9,7 @@ use loopflow::graph::compile_graph;
 use loopflow::graph::load_graph;
 use loopflow::graph::{ConcreteStep, Step};
 use loopflow::store::sqlite::SqliteStore;
-use support::{codex_app_server_script, register_codex_account};
+use support::codex_app_server_script;
 use tempfile::TempDir;
 
 fn session_id_for_capture(home: &Path, artifact: &str) -> String {
@@ -1188,7 +1188,6 @@ fn task_run_history_reads_only_that_tasks_runs_without_starting_it() {
     );
 
     write_skill(repo.path(), "history-work", "Do proof-owned work.");
-    register_codex_account(home.path());
     let bin = TempDir::new().unwrap();
     write_executable(
         &bin.path().join("codex"),
@@ -1467,7 +1466,6 @@ fn bound_graphs_keep_task_context_and_leave_other_graphs_and_shared_edits_alone(
     let stopped = earlier_graph();
     assert_eq!(stopped["entry"]["state"], "stopped");
 
-    register_codex_account(home.path());
     let bin = TempDir::new().unwrap();
     let provider = codex_app_server_script("done", "if [ \"$1\" = --version ]; then exit 0; fi").replace(
         "read -r turn_start",
@@ -1876,7 +1874,6 @@ fn scripted_provider(home: &Path, answers: &[&str]) -> (TempDir, String) {
         provider.contains("$answer\"'"),
         "the stand-in takes a script"
     );
-    register_codex_account(home);
     let bin = TempDir::new().unwrap();
     let provider = provider.replace("@record-context@", record_context_script());
     write_executable(&bin.path().join("codex"), &provider);

@@ -2396,10 +2396,8 @@ fn task_run_open_args(cli: &Cli) -> Option<TaskRunOpen> {
     if let Some(agent) = &cli.agent {
         args.extend(["--agent".into(), agent.clone()]);
     }
-    for (flag, values) in [("--setting", &cli.settings)] {
-        for value in values {
-            args.extend([flag.to_owned(), value.clone()]);
-        }
+    for value in &cli.settings {
+        args.extend(["--setting".to_owned(), value.clone()]);
     }
     Some(TaskRunOpen {
         args,

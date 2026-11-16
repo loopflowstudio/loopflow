@@ -550,11 +550,11 @@ fn release_notes_falls_back_for_every_provider_degradation_class() {
             ReleaseNotesDegradation::Cooldown,
         ),
         (
-            "agent stopped after account subscription limit",
+            "agent stopped after provider usage limit",
             ReleaseNotesDegradation::Quota,
         ),
         (
-            "agent stopped after account credential invalidated",
+            "agent stopped after provider credential invalidated",
             ReleaseNotesDegradation::Authentication,
         ),
         (

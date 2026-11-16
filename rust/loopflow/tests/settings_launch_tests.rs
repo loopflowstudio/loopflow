@@ -47,7 +47,7 @@ fn bad_config_lines_do_not_stop_graph_commands() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     let _env = support::EnvGuard::with_home(&[], Some(home.path()));
-    let preferences = "# default_agent: claude:fable\ndefault_agent: codex\nfuture: {enabled: true}\nbroken: [do-not-print-this-value\nclaude: {model: opus, future: true}\nyolo: perhaps\nskills: {implement: {agent: 'claude:fable', future: true}}\n";
+    let preferences = "# default_agent: claude:fable\ndefault_agent: codex\nfuture: {enabled: true}\nbroken: [do-not-print-this-value\nclaude: {model: opus, future: true}\nyolo: perhaps\nskills: {implement: {agent: 'claude:fable', future: true}}\naccount: {claude: [saved]}\naccounts: {claude: {saved: {login_email: saved@example.com}}}\n";
     fs::write(home.path().join("config.yaml"), preferences).unwrap();
     for args in [
         vec!["--context", "graph", "auto"],
@@ -73,6 +73,8 @@ fn bad_config_lines_do_not_stop_graph_commands() {
             "{warnings}"
         );
         assert!(!warnings.contains("do-not-print-this-value"), "{warnings}");
+        // The released lf still reads its account preferences from this file.
+        assert!(!warnings.contains("skipping account"), "{warnings}");
         if args[0] == "config" {
             let settings: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
             assert_eq!(settings[0]["settings"]["agent"]["value"], "claude:fable");
@@ -189,7 +191,7 @@ for line in sys.stdin:
         &repo.head_sha(),
     );
 
-    support::managed_codex_account(home.path());
+    support::seed_store(home.path());
 
     for (path, content) in [
         (".lf/skills/first.md", "---\nagent: codex\n---\nFirst step."),
@@ -918,7 +920,7 @@ with (home / 'session-children.jsonl').open('a') as output:
         repo: repo.path(),
     };
 
-    support::managed_codex_account(home.path());
+    support::seed_store(home.path());
     write_preferences(
         home.path(),
         "agent: claude\nskills: {implement: {agent: codex}}\n",

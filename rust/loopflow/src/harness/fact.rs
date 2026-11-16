@@ -2,7 +2,7 @@
 //!
 //! Each harness has one decoder that turns a native message into an ordered
 //! `Vec<Decoded>`: `Fact` for what Loopflow records (receipts, availability,
-//! passive quota readings, native conversation identity) and `Display` for what a
+//! native conversation identity, explicit turn refusals) and `Display` for what a
 //! person watches live. Decoders hold only the cross-message correlation their
 //! provider needs; `FactWriter` owns receipts and availability writes.
 
@@ -12,24 +12,6 @@ use serde_json::Value;
 
 use crate::chat::types::{ConversationEvent, Lifecycle};
 use crate::id::AgentSessionId;
-use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct RateLimitSignal {
-    pub utilization_percent: Option<u8>,
-    pub resets_at: Option<i64>,
-    pub limited: bool,
-    pub reason: String,
-    /// Per-window subscription state carried by the native provider event.
-    pub windows: Vec<crate::store::AccountLimitWindow>,
-    /// The one model the limit applies to, as the provider scopes it; `None`
-    /// limits the whole account, unless `credits`.
-    pub model: Option<String>,
-    /// Usage credits ran out. They pay for one model, so the limit holds the
-    /// model the launch ran, never the account.
-    pub credits: bool,
-}
-
 /// One provider turn in its native conversation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ProviderTurn {
@@ -98,7 +80,10 @@ pub(crate) enum ProviderFact {
         status: Lifecycle,
         detail: Value,
     },
-    RateLimit(RateLimitSignal),
+    /// Claude explicitly rejected a turn; snapshots alone never refuse work.
+    TurnRejected {
+        reason: String,
+    },
     /// One main-conversation model request and the input it carried, counted
     /// by the provider (cache reads and writes included).
     Request {
@@ -190,7 +175,7 @@ pub(crate) fn fact_lines(decoded: &[Decoded]) -> Vec<String> {
                 "TurnCompleted {} {status:?}",
                 t.as_ref().map_or("-".to_owned(), turn)
             ),
-            ProviderFact::RateLimit(_) => "RateLimit".to_owned(),
+            ProviderFact::TurnRejected { reason } => format!("TurnRejected {reason}"),
             ProviderFact::Request { input_tokens } => format!("Request {input_tokens}"),
             ProviderFact::Compacted { pre_tokens } => format!("Compacted {pre_tokens:?}"),
         })

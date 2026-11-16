@@ -273,8 +273,9 @@ survives; the backoff tops out at 30 seconds.
 
 A classified usage-limit or model-unavailable refusal moves a headless run
 through its configured model/harness order. It never selects another login or
-waits for a reset. An explicit agent or model pin stops instead; exhaustion
-reports the provider error and a next step. Interactive Sessions retain the
+waits for a reset. An explicit agent pins the harness; bare Claude can still
+try its other models. An explicit model pin or exhausted fallback order stops
+with the provider error and a next step. Interactive Sessions retain the
 refusal and require an explicit retry or move, even when attached to a Task.
 
 ```bash

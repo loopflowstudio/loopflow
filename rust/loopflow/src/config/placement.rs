@@ -165,15 +165,6 @@ pub(crate) fn scopes(conn: &Connection) -> Result<Vec<(DefaultScope, String)>> {
     Ok(out)
 }
 
-#[derive(schemars::JsonSchema, Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct AccountDeclaration {
-    pub login_email: Option<crate::profile::EmailAddress>,
-    pub routing_state: Option<crate::store::RoutingState>,
-    pub plan: Option<String>,
-    pub paid_through: Option<String>,
-}
-
 pub(crate) fn historical_account_labels(conn: &Connection) -> Result<Value> {
     let (path, _) = location(conn, None)?;
     super::files::read(&path)

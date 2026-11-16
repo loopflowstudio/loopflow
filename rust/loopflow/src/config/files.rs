@@ -993,7 +993,7 @@ mod tests {
         )
         .unwrap();
         set(second.path(), None, false, false, "agent", Some("codex")).unwrap();
-        let accounts = |repo| {
+        let agent = |repo| {
             crate::config::load_config(Some(repo))
                 .unwrap()
                 .unwrap()
@@ -1001,8 +1001,8 @@ mod tests {
                 .unwrap()
                 .to_owned()
         };
-        assert_eq!(accounts(first.path()), "claude:sonnet");
-        assert_eq!(accounts(second.path()), "codex");
+        assert_eq!(agent(first.path()), "claude:sonnet");
+        assert_eq!(agent(second.path()), "codex");
         assert!(!home.path().join("loopflow.db").exists());
     }
 

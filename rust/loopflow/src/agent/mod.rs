@@ -15,7 +15,7 @@ use std::env;
 use std::fs;
 use std::io::{Seek, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command};
+use std::process::Command;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::thread;
@@ -307,13 +307,13 @@ fn _note_limit_recovery(
     }
 }
 
-fn _record_limit_recovery(provider: &str, reason: &str, retry_at: Option<i64>) {
+fn _record_limit_recovery(provider: &str, reason: &str) {
     _note_limit_recovery(|store, process| {
         store.record_agent_limit_recovery(
             process,
             provider,
             reason,
-            retry_at,
+            None,
             crate::config::agent_override().as_deref(),
         )
     });
@@ -325,20 +325,24 @@ fn _record_agent_move(provider: &str, reason: &str, next: &str) {
     _record_limit_recovery(
         provider,
         &format!("{reason}{}{next}", crate::ops::task_execution::MOVED_TO),
-        None,
     );
 }
 
 /// A provider refused the step and no agent it may use is left: the stop
 /// and what would let it move, where Task status and `lf task run` read it.
-fn _record_limit_stop(provider: &str, reason: &str, launch: &AgentConfig, rungs: &[String]) {
+fn _record_limit_stop(
+    provider: &str,
+    reason: &str,
+    launch: &AgentConfig,
+    rungs: &[String],
+) -> String {
     let advice = _limit_stop_advice(provider, launch, rungs);
     eprintln!("Stopped: {advice}");
     _record_limit_recovery(
         provider,
         &format!("{reason}{}{advice}", crate::ops::task_execution::STOPPED),
-        None,
     );
+    advice
 }
 
 /// `rungs` is the whole order the step could walk; it stops after the last.
@@ -739,10 +743,10 @@ const TRANSIENT_RETRY_DELAYS: [Duration; 4] = [
     Duration::from_secs(30),
 ];
 const RETRY_PROMPT: &str = "Continue the original task after the transient provider failure. Re-read the current workspace state, finish any interrupted work, and return the result.";
-const LIMIT_FAILOVER_PROMPT: &str = "Continue this task after the previous provider account reached its subscription limit. Re-read the current workspace state and finish any interrupted work.";
+const LIMIT_FAILOVER_PROMPT: &str = "Continue this task after the previous provider reached its usage limit. Re-read the current workspace state and finish any interrupted work.";
 const MODEL_FAILOVER_PROMPT: &str = "Continue this task after the previous model was unavailable. Re-read the current workspace state and finish any interrupted work.";
 const AGENT_FAILOVER_PROMPT: &str = "Continue this task on this provider. Re-read the current workspace state and finish any interrupted work.";
-const CREDENTIAL_FAILOVER_PROMPT: &str = "Continue this task after the previous provider account credential was revoked. Re-read the current workspace state and finish any interrupted work.";
+const CREDENTIAL_FAILOVER_PROMPT: &str = "Continue this task after the previous provider's credential was revoked. Re-read the current workspace state and finish any interrupted work.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
@@ -762,12 +766,12 @@ pub enum AgentFailure {
     /// The provider process reported a retryable connection failure.
     #[error("provider transport")]
     Transport,
-    /// The native provider exhausted a subscription window.
-    #[error("account subscription limit")]
-    AccountSubscriptionLimit,
+    /// The native provider refused the turn on its usage limit.
+    #[error("provider usage limit")]
+    UsageLimit,
     /// The native provider's credential was explicitly revoked.
-    #[error("account credential invalidated")]
-    AccountCredentialInvalidated,
+    #[error("provider credential invalidated")]
+    CredentialInvalidated,
 }
 
 /// Build `thread/start` params for Codex app-server sessions. `headless` runs
@@ -980,7 +984,7 @@ fn run_admitted_agent(
         .map_err(|error| {
         CoreError::ExecutionFailed(format!("cannot start planning sync: {error}"))
     })?;
-    let result = _run_with_transient_retries(
+    let result = _run_with_retries(
         &launch,
         &process,
         &TRANSIENT_RETRY_DELAYS,
@@ -1002,7 +1006,7 @@ fn run_admitted_agent(
     result
 }
 
-fn _run_with_transient_retries(
+fn _run_with_retries(
     launch: &AgentConfig,
     process: &ProcessConfig,
     retry_delays: &[Duration],
@@ -1026,8 +1030,8 @@ fn _run_with_transient_retries(
             return Ok(result);
         };
         let prompt = match failure {
-            AgentFailure::AccountSubscriptionLimit => LIMIT_FAILOVER_PROMPT,
-            AgentFailure::AccountCredentialInvalidated => CREDENTIAL_FAILOVER_PROMPT,
+            AgentFailure::UsageLimit => LIMIT_FAILOVER_PROMPT,
+            AgentFailure::CredentialInvalidated => CREDENTIAL_FAILOVER_PROMPT,
             AgentFailure::ModelUnavailable => MODEL_FAILOVER_PROMPT,
             _ => RETRY_PROMPT,
         };
@@ -1039,16 +1043,16 @@ fn _run_with_transient_retries(
             attempt.resume_token = Some(thread);
             attempt.task_prompt = prompt.to_owned();
             attempt.skill_invocation = None;
-        } else {
-            attempt.task_prompt = _with_original_task(prompt, launch);
         }
+        // Without a native thread, retry the same input.
         let delay = match failure {
-            AgentFailure::AccountSubscriptionLimit
-            | AgentFailure::AccountCredentialInvalidated
+            AgentFailure::UsageLimit
+            | AgentFailure::CredentialInvalidated
             | AgentFailure::ModelUnavailable => {
                 let reason = _failure_reason(&result, failure);
                 let Some(next) = rungs.get(rung + 1) else {
-                    _record_limit_stop(&provider, &reason, launch, &rungs);
+                    let advice = _record_limit_stop(&provider, &reason, launch, &rungs);
+                    result.stderr = format!("{reason}\n{advice}");
                     return Ok(result);
                 };
                 rung += 1;
@@ -1107,8 +1111,8 @@ fn _fallthrough_rungs(
     Ok(rungs)
 }
 
-/// Put the step on `agent`, starting from how it stood before it began falling
-/// through. The thread moves within its provider; another provider reads the
+/// Put the current attempt on `agent`. The thread moves within its provider;
+/// another provider reads the
 /// conversation so far and begins its own.
 fn _climb(
     origin: &AgentConfig,
@@ -1155,11 +1159,12 @@ fn _history_import(process: &ProcessConfig) -> Option<String> {
 
 /// The provider's own words for a failure, when it gave any.
 fn _failure_reason(result: &AgentProcessResult, failure: AgentFailure) -> String {
-    result
-        .stderr
-        .lines()
-        .next()
-        .map_or_else(|| failure.to_string(), str::to_owned)
+    let reason = result.stderr.trim();
+    if reason.is_empty() {
+        failure.to_string()
+    } else {
+        reason.to_owned()
+    }
 }
 
 fn _classify_agent_failure(result: &AgentProcessResult) -> Option<AgentFailure> {
@@ -1167,10 +1172,10 @@ fn _classify_agent_failure(result: &AgentProcessResult) -> Option<AgentFailure> 
         return None;
     }
     if _find_provider_error(result, credential_invalidated_failure).is_some() {
-        return Some(AgentFailure::AccountCredentialInvalidated);
+        return Some(AgentFailure::CredentialInvalidated);
     }
     if _find_provider_error(result, subscription_limit_text).is_some() {
-        return Some(AgentFailure::AccountSubscriptionLimit);
+        return Some(AgentFailure::UsageLimit);
     }
     if _find_provider_error(result, _model_unavailable).is_some() {
         return Some(AgentFailure::ModelUnavailable);
@@ -1257,7 +1262,7 @@ pub(crate) fn classify_retryable_agent_failure(text: &str) -> Option<AgentFailur
 /// or the line a native Claude displayed. Claude's openers are its own list of
 /// usage-limit messages; its capacity, per-model and seat-type lines name no
 /// spent window.
-pub(crate) fn subscription_limit_text(line: &str) -> Option<SpentLimit> {
+fn subscription_limit_text(line: &str) -> Option<()> {
     let text = line.to_ascii_lowercase();
     (text.contains("you've hit your")
         || text.contains("you've reached your")
@@ -1270,33 +1275,7 @@ pub(crate) fn subscription_limit_text(line: &str) -> Option<SpentLimit> {
         || text.contains("quota exceeded")
         || text.contains("insufficient_quota")
         || text.contains("rate_limit_reached"))
-    .then(|| SpentLimit {
-        reason: line.to_string(),
-        model: _limited_model(&text),
-        credits: text.contains("out of usage credits"),
-    })
-}
-
-/// Spent quota a provider reported in words.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct SpentLimit {
-    pub reason: String,
-    /// The model family the line names ("You've reached your Fable limit"),
-    /// as limit scopes spell it; `None` when the whole account is spent,
-    /// unless `credits`.
-    pub model: Option<String>,
-    /// "You're out of usage credits": the credits pay for the model the
-    /// launch ran, so only that model is spent.
-    pub credits: bool,
-}
-
-/// The model family named between "your" and "limit" in a lowercased line.
-fn _limited_model(text: &str) -> Option<String> {
-    let named = text.split_once("your ")?.1.split_once("limit")?.0;
-    named
-        .split(|character: char| !character.is_ascii_alphanumeric())
-        .find(|word| crate::config::CLAUDE_MODEL_FAMILIES.contains(word))
-        .map(str::to_string)
+    .then_some(())
 }
 
 fn _begin_process_runtime(
@@ -1465,7 +1444,7 @@ fn _run_harness_once(
                                 stderr.push_str(&format!("{code}: {message}\n"));
                                 limited |= code == "provider_rate_limited";
                                 if crate::harness::is_terminal_harness_error(&code)
-                                    || matches!(code.as_str(), "codex_dispatch_rejected" | "provider_rate_limited")
+                                    || code == "codex_dispatch_rejected"
                                 {
                                     exit_code = Some(1);
                                 }
@@ -1496,7 +1475,7 @@ fn _run_harness_once(
                 stdout,
                 stderr,
                 agent_session: harness.agent_session(),
-                failure: limited.then_some(AgentFailure::AccountSubscriptionLimit),
+                failure: limited.then_some(AgentFailure::UsageLimit),
             })
         };
         let result = match process.timeout {
@@ -1633,17 +1612,6 @@ fn _run_agent_once(
     run_interactive(cmd, process.timeout, admitted_runtime, title, launch.holder)
 }
 
-fn spawn_agent_child(
-    cmd: Command,
-    runtime: &LfProcessRuntime,
-    holder: crate::session::Holder,
-) -> Result<(Child, crate::process::SessionAttachment), CoreError> {
-    let child = runtime
-        .spawn_native_agent(cmd, holder)
-        .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
-    Ok(child)
-}
-
 fn run_interactive(
     mut cmd: Command,
     timeout: Option<Duration>,
@@ -1654,7 +1622,9 @@ fn run_interactive(
     let start = Instant::now();
     let program = cmd.get_program().to_string_lossy().into_owned();
     let foreground = crate::os_process::foreground::hand_to(&mut cmd);
-    let (mut child, attachment) = spawn_agent_child(cmd, runtime, holder)?;
+    let (mut child, attachment) = runtime
+        .spawn_native_agent(cmd, holder)
+        .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     let pid = child.id();
     let _pid_guard = ChildPidGuard::new(pid);
     if let Some(foreground) = &foreground {
@@ -2119,7 +2089,7 @@ trust_level = "trusted"
             ..Default::default()
         };
         let mut attempts = Vec::new();
-        let result = _run_with_transient_retries(
+        let result = _run_with_retries(
             &launch,
             &auto_process(),
             &[],
@@ -2146,7 +2116,7 @@ trust_level = "trusted"
             ..Default::default()
         };
         let mut attempts = 0;
-        let result = _run_with_transient_retries(
+        let result = _run_with_retries(
             &launch,
             &ProcessConfig::default(),
             &[],
@@ -2176,7 +2146,7 @@ trust_level = "trusted"
             ..Default::default()
         };
         let mut attempts = 0;
-        let result = _run_with_transient_retries(
+        let result = _run_with_retries(
             &launch,
             &auto_process(),
             &[Duration::ZERO],
@@ -2244,9 +2214,9 @@ trust_level = "trusted"
             ..Default::default()
         };
         let mut attempts = Vec::new();
-        let result = _run_with_transient_retries(
+        let result = _run_with_retries(
             &launch,
-            &ProcessConfig { ..auto_process() },
+            &auto_process(),
             &[],
             |config, _| {
                 attempts.push(config.clone());
@@ -2274,7 +2244,7 @@ trust_level = "trusted"
         assert_eq!(attempts[1].task_prompt, MODEL_FAILOVER_PROMPT);
         assert_eq!(attempts[2].resume_token, None);
         assert!(attempts[2].task_prompt.ends_with("finish the operation"));
-        assert!(!attempts[2].task_prompt.contains("subscription limit"));
+        assert!(!attempts[2].task_prompt.contains("usage limit"));
     }
 
     #[test]
@@ -2302,7 +2272,7 @@ trust_level = "trusted"
         let mut attempts = Vec::new();
         let mut waits = Vec::new();
 
-        let result = _run_with_transient_retries(
+        let result = _run_with_retries(
             &launch,
             &process,
             &[Duration::ZERO],
@@ -2342,7 +2312,7 @@ trust_level = "trusted"
         assert_eq!(_classify_agent_failure(&result), None);
         result.stderr = "service unavailable".into();
         let mut attempts = 0;
-        _run_with_transient_retries(
+        _run_with_retries(
             &launch,
             &auto_process(),
             &[Duration::ZERO],
@@ -2362,7 +2332,7 @@ trust_level = "trusted"
         AgentProcessResult {
             exit_code: 1,
             agent_session: Some("thread".into()),
-            failure: Some(AgentFailure::AccountSubscriptionLimit),
+            failure: Some(AgentFailure::UsageLimit),
             ..failed_result("provider_rate_limited: rejected: seven_day_overage_included")
         }
     }
@@ -2380,7 +2350,7 @@ trust_level = "trusted"
             agent: Some("codex".to_string()),
             ..default_launch()
         };
-        let result = _run_with_transient_retries(
+        let result = _run_with_retries(
             &launch,
             &auto_process(),
             &[Duration::ZERO],
@@ -2389,10 +2359,7 @@ trust_level = "trusted"
         )
         .expect("typed launch failure is returned");
 
-        assert!(matches!(
-            result.failure,
-            Some(AgentFailure::AccountSubscriptionLimit)
-        ));
+        assert!(matches!(result.failure, Some(AgentFailure::UsageLimit)));
     }
 
     #[test]
@@ -2405,34 +2372,6 @@ trust_level = "trusted"
         ] {
             assert!(subscription_limit_text(line).is_some(), "{line}");
         }
-    }
-
-    #[test]
-    fn a_spent_line_naming_a_model_scopes_its_limit() {
-        let model = |line: &str| subscription_limit_text(line).unwrap().model;
-        assert_eq!(
-            model("You've reached your Fable limit. Switch to another model to continue."),
-            Some("fable".to_string())
-        );
-        assert_eq!(
-            model("You've hit your weekly Opus limit \u{b7} resets Wed 12:00"),
-            Some("opus".to_string())
-        );
-        assert_eq!(
-            model("You've hit your weekly limit \u{b7} resets Wed 12:00"),
-            None
-        );
-        assert_eq!(
-            model("You're out of usage credits. /model to switch models."),
-            None
-        );
-        let credits = |line: &str| subscription_limit_text(line).unwrap().credits;
-        assert!(credits(
-            "You're out of usage credits. /model to switch models."
-        ));
-        assert!(!credits(
-            "You've hit your weekly limit \u{b7} resets Wed 12:00"
-        ));
     }
 
     #[test]
@@ -2457,7 +2396,7 @@ trust_level = "trusted"
         let process = auto_process();
         let mut attempts = 0;
 
-        let result = _run_with_transient_retries(
+        let result = _run_with_retries(
             &launch,
             &process,
             &[Duration::ZERO],
@@ -2483,7 +2422,7 @@ trust_level = "trusted"
         let mut attempts = 0;
         let mut waits = 0;
 
-        let result = _run_with_transient_retries(
+        let result = _run_with_retries(
             &launch,
             &process,
             &[Duration::ZERO, Duration::ZERO],
@@ -2570,9 +2509,9 @@ trust_level = "trusted"
         let refused = || failed_result("codex_error: You've hit your usage limit");
         let mut scripted = vec![refused(), limited_result(), done()].into_iter();
         let mut attempts = Vec::new();
-        let result = _run_with_transient_retries(
+        let result = _run_with_retries(
             &launch,
-            &ProcessConfig { ..auto_process() },
+            &auto_process(),
             &[],
             |config, _| {
                 attempts.push(config.clone());
@@ -2599,9 +2538,9 @@ trust_level = "trusted"
             ..Default::default()
         };
         let mut attempts = 0;
-        let result = _run_with_transient_retries(
+        let result = _run_with_retries(
             &launch,
-            &ProcessConfig { ..auto_process() },
+            &auto_process(),
             &[],
             |_, _| {
                 attempts += 1;
@@ -2611,7 +2550,7 @@ trust_level = "trusted"
         )
         .unwrap();
         assert_eq!(attempts, 1);
-        assert_eq!(result.failure, Some(AgentFailure::AccountSubscriptionLimit));
+        assert_eq!(result.failure, Some(AgentFailure::UsageLimit));
         // What it records names the way out; with an order, what was tried.
         let advice = _limit_stop_advice("codex", &launch, &["codex".into()]);
         assert_eq!(
@@ -2699,12 +2638,12 @@ trust_level = "trusted"
                         ..Default::default()
                     };
                     for failure in [
-                        AgentFailure::AccountSubscriptionLimit,
-                        AgentFailure::AccountCredentialInvalidated,
+                        AgentFailure::UsageLimit,
+                        AgentFailure::CredentialInvalidated,
                         AgentFailure::ModelUnavailable,
                     ] {
                         let mut attempts = Vec::new();
-                        let result = _run_with_transient_retries(
+                        let result = _run_with_retries(
                             &launch,
                             &process,
                             &[],
@@ -2744,7 +2683,7 @@ trust_level = "trusted"
                         }
                     }
                     let mut dispatches = 0;
-                    let success = _run_with_transient_retries(&launch, &process, &[], |_, _| {
+                    let success = _run_with_retries(&launch, &process, &[], |_, _| {
                         dispatches += 1;
                         Ok(AgentProcessResult {
                             stdout: "You've hit your usage limit is an example error, not this answer.".into(),

@@ -8,7 +8,6 @@ use serde_json::{json, Value};
 
 use super::fact::{self, Decoded, ProviderFact, ProviderTurn, Signal};
 use crate::chat::types::{ConversationEvent, ConversationItem, FileEdit, Lifecycle, TurnUsage};
-use crate::harness::fact::RateLimitSignal;
 use crate::harness::lf_tag::LfTagParser;
 
 /// One persistent Claude process's stream.
@@ -29,11 +28,6 @@ impl ClaudeDecoder {
         self.outbound.insert(request.to_owned());
     }
 
-    /// Forget display state for a turn that ended outside the stream.
-    pub(super) fn reset_turn(&mut self) {
-        self.state = ReaderState::default();
-    }
-
     /// Tools still in flight when the stream ended without a result.
     pub(super) fn drain_open_items(&mut self, status: Lifecycle) -> Vec<ConversationItem> {
         self.state.drain_open_items(status)
@@ -44,8 +38,8 @@ impl ClaudeDecoder {
         let Ok(value) = serde_json::from_str::<Value>(line) else {
             return Ok(Vec::new());
         };
-        if let Some(signal) = rate_limit_signal(&value) {
-            return Ok(vec![ProviderFact::RateLimit(signal).into()]);
+        if let Some(reason) = turn_rejection(&value) {
+            return Ok(vec![ProviderFact::TurnRejected { reason }.into()]);
         }
         let signals = signals(&value);
         if let Some(tasks) = signals.iter().find_map(|signal| match signal {
@@ -380,7 +374,9 @@ impl ReaderState {
     }
 }
 
-fn rate_limit_signal(value: &Value) -> Option<RateLimitSignal> {
+/// Only an explicit rejection refuses the current turn. Utilization and reset
+/// snapshots do not establish whether the provider accepted its input.
+fn turn_rejection(value: &Value) -> Option<String> {
     let event = value
         .get("stream_event")
         .and_then(|stream| stream.get("event"))
@@ -393,98 +389,16 @@ fn rate_limit_signal(value: &Value) -> Option<RateLimitSignal> {
         .or_else(|| event.get("rateLimitInfo"))
         .or_else(|| event.get("rate_limit"))
         .unwrap_or(event);
-    let status = info
-        .get("status")
-        .and_then(Value::as_str)
-        .unwrap_or("rate_limit_event");
-    let limited = status.eq_ignore_ascii_case("rejected");
-    let utilization_percent = info
-        .get("utilization")
-        .or_else(|| info.get("used_percent"))
-        .or_else(|| info.get("usedPercent"))
-        .and_then(Value::as_f64)
-        .map(|value| {
-            let percent = if value <= 1.0 { value * 100.0 } else { value };
-            percent.round().clamp(0.0, 100.0) as u8
-        });
-    let resets_at = info
-        .get("resets_at")
-        .or_else(|| info.get("resetsAt"))
-        .or_else(|| info.get("reset_at"))
-        .or_else(|| info.get("reset_timestamp"))
-        .and_then(parse_reset_timestamp);
-    let rate_type = info
-        .get("rate_limit_type")
-        .or_else(|| info.get("rateLimitType"))
-        .and_then(Value::as_str);
-    let reason = rate_type
-        .map(|rate_type| format!("{status}: {rate_type}"))
-        .unwrap_or_else(|| status.to_string());
-    // The bucket decides the scope: `seven_day_fable` is Fable's whatever
-    // model the event names, and `seven_day` or `five_hour` stay
-    // account-wide. Only the included per-model allocation, which names no
-    // family, takes it from the reported model.
-    let model = match rate_type {
-        Some("seven_day_overage_included") => info
-            .get("model")
+    let status = info.get("status").and_then(Value::as_str)?;
+    if !status.eq_ignore_ascii_case("rejected") {
+        return None;
+    }
+    Some(
+        info.get("rate_limit_type")
+            .or_else(|| info.get("rateLimitType"))
             .and_then(Value::as_str)
-            .map(claude_model_family),
-        rate_type => rate_type.and_then(claude_limit_model).map(str::to_owned),
-    };
-    // The stream event carries one window at a time, named as Claude names
-    // it, so the stored observation lands on the key a poll would update.
-    let windows = utilization_percent
-        .map(|used_percent| {
-            vec![crate::store::AccountLimitWindow {
-                window: rate_type.unwrap_or("five_hour").to_string(),
-                used_percent,
-                resets_at,
-                plan: None,
-                model: model.clone(),
-                limited_until: None,
-            }]
-        })
-        .unwrap_or_default();
-    Some(RateLimitSignal {
-        utilization_percent,
-        resets_at,
-        limited,
-        reason,
-        windows,
-        model,
-        credits: rate_type == Some("overage"),
-    })
-}
-
-/// The model a Claude limit is scoped to, when its type names one lf can
-/// launch (`seven_day_opus`). Other suffixes are not models and limit the
-/// whole account.
-fn claude_limit_model(rate_type: &str) -> Option<&str> {
-    let suffix = rate_type.rsplit('_').next()?;
-    crate::config::CLAUDE_MODEL_FAMILIES
-        .contains(&suffix)
-        .then_some(suffix)
-}
-
-fn parse_reset_timestamp(value: &Value) -> Option<i64> {
-    if let Some(value) = value.as_i64() {
-        return Some(if value > 100_000_000_000 {
-            value / 1000
-        } else {
-            value
-        });
-    }
-    let value = value.as_str()?;
-    if let Ok(timestamp) = value.parse::<i64>() {
-        return Some(if timestamp > 100_000_000_000 {
-            timestamp / 1000
-        } else {
-            timestamp
-        });
-    }
-    time::OffsetDateTime::parse(value, &time::format_description::well_known::Rfc3339)
-        .ok()
-        .map(|timestamp| timestamp.unix_timestamp())
+            .map_or_else(|| status.to_owned(), |kind| format!("{status}: {kind}")),
+    )
 }
 
 /// A request's whole input: fresh tokens plus cache reads and writes.
@@ -948,14 +862,6 @@ fn flush_text_delta_parser(out: &mut Vec<Decoded>, state: &mut ReaderState, turn
     }
 }
 
-fn claude_model_family(model: &str) -> String {
-    let model = model.to_ascii_lowercase();
-    crate::config::CLAUDE_MODEL_FAMILIES
-        .into_iter()
-        .find(|family| model.contains(family))
-        .map_or(model, str::to_owned)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1153,14 +1059,6 @@ mod tests {
         })
     }
 
-    fn rate_limit(line: &str) -> RateLimitSignal {
-        let (_, facts) = decode(&mut ClaudeDecoder::default(), line, "turn_1");
-        match facts.as_slice() {
-            [ProviderFact::RateLimit(signal)] => signal.clone(),
-            other => panic!("expected one rate limit, got {other:?}"),
-        }
-    }
-
     #[test]
     fn system_event_observes_the_native_session() {
         for line in [
@@ -1177,61 +1075,39 @@ mod tests {
     }
 
     #[test]
-    fn rejected_rate_limit_event_marks_a_hard_limit() {
-        let signal = rate_limit(
+    fn rejected_rate_limit_event_retains_the_provider_reason() {
+        let (_, facts) = decode(
+            &mut ClaudeDecoder::default(),
             r#"{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","rate_limit_type":"five_hour","utilization":1.0,"resets_at":1900000000}}"#,
+            "turn_1",
         );
-
-        assert!(signal.limited);
-        assert_eq!(signal.utilization_percent, Some(100));
-        assert_eq!(signal.resets_at, Some(1_900_000_000));
-        assert!(signal.reason.contains("five_hour"));
+        assert_eq!(
+            facts,
+            [ProviderFact::TurnRejected {
+                reason: "rejected: five_hour".into()
+            }]
+        );
     }
 
-    /// The event that started the November 2 failures.
     #[test]
-    fn claude_usage_reconciliation_included_allocation_is_not_paid_credit() {
-        let signal = rate_limit(
-            r#"{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","rate_limit_type":"seven_day_overage_included","utilization":1.0,"resets_at":1900000000}}"#,
-        );
-        assert!(signal.limited);
-        assert!(!signal.credits);
-        assert_eq!(signal.model, None);
-        assert_eq!(signal.windows[0].window, "seven_day_overage_included");
-        assert!(!rate_limit(
-            r#"{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","rate_limit_type":"seven_day","utilization":1.0}}"#,
-        )
-        .credits);
-    }
-
-    /// A limit on one model leaves the account's other models usable.
-    #[test]
-    fn a_model_scoped_limit_names_its_model_and_keeps_claude_s_window_name() {
-        let signal = rate_limit(
-            r#"{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","rate_limit_type":"seven_day_opus","utilization":1.0,"resets_at":1900000000}}"#,
-        );
-        assert!(signal.limited);
-        assert_eq!(signal.model.as_deref(), Some("opus"));
-        assert_eq!(signal.windows[0].window, "seven_day_opus");
-        assert_eq!(signal.windows[0].model.as_deref(), Some("opus"));
-        // Suffixes that are not models limit every model.
-        for kind in ["seven_day_oauth_apps", "seven_day_omelette", "five_hour"] {
-            let signal = rate_limit(&format!(
-                r#"{{"type":"rate_limit_event","rate_limit_info":{{"status":"rejected","rate_limit_type":"{kind}","utilization":1.0}}}}"#
-            ));
-            assert_eq!(signal.model, None, "{kind}");
-            assert_eq!(signal.windows[0].window, kind);
+    fn quota_readings_do_not_reject_a_turn() {
+        for status in [
+            "allowed",
+            "allowed_warning",
+            "blocked",
+            "limited",
+            "rate_limit_reached",
+        ] {
+            let (display, facts) = decode(
+                &mut ClaudeDecoder::default(),
+                &format!(
+                    r#"{{"stream_event":{{"event":{{"type":"rate_limit_event","rate_limit_info":{{"status":"{status}","utilization":1.0}}}}}}}}"#
+                ),
+                "turn_1",
+            );
+            assert!(display.is_empty(), "{status}: {display:?}");
+            assert!(facts.is_empty(), "{status}: {facts:?}");
         }
-    }
-
-    #[test]
-    fn rate_limit_warning_updates_utilization_without_limiting() {
-        let signal = rate_limit(
-            r#"{"stream_event":{"event":{"type":"rate_limit_event","rate_limit_info":{"status":"allowed_warning","utilization":0.72}}}}"#,
-        );
-
-        assert!(!signal.limited);
-        assert_eq!(signal.utilization_percent, Some(72));
     }
 
     #[test]

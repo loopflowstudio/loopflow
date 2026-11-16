@@ -26,8 +26,6 @@ mod pi_decode;
 pub(crate) mod task_updates;
 
 use crate::id::AgentSessionId;
-/// Name a codex rate-limit window by duration — shared with the subscription
-/// poller so stream and poll observations land on the same window key.
 use anyhow::Result;
 use async_trait::async_trait;
 use tokio::sync::mpsc;

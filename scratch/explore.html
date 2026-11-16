@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-434 · Three ways through a Task</title>
+<style>
+:root{color-scheme:light dark;--paper:#f7f5ef;--surface:#fffefb;--ink:#252829;--muted:#686c69;--line:#d6d8d1;--accent:#315f57;--wash:#e9efea;--error:#a13630;--code:#eeeee7}
+@media(prefers-color-scheme:dark){:root{--paper:#1c2022;--surface:#252a2c;--ink:#e9e9e1;--muted:#a9b0aa;--line:#454d4d;--accent:#b6d6c5;--wash:#303f3a;--error:#ffa39a;--code:#303537}}
+*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}main{max-width:920px;margin:auto;padding:60px 30px 90px}header{padding-bottom:44px;border-bottom:1px solid var(--line)}.eyebrow{font-size:12px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}h1{font-size:clamp(32px,5vw,48px);line-height:1.13;letter-spacing:-.035em;margin:16px 0 22px;max-width:700px}h2{font-size:28px;letter-spacing:-.025em;line-height:1.2;margin:12px 0}h3{font-size:18px;margin:0 0 10px}p{margin:12px 0}.lead{font-size:20px;max-width:690px}.muted,small{color:var(--muted)}small{font-size:13px}.sources{font-size:12px;margin-top:24px;overflow-wrap:anywhere}a{color:var(--accent);text-underline-offset:3px}section{padding:44px 0;border-bottom:1px solid var(--line)}.tradeoff{font-size:14px;max-width:760px;margin:18px 0 24px}.mock{background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden}.mock-head{padding:18px 22px;border-bottom:1px solid var(--line)}.mock-body{padding:24px}.row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}.spread{justify-content:space-between}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}button,select,input,textarea{font:inherit;color:var(--ink)}button{background:var(--surface);border:1px solid var(--line);padding:9px 13px;border-radius:6px;cursor:pointer;font-size:14px;line-height:1.4}button:hover{border-color:var(--accent);background:var(--wash)}button:focus-visible,select:focus-visible,textarea:focus-visible,input:focus-visible,summary:focus-visible{outline:3px solid var(--accent);outline-offset:3px}button.primary{background:var(--ink);color:var(--paper);border-color:var(--ink)}button[aria-pressed=true]{background:var(--wash);border-color:var(--accent)}button:disabled{opacity:.5;cursor:default}.route{display:flex;gap:0;list-style:none;padding:24px 0;margin:0;align-items:stretch}.route li{flex:1;min-width:0;border-top:2px solid var(--line);padding:10px 8px 0 0;font-size:13px}.route li.current{border-color:var(--accent);font-weight:650;color:var(--accent)}.route li small{display:block;font-weight:400}.route button{border:0;padding:0;background:none;text-align:left;color:inherit;font-weight:inherit}.detail{border-left:3px solid var(--accent);padding:2px 0 2px 18px;min-height:116px}.status{font-size:18px;font-weight:600}.meta{font-size:13px;color:var(--muted)}.state{border-top:1px solid var(--line);padding:16px 22px;background:var(--wash)}.artifact{border:1px solid var(--line);border-radius:7px;padding:23px;margin:20px 0;background:var(--paper)}.artifact h3{font-size:22px}.artifact ul{padding-left:20px}details{margin-top:18px;font-size:14px}summary{cursor:pointer;color:var(--accent);padding:6px 0}pre{white-space:pre-wrap;overflow-wrap:anywhere;font:13px/1.6 ui-monospace,SFMono-Regular,monospace;background:var(--code);padding:16px;border-radius:6px}code{font:13px ui-monospace,SFMono-Regular,monospace}label{display:block;font-size:14px;margin:16px 0 6px}select,input,textarea{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:9px;width:100%}textarea{min-height:80px;resize:vertical}.note{font-size:13px;color:var(--muted);margin-top:14px}.error{color:var(--error)}[hidden]{display:none!important}.history{border-top:1px solid var(--line);margin-top:20px;padding-top:16px}.checks{list-style:none;padding:0}.checks li{padding:6px 0;border-bottom:1px solid var(--line);font-size:14px}.checks span{float:right;color:var(--muted)}.terminal{background:var(--code);padding:20px;border-radius:8px;font:14px/1.8 ui-monospace,SFMono-Regular,monospace}.question{margin:26px 0}.question strong{display:block}.answer{padding:16px;background:var(--wash);border-radius:6px;min-height:58px}.legend{padding:12px 0;color:var(--muted);font-size:13px}.number{font:13px ui-monospace,monospace;color:var(--accent)}@media(max-width:600px){main{padding:30px 18px 60px}.mock-body{padding:18px}.mock-head{padding:16px}.route{flex-wrap:wrap;gap:14px}.route li{flex:1 0 28%}.checks span{float:none;display:block}.actions button{max-width:100%}.lead{font-size:18px}}
+</style>
+</head>
+<body><main>
+<header>
+<div class="eyebrow">LOO-434 · Explore / round 1 · November 8, 2026</div>
+<h1>What should lead you<br>through a Task?</h1>
+<p class="lead">The whole route, the next decision, or a delivery that worked before.</p>
+<p>Three proposed experiences for starting useful work, reviewing it in the same conversation, and knowing what happens next. Try the controls, then choose a direction—or combine them.</p>
+<p class="note">All examples below are simulated. Buttons change this page only. Nothing starts, publishes, merges, or records a choice in Loopflow.</p>
+<div class="sources">Built from <a href="loo-434-repeatable-delivery.md">the kickoff design</a>, <code>TaskWorkView.swift</code>, <code>NewTaskSheet.swift</code>, <code>task_graph.rs</code>, the builtin <code>feature</code> / <code>deliver</code> graphs, and LOO-733’s review-panel design. The example “Export filtered results” and its checks are fictional.</div>
+</header>
+
+<section aria-labelledby="a-title">
+<div class="number">01 / ROUTE</div>
+<h2 id="a-title">A. Follow the route</h2>
+<p class="lead">You can see the entire journey before taking the next step.</p>
+<p class="tradeoff"><strong>Appeal:</strong> reviews, execution and iterations have one visible home. <strong>Cost:</strong> closest to today’s workspace; shared move descriptions and one live diagram. <strong>Risk:</strong> a newcomer still has a map to learn before getting useful work done.</p>
+<div class="mock">
+<div class="mock-head"><div class="meta">Export filtered results · Build a feature</div><div class="row spread"><strong>The route to a verified change</strong><button id="a-reset">Reset example</button></div></div>
+<div class="mock-body">
+<ol class="route" aria-label="Workflow steps">
+<li><button data-route="plan">Plan<small>Finished</small></button></li>
+<li><button data-route="design">Choose design<small>Review · 2 rounds</small></button></li>
+<li><button data-route="build">Build & check<small>Finished · pass 2</small></button></li>
+<li class="current"><button data-route="demo">Try the change<small>Here · demo</small></button></li>
+<li><button data-route="land">Gate & merge<small>Not started</small></button></li>
+<li><button data-route="verify">Verify on main<small>Review ahead</small></button></li>
+</ol>
+<div class="detail" id="a-detail" aria-live="polite"><h3>Try the change · your next review</h3><p>Implementation and checks finished. The Task is open. No run is active.</p><small>Continue runs the gate and merges the PR, then stops at verification.</small></div>
+<div class="actions"><button id="a-review">Read the demo</button><button id="a-iterate">Revise implementation → demo</button><button class="primary" id="a-continue">Gate & merge → verify</button></div>
+<div id="a-page" class="artifact" hidden><h3>Export only what you can see</h3><p>Filter the table, choose Export, and open the CSV. It should contain the visible rows in their displayed order.</p><p class="meta">The existing Task conversation handles your response. Reviewing the page does not advance the route.</p></div>
+<details><summary>Run history and instructions</summary><p>Pass 1 · check failed: exported all rows.<br>Pass 2 · filter and row-order checks passed; PR published.</p><pre>Instructions used · implement · pass 2
+Export the current filtered rows in displayed order.
+Exercise an empty result and a changed filter.</pre><p class="meta">Proposed history view. A real run without captured instructions says “Not recorded”.</p></details>
+</div>
+<div class="state" id="a-state" role="status">At demo · no active run · Task open</div>
+</div>
+<p class="legend">Try a route stop, then “Revise implementation” or “Gate & merge”. The action’s destination stays visible.</p>
+</section>
+
+<section aria-labelledby="b-title">
+<div class="number">02 / NEXT DECISION</div>
+<h2 id="b-title">B. Work the next decision</h2>
+<p class="lead">The work you’re reviewing stays in front of you. The next move explains itself.</p>
+<p class="tradeoff"><strong>Appeal:</strong> useful at a glance; the same conversation carries each round. <strong>Cost:</strong> shared moves plus a compact action area; integrates with LOO-733’s panel without choosing its layout. <strong>Risk:</strong> the larger plan is easier to miss, so the next stop and merge effect must always be visible.</p>
+<div class="mock">
+<div class="mock-head"><div class="row spread"><div><div class="meta">Export filtered results</div><strong id="b-heading">Choose what to build</strong></div><button id="b-reset">Reset example</button></div></div>
+<div class="mock-body">
+<div class="status" id="b-status" aria-live="polite">At explore · no active run · Task open</div>
+<div class="artifact" id="b-content"><div class="meta">Design · round 2</div><h3>One export button.<br>The rows you’re looking at.</h3><p>Export the filtered table in its current order. Keep the existing CSV format. An empty result produces the headers only.</p><p class="meta">Discuss and revise this page in the same Task conversation. LOO-733 owns the response controls.</p></div>
+<p id="b-next">Next: implement, check and publish a PR. Stop at demo for you to try it.</p>
+<div class="actions" id="b-actions"></div>
+<details><summary>Whole route & past runs</summary><p>Plan → <strong>choose design</strong> → build and check → try it → gate and merge → verify on main → end.</p><p>Current example: kickoff succeeded. No implementation run yet.</p><p class="meta">In the product this reads the captured Graph and recorded runs; it does not infer progress from the page.</p></details>
+</div>
+</div>
+<p class="legend">Try “Build & publish”, then Stop or simulate a failed check. Recovery says which completed steps repeat. “Simulate run finished → demo” advances the example to review.</p>
+</section>
+
+<section aria-labelledby="c-title">
+<div class="number">03 / REPEATABLE DELIVERY</div>
+<h2 id="c-title">C. Start from something that worked</h2>
+<p class="lead">A verified delivery is the beginning of the next one.</p>
+<p class="tradeoff"><strong>Appeal:</strong> workflows become useful examples you can inspect, reuse and improve. <strong>Cost:</strong> largest—connect historical instructions, checks and delivery to today’s editable definitions. <strong>Risk:</strong> old success can look like a promise; the new Task must earn its own checks and approval.</p>
+<div class="mock">
+<div class="mock-head"><div class="meta">Past delivery · illustrative example</div><strong>Export filtered results</strong><div class="meta">Merged and verified · feature workflow · two implementation passes</div></div>
+<div class="mock-body">
+<h3>What was verified</h3>
+<ul class="checks"><li>Filtered rows, displayed order <span>Automated check passed</span></li><li>Empty results keep CSV headers <span>Automated check passed</span></li><li>Export opened correctly on main <span>Recorded verification</span></li></ul>
+<details><summary>Read the instructions this run used</summary><pre>implement · captured at run time
+Export the current filtered rows in displayed order.
+Exercise an empty result and a changed filter.</pre><p>Today’s workflow adds a CSV round-trip check. The past run remains unchanged.</p></details>
+<div class="actions"><button class="primary" id="c-reuse">Use this workflow for another Task</button><button id="c-improve">Prepare a workflow improvement</button></div>
+<div id="c-form" hidden>
+<label for="c-request">What should the next Task deliver?</label><input id="c-request" value="Export the selected rows as JSON">
+<label for="c-definition">Workflow definition</label><select id="c-definition"><option value="current">Current feature workflow · includes CSV round-trip check</option><option value="historic">Compare with the captured workflow from this delivery</option></select>
+<p id="c-plan">You choose the design, try the change, and verify on main. New work gets new checks; merging remains a separate move.</p>
+<button id="c-start">Preview the new Task</button>
+</div>
+<div id="c-edit" hidden><label for="c-change">Proposed change to the workflow</label><textarea id="c-change">Add a round-trip check for every exported format.</textarea><p class="meta">Prepare an editable change to the existing skill or Graph in an ordinary Task. Review and publish it before future Tasks take it up. This changes neither this delivery nor any captured running workflow.</p><button id="c-draft">Preview improvement Task</button></div>
+<div id="c-result" role="status" class="history" hidden></div>
+</div></div>
+<p class="legend">Try reuse, compare today’s definition with the old run, or prepare an improvement. No new template object or execution engine.</p>
+</section>
+
+<section aria-labelledby="terminal-title">
+<h2 id="terminal-title">The terminal still needs a clear choice</h2>
+<p>Shared by all three: leaving a taskless interactive step must make Continue and Stop understandable. Native provider interrupt and edit shortcuts keep their meaning.</p>
+<div class="terminal"><div>explore finished.</div><div>Continue runs implementation and checks, then opens demo.</div><div>Stop leaves later steps unstarted.</div><div class="actions"><button id="t-continue">c · Continue</button><button id="t-stop">s · Stop</button><button id="t-reset">Reset</button></div><p id="t-state" role="status">Waiting for a choice. No later step has started.</p></div>
+<p class="note">Proposed explicit-key version. The other option is Enter to continue. This mock proves neither PTY behavior nor real-provider shortcuts; those stay in the implementation’s acceptance checks.</p>
+</section>
+
+<section aria-labelledby="decision-title">
+<h2 id="decision-title">Choose the center of gravity</h2>
+<p>B is the recommended starting point: keep the review in view, make the next action precise, and expose route and history when needed. C is the larger ambition if repeatability should lead the whole product.</p>
+<div class="question"><strong>1. What should lead the Task experience?</strong><div class="actions"><button data-answer="1a">1a · The route</button><button data-answer="1b">1b · The next decision</button><button data-answer="1c">1c · A past delivery</button></div></div>
+<div class="question"><strong>2. After a taskless provider exits, how should Continue work?</strong><div class="actions"><button data-answer="2a">2a · Require c</button><button data-answer="2b">2b · Enter continues</button></div></div>
+<p class="answer" id="answer" aria-live="polite">Choose options to compose a reply. You can also combine directions or ask for another round.</p>
+<p class="note">Selection stays on this page. Send the reply in the conversation; it records no decision by itself.</p>
+</section>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+const set=(id,value)=>$(id).textContent=value;
+const route={plan:['Plan finished','Kickoff identified the export behavior and review points.'],design:['Design review · two rounds','The existing Task conversation settled the filtered-row behavior in this example.'],build:['Implementation · two passes','Pass 1 failed a filtered-row check. Pass 2 fixed it and published a PR.'],demo:['Try the change · your next review','Implementation and checks finished. The Task is open. No run is active.'],land:['Gate and merge · not started','Continuing from demo runs gate, then the landing command. It can merge the PR before stopping at verify.'],verify:['Verify on main · review ahead','After merge, check the result on main. Reaching end requests completion and approves Auto-Ship under the current contract.']};
+function showRoute(key){const [title,body]=route[key];$('a-detail').replaceChildren();const h=document.createElement('h3'),p=document.createElement('p');h.textContent=title;p.textContent=body;$('a-detail').append(h,p)}
+document.querySelectorAll('[data-route]').forEach(b=>b.onclick=()=>showRoute(b.dataset.route));
+$('a-review').onclick=()=>{$('a-page').hidden=!$('a-page').hidden};
+$('a-iterate').onclick=()=>{set('a-state','Simulation: running implementation again → demo · Task open');set('a-continue','Gate & merge → verify');$('a-continue').disabled=true;$('a-iterate').disabled=true;showRoute('build')};
+$('a-continue').onclick=()=>{set('a-state','Simulation: gate and landing started → verify · Task open');$('a-continue').disabled=true;$('a-iterate').disabled=true;showRoute('land')};
+$('a-reset').onclick=()=>{set('a-state','At demo · no active run · Task open');$('a-continue').disabled=false;$('a-iterate').disabled=false;$('a-page').hidden=true;showRoute('demo')};
+function buttons(items){$('b-actions').replaceChildren();for(const [label,action,primary] of items){const button=document.createElement('button');button.textContent=label;if(primary)button.className='primary';button.onclick=action;$('b-actions').append(button)}}
+function bState(kind){$('b-status').classList.toggle('error',kind==='failed');
+ if(kind==='design'){set('b-heading','Choose what to build');set('b-status','At explore · no active run · Task open');$('b-content').innerHTML='<div class="meta">Design · round 2</div><h3>One export button.<br>The rows you’re looking at.</h3><p>Export the filtered table in its current order. Keep the existing CSV format. An empty result produces the headers only.</p><p class="meta">Discuss and revise this page in the same Task conversation. LOO-733 owns the response controls.</p>';set('b-next','Next: implement, check and publish a PR. Stop at demo for you to try it.');buttons([['Build & publish → demo',()=>bState('running'),true]])}
+ if(kind==='running'){set('b-heading','Building the change');set('b-status','Run from explore · checking export behavior · Task open');$('b-content').innerHTML='<h3>The empty-result check passed.</h3><p>Checking filtered rows and row order next. The design stays available in this Task’s conversation.</p>';set('b-next','This run stops at demo. Publishing does not merge the PR.');buttons([['Stop run',()=>bState('stopped')],['Simulate failed check',()=>bState('failed')],['Simulate run finished → demo',()=>bState('demo')]])}
+ if(kind==='stopped'||kind==='failed'){set('b-heading',kind==='failed'?'A check failed':'Run stopped');set('b-status',kind==='failed'?'Run from explore · check failed (exit 1) · Task open':'Run from explore · stopped by you · Task open');$('b-content').innerHTML=kind==='failed'?'<h3>Expected 12 rows. Export contained 80.</h3><p>The export ignored the active filter. No PR was published by this run.</p>':'<h3>Later steps have not started.</h3><p>The implementation remains in the checkout. Stopping did not finish the Task.</p>';set('b-next','Run again restarts this segment after explore, including completed documentation and implementation work. Failed-step retry belongs to LOO-435.');buttons([['Run segment again → demo',()=>bState('running'),true]])}
+ if(kind==='demo'){set('b-heading','Try the change');set('b-status','At demo · implementation run succeeded · Task open');$('b-content').innerHTML='<div class="meta">Demo · same Task conversation</div><h3>Filter the table. Export. Open the CSV.</h3><p>Check the visible rows and their order. The automated filter and empty-result checks passed in this example.</p>';set('b-next','Next: gate the branch and merge the PR, then stop at verify.');buttons([['Revise implementation → demo',()=>bState('running')],['Gate & merge → verify',()=>bState('verify'),true]])}
+ if(kind==='verify'){set('b-heading','Verify the result on main');set('b-status','At verify · gate and landing succeeded · Task open');$('b-content').innerHTML='<h3>The example PR is merged.</h3><p>Try the export on main and record what happened in this conversation. A merge alone does not complete the Task.</p>';set('b-next','After verification, reaching end requests completion and approves Auto-Ship under the existing contract.');buttons([['Simulate verification recorded → end',()=>bState('done'),true]])}
+ if(kind==='done'){set('b-heading','Delivery verified');set('b-status','At end · no active run · Task completed');$('b-content').innerHTML='<h3>Filtered export works on main.</h3><p>The verification and completion succeeded in this simulated example. Run instructions and checks remain available in history.</p>';set('b-next','Use this workflow again with a new Task, or inspect its past runs.');buttons([['Replay example',()=>bState('design')]])}
+}
+$('b-reset').onclick=()=>bState('design');bState('design');
+$('c-reuse').onclick=()=>{$('c-form').hidden=false;$('c-edit').hidden=true;$('c-result').hidden=true};
+$('c-improve').onclick=()=>{$('c-edit').hidden=false;$('c-form').hidden=true;$('c-result').hidden=true};
+$('c-definition').onchange=()=>{const historical=$('c-definition').value==='historic';set('c-plan',historical?'Difference: the old run did not include today’s CSV round-trip check. To recreate that definition, prepare an editable workflow change first.':'You choose the design, try the change, and verify on main. New work gets new checks; merging remains a separate move.');$('c-start').disabled=historical};
+$('c-start').onclick=()=>{$('c-result').hidden=false;set('c-result','New Task preview: '+($('c-request').value.trim()||'Describe an outcome first')+'. Uses the current feature workflow. Starts with kickoff, then stops at explore. No Task was created.')};
+$('c-draft').onclick=()=>{$('c-result').hidden=false;set('c-result','Improvement Task preview: '+($('c-change').value.trim()||'Describe the change first')+' Past runs stay unchanged. No Task or file was created.')};
+let terminalChoice=null;function terminal(choice){if(terminalChoice)return;terminalChoice=choice;set('t-state',choice==='continue'?'Simulation: the next segment started once. This choice is now closed.':'Stopped here. Later steps remain unstarted.');$('t-continue').disabled=true;$('t-stop').disabled=true}
+$('t-continue').onclick=()=>terminal('continue');$('t-stop').onclick=()=>terminal('stop');$('t-reset').onclick=()=>{terminalChoice=null;$('t-continue').disabled=false;$('t-stop').disabled=false;set('t-state','Waiting for a choice. No later step has started.')};
+const answers={};document.querySelectorAll('[data-answer]').forEach(button=>button.onclick=()=>{const value=button.dataset.answer;answers[value[0]]=value;document.querySelectorAll('[data-answer]').forEach(b=>b.setAttribute('aria-pressed',String(answers[b.dataset.answer[0]]===b.dataset.answer)));set('answer','Reply in the conversation: '+Object.values(answers).join(', ')+'. You can add what to change or combine.')});
+</script>
+</body></html>

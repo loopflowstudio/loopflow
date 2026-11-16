@@ -459,6 +459,7 @@ private struct TaskDocumentView: NSViewRepresentable {
             host.addSubview(document.scroll)
         }
         document.editor.applyPalette(palette)
+        document.editor.recordReadiness()
         document.scroll.backgroundColor = NSColor(palette.background)
     }
 }

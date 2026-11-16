@@ -30,6 +30,23 @@ Checks before live collection:
 Live probe LOO-929 was reopened for these trials, without a Graph run. The
 owned checkout contains `scratch/performance-probe.txt` as a plain text editor
 fixture. Restore completion after collection. New Start/Complete timings from
-its earlier run remain separate by build. No native figures from the new hooks yet.
+its earlier run remain separate by build. New build 170cc346 observations on the live Machine: app process start → typing 131432.35 ms (75F2627B-571A-47FD-A049-C990AA8EE156), Task selection → input 507.67 ms (73C9AE98-9F2B-4F4A-9141-D7BB8FEBE74B), reconnect → typing 3030.18 ms (97BBF095-6462-4546-86DF-6067A2D64C39). Each n=1, captured-frame upper bounds. Actual unsent typing was verified and cleared. No P95 or speed comparison.
 
 Live validation rejected three launch observations from build 0814633052: EF72F4E2-8C75-40EC-9D95-62828222AD4F, FABF453D-C86B-4FB9-AC1A-386467035ADA, E05C76AC-9DDA-4E0B-A48F-0C599204BBA0. The observer depended on system key-window activation under background app control; menus/focus could end the interval late. Raw journal records remain intact; interaction-validations.ndjson records the endpoint rejection. This is unrelated to the valid earlier 23.8 s Start sample. Launch now follows the actual input-focused terminal window.
+
+Remaining live collection:
+- Native first-response sample FA7A874F-A520-4BE3-A814-32719F32785B showed Tungsten on screen, but Session preview stayed null. Native Codex uses turn-end side reads rather than the live decoder notification path. Reuse the existing watched transcript reading to supply bounded assistant identity, then require matching visible terminal text. This remains a response-observed upper bound, including transcript publication.
+- New conversation 1C421473-D781-4C20-B949-EC79AB39206B and return 43671275-24D3-4746-8DAB-138F273790AD were accessibility actions without native input timestamps. No latency claimed. Native coordinate clicks on that popover did not activate its controls. A real-click trial is still needed. The additional owned conversation is session_21785126813e4db8bfcb8b3cd50acec1 and replied without changing files.
+- File trial 8CB3C9AB-DC8C-4779-9CD4-BB683C5AE69B included a driver pause before focusing the editor; rejected by sidecar. End at mounted, visible, editable contents so a second focus click cannot enter file-loading time. Repeat after installing the corrected build.
+- Repeat new journeys on Manabot and Kata; retain absent repository measurements.
+- Restore completion of LOO-929 after collection. Its text fixture was restored after typing/Undo.
+
+At 2026-11-16 15:30 local the host reported load 121.09/120.53/119.44, with 20 GiB disk available. This is context, never a baseline gate. Current Machine service remains 470da475a; new native-preview projection needs the updated reader at runtime before an app sample can qualify.
+
+“im not sure i understand what i was supposed to do” — Jack Heart, after the request for real popover clicks. Clarified: select LOO-929 in Loopflow Dev, press ⌘/, click New conversation; said this could be left for now.
+
+Checks for the native response/file repair: 39 focused Swift tests passed; final input/response checks 12 passed; Python timing report 15 passed and Ruff passed. Native transcript/provenance Rust checks passed; final narrow assistant-only parsing check and Clippy pending. Native rollout context/user JSON is excluded before parsing so measurement does not reread every injected prompt.
+
+Latest checks: native transcript/turn tests 9 passed; native provenance 1 passed; full Clippy and formatting passed. Swift response/file/interaction checks 39 passed; final response/interaction checks after removing the redundant availability gate 12 passed. Report checks 15 passed and Ruff passed.
+
+“done” — Jack Heart, after the single real New conversation click. Input 3A768CDB-286F-477F-B034-F7EF30275776 at 1794872782.422018, captured acknowledgment 196.03 ms. No usable endpoint appeared within the next several minutes. New Session session_3dacba2087aa4a88943c19da150b82fc was listed detached with no terminal IDs; the visible shell remained session_21785126813e4db8bfcb8b3cd50acec1. Preserve this unsuccessful trial, never a completed percentile.

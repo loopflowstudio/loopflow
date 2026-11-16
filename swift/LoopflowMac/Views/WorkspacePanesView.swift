@@ -519,9 +519,15 @@ struct SessionPaneView: View {
                     help: "Reconnect this pane to the existing conversation.",
                     disabled: changingSession) {
                     changingSession = true
-                    Task { @MainActor in
-                        defer { changingSession = false }
-                        await sessions.refresh(item.id)
+                    Perf.userAction(.reconnect, scenario: "refresh_to_typing", id: item.id,
+                                    repository: sessions.repoPath, liveSessions: sessions.sessions.count,
+                                    owner: workspace.performanceOwner) {
+                        Perf.acknowledged(.reconnect, id: item.id, owner: workspace.performanceOwner)
+                        Task { @MainActor in
+                            defer { changingSession = false }
+                            await sessions.refresh(item.id)
+                            Perf.reconnected(id: item.id, owner: workspace.performanceOwner)
+                        }
                     }
                 }
             }
@@ -800,6 +806,7 @@ struct SessionPaneView: View {
                         }
                     } else if let command = try? workspace.shellAttachment(tab) {
                         GhosttyTerminalView(
+                repository: sessions.repoPath,
                             workingDirectory: NSHomeDirectory(),
                             argv: command,
                             terminal: terminal,
@@ -978,6 +985,7 @@ struct SessionPaneView: View {
         if let location = pane.content.location, surface.workspace?.identity == location,
            let terminal = pane.terminal {
             GhosttyTerminalView(
+                repository: sessions.repoPath,
                 workingDirectory: sessions.presentationDirectory(for: surface, checkout: location.worktree),
                 argv: item.launchArguments,
                 terminal: terminal,

@@ -272,6 +272,7 @@ final class WorkModel {
             guard let workspace = registry.retained(key), !workspace.conversationClosed else { continue }
             if key.kind == .task, let record = records.first(where: { $0.taskPrimary && $0.names(task: key.id) }) {
                 Perf.retarget(.startTask, from: key.id, to: record.id, owner: navigation.performanceOwner)
+                Perf.retarget(.taskWorkspaceReady, from: key.id, to: record.id, owner: navigation.performanceOwner)
             }
             workspace.startPersistence(query: query, repoPath: repoPath)
             if workspace.multiplexer.sessionPane?.sessionId == nil,
@@ -553,6 +554,7 @@ final class WorkModel {
             }
         }
         Perf.retarget(.startTask, from: task.id, to: sessionID, owner: navigation.performanceOwner)
+        Perf.retarget(.taskWorkspaceReady, from: task.id, to: sessionID, owner: navigation.performanceOwner)
         var records: [SessionRecord] = []
         if let preparation {
             // Preparation already returned this Session's authoritative reading.
@@ -637,8 +639,13 @@ final class WorkModel {
 
     /// Exact contextual links share the same synchronous pane placement as Task entry.
     func openSession(_ record: SessionRecord, store: SessionsStore) {
-        guard let workspace = placeExactSession(record, store: store) else { return }
-        Task { await store.select(record.id, intent: workspace.conversationIntent) }
+        let owner = navigation.performanceOwner
+        Perf.userAction(.taskWorkspaceReady, scenario: "session", id: record.id,
+                        repository: repoPath, liveSessions: liveSessionCount, owner: owner) {
+            guard let workspace = placeExactSession(record, store: store) else { return }
+            Perf.acknowledged(.taskWorkspaceReady, id: record.id, owner: owner)
+            Task { await store.select(record.id, intent: workspace.conversationIntent) }
+        }
     }
 
     private func placeExactSession(_ record: SessionRecord, store: SessionsStore) -> SessionsWorkspace? {

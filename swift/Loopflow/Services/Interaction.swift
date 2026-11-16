@@ -151,7 +151,7 @@ public final class Interaction {
     public let name: String
     public let scenario: String
     private let input: InteractionInput?
-    private let context: Context
+    private var context: Context
     private let sink: @Sendable (Record) -> Void
     private var terminal = false
     private var acknowledgedAt: TimeInterval?
@@ -170,6 +170,12 @@ public final class Interaction {
         self.sink = sink
         let evidence: Evidence = input == nil ? .unavailable : input?.source == .processStart ? .processStart : .inputEvent
         emit(.input, uptime: input?.uptime, evidence: evidence, outcome: nil)
+    }
+
+    /// Launch learns its repository only after the restored window is identified.
+    public func identifyLaunch(repository: String?, liveSessions: Int?) {
+        guard name == "open_app", !terminal else { return }
+        context = Context(thermalState: context.thermalState, liveSessions: liveSessions, repository: repository)
     }
 
     public func acknowledged(at uptime: TimeInterval, evidence: Evidence) {
@@ -193,7 +199,7 @@ public final class Interaction {
     /// acknowledgment. Failed capture never upgrades a model observation.
     public func observe(_ phase: Phase, capture: @escaping @MainActor () async -> TimeInterval?) {
         guard !terminal, phase == .acknowledged || phase == .usable else { return }
-        guard let input, input.source != .processStart else {
+        guard let input, input.source != .processStart || name == "open_app" else {
             if phase == .usable { finish(.unmeasured) }
             return
         }
@@ -216,7 +222,8 @@ public final class Interaction {
         let ordered: Bool
         if let acknowledgedAt, let usableAt { ordered = acknowledgedAt <= usableAt }
         else { ordered = false }
-        let complete = input != nil && input?.source != .processStart && acknowledgmentPresented && usabilityPresented && ordered
+        let complete = input != nil && (input?.source != .processStart || name == "open_app")
+            && acknowledgmentPresented && usabilityPresented && ordered
         let outcome: Outcome = requested == .completed && !complete ? .unmeasured : requested
         emit(.outcome, uptime: ProcessInfo.processInfo.systemUptime, evidence: .unavailable, outcome: outcome)
     }

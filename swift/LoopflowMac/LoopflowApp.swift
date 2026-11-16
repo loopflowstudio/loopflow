@@ -62,8 +62,7 @@ struct LoopflowApp: App {
     init() {
         NSWindow.allowsAutomaticWindowTabbing = false
         if AppTestMode.current() == nil { Perf.startRecording() }
-        Perf.begin(Perf.coldStart, "launch", id: "launch",
-                   detail: "pre_main_ms=\(Int(PerfClock.millisecondsSinceProcessStart() ?? -1))")
+        Perf.begin(.coldStart, "process_start_to_typing", id: "launch")
         Perf.begin(Perf.workspaceCurrent, "launch", id: "launch")
         if AppTestMode.current() == nil {
             DesktopLog.home.begin()

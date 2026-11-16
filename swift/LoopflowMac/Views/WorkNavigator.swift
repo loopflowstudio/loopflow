@@ -137,7 +137,6 @@ struct WorkNavigator: View {
         }
         .onChange(of: rowOrder.isEmpty, initial: true) { _, empty in
             guard !empty else { return }
-            Perf.stateObserved(Perf.coldStart, id: "launch")
             let source = model.showsSavedWork ? "saved" : "fresh"
             DispatchQueue.main.async { LaunchJournal.home.mark(.usable, ["source": source]) }
         }

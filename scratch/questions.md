@@ -26,10 +26,6 @@ Assumptions taken in kickoff; each is reversible by re-running `install`.
 - **Idle timeout** stays 600 s unless slice 2 shows a root still unloaded at its
   first build. Kickoff observation: the stock daemon had been up 55 minutes
   under shared use, so no 600 s gap occurred in that time.
-- **Disk cleanup's sccache cap check** reads the Homebrew binary's daemon, which
-  the pinned daemon replaces. Assumed for now: slice 1 points the check at the
-  configured wrapper and socket. Open: whether that belongs in this Task or its own.
-
 - **Idle telemetry revision (2026-11-16):** pinned `ServerInfo` exposes basedirs
   and counters, but no last-request timestamp. `status` reports idle seconds as
   null with a reason rather than inventing a countdown. Natural-idle probes
@@ -42,3 +38,9 @@ Assumptions taken in kickoff; each is reversible by re-running `install`.
   entry-point fixtures (`ModuleNotFoundError: tomlkit`); that attempted change
   was removed. The existing PATH-based cap observation still needs a separate
   installed-entry-point design; cache activation does not change the 10 GiB cap.
+
+- **No defaults from calibration.** The corrected warm comparison is pending.
+  Three warm paired cohorts are 2–4 after cohort 1 revealed missing mode-specific
+  dependency seeds and an instrumentation basename that bypassed native caching.
+  Keep incremental off and the idle timeout unchanged until those rows and the
+  production root check are complete.

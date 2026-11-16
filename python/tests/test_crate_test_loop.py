@@ -3,6 +3,7 @@
 import importlib.util
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -71,3 +72,73 @@ def test_incomplete_or_nonpassing_samples_cannot_publish(probe, change):
         rows[0]["workspace_compilers"] = []
     with pytest.raises(ValueError):
         probe.validate(rows, 3)
+
+
+@pytest.mark.parametrize(
+    "winners,default", [(set(), False), ({"app"}, False), ({"app", "execution"}, True)]
+)
+def test_report_selects_incremental_only_when_both_edit_totals_win(
+    probe, tmp_path, winners, default
+):
+    directory = ROOT / "scripts/benchmarks/crate-rebuild"
+    spec = importlib.util.spec_from_file_location("crate_report", directory / "report.py")
+    report = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(report)
+    rows = _receipts(probe)
+    for row in rows:
+        owner = "app" if row["case"] in probe.CASES[:3] else "execution"
+        if owner in winners and row["mode"] == "incremental":
+            row["wall_seconds"] *= 0.5
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "receipts.json").write_text(json.dumps(rows))
+    (source / "configuration.json").write_text(
+        json.dumps({"cohorts": 3, "revision": "fixture", "rustc": "fixture rustc"})
+    )
+    output = tmp_path / "results"
+    report._test_loop(source, output)
+    result = json.loads((output / "loo-921.json").read_text())
+    assert result["default_incremental"] is default
+    assert result["concurrent_worktree_capacity"] is None
+    assert len(result["receipts"]) == 39
+    assert (output / "loo-921-raw.json.gz").exists()
+    assert "A Rust edit through a passing test" in (output / "loo-921.html").read_text()
+
+
+def test_resume_complete_measurement_reuses_receipts_without_a_target(
+    probe, tmp_path, monkeypatch, capsys
+):
+    output = tmp_path / "measurement"
+    output.mkdir()
+    (output / "configuration.json").write_text(json.dumps({"cohorts": 3}))
+    (output / "receipts.json").write_text(json.dumps(_receipts(probe)))
+    (output / "passed.json").write_text('{"passed": true}')
+    monkeypatch.setattr("sys.argv", ["test_loop.py", "--output", str(output), "--resume"])
+    probe.main()
+    assert "already complete" in capsys.readouterr().out
+    assert set(p.name for p in output.iterdir()) == {
+        "configuration.json",
+        "receipts.json",
+        "passed.json",
+    }
+
+
+def test_calibration_cannot_replace_a_missing_warm_cohort(probe):
+    rows = _receipts(probe)
+    for row in rows:
+        row["cohort"] += 1
+    rows.append({**rows[0], "cohort": 1, "exit_code": 101, "tests_passed": 0})
+    probe.validate(rows, 4, [1])
+    with pytest.raises(ValueError):
+        probe.validate(rows, 3, [1])
+
+
+def test_low_disk_stops_before_cache_or_worktree_setup(probe, tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("CARGO_HOME", str(tmp_path / "cargo"))
+    monkeypatch.setattr(probe.shutil, "disk_usage", lambda path: SimpleNamespace(free=0))
+    output = tmp_path / "experiment"
+    monkeypatch.setattr("sys.argv", ["test_loop.py", "--output", str(output)])
+    with pytest.raises(SystemExit, match="repository reserve"):
+        probe.main()
+    assert not list(output.iterdir())

@@ -14,6 +14,7 @@ import tomlkit
 REVISION = "ca81ec2a2566efc623692741440d99c710268841"
 CACHE_ENV = {
     "SCCACHE_CLIENT_SIDE": "1",
+    "SCCACHE_ALLOW_INCREMENTAL": "1",
     "SCCACHE_MAX_FRAME_LENGTH": str(1024 * 1024 * 1024),
     "SCCACHE_IGNORE_SERVER_IO_ERROR": "1",
 }
@@ -131,7 +132,7 @@ def install_hook(repo: Path) -> None:
     hook = Path(
         subprocess.check_output(
             ["git", "rev-parse", "--git-path", "hooks/post-checkout"], cwd=repo, text=True
-        ).strip()
+        ).removesuffix("\n")
     )
     if not hook.is_absolute():
         hook = repo / hook
@@ -216,16 +217,18 @@ def cache_status(repo: Path) -> dict:
     # A revision override is still a pin when its full SHA is carried in the stable path.
     pinned = bool(
         wrapper
-        and wrapper.exists()
+        and wrapper.is_file()
+        and os.access(wrapper, os.X_OK)
         and wrapper.parent.name == "bin"
         and wrapper.parent.parent.parent == expected.parent.parent.parent
         and len(wrapper.parent.parent.name) == 40
+        and all(c in "0123456789abcdef" for c in wrapper.parent.parent.name)
     )
     config = Path(env.get("SCCACHE_CONF", str(inventory_path())))
     listed = json.loads(config.read_text()).get("basedirs", []) if config.exists() else []
     root = subprocess.check_output(
         ["git", "rev-parse", "--show-toplevel"], cwd=repo, text=True
-    ).strip()
+    ).removesuffix("\n")
     root = str(Path(root).resolve())
     result = {
         "wrapper": str(wrapper) if wrapper else None,
@@ -324,7 +327,8 @@ def main() -> None:
                     f"{counts.get('cache_misses', {}).get('counts', {}).get('Rust', 0)} misses"
                 )
                 print(
-                    f"cache    {stats['cache_size']} of {stats['max_cache_size']} bytes"
+                    f"cache    {stats['cache_size'] / 1024**3:.1f} GiB "
+                    f"of {stats['max_cache_size'] / 1024**3:.1f} GiB"
                     if stats
                     else "cache    unmeasured (daemon not running)"
                 )

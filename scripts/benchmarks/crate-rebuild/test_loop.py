@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Sequence
 from pathlib import Path
 
 import tomlkit
@@ -18,6 +19,7 @@ from run import _timing
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from build_cache import cargo_configuration, configured_cache, inventory_path, refresh  # noqa: E402
+from resource_envelope import load_policy  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[3]
 FILTERS = {
@@ -125,23 +127,31 @@ def summarize(receipts: list[dict]) -> list[dict]:
     return result
 
 
-def validate(receipts: list[dict], cohorts: int) -> None:
-    expected = {
-        (c, m, case)
-        for c in range(1, cohorts + 1)
-        for m in ("cache", "incremental")
-        for case in CASES
-    }
-    expected |= {(c, "cache", "execution_new") for c in range(1, cohorts + 1)}
-    samples = [r for r in receipts if r["cohort"] > 0]
+def validate(receipts: list[dict], cohorts: int, calibration_cohorts: Sequence[int] = ()) -> None:
+    warm = set(range(1, cohorts + 1)) - set(calibration_cohorts)
+    expected = {(c, m, case) for c in warm for m in ("cache", "incremental") for case in CASES}
+    expected |= {(c, "cache", "execution_new") for c in warm}
+    samples = [r for r in receipts if r["cohort"] in warm]
     actual = {(r["cohort"], r["mode"], r["case"]) for r in samples}
-    if cohorts < 3 or actual != expected or len(samples) != len(expected):
+    if len(warm) < 3 or actual != expected or len(samples) != len(expected):
         raise ValueError("three or more complete cohorts are required")
     for r in receipts:
+        if r["cohort"] in calibration_cohorts:
+            continue
         if r["exit_code"] or r["tests_passed"] != 1:
             raise ValueError(f"focused test did not pass exactly once: {r['case']}")
         if not any(c["kind"] == "test" for c in r["workspace_compilers"]):
             raise ValueError(f"test compilation missing: {r['case']}")
+
+
+def _require_disk(directory: Path, minimum: int) -> None:
+    free = shutil.disk_usage(directory).free
+    if free < minimum:
+        raise SystemExit(
+            f"benchmark disk budget: {free / 1024**3:.1f} GiB free; "
+            f"the repository reserve is {minimum / 1024**3:.0f} GiB. "
+            "Experiment receipts and state are retained; resume after space is available."
+        )
 
 
 def main() -> None:
@@ -158,6 +168,17 @@ def main() -> None:
     receipts_path = output / "receipts.json"
     if state.exists() and not args.resume:
         parser.error("output already exists; use --resume")
+    if args.resume and (output / "passed.json").exists():
+        config = json.loads(state.read_text())
+        validate(
+            json.loads(receipts_path.read_text()),
+            config["cohorts"],
+            config.get("calibration_cohorts", []),
+        )
+        print(f"Measurement already complete: {output}")
+        return
+    reserve = load_policy().minimum_free_disk_bytes
+    _require_disk(output, reserve)
     cache, cargo_env = configured_cache()
     if not cache or not cache.exists():
         parser.error("run scripts/build_cache.py install first")
@@ -171,8 +192,13 @@ def main() -> None:
     revision = _run(["git", "rev-parse", "HEAD"], ROOT, env)
     if args.resume:
         config = json.loads(state.read_text())
-        if config["revision"] != revision or config["cohorts"] != args.cohorts:
-            raise ValueError("resume revision/cohort count differs")
+        args.cohorts = max(config["cohorts"], args.cohorts)
+        config["cohorts"] = args.cohorts
+        revision = config["revision"]
+        config.setdefault("drivers", []).append(
+            hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+        )
+        _write(state, config)
         root = Path(config["temporary"])
         if config["cache_sha256"] != hashlib.sha256(cache.read_bytes()).hexdigest():
             raise ValueError("resume cache binary differs")
@@ -180,6 +206,7 @@ def main() -> None:
         root = Path(tempfile.mkdtemp(prefix="lf921-", dir="/tmp")).resolve()
         config = {
             "revision": revision,
+            "drivers": [hashlib.sha256(Path(__file__).read_bytes()).hexdigest()],
             "cohorts": args.cohorts,
             "temporary": str(root),
             "cache": str(cache),
@@ -199,7 +226,7 @@ def main() -> None:
     receipts = json.loads(receipts_path.read_text()) if receipts_path.exists() else []
     # Register every measured root before starting the private daemon. Creating a
     # worktree is timed separately and included in its first sample's wall time.
-    specs = [(0, "cache", "seed")] + [
+    specs = [(0, mode, "seed") for mode in ("cache", "incremental")] + [
         (c, m, "mixed") for c in range(1, args.cohorts + 1) for m in ("cache", "incremental")
     ]
     specs += [(c, "cache", "execution") for c in range(1, args.cohorts + 1)]
@@ -208,6 +235,9 @@ def main() -> None:
             key = f"{cohort}_{mode}_{group}"
             item = config["trees"].get(key)
             if item is None:
+                continue
+            if cohort in config.get("calibration_cohorts", []):
+                shutil.rmtree(Path(item["path"]) / "target", ignore_errors=True)
                 continue
             cases = (
                 ["seed_app", "seed_execution"]
@@ -255,7 +285,8 @@ def main() -> None:
         config["trees"][key] = {"path": str(tree), "setup_seconds": time.monotonic() - start}
         _write(state, config)
     refresh(ROOT, inventory_path())
-    wrapper = root / "compiler-wrapper"
+    # cc-rs recognizes this basename and also routes native compiles through it.
+    wrapper = root / "sccache"
     wrapper.write_text(
         f"#!{sys.executable}\n" + Path(__file__).with_name("compiler_receipt.py").read_text()
     )
@@ -296,6 +327,7 @@ def main() -> None:
                 "LOOPFLOW_REBUILD_RECEIPTS": str(compiler_log),
                 "CARGO_INCREMENTAL": "1" if mode == "incremental" else "0",
             }
+            _require_disk(root, reserve)
             start = time.monotonic()
             edit_suffix = f"{stem}_attempt_{item.get('attempt', 0)}"
             edit = _edit(tree, owner, edit_suffix) if cohort else None
@@ -332,6 +364,7 @@ def main() -> None:
                 )
                 try:
                     while child.poll() is None:
+                        _require_disk(root, reserve)
                         rss = _tree_rss(_processes(), child.pid)
                         peak = max(peak, rss)
                         memory.append([round(time.monotonic() - start, 3), rss])
@@ -425,8 +458,10 @@ def main() -> None:
                 raise RuntimeError(f"focused test failed: {output / (stem + '.log')}")
 
         for cohort in range(args.cohorts + 1):
+            if cohort in config.get("calibration_cohorts", []):
+                continue
             modes = (
-                ("cache",)
+                ("cache", "incremental")
                 if cohort == 0
                 else (("cache", "incremental") if cohort % 2 else ("incremental", "cache"))
             )
@@ -444,7 +479,7 @@ def main() -> None:
                 sample(cohort, "cache", "execution", "execution_new", "execution", True)
                 tree = Path(config["trees"][f"{cohort}_cache_execution"]["path"])
                 shutil.rmtree(tree / "target", ignore_errors=True)
-        validate(receipts, args.cohorts)
+        validate(receipts, args.cohorts, config.get("calibration_cohorts", []))
         _write(output / "passed.json", {"passed": True})
         for item in config["trees"].values():
             tree = Path(item["path"])

@@ -315,6 +315,9 @@ libraries from a cache every worktree on the Machine shares. A crate you edited
 compiles, and so does everything that depends on it. Binaries, test
 executables, proc-macros and build scripts always compile and link, so a full
 hit rate still leaves a build to wait for. Each worktree keeps its own target.
+Application unit tests also build execution with `test-support` and
+`loopflow-test-support`. Those libraries embed checkout-local fixture paths,
+so they compile in each root too.
 
 `install` builds one pinned sccache revision into
 `~/.local/share/loopflow/sccache/<revision>/`, runs it once, and only then
@@ -375,7 +378,9 @@ rebuilds of the one crate you keep editing:
 CARGO_INCREMENTAL=1 cargo test -p loopflow-execution --lib skills::catalog::
 ```
 
-Workspace crates then skip the cache in that command; dependencies still hit.
+The installer sets `SCCACHE_ALLOW_INCREMENTAL=1`, which the pin requires for
+this opt-in. Workspace crates then skip the cache in that command; dependencies
+still use the cache, with separate keys for the other incremental setting.
 [The test-loop results](benchmarks/crate-rebuild/results/loo-921.html) give what
 a new worktree and a repeated edit cost through a passing test in each mode, and
 the default follows those rows.

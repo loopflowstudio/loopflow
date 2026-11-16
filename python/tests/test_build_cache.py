@@ -104,6 +104,7 @@ def test_status_classifies_loaded_roots(tmp_path, monkeypatch, running, loaded, 
     wrapper = tmp_path / ".local/share/loopflow/sccache" / build_cache.REVISION / "bin/sccache"
     wrapper.parent.mkdir(parents=True)
     wrapper.touch()
+    wrapper.chmod(0o755)
     socket = tmp_path / "cache.sock"
     if running:
         socket.touch()

@@ -41,8 +41,10 @@ def _test_loop(source: Path, output: Path) -> None:
 
     config = json.loads((source / "configuration.json").read_text())
     receipts = json.loads((source / "receipts.json").read_text())
-    validate(receipts, config["cohorts"])
-    summary = summarize(receipts)
+    calibration = config.get("calibration_cohorts", [])
+    warm_cohorts = sorted(set(range(1, config["cohorts"] + 1)) - set(calibration))
+    validate(receipts, config["cohorts"], calibration)
+    summary = summarize([r for r in receipts if r["cohort"] in warm_cohorts])
     totals = []
     for owner, cases in (("app", CASES[:3]), ("execution", CASES[3:])):
         for mode in ("cache", "incremental"):
@@ -52,7 +54,7 @@ def _test_loop(source: Path, output: Path) -> None:
                     for r in receipts
                     if r["cohort"] == cohort and r["mode"] == mode and r["case"] in cases
                 )
-                for cohort in range(1, config["cohorts"] + 1)
+                for cohort in warm_cohorts
             ]
             totals.append(
                 {
@@ -68,8 +70,30 @@ def _test_loop(source: Path, output: Path) -> None:
         < next(r["median"] for r in totals if r["owner"] == owner and r["mode"] == "cache")
         for owner in ("app", "execution")
     )
+    interruption = source / "host-interruption.json"
+    disk_interruption = source / "disk-interruption.json"
+    loads = [
+        r[key][0]
+        for r in receipts
+        if r["cohort"] in warm_cohorts
+        for key in ("load_before", "load_after")
+        if key in r
+    ]
+    background = {"min_1m": min(loads), "max_1m": max(loads)} if loads else None
     payload = {
         "configuration": config,
+        "warm_cohorts": warm_cohorts,
+        "background_load": background,
+        "host_interruption": json.loads(interruption.read_text())
+        if interruption.exists()
+        else None,
+        "disk_interruption": json.loads(disk_interruption.read_text())
+        if disk_interruption.exists()
+        else None,
+        "abandoned_attempts": {
+            str(p.relative_to(source)): json.loads(p.read_text())
+            for p in sorted((source / "abandoned-attempts").glob("*/receipts.json"))
+        },
         "summary": summary,
         "three_edit_totals": totals,
         "default_incremental": incremental,
@@ -77,12 +101,11 @@ def _test_loop(source: Path, output: Path) -> None:
         "capacity_note": "Unmeasured; all Cargo commands ran serially",
         "method": "Workspace wrapper records all compiler intervals. Cache deltas are "
         "attributed to a compiler only when no other interval overlaps. "
-        "Two statistics RPCs per compiler are included in timings. "
+        "Two statistics RPCs per workspace compiler are included in timings. "
         "Test compiler time includes linking. Memory is sampled every second; "
         "sampled peak can miss shorter peaks. Daemon CPU is separate.",
-        "driver_sha256": hashlib.sha256(
-            Path(__file__).with_name("test_loop.py").read_bytes()
-        ).hexdigest(),
+        "measurement_drivers": config.get("drivers"),
+        "report_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         "receipts": receipts,
     }
     output.mkdir(parents=True, exist_ok=True)
@@ -99,6 +122,16 @@ def _test_loop(source: Path, output: Path) -> None:
             }
             for r in receipts
         ],
+    }
+    compact["abandoned_attempts"] = {
+        name: [
+            {
+                key: row[key]
+                for key in ("cohort", "mode", "case", "exit_code", "tests_passed", "wall_seconds")
+            }
+            for row in rows
+        ]
+        for name, rows in payload["abandoned_attempts"].items()
     }
     (output / "loo-921.json").write_text(json.dumps(compact, indent=2) + "\n")
 
@@ -127,6 +160,22 @@ def _test_loop(source: Path, output: Path) -> None:
         f"[{r['min']:.2f}–{r['max']:.2f}]</td></tr>"
         for r in totals
     )
+    load_note = (
+        f"One-minute load ranged from {background['min_1m']:.1f} to "
+        f"{background['max_1m']:.1f} across sample boundaries. "
+        "These are observations under background work, not a controlled CPU-speed comparison."
+        if background
+        else "Background load is unmeasured in these fixtures."
+    )
+    interruption_note = (
+        "The execution seed was interrupted when load rose above 400. "
+        "Its earlier receipts are retained; the unfinished seed group restarted."
+        if payload["host_interruption"]
+        else ""
+    )
+    calibration_note = config.get(
+        "calibration_reason", "Both incremental settings were seeded before measurement."
+    )
     document = f"""<!doctype html><html lang="en"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width"><title>LOO-921 edit-to-test loop</title>
 <style>body{{font:16px/1.5 system-ui;max-width:1050px;margin:48px auto;padding:0
@@ -135,9 +184,11 @@ table{{width:100%;border-collapse:collapse;margin:24px 0}}th,td{{text-
 align:left;padding:10px;border-bottom:1px solid #ddd}}
 th{{background:#f4f5f6}}td{{font-variant-numeric:tabular-nums}}</style>
 <h1>A Rust edit through a passing test</h1>
-<p>{config["cohorts"]} alternating cohorts, Machine Cargo jobs unchanged.
+<p>{len(warm_cohorts)} warm alternating cohorts, Machine Cargo jobs unchanged.
 Median [minimum–maximum]. Each sample passes one focused test and includes its link.</p>
 <p>Revision <code>{html.escape(config["revision"])}</code>.<br>{html.escape(config["rustc"])}</p>
+<p>{html.escape(load_note)} {html.escape(interruption_note)}</p>
+<p>{html.escape(calibration_note)}</p>
 <h2>Elapsed seconds</h2>{table("wall_seconds")}
 <h2>Three edits, elapsed seconds</h2><p>Application includes new-worktree creation and its first
 build.
@@ -152,7 +203,9 @@ Incremental must win both three-edit totals to become the default.</p>
 <h2>Largest process RSS, GiB</h2>{table("rss_bytes", 1024**3)}
 <h2>Peak sampled process-tree RSS, GiB</h2>{table("tree_rss_bytes", 1024**3)}
 <p>{html.escape(payload["method"])} Concurrent-worktree capacity is unmeasured.
-Cold seed commands are excluded. Each worktree owns its target; all samples use one private cache.
+Both incremental settings need their own third-party cache keys. Seed commands and
+calibration cohorts are excluded from medians; their raw receipts are retained.
+Each worktree owns its target; all samples use one private cache.
 New roots are registered before starting its daemon. Worktree creation is timed separately and added
 to the first build; setup overlaps no Cargo command. Registry build scripts and proc macros still
 build.</p>

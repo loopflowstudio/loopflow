@@ -139,7 +139,7 @@ Unmeasured until this Task; the receipts must show it.
   no-op; `--revision` moves the pin.
 - `refresh` is today's inventory function, unchanged in behavior.
 - `status` prints wrapper path and whether it is the pin, the daemon on the
-  pinned socket (pid, executable, uptime, seconds idle), roots the daemon loaded
+  pinned socket (pid, executable, uptime; idle time is unmeasured), roots the daemon loaded
   against roots on disk and whether this checkout is among them, Rust hit and
   miss counts, cache size against its cap. `--json` for the harness. Exit 0 when
   this checkout's root is loaded by the pinned daemon; 3 when it waits for idle;
@@ -159,7 +159,8 @@ its test.
 
 Real linked worktrees from `git worktree add`, the Machine's own Cargo
 configuration (pinned wrapper, its `jobs`), and the isolated cache above so
-counters belong to the run. One cold seed, outside the samples. Per cohort,
+counters belong to the run. Seed both incremental settings outside the samples:
+changing the setting changes third-party artifact keys too. Per cohort,
 mode order alternating:
 
 | Sample | cache mode (`incremental = false`) | repeated-edit mode (`CARGO_INCREMENTAL=1`) |
@@ -266,14 +267,39 @@ Not touched: `.cargo/` in the repository (none exists), CI workflows,
   requests fell in the same window.
 - Two Cargo commands at once; a published concurrency budget.
 
-## Slices
+## Remaining implementation acceptance
 
-1. **This slice — activation.** `install`/`refresh`/`status`, dev-lf cutover,
-   tests, then run `install` on this Machine. Focused test:
-   `uv run pytest python/tests/test_build_cache.py python/tests/test_dev_lf.py`.
-2. Machine check (below), recorded in scratch with what `status` printed.
-3. `test_loop.py` and report; run it; write `results/loo-921.*`.
-4. Apply the default rules; rewrite the docs with the numbers.
+- Three warm paired cohorts (2, 3 and 4), then `results/loo-921.{json,html}` and
+  gzipped raw receipts, default selection and measured documentation.
+- The production shared-daemon new-root check after a natural idle exit. The
+  Task checkout is loaded; `/tmp/loo921-machine-root` remains unloaded.
+- Gate/CI owns `documented_commands::` and the broader suites; local Rust builds
+  cannot currently run within the existing disk reserve.
+
+**Stopped for disk capacity (2026-11-16).** `df -h /tmp` reported 28 GiB free
+while the benchmark ran, below the repository's 32 GiB reserve, and later 26 GiB
+with its compilers stopped. Only the interrupted experiment target was removed.
+The private daemon and experiment Cargo process group are stopped. The shared
+Machine daemon was not signalled. The driver now checks the existing policy
+before and during builds, stopping only its own process group on shortage.
+
+Retained source snapshot: `20be2558e7e70c013226568bd8131cef27129118`.
+Receipts and all earlier attempts: `/private/tmp/loo921-test-loop`.
+Private cache and linked sources: `/private/tmp/lf921-ickrwrsz`.
+Both directories have `.cleanup-keep`; the private cache is about 639 MiB.
+Four corrected calibration commands passed (cache app/execution, incremental
+app/execution). No warm measured row completed. Cohort 1 is calibration and is
+excluded, including its earlier unseeded incremental and native-cache bypass
+attempts. No comparative report or new default has been produced.
+
+Resume once build headroom exists above the reserve:
+
+```bash
+uv run python scripts/benchmarks/crate-rebuild/test_loop.py --output /tmp/loo921-test-loop --cohorts 4 --resume
+```
+
+The completed seeds and immutable source snapshot are retained. Resume restores
+only the interrupted group to a fresh target and gives its edits a new suffix.
 
 ## Acceptance at gate
 
@@ -342,4 +368,40 @@ package `sccache` explicitly (its repository contains multiple binary packages).
 
 Checks: root probe and real-crate probe passed with the installed pin (receipts
 `/tmp/loo921-root-proof` and `/tmp/loo921-cache-proof`); focused Python activation,
-dev-entry, cohort validation and third-party inventory: 23 passed.
+dev-entry, cohort validation and third-party inventory: 30 passed.
+
+The first incremental sample exited before `rustc -vV`: the pin requires
+`SCCACHE_ALLOW_INCREMENTAL=1`. Installation now supplies it. With
+`CARGO_INCREMENTAL=0` it changes no compilation path; the completed cache-mode
+group is retained. The failed incremental attempt remains with the raw receipts.
+
+## Calibration correction (2026-11-16)
+
+The initial cache-mode fresh app row had 300 Rust hits / 2 misses. Switching
+`CARGO_INCREMENTAL` produced 0 hits / 296 misses in the first incremental app
+row, plus 7 incremental compiles. A seed in only cache mode did not warm the
+other Cargo artifact graph. Cohort 1 is calibration, retained in the receipts
+and excluded from all medians. The driver now seeds application and execution
+tests in both modes. Three warm paired cohorts are 2, 3 and 4; no default is
+chosen from the cold incremental row.
+
+The installed cc-rs source recognizes `RUSTC_WRAPPER` basenames (`sccache`,
+`cachepot`, `buildcache`, `kache`). The first driver used `compiler-wrapper`,
+bypassing native caching. Both initial seed attempts and cohort 1 are excluded
+from the warm comparison, with receipts retained. The final driver uses
+`sccache`, matching `run.py`; both seeds are rebuilt before cohorts 2–4.
+
+Latest production observation: pinned daemon PID 35015 still had only the older
+root list after 1h19m uptime; `/tmp/loo921-machine-root` returned status 3. No
+shared-daemon natural-idle/reuse claim is made. The 600-second idle default and
+`incremental=false` remain unchanged pending the remaining checks and warm data.
+
+Corrected native-cache seed counters: cache application warm-up recorded 273
+C/C++ and 109 assembler misses; incremental application warm-up then hit all
+273 C/C++ and 109 assembler entries (296 Rust hits). Both execution warm-ups
+had 2 C/C++ and 10 Rust hits. The final wrapper therefore exercises cc-rs's
+normal native-cache route, not just Rust. These are calibration counters, not
+measured cohort results.
+
+`check_architecture.py`: passed. `report.py --test-loop` on the retained dataset:
+rejects the missing three warm cohorts before writing a report.

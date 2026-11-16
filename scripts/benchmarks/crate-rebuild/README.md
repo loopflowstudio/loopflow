@@ -19,8 +19,10 @@ uv run python scripts/benchmarks/crate-rebuild/report.py --test-loop /tmp/lf-tes
 then a focused `cargo test` that passes. It uses the Machine's own Cargo
 configuration from [`build_cache.py install`](../../testing.md#shared-compilation-cache)
 (the pinned wrapper and the Machine's `jobs`), with a private cache directory
-and socket so every counter belongs to the run. One cold seed fills that cache
-and is not a sample.
+and socket so every counter belongs to the run. Both incremental settings get
+a seed application test and execution test.
+Switching `CARGO_INCREMENTAL` changes third-party artifact keys too; a seed in
+only one mode leaves the other cold. Seeds are excluded from the samples.
 
 | Sample | cache mode (`incremental = false`) | repeated-edit mode (`CARGO_INCREMENTAL=1`) |
 |---|---|---|
@@ -33,8 +35,11 @@ and is not a sample.
 Each cohort runs every row once, alternating which mode goes first; three
 cohorts is the minimum. Edits are unique to their cohort, so none can retrieve
 an earlier edited artifact. Worktrees and targets are removed after their
-samples. Cargo commands run one at a time. After an exited run, `--resume` with
-the same output directory retains completed groups. An interrupted group starts
+samples. Cargo commands run one at a time. The existing repository disk reserve
+is
+checked before and during builds; crossing it stops only the experiment
+process group and retains its receipts. No Machine cache or other checkout is
+cleaned. After an exited run, `--resume` with the same output directory retains completed groups. An interrupted group starts
 again with distinct edits and a fresh target; its earlier raw attempts move to
 `abandoned-attempts/` so partially compiled artifacts cannot bias its samples.
 

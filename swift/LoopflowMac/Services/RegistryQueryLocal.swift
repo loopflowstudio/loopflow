@@ -10,10 +10,10 @@ enum RegistryQueryLocal {
         try await LocalWaveAgentLauncher.queryLf(args, cwd: cwd, input: input)
     }, serve: { query in
         try await ServerClient.read(query)
-    }, write: { change in
+    }, stamped: { try await ServerClient.reading($0) }, write: { change in
         switch change {
         case .taskCreate(_, let requestID, _, _, _, _, _, _), .sessionNew(_, let requestID, _, _):
-            let answer = try await CreationSubmissions.shared.submit(change, requestID: requestID)
+            let answer = try await ClientWorkStore.shared.submit(change, requestID: requestID)
             do {
                 switch change {
                 case .taskCreate: _ = try RegistryQuery.decode(TaskCreateReceipt.self, from: answer)
@@ -21,7 +21,7 @@ enum RegistryQueryLocal {
                 default: break
                 }
                 return answer
-            } catch { throw SubmittedCreationError(requestID: requestID, cause: error) }
+            } catch { throw OperationSubmissionError(requestID: requestID, cause: error) }
         default: return try await ServerClient.write(change)
         }
     }, watchFiles: { args, cwd in
@@ -43,10 +43,10 @@ enum RegistryQueryLocal {
             let process = LocalWaveAgentLauncher.queryProcess([configuration.helper] + args)
             process.environment = configuration.environment
             if let cwd { process.currentDirectoryURL = URL(fileURLWithPath: cwd) }
-            let reader = try LocalLineObservation<Data>.start(
+            let reader = try LocalLineObservation<ReceivedReading>.start(
                 name: "Task history", process: process, frameLimit: 32 * 1024 * 1024, silence: nil,
                 configurationChanged: { try ReaderLaunchConfiguration.current() != configuration },
-                decode: { $0 })
+                decode: { ReceivedReading($0) })
             return LineSubscription(lines: reader.frames, send: reader.send, cancel: reader.cancel)
         }.value
     }, subscribeWork: {

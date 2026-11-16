@@ -91,7 +91,16 @@ struct WavesView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(palette.background)
-        .safeAreaInset(edge: .bottom) { CreationRecoveryView() }
+        .safeAreaInset(edge: .bottom) {
+            VStack(alignment: .leading, spacing: 0) {
+                if model.waitingForConnection {
+                    Text("Waiting for connection").font(Typography.body(11)).foregroundStyle(palette.textSecondary).padding(10)
+                }
+                ForEach(model.pendingOperations.filter { !$0.isCreation }) { operation in
+                    DesktopPendingOperationRow(model: model, operation: operation)
+                }
+            }
+        }
         .task { await model.keepWorkCurrent() }
         .task { await model.keepPlanningCurrent() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
@@ -360,6 +369,7 @@ struct WavesView: View {
     private var waveDetail: some View {
         if let wave = selectedWave {
             WaveDetailPane(
+                model: model,
                 wave: wave,
                 repoPath: waveRepoPath(for: wave),
                 streamed: model.waveDetail(id: wave.id),

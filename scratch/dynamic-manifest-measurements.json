@@ -1,0 +1,515 @@
+{
+  "kind": "diagnostic_only_no_native_baseline",
+  "runs": {
+    "initial": [
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 327.438167,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2848480,
+        "sample": 0,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 327.650875,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2848480,
+        "sample": 1,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 327.592708,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2848480,
+        "sample": 2,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 327.606459,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2848480,
+        "sample": 3,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 338.315625,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2848480,
+        "sample": 4,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 329.549292,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2848480,
+        "sample": 5,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 340.272875,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2848480,
+        "sample": 6,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 338.859291,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2848480,
+        "sample": 7,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 335.441959,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2848480,
+        "sample": 8,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 329.5915,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2848480,
+        "sample": 9,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 325.310583,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2848480,
+        "sample": 10,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 326.078125,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2848480,
+        "sample": 11,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 332.049583,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2848480,
+        "sample": 12,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 332.140209,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2848480,
+        "sample": 13,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 332.428375,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2848480,
+        "sample": 14,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 328.629291,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2848480,
+        "sample": 15,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 334.725,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2848480,
+        "sample": 16,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 329.347541,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2848480,
+        "sample": 17,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 332.863458,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2848480,
+        "sample": 18,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 335.268959,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2848480,
+        "sample": 19,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 336.499292,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2848480,
+        "sample": 20,
+        "tasks": 10000
+      }
+    ],
+    "ordered": [
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 190.989625,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2849209,
+        "sample": 0,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 193.812167,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2849209,
+        "sample": 1,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 193.746666,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2849209,
+        "sample": 2,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 194.302666,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2849209,
+        "sample": 3,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 191.899125,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2849209,
+        "sample": 4,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 200.672542,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2849209,
+        "sample": 5,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 196.953041,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2849209,
+        "sample": 6,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 192.521291,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2849209,
+        "sample": 7,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 193.998875,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2849209,
+        "sample": 8,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 193.807292,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2849209,
+        "sample": 9,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 192.061209,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2849209,
+        "sample": 10,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 194.572583,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2849209,
+        "sample": 11,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 197.453709,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2849209,
+        "sample": 12,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 199.574709,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2849209,
+        "sample": 13,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 203.929875,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2849209,
+        "sample": 14,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 192.978834,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2849209,
+        "sample": 15,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 197.893625,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2849209,
+        "sample": 16,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 195.988708,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2849209,
+        "sample": 17,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 194.385083,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2849209,
+        "sample": 18,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 201.556583,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2849209,
+        "sample": 19,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 200.118708,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2849209,
+        "sample": 20,
+        "tasks": 10000
+      }
+    ],
+    "indexed": [
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 8.390625,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2849209,
+        "sample": 0,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 8.536375,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2849209,
+        "sample": 1,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 8.298166,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2849209,
+        "sample": 2,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 8.183958,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2849209,
+        "sample": 3,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 8.123667,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2849209,
+        "sample": 4,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 7.972791,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2849209,
+        "sample": 5,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 8.014667,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2849209,
+        "sample": 6,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 7.863375,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2849209,
+        "sample": 7,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 8.025375,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2849209,
+        "sample": 8,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 8.638542,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2849209,
+        "sample": 9,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 9.5725,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2849209,
+        "sample": 10,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 8.057708,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2849209,
+        "sample": 11,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 7.931167,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2849209,
+        "sample": 12,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 7.881417,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2849209,
+        "sample": 13,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 7.9035,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2849209,
+        "sample": 14,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 8.0045,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2849209,
+        "sample": 15,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 8.069083,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2849209,
+        "sample": 16,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 8.024417,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2849209,
+        "sample": 17,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 7.996333,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2849209,
+        "sample": 18,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 7.766583,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2849209,
+        "sample": 19,
+        "tasks": 10000
+      },
+      {
+        "build": "SwiftPM debug",
+        "duration_ms": 8.01,
+        "endpoint": "dynamic_move_reducer_cpu_wall_no_native_views",
+        "manifest_bytes": 2849209,
+        "sample": 20,
+        "tasks": 10000
+      }
+    ]
+  }
+}

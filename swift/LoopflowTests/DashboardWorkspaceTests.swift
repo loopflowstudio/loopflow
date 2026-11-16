@@ -71,6 +71,16 @@ struct DashboardWorkspaceTests {
             var resolution = try #require(json["resolution"] as? [String: Any])
             resolution["members"] = order.map { ["source": ["repository-default"], "work": ["repository": "repo_11111111111111111111111111111111", "kind": "task", "id": $0]] }
             json["resolution"] = resolution
+            var membership = try #require(json["membership"] as? [String: Any])
+            membership["root"] = ["kind": "members", "members": resolution["members"]!]
+            json["membership"] = membership
+            let original = try #require((json["contents"] as? [[String: Any]])?.first)
+            json["contents"] = order.map { id in
+                var content = original
+                content["work"] = ["repository": json["repo"]!, "kind": "task", "id": id]
+                content["title"] = id; content["identifier"] = id
+                return content
+            }
             return String(decoding: try JSONSerialization.data(withJSONObject: json), as: UTF8.self)
         }
         let initial = try plan(ids)
@@ -107,6 +117,9 @@ struct DashboardWorkspaceTests {
         var resolution = try #require(json["resolution"] as? [String: Any])
         resolution["members"] = members
         json["resolution"] = resolution
+        var membership = try #require(json["membership"] as? [String: Any])
+        membership["root"] = ["kind": "members", "members": members]
+        json["membership"] = membership
         json["projection"] = ["visible": members, "suppressed": []]
         json["contents"] = members.map { ["work": $0["work"]!, "title": "t", "states": [], "identifier": NSNull(), "primary_session": NSNull(), "location": NSNull(), "argv": NSNull(), "unavailable": [], "face": NSNull(), "pane_revision": NSNull()] }
         let plan = try JSONDecoder().decode(WorkViewPlan.self, from: JSONSerialization.data(withJSONObject: json))
@@ -129,6 +142,16 @@ struct DashboardWorkspaceTests {
             var resolution = try #require(json["resolution"] as? [String: Any])
             resolution["members"] = members
             json["resolution"] = resolution
+            var membership = try #require(json["membership"] as? [String: Any])
+            membership["root"] = ["kind": "members", "members": resolution["members"]!]
+            json["membership"] = membership
+            let original = try #require((json["contents"] as? [[String: Any]])?.first)
+            json["contents"] = order.map { id in
+                var content = original
+                content["work"] = ["repository": json["repo"]!, "kind": "task", "id": id]
+                content["title"] = id; content["identifier"] = id
+                return content
+            }
             json["arrangement"] = ["order": members, "hidden": [], "mode": mode]
             json["projection"] = ["visible": members, "suppressed": []]
             return String(decoding: try JSONSerialization.data(withJSONObject: json), as: UTF8.self)
@@ -255,6 +278,7 @@ struct DashboardWorkspaceTests {
         let plan = WorkViewPlan(name: "Review", pinned: false, dashboardID: "review", repository: "repo", repositoryPath: "/src/fixture",
             selection: WorkSelection(id: "root", expression: .filter(.state(.open))), savedRevision: 1,
             resolution: WorkSelectionResolution(attention: [], members: members, unavailable: []),
+            membership: WorkMembershipPlan(domains: [], effects: [:], root: .members(members), facts: [], unavailable: []),
             arrangement: WorkArrangement(order: members, hidden: [], mode: .touched),
             projection: WorkArrangementProjection(visible: members, suppressed: []), slots: DashboardSlotLayout(root: .slot(0)),
             contents: [a, b].map { fixtureViewContent(work: $0, title: $0.id) })
@@ -292,12 +316,28 @@ struct DashboardWorkspaceTests {
             .replacingOccurrences(of: "\"saved_revision\": 3", with: "\"saved_revision\": null")).utf8)
         let expression = saved ? "query:picked" : "state:backlog or task:LOO-497"
         let plan = try JSONDecoder().decode(WorkViewPlan.self, from: bytes)
-        let query = RegistryQuery { args, _ in
-            if args == ["desktop", "view", "show", expression, "--json"] { return String(decoding: bytes, as: UTF8.self) }
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let disk = ClientWorkStore(directory: directory, machine: { fixtureMachineId }, read: { _ in "null" },
+            observe: { _ in ServerWatch(updates: AsyncThrowingStream { _ in }, checkpoint: { _ in }, cancel: {}) }, send: { _ in })
+        let owner = WorkInteraction(machine: fixtureMachineId, store: disk)
+        defer { owner.shutdown() }
+        let read = ServedRead.desktopViewGet(directory: "/repo", expression: expression)
+        _ = owner.open(read) { _ in }
+        let stamp = try JSONDecoder().decode(ReadingStamp.self, from: JSONSerialization.data(withJSONObject: [
+            "machine": fixtureMachineId, "epoch": "epoch", "schema": ServerProtocol.revision, "query": "query", "complete": true, "observations": NSNull(),
+            "revisions": ["planning": 1, "sessions": 1, "graphs": 1, "processes": 1, "usage": 1]]))
+        try await owner.receive([plan], stamp: stamp, for: read)
+        let query = RegistryQuery(subscribeRead: { _, _ in
+            let (lines, continuation) = AsyncThrowingStream<ReceivedReading, any Error>.makeStream()
+            return LineSubscription(lines: lines, send: { _ in }, cancel: { continuation.finish() })
+        }) { args, _ in
             if args.starts(with: ["desktop", "layout"]) { return "null" }
             throw RegistryQueryError("Unexpected execution")
         }
         let model = WorkModel(query: query, repoPath: "/repo")
+        model.useInteractionForTesting(owner)
+        model.confirmMachine(fixtureMachineId)
         let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
         model.bindWorkspaces(registry, repository: plan.repository)
         model.navigation.palette = .search
@@ -305,7 +345,7 @@ struct DashboardWorkspaceTests {
         let link = try #require(URL(string: "loopflow://open?repo=/repo&view=\(encoded)"))
         await model.receiveWorkLink(.view(expression: expression, address: link.absoluteString))
         let state = model.inspectDesktop(repository: plan.repository, window: UUID(), workspaces: registry)
-        #expect(state.destination == (saved ? .dashboard(id: "picked") : .view(selection: plan.selection)))
+        #expect(state.destination == .view(selection: plan.selection))
         #expect(model.navigation.showsSelection)
         #expect(model.navigation.palette == nil)
         #expect(state.view == plan)
@@ -320,11 +360,11 @@ struct DashboardWorkspaceTests {
         model.goBack()
         #expect(model.navigation.showsSelection)
         #expect(model.navigation.palette == nil)
-        #expect(model.selectedViewPlan == plan)
+        #expect(model.selectedViewPlan?.confirmed == plan)
         model.goForward()
         #expect(registry.selectedWork?.kind == .repository)
         model.goBack()
-        #expect(model.selectedViewPlan == plan)
+        #expect(model.selectedViewPlan?.confirmed == plan)
     }
 
     @Test func delayedRestoreRetainsNewTabsAndDraftsAndStaleSaveDoesNotReplaceThem() async throws {

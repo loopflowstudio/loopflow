@@ -21,6 +21,7 @@ final class TaskFeed {
     private(set) var repositories: [RepositoryTasks] = []
     private(set) var loaded = false
     private(set) var error: String?
+    var waitingForConnection: Bool { client.interaction.waitingForConnection }
     private(set) var waves: [Wave] = []
     var filter = TaskList.started
     /// The Wave whose Tasks are listed; nil lists every Wave's.
@@ -30,6 +31,7 @@ final class TaskFeed {
     @ObservationIgnored private var observation: RemoteTaskObservation?
     @ObservationIgnored private var reader: Task<Void, Never>?
     @ObservationIgnored private var generation = 0
+    @ObservationIgnored private var lease: UUID?
 
     init(client: RemoteMobileClient) { self.client = client }
 
@@ -37,60 +39,101 @@ final class TaskFeed {
         stop()
         let current = generation
         waiting = Perf.begin("tasks_current")
-        // The last reading under each filter, shown at once while the Machine answers.
-        // It is kept as wire bytes and read by the live decoder, so a file an older
-        // app wrote fails to load instead of showing a stale shape.
-        let url = savedURL
-        let saved = await Task.detached(priority: .userInitiated) {
-            (try? RemoteTaskObservation.decode(frame: RawJSON(Data(contentsOf: url))).reading).flatMap { try? $0.get() }
-        }.value
+        mount()
+        await client.interaction.refreshFromStore()
         guard current == generation else { return }
-        if let saved {
-            repositories = saved
-            loaded = true
-            Perf.launch("tasks_saved")
-        } else {
-            repositories = []
-            loaded = false
-        }
+        if loaded { Perf.launch("tasks_saved") }
         let observation = client.observeTasks(expression: filter.expression(wave: wave))
         self.observation = observation
         reader = Task { [weak self] in
             do {
                 for try await update in observation.readings {
                     guard let self, current == self.generation else { return }
-                    switch update.reading {
-                    case .success(let repositories):
-                        let changed = repositories != self.repositories || !self.loaded
-                        if changed { self.repositories = repositories }
-                        self.loaded = true
-                        self.error = nil
+                    switch update {
+                    case .success:
+                        let reasons = self.repositories.flatMap(\.unavailable)
+                        self.error = reasons.isEmpty ? nil : reasons.joined(separator: "; ")
                         Perf.launch("tasks_current")
                         if let waiting = self.waiting { Perf.end(waiting, self.filter.rawValue) }
                         self.waiting = nil
-                        if changed { self.save(update.wire) }
                         if self.waves.isEmpty, let found = try? await self.client.waves() { self.waves = found }
                     case .failure(let error): self.error = error.message
                     }
                 }
                 throw RegistryQueryError("Task updates ended.")
             } catch {
-                guard let self, current == self.generation else { return }
-                self.stop()
+                guard let self, current == self.generation, !Task.isCancelled else { return }
+                self.observation?.close()
+                self.observation = nil
+                self.reader = nil
                 self.error = machineConnectionMessage(error)
             }
         }
     }
 
+    func mount() {
+        if let lease { client.interaction.close(lease); self.lease = nil }
+        let current = generation
+        lease = client.interaction.open(.viewSelect(expression: filter.expression(wave: wave))) { [weak self] plans in
+            guard let self, current == self.generation else { return }
+            guard let plans else { self.repositories = []; self.taskFacts = [:]; self.loaded = false; return }
+            self.taskFacts = Dictionary(plans.flatMap { $0.membership.facts }.map { ($0.work, $0) }, uniquingKeysWith: { first, _ in first })
+            switch RemoteTaskObservation.decodePlans(plans) {
+            case .success(let repositories):
+                self.repositories = repositories
+                self.loaded = true
+                let reasons = repositories.flatMap(\.unavailable)
+                self.error = reasons.isEmpty ? nil : reasons.joined(separator: "; ")
+            case .failure(let error): self.error = error.message
+            }
+        }
+    }
+
+    private(set) var taskFacts: [WorkWorkspaceKey: WorkMembershipPlan.Facts] = [:]
+
+    func execute(_ task: WorkViewPlan.Content, action: WorkInteraction.TaskCommand) {
+        guard let directory = repositories.first(where: { $0.repository == task.work.repository })?.path else { return }
+        client.interaction.executeTask(task.work, issue: task.identifier ?? task.work.id, directory: directory, action: action)
+    }
+
+    func edit(_ task: WorkViewPlan.Content, edit: WorkInteraction.TaskEdit) {
+        guard let directory = repositories.first(where: { $0.repository == task.work.repository })?.path else { return }
+        client.interaction.editTask(task.work, issue: task.identifier ?? task.work.id, directory: directory, edit: edit)
+    }
+
+    func move(_ task: WorkViewPlan.Content, to wave: String?) {
+        guard let directory = repositories.first(where: { $0.repository == task.work.repository })?.path else { return }
+        client.interaction.moveTask(task.work, issue: task.identifier ?? task.work.id, directory: directory, wave: wave)
+    }
+
+    func complete(_ task: WorkViewPlan.Content, selected: WorkWorkspaceKey?, visible: [WorkWorkspaceKey],
+                  select: (WorkWorkspaceKey?) -> Void) {
+        leave(task, abandoning: false, selected: selected, visible: visible, select: select)
+    }
+
+    func abandon(_ task: WorkViewPlan.Content, selected: WorkWorkspaceKey?, visible: [WorkWorkspaceKey],
+                 select: (WorkWorkspaceKey?) -> Void) {
+        leave(task, abandoning: true, selected: selected, visible: visible, select: select)
+    }
+
+    private func leave(_ task: WorkViewPlan.Content, abandoning: Bool, selected: WorkWorkspaceKey?,
+                       visible: [WorkWorkspaceKey], select: (WorkWorkspaceKey?) -> Void) {
+        guard let directory = repositories.first(where: { $0.repository == task.work.repository })?.path else { return }
+        let leave = abandoning ? client.interaction.abandon : client.interaction.complete
+        _ = leave(task.work, task.identifier ?? task.work.id, directory, selected, visible, select)
+    }
+
     func refresh() async {
         guard let observation else { await start(); return }
         do { try await observation.refresh() } catch {
-            stop()
+            reader?.cancel(); reader = nil
+            observation.close(); self.observation = nil
             self.error = machineConnectionMessage(error)
         }
     }
 
     func stop() {
+        if let lease { client.interaction.close(lease); self.lease = nil }
         generation += 1
         reader?.cancel()
         reader = nil
@@ -98,23 +141,15 @@ final class TaskFeed {
         observation = nil
     }
 
-    /// Removes what this Machine's readings left on the phone.
-    func forget() {
+    /// Remove cached Work without discarding unanswered submitted commands.
+    func forget() async {
         stop()
+        do { try await client.journal.forgetQueries(machine: client.savedMachine.machineID) }
+        catch { self.error = error.localizedDescription }
+        // Released versions kept query files outside the outbox.
         let saved = (try? FileManager.default.contentsOfDirectory(at: .cachesDirectory, includingPropertiesForKeys: nil)) ?? []
         for file in saved where file.lastPathComponent.hasPrefix("tasks-\(client.savedMachine.machineID)-") {
             try? FileManager.default.removeItem(at: file)
-        }
-    }
-
-    private var savedURL: URL {
-        URL.cachesDirectory.appending(path: "tasks-\(client.savedMachine.machineID)-\(filter.rawValue)\(wave.map { "-\($0)" } ?? "").json")
-    }
-
-    private func save(_ wire: Data) {
-        let url = savedURL
-        Task.detached(priority: .utility) {
-            try? wire.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
         }
     }
 
@@ -128,8 +163,14 @@ struct TaskListView: View {
     @State private var search = ""
     @State private var drafts: [WorkWorkspaceKey: String] = [:]
     @State private var creation: MobileTaskCreation?
-    @State private var created: WorkViewPlan.Content?
-    @State private var showingCreated = false
+    private enum Destination: Hashable {
+        case work(WorkWorkspaceKey)
+        case operation(String)
+        var work: WorkWorkspaceKey? { if case .work(let key) = self { key } else { nil } }
+    }
+    @State private var path: [Destination] = []
+    @State private var selectedOperation: PendingOperation?
+    @State private var retained: [WorkWorkspaceKey: WorkViewPlan.Content] = [:]
     /// The repository shown, by durable ID; empty shows every repository.
     @AppStorage("repository") private var repository = ""
     @Environment(\.colorScheme) private var colorScheme
@@ -175,10 +216,23 @@ struct TaskListView: View {
         return feed.waves.filter { $0.repo == path }.sorted { $0.displayName < $1.displayName }
     }
 
+    private var readingError: String? { feed.error ?? client.interaction.cacheError }
+
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             List {
-                if let error = feed.error {
+                if feed.waitingForConnection {
+                    Text("Waiting for connection").font(Typography.caption(13))
+                        .foregroundStyle(theme.palette.textSecondary)
+                }
+                ForEach(client.interaction.listedOperations) { operation in
+                    PendingOperationRow(operation: operation, interaction: client.interaction, edit: {
+                        client.interaction.editCreation($0.id) { creation = MobileTaskCreation(client: client, request: $0) }
+                    }, select: { selectedOperation = $0; path = [.operation($0.id)] })
+                    .buttonStyle(.borderless)
+                }
+
+                if let error = readingError {
                     VStack(alignment: .leading, spacing: 8) {
                         Label("Couldn’t update Tasks", systemImage: "wifi.exclamationmark").font(Typography.strong(15))
                         Text(error).font(Typography.caption(13))
@@ -192,7 +246,8 @@ struct TaskListView: View {
                         ForEach(section.open, id: \.work) { link($0) }
                         if !section.quiet.isEmpty {
                             // Started Tasks nobody has opened a conversation for stay one tap away.
-                            DisclosureGroup("\(section.quiet.count) without a conversation") {
+                            DisclosureGroup(feed.repositories.first { $0.repository == section.repository }?.unavailable.isEmpty == true
+                                ? "\(section.quiet.count) without a conversation" : "Without a conversation · incomplete") {
                                 ForEach(section.quiet, id: \.work) { link($0) }
                             }
                             .font(Typography.caption(14))
@@ -213,9 +268,9 @@ struct TaskListView: View {
             .scrollContentBackground(.hidden)
             .background(theme.palette.background)
             .overlay {
-                if !feed.loaded && feed.error == nil {
+                if !feed.loaded && readingError == nil && !feed.waitingForConnection {
                     ProgressView()
-                } else if sections.isEmpty && feed.error == nil {
+                } else if sections.isEmpty && readingError == nil && !feed.waitingForConnection {
                     if search.isEmpty {
                         ContentUnavailableView("No \(feed.filter.title.lowercased()) Tasks", systemImage: "checkmark.circle")
                     } else {
@@ -235,13 +290,25 @@ struct TaskListView: View {
                 }
             }
             .searchable(text: $search, prompt: "Search Tasks")
-            .navigationDestination(isPresented: $showingCreated) {
-                if let created { workspace(created) }
+            .navigationDestination(for: Destination.self) { destination in
+                switch destination {
+                case .work(let work):
+                    if let task = retained[work] ?? feed.repositories.flatMap(\.tasks).first(where: { $0.work == work }) { workspace(task) }
+                case .operation(let id):
+                    if let operation = (selectedOperation?.id == id ? selectedOperation : nil) ?? client.interaction.creations.first(where: { $0.id == id }) {
+                        MobileCreationConversation(client: client, operation: operation, theme: theme) { operation in
+                            client.interaction.editCreation(operation.id) { original in
+                                creation = MobileTaskCreation(client: client, request: original)
+                                path = []
+                            }
+                        }
+                    }
+                }
             }
-            .sheet(item: $creation, onDismiss: { showingCreated = created != nil }) { model in
-                MobileNewTaskView(model: model, theme: theme) { opening in
-                    opening.presented()
-                    created = opening.task
+            .sheet(item: $creation) { model in
+                MobileNewTaskView(model: model, theme: theme) { operation in
+                    selectedOperation = operation
+                    path = [.operation(operation.id)]
                     creation = nil
                 }
             }
@@ -266,7 +333,6 @@ struct TaskListView: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        created = nil
                         creation = MobileTaskCreation(client: client)
                     } label: { Image(systemName: "plus") }
                         .accessibilityLabel("New Task")
@@ -276,8 +342,10 @@ struct TaskListView: View {
                         Text(client.savedMachine.endpoint.host ?? "Machine")
                         Button("Change address", action: onChangeAddress)
                         Button("Forget Machine", role: .destructive) {
-                            feed.forget()
-                            onForget()
+                            Task {
+                                await feed.forget()
+                                onForget()
+                            }
                         }
                     } label: { Image(systemName: "desktopcomputer") }
                         .accessibilityLabel("Machine")
@@ -288,7 +356,8 @@ struct TaskListView: View {
         .environment(\.palette, theme.palette)
         .onChange(of: repository) { feed.wave = nil }
         .task(id: [feed.filter.rawValue, feed.wave ?? "", String(scenePhase == .active)]) {
-            if scenePhase == .active { await feed.start() } else { feed.stop() }
+            if scenePhase == .active { await feed.start() }
+            else { await client.interaction.persistPending(); feed.stop() }
         }
     }
 
@@ -299,7 +368,11 @@ struct TaskListView: View {
     }
 
     private func link(_ task: WorkViewPlan.Content) -> some View {
-        NavigationLink { workspace(task) } label: { row(task) }
+        Button {
+            PerfClock.interaction(.taskSelect, .gesture, id: task.work.id)
+            retained[task.work] = task
+            path = [.work(task.work)]
+        } label: { row(task) }
             .listRowInsets(EdgeInsets(top: 12, leading: 20, bottom: 12, trailing: 16))
             .listRowBackground(theme.palette.background)
     }
@@ -307,7 +380,23 @@ struct TaskListView: View {
     private func workspace(_ task: WorkViewPlan.Content) -> some View {
         TaskWorkspaceView(client: client, task: task, theme: theme, draft: Binding(
             get: { drafts[task.work] ?? "" },
-            set: { drafts[task.work] = $0 }))
+            set: { drafts[task.work] = $0 }), complete: { leave(task, abandoning: false) },
+            abandon: { leave(task, abandoning: true) },
+            move: { wave in
+                feed.move(task, to: wave)
+            }, edit: { feed.edit(task, edit: $0) }, execute: { feed.execute(task, action: $0) }, facts: feed.taskFacts[task.work], waves: feed.waves.filter { wave in feed.repositories.contains { $0.repository == task.work.repository && $0.path == wave.repo } },
+            completionDirectory: feed.repositories.first { $0.repository == task.work.repository }?.path)
+    }
+
+    private func leave(_ task: WorkViewPlan.Content, abandoning: Bool) {
+        let visible = sections.flatMap { $0.open + $0.quiet }.map(\.work)
+        let leave = abandoning ? feed.abandon : feed.complete
+        leave(task, path.last?.work, visible) { next in
+            if let next, let content = feed.repositories.flatMap(\.tasks).first(where: { $0.work == next }) {
+                retained[next] = content
+            }
+            path = next.map { [.work($0)] } ?? []
+        }
     }
 
     private func row(_ task: WorkViewPlan.Content) -> some View {

@@ -1,11 +1,11 @@
 import Foundation
 
-/// Revision 5 of the server protocol: one connection per client, a negotiated
+/// Revision 6 of the server protocol: one connection per client, a negotiated
 /// revision, requests multiplexed by id. Mirrors `rust/loopflow/src/server/wire.rs`;
 /// carriers add no Work authority.
 public enum ServerProtocol {
-    public static let revision = 5
-    public static let minRevision = 5
+    public static let revision = 6
+    public static let minRevision = 6
     /// The largest control-connection message; larger ones travel by ticket.
     public static let maxMessage = 1024 * 1024
     /// The largest message a ticketed connection carries.
@@ -152,9 +152,11 @@ public struct MachineMobileStatus: Codable, Sendable {
 public enum ServerOperation: Encodable, Sendable {
     case read(ServedRead)
     case command(ServedWrite)
+    /// Durable admission; the receipt is available before command execution.
+    case operationSubmit(requestID: String, epoch: String, command: ServedWrite)
     case config(ConfigOperation)
-    /// The unchanged payload of a submitted creation; never arbitrary command replay.
-    case submittedCreation(JSONValue)
+    /// The saved operation envelope; admission retains the original command.
+    case submittedOperation(JSONValue)
     /// A ticket for the Session's held terminal, answered `{ticket, terminal_id,
     /// expires_in_ms}`.
     case sessionAttach(session: String)
@@ -173,17 +175,23 @@ public enum ServerOperation: Encodable, Sendable {
 
     private enum Keys: String, CodingKey {
         case kind, bytes, session, request, argv, cwd, env, rows, cols, placement, terminalID = "terminal_id"
-        case moment, delivery, adapter, callback, gap, printed, inbox
+        case moment, delivery, adapter, callback, gap, printed, inbox, command, epoch, requestID = "request_id"
     }
     public func encode(to encoder: Encoder) throws {
         switch self {
         case .read(let query): try query.encode(to: encoder)
         case .command(let change): try change.encode(to: encoder)
+        case .operationSubmit(let requestID, let epoch, let command):
+            var box = encoder.container(keyedBy: Keys.self)
+            try box.encode("operation.submit", forKey: .kind)
+            try box.encode(requestID, forKey: .requestID)
+            try box.encode(command, forKey: .command)
+            try box.encode(epoch, forKey: .epoch)
         case .requestUpload(let bytes):
             var box = encoder.container(keyedBy: Keys.self)
             try box.encode("request.upload", forKey: .kind)
             try box.encode(bytes, forKey: .bytes)
-        case .submittedCreation(let payload): try payload.encode(to: encoder)
+        case .submittedOperation(let payload): try payload.encode(to: encoder)
         case .config(let operation): try operation.encode(to: encoder)
         case .sessionAttach(let session):
             var box = encoder.container(keyedBy: Keys.self)
@@ -376,6 +384,7 @@ public struct ServerWelcome: Decodable, Sendable {
     public let minRevision: Int
     /// Changes with every server start.
     public let instance: String
+    public let observations: String
     public let build: String
     public let executableSHA256: String
     /// `.null` while the Machine registry is unavailable or uninitialized.
@@ -383,7 +392,7 @@ public struct ServerWelcome: Decodable, Sendable {
     public let limits: ServerLimits
 
     private enum CodingKeys: String, CodingKey {
-        case revision, instance, build, machine, limits
+        case revision, instance, observations, build, machine, limits
         case clientID = "client_id", serverRevision = "server_revision", minRevision = "min_revision"
         case executableSHA256 = "executable_sha256"
     }

@@ -18,9 +18,10 @@ Reopen a repository window: known Task names and identifiers stay readable in
 the sidebar and breadcrumbs while planning loads. A returning launch opens on
 the workspace saved at `<Machine>/desktop-cache/workspace.json` and shows
 **Updating…** until this launch's reads replace it. Saved rows open
-and navigate; Graph process state, Task condition, Session state and every action except
-opening a Session wait for the fresh read. The Portfolio window opens from the
-same saved workspace. With no known Task name yet, a row says **Loading Task…**
+and navigate. Graph process state, Task condition, Session state and execution
+actions wait for a fresh read. Complete, Abandon and Session rename publish their
+local changes immediately and retain saved requests while disconnected. The
+Portfolio window opens from the same saved workspace. With no known Task name yet, a row says **Loading Task…**
 until its first read answers. The working Task list shows loading until it has
 answered; an empty result then says there are no working Tasks. Newly created
 and reopened Tasks use their locally recorded names while tracker updates are
@@ -74,6 +75,45 @@ open their brief beside **Start**, which runs the Task's Workflow; opening alone
 starts nothing. Waves follow Tasks in the same scrolling sidebar, with counts
 from the planning inventory.
 
+Press **⌘N**, describe the work—for example, “Fix the sidebar search”—and press
+**⌘Return** or **Start**. Keep the Task in the current repository or choose a
+Wave and, optionally, a different Workflow before starting. The sheet initially
+follows the selected Wave and the displayed scope default. Start is disabled
+until the request has text and a repository is resolved. Without one, the sheet
+says **Open a repository to start a Task.**
+
+The sheet closes immediately into the new conversation, with your request and
+**Starting conversation…** visible while its workspace and provider prepare.
+The live conversation replaces that status in place; typing becomes available
+when it is connected and ready. You can navigate elsewhere while it starts;
+completion leaves your newer selection alone. Filed identity, Graph admission,
+native attachment and Work query freshness remain separate facts. A stale query
+cannot replace the operation's saved outcome.
+
+**Claim** requests ownership on this Machine; **Unassign** releases ownership
+while keeping checkout, PR and conversations. Controls and affected lists update
+immediately. **Reopen** withdraws completion without restarting the Workflow.
+For completed or completing work it also withdraws Auto-Ship approval; an
+already-open no-op keeps approval. The destination follows retained facts;
+missing facts leave it incomplete. Saved changes wait for the original Machine
+through restart. Refusal removes only that change; an uncertain send checks the
+original request. Later navigation, drafts and conversations stay put.
+
+Complete and Abandon show their projected result while delivering, with no extra request
+row. A disconnected request shows **Waiting for connection** without an action;
+its saved identity resumes automatically when its original Machine reconnects,
+including after app restart. An unreachable Machine shows **Waiting for connection**
+once above held changes; their rows keep their request titles. Requests needing attention show recovery controls.
+Creations also keep a row until their result has been shown. Launch errors appear
+in the conversation. After a local save failure, **Try again** retries the
+same request ID; **Edit request** returns an unsaved creation's words to the editor.
+Once saved, **Check request** recovers the original result. **Inspect** shows its
+receipt when recovery needs attention. **Retry opening** reopens the recorded
+Session after attachment fails. Opening the result from its ordinary Task row also
+clears the redundant request row; unresolved recovery stays visible. For an unanswered
+submission, use [creation recovery](../docs/server.md#recover-a-submitted-creation)
+before creating another Task with the same request.
+
 Click a row to select its retained workspace. The title-bar **Repo › Wave › Task**
 path follows hierarchy: click a name to go there, or the **›** after it to list and
 search what it contains; Back and **⌘[ / ⌘]** follow visits. **⌘K** searches Work
@@ -88,7 +128,19 @@ With sidebar focus, **⌘F** searches its visible Tasks and Waves; **Search all 
 widens the same navigator. **Shift-F10** opens the focused Task's actions without
 changing the open workspace.
 
-The Task action menu moves work into a Wave or back to **No Wave** through the shared planning operation, retaining its workspace and drafts.
+Move a Task to a Wave or **No Wave** from its action menu. Cached lists, boards,
+its trail and counts change immediately; its conversation and drafts stay open. While
+disconnected, the change waits for its original Machine and survives restart.
+A refusal restores only that change, leaving later edits and navigation alone.
+Incomplete cached destinations wait for their missing data before showing an
+exact count.
+Wave detail uses the same current location as the board and trail. Completed-history
+pages stay loaded when Tasks move or reopen, including across range changes and
+failed next-page requests. Missing data keeps counts incomplete and loaded content
+reachable. Done ranges use the current completion time from the same supported fact as
+lifecycle, on both board and detail. Old history pages cannot restore a prior
+completion date. While that time is unavailable, the range stays incomplete;
+**All ages** can show the completed Task immediately.
 
 Open an active Task whose planning state is **Todo**: wherever its lifecycle
 appears in the page, sidebar, board or breadcrumb picker, it shows **Active**.
@@ -111,6 +163,13 @@ Task conversations include Sessions bound to the Task and Sessions working in
 its checkout. Repository and Wave primary conversations keep their own scope,
 even in a Task checkout. The Task's conversation list and breadcrumb Session
 picker use the same membership.
+
+Rename a Session to change its name in lists, breadcrumbs and retained panes.
+Save closes the editor immediately. The name survives restart while waiting for
+its Machine, then delivers automatically in the order it was edited. A refusal
+restores only that name and shows the request's explanation; later navigation and
+other edits stay where you put them. A newer name replaces an earlier edit that
+never saved. Older refreshes cannot undo a confirmed rename.
 
 Drag a Task in the sidebar to change its shared order. Ordinary repository and
 Wave lists, boards and Task pickers keep that relative order after refresh.
@@ -468,8 +527,13 @@ or running edge is marked. The labels of the edges leaving the current node
 are buttons; each runs `lf -b task run` as a child of the app. No edge is offered while one runs. An edge whose Graph stopped holds the
 Task, is drawn stopped, and is offered again with the others leaving its
 node. **Move to** changes Workflow position; `end` requests completion.
-**Complete** changes Task status independently. **Retry completion** retries a
-failed request without replaying the Graph.
+**Complete** removes the Task from affected lists and counts immediately. Completing
+the selected Task opens the next visible Task, or an empty selection when none
+remains. Other windows keep their selections; Back can still reach the retained
+workspace. The original command saves before sending. A failed save restores its
+membership and offers **Try again**, keeping later navigation. A lost reply
+recovers that same request. **Retry completion** retries a domain-reported failure
+without replaying the Graph.
 Linear completion leaves the displayed Workflow and live Processes intact.
 Loading or unavailable Workflow readings remain explicit; a failed refresh keeps
 the last recorded graph with its actions disabled. Only a successful Task reading
@@ -502,9 +566,10 @@ start a provider or resolve a Session.
 The toolbar above the workspace shows its Work ancestry. On the left it drills
 Wave → Task → Session: Wave and Task crumbs return to their details; the Task's
 issue ID links to Linear. The Task crumb keeps the exact conversation name
-without a sibling picker. Repository/Wave crumbs can choose among their Sessions. The pencil renames the Session in place through `lf session
-rename`; the shown name is the shared readback, and a rejected name stays in the
-field with its error. A remote Graph Session's name lives on its Machine and is not
+without a sibling picker. Repository/Wave crumbs can choose among their Sessions. The pencil opens the
+Session name editor. Save closes it and shows the new name immediately, including
+while disconnected. A refusal restores that name and explains the saved request.
+A remote Graph Session's name lives on its Machine and is not
 renamed here. Outside Task navigation, the Session shows its Graph membership
 beside the name. Task navigation keeps that provenance in inspection. On the right sit
 the Task's read-only worktree location and the Activity glyph.
@@ -872,26 +937,40 @@ only reconnect. CLI commands and served writes call the same Rust operations,
 which return typed values. Each served mutation runs in a request-scoped worker
 with its directory and `CommandIo`; it creates no Process row for the request.
 Its response trace correlates diagnostics and effects in `logs/lf.log`.
+Start, Auto-Ship and Stop Auto-Ship publish a pending request immediately on both
+hosts and save it before sending, including while disconnected. They retain the
+original Machine and request ID through restart. A successful dispatch retires the
+request; Graph position, shipping, PR state and input readiness still come from
+Machine readings. A failed or uncertain dispatch offers Check request and Inspect.
+An uncertain dispatch holds conflicting Task commands without replay; a finished
+failure allows later commands without asserting rollback. Stop requests withdrawal;
+it never claims that the carrier Process has exited.
 Task run and ship dispatch detached execution under existing Graph owners.
 Terminal launches and remote Task file streams retain their CLI transports;
 Desktop's UI automation remains app-owned.
 
 Canceling releases the client's wait, but an admitted mutation may still complete.
-After a lost response, refresh authoritative state before another deliberate edit.
-Task creation (including Session adoption) and new Session threads additionally
-have creation receipts. `CreationSubmissions` saves the exact submitted payload,
-request ID, original Machine and protocol version before sending; the payload
-contains the original repository directory. A single app recovery owner looks up
-receipts after restart and continues only absent or safely resumable submissions.
-The server derives `complete`, `continue` or `inspect`; Desktop does not infer
-continuation from milestones. `CreationPresentation` retires a submission when
-its Task or Session view mounts, including promotion. Cold recovery's Show result
-uses the same completion owner after displaying the resource; Inspect retains
-unconfirmed launches or conversation changes. Failed removal repeats lookup and
-presentation. No local milestone ledger is stored.
-An earlier New Task reply leaves later navigation and a newer New Task sheet
-alone. Its result stays registered for recovery until presented; only the
-originating sheet can close, and opening the result requires unchanged navigation.
+Saved requests recover their original IDs after a lost response. Other mutation
+families still need an authoritative refresh before another deliberate edit.
+Task creation (including Session adoption), new Session threads, Complete, Abandon,
+Claim, Unassign, Reopen, Move, Start, Auto-Ship, Stop Auto-Ship
+and Session rename use the shared
+`ClientWorkStore` outbox. It saves the exact command, request ID, original Machine
+and protocol version in SQLite before sending `operation.submit`. Admission saves
+the request before Git, planning or provider preparation; it does not enable input.
+Stamped `operation.get` subscriptions report validation, execution and committed
+results without a status poll. Receipt revisions compare only within one database
+epoch. Recovery on a replacement database retains an unanswered request rather
+than sending it again. Released journal files import transactionally with their
+original payloads; an absent receipt cannot prove that an imported request was
+never sent.
+`WorkInteraction` publishes New Task's operation and submitted words synchronously,
+then saves before sending. Receipt stages bind exact Task and Session identities
+without waiting for a finished command. The operation remains recoverable after
+navigation leaves it. The native owner controls attachment and input readiness;
+mounting the result acknowledges presentation only. Query coverage and unresolved
+recovery remain in the shared store, independently of that acknowledgment.
+`CreationPresentation` also acknowledges mounted Session changes and promotion.
 See the [creation contract](../rust/loopflow/src/server/README.md#creation-receipts).
 
 The parts: the plan, the repository's Dashboard plans
@@ -1103,10 +1182,93 @@ starting a provider. Waves group their full inventory as Owned and Unowned; rows
 ## Testing
 
 Test shared Work through the [server protocol](../rust/loopflow/src/server/README.md).
+Desktop and iOS decode subscription envelopes with the shared `SubscriptionReading`
+and retain their `ReadingStamp`. Its database epoch and revisions describe the
+body's SQLite snapshot; live OS observations remain outside that stamp. Process
+exit can change activity and ordering without changing a SQLite revision. A local
+checkpoint acknowledgement cannot make cached facts newer. Protocol revision 6
+requires the matching helper and phone app.
 Rust's `served_reads` verifies CLI/server mutation parity, input/output/errors,
 concurrent request traces in `logs/lf.log`, and no request Process rows or global
 context changes. Native cancellation releases the client's wait; a lost reply
 remains unknown without replay.
+
+`ClientWorkStore.observeSaved` keeps domain evidence current after recovering a
+saved command result; Desktop retains that observation while the request remains
+saved. It never submits commands. `planning` exposes current evidence for the
+exact correlated changes, separately from the result's historical `sync` and
+error. Showing a result records a local acknowledgment in the saved
+operation. Its domain stage declares whether planning applies; a missing required
+change or unavailable status keeps **Inspect**, as do unclassified diagnostics.
+Task filing follows its original export receipt; Session input replacement has no
+planning effect. A known, resolved command retires in the transaction that persists
+its required reload fence; creation also retains its result until it has been shown.
+Session rename joins its actual name and sessions-domain fence to normalized
+field facts in that transaction; stamped Session pages and Work frames share those
+facts across windows and queries. It requires no membership reload. Completion
+transfers its ordered removal to lagging stored queries in that same transaction. A covering query drops its own effect independently; a newly opened
+query beyond retirement needs a covering base. Effects and reload requirements
+survive restart without relabeling projected facts as confirmed.
+
+Desktop's live Task lists and Dashboards and the phone's Task feed persist complete
+stamped query bodies in the shared SQLite store. The phone restores those bases
+through the same freshness and invalidation rules; its separate query files are
+no longer read or written. Departed epochs and query ordering survive restart.
+Each subscription reading retains its receiving Machine link through buffering
+and decoding. Independently supported parent, disposition, ownership, publication and execution
+inputs join before
+query replacement; external activity joins only while that receiving link is
+current. Disconnect and reconnect leave earlier activity last-known until a
+current-link capture revalidates it, even when the server retains its observation
+source. Queued old readings cannot borrow the new link or revoke its capture.
+Field facts, query writes and local revalidation proof commit or roll back together.
+Each cached query also stores a replaceable derived answer with its authored
+program, candidate snapshot, content identities and consumed membership fields.
+Requested ownership persists as local answer metadata, without adding an owner
+identity or projected field to the Machine DTO.
+Projection uses normalized fields and their persisted stage incorporation:
+Complete followed by a newer Reopen cannot be reapplied by a held query.
+Rows and dependency coverage publish together. Disconnect invalidates Busy
+coverage in mounted windows without a new body or command, while lifecycle-only
+membership remains independent. A welcome alone cannot restore an exact Busy
+count; a current-link capture must revalidate its activity. Losing coverage
+retains the last evaluated membership rather than reviving old Machine rows.
+A query from a replacement epoch also invalidates outstanding receipt evidence
+for that Machine; recovery never replays an uncertain command. Rust compiles a
+finite membership program over a repository manifest, preserving scope, source
+paths and order. Dynamic Wave ancestry, kind and state predicates reevaluate
+against normalized fields; explicit Work leaves retain fixed identities.
+Real content is cached separately by identity and provenance. Move publishes
+parent intent to source and destination queries, including an omitted destination,
+and keeps its original Machine and Task resource lane across restart.
+A retired command acknowledges only its own invalidation on each retained query;
+an unrelated receipt revision cannot clear another query's reload requirement.
+The shared Swift projection derives members, attention, arrangement,
+visible/suppressed occurrences and unique Task counts together; unknown membership
+has no exact total. Both clients consume these projected query results through
+`WorkInteraction`, one main-actor presentation owner per Machine. Its query leases
+keep separate windows on the same projection. Complete publishes and navigates
+synchronously, then saves the same ID in gesture order before sending. Store
+publications replace transient effects by ID and revision, including when a fast
+receipt has already retired the operation. Disk, receipt and cache changes repaint
+mounted queries without another server frame. Save failure retains the original
+command for retry. Shared query tests run on both targets, including held disk,
+reply permutations, restart and replacement epochs. Boards, Task trails and No Wave
+grouping join real planning content to the same projected parent and lifecycle.
+Session attribution remains separate from the Task's current location. Missing
+content or ancestry withholds exact counts; unknown conversation activity does not
+change lifecycle-only board membership. Exhaustive mutation policies and native
+acceptance are unfinished.
+SQLite fixtures await `WorkInteraction.shutdown().value` and any direct query
+reader's close before calling `ClientWorkStore.close()` and removing temporary
+directories. Cancellation alone can leave a reader holding SQLite after its
+directory has gone. Closing a normal query lease still leaves commands running.
+Desktop query destinations keep the original Machine, repository and expression,
+not a captured plan. Unsaved queries and saved Dashboard refreshes mount shared
+query leases; stamped replies update their confirmed bases before projection.
+Post-write refreshes request subscription freshness rather than publishing a raw
+plan. Navigation history returns to the query's current projection. Projection in
+inspection and the remaining migration work above are still unfinished.
 
 Terminal recovery must preserve the exact owner, draft and newer control claims.
 Opening shows **Opening… Input paused** through attachment and native readiness;
@@ -1280,6 +1442,18 @@ lf desktop view 'query:attention'             # open a saved one
 ```
 
 Dashboards open only through `lf desktop`; the sidebar, Cmd-K and menus offer none.
+Opening selects the query immediately and shows its cached projection while it
+refreshes. A new query shows loading in that destination. Back and Forward return
+to the query with current pending changes. Failed refreshes keep usable content
+beside **Retry**. Completing a Task follows that view's displayed occurrence order,
+with repeated occurrences counted once.
+
+Recent query answers share a bounded cache across windows. Live views stay pinned;
+returning after cache eviction or invalidation loads in the selected query. After
+observation pauses, a retained answer is checked against saved pending changes
+before display. Closing a view never cancels its submitted commands. Old closed
+membership stays unavailable until a covering reading arrives.
+
 Save an open query to name, pin and arrange it. Edit changes only that Dashboard;
 repository and Wave conversations keep their normal views. Unstarted Tasks show
 **Start** and their brief without opening a Session. Tasks appear side by side

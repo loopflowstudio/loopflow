@@ -52,6 +52,7 @@ public typealias RegistryRunner = @Sendable (_ lfArgs: [String], _ cwd: String?)
 public enum ServedRead: Equatable, Sendable, Encodable {
     case processHistory(id: String)
     case creationGet(requestID: String)
+    case operationGet(requestID: String)
     case processList
     case desktopViewList(directory: String)
     case sessionList(directory: String, headless: Bool, after: String?, limit: Int?, task: String?)
@@ -111,6 +112,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     public var argv: [String] {
         switch self {
         case .processHistory(let id): return ["session", "history", "show", id]
+        case .operationGet(let requestID): return ["server", "receipt", requestID, "--operation", "--json"]
         case .creationGet(let requestID): return ["server", "receipt", requestID, "--json"]
         case .processList:
             return ["process", "list", "--json"]
@@ -230,6 +232,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     private var tagged: TaggedFields {
         switch self {
         case .processHistory(let id): TaggedFields("process.history", ["id": id])
+        case .operationGet(let requestID): TaggedFields("operation.get", ["request_id": requestID])
         case .creationGet(let requestID): TaggedFields("creation.get", ["request_id": requestID])
         case .processList: TaggedFields("process.list")
         case .desktopViewList(let directory): TaggedFields("desktop.view.list", ["directory": directory])
@@ -806,6 +809,8 @@ public struct RegistryQuery: Sendable {
     /// What a `ServedRead`'s `argv` prints: served in the app when the
     /// transport can, else run.
     private var serve: @Sendable (ServedRead) async throws -> String
+    /// A reading with the snapshot provenance of its body, when supported.
+    private var stamped: (@Sendable (ServedRead) async throws -> RawJSON)?
     /// What a `ServedWrite`'s `argv` prints: made in the app when the
     /// transport can, else run.
     private var write: @Sendable (ServedWrite) async throws -> String
@@ -818,12 +823,14 @@ public struct RegistryQuery: Sendable {
             throw RegistryQueryError("Draft comparison is unavailable on this transport")
         },
         serve: (@Sendable (ServedRead) async throws -> String)? = nil,
+        stamped: (@Sendable (ServedRead) async throws -> RawJSON)? = nil,
         write: (@Sendable (ServedWrite) async throws -> String)? = nil,
         watchFiles: (@Sendable ([String], String?) async throws -> TaskFilesObservation)? = nil,
         subscribeRead: (@Sendable ([String], String?) async throws -> LineSubscription)? = nil,
         subscribeWork: (@Sendable () async throws -> WorkObservation)? = nil,
         run: @escaping RegistryRunner
     ) {
+        self.stamped = stamped
         self.runWithInput = runWithInput
         self.serve = serve ?? { query in
             if let input = query.input { return try await runWithInput(query.argv, query.cwd, input) }
@@ -942,6 +949,14 @@ public struct RegistryQuery: Sendable {
             }
         }
         var query = self
+        if let stamped {
+            query.stamped = { read in
+                try await validate()
+                let output = try await stamped(read)
+                try await validate()
+                return output
+            }
+        }
         query.run = { [run] args, cwd in
             try await validate()
             let output = try await run(args, cwd)
@@ -970,7 +985,7 @@ public struct RegistryQuery: Sendable {
             query.observeRead = { args, cwd in
                 try await validate()
                 let subscription = try await observeRead(args, cwd)
-                let lines = AsyncThrowingStream<Data, any Error> { continuation in
+                let lines = AsyncThrowingStream<ReceivedReading, any Error> { continuation in
                     let reader = Task {
                         do {
                             for try await line in subscription.lines {
@@ -1020,6 +1035,13 @@ public struct RegistryQuery: Sendable {
             let stdout = try await serve(read)
             record(stdout)
             return stdout
+        }
+        if let stamped {
+            query.stamped = { read in
+                let frame = try await stamped(read)
+                if let body = try frame.fields()["body"] { record(body.printed) }
+                return frame
+            }
         }
         query.write = { [write] change in
             let stdout = try await write(change)
@@ -1157,6 +1179,18 @@ public struct RegistryQuery: Sendable {
         try Self.decode(String.self, from: await serve(.processHistory(id: id)))
     }
 
+    public func taskStatus(task: String, cwd: String?) async throws -> WorkFrame.TaskStatusReading {
+        try Self.decode(WorkFrame.TaskStatusReading.self,
+                        from: await serve(.taskGet(directory: cwd ?? "/", issue: task)))
+    }
+
+    /// A stamped query subscription. Checkpoints request freshness; only its
+    /// reading can incorporate a pending effect.
+    public func subscribe(_ read: ServedRead) async throws -> LineSubscription {
+        guard let observeRead else { throw RegistryQueryError("Live Work observation is unavailable on this transport") }
+        return try await observeRead(read.argv + ["--subscribe"], read.cwd)
+    }
+
     /// One store-driven reading keeps position, readiness and run history together.
     public func subscribeTask(task: String) async throws -> LineSubscription {
         guard let observeRead else { throw RegistryQueryError("Live Task observation is unavailable on this transport") }
@@ -1183,13 +1217,6 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(Customized.self, from: await write(.graphCustomize(directory: cwd ?? "/", name: name))).path
     }
 
-    /// Run the Task's graph until its next interactive step; returns once it
-    /// runs. `graph` takes up another graph; `from` starts at that step instead,
-    /// and an interactive `from` only puts the Task there.
-    public func runTask(issue: String, graph: String?, from: String? = nil, cwd: String?) async throws {
-        _ = try await write(.taskRun(directory: cwd ?? "/", issue: issue, graph: graph, from: from, agent: nil, approve: false))
-    }
-
     /// New Task: Rust files the request in `wave` (nil files it in the
     /// repository), starts it as `lf task run` does and admits its conversation
     /// with the request as the first turn. Returns once the Graph registers.
@@ -1201,18 +1228,6 @@ public struct RegistryQuery: Sendable {
     /// The graph a new Task in `wave`, or the repository when nil, would take up.
     public func waveGraph(wave: String?, cwd: String?) async throws -> WaveGraph {
         try Self.decode(WaveGraph.self, from: await serve(.waveGraph(directory: cwd ?? "/", wave: wave)))
-    }
-
-    /// Ship the Task: run the rest of its graph to the end headless, standing
-    /// in at each interactive step. Returns once it is shipping; it runs on until the Task lands.
-    public func shipTask(issue: String, cwd: String?) async throws {
-        _ = try await write(.taskShip(directory: cwd ?? "/", issue: issue))
-    }
-
-    /// Withdraw a Task's Auto-Ship approval: its ship process stops and any
-    /// auto-merge Loopflow armed is disabled.
-    public func stopShipping(issue: String, cwd: String?) async throws {
-        _ = try await write(.taskHold(directory: cwd ?? "/", issue: issue))
     }
 
     public func moveTask(issue: String, wave: String?, cwd: String?) async throws {
@@ -1298,9 +1313,17 @@ public struct RegistryQuery: Sendable {
 
     /// One bounded page, ordered by stable Session identity.
     public func sessionPage(includingHeadless: Bool = false, after: String? = nil,
-                            cwd: String? = nil) async throws -> SessionPage {
-        try Self.decode(SessionPage.self, from: await serve(
-            .sessionList(directory: cwd ?? "/", headless: includingHeadless, after: after, limit: 100, task: nil)))
+                            cwd: String? = nil) async throws -> (page: SessionPage, stamp: ReadingStamp?) {
+        let read = ServedRead.sessionList(directory: cwd ?? "/", headless: includingHeadless, after: after, limit: 100, task: nil)
+        if let stamped {
+            let reading = try await stamped(read).decode(SubscriptionReading<SessionPage>.self)
+            if let reason = reading.unavailable { throw RegistryQueryError(reason) }
+            guard let page = reading.body, let stamp = reading.stamp else {
+                throw RegistryQueryError("Session page is missing its stamped contents")
+            }
+            return (page, stamp)
+        }
+        return (try Self.decode(SessionPage.self, from: await serve(read)), nil)
     }
 
     /// The repository or Wave's retained conversation; explicit opening only.
@@ -1343,17 +1366,6 @@ public struct RegistryQuery: Sendable {
                            task: work?.kind == .task ? work?.id : nil,
                            wave: work?.kind == .wave ? work?.id : nil,
                            agent: agent, intent: intent)))
-    }
-
-    /// Give one Session a human-assigned name and return the authoritative
-    /// record. The durable Session ID selects the conversation or Graph boundary.
-    public func renameSession(
-        id: String,
-        name: String,
-        cwd: String? = nil
-    ) async throws -> SessionRecord {
-        let stdout = try await write(.sessionRename(directory: cwd ?? "/", id: id, name: name))
-        return try Self.decode(SessionRecord.self, from: stdout)
     }
 
     /// Restart the conversation on a fresh provider thread seeded with what the

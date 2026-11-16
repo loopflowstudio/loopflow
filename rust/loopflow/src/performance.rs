@@ -15,6 +15,7 @@ static ENABLED: AtomicBool = AtomicBool::new(false);
 static CONNECTIONS: AtomicU64 = AtomicU64::new(0);
 static STATEMENTS: AtomicU64 = AtomicU64::new(0);
 static ROWS: AtomicU64 = AtomicU64::new(0);
+static SQL_NANOS: AtomicU64 = AtomicU64::new(0);
 
 /// One receipt stream per actual CLI process, including nested CLI invocations.
 /// Missing final records expose interruption rather than implying zero work.
@@ -94,6 +95,7 @@ fn record(file: &mut File, event: &str, started: Instant) -> std::io::Result<()>
         "connections": CONNECTIONS.load(Ordering::Relaxed),
         "statements": STATEMENTS.load(Ordering::Relaxed),
         "rows": ROWS.load(Ordering::Relaxed),
+        "sql_ms": SQL_NANOS.load(Ordering::Relaxed) as f64 / 1_000_000.0,
     });
     writeln!(file, "{value}")
 }
@@ -110,7 +112,9 @@ pub(crate) fn observe_sqlite(connection: &rusqlite::Connection) {
     if ENABLED.load(Ordering::Relaxed) {
         CONNECTIONS.fetch_add(1, Ordering::Relaxed);
         connection.trace_v2(
-            TraceEventCodes::SQLITE_TRACE_STMT | TraceEventCodes::SQLITE_TRACE_ROW,
+            TraceEventCodes::SQLITE_TRACE_STMT
+                | TraceEventCodes::SQLITE_TRACE_ROW
+                | TraceEventCodes::SQLITE_TRACE_PROFILE,
             Some(count_sqlite),
         );
     }
@@ -126,6 +130,12 @@ fn count_sqlite(event: TraceEvent<'_>) {
         }
         TraceEvent::Row(..) => {
             ROWS.fetch_add(1, Ordering::Relaxed);
+        }
+        TraceEvent::Profile(_, duration) => {
+            SQL_NANOS.fetch_add(
+                u64::try_from(duration.as_nanos()).unwrap_or(u64::MAX),
+                Ordering::Relaxed,
+            );
         }
         _ => {}
     }

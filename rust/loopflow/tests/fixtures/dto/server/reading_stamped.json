@@ -1,0 +1,34 @@
+{
+  "type": "reading",
+  "id": "tasks-1",
+  "frame": {
+    "answers": null,
+    "stamp": {
+      "machine": "machine_fixture",
+      "epoch": "ab0123456789ab0123456789ab01234567",
+      "schema": 6,
+      "query": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "complete": true,
+      "revisions": {
+        "planning": 7,
+        "sessions": 11,
+        "graphs": 3,
+        "processes": 2,
+        "usage": 0
+      },
+      "observations": {
+        "source": "fixture-observer",
+        "validated_at": 19,
+        "dependencies": [
+          {
+            "fact": "opaque-process-fact",
+            "token": 17
+          }
+        ]
+      }
+    },
+    "unavailable": null,
+    "body": []
+  },
+  "checkpoint": "fixture-stamped"
+}

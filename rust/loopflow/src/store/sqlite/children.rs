@@ -268,7 +268,7 @@ impl SqliteStore {
         placement: Option<&(PathBuf, TaskPr)>,
         session: Option<&crate::session::LfSession>,
         destination: Option<&Path>,
-        receipt: Option<&super::creation::CreationIdentity>,
+        receipt: Option<&super::operations::CreationIdentity>,
     ) -> StoreResult<Task> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let me = match creation {
@@ -280,6 +280,10 @@ impl SqliteStore {
             None => super::task_ownership::OwnershipFacts::of_task_in(&conn, task_id)?,
         };
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let changes_before: i64 =
+            tx.query_row("SELECT COALESCE(max(seq),0) FROM task_changes", [], |row| {
+                row.get(0)
+            })?;
         if let Some(input) = creation {
             if let Some(project) = &input.project_id {
                 super::durable::require_selected_project(&tx, project)?;
@@ -354,7 +358,7 @@ impl SqliteStore {
                 session_id: session.map(|s| s.id.clone()),
                 milestone: "filed".into(),
             })?;
-            super::creation::insert_in(
+            super::operations::insert_in(
                 &tx,
                 identity,
                 Some(task_id.as_str()),
@@ -362,6 +366,32 @@ impl SqliteStore {
                 None,
                 "filed",
                 Some(&result),
+            )?;
+            let mut query =
+                tx.prepare("SELECT id FROM task_changes WHERE task_id=?1 AND seq>?2 ORDER BY seq")?;
+            let mut changes = query
+                .query_map(params![task_id.as_str(), changes_before], |row| {
+                    Ok(crate::store::planning_sync::PlanningChangeRef {
+                        kind: crate::store::planning_sync::PlanningChangeKind::Task,
+                        owner: task_id.to_string(),
+                        id: row.get(0)?,
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            if creation.is_some() && me.planning_connected() {
+                changes.push(crate::store::planning_sync::PlanningChangeRef {
+                    kind: crate::store::planning_sync::PlanningChangeKind::TaskCreation,
+                    owner: task_id.to_string(),
+                    id: task_id.to_string(),
+                });
+            }
+            super::operations::commit_filing_in(
+                &tx,
+                &identity.request_id,
+                task_id.as_str(),
+                session.map(|s| s.id.as_str()),
+                &result,
+                changes,
             )?;
         }
         tx.commit()?;
@@ -406,6 +436,22 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let request = request_completion_in(&tx, task, note)?;
+        if let Some(request) = request {
+            super::operations::completion_requested_in(&tx, task.as_str(), request)?;
+        } else {
+            super::operations::commit_current_in(
+                &tx,
+                "task.completed",
+                &[task.as_str()],
+                &["planning"],
+                Vec::new(),
+                || {
+                    Ok(serde_json::to_value(
+                        task_on(&tx, task)?.ok_or(StoreError::NotFound)?,
+                    )?)
+                },
+            )?;
+        }
         tx.commit()?;
         Ok(request)
     }
@@ -454,6 +500,9 @@ impl SqliteStore {
         validate_task_project(&transaction, task)?;
         let state = super::durable::task_state_in(&transaction, &task.id)?;
         if state == TaskState::Done {
+            // A later request may have completed after this one was withdrawn.
+            // Only the transaction settling the exact request certifies it.
+            transaction.commit()?;
             return Ok(true);
         }
         let current_request: Option<i64> = transaction.query_row(
@@ -480,13 +529,20 @@ impl SqliteStore {
             "UPDATE tasks SET completion_request=NULL,completion_error=NULL WHERE id=?1",
             params![task.id.as_str()],
         )?;
-        super::task_state_delivery::queue_in(&transaction, &task.id, "completed")?;
+        let change = super::task_state_delivery::queue_in(&transaction, &task.id, "completed")?;
         insert_task_event_in(
             &transaction,
             &task.id,
             &TaskEventKind::Completed {
                 summary: "Task completed".into(),
             },
+        )?;
+        super::operations::completion_committed_in(
+            &transaction,
+            task.id.as_str(),
+            request,
+            vec![change],
+            &serde_json::to_value(task_on(&transaction, &task.id)?.ok_or(StoreError::NotFound)?)?,
         )?;
         transaction.commit()?;
         Ok(true)
@@ -497,23 +553,40 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let task = task_on(&tx, id)?.ok_or(StoreError::NotFound)?;
-        require_task_not_deleted(&tx, &task)?;
-        if super::durable::task_state_in(&tx, id)? == TaskState::Abandoned {
-            return Err(StoreError::InvalidAuthority(
-                "An abandoned Task cannot be reopened".into(),
-            ));
+        let inputs = super::task_details::state_inputs_in(&tx, &ids_json([id.as_str()]))?
+            .remove(id)
+            .ok_or(StoreError::NotFound)?;
+        let permission = require_task_not_deleted(&tx, &task).and_then(|()| {
+            if inputs.state() == TaskState::Abandoned {
+                Err(StoreError::InvalidAuthority(
+                    "An abandoned Task cannot be reopened".into(),
+                ))
+            } else {
+                Ok(())
+            }
+        });
+        if let Err(error) = permission {
+            if matches!(error, StoreError::InvalidAuthority(_)) {
+                super::operations::refuse_current_in(
+                    &tx,
+                    "task.reopened",
+                    &[id.as_str()],
+                    &["planning", "graphs"],
+                    &error,
+                )?;
+                tx.commit()?;
+            }
+            return Err(error);
         }
-        let (completed, pending): (bool, bool) = tx.query_row(
-            "SELECT planning_completed,completion_request IS NOT NULL FROM tasks WHERE id=?1",
-            [id.as_str()],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )?;
-        if completed || pending {
+        let completed = inputs.completed;
+        let pending = inputs.completion_request;
+        let mut changes = Vec::new();
+        if completed || pending.is_some() {
             tx.execute(
                 "UPDATE tasks SET completion_request=NULL,completion_error=NULL WHERE id=?1",
                 [id.as_str()],
             )?;
-            super::task_state_delivery::queue_in(&tx, id, "unstarted")?;
+            changes.push(super::task_state_delivery::queue_in(&tx, id, "unstarted")?);
             // Reopening withdraws Auto-Ship: the approval ended with the Task.
             super::task_work::unship_in(&tx, id)?;
             insert_task_event_in(
@@ -527,7 +600,18 @@ impl SqliteStore {
                 },
             )?;
         }
+        if let Some(request) = pending {
+            super::operations::completion_superseded_in(&tx, id.as_str(), request)?;
+        }
         let task = task_on(&tx, id)?.ok_or(StoreError::NotFound)?;
+        super::operations::commit_current_in(
+            &tx,
+            "task.reopened",
+            &[id.as_str()],
+            &["planning", "graphs"],
+            changes,
+            || Ok(serde_json::to_value(&task)?),
+        )?;
         tx.commit()?;
         Ok(task)
     }
@@ -842,11 +926,17 @@ impl SqliteStore {
     pub fn insert_task_pr(&self, pr: &TaskPr) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let mut withdrawn = None;
         if let Some(previous) = active_task_pr_on(&tx, &pr.task_id)? {
             if previous.is_settled() && pr.sequence > previous.sequence {
                 tx.execute(
                     "UPDATE task_prs SET historical=1 WHERE id=?1",
                     [previous.id.as_str()],
+                )?;
+                withdrawn = tx.query_row(
+                    "SELECT completion_request FROM tasks WHERE id=?1",
+                    [pr.task_id.as_str()],
+                    |row| row.get::<_, Option<i64>>(0),
                 )?;
                 tx.execute(
                     "UPDATE tasks SET completion_request=NULL,completion_error=NULL WHERE id=?1",
@@ -856,6 +946,9 @@ impl SqliteStore {
             }
         }
         insert_task_pr(&tx, pr)?;
+        if let Some(request) = withdrawn {
+            super::operations::completion_superseded_in(&tx, pr.task_id.as_str(), request)?;
+        }
         tx.commit()?;
         Ok(())
     }

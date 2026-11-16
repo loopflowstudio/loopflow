@@ -13,6 +13,21 @@
           "items": [],
           "truncated": false
         }
+      },
+      "stamp": {
+        "machine": "machine_fixture",
+        "epoch": "ab0123456789ab0123456789ab01234567",
+        "schema": 6,
+        "query": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "complete": true,
+        "revisions": {
+          "planning": 7,
+          "sessions": 11,
+          "graphs": 3,
+          "processes": 2,
+          "usage": 0
+        },
+        "observations": null
       }
     }
   },
@@ -198,9 +213,124 @@
             }
           ],
           "name": null,
-          "pinned": false
+          "pinned": false,
+          "membership": {
+            "root": {
+              "kind": "members",
+              "members": [
+                {
+                  "source": [
+                    "root",
+                    "first"
+                  ],
+                  "work": {
+                    "repository": "repo_11111111111111111111111111111111",
+                    "kind": "task",
+                    "id": "task_33333333333333333333333333333333"
+                  }
+                },
+                {
+                  "source": [
+                    "root",
+                    "second"
+                  ],
+                  "work": {
+                    "repository": "repo_11111111111111111111111111111111",
+                    "kind": "task",
+                    "id": "task_33333333333333333333333333333333"
+                  }
+                }
+              ]
+            },
+            "facts": [
+              {
+                "work": {
+                  "repository": "repo_11111111111111111111111111111111",
+                  "kind": "task",
+                  "id": "task_33333333333333333333333333333333"
+                },
+                "name": "LOO-1",
+                "parent": {
+                  "wave": null,
+                  "support": null
+                },
+                "activity": {
+                  "states": [],
+                  "known": true,
+                  "support": null
+                },
+                "disposition": {
+                  "value": {
+                    "completed": false,
+                    "abandoned": false,
+                    "completed_at": null,
+                    "planning_state": null,
+                    "completion_request": null
+                  },
+                  "known": true,
+                  "support": null
+                },
+                "ownership": {
+                  "value": null,
+                  "known": true,
+                  "support": null
+                },
+                "publication": {
+                  "value": false,
+                  "known": true,
+                  "support": null
+                },
+                "execution": {
+                  "value": {
+                    "checkout": false,
+                    "held": false,
+                    "graph_running": false,
+                    "carrier_running": false,
+                    "approved": false
+                  },
+                  "known": true,
+                  "support": null
+                }
+              }
+            ],
+            "unavailable": [],
+            "effects": {
+              "task.complete": {
+                "stage": "task.completed",
+                "domains": [
+                  "planning"
+                ]
+              },
+              "task.claim": {
+                "stage": "task.claimed",
+                "domains": [
+                  "planning"
+                ]
+              },
+              "task.unassign": {
+                "stage": "task.unassigned",
+                "domains": [
+                  "planning"
+                ]
+              },
+              "task.reopen": {
+                "stage": "task.reopened",
+                "domains": [
+                  "graphs",
+                  "planning"
+                ]
+              }
+            },
+            "domains": [
+              "graphs",
+              "planning",
+              "processes",
+              "sessions"
+            ]
+          }
         }
-      ]
+      ],
+      "stamp": null
     }
   },
   {
@@ -209,7 +339,8 @@
     "frame": {
       "answers": 7,
       "unavailable": null,
-      "body": []
+      "body": [],
+      "stamp": null
     }
   },
   {
@@ -218,7 +349,8 @@
     "frame": {
       "answers": 7,
       "unavailable": "Task LOO-1 is not registered",
-      "body": null
+      "body": null,
+      "stamp": null
     }
   },
   {
@@ -230,7 +362,8 @@
       "body": {
         "truncated": false,
         "items": []
-      }
+      },
+      "stamp": null
     }
   },
   {
@@ -241,7 +374,8 @@
       "unavailable": null,
       "body": {
         "nodes": []
-      }
+      },
+      "stamp": null
     }
   },
   {
@@ -274,7 +408,8 @@
           "conflicts": {}
         },
         "row": null
-      }
+      },
+      "stamp": null
     }
   },
   {
@@ -286,7 +421,8 @@
       "body": {
         "transport": "git",
         "destinations": []
-      }
+      },
+      "stamp": null
     }
   }
 ]

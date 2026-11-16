@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 
 use super::{Error, ErrorCode};
 use crate::id::LfSessionId;
-use crate::store::sqlite::creation::{CreationIdentity, CreationReceipt, RecoveryDisposition};
+use crate::store::sqlite::operations::{CreationIdentity, CreationReceipt, RecoveryDisposition};
 use crate::store::{open_store, storage_config_from_env};
 use crate::work::task::Task;
 
@@ -89,7 +89,7 @@ pub fn create(id: &str, mut input: TaskCreation) -> Result<TaskCreateReceipt> {
     );
     store
         .sqlite
-        .check_creation(&identity)
+        .claim_creation(&identity)
         .map_err(|error| match error {
             crate::store::StoreError::Stale(message) => anyhow::Error::from(
                 Error::new(ErrorCode::Conflict, message).with(serde_json::json!({"request_id":id})),

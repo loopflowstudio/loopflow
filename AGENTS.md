@@ -335,6 +335,8 @@ them.
 - Fixtures that change process environment share `loopflow_test_support::env_lock`.
 - macOS SMAppService fixtures register temporary bundles with LaunchServices and launch bundle-owned update code through it. An external test runner writing a registered app can fail App Management; it does not model an app update. Cleanup unregisters the unique service job and LaunchServices entry.
 - `SqliteStore::open_ephemeral` applies every migration; don't replay one with `apply_migration_for_test`.
+- Prepared database fixtures reseed the local Machine and client-store epoch only
+  when copying a fresh file; concurrent first opens and later reopens retain both.
 - Fake `gh` scripts route `api graphql` calls by query name; renaming a query means grepping `rust/loopflow/tests/` for the old name.
 - Tests that redirect process-wide stdout/stderr run in isolated child processes.
 - Lifetime tests start a held terminal beside a `MachineServer` and view it from a PTY; a `--json` viewer on a pipe dies with its stdin and hides retirement bugs. With `RUST_LOG` set, diagnostics go to stderr, not `logs/lf.log`.
@@ -410,9 +412,35 @@ gate or CI; it never blocks an earlier step. Real failures still get fixed.
 Scratch keeps one line per check: command, result, and who runs it later;
 once gate clears scratch, the PR body keeps them.
 
+A Swift class whose stored properties are initialized runs `deinit` when its
+initializer throws. Give native handles one cleanup owner; an initializer's catch
+must not close a handle that `deinit` owns.
+
 Swift async process fixtures install `terminationHandler` before `run()` and
 await its completion. Don't call blocking `waitUntilExit()` on a cooperative
 executor; it can stay in Foundation's run loop after the child has exited.
+Actor-isolated helpers advancing an `inout AsyncStream.Iterator` use
+`next(isolation: #isolation)` so Swift 6 retains the caller's isolation.
+
+Tests that touch `ClientWorkStore.shared` use a private `LF_HOME` inside the
+network boundary, so opening the outbox cannot import the account's real pending
+submissions. Put `env LF_HOME=/tmp/<fixture-home>` after `scripts/test_network.py
+--desktop`, before `swift test`.
+
+SQLite fixtures register directory removal with XCTest teardown, then store close,
+then an awaited `WorkInteraction.shutdown().value` barrier (blocks run in reverse
+order). A synchronous cancellation defer does not release SQLite before unlinking.
+
+Opt-in benchmark `LF_*` variables are cleared by the network boundary. Set them
+on its child command: `uv run python scripts/test_network.py --desktop env LF_WORKSPACE_PERF_OUTPUT=/tmp/projection.json swift test --skip-build --disable-sandbox --package-path swift --filter WorkspacePerformanceTests`.
+A skipped benchmark is unmeasured, even when its test run exits successfully.
+
+Platform setup belongs in app targets; conditional code in shared Swift must
+compile for both platforms (`check_swift_multiplatform_boundaries.py`). Bind inner
+Swift Testing `#require` values separately; nested `#require` macros recurse.
+
+Shared Desktop/iOS fixture tests look in the test bundle, then the source checkout;
+keep fixture discovery free of nested platform gates.
 
 Headless Swift view tests inspect production leaf views directly when a parent
 needs `@Environment` Observation objects, which ViewInspector can't inject.

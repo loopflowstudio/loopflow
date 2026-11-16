@@ -39,15 +39,18 @@ struct WaveStandup: Equatable {
     let autonomous: [Row]
     let done: [Row]
     let doneDays: Int
+    private let missingCompletionDates: Bool
     /// Pictures and names appear once the started and finished Tasks span two people.
     let showsPeople: Bool
 
     /// `tasks` fill Backlog, Working and Autonomous; `closed` fills Done. Today both come from the
-    /// Wave roadmap; LOO-604 moves closed Tasks to `lf task list --done`, which then
-    /// becomes `closed` alone. `github` maps lowercase owner emails to their users.
-    init(tasks: [RoadmapTask], closed: [RoadmapTask], doneDays: Int, now: Date, github: [String: GitHubPerson]) {
+    /// shared projected inventory. `github` maps lowercase owner emails to their users.
+    init(tasks: [RoadmapTask], closed: [RoadmapTask], doneDays: Int, now: Date, github: [String: GitHubPerson], facts: [String: WorkMembershipPlan.Facts]) {
+        func section(_ task: RoadmapTask) -> TaskSection? {
+            facts[task.id].map { TaskSection(states: $0.lifecycle.states) }
+        }
         self.doneDays = doneDays
-        let since = now.addingTimeInterval(-Double(doneDays) * 86_400)
+        missingCompletionDates = doneDays > 0 && closed.contains { section($0) == .done && facts[$0.id]?.lifecycle.completed(inLast: doneDays, now: now) == nil }
         var emails: [String: String] = [:]
         for owner in (tasks + closed).compactMap({ $0.runtime?.owner }) {
             if let name = owner.person, let email = owner.personKey { emails[name] = emails[name] ?? email.lowercased() }
@@ -59,23 +62,22 @@ struct WaveStandup: Equatable {
             return Person(key: key, name: user?.name ?? owner.person ?? user?.login ?? key, github: user)
         }
         done = closed.filter { task in
-            guard task.section == .done else { return false }
+            guard section(task) == .done else { return false }
             if doneDays == 0 { return true }
-            guard let date = task.task.completedAt.flatMap(Self.date) else { return false }
-            return date <= now && date >= since
-        }.sorted { ($0.task.completedAt ?? "") > ($1.task.completedAt ?? "") }
+            return facts[task.id]?.lifecycle.completed(inLast: doneDays, now: now) == true
+        }.sorted { (facts[$0.id]?.lifecycle.completedAt ?? "") > (facts[$1.id]?.lifecycle.completedAt ?? "") }
             .map { Row(task: $0, person: person($0), note: nil, session: nil) }
-        func started(_ section: TaskSection) -> [Row] {
-            tasks.filter { $0.section == section }.map { task in
+        func started(_ target: TaskSection) -> [Row] {
+            tasks.filter { section($0) == target }.map { task in
                 let note = task.pr?.phase == .merged ? "merged" : task.nextMove.reason
                 return Row(task: task, person: person(task), note: note.isEmpty ? nil : note,
-                           session: task.selectionStates.contains(.available) ? .available
-                            : task.selectionStates.contains(.busy) ? .busy : nil)
+                           session: Set(facts[task.id]?.states ?? []).contains(.available) ? .available
+                            : Set(facts[task.id]?.states ?? []).contains(.busy) ? .busy : nil)
             }
         }
         working = started(.working)
         autonomous = started(.autonomous)
-        backlog = tasks.filter { $0.section == .backlog }
+        backlog = tasks.filter { section($0) == .backlog }
             .map { Row(task: $0, person: nil, note: nil, session: nil) }
         showsPeople = Set((working + autonomous + done).compactMap { $0.person?.key }).count >= 2
     }
@@ -89,9 +91,8 @@ struct WaveStandup: Equatable {
         }
     }
 
-    private static func date(_ timestamp: String) -> Date? {
-        if let date = try? Date.ISO8601FormatStyle(includingFractionalSeconds: true).parse(timestamp) { return date }
-        return try? Date.ISO8601FormatStyle().parse(timestamp)
+    func count(_ section: WaveBoardSection) -> Int? {
+        section == .done && missingCompletionDates ? nil : rows(section).count
     }
 
     /// A Wave's heading lines: name and status, objective, chapter Project and KRs.
@@ -111,12 +112,12 @@ struct WaveStandup: Equatable {
         var lines = heading
         lines.append("")
         lines.append(WaveBoardSection.allCases.map { item in
-            let label = "\(item.title) \(rows(item).count)"
+            let label = "\(item.title) \(count(item).map(String.init) ?? "?")"
             return item == section ? "[\(label)]" : label
         }.joined(separator: " · "))
         if section == .done, doneDays > 0 { lines.append("  last \(doneDays) days") }
         let shown = rows(section)
-        if shown.isEmpty { lines.append("  None") }
+        if shown.isEmpty { lines.append(count(section) == nil ? "  Completion dates await confirmation" : "  None") }
         lines += shown.map { row in
             var line = "  \(row.task.task.identifier) \(row.task.task.name)"
             if let person = row.person, showsPeople { line += " · \(person.name)" }
@@ -254,13 +255,16 @@ struct WaveStandupBoard: View {
             HStack(alignment: .center, spacing: Spacing.lg) {
                 Picker("Section", selection: Binding(get: { shown }, set: { model.navigation.boardSections[view] = $0 })) {
                     ForEach(WaveBoardSection.allCases, id: \.self) { item in
-                        Text("\(item.title) · \(standup.rows(item).count)").tag(item)
+                        Text("\(item.title) · \(standup.count(item).map(String.init) ?? "…")").tag(item)
                     }
                 }
                 .pickerStyle(.segmented).labelsHidden().fixedSize()
                 .font(Typography.strong(15))
                 .accessibilityIdentifier("wave-section-picker")
                 if shown == .done { WaveDoneRange(days: $doneDays) }
+            }
+            if standup.count(shown) == nil {
+                Text("Completion dates await confirmation").font(Typography.caption(12)).foregroundStyle(palette.warning)
             }
             WaveBoardList(rows: standup.rows(shown), people: shown != .backlog && standup.showsPeople) { row in
                 withAnimation(FocusSizing.animation) { model.enter(.task(id: row.id), from: view) }

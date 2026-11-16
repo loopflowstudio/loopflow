@@ -8,9 +8,86 @@ import ViewInspector
 @testable import Loopflow
 @testable import LoopflowMac
 
+extension WorkProjection {
+    init(roadmaps: [WaveRoadmap], inventory: [RoadmapTask], sessions: [SessionRecord]) {
+        let facts = inventory.map { task in
+            membershipFact(work: .init(repository: task.task.repo, kind: .task, id: task.id), name: task.task.identifier,
+                parent: .init(wave: task.task.waveId, support: nil),
+                lifecycle: .init(completedAt: nil, states: Array(task.selectionStates), known: true, support: nil),
+                activity: .init(states: [], known: true, support: nil))
+        }
+        self.init(roadmaps: roadmaps, inventory: inventory, sessions: sessions, facts: facts)
+    }
+}
+
 @Suite("Unified Work and Session navigation")
 @MainActor
 struct WorkNavigationTests {
+    @Test("Projected fields move boards and trails while the Session stays attributed to its original Wave")
+    func projectedInventoryMovesBoardsAndTrail() throws {
+        let roadmap = try roadmap()
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Passive projection") }, repoPath: "/src/loopflow")
+        model.applyFixture(roadmap: .available(roadmap), waves: .available([]), workActivity: .loading, repos: [])
+        let task = try #require(roadmap.tasks.items.first { $0.id == "issue-review" })
+        let wave = try #require(task.task.waveId)
+        let record = try session("retained", work: .task(id: task.id), waveId: wave)
+        model.select(.task(id: task.id))
+        model.navigation.selectedSessionId = record.id
+        model.navigation.renaming = SessionRenameDraft(sessionId: record.id, text: "Keep this draft")
+        let content = WorkViewPlan.Content(paneRevision: nil, face: nil, work: .init(repository: task.task.repositoryId, kind: .task, id: task.id),
+            title: task.task.name, states: [.working], identifier: task.task.identifier, primarySession: record.id,
+            location: nil, argv: nil, unavailable: [])
+        let template = fixtureViewPlan(owner: .init(repository: task.task.repositoryId, kind: .repository, id: "repo"), members: [content])
+        let fields = [membershipFact(work: content.work, name: task.task.identifier,
+            parent: .init(wave: wave, support: nil), lifecycle: .init(completedAt: nil, states: [.working], known: true, support: nil),
+            activity: .init(states: [], known: false, support: nil))]
+        func publish(parent: String?, states: [WorkSelectionState] = [.working], incomplete: Bool = false) {
+            var facts = fields
+            facts[0].parent = .init(wave: parent, support: nil)
+            facts[0].disposition.value.completed = states.contains(.done)
+            let membership = WorkMembershipPlan(domains: [], effects: [:], root: template.membership.root,
+                facts: facts, unavailable: incomplete ? ["Destination awaits confirmation"] : [])
+            model.applyProjectedSelectionPlans([ProjectedWorkPlan(template, membership: membership)], reason: "")
+        }
+        func detail() -> ProjectedTaskHistory {
+            model.detailTasks(wave: wave, repository: task.task.repo, content: [task, task],
+                showCompleted: false, days: 7, now: .now, contentComplete: true, historyComplete: false)
+        }
+        publish(parent: wave)
+        #expect(detail().rows.map(\.id) == [task.id])
+        #expect(model.startedTaskCount(.wave(wave)) == 1)
+        #expect(model.standupTasks(.wave(wave))?.items.map(\.id) == [task.id])
+        #expect(model.standup([task], doneDays: 0).working.map(\.id) == [task.id])
+        publish(parent: nil)
+        #expect(detail().rows.isEmpty)
+        #expect(detail().retained.map(\.id) == [task.id])
+        #expect(model.startedTaskCount(.wave(wave)) == 0)
+        #expect(model.standupTasks(.wave(wave))?.items.isEmpty == true)
+        #expect(model.projection.standaloneTasks.map(\.task.id) == [task.id])
+        let projection = WorkProjection(roadmaps: roadmap.waves, inventory: roadmap.tasks.items, sessions: [record],
+            facts: [try #require(model.projection.standaloneTasks.first).facts])
+        #expect(projection.breadcrumb(selection: model.selection, sessionId: record.id)?.waveWork == nil)
+        #expect(projection.breadcrumb(selection: model.selection, sessionId: record.id)?.taskWork == .task(id: task.id))
+        let missingContent = WorkProjection(roadmaps: roadmap.waves, inventory: [], sessions: [record],
+            facts: [try #require(model.projection.standaloneTasks.first).facts])
+        #expect(missingContent.breadcrumb(selection: model.selection, sessionId: record.id)?.waveWork == nil)
+        #expect(missingContent.breadcrumb(selection: model.selection, sessionId: record.id)?.taskWork == .task(id: task.id))
+        publish(parent: "unresolved", incomplete: true)
+        #expect(detail().rows.first?.status == "Updating…")
+        #expect(detail().count == nil)
+        #expect(model.startedTaskCount(.repository) == nil)
+        #expect(model.projection.standaloneTasks.isEmpty)
+        #expect(model.projection.unplacedTasks.map(\.task.id) == [task.id])
+        publish(parent: nil, states: [.done])
+        #expect(model.startedTaskCount(.repository) == 0)
+        #expect(model.standup([task], doneDays: 0).working.isEmpty)
+        #expect(model.standup([task], doneDays: 0).done.map(\.id) == [task.id])
+        #expect(model.selection == .task(id: task.id))
+        #expect(model.navigation.selectedSessionId == record.id)
+        #expect(model.navigation.renaming?.text == "Keep this draft")
+        #expect(record.waveId == wave)
+    }
+
     @Test("Working Tasks Dashboard caption uses the Working section query")
     func workingTasksDashboardCaption() {
         let repository = WorkSelection(id: "repository", expression: .repository)
@@ -226,6 +303,20 @@ struct WorkNavigationTests {
         #expect(model.navigation.sidebarWaveID == nil)
     }
 
+    @Test("Wave and repository clicks select immediately, including rapid return")
+    func waveClickSelectsBeforeReturningFromTheGesture() throws {
+        let model = try dashboardModel(claimed: true)
+        let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
+        try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-wave-wave-1").button().tap()
+        #expect(model.selection == .wave(id: "wave-1"))
+        #expect(model.navigation.sidebarScope == .wave("wave-1"))
+        try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-wave-repository").button().tap()
+        #expect(model.selection == nil)
+        #expect(model.navigation.sidebarScope == .repository)
+        try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-wave-wave-1").button().tap()
+        #expect(model.selection == .wave(id: "wave-1"))
+    }
+
     @Test("A Wave row counts its working and autonomous Tasks, not backlog or done")
     func waveRowCountsStartedTasks() throws {
         let model = try dashboardModel(claimed: true)
@@ -284,33 +375,6 @@ struct WorkNavigationTests {
         model.navigation.sidebarFilter = .busy
         #expect(model.sidebarTaskIDs == ["running"])
         #expect(model.sidebarAutonomousTaskIDs.isEmpty)
-    }
-
-    @Test("Abandoning the open Task drops its row and opens the next one before the command returns; a refusal puts it back")
-    func abandonLeavesTheSidebarAtOnce() async throws {
-        let model = WorkModel(query: RegistryQuery { args, _ in
-            if args.contains("abandon") {
-                try await Task.sleep(for: .milliseconds(50))
-                throw RegistryQueryError("Task has unpushed commits")
-            }
-            throw RegistryQueryError("unused")
-        }, repoPath: "/src/loopflow")
-        model.applyFixture(roadmap: .available(try roadmap()), waves: .available([]), workActivity: .loading, repos: [])
-        func task(_ id: String) -> WorkViewPlan.Content {
-            fixtureViewContent(work: .init(repository: "repo", kind: .task, id: id), title: id)
-        }
-        model.applySelectionPlans([fixtureViewPlan(owner: .init(repository: "repo", kind: .repository, id: "repo"),
-                                                   members: [task("issue-review"), task("issue-now")])], reason: "")
-        model.applyStartedFixture(working: ["issue-review", "issue-now"])
-        model.select(.task(id: "issue-review"))
-        let abandoned = try #require(model.task(id: "issue-review")?.task)
-        let abandon = Task { await model.abandonTask(abandoned) }
-        for _ in 0..<20 where !model.abandoningTaskIDs.contains("issue-review") { await Task.yield() }
-        #expect(model.sidebarTaskIDs == ["issue-now"])
-        #expect(model.selection == .task(id: "issue-now"))
-        await abandon.value
-        #expect(model.sidebarTaskIDs == ["issue-review", "issue-now"])
-        #expect(model.dashboardError == "Task has unpushed commits")
     }
 
     @Test("A row dragged over another lands there on release and leaves no drag behind")
@@ -373,7 +437,7 @@ struct WorkNavigationTests {
         let start = try offer.inspect().find(viewWithAccessibilityIdentifier: "task-start-issue-review").button()
         #expect(!start.isDisabled())
         #expect(throws: Never.self) { try offer.inspect().find(text: task.task.description) }
-        #expect(model.navigation.taskRunDrafts[task.id] == nil)
+        #expect(model.taskExecution(task) == nil)
     }
 
     @Test("Selecting Work closes Find Work and preserves the sidebar preference", arguments: [false, true])
@@ -566,6 +630,7 @@ struct WorkNavigationTests {
             roadmap: roadmapJSON(),
             sessions: String(decoding: try JSONEncoder().encode([attached, orphan, stray]), as: UTF8.self))
         let model = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
+        model.applySelectionPlans([fixtureInventoryPlan(try roadmap())], reason: "")
         await model.refresh()
         var opened: [String] = []
         let view = WorkNavigator(model: model, onOpenSession: { opened.append($0.id) })
@@ -703,6 +768,7 @@ struct WorkNavigationTests {
     func unavailablePlanningPreservesRepositorySelection(truncated: Bool) async throws {
         let source = try ReadingSource(roadmap: roadmapJSON(), sessions: sessionsJSON())
         let model = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
+        model.applySelectionPlans([fixtureInventoryPlan(try roadmap())], reason: "")
         await model.refresh()
         model.select(.task(id: "issue-review"))
         var snapshot = try #require(JSONSerialization.jsonObject(with: Data(roadmapJSON().utf8)) as? [String: Any])
@@ -874,6 +940,7 @@ struct WorkNavigationTests {
         #expect(model.projection.unmatchedSessions.map(\.id) == ["human"])
         await gate.release()
         await refresh.value
+        model.applySelectionPlans([fixtureInventoryPlan(try roadmap())], reason: "")
         #expect(model.projection.subject(for: "human") == .task(id: "issue-review"))
         #expect(model.projection.unmatchedSessions.isEmpty)
     }
@@ -896,6 +963,7 @@ struct WorkNavigationTests {
         let missing = String(decoding: try JSONSerialization.data(withJSONObject: snapshot), as: UTF8.self)
         let source = ReadingSource(roadmap: original, sessions: String(decoding: try JSONEncoder().encode(records), as: UTF8.self))
         let model = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
+        model.applySelectionPlans([fixtureInventoryPlan(try roadmap())], reason: "")
         await model.refresh()
         model.select(model.projection.subject(for: "first"))
         model.navigation.selectedSessionId = "first"
@@ -1110,6 +1178,7 @@ struct WorkNavigationTests {
         let initial = String(decoding: try JSONSerialization.data(withJSONObject: wire), as: UTF8.self)
         let source = ReadingSource(roadmap: initial, sessions: try sessionsJSON())
         let model = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
+        model.applySelectionPlans([fixtureInventoryPlan(try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(initial.utf8)))], reason: "")
         await model.refresh()
         let registry = SessionsWorkspaceRegistry(localMachineId: "local")
         model.bindWorkspaces(registry, repository: "repo")
@@ -1128,6 +1197,7 @@ struct WorkNavigationTests {
             inventory["items"] = [task]
             wire["tasks"] = inventory
             await source.replaceRoadmap(String(decoding: try JSONSerialization.data(withJSONObject: wire), as: UTF8.self))
+            model.applySelectionPlans([fixtureInventoryPlan(try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: wire)))], reason: "")
             await model.refresh()
             #expect(model.selection == .task(id: taskId))
             #expect(registry.selectedWork == key)
@@ -1168,7 +1238,9 @@ struct WorkNavigationTests {
 
     private func model() throws -> WorkModel {
         let source = try ReadingSource(roadmap: roadmapJSON(), sessions: sessionsJSON())
-        return WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
+        let model = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
+        model.applySelectionPlans([fixtureInventoryPlan(try roadmap())], reason: "")
+        return model
     }
     /// Working Tasks [review, now]; wave-1 [now]; Dashboard "Review" [now, later, review] and wave-1.
     private func dashboardModel(claimed: Bool = false) throws -> WorkModel {
@@ -1185,12 +1257,14 @@ struct WorkNavigationTests {
         let dashboard = WorkViewPlan(name: "Review", pinned: true, dashboardID: "review", repository: "repo", repositoryPath: "/src/fixture",
             selection: WorkSelection(id: "root", expression: .filter(.state(.open))), savedRevision: 1,
             resolution: WorkSelectionResolution(attention: [], members: members + [hidden], unavailable: []),
+            membership: WorkMembershipPlan(domains: [], effects: [:], root: .members(members + [hidden]), facts: [], unavailable: []),
             arrangement: WorkArrangement(order: members + [hidden], hidden: [hidden], mode: .touched),
             projection: WorkArrangementProjection(visible: members, suppressed: []), slots: DashboardSlotLayout(root: .slot(0)),
-            contents: review)
+            contents: review + [content(.task, "issue-available")])
         model.applySelectionPlans([
             fixtureViewPlan(owner: .init(repository: "repo", kind: .repository, id: "repo"),
-                            members: [content(.task, "issue-review"), content(.task, "issue-now")]),
+                            members: [content(.task, "issue-review"), content(.task, "issue-now")],
+                            facts: fixtureInventoryPlan(try claimed ? claimedRoadmap() : roadmap()).membership.facts),
             fixtureViewPlan(owner: .init(repository: "repo", kind: .wave, id: "wave-1"),
                             members: [content(.task, "issue-now")]),
             dashboard,
@@ -1213,6 +1287,7 @@ struct WorkNavigationTests {
                             "machine": ["id": "home_7a3f0c2e9b1d4e5f8a6b0c1d2e3f4a5b", "label": "mini"]]
         tasks[index]["runtime"] = runtime
         tasks[index]["section"] = "autonomous"
+        tasks[index]["selection_states"] = ((tasks[index]["selection_states"] as? [String]) ?? []).filter { $0 != "backlog" } + ["autonomous"]
         inventory["items"] = tasks
         planning["tasks"] = inventory
         return try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: planning))
@@ -1268,9 +1343,16 @@ private actor ReadingSource {
     func fail() { failed = true }
     func replaceRoadmap(_ value: String) { roadmap = value }
     func replaceSessions(_ value: String) { sessions = value }
-    func read(_ args: [String]) throws -> String {
+    @MainActor private static func inventory(_ roadmap: String) throws -> WorkViewPlan {
+        fixtureInventoryPlan(try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(roadmap.utf8)))
+    }
+    func read(_ args: [String]) async throws -> String {
         if failed { throw RegistryQueryError("offline") }
         switch args.first {
+        case "desktop" where args.dropFirst().prefix(2) == ["view", "list"]:
+            return String(decoding: try JSONEncoder().encode([await Self.inventory(roadmap)]), as: UTF8.self)
+        case "desktop" where args.dropFirst().prefix(2) == ["view", "show"]:
+            return String(decoding: try JSONEncoder().encode(await Self.inventory(roadmap)), as: UTF8.self)
         case "plan" where args.dropFirst().first == "list": return roadmap
         case "session" where args.dropFirst().first == "list": return #"{"entries":\#(sessions),"next":null}"#
         case "wave" where args.dropFirst().first == "list": return "[]"

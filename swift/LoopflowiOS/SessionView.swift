@@ -17,6 +17,12 @@ struct SessionView: View {
         _link = State(initialValue: SessionLink(client: client, task: task))
     }
 
+    init(client: RemoteMobileClient, sessionID: String, title: String, theme: ThemeDefinition, draft: Binding<String>) {
+        self.theme = theme
+        _draft = draft
+        _link = State(initialValue: SessionLink(client: client, sessionID: sessionID, title: title))
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             if case .unavailable(let reason) = link.state {
@@ -31,7 +37,7 @@ struct SessionView: View {
             }
         }
         .background(theme.palette.background)
-        .navigationTitle(link.task.title)
+        .navigationTitle(link.title)
         .navigationBarTitleDisplayMode(.inline)
         .onChange(of: scenePhase) { _, phase in
             if phase == .background { link.suspend() }

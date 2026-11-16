@@ -585,6 +585,7 @@ time.sleep(60)
         performance, "_prepare_native_fixture", lambda output, cli: output / "fixture"
     )
 
+    monkeypatch.setattr(performance, "_measurement_preflight", lambda *_: True)
     with pytest.raises(KeyError, match="pid"):
         performance._run_native(
             tmp_path, {}, samples=1, soak_seconds=1, cli=tmp_path / "unused-cli"
@@ -625,6 +626,7 @@ def test_sandbox_paths_do_not_change_test_binary_hash_or_comparison_command(
             str(executable),
         ],
     )
+    monkeypatch.setattr(performance, "_measurement_preflight", lambda *_: True)
     receipts = []
     for name in ("before", "after"):
         output = tmp_path / name
@@ -798,3 +800,47 @@ def test_changed_repository_inputs_and_failed_git_cannot_compare(tmp_path: Path)
     current["metadata"]["repository_inputs_unchanged"] = True
     current["metadata"]["git_observations_complete"] = False
     assert not performance._comparison(current, baseline)["available"]
+
+
+def test_host_load_reports_cores_without_retaining_process_arguments() -> None:
+    load = performance._host_load(
+        "100.0 /usr/bin/python3\n"
+        " 7.5 /Applications/Example App.app/Contents/MacOS/Example App\n"
+        "not-a-number /usr/bin/no\nnan /usr/bin/no\n"
+    )
+    assert load["cpu_percent"] == 107.5
+    assert load["top"] == [
+        {"cpu_percent": 100.0, "executable": "python3"},
+        {"cpu_percent": 7.5, "executable": "Example App"},
+    ]
+
+
+def test_preflight_retains_contamination_and_does_not_launch_native_probe(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        performance.subprocess, "check_output", lambda *args, **kwargs: "125.0 /usr/bin/python3\n"
+    )
+    monkeypatch.setattr(performance.platform, "platform", lambda: "fixture")
+    result = performance._preflight(tmp_path / "trial")
+    report = json.loads((tmp_path / "trial/preflight.json").read_text())
+    assert result == 1
+    assert report["status"] == "rejected"
+    assert report["samples"][0]["cpu_percent"] == 125
+    assert report["native"] is None
+
+
+def test_cli_volume_separates_sql_profile_time_from_process_wall_time(tmp_path: Path) -> None:
+    base = dict(
+        event="start", pid=1, time=1, elapsed_ms=0, connections=0, statements=0, rows=0, sql_ms=0
+    )
+    end = dict(
+        base, event="end", time=2, elapsed_ms=1000, connections=1, statements=10, rows=1, sql_ms=12
+    )
+    (tmp_path / "lf-1.jsonl").write_text(json.dumps(base) + "\n" + json.dumps(end) + "\n")
+    report = performance._cli_volume(tmp_path)
+    assert report["sql_profile_ms"] == 12
+    del base["sql_ms"]
+    del end["sql_ms"]
+    (tmp_path / "lf-1.jsonl").write_text(json.dumps(base) + "\n" + json.dumps(end) + "\n")
+    assert performance._cli_volume(tmp_path)["sql_profile_ms"] is None

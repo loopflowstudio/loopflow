@@ -2,6 +2,24 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Stable delivery identities owned by planning, rather than copies of its queue.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PlanningChangeRef {
+    pub kind: PlanningChangeKind,
+    pub owner: String,
+    pub id: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PlanningChangeKind {
+    Task,
+    Project,
+    TaskState,
+    TaskCreation,
+    TaskComment,
+}
+
 /// A pending field edit and its provider baseline, independent of connection state.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PlanningChange {

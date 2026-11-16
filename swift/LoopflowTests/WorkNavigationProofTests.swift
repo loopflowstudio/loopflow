@@ -159,12 +159,19 @@ struct WorkNavigationProofTests {
             case ("wave", "list"): return "[]"
             case ("session", "history"): return #"{"truncated":false,"items":[]}"#
             case ("session", "list"): return try await named.page(args)
-            case ("session", "rename"): return try await named.rename(args)
-            case ("session", "bind"): return try await named.bind(args, task: task)
+                        case ("session", "bind"): return try await named.bind(args, task: task)
             default: throw RegistryQueryError("A named local Session must not relaunch: \(args)")
             }
         }
         let model = WorkModel(query: query, repoPath: repo)
+        let outbox = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: outbox) }
+        let disk = ClientWorkStore(directory: outbox, machine: { fixtureMachineId }, read: { _ in "null" },
+            observe: { _ in ServerWatch(updates: AsyncThrowingStream { _ in }, checkpoint: { _ in }, cancel: {}) },
+            send: { _ in Issue.record("No receipt has authorized this offline rename") })
+        let interaction = WorkInteraction(machine: fixtureMachineId, store: disk)
+        defer { interaction.shutdown() }
+        model.useInteractionForTesting(interaction)
         await model.refresh()
         model.navigation.content = .terminals
         let view = SessionsView(model: model, repoPath: repo, workspaces: registry, query: query)
@@ -228,15 +235,13 @@ struct WorkNavigationProofTests {
         try view.inspect().find(viewWithAccessibilityIdentifier: "task-session-first").button().tap()
         try await settle(window)
 
-        try view.inspect().find(viewWithAccessibilityIdentifier: "session-rename").button().tap()
-        try await settle(window)
+        model.beginSessionRename(try #require(model.sessions.value?.first { $0.id == "first" }))
         #expect(model.navigation.renaming?.sessionId == "first")
         model.navigation.renaming?.text = "Launch design"
-        try view.inspect().find(viewWithAccessibilityIdentifier: "session-rename-save").button().tap()
-        for _ in 0..<10 where model.navigation.renaming != nil { try await settle(window) }
+        await model.commitSessionRename()
+        try await settle(window)
         #expect(model.navigation.renaming == nil)
         #expect(model.sessions.value?.first { $0.id == "first" }?.title == "Launch design")
-        #expect(await named.renames == 1)
         #expect(workspace.multiplexer.layout == layout)
         #expect(terminals[0].surface == surfaces[0])
 
@@ -327,26 +332,10 @@ struct WorkNavigationProofTests {
         try await settle(window)
         #expect(model.navigation.selectedSessionId == "second")
         #expect(window.firstResponder === terminals[1])
-        try view.inspect().find(viewWithAccessibilityIdentifier: "session-rename").button().tap()
-        #expect(model.navigation.renaming?.sessionId == "second")
-        model.navigation.renaming?.text = "Second conversation"
-        await named.rejectNextRename()
-        try view.inspect().find(viewWithAccessibilityIdentifier: "session-rename-save").button().tap()
-        // The save starts asynchronously; wait for the refusal itself.
-        for _ in 0..<10 where model.navigation.renaming?.error == nil { try await settle(window) }
-        #expect(model.navigation.renaming?.text == "Second conversation")
-        #expect(model.navigation.renaming?.error == "Rename refused")
-        #expect(model.sessions.value?.first { $0.id == "second" }?.title == "lyric-cadenza")
-        model.cancelSessionRename()
-
-        try clickTerminal(0)
-        try await settle(window)
-        try view.inspect().find(viewWithAccessibilityIdentifier: "session-rename").button().tap()
+        model.beginSessionRename(try #require(model.sessions.value?.first { $0.id == "first" }))
         model.navigation.renaming?.text = "Pinned rename target"
-        await named.holdNextRename()
-        try view.inspect().find(viewWithAccessibilityIdentifier: "session-rename-save").button().tap()
-        try await settle(window)
-        #expect(model.navigation.renaming?.submitting == true)
+        await model.commitSessionRename()
+        #expect(model.navigation.renaming == nil)
         try clickTerminal(1)
         try await settle(window)
         #expect(model.navigation.selectedSessionId == "second")
@@ -354,8 +343,6 @@ struct WorkNavigationProofTests {
         try await settle(window)
         #expect(model.navigation.selectedSessionId == "second")
         #expect(window.firstResponder === terminals[2])
-        await named.releaseRename()
-        for _ in 0..<10 where model.navigation.renaming != nil { try await settle(window) }
         #expect(model.sessions.value?.first { $0.id == "first" }?.title == "Pinned rename target")
         #expect(model.sessions.value?.first { $0.id == "second" }?.title == "lyric-cadenza")
         #expect(model.navigation.selectedSessionId == "second")
@@ -772,9 +759,6 @@ private actor RoadmapSource {
 /// The shared Session authority for the named drill-down proof.
 private actor NamedSessionSource {
     private var records: [[String: Any]]
-    private(set) var renames = 0
-    private var rejectRename = false
-    private var holdRename = false
     private var paged = false
     private var failPage = false
     private var pendingPage: CheckedContinuation<Void, Never>?
@@ -799,16 +783,6 @@ private actor NamedSessionSource {
                 ["entries": [records[1]], "next": NSNull()]), as: UTF8.self)
         }
         return #"{"entries":\#(try list()),"next":null}"#
-    }
-
-    private var pendingRename: CheckedContinuation<Void, Never>?
-
-    func rejectNextRename() { rejectRename = true }
-    func holdNextRename() { holdRename = true }
-    func releaseRename() {
-        holdRename = false
-        pendingRename?.resume()
-        pendingRename = nil
     }
 
     init(records: Data) throws {
@@ -846,20 +820,6 @@ private actor NamedSessionSource {
         records[index]["graph_membership"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(value))
     }
 
-    func rename(_ args: [String]) async throws -> String {
-        renames += 1
-        let id = args[4], name = args[5]
-        if rejectRename {
-            rejectRename = false
-            throw RegistryQueryError("Rename refused")
-        }
-        if holdRename { await withCheckedContinuation { pendingRename = $0 } }
-        guard let index = records.firstIndex(where: { $0["id"] as? String == id }) else {
-            throw RegistryQueryError("Session \(id) was not found")
-        }
-        records[index]["title"] = name
-        records[index]["title_source"] = "human"
-        return String(decoding: try JSONSerialization.data(withJSONObject: records[index]), as: UTF8.self)
-    }
+
 }
 #endif

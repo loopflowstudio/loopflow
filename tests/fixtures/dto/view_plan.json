@@ -173,5 +173,136 @@
         }
       ]
     }
+  },
+  "membership": {
+    "root": {
+      "kind": "compose",
+      "items": [
+        {
+          "kind": "select",
+          "source": [
+            "root",
+            "first"
+          ],
+          "predicate": {
+            "kind": "state",
+            "state": "backlog"
+          }
+        },
+        {
+          "kind": "members",
+          "members": [
+            {
+              "source": [
+                "root",
+                "second"
+              ],
+              "work": {
+                "repository": "repo_11111111111111111111111111111111",
+                "kind": "task",
+                "id": "task_33333333333333333333333333333333"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "facts": [
+      {
+        "work": {
+          "repository": "repo_11111111111111111111111111111111",
+          "kind": "task",
+          "id": "task_33333333333333333333333333333333"
+        },
+        "name": "LOO-1",
+        "parent": {
+          "wave": null,
+          "support": null
+        },
+        "activity": {
+          "states": [],
+          "known": true,
+          "support": null
+        },
+        "disposition": {
+          "value": {
+            "completed": false,
+            "abandoned": false,
+            "completed_at": null,
+            "planning_state": null,
+            "completion_request": null
+          },
+          "known": true,
+          "support": null
+        },
+        "ownership": {
+          "value": null,
+          "known": true,
+          "support": null
+        },
+        "publication": {
+          "value": false,
+          "known": true,
+          "support": null
+        },
+        "execution": {
+          "value": {
+            "checkout": false,
+            "held": false,
+            "graph_running": false,
+            "carrier_running": false,
+            "approved": false
+          },
+          "known": true,
+          "support": null
+        }
+      }
+    ],
+    "unavailable": [],
+    "effects": {
+      "task.complete": {
+        "stage": "task.completed",
+        "domains": [
+          "planning"
+        ]
+      },
+      "task.abandon": {
+        "stage": "task.abandoned",
+        "domains": [
+          "planning"
+        ]
+      },
+      "task.move": {
+        "stage": "task.membership_changed",
+        "domains": [
+          "planning"
+        ]
+      },
+      "task.claim": {
+        "stage": "task.claimed",
+        "domains": [
+          "planning"
+        ]
+      },
+      "task.unassign": {
+        "stage": "task.unassigned",
+        "domains": [
+          "planning"
+        ]
+      },
+      "task.reopen": {
+        "stage": "task.reopened",
+        "domains": [
+          "graphs",
+          "planning"
+        ]
+      }
+    },
+    "domains": [
+      "graphs",
+      "planning",
+      "processes",
+      "sessions"
+    ]
   }
 }

@@ -1,7 +1,7 @@
 //! The bounded query syntax compiles to the same authored selections as defaults.
 use super::{
-    wave_descendants, DashboardId, MemberRef, Selection, SelectionError, SelectionExpression,
-    SelectionFilter, SelectionId, SelectionResolution, SelectionState, SelectionWork,
+    DashboardId, MemberRef, MembershipNode, MembershipPredicate, Selection, SelectionError,
+    SelectionExpression, SelectionFilter, SelectionId, SelectionState, SelectionWork,
     WorkWorkspaceKind,
 };
 use sha2::{Digest, Sha256};
@@ -73,13 +73,13 @@ impl Selection {
         Ok(selection)
     }
 
-    pub(super) fn expand_filter(
+    pub(super) fn compile_filter(
         filter: &SelectionFilter,
         repository: &str,
         work: &[SelectionWork],
         path: &[SelectionId],
-        result: &mut SelectionResolution,
-    ) -> Result<(), SelectionError> {
+        unavailable: &mut Vec<String>,
+    ) -> Result<MembershipNode, SelectionError> {
         let scoped: Vec<_> = work
             .iter()
             .filter(|item| item.key.repository == repository)
@@ -112,60 +112,37 @@ impl Selection {
                 match matches.as_slice() {
                     [one] => Some(*one),
                     [] => {
-                        result
-                            .unavailable
-                            .push(format!("{kind:?} {name} is unavailable"));
-                        return Ok(());
+                        unavailable.push(format!("{kind:?} {name} is unavailable"));
+                        return Ok(MembershipNode::Members {
+                            members: Vec::new(),
+                        });
                     }
                     _ => return Err(SelectionError::Ambiguous(format!("{kind:?} {name}"))),
                 }
             }
             _ => None,
         };
-        let descendants = match (filter, target) {
-            (SelectionFilter::Wave(_), Some(wave)) => {
-                wave_descendants(repository, &wave.key.id, work)
+        let predicate = match filter {
+            SelectionFilter::Task(_) => {
+                return Ok(MembershipNode::Members {
+                    members: vec![MemberRef {
+                        source: path.to_vec(),
+                        work: target.expect("Task target resolved").key.clone(),
+                    }],
+                })
             }
-            _ => BTreeSet::new(),
+            SelectionFilter::Wave(_) => MembershipPredicate::Descendants {
+                wave: target.expect("Wave target resolved").key.id.clone(),
+            },
+            SelectionFilter::Kind(kind) => MembershipPredicate::Kind {
+                work_kind: kind.clone(),
+            },
+            SelectionFilter::State(state) => MembershipPredicate::State { state: *state },
         };
-        for item in scoped {
-            let included = match filter {
-                SelectionFilter::Task(_) => {
-                    Some(item.key == target.expect("Task target resolved").key)
-                }
-                SelectionFilter::Wave(_) => Some(
-                    item.parent_wave
-                        .as_ref()
-                        .is_some_and(|parent| descendants.contains(parent.as_str())),
-                ),
-                SelectionFilter::Kind(kind) => Some(&item.key.kind == kind),
-                SelectionFilter::State(state) if item.key.kind == WorkWorkspaceKind::Task => {
-                    match state {
-                        _ if item.states.contains(state) => Some(true),
-                        SelectionState::Available
-                        | SelectionState::Busy
-                        | SelectionState::Blocked
-                            if !item.activity_known =>
-                        {
-                            None
-                        }
-                        _ => Some(false),
-                    }
-                }
-                SelectionFilter::State(_) => Some(false),
-            };
-            match included {
-                Some(true) => result.members.push(MemberRef {
-                    source: path.to_vec(),
-                    work: item.key.clone(),
-                }),
-                None => result
-                    .unavailable
-                    .push(format!("Task {} activity is unavailable", item.name)),
-                Some(false) => {}
-            }
-        }
-        Ok(())
+        Ok(MembershipNode::Select {
+            source: path.to_vec(),
+            predicate,
+        })
     }
 }
 

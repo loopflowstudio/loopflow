@@ -433,6 +433,16 @@ struct SessionPaneView: View {
 
     private var showsStrip: Bool { item != nil || (store.visibleLayout?.allPanes.count ?? 0) > 1 }
 
+    private var creationRequests: [String] {
+        guard !model.preparingCreation, let item else { return [] }
+        return model.presentationRequests(sessionID: item.id)
+    }
+
+    private func presentCreationResult() async {
+        guard !model.preparingCreation, let item else { return }
+        await model.presentedSessionResult(item.id)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             if showsStrip {
@@ -465,7 +475,7 @@ struct SessionPaneView: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(_title), \(isFocused ? "active" : "open")")
         .accessibilityIdentifier(item.map { "session-pane-\($0.id)" } ?? "session-pane-empty")
-        .modifier(CreationPresentation(recovery: .shared, resource: .session(item?.id ?? ""), visible: item != nil))
+        .task(id: creationRequests) { await presentCreationResult() }
         .alert("Could not change pane", isPresented: Binding(
             get: { shellError != nil }, set: { if !$0 { shellError = nil } }
         )) {
@@ -1002,7 +1012,7 @@ struct SessionPaneView: View {
     /// otherwise the terminal's own title, then the pane kind.
     private var _title: String {
         if case .shell = pane.content, paneSessions.count == 1, let session = paneSessions.first {
-            return session.record.title
+            return model.sessionTitle(session.record)
         }
         let title = terminalTitle ?? _terminalIdentity.flatMap { sessions.surfaces.title(for: $0) }
         if let title, !title.isEmpty { return title }
@@ -1020,7 +1030,7 @@ struct SessionPaneView: View {
         case .browser: pane.content.selectedBrowserTab?.title ?? "Browser"
         }
         return PaneProgramHeading(provider: paneSessions.count == 1 ? paneSessions.first?.presentationProvider : nil,
-            title: paneSessions.count == 1 ? paneSessions.first?.record.title ?? _title : _title,
+            title: paneSessions.count == 1 ? paneSessions.first.map { model.sessionTitle($0.record) } ?? _title : _title,
             directory: pane.content.location?.worktree, fallback: fallback)
     }
 

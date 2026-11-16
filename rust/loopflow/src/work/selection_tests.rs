@@ -65,10 +65,13 @@ fn defaults_include_child_waves_and_working_wave_tasks() {
         parent_wave,
         name: String::new(),
         activity_known: false,
+        activity_states: BTreeSet::new(),
+        inputs: None,
+        support: None,
     })
     .collect();
     let wave = node("root", SelectionExpression::Wave { wave: root.clone() })
-        .resolve("repo", &work, &BTreeMap::new())
+        .resolve("repo", &input_work(&work), &BTreeMap::new())
         .unwrap();
     assert_eq!(
         wave.members
@@ -80,7 +83,7 @@ fn defaults_include_child_waves_and_working_wave_tasks() {
     assert!(wave.unavailable.is_empty());
     let filtered = Selection::parse(&format!("wave:{root} state:open"), None)
         .unwrap()
-        .resolve("repo", &work, &BTreeMap::new())
+        .resolve("repo", &input_work(&work), &BTreeMap::new())
         .unwrap();
     assert_eq!(
         filtered
@@ -92,7 +95,7 @@ fn defaults_include_child_waves_and_working_wave_tasks() {
     );
     assert!(filtered.unavailable.is_empty());
     let repo = node("root", SelectionExpression::Repository)
-        .resolve("repo", &work, &BTreeMap::new())
+        .resolve("repo", &input_work(&work), &BTreeMap::new())
         .unwrap();
     assert_eq!(repo.members.len(), 2); // immediate Wave plus the idle Task; unstarted isn't Working
     let explicit = node(
@@ -101,7 +104,7 @@ fn defaults_include_child_waves_and_working_wave_tasks() {
             work: work[5].key.clone(),
         },
     )
-    .resolve("repo", &work, &BTreeMap::new())
+    .resolve("repo", &input_work(&work), &BTreeMap::new())
     .unwrap();
     assert_eq!(explicit.members[0].work.id, "backlog");
 }
@@ -118,6 +121,9 @@ fn nested_sources_survive_insertions_and_report_unavailable_queries_and_cycles()
             SelectionState::Working,
         ]),
         activity_known: false,
+        activity_states: BTreeSet::new(),
+        inputs: None,
+        support: None,
     }];
     let query = DashboardId("saved".into());
     let reference = node(
@@ -130,18 +136,24 @@ fn nested_sources_survive_insertions_and_report_unavailable_queries_and_cycles()
         query.clone(),
         node("definition", SelectionExpression::Repository),
     )]);
-    let before = reference.resolve("repo", &work, &queries).unwrap();
+    let before = reference
+        .resolve("repo", &input_work(&work), &queries)
+        .unwrap();
     let mut composition = node(
         "composition",
         SelectionExpression::Compose {
             items: vec![reference.clone()],
         },
     );
-    let first = composition.resolve("repo", &work, &queries).unwrap();
+    let first = composition
+        .resolve("repo", &input_work(&work), &queries)
+        .unwrap();
     if let SelectionExpression::Compose { items } = &mut composition.expression {
         items.insert(0, node("inserted", SelectionExpression::Repository));
     }
-    let after = composition.resolve("repo", &work, &queries).unwrap();
+    let after = composition
+        .resolve("repo", &input_work(&work), &queries)
+        .unwrap();
     assert_eq!(first.members[0], after.members[1]);
     assert_ne!(after.members[0], after.members[1]);
     assert_eq!(
@@ -153,10 +165,12 @@ fn nested_sources_survive_insertions_and_report_unavailable_queries_and_cycles()
     );
     queries.insert(query.clone(), reference.clone());
     assert!(matches!(
-        reference.resolve("repo", &work, &queries),
+        reference.resolve("repo", &input_work(&work), &queries),
         Err(SelectionError::QueryCycle(_))
     ));
-    let missing = reference.resolve("repo", &work, &BTreeMap::new()).unwrap();
+    let missing = reference
+        .resolve("repo", &input_work(&work), &BTreeMap::new())
+        .unwrap();
     assert!(missing.members.is_empty());
     assert!(!missing.unavailable.is_empty());
 }
@@ -303,6 +317,9 @@ fn query_work() -> Vec<SelectionWork> {
             name: "Product".into(),
             states: Default::default(),
             activity_known: false,
+            activity_states: BTreeSet::new(),
+            inputs: None,
+            support: None,
         },
         SelectionWork {
             key: key("a", WorkWorkspaceKind::Task),
@@ -310,6 +327,9 @@ fn query_work() -> Vec<SelectionWork> {
             name: "FIX-1".into(),
             states: [SelectionState::Open, SelectionState::Available].into(),
             activity_known: true,
+            activity_states: BTreeSet::new(),
+            inputs: None,
+            support: None,
         },
         SelectionWork {
             key: key("b", WorkWorkspaceKind::Task),
@@ -317,6 +337,9 @@ fn query_work() -> Vec<SelectionWork> {
             name: "FIX-2".into(),
             states: [SelectionState::Backlog].into(),
             activity_known: true,
+            activity_states: BTreeSet::new(),
+            inputs: None,
+            support: None,
         },
     ]
 }
@@ -329,7 +352,9 @@ fn query_selection_filters_compose_with_defaults_and_preserve_overlapping_occurr
         None,
     )
     .unwrap();
-    let reading = query.resolve("repo", &work, &BTreeMap::new()).unwrap();
+    let reading = query
+        .resolve("repo", &input_work(&work), &BTreeMap::new())
+        .unwrap();
     assert_eq!(
         reading
             .members
@@ -348,7 +373,7 @@ fn query_selection_filters_compose_with_defaults_and_preserve_overlapping_occurr
     let query = Selection::parse("query:attention or task:FIX-2", None).unwrap();
     assert_eq!(
         query
-            .resolve("repo", &work, &catalog)
+            .resolve("repo", &input_work(&work), &catalog)
             .unwrap()
             .members
             .len(),
@@ -362,20 +387,22 @@ fn query_selection_edits_retain_source_ids_and_hidden_geometry() {
     let open = Selection::parse("state:open", None).unwrap();
     let edited = Selection::parse("state:available", Some(&open)).unwrap();
     assert_eq!(
-        open.resolve("repo", &work, &BTreeMap::new())
+        open.resolve("repo", &input_work(&work), &BTreeMap::new())
             .unwrap()
             .members,
         edited
-            .resolve("repo", &work, &BTreeMap::new())
+            .resolve("repo", &input_work(&work), &BTreeMap::new())
             .unwrap()
             .members
     );
     let single = Selection::parse("task:FIX-1", None).unwrap();
-    let single_reading = single.resolve("repo", &work, &BTreeMap::new()).unwrap();
+    let single_reading = single
+        .resolve("repo", &input_work(&work), &BTreeMap::new())
+        .unwrap();
     let expanded = Selection::parse("task:FIX-1 or task:FIX-2", Some(&single)).unwrap();
     assert_eq!(
         expanded
-            .resolve("repo", &work, &BTreeMap::new())
+            .resolve("repo", &input_work(&work), &BTreeMap::new())
             .unwrap()
             .members[0],
         single_reading.members[0]
@@ -385,9 +412,13 @@ fn query_selection_edits_retain_source_ids_and_hidden_geometry() {
         before,
         Selection::parse("task:FIX-1 or task:FIX-1", None).unwrap()
     );
-    let old = before.resolve("repo", &work, &BTreeMap::new()).unwrap();
+    let old = before
+        .resolve("repo", &input_work(&work), &BTreeMap::new())
+        .unwrap();
     let after = Selection::parse("task:FIX-2 or task:FIX-1 or task:FIX-1", Some(&before)).unwrap();
-    let next = after.resolve("repo", &work, &BTreeMap::new()).unwrap();
+    let next = after
+        .resolve("repo", &input_work(&work), &BTreeMap::new())
+        .unwrap();
     assert_eq!(old.members, next.members[1..]);
     let mut layout = Arrangement::automatic(&old.members);
     layout.mode = ArrangementMode::Touched;
@@ -441,23 +472,23 @@ fn query_selection_rejects_bad_syntax_and_ambiguous_refs_without_guessing() {
     work[2].name = "OTHER-1".into();
     assert!(Selection::parse("task:#1", None)
         .unwrap()
-        .resolve("repo", &work, &BTreeMap::new())
+        .resolve("repo", &input_work(&work), &BTreeMap::new())
         .is_err());
     let missing = Selection::parse("query:missing", None)
         .unwrap()
-        .resolve("repo", &work, &BTreeMap::new())
+        .resolve("repo", &input_work(&work), &BTreeMap::new())
         .unwrap();
     assert!(!missing.unavailable.is_empty());
     let empty = Selection::parse("task:FIX-1 state:backlog query:missing", None)
         .unwrap()
-        .resolve("repo", &work, &BTreeMap::new())
+        .resolve("repo", &input_work(&work), &BTreeMap::new())
         .unwrap();
     assert!(empty.members.is_empty());
     assert_eq!(empty.unavailable, missing.unavailable);
     work[1].activity_known = false;
     assert!(!Selection::parse("state:busy", None)
         .unwrap()
-        .resolve("repo", &work, &BTreeMap::new())
+        .resolve("repo", &input_work(&work), &BTreeMap::new())
         .unwrap()
         .unavailable
         .is_empty());
@@ -471,8 +502,75 @@ fn query_selection_plan_wire_roundtrips() {
         serde_json::to_value(&plan).unwrap(),
         serde_json::from_str::<serde_json::Value>(fixture).unwrap()
     );
+    let work: Vec<_> = plan
+        .membership
+        .facts
+        .iter()
+        .map(|fact| SelectionWork {
+            key: fact.work.clone(),
+            parent_wave: None,
+            name: fact.name.clone(),
+            states: fact.states(),
+            activity_known: fact.activity.known,
+            activity_states: fact.activity.states.clone(),
+            inputs: Some(super::selection::TaskMembershipInputs {
+                disposition: fact.disposition.value.clone(),
+                ownership: fact.ownership.value.clone(),
+                publication: fact.publication.value,
+                execution: fact.execution.value,
+            }),
+            support: None,
+        })
+        .collect();
+    assert_eq!(
+        plan.selection
+            .membership_plan(&plan.repository, &work, &BTreeMap::new())
+            .unwrap(),
+        plan.membership
+    );
+    assert_eq!(plan.membership.resolve(), plan.resolution);
+    let mut completed = plan.membership.clone();
+    let effect = &completed.effects["task.complete"];
+    assert_eq!(effect.stage, "task.completed");
+    for fact in &mut completed.facts {
+        fact.disposition.value.completed = true;
+        fact.activity.states.clear();
+    }
+    // Only the explicit occurrence survives, with no stale attention or duplicate.
+    assert_eq!(completed.resolve().members, plan.resolution.members[1..]);
+    assert!(completed.resolve().attention.is_empty());
+    let mut missing = serde_json::to_value(&plan).unwrap();
+    missing.as_object_mut().unwrap().remove("membership");
+    assert!(serde_json::from_value::<super::selection::ViewPlan>(missing).is_err());
     assert_eq!(plan.projection, plan.arrangement.project());
     plan.arrangement.validate(&plan.resolution.members).unwrap();
+}
+
+#[test]
+fn explicit_membership_program_keeps_only_its_candidates_at_ten_thousand_tasks() {
+    let work: Vec<_> = (0..10_000)
+        .map(|index| SelectionWork {
+            key: key(&format!("task_{index}"), WorkWorkspaceKind::Task),
+            parent_wave: None,
+            name: format!("LOO-{index}"),
+            states: BTreeSet::from([SelectionState::Working]),
+            activity_known: true,
+            activity_states: BTreeSet::new(),
+            inputs: None,
+            support: None,
+        })
+        .collect();
+    let selection = node(
+        "one",
+        SelectionExpression::Work {
+            work: work[5000].key.clone(),
+        },
+    );
+    let plan = selection
+        .membership_plan("repo", &input_work(&work), &BTreeMap::new())
+        .unwrap();
+    assert_eq!(plan.facts.len(), 1);
+    assert_eq!(plan.resolve().task_ids(), ["task_5000"]);
 }
 
 #[test]
@@ -491,7 +589,9 @@ fn dashboard_wire_keeps_identity_separate_from_its_query() {
 fn auto_order_follows_the_query_until_touched_then_arrivals_append() {
     let work = query_work();
     let query = Selection::parse("kind:task", None).unwrap();
-    let reading = query.resolve("repo", &work, &BTreeMap::new()).unwrap();
+    let reading = query
+        .resolve("repo", &input_work(&work), &BTreeMap::new())
+        .unwrap();
     let mut layout = Arrangement::automatic(&[]);
     layout.reconcile(&reading);
     assert_eq!(layout.order, reading.members);
@@ -500,7 +600,9 @@ fn auto_order_follows_the_query_until_touched_then_arrivals_append() {
     layout.order = reversed.clone();
     layout.mode = ArrangementMode::Touched;
     let wider = Selection::parse("kind:task or kind:wave", Some(&query)).unwrap();
-    let wider = wider.resolve("repo", &work, &BTreeMap::new()).unwrap();
+    let wider = wider
+        .resolve("repo", &input_work(&work), &BTreeMap::new())
+        .unwrap();
     let arrivals: Vec<_> = wider
         .members
         .iter()
@@ -552,6 +654,9 @@ fn working_tasks_are_the_working_section_and_the_others_have_their_own_queries()
         name: id.into(),
         states: BTreeSet::from([SelectionState::Open, state, section]),
         activity_known: true,
+        activity_states: BTreeSet::new(),
+        inputs: None,
+        support: None,
     })
     .chain([SelectionWork {
         key: key(wave.as_str(), WorkWorkspaceKind::Wave),
@@ -559,11 +664,14 @@ fn working_tasks_are_the_working_section_and_the_others_have_their_own_queries()
         name: "wave".into(),
         states: BTreeSet::new(),
         activity_known: false,
+        activity_states: BTreeSet::new(),
+        inputs: None,
+        support: None,
     }])
     .collect();
     let ids = |selection: Selection| {
         selection
-            .resolve("repo", &work, &BTreeMap::new())
+            .resolve("repo", &input_work(&work), &BTreeMap::new())
             .unwrap()
             .task_ids()
     };
@@ -590,4 +698,151 @@ fn working_tasks_are_the_working_section_and_the_others_have_their_own_queries()
         ids(Selection::parse("state:moving", None).unwrap()),
         ["moving"]
     );
+}
+
+#[test]
+fn typed_fields_keep_sqlite_support_when_activity_is_unavailable() {
+    use super::selection::{FieldObservations, MembershipFacts};
+    let fixture = include_str!("../../../../tests/fixtures/dto/membership_fields.json");
+    let fields: Vec<MembershipFacts> = serde_json::from_str(fixture).unwrap();
+    assert_eq!(
+        serde_json::to_value(&fields).unwrap(),
+        serde_json::from_str::<serde_json::Value>(fixture).unwrap()
+    );
+    assert_eq!(
+        fields[0].parent.support.as_ref().unwrap().revisions.len(),
+        1
+    );
+    assert!(matches!(
+        fields[0].parent.support.as_ref().unwrap().observations,
+        FieldObservations::Sqlite
+    ));
+    assert!(matches!(
+        fields[0].activity.support.as_ref().unwrap().observations,
+        FieldObservations::Unavailable
+    ));
+    let FieldObservations::Captured { evidence } =
+        &fields[1].activity.support.as_ref().unwrap().observations
+    else {
+        panic!("validated empty set")
+    };
+    assert!(evidence.dependencies.is_empty());
+    for field in [
+        "parent",
+        "disposition",
+        "ownership",
+        "publication",
+        "execution",
+        "activity",
+    ] {
+        let mut selected = serde_json::to_value(&fields[0]).unwrap();
+        selected[field].as_object_mut().unwrap().remove("support");
+        assert!(serde_json::from_value::<MembershipFacts>(selected).is_err());
+    }
+}
+
+#[test]
+fn dynamic_wave_membership_consumes_moves_without_recompiling_candidates() {
+    let a = WaveId::new();
+    let b = WaveId::new();
+    let child = WaveId::new();
+    let work: Vec<_> = [
+        (key(a.as_str(), WorkWorkspaceKind::Wave), None),
+        (key(b.as_str(), WorkWorkspaceKind::Wave), None),
+        (
+            key(child.as_str(), WorkWorkspaceKind::Wave),
+            Some(b.clone()),
+        ),
+        (key("task", WorkWorkspaceKind::Task), Some(a.clone())),
+    ]
+    .into_iter()
+    .map(|(key, parent_wave)| SelectionWork {
+        name: key.id.clone(),
+        key,
+        parent_wave,
+        states: BTreeSet::from([SelectionState::Working]),
+        activity_known: true,
+        activity_states: BTreeSet::new(),
+        inputs: None,
+        support: None,
+    })
+    .collect();
+    let selection = node("destination", SelectionExpression::Wave { wave: b.clone() });
+    let mut plan = selection
+        .membership_plan("repo", &input_work(&work), &BTreeMap::new())
+        .unwrap();
+    assert!(plan.resolve().task_ids().is_empty());
+    plan.facts
+        .iter_mut()
+        .find(|fact| fact.work.id == "task")
+        .unwrap()
+        .parent
+        .wave = Some(child);
+    let resolution = plan.resolve();
+    assert_eq!(resolution.task_ids(), ["task"]);
+    assert_eq!(
+        resolution.members.last().unwrap().source,
+        [SelectionId("destination".into())]
+    );
+    plan.facts
+        .iter_mut()
+        .find(|fact| fact.work.id == "task")
+        .unwrap()
+        .parent
+        .wave = None;
+    assert!(plan.resolve().task_ids().is_empty());
+}
+
+fn input_work(work: &[SelectionWork]) -> Vec<SelectionWork> {
+    work.iter()
+        .cloned()
+        .map(|mut item| {
+            if item.key.kind == WorkWorkspaceKind::Task && item.inputs.is_none() {
+                item.activity_states = item
+                    .states
+                    .iter()
+                    .filter(|state| {
+                        matches!(
+                            state,
+                            SelectionState::Available
+                                | SelectionState::Busy
+                                | SelectionState::Blocked
+                        )
+                    })
+                    .copied()
+                    .collect();
+                let states = &item.states;
+                let owned = states.contains(&SelectionState::Working)
+                    || states.contains(&SelectionState::Autonomous);
+                item.inputs = Some(super::selection::TaskMembershipInputs {
+                    disposition: super::selection::TaskDisposition {
+                        completed: states.contains(&SelectionState::Done),
+                        abandoned: false,
+                        completed_at: None,
+                        planning_state: None,
+                        completion_request: None,
+                    },
+                    ownership: owned.then_some(crate::durable::TaskOwner {
+                        person: None,
+                        person_key: None,
+                        person_id: None,
+                        machine: crate::durable::MachineRef {
+                            id: None,
+                            label: None,
+                        },
+                    }),
+                    publication: states.contains(&SelectionState::Open),
+                    execution: crate::durable::TaskExecution {
+                        checkout: owned || states.contains(&SelectionState::Idle),
+                        graph_running: states.contains(&SelectionState::Moving)
+                            || states.contains(&SelectionState::Shipping),
+                        carrier_running: false,
+                        held: states.contains(&SelectionState::Active),
+                        approved: states.contains(&SelectionState::Shipping),
+                    },
+                });
+            }
+            item
+        })
+        .collect()
 }

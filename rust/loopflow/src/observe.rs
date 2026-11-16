@@ -9,6 +9,8 @@ use std::sync::{Arc, LazyLock, Mutex, Weak};
 use std::time::{Duration, SystemTime};
 
 use crate::journal::OsProcess;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum Fact {
@@ -160,7 +162,8 @@ const TURN_HINTED: Duration = Duration::from_secs(1);
 
 #[derive(Debug)]
 struct Entry {
-    answer: Option<Answer>,
+    id: String,
+    answer: Answer,
     revision: u64,
     checked: SystemTime,
     used: SystemTime,
@@ -168,9 +171,16 @@ struct Entry {
 
 type SharedEntry = Arc<Mutex<Entry>>;
 
-/// The entries and revisions read by one invocation, including bounded workers.
+#[derive(Debug, Clone)]
+struct Captured {
+    entry: SharedEntry,
+    token: u64,
+    answer: Arc<Answer>,
+}
+
+/// The answers and tokens read by one invocation, including bounded workers.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct Dependencies(Arc<Mutex<HashMap<Fact, (SharedEntry, u64)>>>);
+pub(crate) struct Dependencies(Arc<Mutex<HashMap<Fact, Captured>>>);
 
 impl Dependencies {
     pub(crate) fn changed(&self) -> bool {
@@ -178,18 +188,81 @@ impl Dependencies {
             .lock()
             .expect("observed dependencies")
             .values()
-            .any(|(entry, revision)| entry.lock().expect("observed fact").revision != *revision)
+            .any(|captured| {
+                captured.entry.lock().expect("observed fact").revision != captured.token
+            })
     }
 }
 
-#[derive(Debug, Default)]
+/// A coherent capture from one ephemeral observation source. IDs reveal no paths.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ObservationEvidence {
+    pub source: String,
+    pub validated_at: u64,
+    pub dependencies: Vec<ObservationDependency>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ObservationDependency {
+    pub fact: String,
+    pub token: u64,
+}
+
+#[derive(Debug)]
 pub(crate) struct Cache {
+    incarnation: String,
+    // Serializes answer installation, eviction and validation, not observation I/O.
+    clock: Mutex<u64>,
     entries: Mutex<HashMap<Fact, SharedEntry>>,
+}
+
+impl Default for Cache {
+    fn default() -> Self {
+        Self {
+            incarnation: uuid::Uuid::new_v4().to_string(),
+            clock: Mutex::new(0),
+            entries: Mutex::new(HashMap::new()),
+        }
+    }
 }
 
 static SHARED: LazyLock<Mutex<Weak<Cache>>> = LazyLock::new(Mutex::default);
 
 impl Cache {
+    pub(crate) fn incarnation(&self) -> &str {
+        &self.incarnation
+    }
+
+    /// Validate the whole consumed set while answer replacement is excluded.
+    pub(crate) fn evidence(&self, dependencies: &Dependencies) -> Option<ObservationEvidence> {
+        let captured = dependencies.0.lock().expect("observed dependencies");
+        let clock = self.clock.lock().expect("observation clock");
+        let entries = self.entries.lock().expect("observation cache");
+        let mut tokens = Vec::with_capacity(captured.len());
+        for (fact, captured) in captured.iter() {
+            if !entries
+                .get(fact)
+                .is_some_and(|current| Arc::ptr_eq(current, &captured.entry))
+            {
+                return None;
+            }
+            let entry = captured.entry.lock().expect("observed fact");
+            if entry.revision != captured.token {
+                return None;
+            }
+            tokens.push(ObservationDependency {
+                fact: entry.id.clone(),
+                token: captured.token,
+            });
+        }
+        tokens.sort_by(|a, b| a.fact.cmp(&b.fact));
+        Some(ObservationEvidence {
+            source: self.incarnation.clone(),
+            validated_at: *clock,
+            dependencies: tokens,
+        })
+    }
+
     pub(crate) fn shared() -> Arc<Self> {
         let mut shared = SHARED.lock().expect("observation cache");
         if let Some(cache) = shared.upgrade() {
@@ -211,6 +284,7 @@ impl Cache {
 
     fn refresh(&self, source: Source) {
         let entries = {
+            let _clock = self.clock.lock().expect("observation clock");
             let mut entries = self.entries.lock().expect("observation cache");
             entries.retain(|_, entry| {
                 Arc::strong_count(entry) > 1
@@ -226,16 +300,24 @@ impl Cache {
         };
         for (fact, entry) in entries {
             if entry.try_lock().map_or(true, |entry| {
-                entry.answer.is_none()
-                    || entry.checked.elapsed().unwrap_or_default() < fact.interval()
+                entry.checked.elapsed().unwrap_or_default() < fact.interval()
             }) {
                 continue;
             }
             let answer = fact.observe();
+            let mut clock = self.clock.lock().expect("observation clock");
+            let entries = self.entries.lock().expect("observation cache");
+            if !entries
+                .get(&fact)
+                .is_some_and(|current| Arc::ptr_eq(current, &entry))
+            {
+                continue;
+            }
             let mut entry = entry.lock().expect("observed fact");
-            if entry.answer.as_ref() != Some(&answer) {
-                entry.answer = Some(answer);
-                entry.revision += 1;
+            if entry.answer != answer {
+                entry.answer = answer;
+                *clock = clock.checked_add(1).expect("observation clock exhausted");
+                entry.revision = *clock;
             }
             entry.checked = SystemTime::now();
         }
@@ -274,12 +356,15 @@ impl Cache {
             entries: Mutex::new(HashMap::from([(
                 Fact::RawConversations,
                 Arc::new(Mutex::new(Entry {
-                    answer: Some(Answer::Raw(raw)),
-                    revision: 0,
+                    id: uuid::Uuid::new_v4().to_string(),
+                    answer: Answer::Raw(raw),
+                    revision: 1,
                     checked: SystemTime::now(),
                     used: SystemTime::now(),
                 })),
             )])),
+            clock: Mutex::new(1),
+            ..Self::default()
         })
     }
 
@@ -289,6 +374,7 @@ impl Cache {
             Some(Reading {
                 cache: self.clone(),
                 dependencies: dependencies.clone(),
+                fields: Vec::new(),
             }),
             read,
         );
@@ -296,39 +382,56 @@ impl Cache {
     }
 
     fn read(&self, fact: Fact, dependencies: &Dependencies) -> Answer {
-        let entry = self
-            .entries
+        // One captured answer per invocation, also shared by inherited workers.
+        if let Some(captured) = dependencies
+            .0
             .lock()
-            .expect("observation cache")
+            .expect("observed dependencies")
+            .get(&fact)
+        {
+            return captured.answer.as_ref().clone();
+        }
+        let entry = {
+            let entries = self.entries.lock().expect("observation cache");
+            entries.get(&fact).cloned()
+        };
+        // Retaining an existing entry keeps eviction from removing it while
+        // installation waits. Only absent entries need observation I/O.
+        let initial = entry.is_none().then(|| scope(None, || fact.observe()));
+        let mut captured = dependencies.0.lock().expect("observed dependencies");
+        // Another worker may have installed this invocation's first answer
+        // while we observed. Every worker consumes that same captured answer.
+        if let Some(captured) = captured.get(&fact) {
+            return captured.answer.as_ref().clone();
+        }
+        let mut clock = self.clock.lock().expect("observation clock");
+        let mut entries = self.entries.lock().expect("observation cache");
+        let entry = entries
             .entry(fact.clone())
             .or_insert_with(|| {
+                *clock = clock.checked_add(1).expect("observation clock exhausted");
                 Arc::new(Mutex::new(Entry {
-                    answer: None,
-                    revision: 0,
+                    id: uuid::Uuid::new_v4().to_string(),
+                    answer: initial.expect("absent fact observed before installation"),
+                    revision: *clock,
                     checked: SystemTime::now(),
                     used: SystemTime::now(),
                 }))
             })
             .clone();
         let mut observed = entry.lock().expect("observed fact");
-        if observed.answer.is_none() {
-            observed.answer = Some(fact.observe());
-            observed.checked = SystemTime::now();
-        }
         observed.used = SystemTime::now();
         let revision = observed.revision;
-        let answer = observed
-            .answer
-            .clone()
-            .expect("fact observed before reading");
+        let answer = observed.answer.clone();
         drop(observed);
-        // Keep the first revision so a change during the reading stays visible.
-        dependencies
-            .0
-            .lock()
-            .expect("observed dependencies")
-            .entry(fact)
-            .or_insert((entry, revision));
+        captured.insert(
+            fact,
+            Captured {
+                entry,
+                token: revision,
+                answer: Arc::new(answer.clone()),
+            },
+        );
         answer
     }
 }
@@ -337,6 +440,7 @@ impl Cache {
 struct Reading {
     cache: Arc<Cache>,
     dependencies: Dependencies,
+    fields: Vec<Dependencies>,
 }
 thread_local! {
     static READING: RefCell<Option<Reading>> = const { RefCell::new(None) };
@@ -353,6 +457,31 @@ fn scope<T>(reading: Option<Reading>, read: impl FnOnce() -> T) -> T {
     read()
 }
 
+/// A field records consumed inputs without creating another answer cache.
+#[derive(Debug, Clone)]
+pub(crate) struct FieldCapture {
+    cache: Arc<Cache>,
+    dependencies: Dependencies,
+}
+
+impl FieldCapture {
+    pub(crate) fn evidence(&self) -> Option<ObservationEvidence> {
+        self.cache.evidence(&self.dependencies)
+    }
+}
+
+pub(crate) fn field<T>(read: impl FnOnce() -> T) -> (T, Option<FieldCapture>) {
+    let Some(mut reading) = READING.with(|reading| reading.borrow().clone()) else {
+        return (read(), None);
+    };
+    let capture = FieldCapture {
+        cache: reading.cache.clone(),
+        dependencies: Dependencies::default(),
+    };
+    reading.fields.push(capture.dependencies.clone());
+    (scope(Some(reading), read), Some(capture))
+}
+
 pub(crate) fn active() -> bool {
     READING.with(|reading| reading.borrow().is_some())
 }
@@ -365,7 +494,28 @@ pub(crate) fn inherit<T>(read: impl FnOnce() -> T) -> impl FnOnce() -> T {
 fn read(fact: Fact) -> Answer {
     let reading = READING.with(|reading| reading.borrow().clone());
     match reading {
-        Some(reading) => reading.cache.read(fact, &reading.dependencies),
+        Some(reading) => {
+            let answer = reading.cache.read(fact.clone(), &reading.dependencies);
+            if reading.fields.is_empty() {
+                return answer;
+            }
+            let captured = reading
+                .dependencies
+                .0
+                .lock()
+                .expect("observed dependencies")
+                .get(&fact)
+                .expect("read captured its answer")
+                .clone();
+            for field in &reading.fields {
+                field
+                    .0
+                    .lock()
+                    .expect("field dependencies")
+                    .insert(fact.clone(), captured.clone());
+            }
+            answer
+        }
         None => fact.observe(),
     }
 }
@@ -517,6 +667,160 @@ mod tests {
         for source in [Source::Local, Source::Git, Source::Github] {
             cache.refresh(source);
         }
+    }
+
+    #[test]
+    fn fields_validate_only_their_consumed_inputs_and_share_invocation_answers() {
+        let dir = tempfile::tempdir().unwrap();
+        let activity = dir.path().join("activity");
+        let other = dir.path().join("other");
+        std::fs::write(&activity, "busy").unwrap();
+        std::fs::write(&other, "stable").unwrap();
+        let cache = Arc::new(Cache::default());
+        let ((invalid, independent, empty), invocation) = cache.capture(|| {
+            let (_, invalid) = super::field(|| read_to_string(&activity).unwrap());
+            let (_, independent) = super::field(|| {
+                std::thread::scope(|scope| {
+                    scope
+                        .spawn(inherit(|| read_to_string(&other).unwrap()))
+                        .join()
+                        .unwrap()
+                })
+            });
+            let (_, empty) = super::field(|| ());
+            std::fs::write(&activity, "idle").unwrap();
+            refresh(&cache);
+            let (repeated, repeated_capture) = super::field(|| read_to_string(&activity).unwrap());
+            assert_eq!(repeated, "busy", "a field must reuse the invocation answer");
+            assert!(repeated_capture.unwrap().evidence().is_none());
+            (invalid.unwrap(), independent.unwrap(), empty.unwrap())
+        });
+        assert!(cache.evidence(&invocation).is_none());
+        assert!(invalid.evidence().is_none());
+        let supported = independent.evidence().unwrap();
+        assert_eq!(supported.dependencies.len(), 1);
+        assert!(empty.evidence().unwrap().dependencies.is_empty());
+        let (_, bare) = super::field(|| ());
+        assert!(bare.is_none(), "bare reads cannot certify external absence");
+    }
+
+    #[test]
+    fn a_capture_reuses_answers_across_changes_and_inherited_workers() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("private-file");
+        std::fs::write(&path, "before").unwrap();
+        let cache = Arc::new(Cache::default());
+        let (_, dependencies) = cache.capture(|| {
+            assert_eq!(read_to_string(&path).unwrap(), "before");
+            std::fs::write(&path, "after").unwrap();
+            refresh(&cache);
+            assert_eq!(read_to_string(&path).unwrap(), "before");
+            std::thread::scope(|scope| {
+                assert_eq!(
+                    scope
+                        .spawn(inherit(|| read_to_string(&path).unwrap()))
+                        .join()
+                        .unwrap(),
+                    "before"
+                );
+            });
+        });
+        assert!(dependencies.changed());
+        assert!(
+            cache.evidence(&dependencies).is_none(),
+            "mixed-time computation cannot normalize"
+        );
+        let (answer, dependencies) = cache.capture(|| read_to_string(&path).unwrap());
+        assert_eq!(answer, "after");
+        let evidence = cache.evidence(&dependencies).unwrap();
+        assert_eq!(evidence.source, cache.incarnation());
+        assert!(!serde_json::to_string(&evidence)
+            .unwrap()
+            .contains("private-file"));
+        // A later change doesn't mutate captured historical evidence.
+        std::fs::write(&path, "later").unwrap();
+        refresh(&cache);
+        let (_, later) = cache.capture(|| read_to_string(&path).unwrap());
+        let later = cache.evidence(&later).unwrap();
+        assert!(later.validated_at > evidence.validated_at);
+        assert_eq!(later.dependencies[0].fact, evidence.dependencies[0].fact);
+        assert!(later.dependencies[0].token > evidence.dependencies[0].token);
+    }
+
+    #[test]
+    fn held_observation_io_does_not_block_an_unrelated_inherited_read() {
+        use std::os::unix::fs::PermissionsExt;
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let entered = directory.path().join("entered");
+        let release = directory.path().join("release");
+        assert!(std::process::Command::new("mkfifo")
+            .args([&entered, &release])
+            .status()
+            .unwrap()
+            .success());
+        let executable = directory.path().join("gh");
+        std::fs::write(
+            &executable,
+            "#!/bin/sh\nprintf started > entered\n/bin/cat release >/dev/null\nprintf answer\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let _path = crate::lf::commands::graph::EnvVarGuard::set(
+            "PATH",
+            &format!(
+                "{}:{}",
+                directory.path().display(),
+                std::env::var("PATH").unwrap()
+            ),
+        );
+        let file = directory.path().join("file");
+        std::fs::write(&file, "independent").unwrap();
+        let cache = Arc::new(Cache::default());
+        cache.capture(|| {
+            std::thread::scope(|scope| {
+                let held = scope.spawn(inherit(|| {
+                    super::github(directory.path(), &["pr", "checks"]).unwrap()
+                }));
+                assert_eq!(std::fs::read_to_string(&entered).unwrap(), "started");
+                let (sender, arrived) = std::sync::mpsc::channel();
+                let sibling = scope.spawn(inherit(move || {
+                    sender.send(read_to_string(&file).unwrap()).unwrap()
+                }));
+                let answer = arrived.recv_timeout(Duration::from_secs(5));
+                // Release even on failure, so the fixture always joins its command.
+                std::fs::write(&release, "release").unwrap();
+                assert_eq!(held.join().unwrap().stdout, b"answer");
+                sibling.join().unwrap();
+                assert_eq!(answer.unwrap(), "independent");
+            })
+        });
+    }
+
+    #[test]
+    fn eviction_never_reuses_tokens_and_replacement_has_another_source() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("file");
+        std::fs::write(&path, "same").unwrap();
+        let cache = Arc::new(Cache::default());
+        let (_, dependencies) = cache.capture(|| read_to_string(&path).unwrap());
+        let before = cache.evidence(&dependencies).unwrap();
+        drop(dependencies);
+        for entry in cache.entries.lock().unwrap().values() {
+            entry.lock().unwrap().used = SystemTime::now() - Duration::from_secs(301);
+        }
+        cache.refresh(Source::Local);
+        assert!(cache.entries.lock().unwrap().is_empty());
+        let (_, dependencies) = cache.capture(|| read_to_string(&path).unwrap());
+        let after = cache.evidence(&dependencies).unwrap();
+        assert_eq!(before.source, after.source);
+        assert!(after.dependencies[0].token > before.dependencies[0].token);
+        let replacement = Arc::new(Cache::default());
+        let (_, dependencies) = replacement.capture(|| read_to_string(&path).unwrap());
+        assert_ne!(
+            replacement.evidence(&dependencies).unwrap().source,
+            before.source
+        );
     }
 
     #[test]
@@ -723,15 +1027,18 @@ mod tests {
         let started = crate::journal::process_started_at(pid).unwrap().unwrap();
         let cache = Arc::new(Cache::default());
         let (before, dependencies) = cache.capture(|| process(pid, started));
+        let live = cache.evidence(&dependencies).unwrap();
         child.kill().unwrap();
         child.wait().unwrap();
         assert_eq!(before, ProcessIdentityEvidence::Live);
         assert_eq!(process(pid, started), ProcessIdentityEvidence::Dead);
         refresh(&cache);
         assert!(dependencies.changed());
-        assert_eq!(
-            cache.capture(|| process(pid, started)).0,
-            ProcessIdentityEvidence::Dead
-        );
+        let (after, dependencies) = cache.capture(|| process(pid, started));
+        assert_eq!(after, ProcessIdentityEvidence::Dead);
+        let dead = cache.evidence(&dependencies).unwrap();
+        assert_eq!(live.source, dead.source);
+        assert_eq!(live.dependencies[0].fact, dead.dependencies[0].fact);
+        assert!(dead.dependencies[0].token > live.dependencies[0].token);
     }
 }

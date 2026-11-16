@@ -52,7 +52,30 @@ struct WaveStandupTests {
 
     private func standup(_ tasks: [RoadmapTask], closed: [RoadmapTask]? = nil, doneDays: Int = 7,
                          github: [String: GitHubPerson] = [:]) -> WaveStandup {
-        WaveStandup(tasks: tasks, closed: closed ?? tasks, doneDays: doneDays, now: now, github: github)
+        WaveStandup(tasks: tasks, closed: closed ?? tasks, doneDays: doneDays, now: now, github: github,
+            facts: Dictionary((tasks + (closed ?? [])).map { task in
+                let section: [WorkSelectionState] = switch task.section {
+                case .backlog: [.backlog]
+                case .working: [.working]
+                case .autonomous: [.autonomous]
+                case .done: [.done]
+                case .abandoned: []
+                }
+                return (task.id, fact(task.id, lifecycle: .init(completedAt: task.task.completedAt,
+                    states: section, known: true, support: dateSupport), activity: Array(task.selectionStates)))
+            }, uniquingKeysWith: { first, _ in first }))
+    }
+
+    private var dateSupport: WorkMembershipPlan.FieldSupport {
+        .init(machine: "machine", epoch: "epoch", schema: UInt32(ServerProtocol.revision),
+            derivation: "work.lifecycle/2", revisions: ["planning": 9], observations: .sqlite)
+    }
+
+    private func fact(_ id: String, lifecycle: WorkMembershipPlan.LifecycleFact,
+                      activity: [WorkSelectionState] = []) -> WorkMembershipPlan.Facts {
+        membershipFact(work: .init(repository: "repo", kind: .task, id: id), name: id,
+            parent: .init(wave: nil, support: nil), lifecycle: lifecycle,
+            activity: .init(states: activity, known: true, support: nil))
     }
 
     @Test func columnsAreRustSections() throws {
@@ -123,11 +146,39 @@ struct WaveStandupTests {
         #expect(standup.text(heading: [], section: .done).hasSuffix("Done 0]\n  last 7 days\n  None"))
     }
 
+    @Test func doneWindowKeepsUnknownCompletionDatesIncomplete() throws {
+        let completed = try task("just-completed", section: "working", owner: "Person")
+        let board = WaveStandup(tasks: [completed], closed: [completed], doneDays: 7, now: now, github: [:],
+            facts: [completed.id: fact(completed.id, lifecycle: .init(completedAt: nil, states: [.done], known: true, support: nil))])
+        #expect(board.working.isEmpty)
+        #expect(board.count(.done) == nil)
+        #expect(board.text(heading: [], section: .done).contains("Completion dates await confirmation"))
+        let allAges = WaveStandup(tasks: [completed], closed: [completed], doneDays: 0, now: now, github: [:],
+            facts: [completed.id: fact(completed.id, lifecycle: .init(completedAt: nil, states: [.done], known: true, support: nil))])
+        #expect(allAges.count(.done) == 1)
+    }
+
+    @Test func datedBoardUsesProjectedCompletionInsteadOfOldPage() throws {
+        let old = try task("a", section: "done", completedAt: "2026-10-01T09:00:00Z")
+        let support = WorkMembershipPlan.FieldSupport(machine: "machine", epoch: "epoch", schema: UInt32(ServerProtocol.revision),
+            derivation: "work.lifecycle/2", revisions: ["planning": 9], observations: .sqlite)
+        let current = WorkMembershipPlan.LifecycleFact(completedAt: "2026-10-25T09:00:00Z", states: [.done], known: true, support: support)
+        let board = WaveStandup(tasks: [old], closed: [old], doneDays: 7, now: now, github: [:],
+            facts: ["a": fact("a", lifecycle: current)])
+        #expect(board.done.map(\.id) == ["a"])
+        #expect(board.count(.done) == 1)
+        let pending = WaveStandup(tasks: [old], closed: [old], doneDays: 7, now: now, github: [:],
+            facts: ["a": fact("a", lifecycle: .init(completedAt: nil, states: [.done], known: true, support: nil))])
+        #expect(pending.done.isEmpty)
+        #expect(pending.count(.done) == nil)
+    }
+
     @Test func boardRendersHeaderColumnsAndMetrics() throws {
         let roadmap = try roadmap()
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Rendering is passive") },
                               repoPath: roadmap.wave.repo)
         model.applyFixture(roadmap: .available(try snapshot()), waves: .available([]), workActivity: .loading, repos: [])
+        model.applySelectionPlans([fixtureInventoryPlan(try self.snapshot())], reason: "")
         let board = WaveStandupBoard(model: model, view: .wave(roadmap.wave.id))
         #expect(try board.inspect().find(viewWithAccessibilityIdentifier: "wave-title").text().string() == roadmap.wave.displayName)
         #expect(try board.inspect().find(viewWithAccessibilityIdentifier: "wave-metric-headline").text().string()
@@ -151,6 +202,7 @@ struct WaveStandupTests {
         let repo = try roadmap().wave.repo
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Rendering is passive") }, repoPath: repo)
         model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        model.applySelectionPlans([fixtureInventoryPlan(try self.snapshot())], reason: "")
         let board = WaveStandupBoard(model: model, view: .repository)
         #expect(try board.inspect().find(viewWithAccessibilityIdentifier: "wave-title").text().string() == model.repositoryName)
         // Unstarted backlog from every Wave, and none, is on the repository's board.
@@ -198,6 +250,7 @@ struct WaveStandupTests {
         #expect(!conversation.multiplexer.collapsedPaneIds.contains(pane.id))
         try DesktopAction.perform(DesktopActionRequest(repository: "repo", window: "window", pane: nil, action: "show",
                                                        args: ["part": "board"]), model: model, workspaces: registry)
+        model.applySelectionPlans([fixtureInventoryPlan(try self.snapshot())], reason: "")
         let board = WaveStandupBoard(model: model, view: view)
         try board.inspect().find(viewWithAccessibilityIdentifier: "show-pane-tiles").button().tap()
         #expect(model.desktopViewParts(repository: "repo").map(\.hidden) == [false, false, false])

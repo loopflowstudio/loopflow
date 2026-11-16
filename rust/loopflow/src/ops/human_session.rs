@@ -1568,20 +1568,20 @@ pub(crate) async fn new_thread(
     let _creation_lock =
         crate::journal::request::spawn_blocking(move || crate::engine::creation::lock(&request))
             .await??;
-    store.sqlite.check_creation(&identity)?;
+    store.sqlite.claim_creation(&identity)?;
     // Serialize with other Session launches and new-thread requests.
     let lock_id = id.to_string();
     let launch_lock =
         crate::journal::request::spawn_blocking(move || lock_session_process(&lock_id)).await??;
     if let Some(receipt) = store.sqlite.creation_receipt(request_id)? {
-        if receipt.disposition == crate::store::sqlite::creation::RecoveryDisposition::Inspect {
+        if receipt.disposition == crate::store::sqlite::operations::RecoveryDisposition::Inspect {
             return Err(crate::engine::creation::unknown(&receipt).into());
         }
         let next = store
             .session(id)
             .await?
             .ok_or_else(|| session_not_found(id))?;
-        if receipt.disposition == crate::store::sqlite::creation::RecoveryDisposition::Continue {
+        if receipt.disposition == crate::store::sqlite::operations::RecoveryDisposition::Continue {
             // The input and receipt committed together, before filesystem publication.
             // Only that exact input may finish publishing; never replace a newer one.
             if next.artifact_key != receipt.artifact_key {
@@ -1920,21 +1920,18 @@ pub(crate) async fn rename(
     title: &str,
     source: SessionTitleSource,
 ) -> Result<SessionRecord> {
-    let session = find_session(store, session_id, false)
-        .await?
-        .ok_or_else(|| session_not_found(session_id))?;
-    let title = crate::naming::validate_session_title(title)
-        .map_err(|error| anyhow!("cannot rename Session {session_id}: {error}"))?;
+    let session = session_by_id(store, session_id).await?;
+    let id = session
+        .as_ref()
+        .map_or(session_id, |session| session.id.as_str());
     let title_source = match source {
         SessionTitleSource::Human => crate::session::TitleSource::Human,
         SessionTitleSource::Generated => crate::session::TitleSource::Generated,
         SessionTitleSource::Unavailable => bail!("unavailable is not a title source"),
     };
-    store
-        .rename_session(&session.id, title, title_source)
-        .await?;
+    store.rename_session(id, title, title_source).await?;
     let session = store
-        .session(&session.id)
+        .session(id)
         .await?
         .ok_or_else(|| session_not_found(session_id))?;
     surface(store, &session).await

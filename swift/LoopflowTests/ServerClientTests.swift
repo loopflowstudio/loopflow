@@ -160,6 +160,144 @@ struct ServerClientTests {
         #expect(try await ServerClient.read(.repoPath(id: "repo_1"), location: peer.location) == "/src/again")
     }
 
+    @Test func observationSourceComesFromTheCurrentWelcomeAcrossSharedConsumers() async throws {
+        let first = try ServerPeer()
+        let second = try ServerPeer()
+        first.serve(observations: "first-observer") { _, _ in true }
+        second.serve(observations: "second-observer") { _, _ in true }
+        let attempts = Mutex(0)
+        let connection = MachineConnection {
+            let peer = attempts.increment() == 1 ? first : second
+            return try await ServerLink.open(.unix(path: peer.location.path()))
+        }
+        let old = try await connection.link()
+        let sibling = try await connection.link()
+        #expect(old === sibling)
+        #expect(connection.observationSource == "first-observer")
+        await old.close()
+        #expect(connection.observationSource == nil)
+        let current = try await connection.link()
+        #expect(connection.observationSource == "second-observer")
+        #expect(!connection.isCurrent(old))
+        #expect(connection.isCurrent(current))
+        // An old close or delayed welcome cannot elect its source again.
+        connection.disconnected(old)
+        #expect(!connection.establish(old, attempt: UUID()))
+        #expect(connection.observationSource == "second-observer")
+        #expect(try await connection.link() === current)
+        await current.close()
+        #expect(connection.observationSource == nil)
+    }
+
+    @Test func readingCannotReplaceTheNegotiatedObservationSource() async throws {
+        let peer = try ServerPeer()
+        peer.serve(observations: "current-observer") { message, respond in
+            guard message["type"] as? String == "subscribe" else { return true }
+            respond(["type": "reading", "id": message["id"]!, "checkpoint": "delayed",
+                "frame": ["answers": NSNull(), "unavailable": NSNull(), "body": "old",
+                    "stamp": ["machine": "machine", "epoch": "epoch", "schema": ServerProtocol.revision,
+                        "query": "query", "complete": true,
+                        "revisions": ["planning": 1, "sessions": 1, "graphs": 1, "processes": 1, "usage": 1],
+                        "observations": ["source": "old-observer", "validated_at": 9, "dependencies": []]]]])
+            return true
+        }
+        let connection = MachineConnection { try await ServerLink.open(.unix(path: peer.location.path())) }
+        let watch = ServerLink.subscribe(.allPlans, connection: connection) { update -> ReceivedReading? in
+            guard case .reading(let frame) = update else { return nil }
+            return frame
+        }
+        defer { watch.cancel() }
+        var readings = watch.updates.makeAsyncIterator()
+        do {
+            _ = try await readings.next()
+            Issue.record("A reading elected an obsolete source")
+        } catch {
+            #expect(error.localizedDescription.contains("unnegotiated observation source"))
+        }
+        #expect(connection.observationSource == "current-observer")
+        let link = try await connection.link()
+        await link.close()
+    }
+
+    @Test func receiptWatchWaitsAcrossFailedOpensAndLossBeforeItsFirstReading() async throws {
+        let peer = try ServerPeer()
+        let attempts = Mutex(0)
+        peer.serve { message, respond in
+            guard message["type"] as? String == "subscribe" else { return true }
+            respond(["type": "response", "id": message["id"]!, "trace_id": "trace", "result": NSNull()])
+            // Lose this link before any baseline. The receipt watch still owns
+            // recovery; the Machine connection owns reconnection.
+            peer.serve { message, respond in
+                if message["type"] as? String == "subscribe" {
+                    #expect(message["resume"] is NSNull)
+                    respond(["type": "response", "id": message["id"]!, "trace_id": "trace", "result": NSNull()])
+                } else if message["type"] as? String == "checkpoint" {
+                    respond(["type": "reading", "id": message["id"]!, "checkpoint": "current",
+                        "frame": ["answers": message["checkpoint"]!, "stamp": NSNull(), "unavailable": NSNull(), "body": "reconnected"]])
+                }
+                return true
+            }
+            return false
+        }
+        let connection = MachineConnection {
+            if attempts.increment() <= 2 { throw ServerConnectionUnavailable(RegistryQueryError("Offline")) }
+            return try await ServerLink.open(.unix(path: peer.location.path()))
+        }
+        let watch = ServerLink.subscribe(.operationGet(requestID: "original"), reconnect: true, connection: connection) { update -> ReceivedReading? in
+            guard case .reading(let frame) = update else { return nil }
+            return frame
+        }
+        defer { watch.cancel() }
+        var connections = connection.changes().makeAsyncIterator()
+        while !connection.isWaiting { _ = await connections.next() }
+        #expect(connection.isWaiting)
+        var frames = watch.updates.makeAsyncIterator()
+        let frame = try #require(try await frames.next())
+        #expect(try RawJSON(frame.bytes).fields()["body"]?.decode(String.self) == "reconnected")
+        #expect(attempts.get() == 4)
+        #expect(!connection.isWaiting)
+    }
+
+    @Test func threeHeldReceiptsShareOneMachineReconnectAndCancelIndependently() async throws {
+        let peer = try ServerPeer()
+        let attempts = Mutex(0)
+        let (opened, signal) = AsyncStream<Void>.makeStream()
+        let (release, allow) = AsyncStream<Void>.makeStream()
+        let connection = MachineConnection {
+            if attempts.increment() == 1 { throw ServerConnectionUnavailable(RegistryQueryError("Offline")) }
+            signal.yield(())
+            var gate = release.makeAsyncIterator()
+            _ = await gate.next()
+            return try await ServerLink.open(.unix(path: peer.location.path()))
+        }
+        peer.serve { message, respond in
+            if message["type"] as? String == "subscribe" {
+                respond(["type": "reading", "id": message["id"]!, "checkpoint": "current",
+                    "frame": ["answers": NSNull(), "stamp": NSNull(), "unavailable": NSNull(), "body": "recovered"]])
+            }
+            return true
+        }
+        let watches = (0..<3).map { index in
+            ServerLink.subscribe(.operationGet(requestID: "held-\(index)"), reconnect: true, connection: connection) { update -> ReceivedReading? in
+                guard case .reading(let frame) = update else { return nil }
+                return frame
+            }
+        }
+        defer { for watch in watches { watch.cancel() }; allow.finish(); signal.finish() }
+        var opens = opened.makeAsyncIterator()
+        _ = await opens.next()
+        #expect(connection.isWaiting)
+        watches[0].cancel()
+        allow.yield(())
+        for watch in watches.dropFirst() {
+            var frames = watch.updates.makeAsyncIterator()
+            let frame = try #require(try await frames.next())
+            #expect(try RawJSON(frame.bytes).fields()["body"]?.decode(String.self) == "recovered")
+            #expect(!connection.isWaiting)
+        }
+        #expect(attempts.get() == 2)
+    }
+
     @Test func disconnectedWatchResumesItsBaselineAndNewestConfirmation() async throws {
         let peer = try ServerPeer()
         peer.serve { message, respond in
@@ -171,14 +309,14 @@ struct ServerClientTests {
             let id = message["id"]!
             respond(["type": "response", "id": id, "trace_id": "trace", "result": NSNull()])
             respond(["type": "reading", "id": id, "checkpoint": "received-baseline",
-                     "frame": ["answers": NSNull(), "unavailable": NSNull(), "body": "baseline"]])
+                     "frame": ["answers": NSNull(), "stamp": NSNull(), "unavailable": NSNull(), "body": "baseline"]])
             return true
         }
         let subscription = ServerClient.subscribe(.allPlans, location: peer.location)
         var frames = subscription.lines.makeAsyncIterator()
         defer { Task { await subscription.cancel() } }
         let baseline = try #require(try await frames.next())
-        #expect(String(decoding: baseline, as: UTF8.self).contains("baseline"))
+        #expect(String(decoding: baseline.bytes, as: UTF8.self).contains("baseline"))
         let resumed = Mutex(false)
         peer.serve { message, respond in
             switch message["type"] as? String {
@@ -191,7 +329,7 @@ struct ServerClientTests {
                 #expect(resumed.get())
                 #expect(message["checkpoint"] as? Int == 100)
                 respond(["type": "reading", "id": message["id"]!, "checkpoint": "confirmed-baseline",
-                         "frame": ["answers": message["checkpoint"]!, "unavailable": NSNull(), "body": "confirmed"]])
+                         "frame": ["answers": message["checkpoint"]!, "stamp": NSNull(), "unavailable": NSNull(), "body": "confirmed"]])
             case "cancel": return false
             default: break
             }
@@ -200,7 +338,7 @@ struct ServerClientTests {
         // Only the newest confirmation needs replay; it answers every earlier request.
         for id in 1...100 { subscription.send(Data("{\"id\":\(id)}".utf8)) }
         let confirmed = try #require(try await frames.next())
-        let value = try JSONSerialization.jsonObject(with: confirmed) as! [String: Any]
+        let value = try JSONSerialization.jsonObject(with: confirmed.bytes) as! [String: Any]
         #expect(value["body"] as? String == "confirmed")
         #expect(value["answers"] as? Int == 100)
         await subscription.cancel()
@@ -213,7 +351,7 @@ struct ServerClientTests {
             let id = message["id"]!
             respond(["type": "response", "id": id, "trace_id": "trace", "result": NSNull()])
             respond(["type": "reading", "id": id, "checkpoint": "queued-baseline",
-                     "frame": ["answers": NSNull(), "unavailable": NSNull(), "body": "baseline"]])
+                     "frame": ["answers": NSNull(), "stamp": NSNull(), "unavailable": NSNull(), "body": "baseline"]])
             return false
         }
         let subscription = ServerClient.subscribe(.allPlans, location: peer.location)
@@ -228,7 +366,7 @@ struct ServerClientTests {
                 resumed.set(true) // The unchanged baseline is omitted on this connection.
             case "checkpoint":
                 respond(["type": "reading", "id": message["id"]!, "checkpoint": "queued-baseline",
-                         "frame": ["answers": message["checkpoint"]!, "unavailable": NSNull(), "body": "baseline"]])
+                         "frame": ["answers": message["checkpoint"]!, "stamp": NSNull(), "unavailable": NSNull(), "body": "baseline"]])
             case "cancel": return false
             default: break
             }
@@ -240,12 +378,15 @@ struct ServerClientTests {
         try #require(resumed.get())
         var frames = subscription.lines.makeAsyncIterator()
         let baseline = try #require(try await frames.next())
-        let value = try JSONSerialization.jsonObject(with: baseline) as! [String: Any]
+        let value = try JSONSerialization.jsonObject(with: baseline.bytes) as! [String: Any]
         #expect(value["body"] as? String == "baseline")
         #expect(value["answers"] is NSNull)
+        let revalidated = try #require(try await frames.next())
+        let current = try JSONSerialization.jsonObject(with: revalidated.bytes) as! [String: Any]
+        #expect(current["answers"] as? Int == 0)
         subscription.send(Data(#"{"id":1}"#.utf8))
         let confirmed = try #require(try await frames.next())
-        let confirmation = try JSONSerialization.jsonObject(with: confirmed) as! [String: Any]
+        let confirmation = try JSONSerialization.jsonObject(with: confirmed.bytes) as! [String: Any]
         #expect(confirmation["body"] as? String == "baseline")
         #expect(confirmation["answers"] as? Int == 1)
         await subscription.cancel()
@@ -286,10 +427,10 @@ struct ServerClientTests {
                     try? peer.admit("baseline") { connection in
                         guard release.wait(timeout: .now() + 10) == .success else { return }
                         try connection.write(["type": "reading", "id": id, "checkpoint": "first",
-                                              "frame": "first"])
+                                              "frame": ["answers": NSNull(), "stamp": NSNull(), "unavailable": NSNull(), "body": "first"]])
                     }
                 }
-                respond(["type": "reading", "id": id, "checkpoint": "second", "frame": "second"])
+                respond(["type": "reading", "id": id, "checkpoint": "second", "frame": ["answers": NSNull(), "stamp": NSNull(), "unavailable": NSNull(), "body": "second"]])
                 respond(["type": "ended", "id": id])
             case "request":
                 respond(["type": "response", "id": id, "trace_id": "trace", "result": "independent"])
@@ -305,8 +446,8 @@ struct ServerClientTests {
         var frames = subscription.lines.makeAsyncIterator()
         let first = try await frames.next()
         let second = try await frames.next()
-        #expect(first.map { String(decoding: $0, as: UTF8.self) } == "\"first\"")
-        #expect(second.map { String(decoding: $0, as: UTF8.self) } == "\"second\"")
+        #expect(try first?.decode(SubscriptionReading<String>.self).body == "first")
+        #expect(try second?.decode(SubscriptionReading<String>.self).body == "second")
         #expect(try await frames.next() == nil)
     }
 
@@ -356,7 +497,7 @@ struct ServerClientTests {
             if message["type"] as? String == "checkpoint" { return false }
             if message["type"] as? String == "subscribe" {
                 respond(["type": "response", "id": message["id"]!, "trace_id": "trace", "result": NSNull()])
-                respond(["type": "reading", "id": message["id"]!, "checkpoint": "old", "frame": ["answers": NSNull(), "unavailable": NSNull(), "body": "old"]])
+                respond(["type": "reading", "id": message["id"]!, "checkpoint": "old", "frame": ["answers": NSNull(), "stamp": NSNull(), "unavailable": NSNull(), "body": "old"]])
             }
             return true
         }
@@ -368,7 +509,7 @@ struct ServerClientTests {
             case "subscribe":
                 #expect(message["resume"] is NSNull)
                 respond(["type": "response", "id": message["id"]!, "trace_id": "trace", "result": NSNull()])
-                respond(["type": "reading", "id": message["id"]!, "checkpoint": "fresh", "frame": ["answers": NSNull(), "unavailable": NSNull(), "body": "fresh"]])
+                respond(["type": "reading", "id": message["id"]!, "checkpoint": "fresh", "frame": ["answers": NSNull(), "stamp": NSNull(), "unavailable": NSNull(), "body": "fresh"]])
             case "cancel": return false
             default: break
             }
@@ -376,7 +517,7 @@ struct ServerClientTests {
         }
         subscription.send(Data(#"{"id":1}"#.utf8))
         guard case .reading(let frame) = try await updates.next() else { Issue.record("Missing reconnect baseline"); return }
-        #expect(try frame.fields()["body"]?.string == "fresh")
+        #expect(try RawJSON(frame.bytes).fields()["body"]?.string == "fresh")
         await subscription.cancel()
     }
 
@@ -389,7 +530,7 @@ struct ServerClientTests {
                 #expect(message["resume"] is NSNull)
                 let id = message["id"]!
                 respond(["type": "response", "id": id, "trace_id": "trace", "result": NSNull()])
-                respond(["type": "reading", "id": id, "checkpoint": "baseline", "frame": ["answers": NSNull(), "unavailable": NSNull(), "body": [:]]])
+                respond(["type": "reading", "id": id, "checkpoint": "baseline", "frame": ["answers": NSNull(), "stamp": NSNull(), "unavailable": NSNull(), "body": [:]]])
             case "checkpoint":
                 let id = message["id"]!
                 // Another ID's event occupies seq=1. Routing must follow sequence checking.
@@ -434,11 +575,11 @@ struct ServerClientTests {
                 let id = message["id"] as! String
                 subscriptionID.set(id)
                 respond(["type": "response", "id": id, "trace_id": "trace", "result": NSNull()])
-                respond(["type": "reading", "id": id, "checkpoint": "fixture-checkpoint", "frame": ["answers": 1, "unavailable": NSNull(), "body": NSNull()]])
+                respond(["type": "reading", "id": id, "checkpoint": "fixture-checkpoint", "frame": ["answers": 1, "stamp": NSNull(), "unavailable": NSNull(), "body": NSNull()]])
             case ("checkpoint", _):
                 #expect(message["checkpoint"] as? Int == 4)
                 let id = subscriptionID.get()!
-                respond(["type": "reading", "id": id, "checkpoint": "fixture-checkpoint", "frame": ["answers": 4, "unavailable": "gone", "body": NSNull()]])
+                respond(["type": "reading", "id": id, "checkpoint": "fixture-checkpoint", "frame": ["answers": 4, "stamp": NSNull(), "unavailable": "gone", "body": NSNull()]])
                 respond(["type": "error", "id": id, "code": "unavailable", "message": "gone", "data": NSNull()])
             case ("request", _):
                 respond(["type": "response", "id": message["id"]!, "trace_id": "trace", "result": "still here"])
@@ -449,10 +590,10 @@ struct ServerClientTests {
         let subscription = ServerClient.subscribe(.allPlans, location: peer.location)
         var frames = subscription.lines.makeAsyncIterator()
         let first = try #require(try await frames.next())
-        #expect((try JSONSerialization.jsonObject(with: first) as? [String: Any])?["answers"] as? Int == 1)
+        #expect((try JSONSerialization.jsonObject(with: first.bytes) as? [String: Any])?["answers"] as? Int == 1)
         subscription.send(Data(#"{"id":4}"#.utf8 + [10]))
         let last = try #require(try await frames.next())
-        #expect((try JSONSerialization.jsonObject(with: last) as? [String: Any])?["unavailable"] as? String == "gone")
+        #expect((try JSONSerialization.jsonObject(with: last.bytes) as? [String: Any])?["unavailable"] as? String == "gone")
         do {
             _ = try await frames.next()
             Issue.record("An ended subscription kept its stream open")
@@ -544,7 +685,7 @@ struct ServerClientTests {
             do {
                 var frames = subscription.lines.makeAsyncIterator()
                 let first = try #require(try await frames.next())
-                #expect(String(decoding: first, as: UTF8.self).contains("Recovered Work"))
+                #expect(String(decoding: first.bytes, as: UTF8.self).contains("Recovered Work"))
             } catch {
                 await subscription.cancel()
                 throw error
@@ -610,7 +751,7 @@ private final class ServerPeer: @unchecked Sendable {
     }
 
     /// `handle` returns false to close the connection after this message.
-    func serve(_ handle: @escaping @Sendable (_ message: [String: Any], _ respond: (_ line: [String: Any]) -> Void) -> Bool) {
+    func serve(observations: String = "fixture-observer", _ handle: @escaping @Sendable (_ message: [String: Any], _ respond: (_ line: [String: Any]) -> Void) -> Bool) {
         Thread.detachNewThread { [self] in
             let fd = accept(listener, nil, nil)
             guard fd >= 0 else { return }
@@ -619,7 +760,7 @@ private final class ServerPeer: @unchecked Sendable {
             do {
                 _ = try connection.read() // hello
                 try connection.write([
-                    "type": "welcome", "client_id": "fixture-client", "revision": ServerProtocol.revision, "server_revision": ServerProtocol.revision, "min_revision": ServerProtocol.minRevision, "instance": "fixture",
+                    "type": "welcome", "observations": observations, "client_id": "fixture-client", "revision": ServerProtocol.revision, "server_revision": ServerProtocol.revision, "min_revision": ServerProtocol.minRevision, "instance": "fixture",
                     "build": "test", "executable_sha256": String(repeating: "f", count: 64), "machine": NSNull(),
                     "limits": ["max_message": 1_048_576, "max_connections": 64,"max_open":256,"max_retained_bytes":67108864],
                 ])

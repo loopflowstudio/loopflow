@@ -3,7 +3,14 @@ use crate::id::WaveId;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
+mod membership;
 mod panes;
+pub(crate) use membership::task_selection_states;
+pub use membership::{
+    FieldObservations, FieldSupport, MembershipFacts, MembershipNode, MembershipPlan,
+    MembershipPredicate, MembershipStateEffect, MembershipSupport, ParentFact, StateFact,
+    TaskDisposition, TaskMembershipInputs, ValueFact,
+};
 mod query;
 pub use panes::{
     BrowserTab, ChangeComparison, FileDraft, FileTab, PaneIntent, PaneKind, PaneTree, ShellTab,
@@ -128,6 +135,12 @@ pub enum SelectionState {
     Done,
 }
 
+impl SelectionState {
+    fn is_activity(&self) -> bool {
+        matches!(self, Self::Available | Self::Busy | Self::Blocked)
+    }
+}
+
 /// The source path contains authored IDs, never array indexes or current focus.
 #[derive(
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, schemars::JsonSchema,
@@ -167,31 +180,9 @@ pub struct SelectionWork {
     pub states: BTreeSet<SelectionState>,
     /// An unobservable process is different from a complete read with no current reports.
     pub activity_known: bool,
-}
-
-fn wave_descendants<'a>(
-    repository: &str,
-    wave: &'a str,
-    work: &'a [SelectionWork],
-) -> BTreeSet<&'a str> {
-    let mut descendants = BTreeSet::from([wave]);
-    loop {
-        let before = descendants.len();
-        for item in work {
-            if item.key.repository == repository
-                && item.key.kind == WorkWorkspaceKind::Wave
-                && item
-                    .parent_wave
-                    .as_ref()
-                    .is_some_and(|parent| descendants.contains(parent.as_str()))
-            {
-                descendants.insert(item.key.id.as_str());
-            }
-        }
-        if descendants.len() == before {
-            return descendants;
-        }
-    }
+    pub activity_states: BTreeSet<SelectionState>,
+    pub inputs: Option<TaskMembershipInputs>,
+    pub support: Option<MembershipSupport>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -264,148 +255,7 @@ impl Selection {
         work: &[SelectionWork],
         queries: &BTreeMap<DashboardId, Selection>,
     ) -> Result<SelectionResolution, SelectionError> {
-        self.validate()?;
-        let mut result = SelectionResolution {
-            attention: BTreeSet::new(),
-            members: Vec::new(),
-            unavailable: Vec::new(),
-        };
-        self.expand(
-            repository,
-            work,
-            queries,
-            &mut Vec::new(),
-            &mut BTreeSet::new(),
-            &mut result,
-        )?;
-        let selected: BTreeSet<_> = result.members.iter().map(|member| &member.work).collect();
-        result.attention = work
-            .iter()
-            .filter(|item| {
-                selected.contains(&item.key)
-                    && (item.states.contains(&SelectionState::Available)
-                        || item.states.contains(&SelectionState::Blocked))
-            })
-            .map(|item| item.key.clone())
-            .collect();
-        Ok(result)
-    }
-
-    fn expand(
-        &self,
-        repository: &str,
-        work: &[SelectionWork],
-        queries: &BTreeMap<DashboardId, Selection>,
-        path: &mut Vec<SelectionId>,
-        visiting: &mut BTreeSet<DashboardId>,
-        result: &mut SelectionResolution,
-    ) -> Result<(), SelectionError> {
-        path.push(self.id.clone());
-        match &self.expression {
-            SelectionExpression::Intersect { items } => {
-                let mut members = None::<Vec<MemberRef>>;
-                for item in items {
-                    let mut reading = SelectionResolution {
-                        attention: BTreeSet::new(),
-                        members: Vec::new(),
-                        unavailable: Vec::new(),
-                    };
-                    item.expand(repository, work, queries, path, visiting, &mut reading)?;
-                    if let Some(members) = &mut members {
-                        let keys: BTreeSet<_> =
-                            reading.members.iter().map(|member| &member.work).collect();
-                        members.retain(|member| keys.contains(&member.work));
-                    } else {
-                        members = Some(reading.members);
-                    }
-                    // Even an empty intersection must report unavailable evidence.
-                    result.unavailable.extend(reading.unavailable);
-                }
-                result.members.extend(members.unwrap_or_default());
-            }
-            SelectionExpression::Filter { filter } => {
-                Self::expand_filter(filter, repository, work, path, result)?;
-            }
-            SelectionExpression::Compose { items } => {
-                for item in items {
-                    item.expand(repository, work, queries, path, visiting, result)?;
-                }
-            }
-            SelectionExpression::Query { query } => {
-                if !visiting.insert(query.clone()) {
-                    return Err(SelectionError::QueryCycle(query.0.clone()));
-                }
-                if let Some(selection) = queries.get(query) {
-                    selection.validate()?;
-                    selection.expand(repository, work, queries, path, visiting, result)?;
-                } else {
-                    result
-                        .unavailable
-                        .push(format!("Named query {} is unavailable", query.0));
-                }
-                visiting.remove(query);
-            }
-            SelectionExpression::Work { work: key } => {
-                if key.repository != repository {
-                    return Err(SelectionError::Repository(key.repository.clone()));
-                }
-                if work.iter().any(|item| &item.key == key) {
-                    result.members.push(MemberRef {
-                        source: path.clone(),
-                        work: key.clone(),
-                    });
-                } else {
-                    result
-                        .unavailable
-                        .push(format!("Work {} is unavailable", key.id));
-                }
-            }
-            scope => {
-                let wave = match scope {
-                    SelectionExpression::Wave { wave } => Some(wave),
-                    _ => None,
-                };
-                if let Some(wave) = wave {
-                    if !work.iter().any(|item| {
-                        item.key.repository == repository
-                            && item.key.kind == WorkWorkspaceKind::Wave
-                            && item.key.id == wave.as_str()
-                    }) {
-                        result
-                            .unavailable
-                            .push(format!("Wave {wave} is unavailable"));
-                    }
-                }
-                let descendants = wave.map_or_else(BTreeSet::new, |wave| {
-                    wave_descendants(repository, wave.as_str(), work)
-                });
-                for item in work.iter().filter(|item| item.key.repository == repository) {
-                    let included = match item.key.kind {
-                        WorkWorkspaceKind::Repository => false,
-                        WorkWorkspaceKind::Wave => item.parent_wave.as_ref() == wave,
-                        WorkWorkspaceKind::Task => {
-                            let in_scope = wave.is_none()
-                                || item
-                                    .parent_wave
-                                    .as_ref()
-                                    .is_some_and(|parent| descendants.contains(parent.as_str()));
-                            // The repository and a Wave list the board's Working
-                            // section; the others are `state:backlog`, `state:autonomous`
-                            // and `state:done`.
-                            in_scope && item.states.contains(&SelectionState::Working)
-                        }
-                    };
-                    if included {
-                        result.members.push(MemberRef {
-                            source: path.clone(),
-                            work: item.key.clone(),
-                        });
-                    }
-                }
-            }
-        }
-        path.pop();
-        Ok(())
+        Ok(self.membership_plan(repository, work, queries)?.resolve())
     }
 }
 
@@ -737,6 +587,7 @@ pub struct ViewPlan {
     pub selection: Selection,
     pub saved_revision: Option<i64>,
     pub resolution: SelectionResolution,
+    pub membership: MembershipPlan,
     pub arrangement: Arrangement,
     pub projection: ArrangementProjection,
     /// The page geometry visible members fill, in projection order.

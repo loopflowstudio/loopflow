@@ -29,13 +29,88 @@ you**, **Working now**, **Backlog** or **Done** — in the Machine's order, with
 with a conversation come first; started Tasks nobody has opened a conversation
 for fold under "N without a conversation". Search covers title and checkout
 path. Pull to refresh. **+** opens New Task: describe the work, pick a
-repository, **Create & start**.
+repository, **Create & start**. The editor closes immediately into the submitted
+conversation. Its words appear once beside **Starting conversation…** while the
+Machine prepares the Task and Session; native attachment controls input. Leaving for another Task keeps that
+selection when a receipt arrives. The recorded Session opens without waiting for
+its Task to appear in the feed. Opening the result, including from an ordinary
+Task row, clears the redundant request row; unresolved recovery stays visible.
+After a local save failure, **Try again** retries the same ID and **Edit request**
+returns the words to the editor. Once saved, **Check request** recovers the original
+result and **Inspect** shows its receipt when recovery needs attention.
+**Reconnect** reopens the same Session after attachment fails. Complete and Abandon
+show no extra request row while delivering. A disconnected request shows
+**Waiting for connection** without an action and resumes automatically on its
+original Machine, including after app restart. The Task feed shows **Waiting for
+connection** once above saved Tasks or an empty list. Pull to refresh ends
+immediately while waiting; Tasks refresh automatically when the Machine returns.
+A request needing attention shows recovery controls; a creation also keeps its row
+until its result has been shown.
+
+The shared SQLite outbox saves the original request
+before `operation.submit` admits it. Receipt subscriptions observe preparation;
+a lost answer is recovered by its original request ID. A replacement Machine
+database never authorizes another submission of an unanswered request.
+Released phone submission files import to each request's original Machine store,
+including exact words, request IDs and saved outcomes. Matching outbox records keep
+their receipt and send history. Conflicting or unreadable files remain intact;
+missing historical receipts require inspection rather than another submission.
+Unsent editor text remains a draft. Retired requests keep only a command digest
+and source identity, so a surviving editor file cannot submit again. They retain
+no authored words or receipts.
+
+The Task feed restores confirmed query bases from that same SQLite store. Older
+replies cannot replace newer saved bases; a retired command leaves a required
+reload fence so an older saved list cannot be shown as current. Returning to a
+cached filter applies pending completion before showing its rows. Separate feeds
+keep their own query leases; closing one leaves the other feed current. A failed
+refresh keeps usable cached content beside **Try again**.
+
+Recent feeds share a bounded cache. Returning after eviction or invalidation loads
+in the selected feed; a retained answer is checked against saved pending changes
+after observation resumes. Closing a feed never cancels its submitted commands.
+A feed known to predate settled changes waits for a covering reading.
 
 ## Task
 
 Opening a Task opens its conversation and fits the terminal to the phone.
 **Changes** lists the files the Task changed; each opens its diff, and the diff
 opens the whole file. A Task with no conversation opens on its Changes.
+
+**Complete** removes the Task from affected feeds and counts immediately, then
+replaces this route with the next visible Task or returns to the list. Other feeds
+keep their selections. The same command saves before sending; its request row's
+**Check request** recovers its original identity after an unanswered send. Save failure restores membership
+without changing your newer navigation. **Abandon** in Task actions asks for
+confirmation before following the same removal and next-Task rule.
+A retained Task shows **Completing…** while
+its command remains pending. These local changes work while the network is waiting;
+provider readiness still comes from the Session connection.
+
+**Task actions → Move to Wave** moves a Task to a Wave or **No Wave**. Cached
+lists and counts change immediately; its conversation and drafts stay open.
+While disconnected, the change waits for its original Machine and survives
+restart. A refusal restores only that change, leaving later edits and navigation
+alone. Incomplete cached destinations retain known rows and show their missing
+data notice; their counts remain unavailable until that data arrives.
+
+**Claim** requests ownership on this Machine; **Unassign** releases ownership
+while keeping checkout, PR and conversations. Controls and affected lists update
+immediately. **Reopen** withdraws completion without restarting the Workflow.
+For completed or completing work it also withdraws Auto-Ship approval; an
+already-open no-op keeps approval. The destination follows retained facts;
+missing facts leave it incomplete. Saved changes wait for the original Machine
+through restart. Refusal removes only that change; an uncertain send checks the
+original request. Later navigation, drafts and conversations stay put.
+
+**Task actions → Start**, **Auto-Ship** and **Stop Auto-Ship** show the request
+immediately and save before sending. Start continues the Task's Workflow using
+its existing/default graph. These actions keep the conversation, route and draft.
+Disconnected requests wait for their original Machine through restart. A successful
+dispatch clears the request; it does not predict a running Graph, a merged PR or a
+stopped Process. Failed or uncertain dispatch keeps **Check request** and **Inspect**.
+Uncertain dispatch holds conflicting Task changes until its outcome is known; a
+finished failure allows later commands without asserting rollback.
 
 The device touched last has the terminal. When another device takes it, the
 phone stops drawing and offers **Continue here**.

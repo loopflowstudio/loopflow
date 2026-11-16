@@ -26,9 +26,10 @@ use crate::lf::commands::task_row::{TaskDetail, TaskGraphRow, TaskNames, TaskThr
 use crate::lf::output::Colors;
 use crate::ops::task_execution::{TaskExecutionSnapshot, TaskExecutionState};
 use crate::session_record::SessionHistory;
-use crate::store::sqlite::selections::{task_selection_states, TaskSelectionReading};
+use crate::store::sqlite::selections::TaskSelectionReading;
 use crate::store::{open_existing_store, SharedStore};
 use crate::work::project::Project;
+use crate::work::selection::task_selection_states;
 use crate::work::task::{
     CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase, Task, TaskPr,
 };
@@ -2024,9 +2025,11 @@ async fn snapshot_task_detail(
             runtime.owner.is_some(),
             pr.as_ref().is_some_and(|pr| pr.publication.is_some()),
             task.state.as_deref(),
-            reads.selection_readings[&task.repository_id]
+            &reads.selection_readings[&task.repository_id]
                 .activity
-                .get(&task.id),
+                .get(&task.id)
+                .map(|a| a.states.clone())
+                .unwrap_or_default(),
         ),
         runtime: Some(runtime),
         next_move,

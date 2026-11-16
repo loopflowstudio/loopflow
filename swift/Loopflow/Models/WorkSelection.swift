@@ -5,6 +5,11 @@ public struct WorkSelection: Codable, Equatable, Sendable {
     public let id: String
     public let expression: Expression
 
+    /// An unresolved expression still identifies the selected query while loading.
+    public static func requestedQuery(_ expression: String) -> WorkSelection {
+        WorkSelection(id: expression, expression: .query(expression))
+    }
+
     public indirect enum Expression: Codable, Equatable, Sendable {
         case repository
         case wave(String)
@@ -170,7 +175,7 @@ public struct WorkViewPlan: Codable, Equatable, Sendable {
         public let face: WorkPaneIntent?
         public let work: WorkWorkspaceKey
         public let title: String
-        public let states: [WorkSelectionState]
+        public var states: [WorkSelectionState]
         /// A Task's short name, as people say it: `LOO-809`.
         public let identifier: String?
         public let primarySession: String?
@@ -188,14 +193,15 @@ public struct WorkViewPlan: Codable, Equatable, Sendable {
     public let repositoryPath: String
     public let selection: WorkSelection
     public let savedRevision: Int64?
-    public var resolution: WorkSelectionResolution
+    public let resolution: WorkSelectionResolution
+    public let membership: WorkMembershipPlan
     public let arrangement: WorkArrangement
     public let projection: WorkArrangementProjection
     /// The page geometry visible members fill, in projection order.
     public let slots: DashboardSlotLayout
     public let contents: [Content]
     enum CodingKeys: String, CodingKey {
-        case repository = "repo", selection, resolution, arrangement, projection, slots, contents, name, pinned
+        case repository = "repo", selection, resolution, membership, arrangement, projection, slots, contents, name, pinned
         case dashboardID = "dashboard_id", savedRevision = "saved_revision", repositoryPath = "repo_path"
     }
 

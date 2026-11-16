@@ -1575,7 +1575,7 @@ fn creation_retry_reconciles_publication_but_never_repeats_a_stop_or_append() {
             .unwrap();
         assert_eq!(
             stopped.disposition,
-            crate::store::sqlite::creation::RecoveryDisposition::Inspect
+            crate::store::sqlite::operations::RecoveryDisposition::Inspect
         );
         assert_eq!(stopped.explanation, "Conversation change unconfirmed");
         // A crash while stopping is uncertain, even if no provider is live now.
@@ -1614,7 +1614,7 @@ fn creation_retry_reconciles_publication_but_never_repeats_a_stop_or_append() {
                 .unwrap()
                 .unwrap()
                 .disposition,
-            crate::store::sqlite::creation::RecoveryDisposition::Continue
+            crate::store::sqlite::operations::RecoveryDisposition::Continue
         );
         // Simulate app/server death after the atomic append, before publication.
         let recovered = super::new_thread(&store, &record.id, None, false, false, "interrupted")
@@ -1637,7 +1637,7 @@ fn creation_retry_reconciles_publication_but_never_repeats_a_stop_or_append() {
                 .unwrap()
                 .unwrap()
                 .disposition,
-            crate::store::sqlite::creation::RecoveryDisposition::Complete
+            crate::store::sqlite::operations::RecoveryDisposition::Complete
         );
         let mut newer = recovered.clone();
         newer.request = Some("A later independent input".into());
@@ -1686,7 +1686,7 @@ fn creation_retry_reconciles_publication_but_never_repeats_a_stop_or_append() {
                 .unwrap()
                 .unwrap()
                 .disposition,
-            crate::store::sqlite::creation::RecoveryDisposition::Continue
+            crate::store::sqlite::operations::RecoveryDisposition::Continue
         );
         let newest = super::append_input(&store, pending).await.unwrap();
         let refused = super::new_thread(&store, &record.id, None, false, false, "superseded")
@@ -1703,7 +1703,7 @@ fn creation_retry_reconciles_publication_but_never_repeats_a_stop_or_append() {
             .unwrap();
         assert_eq!(
             receipt.disposition,
-            crate::store::sqlite::creation::RecoveryDisposition::Inspect
+            crate::store::sqlite::operations::RecoveryDisposition::Inspect
         );
         assert_eq!(
             receipt.explanation,
@@ -1752,7 +1752,7 @@ fn creation_retry_reconciles_publication_but_never_repeats_a_stop_or_append() {
                 .unwrap()
                 .unwrap()
                 .disposition,
-            crate::store::sqlite::creation::RecoveryDisposition::Complete
+            crate::store::sqlite::operations::RecoveryDisposition::Complete
         );
     });
 }

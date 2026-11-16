@@ -34,7 +34,7 @@ func roadmapTaskAction(_ task: RoadmapTask) -> RoadmapTaskAction? {
     return nil
 }
 
-/// One query, two shapes. Both read the single `lf wave show` snapshot: NOW
+/// One projection, two shapes. Both join planning content to projected membership: NOW
 /// re-shapes it into a flat, cross-wave, condition-grouped list; ROADMAP keeps
 /// the Wave › Task tree.
 enum WorkLens: String, CaseIterable, Identifiable {
@@ -50,8 +50,7 @@ enum WorkLens: String, CaseIterable, Identifiable {
     }
 }
 
-/// Loopflow Desktop's shared Work surface: one machine-wide `lf wave show --json`
-/// read, rendered without re-querying each Wave or inventing another work model.
+/// Portfolio content and membership share the Machine's query and command owner.
 struct RoadmapView: View {
     let onOpenWave: (WaveSnapshot) -> Void
     let onOpenTask: (String, String) -> Void
@@ -99,6 +98,9 @@ struct RoadmapView: View {
             }
             if let controlError {
                 evidenceBanner(title: "Control failed", detail: controlError)
+            }
+            if let reason = model.standupTasks(.repository)?.unavailableReason {
+                evidenceBanner(title: "Membership incomplete", detail: reason)
             }
             content
         }
@@ -173,12 +175,14 @@ struct RoadmapView: View {
     }
 
     private var nowSectionsList: [NowSection] {
-        nowSections(from: model.visibleTasks, waves: visibleWaves)
+        nowSections(from: model.visibleTasks, facts: model.projectedFacts, waves: visibleWaves)
     }
 
     @ViewBuilder
     private var nowContent: some View {
-        if nowSectionsList.isEmpty {
+        if nowSectionsList.isEmpty, model.standupTasks(.repository)?.unavailableReason != nil {
+            Text("Waiting for a covering Work reading").foregroundStyle(palette.warning)
+        } else if nowSectionsList.isEmpty {
             ContentUnavailableView(
                 "Nothing needs action",
                 systemImage: "checkmark.circle",
@@ -190,6 +194,7 @@ struct RoadmapView: View {
                     ForEach(nowSectionsList) { section in
                         NowSectionView(
                             section: section,
+                            complete: model.standupTasks(.repository)?.unavailableReason == nil,
                             activeControlId: activeControlId,
                             onSelect: { row in
                                 onOpenTask(row.task.task.repo, row.task.id)
@@ -227,6 +232,8 @@ struct RoadmapView: View {
     private func waveCard(_ roadmap: WaveRoadmap) -> some View {
         RoadmapWaveCard(
             roadmap: roadmap,
+            tasks: model.standupTasks(.wave(roadmap.wave.id)),
+            facts: model.projectedFacts,
             activeControlId: activeControlId,
             onOpenWave: { onOpenWave(roadmap.wave) },
             onOpenTask: { onOpenTask(roadmap.wave.repo, $0) },
@@ -304,6 +311,8 @@ struct RoadmapView: View {
 
 private struct RoadmapWaveCard: View {
     let roadmap: WaveRoadmap
+    let tasks: WorkEvidence<RoadmapTask>?
+    let facts: [WorkMembershipPlan.Facts]
     let activeControlId: String?
     let onOpenWave: () -> Void
     let onOpenTask: (String) -> Void
@@ -342,17 +351,19 @@ private struct RoadmapWaveCard: View {
             }
 
             if let chapter = roadmap.currentProject { WaveProjectView(project: chapter) }
-            switch roadmap.tasks {
+            switch tasks {
             case .unavailable(let reason):
                 Label(reason, systemImage: "exclamationmark.triangle").foregroundStyle(palette.warning)
             case .available(let tasks, let truncated):
                 if tasks.isEmpty { Text("No Tasks in this Project.").foregroundStyle(palette.textSecondary) }
                 ForEach(tasks) { task in
-                    RoadmapTaskRow(task: task,
+                    RoadmapTaskRow(task: task, section: facts.first { $0.work.kind == .task && $0.work.id == task.id }.map { TaskSection(states: $0.lifecycle.states) },
                         activeControlId: activeControlId, onSelect: { onOpenTask(task.id) },
                         onAction: { action in onTaskAction(task, action) }, onOpenWorktree: onOpenWorktree)
                 }
                 if truncated { Text("Older Tasks are truncated.").foregroundStyle(palette.warning) }
+            case nil:
+                Text("Waiting for a covering Work reading").foregroundStyle(palette.warning)
             }
             ForEach(roadmap.unavailableTasks, id: \.taskId) { task in
                 Text("\(task.taskIdentifier): \(task.reason) · \(task.recovery)").foregroundStyle(palette.warning)
@@ -371,6 +382,7 @@ private struct RoadmapWaveCard: View {
 
 struct RoadmapTaskRow: View {
     let task: RoadmapTask
+    let section: TaskSection?
     let activeControlId: String?
     let onSelect: () -> Void
     let onAction: (RoadmapTaskAction) -> Void
@@ -382,9 +394,9 @@ struct RoadmapTaskRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: Spacing.sm) {
-            Image(systemName: task.lifecycle == .done ? "checkmark.circle.fill" : "circle")
+            Image(systemName: section == .done ? "checkmark.circle.fill" : "circle")
                 .font(Typography.caption(11))
-                .foregroundStyle(task.lifecycle == .done ? palette.success : task.section.color(in: palette))
+                .foregroundStyle(section == .done ? palette.success : section?.color(in: palette) ?? palette.textSecondary)
                 .frame(width: 14)
             VStack(alignment: .leading, spacing: Spacing.xxs) {
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
@@ -401,16 +413,16 @@ struct RoadmapTaskRow: View {
                         .foregroundStyle(palette.text)
                         .lineLimit(2)
                     Spacer()
-                    Text(task.section.label)
+                    Text(section?.label ?? "Updating…")
                         .font(Typography.caption(9).weight(.semibold))
-                        .foregroundStyle(task.section.color(in: palette))
+                        .foregroundStyle(section?.color(in: palette) ?? palette.textSecondary)
                 }
                 Text(task.condition.reason)
                     .font(Typography.caption(10))
                     .foregroundStyle(palette.textSecondary)
                     .lineLimit(2)
                     .accessibilityLabel(taskConditionAccessibilityLabel(task))
-                WorkChannelChips(task: task)
+                WorkChannelChips(task: task, section: section)
                 TaskActionCluster(
                     task: task,
                     isActing: isActing,
@@ -432,6 +444,7 @@ struct RoadmapTaskRow: View {
 /// The shared Task condition, lifecycle and orthogonal planning facts.
 struct WorkChannelChips: View {
     let task: RoadmapTask
+    let section: TaskSection?
     @Environment(\.palette) private var palette
 
     var body: some View {
@@ -439,7 +452,7 @@ struct WorkChannelChips: View {
             channel("Condition", task.condition.state.rawValue, task.condition.state.color(in: palette))
             channel("PM", task.task.terminalLabel ?? "open",
                     task.task.isSuccessful ? palette.success : palette.textSecondary)
-            channel("Status", task.lifecycle.label, statusColor(task.lifecycle))
+            channel("Status", section?.label ?? "Updating…", section?.color(in: palette) ?? palette.textSecondary)
         }
     }
 
@@ -455,9 +468,6 @@ struct WorkChannelChips: View {
         .clipShape(Capsule())
     }
 
-    private func statusColor(_ status: TaskState) -> Color {
-        status.isTerminal ? palette.textTertiary : palette.working
-    }
 }
 
 /// The one contextual action plus the always-available Worktree/PR affordances,
@@ -496,6 +506,7 @@ struct TaskActionCluster: View {
 
 struct NowSectionView: View {
     let section: NowSection
+    let complete: Bool
     let activeControlId: String?
     let onSelect: (NowRow) -> Void
     let onTaskAction: (NowRow, RoadmapTaskAction) -> Void
@@ -509,7 +520,7 @@ struct NowSectionView: View {
                 Text(section.group.title)
                     .font(Typography.sectionTitle(15))
                     .foregroundStyle(section.group.color(in: palette))
-                Text("\(section.rows.count)")
+                Text(complete ? "\(section.rows.count)" : "Incomplete")
                     .font(Typography.caption(10).weight(.semibold))
                     .foregroundStyle(palette.textSecondary)
                     .padding(.horizontal, Spacing.xs)
@@ -560,7 +571,7 @@ private struct NowRowView: View {
                     .foregroundStyle(palette.text)
                     .lineLimit(2)
                 Spacer()
-                Text(row.wave?.name ?? "No Wave")
+                Text(row.wave?.name ?? (row.parentWave == nil ? "No Wave" : "Wave unavailable"))
                     .font(Typography.caption(9))
                     .foregroundStyle(palette.textSecondary)
                     .lineLimit(1)
@@ -570,7 +581,7 @@ private struct NowRowView: View {
                 .foregroundStyle(palette.textSecondary)
                 .lineLimit(2)
                 .accessibilityLabel(taskConditionAccessibilityLabel(task))
-            WorkChannelChips(task: task)
+            WorkChannelChips(task: task, section: row.section)
             TaskActionCluster(
                 task: task,
                 isActing: isActing,

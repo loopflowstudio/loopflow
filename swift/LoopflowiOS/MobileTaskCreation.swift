@@ -2,41 +2,6 @@ import Foundation
 import Loopflow
 import Observation
 
-/// Phone-owned presentation of a shared creation receipt, not a server response.
-struct MobileTaskOutcome: Codable, Hashable {
-    enum State: String, Codable { case inProgress = "in_progress", started, failed, unknown }
-    let taskId: String
-    let state: State
-    let receipt: TaskCreateReceipt?
-    let message: String?
-
-    private enum CodingKeys: String, CodingKey {
-        case taskId = "task_id", state, receipt, message
-    }
-
-    init(taskId: String, state: State, receipt: TaskCreateReceipt?, message: String?) {
-        self.taskId = taskId
-        self.state = state
-        self.receipt = receipt
-        self.message = message
-    }
-
-    init(from decoder: any Decoder) throws {
-        let fields = try decoder.container(keyedBy: CodingKeys.self)
-        taskId = try fields.decode(String.self, forKey: .taskId)
-        state = try fields.decode(State.self, forKey: .state)
-        message = try fields.decodeIfPresent(String.self, forKey: .message)
-        let saved = try fields.decodeIfPresent(JSONValue.self, forKey: .receipt)
-        if let saved, saved["milestone"] != .null {
-            receipt = try fields.decode(TaskCreateReceipt.self, forKey: .receipt)
-        } else {
-            // Older phone drafts keep their submission and Task identity. Read a
-            // current receipt from the Machine instead of inventing a milestone.
-            receipt = nil
-        }
-    }
-}
-
 struct MobileCreationContext {
     let machineID: String
     let name: String
@@ -44,64 +9,61 @@ struct MobileCreationContext {
 }
 
 @MainActor
-struct MobileTaskOpening {
-    let task: WorkViewPlan.Content
-    let presented: () -> Void
-}
-
-/// Local recovery state, not another Machine wire type. Credentials stay in Keychain.
-struct MobileTaskSubmission: Codable, Equatable {
-    let id: UUID
-    let machineID: String
-    let machineName: String
-    let directory: String
-    let request: String
-}
-
-@MainActor
 protocol MobileTaskCreationClient {
+    var interaction: WorkInteraction { get }
     func creationContext() async throws -> MobileCreationContext
-    func createTask(_ submission: MobileTaskSubmission) async throws -> MobileTaskOutcome
-    func createdTask(_ submission: MobileTaskSubmission, taskID: String) async throws -> WorkViewPlan.Content
-    func taskPresented(_ submission: MobileTaskSubmission) async throws
+    func importLegacyCreations(_ values: [LegacyOperation]) async throws
+    func draftSubmitted(_ id: String, machine: String?) async throws -> Bool
 }
 
-struct MobileSavedTaskRequest: Codable, Identifiable, Equatable {
-    let submission: MobileTaskSubmission
-    var outcome: MobileTaskOutcome?
-    var id: UUID { submission.id }
-}
-
+/// Editor state only. Submitted commands and outcomes live in ClientWorkStore.
 struct MobileTaskDraft: Codable, Equatable {
+    var id: String? = UUID().uuidString.lowercased()
     var text = ""
     var directory = ""
     var machineID: String?
-    var submission: MobileTaskSubmission?
-    var outcome: MobileTaskOutcome?
-    var savedRequests: [MobileSavedTaskRequest] = []
+}
 
-    init() {}
-
-    private enum CodingKeys: String, CodingKey {
-        case text, directory, machineID, submission, outcome, savedRequests
+/// Decode released files without interpreting an old receipt as current evidence.
+private struct LegacyTaskDraft: Decodable {
+    struct Submission: Codable {
+        let id: UUID
+        let machineID: String
+        let machineName: String
+        let directory: String
+        let request: String
     }
+    struct Saved: Decodable {
+        let submission: Submission
+        let outcome: JSONValue?
+    }
+    let submission: Submission?
+    let outcome: JSONValue?
+    let savedRequests: [Saved]?
 
-    init(from decoder: any Decoder) throws {
-        let values = try decoder.container(keyedBy: CodingKeys.self)
-        text = try values.decode(String.self, forKey: .text)
-        directory = try values.decode(String.self, forKey: .directory)
-        machineID = try values.decodeIfPresent(String.self, forKey: .machineID)
-        submission = try values.decodeIfPresent(MobileTaskSubmission.self, forKey: .submission)
-        outcome = try values.decodeIfPresent(MobileTaskOutcome.self, forKey: .outcome)
-        // Preserve drafts saved before the local recovery list was introduced.
-        // This file is phone-owned UI state, not a Machine wire DTO.
-        savedRequests = try values.decodeIfPresent([MobileSavedTaskRequest].self, forKey: .savedRequests) ?? []
+    func operations(submittedAt: Date) throws -> [LegacyOperation] {
+        var requests = savedRequests ?? []
+        if let submission { requests.append(Saved(submission: submission, outcome: outcome)) }
+        return try requests.map { saved in
+            let request = saved.submission
+            if case .string(let id) = saved.outcome?["task_id"],
+               case .string(let receiptID) = saved.outcome?["receipt"]["task"]["id"], id != receiptID {
+                throw RegistryQueryError("The saved outcome names different Tasks; its original file is retained")
+            }
+            let id = request.id.uuidString.lowercased()
+            let record = SubmittedOperation(requestID: id, destination: request.machineID,
+                payload: try JSONEncoder().encode(ServedWrite.taskCreate(directory: request.directory,
+                    requestID: id, title: nil, request: request.request, wave: nil, graph: nil, session: nil, run: true)),
+                version: ServerProtocol.revision, submittedAt: submittedAt)
+            // Keep the exact released outcome, including receipts from older schemas.
+            return LegacyOperation(record: record, outcome: saved.outcome,
+                source: try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(request)))
+        }
     }
 }
 
 struct MobileTaskDraftStore {
     let url: URL
-
     static var application: Self {
         Self(url: URL.applicationSupportDirectory.appending(path: "Loopflow/new-task.json"))
     }
@@ -119,10 +81,26 @@ struct MobileTaskDraftStore {
         values.isExcludedFromBackup = true
         try excluded.setResourceValues(values)
     }
+
+    @MainActor
+    func migrate(using client: any MobileTaskCreationClient) async throws {
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        let source = try Data(contentsOf: url)
+        let legacy = try JSONDecoder().decode(LegacyTaskDraft.self, from: source)
+        let date = try url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate ?? Date()
+        let operations = try legacy.operations(submittedAt: date)
+        guard !operations.isEmpty else { return }
+        try await client.importLegacyCreations(operations)
+        // A crash before this rewrite repeats the idempotent import. A newer
+        // editor saved while import awaited keeps its words and its whole file.
+        guard try Data(contentsOf: url) == source else { return }
+        var draft = try JSONDecoder().decode(MobileTaskDraft.self, from: source)
+        if let submitted = legacy.submission, draft.text == submitted.request { draft.text = "" }
+        try save(draft)
+    }
 }
 
-@MainActor
-@Observable
+@MainActor @Observable
 final class MobileTaskCreation: Identifiable {
     private let client: any MobileTaskCreationClient
     private let store: MobileTaskDraftStore
@@ -132,78 +110,48 @@ final class MobileTaskCreation: Identifiable {
     private(set) var busy = false
     private(set) var error: String?
     private(set) var storageUnavailable = false
+    private var migrated = false
+    private var submitted = false
 
-    init(client: any MobileTaskCreationClient, store: MobileTaskDraftStore = .application) {
+    init(client: any MobileTaskCreationClient, store: MobileTaskDraftStore = .application, request: PendingOperation? = nil) {
         self.client = client
         self.store = store
         do { draft = try store.load(); savedDraft = draft }
         catch {
             storageUnavailable = true
-            self.error = "Couldn’t read your saved draft. Close this sheet and try again. It hasn’t been overwritten."
+            self.error = "Couldn’t read your saved draft. It hasn’t been overwritten."
+        }
+        if let request, !storageUnavailable {
+            draft.text = request.request
+            draft.id = UUID().uuidString.lowercased()
+            draft.directory = request.directory
+            draft.machineID = request.destination
         }
     }
 
     var canCreate: Bool {
-        !busy && !storageUnavailable && draft.submission == nil && context != nil
-            && !draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !instructionsTooLong
+        migrated && !submitted && !busy && !storageUnavailable && context != nil
+            && !draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !instructionsTooLong
             && context?.repositories.contains(where: { $0.path == draft.directory && $0.error == nil }) == true
     }
-
-    var settled: Bool { draft.outcome.map { $0.state != .inProgress } ?? false }
     var hasUnsavedChanges: Bool { draft != savedDraft }
-
     var instructionsTooLong: Bool {
-        guard draft.text.utf8.count <= 32_768,
-              let encoded = try? JSONEncoder().encode(draft.text) else { return true }
-        // Escaped characters also count toward the bounded Machine frame.
+        guard draft.text.utf8.count <= 32_768, let encoded = try? JSONEncoder().encode(draft.text) else { return true }
         return encoded.count > 48 * 1024
     }
-
-    func editText(_ text: String) {
-        guard draft.submission == nil, !storageUnavailable else { return }
-        draft.text = text
-    }
-
-    func selectRepository(_ path: String) {
-        guard draft.submission == nil, !storageUnavailable else { return }
-        draft.directory = path
-    }
+    func editText(_ text: String) { if !storageUnavailable, draft.text != text { draft.text = text; draft.id = UUID().uuidString.lowercased() } }
+    func selectRepository(_ path: String) { if !storageUnavailable, draft.directory != path { draft.directory = path; draft.id = UUID().uuidString.lowercased() } }
 
     @discardableResult
     func saveDraft() -> Bool {
-        persist(draft)
-    }
-
-    private func persist(_ next: MobileTaskDraft) -> Bool {
-        guard !storageUnavailable else { return false }
-        do { try store.save(next); draft = next; savedDraft = next; return true }
-        catch { self.error = "Couldn’t save your changes on this phone. \(error.localizedDescription)"; return false }
-    }
-
-    @discardableResult
-    func saveForLater() -> Bool {
-        guard !busy, let submission = draft.submission else { return false }
-        var next = draft
-        next.savedRequests.insert(MobileSavedTaskRequest(submission: submission, outcome: draft.outcome), at: 0)
-        next.submission = nil
-        next.outcome = nil
-        next.text = ""
-        if let context, next.machineID != context.machineID {
-            next.machineID = context.machineID
-            next.directory = context.repositories.first(where: { $0.error == nil })?.path ?? ""
+        // No released submission fields may be removed before their import commits.
+        guard migrated, !storageUnavailable, !submitted else { return false }
+        do {
+            try store.save(draft)
+            savedDraft = draft
+            return true
         }
-        guard persist(next) else { return false }
-        error = nil
-        return true
-    }
-
-    func savedRequest(_ id: UUID) -> MobileSavedTaskRequest? {
-        draft.savedRequests.first { $0.id == id }
-    }
-
-    func clearError() {
-        if !storageUnavailable { error = nil }
+        catch { self.error = "Couldn’t save your changes on this phone. \(error.localizedDescription)"; return false }
     }
 
     func prepare() async {
@@ -212,105 +160,50 @@ final class MobileTaskCreation: Identifiable {
         error = nil
         defer { busy = false }
         do {
+            try await store.migrate(using: client)
+            if !migrated {
+                let saved = try store.load()
+                if draft == savedDraft { draft = saved }
+                savedDraft = saved
+                migrated = true
+            }
+            client.interaction.start()
+            if FileManager.default.fileExists(atPath: store.url.path), let id = draft.id,
+               try await client.draftSubmitted(id, machine: draft.machineID), draft.id == id {
+                draft.text = ""
+                draft.id = UUID().uuidString.lowercased()
+            }
+            if draft.id == nil { draft.id = UUID().uuidString.lowercased() }
             let context = try await client.creationContext()
             try Task.checkCancellation()
             self.context = context
-            if let submission = draft.submission {
-                guard submission.machineID == context.machineID else {
-                    throw RegistryQueryError("This request belongs to \(submission.machineName). Reconnect that Machine to check or open it.")
-                }
-            } else {
-                if draft.machineID != context.machineID { draft.directory = "" }
-                draft.machineID = context.machineID
-                if draft.directory.isEmpty { draft.directory = context.repositories.first(where: { $0.error == nil })?.path ?? "" }
-                _ = saveDraft()
-            }
+            if draft.machineID != context.machineID { draft.directory = "" }
+            draft.machineID = context.machineID
+            if draft.directory.isEmpty { draft.directory = context.repositories.first(where: { $0.error == nil })?.path ?? "" }
+            _ = saveDraft()
         } catch { if !Task.isCancelled { self.error = error.localizedDescription } }
     }
 
-    /// Reusing this method after uncertain delivery always submits the saved intent.
-    func submit(savedRequestID: UUID? = nil) async {
-        guard !busy, !storageUnavailable else { return }
-        let saved = savedRequestID.flatMap { savedRequest($0) }
-        if savedRequestID != nil && saved == nil { return }
-        let previous = savedRequestID == nil ? draft.outcome : saved?.outcome
-        if let previous, previous.state != .inProgress { return }
-        if savedRequestID == nil && draft.submission == nil {
-            guard canCreate, let context else { return }
-            draft.submission = MobileTaskSubmission(id: UUID(), machineID: context.machineID,
-                machineName: context.name, directory: draft.directory, request: draft.text)
-        }
-        // Even a failed local write leaves the same ID in memory for the next attempt.
-        guard saveDraft(), let submission = saved?.submission ?? draft.submission else { return }
-        busy = true
-        error = nil
-        defer { busy = false }
-        do {
-            let outcome = try await client.createTask(submission)
-            try Task.checkCancellation()
-            if let previous, previous.taskId != outcome.taskId {
-                throw RegistryQueryError("The Machine returned a different Task for this request")
-            }
-            if let receipt = outcome.receipt, receipt.task.id != outcome.taskId {
-                throw RegistryQueryError("The Machine returned a receipt for a different Task")
-            }
-            var next = draft
-            if let savedRequestID {
-                guard let index = next.savedRequests.firstIndex(where: { $0.id == savedRequestID }) else { return }
-                next.savedRequests[index].outcome = outcome
-            } else {
-                next.outcome = outcome
-            }
-            _ = persist(next)
-        } catch {
-            if !Task.isCancelled {
-                self.error = "Couldn’t confirm the result. Check status to recover this same request. \(error.localizedDescription)"
-            }
-        }
-    }
-
-    func openTask(savedRequestID: UUID? = nil) async -> MobileTaskOpening? {
-        guard !busy, !storageUnavailable else { return nil }
-        let saved = savedRequestID.flatMap { savedRequest($0) }
-        if savedRequestID != nil && saved == nil { return nil }
-        guard let submission = saved?.submission ?? draft.submission,
-              let outcome = savedRequestID == nil ? draft.outcome : saved?.outcome else { return nil }
-        busy = true
-        error = nil
-        defer { busy = false }
-        do {
-            let task = try await client.createdTask(submission, taskID: outcome.taskId)
-            try Task.checkCancellation()
-            guard task.work.id == outcome.taskId else { throw RegistryQueryError("The Machine returned a different Task") }
-            return MobileTaskOpening(task: task) {
-                self.didPresentTask(submission, taskID: outcome.taskId)
-            }
-        } catch {
-            if !Task.isCancelled { self.error = error.localizedDescription }
-            return nil
-        }
-    }
-
-    private func didPresentTask(_ submission: MobileTaskSubmission, taskID: String) {
-        do {
-            // Another sheet may already own a newer draft. Retire only the
-            // request whose destination appeared, using the current saved file.
-            var next = try store.load()
-            if next.submission == submission, next.outcome?.taskId == taskID {
-                next.text = ""
-                next.submission = nil
-                next.outcome = nil
-            } else if let index = next.savedRequests.firstIndex(where: {
-                $0.submission == submission && $0.outcome?.taskId == taskID
-            }) {
-                next.savedRequests.remove(at: index)
-            } else {
-                return
-            }
-            _ = persist(next)
-            Task { try? await client.taskPresented(submission) }
-        } catch {
-            self.error = "Couldn’t update your saved request. It remains available for recovery. \(error.localizedDescription)"
+    /// The caller installs the operation route and closes the editor in this call.
+    func begin(select: (PendingOperation) -> Void) {
+        guard canCreate else { return }
+        let original = draft
+        let operation = client.interaction.createTask(request: draft.text, directory: draft.directory, draftID: draft.id, select: select)
+        submitted = true
+        draft.text = ""
+        draft.id = UUID().uuidString.lowercased()
+        // The editor file remains intact until the outbox commits. Cleanup never
+        // overwrites a newer draft and does not depend on the sheet's lifetime.
+        let interaction = client.interaction
+        let store = store
+        Task {
+            await interaction.persistPending()
+            guard operation.saved, var current = try? store.load(), current == original else { return }
+            current.text = ""
+            current.id = UUID().uuidString.lowercased()
+            do {
+                try store.save(current)
+            } catch { /* The saved command or its compact identity still prevents replay. */ }
         }
     }
 }

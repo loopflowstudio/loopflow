@@ -8,28 +8,19 @@ struct RepositoryTasks: Equatable {
     /// Its path on the Machine, which is how Waves name their repository.
     let path: String
     let tasks: [WorkViewPlan.Content]
+    var unavailable: [String] = []
 
     var name: String { URL(fileURLWithPath: path).lastPathComponent }
 }
 
 typealias MobileTaskReading = Result<[RepositoryTasks], RegistryQueryError>
 
-/// A reading and the wire bytes it was decoded from, which is what the phone keeps.
-struct TaskListReading {
-    let reading: MobileTaskReading
-    let wire: Data
-}
-
 /// The Tasks a Work reading shows, in the Machine's order.
-func mobileTasks(_ plan: WorkViewPlan) throws -> [WorkViewPlan.Content] {
-    guard plan.resolution.unavailable.isEmpty else {
-        throw RegistryQueryError(plan.resolution.unavailable.joined(separator: "; "))
-    }
+func mobileTasks(_ plan: ProjectedWorkPlan) -> [WorkViewPlan.Content] {
     let contents = Dictionary(plan.contents.map { ($0.work, $0) }, uniquingKeysWith: { first, _ in first })
-    return try plan.projection.visible.filter { $0.work.kind == .task }.map { member in
-        guard let task = contents[member.work] else {
-            throw RegistryQueryError("The Machine returned an incomplete Task reading")
-        }
+    return plan.projection.visible.filter { $0.work.kind == .task }.compactMap { member in
+        guard var task = contents[member.work] else { return nil }
+        task.states = plan.states[member.work] ?? task.states
         return task
     }
 }
@@ -39,29 +30,50 @@ func mobileTasks(_ plan: WorkViewPlan) throws -> [WorkViewPlan.Content] {
 /// lost connection resumes the same reading on the next one.
 @MainActor
 final class RemoteTaskObservation {
-    let readings: AsyncThrowingStream<TaskListReading, any Error>
-    private let continuation: AsyncThrowingStream<TaskListReading, any Error>.Continuation
-    private let watch: ServerWatch<RawJSON>
+    let readings: AsyncThrowingStream<Result<Void, RegistryQueryError>, any Error>
+    private let continuation: AsyncThrowingStream<Result<Void, RegistryQueryError>, any Error>.Continuation
+    private let watch: ServerWatch<ReceivedReading>
+    private let connection: MachineConnection
     private var reader: Task<Void, Never>?
+    private var connectionChanges: Task<Void, Never>?
     private var nextCheckpoint: UInt64 = 0
     private var refreshing: (id: UInt64, continuation: CheckedContinuation<Void, any Error>)?
     private var closed = false
 
-    init(query: ServedRead, connect: @escaping @Sendable () async throws -> ServerLink) {
-        watch = ServerLink.subscribe(query, connect: connect) { update -> RawJSON? in
+    init(query: ServedRead, interaction: WorkInteraction, connection: MachineConnection) {
+        self.connection = connection
+        watch = ServerLink.subscribe(query, reconnect: true, connection: connection) { update -> ReceivedReading? in
             guard case .reading(let frame) = update else { return nil }
             return frame
         }
         (readings, continuation) = AsyncThrowingStream.makeStream(bufferingPolicy: .bufferingNewest(1))
+        connectionChanges = Task { [weak self, connection] in
+            for await _ in connection.changes() {
+                guard let self, !Task.isCancelled else { return }
+                if connection.isWaiting {
+                    self.refreshing?.continuation.resume()
+                    self.refreshing = nil
+                }
+            }
+        }
         reader = Task { [weak self, watch] in
             do {
                 for try await frame in watch.updates {
                     guard let self, !self.closed else { return }
                     // A reading is tens to hundreds of kilobytes; decoding it here would
                     // stall a scroll for each one.
-                    let reading = try await Task.detached { try Self.decode(frame: frame) }.value
+                    let envelope = try await Task.detached {
+                        try frame.decode(SubscriptionReading<[WorkViewPlan]>.self)
+                    }.value
+                    guard !self.closed, !Task.isCancelled else { return }
+                    let reading: Result<Void, RegistryQueryError>
+                    if let reason = envelope.unavailable { reading = .failure(RegistryQueryError(reason)) }
+                    else if let plans = envelope.body, let stamp = envelope.stamp {
+                        try await interaction.receive(plans, stamp: stamp, for: query, receivingLink: frame.link)
+                        reading = .success(())
+                    } else { throw RegistryQueryError("Task reading is missing its stamped contents") }
                     guard !self.closed else { return }
-                    self.receive(reading, wire: frame.bytes)
+                    self.receive((envelope.answers, reading))
                 }
                 throw RegistryQueryError("Task updates ended. Refresh to reconnect.")
             } catch { self?.close(error: error) }
@@ -70,12 +82,16 @@ final class RemoteTaskObservation {
 
     func refresh() async throws {
         guard !closed else { throw RegistryQueryError("Task updates disconnected; reconnect for current Tasks") }
-        guard refreshing == nil else { return }
+        guard refreshing == nil, !connection.isWaiting else { return }
         nextCheckpoint += 1
         let checkpoint = nextCheckpoint
         let timeout = Task { [weak self] in
-            do { try await Task.sleep(for: RemoteMobileClient.requestDeadline) } catch { return }
-            self?.close(error: RegistryQueryError("The Machine did not respond in time"))
+            do {
+                try await Task.sleep(for: RemoteMobileClient.requestDeadline)
+                guard let self, !Task.isCancelled, self.refreshing?.id == checkpoint else { return }
+                self.close(error: RegistryQueryError("The Machine did not respond in time"))
+            } catch is CancellationError { }
+            catch { self?.close(error: error) }
         }
         defer { timeout.cancel() }
         try await withTaskCancellationHandler {
@@ -88,20 +104,28 @@ final class RemoteTaskObservation {
         }
     }
 
-    func close() { close(error: CancellationError()) }
+    @discardableResult
+    func close() -> Task<Void, Never> {
+        close(error: CancellationError())
+        let tasks = [reader, connectionChanges].compactMap { $0 }
+        return Task {
+            for task in tasks { await task.value }
+        }
+    }
 
     private func close(error: any Error) {
         guard !closed else { return }
         closed = true
         watch.cancel()
         reader?.cancel()
+        connectionChanges?.cancel()
         continuation.finish(throwing: error)
         refreshing?.continuation.resume(throwing: error)
         refreshing = nil
     }
 
-    private func receive(_ reading: (answers: UInt64?, reading: MobileTaskReading), wire: Data) {
-        continuation.yield(TaskListReading(reading: reading.reading, wire: wire))
+    private func receive(_ reading: (answers: UInt64?, reading: Result<Void, RegistryQueryError>)) {
+        continuation.yield(reading.reading)
         if let refreshing, let answers = reading.answers, answers >= refreshing.id {
             self.refreshing = nil
             refreshing.continuation.resume()
@@ -109,28 +133,18 @@ final class RemoteTaskObservation {
     }
 
     nonisolated static func decode(frame: RawJSON) throws -> (answers: UInt64?, reading: MobileTaskReading) {
-        struct Frame: Decodable {
-            let answers: UInt64?
-            let unavailable: String?
-            let body: [WorkViewPlan]?
-        }
-        let reading = try frame.decode(Frame.self)
+        let reading = try frame.decode(SubscriptionReading<[WorkViewPlan]>.self)
         if let reason = reading.unavailable {
             return (reading.answers, .failure(RegistryQueryError(reason)))
         }
         guard let plans = reading.body else { throw RegistryQueryError("Task reading is missing its contents") }
-        // One repository that cannot answer leaves the others listed; the reading
-        // fails only when none could.
-        var failure: RegistryQueryError?
-        let repositories = plans.map { plan in
-            do { return RepositoryTasks(repository: plan.repository, path: plan.repositoryPath, tasks: try mobileTasks(plan)) } catch {
-                failure = failure ?? (error as? RegistryQueryError) ?? RegistryQueryError(error.localizedDescription)
-                return RepositoryTasks(repository: plan.repository, path: plan.repositoryPath, tasks: [])
-            }
-        }
-        if let failure, repositories.allSatisfy(\.tasks.isEmpty), plans.allSatisfy({ !$0.resolution.unavailable.isEmpty }) {
-            return (reading.answers, .failure(failure))
-        }
-        return (reading.answers, .success(repositories))
+        return (reading.answers, decodePlans(plans.map { ProjectedWorkPlan($0) }))
+    }
+
+    nonisolated static func decodePlans(_ plans: [ProjectedWorkPlan]) -> MobileTaskReading {
+        .success(plans.map { plan in
+            RepositoryTasks(repository: plan.repository, path: plan.repositoryPath,
+                tasks: mobileTasks(plan), unavailable: plan.resolution.unavailable)
+        })
     }
 }

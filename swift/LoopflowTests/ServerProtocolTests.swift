@@ -10,6 +10,168 @@ struct ServerProtocolTests {
         try Data(contentsOf: root.appendingPathComponent("rust/loopflow/tests/fixtures/dto/server/\(name).json"))
     }
 
+    @Test func operationAdmissionAndRecoveryUseDurableIdentity() throws {
+        let change = ServedWrite.taskComplete(directory: "/repo", issue: "LOO-1")
+        #expect(try encoded(.request(id: "admit", operation: .operationSubmit(requestID: "operation_fixture", epoch: "epoch_fixture", command: change), select: nil)) == value("operation_submit"))
+        #expect(try encoded(.request(id: "receipt", operation: .read(.operationGet(requestID: "operation_fixture")), select: nil)) == value("operation_get"))
+        for name in ["operation_admitted", "operation_receipt", "operation_planning", "operation_creation_planning", "operation_state_planning", "operation_ownership_planning", "operation_pending", "operation_candidate", "operation_conflict"] {
+            guard case .response(_, _, let result) = try message(name) else { Issue.record("Expected receipt"); return }
+            let receipt = try result.decode(OperationReceipt.self)
+            #expect(receipt.requestID == "operation_fixture")
+            #expect(try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(receipt)) == result.decode(JSONValue.self))
+            for key in ["request_id", "kind", "fingerprint", "submitted_fingerprint", "validation", "delivery", "revision", "result", "error", "commits", "planning", "created_at", "updated_at"] {
+                var missing = try #require(JSONSerialization.jsonObject(with: result.bytes) as? [String: Any])
+                missing.removeValue(forKey: key)
+                #expect(throws: DecodingError.self) { try JSONDecoder().decode(OperationReceipt.self, from: JSONSerialization.data(withJSONObject: missing)) }
+            }
+        }
+    }
+
+    @Test func ownershipPlanningEvidenceKeepsItsExactComment() throws {
+        guard case .response(_, _, let result) = try message("operation_ownership_planning") else { Issue.record("Expected receipt"); return }
+        let receipt = try result.decode(OperationReceipt.self)
+        let stage = try #require(receipt.commits.first)
+        let current = try #require(receipt.planning?.changes.first)
+        #expect(stage.stage == "task.unassigned")
+        #expect(current.change == stage.planningChanges.first)
+        #expect(current.change.kind == .taskComment)
+        #expect(current.state == .uncertain)
+        #expect(receipt.result == stage.result)
+        #expect(OperationDeclaration(kind: "task.unassign")?.stages == ["task.unassigned"])
+    }
+
+    @Test func completionPlanningEvidenceUsesItsExactStateDelivery() throws {
+        guard case .response(_, _, let result) = try message("operation_state_planning") else { Issue.record("Expected receipt"); return }
+        let receipt = try result.decode(OperationReceipt.self)
+        let stage = try #require(receipt.commits.first)
+        let current = try #require(receipt.planning?.changes.first)
+        #expect(stage.stage == "task.completed")
+        #expect(current.change == stage.planningChanges.first)
+        #expect(current.change.kind == .taskState)
+        #expect(current.state == .uncertain)
+        #expect(current.error == "planning response lost")
+        #expect(receipt.delivery == .finished)
+        #expect(receipt.result == stage.result)
+    }
+
+    @Test func currentPlanningEvidenceDoesNotReplaceTheSavedResult() throws {
+        guard case .response(_, _, let result) = try message("operation_planning") else { Issue.record("Expected receipt"); return }
+        let receipt = try result.decode(OperationReceipt.self)
+        let current = try #require(receipt.planning)
+        #expect(current.changes.map(\.state) == [.pending, .uncertain, .delivered, .superseded, .conflict, .unavailable])
+        #expect(current.changes.map(\.change) == receipt.commits.flatMap(\.planningChanges))
+        #expect(current.fence.revisions["planning"] == 12)
+        #expect(receipt.commits[0].fence.revisions["planning"] == 7)
+        #expect(receipt.error == "planning response lost")
+        #expect(current.changes.dropFirst(2).allSatisfy { $0.error == nil })
+        var object = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(current.changes[0])) as? [String: Any])
+        object.removeValue(forKey: "error")
+        #expect(throws: DecodingError.self) { try JSONDecoder().decode(OperationPlanningChange.self, from: JSONSerialization.data(withJSONObject: object)) }
+    }
+
+    @Test func stageResolutionIsRequiredAndIndependentOfDelivery() throws {
+        guard case .response(_, _, let result) = try message("operation_receipt") else { Issue.record("Expected receipt"); return }
+        let receipt = try result.decode(OperationReceipt.self)
+        #expect(receipt.delivery == .uncertain)
+        #expect(receipt.commits.map(\.resolution) == [.committed, .superseded])
+        let stage = try #require(receipt.commits.last)
+        #expect(stage.stage == "task.completed")
+        let frame = try #require(try RawJSON(fixture("reading_stamped")).fields()["frame"])
+        let stamp = try #require(try frame.decode(SubscriptionReading<[JSONValue]>.self).stamp)
+        let query = try #require(stamp.query)
+        #expect(!stage.fence.isCovered(by: stamp, query: query))
+        var replacement = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(stamp)) as? [String: Any])
+        var revisions = try #require(replacement["revisions"] as? [String: Any])
+        revisions["planning"] = 8
+        replacement["revisions"] = revisions
+        let newer = try JSONDecoder().decode(ReadingStamp.self, from: JSONSerialization.data(withJSONObject: replacement))
+        #expect(stage.fence.isCovered(by: newer, query: query))
+        var object = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(stage)) as? [String: Any])
+        object.removeValue(forKey: "resolution")
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(OperationCommit.self, from: JSONSerialization.data(withJSONObject: object))
+        }
+        var noPlanningDeclaration = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(stage)) as? [String: Any])
+        noPlanningDeclaration.removeValue(forKey: "planning_effect")
+        #expect(throws: DecodingError.self) { try JSONDecoder().decode(OperationCommit.self, from: JSONSerialization.data(withJSONObject: noPlanningDeclaration)) }
+        for resolution in ["committed", "definitely_refused", "superseded"] {
+            object["resolution"] = resolution
+            let decoded = try JSONDecoder().decode(OperationCommit.self, from: JSONSerialization.data(withJSONObject: object))
+            #expect(decoded.resolution.rawValue == resolution)
+        }
+    }
+
+    @Test func creationAdmissionIsSeparateFromCanonicalValidation() throws {
+        let states: [(String, OperationReceipt.Validation, OperationReceipt.Delivery)] = [
+            ("operation_pending", .pending, .queued),
+            ("operation_candidate", .candidate, .untracked),
+            ("operation_conflict", .conflict, .untracked),
+        ]
+        for (name, validation, delivery) in states {
+            guard case .response(_, _, let result) = try message(name) else { Issue.record("Expected receipt"); return }
+            let receipt = try result.decode(OperationReceipt.self)
+            #expect(receipt.validation == validation)
+            #expect(receipt.delivery == delivery)
+            #expect(receipt.submittedFingerprint != nil)
+            #expect((receipt.fingerprint == nil) == (validation == .pending))
+            #expect(receipt.commits.isEmpty)
+        }
+    }
+
+    @Test func commitFencesRequireCausalCoverageOfTheExactQuery() throws {
+        guard case .response(_, _, let result) = try message("operation_receipt") else { Issue.record("Expected receipt"); return }
+        let fence = try #require(try result.decode(OperationReceipt.self).commits.first?.fence)
+        let fields = try RawJSON(fixture("reading_stamped")).fields()
+        let frame = try #require(fields["frame"])
+        let stamp = try #require(try frame.decode(SubscriptionReading<[JSONValue]>.self).stamp)
+        let query = try #require(stamp.query)
+        #expect(fence.isCovered(by: stamp, query: query))
+        #expect(!fence.isCovered(by: stamp, query: "different"))
+        let wire = try #require(try frame.fields()["stamp"])
+        let staleFields: [(String, Any)] = [("complete", false), ("epoch", "old-epoch"), ("machine", "other-machine"), ("schema", 0), ("query", NSNull()), ("revisions", ["planning": 6, "sessions": 999, "graphs": 999, "processes": 999, "usage": 0])]
+        for (key, value) in staleFields {
+            var object = try #require(JSONSerialization.jsonObject(with: wire.bytes) as? [String: Any])
+            object[key] = value
+            let stale = try JSONDecoder().decode(ReadingStamp.self, from: JSONSerialization.data(withJSONObject: object))
+            #expect(!fence.isCovered(by: stale, query: query))
+        }
+    }
+
+    @Test func readingStampsRequireEveryFieldAndRoundTrip() throws {
+        let message = try fixture("reading_stamped")
+        let fields = try RawJSON(message).fields()
+        let frame = try #require(fields["frame"])
+        let reading = try frame.decode(SubscriptionReading<[JSONValue]>.self)
+        let stamp = try #require(reading.stamp)
+        #expect(stamp.observations?.source == "fixture-observer")
+        #expect(stamp.observations?.dependencies.first?.token == 17)
+        #expect(stamp.revisions.sessions == 11)
+        #expect(stamp.complete)
+        #expect(stamp.schema == UInt32(ServerProtocol.revision))
+        let wire = try #require(try frame.fields()["stamp"])
+        #expect(try wire.decode(JSONValue.self) == JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(stamp)))
+        var object = try #require(JSONSerialization.jsonObject(with: wire.bytes) as? [String: Any])
+        for key in ["machine", "epoch", "schema", "query", "complete", "revisions", "observations"] {
+            var missing = object
+            missing.removeValue(forKey: key)
+            #expect(throws: DecodingError.self) {
+                try JSONDecoder().decode(ReadingStamp.self, from: JSONSerialization.data(withJSONObject: missing))
+            }
+        }
+        object["query"] = NSNull()
+        let unscoped = try JSONDecoder().decode(ReadingStamp.self, from: JSONSerialization.data(withJSONObject: object))
+        #expect(unscoped.query == nil)
+        #expect(try RawJSON(JSONEncoder().encode(unscoped)).fields()["query"]?.isNull == true)
+        for key in ["answers", "stamp", "unavailable", "body"] {
+            var missing = try #require(JSONSerialization.jsonObject(with: frame.bytes) as? [String: Any])
+            missing.removeValue(forKey: key)
+            #expect(throws: DecodingError.self) {
+                try JSONDecoder().decode(SubscriptionReading<[JSONValue]>.self,
+                    from: JSONSerialization.data(withJSONObject: missing))
+            }
+        }
+    }
+
     /// What `lf server describe --json` prints; a Rust test holds it to the wire types.
     private func schema() throws -> [String: Any] {
         let data = try Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/server_schema.json"))
@@ -69,6 +231,7 @@ struct ServerProtocolTests {
         #expect(welcome.serverRevision == ServerProtocol.revision)
         #expect(welcome.minRevision == ServerProtocol.minRevision)
         #expect(welcome.instance == "service-incarnation")
+        #expect(welcome.observations == "fixture-observer")
         #expect(welcome.executableSHA256.count == 64)
         #expect(welcome.limits.maxMessage == 1_048_576)
         #expect(welcome.limits.maxConnections == 64)
@@ -482,7 +645,7 @@ struct ServerProtocolTests {
             try ServerMessage(line: Data(#"{"type":"reading","id":"x"}"#.utf8))
         }
         #expect(throws: (any Error).self) {
-            try ServerMessage(line: Data(#"{"type":"welcome","revision":5}"#.utf8))
+            try ServerMessage(line: Data(#"{"type":"welcome","observations":"fixture-observer","revision":5}"#.utf8))
         }
         #expect(throws: (any Error).self) {
             try ServerMessage(line: Data(#"{"type":"response","id":"x","result":{"kind":"bootstrap"}}"#.utf8))

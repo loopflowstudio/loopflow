@@ -14,8 +14,6 @@ struct WorkNavigator: View {
     /// The clicked Wave row moves to the top; a Dashboard's label into the list header.
     @Namespace private var scopeTitle
     @State private var wavesHeight: CGFloat = 130
-    /// The Wave row just clicked, shown before its selection moves it.
-    @State private var pressedScope: WorkNavigation.SidebarScope?
     @State private var removingWave: WaveSnapshot?
     @State private var renamingWave: WaveSnapshot?
     @State private var taskDrag = TaskOrderDrag.State()
@@ -60,13 +58,19 @@ struct WorkNavigator: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if let status = model.workStatus.message {
+            if let status = model.workStatus.message, !model.waitingForConnection {
                 WorkReadStatus(model: model, status: status)
             }
-            if let error = model.dashboardError ?? model.selectionPlans.errorMessage,
+            if let error = model.dashboardError ?? model.presentationError ?? model.selectionPlans.errorMessage,
                ![model.roadmap.errorMessage, model.taskListReading.errorMessage, model.sessions.errorMessage]
                 .compactMap({ $0 }).contains(error) {
                 Text(error).font(Typography.body(11)).foregroundStyle(palette.warning).padding(10)
+            }
+            if model.waitingForConnection {
+                Text("Waiting for connection").font(Typography.body(11)).foregroundStyle(palette.textSecondary).padding(10)
+            }
+            ForEach(model.pendingOperations) { operation in
+                DesktopPendingOperationRow(model: model, operation: operation)
             }
             // The repository tops the sidebar; a selected Wave moves up under it.
             VStack(alignment: .leading, spacing: 5) {
@@ -184,26 +188,19 @@ struct WorkNavigator: View {
 
     private func waveRow(_ wave: WaveRoadmap) -> some View {
         waveRow(scope: .wave(wave.wave.id), name: wave.wave.displayName, icon: "water.waves",
-                count: model.startedTaskCount(.wave(wave.wave.id)), unavailableReason: wave.tasks.unavailableReason)
+                count: model.startedTaskCount(.wave(wave.wave.id)), unavailableReason: model.standupTasks(.wave(wave.wave.id))?.unavailableReason)
             .contextMenu {
                 WaveLifecycleMenu(onRename: { renamingWave = wave.wave }, onRemove: { removingWave = wave.wave })
             }
     }
 
     private func waveRow(scope: WorkNavigation.SidebarScope, name: String, icon: String?,
-                         count: Int, unavailableReason: String?) -> some View {
+                         count: Int?, unavailableReason: String?) -> some View {
         let reference: WorkReference? = if case .wave(let id) = scope { .wave(id: id) } else { nil }
-        let state: SidebarSelection = pressedScope == scope || model.navigation.destination == .work(reference) ? .shown
+        let state: SidebarSelection = model.navigation.destination == .work(reference) ? .shown
             : model.navigation.sidebarScope == scope ? .containing : .none
         return Button {
-            // The click darkens the row first; it moves once that has landed.
-            guard !reduceMotion else { model.select(reference); return }
-            withAnimation(.easeOut(duration: 0.12)) { pressedScope = scope }
-            Task {
-                try? await Task.sleep(for: .milliseconds(120))
-                model.select(reference)
-                pressedScope = nil
-            }
+            model.select(reference)
         } label: {
             HStack {
                 if let icon { Image(systemName: icon) }
@@ -211,8 +208,10 @@ struct WorkNavigator: View {
                 Spacer()
                 if let unavailableReason {
                     Image(systemName: "exclamationmark.triangle").help(unavailableReason)
-                } else {
+                } else if let count {
                     Text("\(count)").font(Typography.code(10)).help("\(count) working or autonomous Tasks")
+                } else {
+                    Image(systemName: "exclamationmark.triangle").help("Waiting for a covering Work reading")
                 }
             }.font(Typography.body(13)).padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -222,7 +221,7 @@ struct WorkNavigator: View {
                 .contentShape(RoundedRectangle(cornerRadius: 6))
         }.buttonStyle(.plain)
             .modifier(FocusedWork(focus: $focusedWork, reference: reference))
-            .accessibilityLabel("\(name), \(count) working or autonomous Tasks")
+            .accessibilityLabel(count.map { "\(name), \($0) working or autonomous Tasks" } ?? "\(name), count unavailable")
             .accessibilityIdentifier("work-wave-\(reference?.id ?? "repository")")
             .matchedGeometryEffect(id: scope, in: scopeTitle)
     }
@@ -389,7 +388,11 @@ struct WorkBreadcrumbs: View {
             // A Wave view in the trail, or the Wave of Work outside any board, heads
             // the crumbs after the repository; the repository page adds none.
             let board = model.navigation.trailBoard
-            if case .wave(let id) = board {
+            if model.breadcrumb?.taskWork != nil {
+                if showWave, let work = model.breadcrumb?.waveWork {
+                    waveCrumb(work.id, name: model.wave(id: work.id)?.wave.displayName ?? "Wave unavailable")
+                }
+            } else if case .wave(let id) = board {
                 waveCrumb(id, name: model.wave(id: id)?.wave.displayName ?? id)
             } else if showWave, board == nil || board == .repository, let wave = model.breadcrumb?.wave {
                 waveCrumb(wave.roadmap.wave.id, name: wave.roadmap.wave.displayName)
@@ -411,7 +414,7 @@ struct WorkBreadcrumbs: View {
                 let presentation = model.taskPresentation(id: task.task.id)
                 WorkTaskIdentity(presentation: presentation)
                 if presentation.context == nil {
-                    Text(TaskHeading(task: task.task).state).foregroundStyle(.secondary).fixedSize()
+                    Text(task.state).foregroundStyle(.secondary).fixedSize()
                         .accessibilityIdentifier("task-heading-state")
                 }
                 if let workspace = model.shownWorkspace, workspace.key.kind == .task, workspace.key.id == task.task.id {
@@ -922,5 +925,19 @@ struct WorkReadStatus: View {
                     .accessibilityIdentifier("work-retry")
             }
         }.font(Typography.body(11)).padding(10).accessibilityIdentifier("work-status")
+    }
+}
+
+/// The request retains its recovery controls even after native input is ready.
+struct DesktopPendingOperationRow: View {
+    let model: WorkModel
+    let operation: PendingOperation
+
+    var body: some View {
+        if let interaction = model.interaction {
+            PendingOperationRow(operation: operation, interaction: interaction,
+                edit: { model.editCreation($0.id) }, select: { model.selectCreation($0) })
+                .buttonStyle(.plain).controlSize(.small).padding(10)
+        }
     }
 }

@@ -12,6 +12,21 @@ struct TaskProjection: Identifiable {
     let id: WorkNodeKey
     let task: RoadmapTask
     let sessions: [SessionRecord]
+    let facts: WorkMembershipPlan.Facts
+
+    var state: String {
+        guard facts.lifecycle.known else { return "Updating…" }
+        let states = Set(facts.lifecycle.states)
+        if states == task.selectionStates.subtracting([.available, .busy, .blocked]) { return TaskHeading(task: task).state }
+        switch TaskSection(states: facts.lifecycle.states) {
+        case .done: return "Completed"
+        case .abandoned: return "Canceled"
+        case .backlog: return "Not started"
+        case .working: return "Working"
+        case .autonomous: return "Shipping"
+        }
+    }
+
 }
 
 struct WaveProjection: Identifiable {
@@ -26,8 +41,14 @@ struct WorkProjection {
     let waves: [WaveProjection]
     let standaloneTasks: [TaskProjection]
     let unmatchedSessions: [SessionRecord]
+    let unplacedTasks: [TaskProjection]
+    private let taskParents: [String: WorkMembershipPlan.ParentFact]
 
-    init(roadmaps: [WaveRoadmap], inventory: [RoadmapTask], sessions: [SessionRecord]) {
+    init(roadmaps: [WaveRoadmap], inventory: [RoadmapTask], sessions: [SessionRecord], facts: [WorkMembershipPlan.Facts]) {
+        let fields = Dictionary(facts.filter { $0.work.kind == .task }.map { ($0.work.id, $0) }, uniquingKeysWith: { first, _ in first })
+        taskParents = fields.mapValues(\.parent)
+        let content = Dictionary(inventory.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let inventory = facts.filter { $0.work.kind == .task }.compactMap { content[$0.work.id] }
         var matched = Set<String>()
         let visibleTaskIds = Set(inventory.map(\.id))
         var taskSessions: [String: [SessionRecord]] = [:]
@@ -53,20 +74,27 @@ struct WorkProjection {
                 id: WorkNodeKey(repo: repo, work: .wave(id: wave.wave.id)),
                 roadmap: wave,
                 sessions: records,
-                tasks: wave.tasks.items.map { task in
+                tasks: inventory.filter { fields[$0.id]?.parent.wave == wave.wave.id }.map { task in
                     let records = taskSessions[task.id] ?? []
                     matched.formUnion(records.map(\.id))
                     return TaskProjection(
                         id: WorkNodeKey(repo: repo, work: .task(id: task.id)),
-                        task: task, sessions: records
+                        task: task, sessions: records, facts: fields[task.id]!
                     )
                 }
             )
         }
-        standaloneTasks = inventory.filter { $0.task.waveId == nil }.map { task in
+        standaloneTasks = inventory.filter { fields[$0.id]?.parent.wave == nil }.map { task in
             let records = taskSessions[task.id] ?? []
             matched.formUnion(records.map(\.id))
-            return TaskProjection(id: WorkNodeKey(repo: task.task.repo, work: .task(id: task.id)), task: task, sessions: records)
+            return TaskProjection(id: WorkNodeKey(repo: task.task.repo, work: .task(id: task.id)), task: task, sessions: records, facts: fields[task.id]!)
+        }
+        let waveIDs = Set(roadmaps.map { $0.wave.id })
+        unplacedTasks = inventory.filter { fields[$0.id]?.parent.wave.map { !waveIDs.contains($0) } == true }.map { task in
+            let records = taskSessions[task.id] ?? []
+            matched.formUnion(records.map(\.id))
+            return TaskProjection(id: WorkNodeKey(repo: task.task.repo, work: .task(id: task.id)),
+                task: task, sessions: records, facts: fields[task.id]!)
         }
         // Missing planning and unattributed Sessions remain reachable, including
         // mandatory human boundaries and multiple conversations on one subject.
@@ -77,7 +105,7 @@ struct WorkProjection {
     /// siblings share its parent subject; the final crumb chooses among them.
     func breadcrumb(selection: WorkReference?, sessionId: String?) -> WorkBreadcrumb? {
         if let sessionId {
-            if let task = standaloneTasks.first(where: { $0.sessions.contains { $0.id == sessionId } }),
+            if let task = (standaloneTasks + unplacedTasks).first(where: { $0.sessions.contains { $0.id == sessionId } }),
                let session = task.sessions.first(where: { $0.id == sessionId }) {
                 return WorkBreadcrumb(wave: nil, task: task, session: session, siblings: task.sessions)
             }
@@ -91,16 +119,18 @@ struct WorkProjection {
                 }
             }
             if let session = unmatchedSessions.first(where: { $0.id == sessionId }) {
-                let waveId = session.waveId ?? (session.work?.kind == .wave ? session.work?.id : nil)
+                let parent = session.taskIds.first.flatMap { taskParents[$0] }
+                let waveId = session.taskIds.isEmpty
+                    ? session.waveId ?? (session.work?.kind == .wave ? session.work?.id : nil) : parent?.wave
                 let wave = waves.first { $0.roadmap.wave.id == waveId }
                 let siblings = session.work.map { work in
                     unmatchedSessions.filter { $0.work == work }
                 } ?? [session]
-                return WorkBreadcrumb(wave: wave, task: nil, session: session, siblings: siblings)
+                return WorkBreadcrumb(wave: wave, task: nil, session: session, siblings: siblings, taskParent: parent)
             }
         }
         guard let selection else { return nil }
-        if let task = standaloneTasks.first(where: {
+        if let task = (standaloneTasks + unplacedTasks).first(where: {
             $0.id.work == selection
         }) {
             return WorkBreadcrumb(wave: nil, task: task, session: nil, siblings: task.sessions)
@@ -119,7 +149,7 @@ struct WorkProjection {
     }
 
     func subject(for sessionId: String) -> WorkReference? {
-        if let task = standaloneTasks.first(where: { $0.sessions.contains { $0.id == sessionId } }) { return task.id.work }
+        if let task = (standaloneTasks + unplacedTasks).first(where: { $0.sessions.contains { $0.id == sessionId } }) { return task.id.work }
         for wave in waves {
             if wave.sessions.contains(where: { $0.id == sessionId }) { return wave.id.work }
             if let task = wave.tasks.first(where: { $0.sessions.contains { $0.id == sessionId } }) {
@@ -139,8 +169,12 @@ struct WorkBreadcrumb {
     let task: TaskProjection?
     let session: SessionRecord?
     let siblings: [SessionRecord]
+    var taskParent: WorkMembershipPlan.ParentFact? = nil
 
     var waveWork: WorkReference? {
+        if let task { return task.facts.parent.wave.map { .wave(id: $0) } }
+        if let taskParent { return taskParent.wave.map { .wave(id: $0) } }
+        if session?.taskIds.isEmpty == false { return nil }
         if let id = session?.waveId { return .wave(id: id) }
         if let work = session?.work, work.kind == .wave { return work }
         return wave?.id.work
@@ -166,25 +200,11 @@ struct SessionBindingDraft: Equatable {
     var error: String?
 }
 
-/// An in-place Session name edit. It belongs to exactly one Session; a
-/// completion for another Session can never touch it.
+/// Local name editor; saving moves the request into WorkInteraction.
 struct SessionRenameDraft: Equatable {
     let id = UUID()
     let sessionId: String
     var text: String
-    var error: String?
-    var submitting = false
-}
-
-/// One Task's in-flight `lf task run` or `lf task move` and its refusal.
-struct TaskRunDraft: Equatable {
-    enum Phase { case runningCommand, awaitingObservation }
-    var phase: Phase?
-    var acting: Bool { phase != nil }
-    var progress: String {
-        phase == .awaitingObservation ? "Task updated; refreshing…" : "Updating Task…"
-    }
-    var error: String?
 }
 
 /// A Wave view's named parts, as `lf desktop -p` names them.
@@ -223,6 +243,14 @@ struct WaveViewRatios: Equatable {
 @MainActor
 @Observable
 final class WorkNavigation {
+    struct TaskCreationDraft {
+        let request: String
+        let wave: String?
+        let graph: String?
+    }
+    var newTaskDraft: TaskCreationDraft?
+    var startingTask: PendingOperation?
+
     enum SidebarFilter: String, CaseIterable {
         case working = "Working tasks"
         case available = "Available"
@@ -276,12 +304,12 @@ final class WorkNavigation {
     }
     var palette: Palette? {
         didSet {
-            if oldValue != palette { paletteGeneration &+= 1 }
+            if oldValue != palette {
+                if palette != nil { startingTask = nil }
+            }
             if oldValue == nil, palette != nil { restorePaletteFocus = true }
         }
     }
-    /// A dismissed and reopened sheet is a different presentation, even at the same Work.
-    @ObservationIgnored private(set) var paletteGeneration = 0
     var restorePaletteFocus = true
     var recentDestinations: [WorkPaletteRow] = []
     /// Source revisions isolate disclosure from changed definitions and repositories.
@@ -293,7 +321,7 @@ final class WorkNavigation {
             workspacePresentation.selectedSessionId = newValue
             // Leaving a Session abandons an unsubmitted edit; a submitted one
             // still settles against its own Session.
-            if let renaming, renaming.sessionId != selectedSessionId, !renaming.submitting {
+            if let renaming, renaming.sessionId != selectedSessionId {
                 self.renaming = nil
             }
             if let binding, binding.sessionId != selectedSessionId, !binding.submitting {
@@ -303,9 +331,7 @@ final class WorkNavigation {
     }
     var renaming: SessionRenameDraft?
     var binding: SessionBindingDraft?
-    /// Graph drafts by planning Task id; they survive Task and Session navigation.
-    var taskRunDrafts: [String: TaskRunDraft] = [:]
-    /// What the last Auto-Ship or Stop Auto-Ship on the window heading did.
+    /// The last Auto-Ship or Stop Auto-Ship request from this window.
     var shipNotice: ShipNotice?
     var startingTaskSessions: Set<String> = []
     var taskSessionErrors: [String: String] = [:]
@@ -319,10 +345,15 @@ final class WorkNavigation {
     var expandedNotices: Set<String> = []
     /// Graph processes whose graph and steps are open, keyed by Graph process.
     var expandedGraphProcesses: Set<String> = []
+    struct QueryDestination: Equatable {
+        let machine: String?
+        let repository: String
+        let expression: String
+    }
     enum Destination: Equatable {
         case work(WorkReference?)
         case dashboard(String)
-        case view(WorkViewPlan)
+        case view(QueryDestination)
         /// The default Dashboard: the Working Tasks plan as a grid of slots.
         case workingTasks
         /// One Dashboard member shown as full Work; the trail returns through its Dashboard.
@@ -398,6 +429,17 @@ final class WorkNavigation {
 
     func resizeSidebar(_ width: CGFloat, availableWidth: CGFloat) {
         sidebarWidth = min(600, max(240, min(width, availableWidth - 360)))
+    }
+
+    /// Resolve an initially unknown local endpoint without recording a new visit.
+    func bindQueryDestinations(to machine: String) {
+        func bind(_ destination: Destination) -> Destination {
+            guard case .view(let query) = destination, query.machine == nil else { return destination }
+            return .view(QueryDestination(machine: machine, repository: query.repository, expression: query.expression))
+        }
+        destination = bind(destination)
+        backStack = backStack.map(bind)
+        forwardStack = forwardStack.map(bind)
     }
 
     /// Selections and visits from another Machine name no Work on this one.

@@ -43,6 +43,7 @@ struct RoadmapViewTests {
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("No read needed") })
         model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
         var opened: (String, String)?
+        model.applySelectionPlans([fixtureInventoryPlan(try loadRoadmapFixture())], reason: "")
         let view = RoadmapView(model: model, onOpenWave: { _ in }, onOpenTask: { opened = ($0, $1) })
         let section = try view.inspect().find(NowSectionView.self).actualView()
         let row = try #require(section.section.rows.first)

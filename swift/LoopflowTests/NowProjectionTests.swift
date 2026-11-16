@@ -23,7 +23,7 @@ struct NowProjectionTests {
     @Test("NOW flattens across waves and drops empty groups")
     func nowSectionsAreFlatAndGrouped() throws {
         let snapshot = try loadRoadmapFixture()
-        let sections = nowSections(from: snapshot.tasks.items, waves: snapshot.waves)
+        let sections = nowSections(from: snapshot.tasks.items, facts: fixtureInventoryPlan(snapshot).membership.facts, waves: snapshot.waves)
 
         #expect(sections.map(\.group) == [.waiting])
         // The unavailable `context` wave contributes no rows.
@@ -53,6 +53,23 @@ struct NowProjectionTests {
         let spoken = taskConditionAccessibilityLabel(dirty)
         #expect(spoken.contains(dirty.condition.reason))
         #expect(spoken.contains("Next owner: task"))
+    }
+
+    @Test("NOW uses projected parents and omits a completed Task before planning catches up")
+    func projectedMembershipWinsOverPlanning() throws {
+        let snapshot = try loadRoadmapFixture()
+        var facts = fixtureInventoryPlan(snapshot).membership.facts
+        let task = try #require(snapshot.tasks.items.first { nowGroup(for: $0) == .waiting })
+        let position = try #require(facts.firstIndex { $0.work.kind == .task && $0.work.id == task.id })
+        facts[position].parent = .init(wave: nil, support: nil)
+        let standalone = nowSections(from: snapshot.tasks.items, facts: facts, waves: snapshot.waves)
+        #expect(standalone.flatMap(\.rows).first { $0.id == task.id }?.wave == nil)
+        facts[position].parent = .init(wave: "unresolved", support: nil)
+        let unresolved = nowSections(from: snapshot.tasks.items, facts: facts, waves: snapshot.waves)
+        #expect(unresolved.flatMap(\.rows).first { $0.id == task.id }?.parentWave == "unresolved")
+        facts[position].disposition.value.completed = true
+        let completed = nowSections(from: snapshot.tasks.items, facts: facts, waves: snapshot.waves)
+        #expect(!completed.flatMap(\.rows).contains { $0.id == task.id })
     }
 
     // MARK: - Fixtures

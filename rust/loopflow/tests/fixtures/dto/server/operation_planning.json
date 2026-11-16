@@ -1,0 +1,147 @@
+{
+  "type": "response",
+  "id": "receipt",
+  "trace_id": "trace_fixture",
+  "result": {
+    "request_id": "operation_fixture",
+    "kind": "task.update",
+    "fingerprint": null,
+    "submitted_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "validation": "bound",
+    "delivery": "finished",
+    "revision": 14,
+    "result": {
+      "id": "task_fixture",
+      "sync": {
+        "connected": true,
+        "changes": []
+      }
+    },
+    "error": "planning response lost",
+    "commits": [
+      {
+        "resolution": "committed",
+        "stage": "task.updated",
+        "resources": [
+          "task_fixture"
+        ],
+        "fence": {
+          "machine": "machine_fixture",
+          "epoch": "ab0123456789ab0123456789ab01234567",
+          "schema": 6,
+          "revisions": {
+            "planning": 7
+          }
+        },
+        "result": {
+          "id": "task_fixture",
+          "sync": {
+            "connected": true,
+            "changes": []
+          }
+        },
+        "planning_changes": [
+          {
+            "kind": "task",
+            "owner": "task_fixture",
+            "id": "change_0"
+          },
+          {
+            "kind": "task",
+            "owner": "task_fixture",
+            "id": "change_1"
+          },
+          {
+            "kind": "task",
+            "owner": "task_fixture",
+            "id": "change_2"
+          },
+          {
+            "kind": "task",
+            "owner": "task_fixture",
+            "id": "change_3"
+          },
+          {
+            "kind": "task",
+            "owner": "task_fixture",
+            "id": "change_4"
+          },
+          {
+            "kind": "task",
+            "owner": "task_fixture",
+            "id": "change_5"
+          }
+        ],
+        "planning_effect": "correlated"
+      }
+    ],
+    "planning": {
+      "fence": {
+        "machine": "machine_fixture",
+        "epoch": "ab0123456789ab0123456789ab01234567",
+        "schema": 6,
+        "revisions": {
+          "planning": 12
+        }
+      },
+      "changes": [
+        {
+          "change": {
+            "kind": "task",
+            "owner": "task_fixture",
+            "id": "change_0"
+          },
+          "state": "pending",
+          "error": "delivery pending"
+        },
+        {
+          "change": {
+            "kind": "task",
+            "owner": "task_fixture",
+            "id": "change_1"
+          },
+          "state": "uncertain",
+          "error": "delivery pending"
+        },
+        {
+          "change": {
+            "kind": "task",
+            "owner": "task_fixture",
+            "id": "change_2"
+          },
+          "state": "delivered",
+          "error": null
+        },
+        {
+          "change": {
+            "kind": "task",
+            "owner": "task_fixture",
+            "id": "change_3"
+          },
+          "state": "superseded",
+          "error": null
+        },
+        {
+          "change": {
+            "kind": "task",
+            "owner": "task_fixture",
+            "id": "change_4"
+          },
+          "state": "conflict",
+          "error": null
+        },
+        {
+          "change": {
+            "kind": "task",
+            "owner": "task_fixture",
+            "id": "change_5"
+          },
+          "state": "unavailable",
+          "error": null
+        }
+      ]
+    },
+    "created_at": 1,
+    "updated_at": 2
+  }
+}

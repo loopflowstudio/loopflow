@@ -77,6 +77,8 @@ fn add_examples(schema: &mut Value) {
 /// Recorded requests, embedded so `describe` needs no source tree. Each
 /// names its operation; a test fails when a request fixture is missing here.
 const REQUESTS: &[&str] = &[
+    include_str!("../../tests/fixtures/dto/server/operation_submit.json"),
+    include_str!("../../tests/fixtures/dto/server/operation_get.json"),
     include_str!("../../tests/fixtures/dto/server/account_connect.json"),
     include_str!("../../tests/fixtures/dto/server/account_disconnect.json"),
     include_str!("../../tests/fixtures/dto/server/account_list.json"),
@@ -132,6 +134,51 @@ const REQUESTS: &[&str] = &[
 /// Recorded answers and the operation each answers. A new `response`
 /// fixture must be named here; subscriptions answer null.
 const RESPONSES: &[(&str, &str, &str)] = &[
+    (
+        "operation_admitted",
+        "operation.submit",
+        include_str!("../../tests/fixtures/dto/server/operation_admitted.json"),
+    ),
+    (
+        "operation_pending",
+        "operation.get",
+        include_str!("../../tests/fixtures/dto/server/operation_pending.json"),
+    ),
+    (
+        "operation_candidate",
+        "operation.get",
+        include_str!("../../tests/fixtures/dto/server/operation_candidate.json"),
+    ),
+    (
+        "operation_conflict",
+        "operation.get",
+        include_str!("../../tests/fixtures/dto/server/operation_conflict.json"),
+    ),
+    (
+        "operation_planning",
+        "operation.get",
+        include_str!("../../tests/fixtures/dto/server/operation_planning.json"),
+    ),
+    (
+        "operation_creation_planning",
+        "operation.get",
+        include_str!("../../tests/fixtures/dto/server/operation_creation_planning.json"),
+    ),
+    (
+        "operation_ownership_planning",
+        "operation.get",
+        include_str!("../../tests/fixtures/dto/server/operation_ownership_planning.json"),
+    ),
+    (
+        "operation_state_planning",
+        "operation.get",
+        include_str!("../../tests/fixtures/dto/server/operation_state_planning.json"),
+    ),
+    (
+        "operation_receipt",
+        "operation.get",
+        include_str!("../../tests/fixtures/dto/server/operation_receipt.json"),
+    ),
     (
         "account",
         "account.disconnect",

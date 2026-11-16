@@ -2067,6 +2067,36 @@
       ],
       "type": "string"
     },
+    "CommitFence": {
+      "description": "Captured with domain facts or a current status reading in one snapshot.\nA status reading dates its evidence; only a domain writer establishes a commit.",
+      "properties": {
+        "epoch": {
+          "type": "string"
+        },
+        "machine": {
+          "type": "string"
+        },
+        "revisions": {
+          "additionalProperties": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "type": "object"
+        },
+        "schema": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "machine",
+        "epoch",
+        "schema",
+        "revisions"
+      ],
+      "type": "object"
+    },
     "Committed": {
       "additionalProperties": false,
       "description": "What `checkout.commit` left.",
@@ -2913,7 +2943,7 @@
           "properties": {
             "items": {
               "items": {
-                "$ref": "#/$defs/PlanBoardTask"
+                "$ref": "#/$defs/ProjectSummary"
               },
               "type": "array"
             },
@@ -2959,7 +2989,7 @@
           "properties": {
             "items": {
               "items": {
-                "$ref": "#/$defs/ProjectSummary"
+                "$ref": "#/$defs/RoadmapTask"
               },
               "type": "array"
             },
@@ -3005,7 +3035,7 @@
           "properties": {
             "items": {
               "items": {
-                "$ref": "#/$defs/RoadmapTask"
+                "$ref": "#/$defs/SessionHistory"
               },
               "type": "array"
             },
@@ -3051,7 +3081,7 @@
           "properties": {
             "items": {
               "items": {
-                "$ref": "#/$defs/SessionHistory"
+                "$ref": "#/$defs/PlanBoardTask"
               },
               "type": "array"
             },
@@ -3184,6 +3214,88 @@
         "path",
         "key",
         "inspections"
+      ],
+      "type": "object"
+    },
+    "FieldObservations": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "const": "sqlite",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "evidence": {
+              "$ref": "#/$defs/ObservationEvidence"
+            },
+            "kind": {
+              "const": "captured",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "evidence"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "unavailable",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "FieldSupport": {
+      "description": "Support belongs to this typed value, independently of query completeness.",
+      "properties": {
+        "derivation": {
+          "type": "string"
+        },
+        "epoch": {
+          "type": "string"
+        },
+        "machine": {
+          "type": "string"
+        },
+        "observations": {
+          "$ref": "#/$defs/FieldObservations"
+        },
+        "revisions": {
+          "additionalProperties": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "type": "object"
+        },
+        "schema": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "machine",
+        "epoch",
+        "schema",
+        "derivation",
+        "revisions",
+        "observations"
       ],
       "type": "object"
     },
@@ -4800,6 +4912,265 @@
       ],
       "type": "object"
     },
+    "MembershipFacts": {
+      "properties": {
+        "activity": {
+          "$ref": "#/$defs/StateFact"
+        },
+        "disposition": {
+          "$ref": "#/$defs/ValueFact"
+        },
+        "execution": {
+          "$ref": "#/$defs/ValueFact4"
+        },
+        "name": {
+          "type": "string"
+        },
+        "ownership": {
+          "$ref": "#/$defs/ValueFact2"
+        },
+        "parent": {
+          "$ref": "#/$defs/ParentFact"
+        },
+        "publication": {
+          "$ref": "#/$defs/ValueFact3"
+        },
+        "work": {
+          "$ref": "#/$defs/WorkWorkspaceKey"
+        }
+      },
+      "required": [
+        "work",
+        "name",
+        "parent",
+        "disposition",
+        "ownership",
+        "publication",
+        "execution",
+        "activity"
+      ],
+      "type": "object"
+    },
+    "MembershipNode": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "const": "members",
+              "type": "string"
+            },
+            "members": {
+              "items": {
+                "$ref": "#/$defs/MemberRef"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "kind",
+            "members"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "select",
+              "type": "string"
+            },
+            "predicate": {
+              "$ref": "#/$defs/MembershipPredicate"
+            },
+            "source": {
+              "items": {
+                "$ref": "#/$defs/SelectionId"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "kind",
+            "source",
+            "predicate"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "items": {
+              "items": {
+                "$ref": "#/$defs/MembershipNode"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "compose",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "items"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "items": {
+              "items": {
+                "$ref": "#/$defs/MembershipNode"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "intersect",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "items"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "MembershipPlan": {
+      "properties": {
+        "domains": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "effects": {
+          "additionalProperties": {
+            "$ref": "#/$defs/MembershipStateEffect"
+          },
+          "type": "object"
+        },
+        "facts": {
+          "items": {
+            "$ref": "#/$defs/MembershipFacts"
+          },
+          "type": "array"
+        },
+        "root": {
+          "$ref": "#/$defs/MembershipNode"
+        },
+        "unavailable": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "domains",
+        "root",
+        "facts",
+        "unavailable",
+        "effects"
+      ],
+      "type": "object"
+    },
+    "MembershipPredicate": {
+      "description": "Authored membership predicates over the captured repository manifest.",
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "const": "default",
+              "type": "string"
+            },
+            "wave": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/WaveId"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "wave"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "descendants",
+              "type": "string"
+            },
+            "wave": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "wave"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "kind",
+              "type": "string"
+            },
+            "work_kind": {
+              "$ref": "#/$defs/WorkWorkspaceKind"
+            }
+          },
+          "required": [
+            "kind",
+            "work_kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "state",
+              "type": "string"
+            },
+            "state": {
+              "$ref": "#/$defs/SelectionState"
+            }
+          },
+          "required": [
+            "kind",
+            "state"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "MembershipStateEffect": {
+      "description": "Semantic stages and reload domains; clients project the typed input change.",
+      "properties": {
+        "domains": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "stage": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "stage",
+        "domains"
+      ],
+      "type": "object"
+    },
     "MetricContractIssueDto": {
       "oneOf": [
         {
@@ -5827,6 +6198,48 @@
         }
       ]
     },
+    "ObservationDependency": {
+      "properties": {
+        "fact": {
+          "type": "string"
+        },
+        "token": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "fact",
+        "token"
+      ],
+      "type": "object"
+    },
+    "ObservationEvidence": {
+      "description": "A coherent capture from one ephemeral observation source. IDs reveal no paths.",
+      "properties": {
+        "dependencies": {
+          "items": {
+            "$ref": "#/$defs/ObservationDependency"
+          },
+          "type": "array"
+        },
+        "source": {
+          "type": "string"
+        },
+        "validated_at": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "source",
+        "validated_at",
+        "dependencies"
+      ],
+      "type": "object"
+    },
     "OccurrenceSettings": {
       "description": "A Graph occurrence retains its defining graph through composition and capture.",
       "properties": {
@@ -5914,6 +6327,197 @@
         }
       ],
       "description": "What a request asks for, named by its `kind`: a dotted resource and verb\n(`task.complete`, `plan.list`). `desktop.*` kinds are Desktop's own\narrangement state, not part of what other clients are offered."
+    },
+    "OperationCommit": {
+      "properties": {
+        "fence": {
+          "$ref": "#/$defs/CommitFence"
+        },
+        "planning_changes": {
+          "items": {
+            "$ref": "#/$defs/PlanningChangeRef"
+          },
+          "type": "array"
+        },
+        "planning_effect": {
+          "$ref": "#/$defs/PlanningEffect"
+        },
+        "resolution": {
+          "$ref": "#/$defs/OperationResolution"
+        },
+        "resources": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "result": true,
+        "stage": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "resolution",
+        "stage",
+        "resources",
+        "fence",
+        "result",
+        "planning_effect",
+        "planning_changes"
+      ],
+      "type": "object"
+    },
+    "OperationDelivery": {
+      "description": "Dispatch state is not a prediction about a provider, Graph or native surface.",
+      "enum": [
+        "untracked",
+        "queued",
+        "dispatched",
+        "finished",
+        "uncertain"
+      ],
+      "type": "string"
+    },
+    "OperationPlanningChange": {
+      "properties": {
+        "change": {
+          "$ref": "#/$defs/PlanningChangeRef"
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/PlanningDeliveryState"
+        }
+      },
+      "required": [
+        "change",
+        "state",
+        "error"
+      ],
+      "type": "object"
+    },
+    "OperationPlanningReading": {
+      "properties": {
+        "changes": {
+          "items": {
+            "$ref": "#/$defs/OperationPlanningChange"
+          },
+          "type": "array"
+        },
+        "fence": {
+          "$ref": "#/$defs/CommitFence"
+        }
+      },
+      "required": [
+        "fence",
+        "changes"
+      ],
+      "type": "object"
+    },
+    "OperationReceipt": {
+      "description": "Creation recovery and general commands read the same row. Command output\nstays separate from the domain results that committed with displayed facts.",
+      "properties": {
+        "commits": {
+          "items": {
+            "$ref": "#/$defs/OperationCommit"
+          },
+          "type": "array"
+        },
+        "created_at": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "delivery": {
+          "$ref": "#/$defs/OperationDelivery"
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fingerprint": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "type": "string"
+        },
+        "planning": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OperationPlanningReading"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "result": true,
+        "revision": {
+          "description": "Orders receipt and correlated planning updates within one database epoch.",
+          "format": "int64",
+          "type": "integer"
+        },
+        "submitted_fingerprint": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updated_at": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "validation": {
+          "$ref": "#/$defs/OperationValidation"
+        }
+      },
+      "required": [
+        "request_id",
+        "kind",
+        "fingerprint",
+        "submitted_fingerprint",
+        "validation",
+        "delivery",
+        "revision",
+        "result",
+        "error",
+        "commits",
+        "planning",
+        "created_at",
+        "updated_at"
+      ],
+      "type": "object"
+    },
+    "OperationResolution": {
+      "description": "Resolution of this semantic stage, independent of delivery and other stages.",
+      "enum": [
+        "committed",
+        "definitely_refused",
+        "superseded"
+      ],
+      "type": "string"
+    },
+    "OperationValidation": {
+      "description": "A pending legacy candidate is reserved, but has no permission to execute.",
+      "enum": [
+        "unbound",
+        "pending",
+        "candidate",
+        "bound",
+        "conflict"
+      ],
+      "type": "string"
     },
     "OwnershipKind": {
       "oneOf": [
@@ -6086,6 +6690,35 @@
         }
       ]
     },
+    "ParentFact": {
+      "properties": {
+        "support": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FieldSupport"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "wave": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WaveId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "wave",
+        "support"
+      ],
+      "type": "object"
+    },
     "PeerPlanningStatus": {
       "description": "Local routing and import evidence. Endpoints are deliberately not displayed:\nGit URLs can contain credentials. A checkpoint is not publication evidence.",
       "properties": {
@@ -6194,7 +6827,7 @@
           "type": "string"
         },
         "tasks": {
-          "$ref": "#/$defs/Evidence"
+          "$ref": "#/$defs/Evidence4"
         }
       },
       "required": [
@@ -6271,6 +6904,56 @@
         "destinations"
       ],
       "type": "object"
+    },
+    "PlanningChangeKind": {
+      "enum": [
+        "task",
+        "project",
+        "task_state",
+        "task_creation",
+        "task_comment"
+      ],
+      "type": "string"
+    },
+    "PlanningChangeRef": {
+      "description": "Stable delivery identities owned by planning, rather than copies of its queue.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/PlanningChangeKind"
+        },
+        "owner": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "owner",
+        "id"
+      ],
+      "type": "object"
+    },
+    "PlanningDeliveryState": {
+      "description": "Current evidence for the exact saved change. Unavailable never means delivered.",
+      "enum": [
+        "pending",
+        "uncertain",
+        "delivered",
+        "superseded",
+        "conflict",
+        "unavailable"
+      ],
+      "type": "string"
+    },
+    "PlanningEffect": {
+      "description": "The domain writer declares whether this stage has an external planning effect.",
+      "enum": [
+        "none",
+        "correlated"
+      ],
+      "type": "string"
     },
     "PlanningState": {
       "description": "Availability of retained planning facts, independent of execution permission.",
@@ -7560,6 +8243,55 @@
                 "type": "null"
               }
             ]
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "A durable command and its committed domain stages; never dispatches it.",
+          "examples": [
+            {
+              "kind": "operation.get",
+              "request_id": "operation_fixture"
+            }
+          ],
+          "properties": {
+            "kind": {
+              "const": "operation.get",
+              "type": "string"
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "request_id"
+          ],
+          "type": "object",
+          "x-result": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/OperationReceipt"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "x-result-example": {
+            "commits": [],
+            "created_at": 1,
+            "delivery": "queued",
+            "error": null,
+            "fingerprint": null,
+            "kind": "task.create",
+            "planning": null,
+            "request_id": "operation_fixture",
+            "result": null,
+            "revision": 0,
+            "submitted_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "updated_at": 1,
+            "validation": "pending"
           }
         },
         {
@@ -9120,6 +9852,57 @@
         }
       ]
     },
+    "ReadingStamp": {
+      "description": "SQLite facts read in the same snapshot as a subscription's body. External\nobservations (Git, providers, process liveness) are not certified by this fence.",
+      "properties": {
+        "complete": {
+          "description": "The whole scoped query was returned, rather than a selected JSON fragment.",
+          "type": "boolean"
+        },
+        "epoch": {
+          "type": "string"
+        },
+        "machine": {
+          "type": "string"
+        },
+        "observations": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ObservationEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Null when consumed external answers changed during computation."
+        },
+        "query": {
+          "description": "SHA-256 of the served read and selection; absent on ordinary CLI streams.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "revisions": {
+          "$ref": "#/$defs/StoreRevisions"
+        },
+        "schema": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "machine",
+        "epoch",
+        "schema",
+        "query",
+        "complete",
+        "revisions",
+        "observations"
+      ],
+      "type": "object"
+    },
     "Records": {
       "description": "Oldest first; replacement moves a record to the end. No heartbeat or clock.",
       "properties": {
@@ -9581,7 +10364,7 @@
           "type": "string"
         },
         "tasks": {
-          "$ref": "#/$defs/Evidence3",
+          "$ref": "#/$defs/Evidence2",
           "description": "Every Task once; each names its Wave."
         },
         "waves": {
@@ -10052,6 +10835,10 @@
               "minimum": 0,
               "type": "integer"
             },
+            "observations": {
+              "description": "Ephemeral external-observation source; independent of the database epoch.",
+              "type": "string"
+            },
             "revision": {
               "description": "The revision both sides speak for this connection.",
               "format": "uint32",
@@ -10075,6 +10862,7 @@
             "server_revision",
             "min_revision",
             "instance",
+            "observations",
             "build",
             "executable_sha256",
             "machine",
@@ -10318,6 +11106,63 @@
     "ServerOperation": {
       "description": "Operations the server owns rather than a shared read or write.",
       "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Durably admit a command, returning its receipt before domain execution.",
+          "examples": [
+            {
+              "command": {
+                "directory": "/repo",
+                "issue": "LOO-1",
+                "kind": "task.complete"
+              },
+              "epoch": "epoch_fixture",
+              "kind": "operation.submit",
+              "request_id": "operation_fixture"
+            }
+          ],
+          "properties": {
+            "command": {
+              "$ref": "#/$defs/Write"
+            },
+            "epoch": {
+              "description": "The database lifetime of the receipt reading that authorized admission.",
+              "type": "string"
+            },
+            "kind": {
+              "const": "operation.submit",
+              "type": "string"
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "request_id",
+            "epoch",
+            "command"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/OperationReceipt"
+          },
+          "x-result-example": {
+            "commits": [],
+            "created_at": 1,
+            "delivery": "queued",
+            "error": null,
+            "fingerprint": null,
+            "kind": "task.complete",
+            "planning": null,
+            "request_id": "operation_fixture",
+            "result": null,
+            "revision": 0,
+            "submitted_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "updated_at": 1,
+            "validation": "bound"
+          }
+        },
         {
           "additionalProperties": false,
           "description": "A ticket for the Session's held terminal, answered `{ticket,\nterminal_id, expires_in_ms}`. A new connection presents the ticket as\nits first message (`attach`) and becomes the bridge; this connection\nstays a client. An orderly terminal sends a final `0x07` frame with\nJSON `{reason: replaced|finished|retired}` (see `x-terminal-close`).\nAfter `replaced`, attaching by the same Session reaches its next terminal.\nBare EOF leaves the reason unknown. A Session no terminal\nruns is `not_found`; attaching never starts a provider.",
@@ -12133,6 +12978,36 @@
       ],
       "type": "string"
     },
+    "StateFact": {
+      "properties": {
+        "known": {
+          "type": "boolean"
+        },
+        "states": {
+          "items": {
+            "$ref": "#/$defs/SelectionState"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "support": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FieldSupport"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "states",
+        "known",
+        "support"
+      ],
+      "type": "object"
+    },
     "Status": {
       "properties": {
         "configuration": {
@@ -12379,6 +13254,40 @@
       ],
       "type": "object"
     },
+    "StoreRevisions": {
+      "description": "One counter per kind of displayed change. Equal revisions mean nothing a\nworkspace surface reads from that domain was committed in between.",
+      "properties": {
+        "graphs": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "planning": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "processes": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "sessions": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "usage": {
+          "description": "Token counts. Moves every few seconds while agents work.",
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "planning",
+        "sessions",
+        "graphs",
+        "processes",
+        "usage"
+      ],
+      "type": "object"
+    },
     "SubscriptionEvent": {
       "description": "An occurrence within the Tasks included in a subscription reading.",
       "oneOf": [
@@ -12499,6 +13408,17 @@
             }
           ]
         },
+        "stamp": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReadingStamp"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Null when the reading could not establish a database snapshot."
+        },
         "unavailable": {
           "description": "Why the read failed. `body` is then `null`.",
           "type": [
@@ -12509,6 +13429,7 @@
       },
       "required": [
         "answers",
+        "stamp",
         "unavailable",
         "body"
       ],
@@ -13337,6 +14258,43 @@
       ],
       "type": "object"
     },
+    "TaskDisposition": {
+      "properties": {
+        "abandoned": {
+          "type": "boolean"
+        },
+        "completed": {
+          "type": "boolean"
+        },
+        "completed_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "completion_request": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "planning_state": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "completed",
+        "abandoned",
+        "completed_at",
+        "planning_state",
+        "completion_request"
+      ],
+      "type": "object"
+    },
     "TaskEdit": {
       "properties": {
         "id": {
@@ -13897,6 +14855,34 @@
           "type": "object"
         }
       ]
+    },
+    "TaskExecution": {
+      "description": "Recorded execution inputs, retained independently of completion and ownership.\nThese describe Graph work, not conversation activity or native input readiness.",
+      "properties": {
+        "approved": {
+          "type": "boolean"
+        },
+        "carrier_running": {
+          "type": "boolean"
+        },
+        "checkout": {
+          "type": "boolean"
+        },
+        "graph_running": {
+          "type": "boolean"
+        },
+        "held": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "checkout",
+        "graph_running",
+        "carrier_running",
+        "held",
+        "approved"
+      ],
+      "type": "object"
     },
     "TaskExecutionSnapshot": {
       "properties": {
@@ -15517,6 +16503,121 @@
       ],
       "type": "object"
     },
+    "ValueFact": {
+      "description": "Independently supported SQL input. Unknown is distinct from a known null.",
+      "properties": {
+        "known": {
+          "type": "boolean"
+        },
+        "support": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FieldSupport"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "value": {
+          "$ref": "#/$defs/TaskDisposition"
+        }
+      },
+      "required": [
+        "value",
+        "known",
+        "support"
+      ],
+      "type": "object"
+    },
+    "ValueFact2": {
+      "description": "Independently supported SQL input. Unknown is distinct from a known null.",
+      "properties": {
+        "known": {
+          "type": "boolean"
+        },
+        "support": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FieldSupport"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "value": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskOwner"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "value",
+        "known",
+        "support"
+      ],
+      "type": "object"
+    },
+    "ValueFact3": {
+      "description": "Independently supported SQL input. Unknown is distinct from a known null.",
+      "properties": {
+        "known": {
+          "type": "boolean"
+        },
+        "support": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FieldSupport"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "value": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "value",
+        "known",
+        "support"
+      ],
+      "type": "object"
+    },
+    "ValueFact4": {
+      "description": "Independently supported SQL input. Unknown is distinct from a known null.",
+      "properties": {
+        "known": {
+          "type": "boolean"
+        },
+        "support": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FieldSupport"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "value": {
+          "$ref": "#/$defs/TaskExecution"
+        }
+      },
+      "required": [
+        "value",
+        "known",
+        "support"
+      ],
+      "type": "object"
+    },
     "Verification": {
       "enum": [
         "accepted",
@@ -15649,6 +16750,9 @@
             }
           ]
         },
+        "membership": {
+          "$ref": "#/$defs/MembershipPlan"
+        },
         "name": {
           "type": [
             "string",
@@ -15695,6 +16799,7 @@
         "selection",
         "saved_revision",
         "resolution",
+        "membership",
         "arrangement",
         "projection",
         "slots",
@@ -15762,7 +16867,7 @@
       "description": "`lf wave status <wave>` and `lf wave plan <wave>`: current planning,\nTask conditions and Session history. Wire type; no defaults.",
       "properties": {
         "history": {
-          "$ref": "#/$defs/Evidence4",
+          "$ref": "#/$defs/Evidence3",
           "description": "This Wave's Machine-local Session history, newest first."
         },
         "metric_portfolio": {
@@ -15773,14 +16878,14 @@
           "$ref": "#/$defs/ProjectReadiness"
         },
         "projects": {
-          "$ref": "#/$defs/Evidence2"
+          "$ref": "#/$defs/Evidence"
         },
         "setup": {
           "$ref": "#/$defs/WaveSetup",
           "description": "What the Wave's Tasks run, where, and which logins pay, with each source."
         },
         "tasks": {
-          "$ref": "#/$defs/Evidence3"
+          "$ref": "#/$defs/Evidence2"
         },
         "unavailable_tasks": {
           "description": "Durable Project Work that cannot join the current PM plan, including\nnon-terminal Tasks stranded under a terminal historical Project.",
@@ -16011,7 +17116,7 @@
           "$ref": "#/$defs/ProjectReadiness"
         },
         "projects": {
-          "$ref": "#/$defs/Evidence2"
+          "$ref": "#/$defs/Evidence"
         },
         "unavailable_tasks": {
           "items": {
@@ -16197,6 +17302,10 @@
           "minimum": 0,
           "type": "integer"
         },
+        "observations": {
+          "description": "Ephemeral external-observation source; independent of the database epoch.",
+          "type": "string"
+        },
         "revision": {
           "description": "The revision both sides speak for this connection.",
           "format": "uint32",
@@ -16215,6 +17324,7 @@
         "server_revision",
         "min_revision",
         "instance",
+        "observations",
         "build",
         "executable_sha256",
         "machine",
@@ -19550,8 +20660,8 @@
     }
   ],
   "title": "Loopflow server protocol",
-  "x-min-revision": 5,
-  "x-revision": 5,
+  "x-min-revision": 6,
+  "x-revision": 6,
   "x-terminal-close": {
     "payload": {
       "$ref": "#/$defs/Close"

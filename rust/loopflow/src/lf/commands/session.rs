@@ -483,7 +483,11 @@ pub(crate) fn subscribe_list(
             async move {
                 match store {
                     Some(store) => read_list(&store, &filter).await,
-                    None => Ok(serde_json::Value::Array(Vec::new())),
+                    None => Ok(if filter.after.is_some() {
+                        serde_json::json!({"entries": [], "next": null})
+                    } else {
+                        serde_json::Value::Array(Vec::new())
+                    }),
                 }
             }
         },

@@ -46,7 +46,7 @@ struct ServerPerformanceTests {
             start = .now
             subscription.send(Data(#"{"id":7}"#.utf8))
             let frame = try #require(try await frames.next())
-            #expect(String(decoding: frame, as: UTF8.self).contains("\"answers\":7"))
+            #expect(String(decoding: frame.bytes, as: UTF8.self).contains("\"answers\":7"))
             results["checkpoint_ms", default: []].append(start.elapsedMs)
             await subscription.cancel()
         }

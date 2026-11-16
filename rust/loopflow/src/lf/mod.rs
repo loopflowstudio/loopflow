@@ -1438,6 +1438,12 @@ pub enum ServerCommand {
     /// Look up a submitted creation without retrying it
     Receipt {
         request_id: String,
+        /// Include command delivery and domain commit fences.
+        #[arg(long)]
+        operation: bool,
+        /// Stream durable command delivery and domain commits until stdin closes.
+        #[arg(long, requires = "operation")]
+        subscribe: bool,
         #[arg(long)]
         json: bool,
     },
@@ -3869,6 +3875,28 @@ mod tests {
             error.to_string(),
             format!("lf {}\n", crate::build_info::VERSION_LINE)
         );
+    }
+
+    #[test]
+    fn operation_receipt_streams_use_the_shared_read_spelling() {
+        let read = crate::lf::commands::read::Read::OperationGet {
+            request_id: "receipt".into(),
+        };
+        let args = std::iter::once("lf".to_owned())
+            .chain(read.argv())
+            .chain(["--subscribe".into()]);
+        let parsed = Cli::try_parse_from(args).unwrap();
+        assert!(matches!(
+            parsed.command,
+            Some(Commands::Server {
+                cmd: ServerCommand::Receipt {
+                    operation: true,
+                    subscribe: true,
+                    json: true,
+                    ..
+                }
+            })
+        ));
     }
 
     #[test]

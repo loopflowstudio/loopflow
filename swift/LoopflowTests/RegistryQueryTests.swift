@@ -58,8 +58,8 @@ struct RegistryQueryTests {
                 throw RegistryQueryError("A peer run page must never use local execution")
             }
             let body = "{\"overview\":\(overview),\"graph_processes\":[\(detail)],\"comments\":{\"identifier\":\"task\",\"comments\":[],\"pending_sync\":[],\"conflicts\":{},\"refresh_error\":null},\"execution\":null,\"row\":null}"
-            let lines = AsyncThrowingStream<Data, any Error> { continuation in
-                continuation.yield(Data("{\"answers\":null,\"unavailable\":null,\"body\":\(body)}".utf8))
+            let lines = AsyncThrowingStream<ReceivedReading, any Error> { continuation in
+                continuation.yield(ReceivedReading(Data("{\"answers\":null,\"unavailable\":null,\"body\":\(body)}".utf8)))
                 continuation.finish()
             }
             return LineSubscription(lines: lines, send: { _ in }, cancel: {})
@@ -68,7 +68,7 @@ struct RegistryQueryTests {
         var iterator = subscription.lines.makeAsyncIterator()
         let line = try #require(await iterator.next())
         let frame = try WorkFrame.decode(part: .task,
-            scope: WorkScope(repo: nil, headless: false, task: "task", activity: nil, taskListWave: nil), sequence: 0, line: line)
+            scope: WorkScope(repo: nil, headless: false, task: "task", activity: nil, taskListWave: nil), sequence: 0, line: line.bytes, receivingLink: line.link)
         guard case .task(let reading?) = frame.content else { Issue.record("Missing Task reading"); return }
         #expect(reading.graphProcesses == [expected])
         #expect(reading.work.graph?.position == .at(step: "demo"))
@@ -212,8 +212,8 @@ struct RegistryQueryTests {
         let query = RegistryQuery { args, _ in
             args.contains("--after") ? lastJSON : firstJSON
         }
-        let page = try await query.sessionPage(cwd: "/tmp/repo")
-        let final = try await query.sessionPage(after: page.next, cwd: "/tmp/repo")
+        let page = try await query.sessionPage(cwd: "/tmp/repo").page
+        let final = try await query.sessionPage(after: page.next, cwd: "/tmp/repo").page
         #expect(page.entries.map(\.id) == ["session-a"])
         #expect(page.next == "session-a")
         #expect(final.entries.map(\.id) == ["session-z"])
@@ -608,7 +608,7 @@ struct RegistryQueryTests {
             }
         }
 
-        let listed = try await query.sessionPage(cwd: "/tmp/repo").entries
+        let listed = try await query.sessionPage(cwd: "/tmp/repo").page.entries
         let opened = try await query.prepareSession(id: session.id, cwd: "/tmp/repo")
 
         #expect(listed == sessions)

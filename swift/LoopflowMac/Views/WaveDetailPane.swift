@@ -29,6 +29,7 @@ struct WaveDetailReading {
 
 /// The Wave's Project plan, Tasks and metrics, from the window's planning reading.
 struct WaveDetailPane: View {
+    let model: WorkModel
     let wave: WaveViewModel
     let repoPath: String
     /// This Wave's share of the window's planning reading, once one has arrived.
@@ -51,6 +52,7 @@ struct WaveDetailPane: View {
             Divider()
             HSplitView {
                 WavePlanView(
+                    model: model,
                     plan: wave.plan ?? WavePlan(objective: ""),
                     wave: wave,
                     streamed: streamed,
@@ -97,6 +99,7 @@ struct WaveDetailPane: View {
 }
 
 private struct WavePlanView: View {
+    let model: WorkModel
     let plan: WavePlan
     let wave: WaveViewModel
     let streamed: StreamedWaveDetail?
@@ -106,7 +109,8 @@ private struct WavePlanView: View {
     let onOpenTask: (String) -> Void
 
     @Environment(\.palette) private var palette
-    @State private var selectedTaskID: String?
+    // Presentation evidence survives removal from current detail and later pages.
+    @State private var selectedTask: RoadmapTask?
     @State private var reading = WaveDetailReading()
     @State private var historyFilter = TaskHistoryFilter()
     @State private var historyNow = Date()
@@ -131,10 +135,9 @@ private struct WavePlanView: View {
                         portfolio: portfolio
                     )
                 }
-                if let selectedTaskID, let workMap {
+                if let selectedTask {
                     WaveWorkInspector(
-                        selectedTaskID: selectedTaskID,
-                        workMap: workMap,
+                        row: taskList.retained.first { $0.id == selectedTask.id },
                         onOpenTask: onOpenTask
                     )
                 }
@@ -171,21 +174,34 @@ private struct WavePlanView: View {
     /// start, or one more page on request.
     private func loadClosed(more: Bool) async {
         guard historyFilter.showCompleted, AppTestMode.current() != .mockWaves else {
-            closed = ClosedTaskHistory()
+            let generation = closed.begin()
+            closed.finish(generation)
             return
         }
-        if !more { closed = ClosedTaskHistory() }
-        closed.isLoading = true
-        defer { closed.isLoading = false }
-        let since = historyFilter.days == 0 ? nil : Date().addingTimeInterval(-Double(historyFilter.days) * 86_400)
+        let generation = closed.begin()
+        let since = historyFilter.days == 0 ? nil : historyNow.addingTimeInterval(-Double(historyFilter.days) * 86_400)
+        defer { closed.finish(generation) }
+        if !more && closed.loaded && (closed.next == nil || since.map { closed.reaches($0) } == true) { return }
         do {
             repeat {
                 let page = try await RegistryQueryLocal.shared.closedTasks(wave: wave.id, after: closed.next, cwd: wave.repo)
-                closed.append(page)
+                closed.receive(page, generation: generation)
+                guard !Task.isCancelled, closed.generation == generation else { return }
             } while !more && closed.next != nil && since.map { !closed.reaches($0) } ?? false
         } catch {
-            closed.error = "Completed Tasks unavailable: \(error.localizedDescription)"
+            closed.finish(generation, error: "Completed Tasks unavailable: \(error.localizedDescription)")
         }
+    }
+
+    private var taskList: ProjectedTaskHistory {
+        let complete: Bool
+        if case .available(_, let truncated) = workMap?.tasks { complete = !truncated }
+        else { complete = false }
+        return model.detailTasks(wave: wave.id, repository: wave.repo,
+            content: (workMap?.tasks.items ?? []) + closed.tasks + [selectedTask].compactMap { $0 },
+            showCompleted: historyFilter.showCompleted, days: historyFilter.days, now: historyNow,
+            contentComplete: complete,
+            historyComplete: closed.loaded && closed.next == nil && closed.error == nil && !closed.isLoading)
     }
 
     private var displayedPlan: WavePlan { reading.plan(cached: plan) }
@@ -249,34 +265,24 @@ private struct WavePlanView: View {
             if isAwaitingDetail {
                 WorkSectionHeading("Tasks")
                 ProgressView("Loading Tasks…").accessibilityIdentifier("wave-detail-loading")
-            } else if let workMap {
-                switch workMap.tasks {
-                case .unavailable(let reason):
-                    WorkSectionHeading("Tasks")
-                    Text(reason).foregroundStyle(palette.warning)
-                case .available(let inventory, let truncated):
-                    let tasks = closed.merged(after: inventory).filter {
-                        historyFilter.includes($0, now: historyNow)
-                    }
-                    WorkSectionHeading(title: "Tasks", count: tasks.count) {
-                        TaskHistoryControls(filter: $historyFilter)
-                            .onChange(of: historyFilter) { historyNow = Date() }
-                    }
-                    if truncated { Text("Planning is partial; more Tasks exist.") }
-                    if tasks.isEmpty { Text("No current Tasks").foregroundStyle(palette.textSecondary) }
-                    ForEach(tasks) { task in RoadmapTaskView(task: task, selectedTaskID: $selectedTaskID) }
-                    if historyFilter.showCompleted {
-                        if let error = closed.error {
-                            Text(error).foregroundStyle(palette.warning)
-                        } else if closed.next != nil {
-                            Button("Older completed Tasks") { Task { await loadClosed(more: true) } }
-                                .disabled(closed.isLoading)
-                        }
+            } else {
+                let list = taskList
+                WorkSectionHeading(title: "Tasks", count: list.count) {
+                    TaskHistoryControls(filter: $historyFilter)
+                        .onChange(of: historyFilter) { historyNow = Date() }
+                }
+                if list.incomplete { Text("Task membership or history is incomplete.").foregroundStyle(palette.textSecondary) }
+                if let reason = workMap?.tasks.unavailableReason { Text(reason).foregroundStyle(palette.warning) }
+                if list.rows.isEmpty && !list.incomplete { Text("No current Tasks").foregroundStyle(palette.textSecondary) }
+                ForEach(list.rows) { row in RoadmapTaskView(row: row, selectedTask: $selectedTask) }
+                if historyFilter.showCompleted {
+                    if let error = closed.error { Text(error).foregroundStyle(palette.warning) }
+                    if closed.next != nil || !closed.loaded {
+                        Button(closed.error == nil ? "Older completed Tasks" : "Retry completed Tasks") {
+                            Task { await loadClosed(more: true) }
+                        }.disabled(closed.isLoading)
                     }
                 }
-            } else {
-                WorkSectionHeading("Tasks")
-                Text("Task status unavailable.").foregroundStyle(palette.textSecondary)
             }
             ForEach(reading.snapshot?.unavailableTasks ?? [], id: \.taskId) { task in
                 Text("\(task.taskIdentifier): \(task.reason) · \(task.recovery)")
@@ -710,16 +716,17 @@ private extension MetricContractIssue {
     }
 }
 
-private struct RoadmapTaskView: View {
-    let task: RoadmapTask
-    @Binding var selectedTaskID: String?
+struct RoadmapTaskView: View {
+    let row: ProjectedTaskHistory.Row
+    private var task: RoadmapTask { row.task }
+    @Binding var selectedTask: RoadmapTask?
 
     @Environment(\.palette) private var palette
 
     /// State, owner when owned, and who moves next.
     private var statusLine: String {
-        let state = task.historyLabel
-        let owner = task.runtime?.owner.map { " · \($0.summary)" } ?? ""
+        let state = row.status
+        let owner = row.ownerLabel.map { " · \($0)" } ?? ""
         return "\(state)\(owner) · next: \(task.nextMove.owner.rawValue)"
     }
 
@@ -757,18 +764,17 @@ private struct RoadmapTaskView: View {
         .contentShape(Rectangle())
         .accessibilityIdentifier("wave-task")
         .onTapGesture {
-            selectedTaskID = task.task.id
+            selectedTask = task
         }
     }
 
     private var isSelected: Bool {
-        selectedTaskID == task.task.id
+        selectedTask?.id == task.id
     }
 }
 
-private struct WaveWorkInspector: View {
-    let selectedTaskID: String
-    let workMap: WaveWorkMap
+struct WaveWorkInspector: View {
+    let row: ProjectedTaskHistory.Row?
     let onOpenTask: (String) -> Void
 
     @Environment(\.palette) private var palette
@@ -786,7 +792,7 @@ private struct WaveWorkInspector: View {
                     .font(Typography.sectionTitle(15))
                     .foregroundStyle(palette.text)
                 details(
-                    status: task.historyLabel,
+                    status: row?.status ?? "Updating…",
                     reason: task.condition.reason,
                     provider: task.runtime?.provider,
                     location: taskLocation,
@@ -807,8 +813,7 @@ private struct WaveWorkInspector: View {
     }
 
     private var task: RoadmapTask? {
-        return workMap.tasks.items
-            .first { $0.task.id == selectedTaskID }
+        row?.task
     }
 
     private var taskLocation: String? {

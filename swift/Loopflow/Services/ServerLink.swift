@@ -34,6 +34,8 @@ public struct ServerEndpoint: Sendable {
 /// fails pending requests; watches resume their retained stream on the next
 /// link. Messages over the control limit travel on ticketed connections.
 public actor ServerLink {
+    nonisolated let generation = UUID()
+    private weak var owner: MachineConnection?
     public nonisolated let welcome: ServerWelcome
     private nonisolated let endpoint: ServerEndpoint
     private let carrier: any ServerCarrier
@@ -58,7 +60,9 @@ public actor ServerLink {
     static let handshakeExpired = "Loopflow server did not answer within 10s; check `lf server status`"
 
     public static func open(_ endpoint: ServerEndpoint) async throws -> ServerLink {
-        let carrier = try await endpoint.control()
+        let carrier: any ServerCarrier
+        do { carrier = try await endpoint.control() }
+        catch { throw ServerConnectionUnavailable(error) }
         do {
             let welcome = try await bounded(handshake, carrier, expired: handshakeExpired) {
                 try await carrier.send(try line(.hello(ServerHello(
@@ -77,7 +81,8 @@ public actor ServerLink {
             return link
         } catch {
             await carrier.close()
-            throw error
+            if error is ServerError || error is RegistryQueryError || error is DecodingError { throw error }
+            throw ServerConnectionUnavailable(error)
         }
     }
 
@@ -88,6 +93,14 @@ public actor ServerLink {
     }
 
     public var isClosed: Bool { failure != nil }
+
+    /// Establish the negotiated source before the connection can serve a watch.
+    func establish(_ connection: MachineConnection, attempt: UUID) throws -> Bool {
+        if let failure { throw failure }
+        guard connection.establish(self, attempt: attempt) else { return false }
+        owner = connection
+        return true
+    }
 
     /// Ends the connection on purpose: requests fail and watches end rather than resume.
     public func close() async {
@@ -191,19 +204,18 @@ public actor ServerLink {
 
     /// `query`'s readings, and its events when `events`, mapped by `map`; nil
     /// skips an update. After a reading, connection loss resumes the same stream
-    /// on the link `connect` returns. `checkpoint(n)` asks for a reading whose
+    /// on the Machine’s next link. `checkpoint(n)` asks for a reading whose
     /// `answers` is `n`; `cancel` ends it.
     public nonisolated static func subscribe<Output: Sendable>(
         _ query: ServedRead, events: Bool = false, buffer: Int = 8,
-        connect: @escaping @Sendable () async throws -> ServerLink,
+        reconnect: Bool = false,
+        connection: MachineConnection,
         map: @escaping @Sendable (ServerSubscriptionUpdate) throws -> Output?
     ) -> ServerWatch<Output> {
         let (updates, continuation) = AsyncThrowingStream<Output, any Error>.makeStream(bufferingPolicy: .bufferingOldest(buffer))
-        let subscription = ServerSubscription(continuation, query: query, events: events, encode: map, connect: connect)
-        Task {
-            do { try await subscription.start() }
-            catch { subscription.finish(throwing: error) }
-        }
+        let subscription = ServerSubscription(continuation, query: query, events: events, reconnect: reconnect,
+            encode: map, connection: connection)
+        subscription.begin()
         return ServerWatch(updates: updates, checkpoint: subscription.checkpoint, cancel: subscription.cancel)
     }
 
@@ -265,7 +277,7 @@ public actor ServerLink {
             // A null result confirms a registered subscription; anything else is
             // a late answer to a forgotten request.
         case .reading(let id, let checkpoint, let frame):
-            subscriptions[id]?.receive(frame, checkpoint: checkpoint)
+            subscriptions[id]?.receive(frame, checkpoint: checkpoint, from: self)
         case .bulk(let id, let ticket, _):
             // Fetched off the reader, so other answers never wait behind it.
             Task {
@@ -328,6 +340,7 @@ public actor ServerLink {
     private func fail(_ error: any Error, resumable: Bool) {
         guard failure == nil else { return }
         failure = error
+        owner?.disconnected(self)
         order = ServerMessageOrder()
         let (waiting, watching) = (pending.values, subscriptions.values)
         pending = [:]
@@ -384,8 +397,16 @@ extension RegistryQuery {
 }
 
 public enum ServerSubscriptionUpdate: Sendable {
-    case reading(RawJSON)
+    case reading(ReceivedReading)
     case event(SubscriptionEvent)
+}
+
+/// A connection failed before an answer was available. Receipt recovery still
+/// decides whether the original command can be admitted again.
+public struct ServerConnectionUnavailable: LocalizedError {
+    public let cause: any Error
+    public init(_ cause: any Error) { self.cause = cause }
+    public var errorDescription: String? { cause.localizedDescription }
 }
 
 /// A live subscription's updates and its two controls.
@@ -409,16 +430,17 @@ final class ServerSubscription: @unchecked Sendable {
     private var recovery: Task<Void, Never>?
     private let query: ServedRead
     private let consumesEvents: Bool
-    private let connect: @Sendable () async throws -> ServerLink
+    private let connection: MachineConnection
     private var stopped = false
-
+    private let reconnect: Bool
     init<Output: Sendable>(_ continuation: AsyncThrowingStream<Output, any Error>.Continuation,
-                           query: ServedRead, events: Bool,
+                           query: ServedRead, events: Bool, reconnect: Bool,
                            encode: @escaping @Sendable (ServerSubscriptionUpdate) throws -> Output?,
-                           connect: @escaping @Sendable () async throws -> ServerLink) {
+                           connection: MachineConnection) {
         self.query = query
+        self.reconnect = reconnect
+        self.connection = connection
         self.consumesEvents = events
-        self.connect = connect
         self.deliver = { update in
             guard let output = try encode(update) else { return true }
             switch continuation.yield(output) {
@@ -431,18 +453,40 @@ final class ServerSubscription: @unchecked Sendable {
         continuation.onTermination = { [weak self] _ in self?.stop(nil) }
     }
 
-    func start() async throws {
+    func begin() {
+        lock.withLock {
+            guard !stopped else { return }
+            recovery = Task { [self] in
+                do { try await start() }
+                catch is CancellationError { }
+                catch { finish(throwing: error) }
+            }
+        }
+    }
+
+    private func start() async throws {
+        while !lock.withLock({ stopped }) {
+            do { try await open(); return }
+            catch is ServerConnectionUnavailable where reconnect {
+                try Task.checkCancellation()
+            }
+        }
+    }
+
+    private func open() async throws {
         try Task.checkCancellation()
-        let link = try await connect()
+        let retry = lock.withLock { reconnect || resumeToken != nil }
+        let link = try await connection.link(reconnect: retry)
         try Task.checkCancellation()
         let (stopped, resume) = lock.withLock { (self.stopped, consumesEvents ? nil : resumeToken) }
         guard !stopped else { return }
-        try await link.register(self, query: query, resume: resume)
-        let checkpoint: UInt64? = lock.withLock {
-            self.link = link
-            eventBaseline = false
-            return pending
+        lock.withLock { self.link = link; eventBaseline = false }
+        do { try await link.register(self, query: query, resume: resume) }
+        catch {
+            if await link.isClosed { throw ServerConnectionUnavailable(error) }
+            throw error
         }
+        let checkpoint: UInt64? = lock.withLock { pending ?? (retry ? 0 : nil) }
         // A failed send ends the link; its failure resumes this watch.
         if let checkpoint { try? await link.checkpoint(id, checkpoint) }
     }
@@ -450,19 +494,19 @@ final class ServerSubscription: @unchecked Sendable {
     /// Keep queued readings in this same stream: the resume token never outruns
     /// the baseline its consumer receives. A new stream starts without a token.
     func disconnected(from link: ServerLink, error: any Error) {
-        let resume = lock.withLock {
-            guard !stopped, self.link === link else { return true }
+        let resume: Bool? = lock.withLock {
+            guard !stopped, self.link === link else { return nil }
             self.link = nil
-            guard resumeToken != nil else { return false }
+            guard reconnect || resumeToken != nil else { return false }
             recovery = Task { [self] in
                 do {
-                    try await Task.sleep(for: .milliseconds(100))
                     try await start()
                 } catch is CancellationError { }
                 catch { finish(throwing: error) }
             }
             return true
         }
+        guard let resume else { return }
         if !resume { finish(throwing: error) }
     }
 
@@ -479,11 +523,21 @@ final class ServerSubscription: @unchecked Sendable {
     }
 
     /// From the link's reader: one complete reading, ordered before its events.
-    func receive(_ frame: RawJSON, checkpoint: String) {
+    func receive(_ frame: RawJSON, checkpoint: String, from link: ServerLink) {
         do {
             let delivered = try lock.withLock {
-                guard !stopped else { return true }
-                guard try deliver(.reading(frame)) else { return false }
+                guard !stopped, self.link === link, connection.isCurrent(link) else { return true }
+                if let stamp = try frame.fields()["stamp"]?.decode(ReadingStamp?.self),
+                   let evidence = stamp.observations, evidence.source != link.welcome.observations {
+                    throw RegistryQueryError("Reading came from an unnegotiated observation source")
+                }
+                let attribution: ReceivingLink?
+                if case .string(let machine) = link.welcome.machine["id"] {
+                    attribution = ReceivingLink(machine: machine, source: link.welcome.observations,
+                        generation: link.generation)
+                } else { attribution = nil }
+                let received = ReceivedReading(frame.bytes, link: attribution)
+                guard try deliver(.reading(received)) else { return false }
                 resumeToken = checkpoint
                 eventBaseline = true
                 if let pending, try frame.fields()["answers"]?.decode(UInt64?.self) == pending {
@@ -532,5 +586,28 @@ final class ServerSubscription: @unchecked Sendable {
         guard first else { return }
         if let link { Task { [id] in await link.unsubscribe(id) } }
         finishStream(error)
+    }
+}
+
+/// Local attribution captured before buffering, never reconstructed from a watch.
+public struct ReceivingLink: Equatable, Sendable {
+    public let machine: String
+    public let source: String
+    public let generation: UUID
+}
+
+/// Unchanged subscription bytes and the link that received them. CLI and cache
+/// inputs carry no negotiated link and cannot revalidate external fields.
+public struct ReceivedReading: Equatable, Sendable {
+    public let bytes: Data
+    public let link: ReceivingLink?
+
+    public init(_ bytes: Data, link: ReceivingLink? = nil) {
+        self.bytes = bytes
+        self.link = link
+    }
+
+    public func decode<T: Decodable>(_ type: T.Type = T.self) throws -> T {
+        try JSONDecoder().decode(type, from: bytes)
     }
 }

@@ -121,13 +121,19 @@ public struct TaskRuntimeSnapshot: Decodable, Sendable, Hashable {
 }
 
 /// A Machine for display. A missing id is an unknown Machine.
-public struct MachineRef: Decodable, Sendable, Hashable {
+public struct MachineRef: Codable, Sendable, Hashable {
     public let id: String?
     public let label: String?
+    private enum CodingKeys: String, CodingKey { case id, label }
+    public func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id); try c.encode(label, forKey: .label)
+    }
+
 }
 
 /// The person and Machine that own a Task.
-public struct TaskOwner: Decodable, Sendable, Hashable {
+public struct TaskOwner: Codable, Sendable, Hashable {
     public let person: String?
     /// The owner's lowercase Git email: the display fallback when they have no
     /// name, not their identity.
@@ -149,6 +155,12 @@ public struct TaskOwner: Decodable, Sendable, Hashable {
         personKey = try container.decodeIfPresent(String.self, forKey: .personKey)
         personId = try container.decode(String?.self, forKey: .personId)
         machine = try container.decode(MachineRef.self, forKey: .machine)
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(person, forKey: .person); try c.encode(personKey, forKey: .personKey)
+        try c.encode(personId, forKey: .personId); try c.encode(machine, forKey: .machine)
     }
 
     /// "Jack Heart on mini"; "Machine unknown" when the Machine was never recorded.
@@ -195,6 +207,17 @@ public struct TaskWorktreeSnapshot: Decodable, Sendable, Hashable {
 /// sidebar's Working Tasks and every count read it.
 public enum TaskSection: String, Decodable, Sendable, Hashable {
     case backlog, working, autonomous, done, abandoned
+}
+
+extension TaskSection {
+    /// Lifecycle states are shared by boards, query rows and local effects.
+    public init(states: [WorkSelectionState]) {
+        if states.contains(.done) { self = .done }
+        else if states.contains(.autonomous) { self = .autonomous }
+        else if states.contains(.working) { self = .working }
+        else if states.contains(.backlog) { self = .backlog }
+        else { self = .abandoned }
+    }
 }
 
 public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {

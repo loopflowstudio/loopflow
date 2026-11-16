@@ -59,7 +59,6 @@ struct TaskConceptTests {
                     #expect(label == "Active")
                     #expect(!task.awaitsStart)
                     #expect(!task.isCompleted)
-                    #expect(TaskHistoryFilter().includes(task, now: .now))
                     #expect(task.conversationIntent == .start)
                     #expect(task.isUnassigned == (phase.name == "unassigned_working"))
                     #expect(throws: (any Error).self) { try header.inspect().find(button: "Reopen") }
@@ -90,6 +89,7 @@ struct TaskConceptTests {
             }
             let model = WorkModel(query: query, repoPath: "/repo")
             model.applyFixture(roadmap: .available(roadmap), waves: .available([]), workActivity: .loading, repos: [])
+            model.applySelectionPlans([fixtureInventoryPlan(roadmap)], reason: "")
             await model.refreshSessions()
             let members = phase.tasks.map { task in
                 WorkViewPlan.Content(paneRevision: nil, face: nil,
@@ -154,6 +154,7 @@ struct TaskConceptTests {
         let task = try #require(phase.tasks.first { $0.task.identifier == "FIX-2" })
         let conversation = try #require(phase.sessions.first { $0.id == "bound" })
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Passive rendering") }, repoPath: "/repo")
+        model.applySelectionPlans([fixtureInventoryPlan(try roadmap(phase))], reason: "")
         let board = try #require(model.standup(phase.tasks, doneDays: 0).working.first { $0.id == task.id })
         #expect(board.session == .available)
         #expect(task.selectionStates.contains(.busy))

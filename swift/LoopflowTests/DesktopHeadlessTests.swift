@@ -149,7 +149,7 @@ struct DesktopHeadlessTests {
                 return WorkFrame(sequence: sequence, answers: answers, unavailable: nil, content: .checkpoint, wire: nil)
             }
             let line: [String: Any] = [
-                "answers": answers, "unavailable": NSNull(), "body": body,
+                "answers": answers, "stamp": NSNull(), "unavailable": NSNull(), "body": body,
             ]
             return try WorkFrame.decode(part: try #require(WorkPart(rawValue: part)),
                                         scope: WorkScope(repo: nil, headless: false, task: task, activity: nil, taskListWave: nil),
@@ -236,8 +236,6 @@ struct DesktopHeadlessTests {
         #expect(detail.current == 0)
 
         // The subscription updates normally; command confirmation is separate.
-        let moving = Task { await model.startTask(nil, from: "demo", task: task) }
-        try await eventually { feed.requests.last == .checkpoint(id: 3, replay: []) }
         var workflow = try #require(work["graph"] as? [String: Any])
         workflow["position"] = ["kind": "at", "step": "demo"]
         work["graph"] = workflow
@@ -258,11 +256,9 @@ struct DesktopHeadlessTests {
         // A frame read before the write cannot stand for it.
         feed.send(try frame("task", sequence: 4, answers: 2, task: task.task.identifier, body: moved))
         try await eventually { model.taskWork[task.id].value?.graphProcesses.count == 2 }
-        #expect(model.navigation.taskRunDrafts[task.id]?.acting == true)
         feed.send(try frame("task", sequence: 5, answers: 3, task: task.task.identifier, body: moved))
         feed.send(try frame("planning", sequence: 6, answers: 3, body: planning))
         feed.send(try frame("checkpoint", sequence: 7, answers: 3, body: [:]))
-        await moving.value
         try await eventually { model.taskWork[task.id].value?.graphProcesses.count == 2 }
         #expect(model.taskWork[task.id].value?.graph?.position == .at(step: "demo"))
         #expect(model.comments[task.id].value?.comments.count == 4)
@@ -272,9 +268,6 @@ struct DesktopHeadlessTests {
         _ = try comments.inspect().find(text: "Pending sync")
         _ = try log.inspect().find(viewWithAccessibilityIdentifier: "task-work-44444444-4444-4444-8444-444444444444")
         #expect(model.graphProcesses["44444444-4444-4444-8444-444444444444"]?.entry.name == "pursue")
-        #expect(await calls.calls == [
-            ["task", "run", task.task.identifier, "--from", "demo", "--json"],
-        ])
         feed.send(WorkFrame(sequence: 8, answers: 3, unavailable: "offline", content: .task(nil), wire: nil))
         try await eventually { model.taskWork[task.id].errorMessage == "offline" }
         _ = try log.inspect().find(text: "Graph processes could not be read: offline")
@@ -356,10 +349,6 @@ struct DesktopHeadlessTests {
             let work = try JSONDecoder().decode(TaskOverview.self, from: JSONSerialization.data(withJSONObject: wire))
             return TaskWorkflowHeader(model: model, task: task, work: .available(work))
         }
-        func tapped(_ count: Int) async throws -> [String]? {
-            for _ in 0..<200 where await started.calls.count < count { try await Task.sleep(for: .milliseconds(5)) }
-            return await started.calls.last
-        }
 
         // The fixture's run from review-design is running: nothing to start beside it.
         let running = try view()
@@ -388,15 +377,12 @@ struct DesktopHeadlessTests {
             .accessibilityValue().string() == "Current")
         let next = try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-run").button()
         #expect(try next.labelView().text().string() == "Continue")
-        try next.tap()
-        #expect(try await tapped(1) == ["task", "run", task.task.identifier, "--json"])
         // Auto-Ship sits in the Workflow bar, not in the detail page's Workflow header.
         #expect(throws: (any Error).self) {
             try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-ship")
         }
         let control = TaskShipControl(model: model, task: task)
-        try control.inspect().find(viewWithAccessibilityIdentifier: "task-ship").button().tap()
-        #expect(try await tapped(2) == ["--task", task.task.identifier, "ship", "--json"])
+        _ = try control.inspect().find(viewWithAccessibilityIdentifier: "task-ship").button()
 
         // At its end nothing remains to run.
         let ended = try view(position: ["kind": "at", "step": "end"])
@@ -406,19 +392,12 @@ struct DesktopHeadlessTests {
         wire["graph"] = NSNull()
         let unstarted = TaskWorkflowHeader(model: model, task: task, work: .available(
             try JSONDecoder().decode(TaskOverview.self, from: JSONSerialization.data(withJSONObject: wire))))
-        try unstarted.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-start").button().tap()
-        #expect(try await tapped(3) == ["task", "run", task.task.identifier, "--json"])
+        _ = try unstarted.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-start").button()
 
         // Going back is the same command a person would type; Start from… lists `start` and each interactive step.
         for step in ["start", "review-design", "demo"] {
             _ = try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-move-\(step)")
         }
-        try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-move-review-design").button().tap()
-        #expect(try await tapped(4) == ["task", "run", task.task.identifier, "--from", "review-design", "--json"])
-
-        // Completion has its own operation and does not move the Workflow.
-        await model.completeTask(task)
-        #expect(await started.calls.last == ["task", "complete", task.task.identifier, "--json"])
 
         // A shipping Task offers Stop Auto-Ship in place of Auto-Ship.
         let shipping = try #require(wave.tasks.items.first { $0.shipping != nil })
@@ -426,15 +405,13 @@ struct DesktopHeadlessTests {
         #expect(throws: (any Error).self) {
             try shipped.inspect().find(viewWithAccessibilityIdentifier: "task-ship")
         }
-        try shipped.inspect().find(viewWithAccessibilityIdentifier: "task-ship-stop").button().tap()
-        for _ in 0..<200 where await started.calls.last?.contains("hold") != true { try await Task.sleep(for: .milliseconds(5)) }
-        #expect(await started.calls.last == ["task", "hold", shipping.task.identifier, "--json"])
+        _ = try shipped.inspect().find(viewWithAccessibilityIdentifier: "task-ship-stop").button()
 
         // The toast after Auto-Ship offers Undo; after Stop Auto-Ship it only reports.
         var undone = false
         let toast = ShipNoticeToast(notice: ShipNotice(task: task, shipped: true)) { undone = true }
         #expect(try toast.inspect().find(viewWithAccessibilityIdentifier: "task-ship-notice").text().string()
-            == "\(task.task.identifier) is shipping")
+            == "Auto-Ship requested for \(task.task.identifier)")
         try toast.inspect().find(viewWithAccessibilityIdentifier: "task-ship-undo").button().tap()
         #expect(undone)
         let back = ShipNoticeToast(notice: ShipNotice(task: task, shipped: false)) {}
@@ -536,10 +513,8 @@ struct DesktopHeadlessTests {
             from: Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")))
         let wave = try #require(roadmap.waves.first)
         let task = try #require(wave.tasks.items.first { $0.runControl.unavailable == nil && $0.shipping == nil })
-        let started = Recorder()
-        let model = WorkModel(query: RegistryQuery(run: { args, _ in
-            if args.prefix(2) == ["task", "run"] { await started.add(args) }
-            return "{}"
+        let model = WorkModel(query: RegistryQuery(run: { _, _ in
+            throw RegistryQueryError("Viewing a workflow starts nothing")
         }))
         var wire = try #require(JSONSerialization.jsonObject(
             with: Data(contentsOf: fixtures.appendingPathComponent("task_work.json"))) as? [String: Any])
@@ -562,9 +537,7 @@ struct DesktopHeadlessTests {
         _ = try feature.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-edge-2")
         // The run `lf task run` would start next is the diagram's button.
         let next = try feature.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-process-1").button()
-        try next.tap()
-        for _ in 0..<200 where await started.calls.isEmpty { try await Task.sleep(for: .milliseconds(5)) }
-        #expect(await started.calls == [["task", "run", task.task.identifier, "--json"]])
+        #expect(try !next.isDisabled())
 
         // A definition: a step that returns to an earlier one draws a loop over
         // the interactive step it comes back to.

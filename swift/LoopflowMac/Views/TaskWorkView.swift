@@ -15,7 +15,14 @@ struct TaskWorkflowHeader: View {
     @State private var expandedTasks: Set<String> = []
 
     private var lifecycleLabel: String {
-        switch task.lifecycle {
+        if model.isCompleting(task) { return OperationDeclaration.completionProgress }
+        if let fact = model.projectedTaskFacts(task) {
+            guard fact.lifecycle.known else { return "Updating…" }
+            if fact.disposition.value.abandoned { return "Canceled" }
+            if fact.lifecycle.states.contains(.done) { return "Completed" }
+            return fact.lifecycle.states.first(where: { [.unstarted, .idle, .active, .moving, .shipping].contains($0) })?.rawValue.capitalized ?? "Updating…"
+        }
+        return switch task.lifecycle {
         case .done: "Completed"
         case .abandoned: "Canceled"
         default: task.lifecycle.label.capitalized
@@ -25,11 +32,11 @@ struct TaskWorkflowHeader: View {
     private var controls: some View {
             HStack(alignment: .center, spacing: Spacing.md) {
                 Text(lifecycleLabel)
-                    .fontWeight(task.isCompleted ? .semibold : .regular)
+                    .fontWeight(model.taskCompleted(task) ? .semibold : .regular)
                     .foregroundStyle(task.lifecycle == .done ? palette.success
                         : task.lifecycle == .abandoned ? palette.failure : palette.textSecondary)
                     .accessibilityIdentifier("task-lifecycle-status")
-                if task.isUnassigned {
+                if model.taskOwned(task) == false {
                     Text("Unassigned").foregroundStyle(palette.textSecondary)
                 }
                 if let workflow = work.value?.graph {
@@ -38,7 +45,7 @@ struct TaskWorkflowHeader: View {
                         .foregroundStyle(palette.textSecondary)
                         .accessibilityIdentifier("task-workflow-position")
                     if let action = runAction(workflow) {
-                        Button(action.label) { Task { await model.startTask(nil, task: task) } }
+                        Button(action.label) { model.startTask(nil, task: task) }
                             .buttonStyle(WorkOutlineButtonStyle(emphasized: true))
                             .disabled(unavailable != nil)
                             .help(unavailable ?? action.help)
@@ -48,7 +55,7 @@ struct TaskWorkflowHeader: View {
                     // Start the next run at a step: back, ahead, or waiting at an interactive step.
                     Menu("Start from…") {
                         ForEach([TaskGraph.start] + workflow.interactiveSteps.map(\.name), id: \.self) { step in
-                            Button(step) { Task { await model.startTask(nil, from: step, task: task) } }
+                            Button(step) { model.startTask(nil, from: step, task: task) }
                                 .accessibilityIdentifier("task-workflow-move-\(step)")
                         }
                     }
@@ -63,10 +70,10 @@ struct TaskWorkflowHeader: View {
                         .foregroundStyle(palette.textSecondary)
                     Menu("Choose workflow") {
                         ForEach(model.workflowCatalog.value ?? [], id: \.name) { choice in
-                            Button(choice.name) { Task { await model.startTask(choice.name, task: task) } }
+                            Button(choice.name) { model.startTask(choice.name, task: task) }
                         }
                     }.task { await model.loadGraphCatalog() }
-                    Button("Start") { Task { await model.startTask(nil, task: task) } }
+                    Button("Start") { model.startTask(nil, task: task) }
                         .buttonStyle(WorkOutlineButtonStyle())
                         .disabled(unavailable != nil)
                         .help(unavailable ?? "lf task run \(task.task.identifier)")
@@ -78,35 +85,34 @@ struct TaskWorkflowHeader: View {
                         .foregroundStyle(palette.textSecondary)
                     Spacer()
                 }
-                if task.isCompleted {
-                    Button("Reopen") { Task { await model.reopenTask(task) } }
-                        .disabled(acting || readingUnavailable != nil)
+                if model.taskCompleted(task) || model.isCompleting(task) {
+                    Button("Reopen") { model.reopenTask(task) }
+                        .disabled(acting)
                         .accessibilityIdentifier("task-reopen")
                 } else {
-                    Button("Complete") { Task { await model.completeTask(task) } }
-                        .disabled(acting || readingUnavailable != nil)
+                    Button("Complete") { model.completeTask(task) }
+                        .disabled(acting || model.isCompleting(task))
                         .accessibilityIdentifier("task-complete")
-                    Button(task.runtime?.owner == nil ? "Claim" : "Unassign") {
-                        Task { await model.assignTask(task, claimed: task.runtime?.owner == nil) }
+                    Button(model.taskOwned(task) != true ? "Claim" : "Unassign") {
+                        model.assignTask(task, claimed: model.taskOwned(task) != true)
                     }
-                    .disabled(acting || readingUnavailable != nil)
+                    .disabled(acting || model.taskOwned(task) == nil)
                     .accessibilityIdentifier("task-claim-unassign")
                     Button("Abandon…", role: .destructive) { confirmingAbandon = true }
-                        .disabled(acting || readingUnavailable != nil)
+                        .disabled(acting)
                         .accessibilityIdentifier("task-abandon")
                 }
                 workspaceActions
                 if acting {
                     ProgressView().controlSize(.small)
-                    Text(draft?.progress ?? "Updating Task…").foregroundStyle(palette.textSecondary)
                 }
             }
             .lineLimit(1)
             .frame(minHeight: 28)
     }
 
-    private var draft: TaskRunDraft? { model.navigation.taskRunDrafts[task.id] }
-    private var acting: Bool { draft?.acting == true }
+    private var draft: PendingOperation? { model.taskExecution(task) }
+    private var acting: Bool { draft?.dispatchPending == true }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -129,7 +135,7 @@ struct TaskWorkflowHeader: View {
                         choices: choices(workflow, shape),
                         unavailable: unavailable, fits: true,
                         hint: { "lf task run \(task.task.identifier) · to \($0.to)" },
-                        choose: { _ in Task { await model.startTask(nil, task: task) } })
+                        choose: { _ in model.startTask(nil, task: task) })
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 Text(task.task.description)
@@ -147,15 +153,18 @@ struct TaskWorkflowHeader: View {
                         .textSelection(.enabled)
                         .accessibilityIdentifier("task-completion-pending")
                     Button("Retry completion") {
-                        Task { await model.completeTask(task) }
+                        model.completeTask(task)
                     }
                     .buttonStyle(WorkOutlineButtonStyle())
-                    .disabled(acting || readingUnavailable != nil)
+                    .disabled(acting)
                     .help("lf task complete \(task.task.identifier)")
                     .accessibilityIdentifier("task-completion-retry")
                 }
             }
-            if let error = draft?.error ?? model.navigation.taskSessionErrors[task.id] {
+            if let request = draft, let interaction = model.interaction {
+                PendingOperationRow(operation: request, interaction: interaction, edit: { _ in }, context: .conversation)
+            }
+            if let error = model.navigation.taskSessionErrors[task.id] {
                 Text(error)
                     .foregroundStyle(palette.failure)
                     .lineLimit(3)
@@ -178,12 +187,12 @@ struct TaskWorkflowHeader: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
             palette.background
-            if task.isCompleted {
+            if model.taskCompleted(task) {
                 (task.lifecycle == .done ? palette.success : palette.failure).opacity(0.14)
             }
         }
         .overlay(alignment: .leading) {
-            if task.isCompleted {
+            if model.taskCompleted(task) {
                 Rectangle()
                     .fill(task.lifecycle == .done ? palette.success : palette.failure)
                     .frame(width: 3)
@@ -234,8 +243,8 @@ struct TaskWorkflowHeader: View {
 
     /// Why no run can be started now.
     private var unavailable: String? {
-        if acting { return draft?.progress ?? "Updating Task…" }
-        return readingUnavailable ?? task.runControl.unavailable
+        if acting { return draft?.presentation().text ?? "Updating Task…" }
+        return task.runControl.unavailable
     }
 
     private var readingUnavailable: String? {
@@ -255,44 +264,38 @@ struct TaskShipControl: View {
     @State private var hovered = false
     @State private var confirmingAbandon = false
 
-    private var acting: Bool { model.navigation.taskRunDrafts[task.id]?.acting == true }
-
-    private var readingUnavailable: String? {
-        if let error = model.roadmap.errorMessage { return error }
-        if model.showsSavedPlanning { return WorkCache.savedReason }
-        return nil
-    }
+    private var acting: Bool { model.taskExecution(task)?.dispatchPending == true }
 
     var body: some View {
         Group {
             if task.shipping != nil {
-                Button("Stop Auto-Ship") { Task { await model.stopShipping(task) } }
+                Button("Stop Auto-Ship") { model.stopShipping(task) }
                     .buttonStyle(WorkOutlineButtonStyle())
-                    .disabled(acting || readingUnavailable != nil)
+                    .disabled(acting)
                     .help("lf --task \(task.task.identifier) ship --stop: withdraw it and disarm auto-merge")
                     .accessibilityIdentifier("task-ship-stop")
-            } else if !task.isCompleted {
-                let refusal = readingUnavailable ?? task.shipControl.unavailable
+            } else if !model.taskCompleted(task) {
+                let refusal = task.shipControl.unavailable
                 HStack(spacing: Spacing.sm) {
                     // Hovering Auto-Ship offers the other ways out of this Task.
                     if hovered {
-                        let owned = task.runtime?.owner != nil
+                        let owned = model.taskOwned(task) == true
                         Button(owned ? "Unassign" : "Claim") {
-                            Task { await model.assignTask(task, claimed: !owned) }
+                            model.assignTask(task, claimed: !owned)
                         }
                         .buttonStyle(WorkOutlineButtonStyle())
-                        .disabled(acting || readingUnavailable != nil)
+                        .disabled(acting || model.taskOwned(task) == nil)
                         .help(owned ? "lf task unassign: nobody owns it, so nothing moves it; its checkout, PR and history stay"
                                     : "lf task claim: you own it on this Machine")
                         .accessibilityIdentifier("task-unassign")
                         Button("Abandon…", role: .destructive) { confirmingAbandon = true }
                             .buttonStyle(WorkOutlineButtonStyle(destructive: true))
-                            .disabled(acting || readingUnavailable != nil)
+                            .disabled(acting)
                             .accessibilityIdentifier("task-ship-abandon")
                     }
-                    Button("Auto-Ship") { Task { await model.shipTask(task) } }
+                    Button("Auto-Ship") { model.shipTask(task) }
                         .buttonStyle(WorkShipButtonStyle())
-                        .disabled(acting || refusal != nil)
+                        .disabled(refusal != nil)
                         .help(refusal ?? "lf --task \(task.task.identifier) ship: run every remaining step and land it")
                         .accessibilityIdentifier("task-ship")
                 }
@@ -477,7 +480,7 @@ struct TaskWorkflowBar: View {
     }
 }
 
-/// What the last Auto-Ship or Stop Auto-Ship did, shown briefly.
+/// The last Auto-Ship or Stop Auto-Ship request, shown briefly.
 struct ShipNotice: Equatable {
     let id = UUID()
     let taskID: String
@@ -500,8 +503,8 @@ struct ShipNoticeToast: View {
     var body: some View {
         HStack(spacing: Spacing.md) {
             Text(notice.shipped
-                 ? "\(notice.issue) is shipping"
-                 : "\(notice.issue) is back in Working · auto-merge disarmed")
+                 ? "Auto-Ship requested for \(notice.issue)"
+                 : "Stop Auto-Ship requested for \(notice.issue)")
                 .accessibilityIdentifier("task-ship-notice")
             if notice.shipped {
                 Button("Undo", action: undo)
@@ -534,7 +537,7 @@ struct ShipNoticeOverlay: View {
             if let notice = navigation.shipNotice {
                 ShipNoticeToast(notice: notice) {
                     guard let task = model.task(id: notice.taskID)?.task else { return }
-                    Task { await model.stopShipping(task) }
+                    model.stopShipping(task)
                 }
                 .padding(.bottom, 18)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -579,22 +582,20 @@ struct TaskStartOffer: View {
     let task: RoadmapTask
 
     private var unavailable: String? {
-        if let draft = model.navigation.taskRunDrafts[task.id], draft.acting { return draft.progress ?? "Updating Task…" }
-        if let error = model.roadmap.errorMessage { return error }
-        if model.showsSavedPlanning { return WorkCache.savedReason }
+        if let request = model.taskExecution(task), request.dispatchPending { return request.presentation().text ?? "Start requested…" }
         return task.runControl.unavailable
     }
 
     var body: some View {
         SessionSlotOffer(
-            title: "Not started", systemImage: "play.circle",
+            title: model.taskExecution(task)?.presentation().text ?? "Not started", systemImage: "play.circle",
             action: "Start", actionImage: "play.fill",
-            note: model.navigation.taskRunDrafts[task.id]?.error
+            note: model.taskExecution(task)?.error
                 ?? "Starts this Task’s Workflow and its first conversation.",
             unavailable: unavailable, help: "lf task run \(task.task.identifier)",
             accessibilityLabel: "Start \(task.task.identifier)",
             actionIdentifier: "task-start-\(task.id)",
-            perform: { Task { await model.startTask(nil, task: task) } }
+            perform: { model.startTask(nil, task: task) }
         ) {
             Text(task.task.description.isEmpty ? "No description recorded." : task.task.description)
                 .lineLimit(8)
@@ -605,6 +606,7 @@ struct TaskStartOffer: View {
 
 /// Shared Task actions for keyboard access and sidebar context menus.
 struct TaskActionItems: View {
+    var completionOrder: [WorkWorkspaceKey]? = nil
     let model: WorkModel
     let task: RoadmapTask
     let wave: WaveSnapshot?
@@ -612,28 +614,26 @@ struct TaskActionItems: View {
     var openSession: ((SessionRecord) -> Void)?
     @State private var copied: String?
 
-    private var unavailable: Bool {
-        model.navigation.taskRunDrafts[task.id]?.acting == true || model.roadmap.errorMessage != nil || model.showsSavedPlanning
-    }
+    private var acting: Bool { model.taskExecution(task)?.dispatchPending == true }
+    private var unavailable: Bool { acting || model.roadmap.errorMessage != nil || model.showsSavedPlanning }
 
     var body: some View {
         Button("New conversation") { newConversation?() }.disabled(newConversation == nil || unavailable)
         Menu("Move to Wave") {
-            Button("No Wave") { Task { await model.moveTask(task, toWave: nil) } }
-                .disabled(task.task.waveId == nil)
+            Button("No Wave") { model.moveTask(task, toWave: nil) }
             ForEach(model.visibleRoadmaps.filter { $0.wave.repo == task.task.repo }, id: \.wave.id) { destination in
                 Button(destination.wave.displayName) {
-                    Task { await model.moveTask(task, toWave: destination.wave.id) }
-                }.disabled(destination.wave.id == task.task.waveId)
+                    model.moveTask(task, toWave: destination.wave.id)
+                }
             }
-        }.disabled(unavailable).accessibilityIdentifier("task-move-wave")
-        if task.isCompleted {
-            Button("Reopen Task") { Task { await model.reopenTask(task) } }.disabled(unavailable)
+        }.disabled(acting).accessibilityIdentifier("task-move-wave")
+        if model.taskCompleted(task) || model.isCompleting(task) {
+            Button("Reopen Task") { model.reopenTask(task) }.disabled(acting)
         } else {
-            Button("Complete Task") { Task { await model.completeTask(task) } }.disabled(unavailable)
-            Button(task.runtime?.owner == nil ? "Claim Task" : "Unassign Task") {
-                Task { await model.assignTask(task, claimed: task.runtime?.owner == nil) }
-            }.disabled(unavailable)
+            Button("Complete Task") { model.completeTask(task, visible: completionOrder) }.disabled(acting || model.isCompleting(task))
+            Button(model.taskOwned(task) != true ? "Claim Task" : "Unassign Task") {
+                model.assignTask(task, claimed: model.taskOwned(task) != true)
+            }.disabled(acting || model.taskOwned(task) == nil)
         }
         if let wave { Button("Open owning Wave") { model.select(.wave(id: wave.id)) } }
         Divider()
@@ -656,7 +656,7 @@ struct TaskActionItems: View {
                 Button("Make \(session.title) primary…") { model.beginSessionBinding(session) }
             }
         }
-        if let error = model.navigation.taskRunDrafts[task.id]?.error { Text(error) }
+        if let error = model.taskExecution(task)?.error { Text(error) }
     }
 
     private func copy(_ value: String, key: String) {
@@ -788,7 +788,7 @@ struct GraphProcessLog: View {
                     for try await line in subscription.lines {
                         try Task.checkCancellation()
                         let frame = try WorkFrame.decode(part: .task,
-                            scope: WorkScope(repo: nil, headless: false, task: subject, activity: nil, taskListWave: nil), sequence: 0, line: line)
+                            scope: WorkScope(repo: nil, headless: false, task: subject, activity: nil, taskListWave: nil), sequence: 0, line: line.bytes, receivingLink: line.link)
                         guard case .task(let reading?) = frame.content else {
                             self.error = frame.unavailable ?? "Task reading is unavailable"
                             continue
@@ -836,7 +836,7 @@ struct TaskWorkView: View {
             }
             if let work = model.taskExecution[task.id].value?.work {
                 ForEach(work.sessions) { session in
-                    row(session.interactive ? "Session" : "Run", id: session.id, name: session.title,
+                    row(session.interactive ? "Session" : "Run", id: session.id, name: model.sessionTitle(id: session.id, fallback: session.title),
                         state: session.completedAt == nil ? "open" : "completed")
                 }
                 ForEach(work.processes) { process in

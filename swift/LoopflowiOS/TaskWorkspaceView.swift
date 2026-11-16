@@ -8,33 +8,136 @@ struct TaskWorkspaceView: View {
     let task: WorkViewPlan.Content
     let theme: ThemeDefinition
     @Binding var draft: String
+    var complete: (() -> Void)? = nil
+    var abandon: (() -> Void)? = nil
+    var move: ((String?) -> Void)? = nil
+    var edit: ((WorkInteraction.TaskEdit) -> Void)? = nil
+    var execute: ((WorkInteraction.TaskCommand) -> Void)? = nil
+    var facts: WorkMembershipPlan.Facts? = nil
+    var waves: [Wave] = []
+    var completionDirectory: String? = nil
+
+    private var completionPending: Bool {
+        if facts?.disposition.value.completionRequest != nil { return true }
+        guard let completionDirectory else { return false }
+        return client.interaction.isCompleting(issue: task.identifier ?? task.work.id, directory: completionDirectory)
+    }
     @State private var showsChanges = false
+    @State private var confirmingAbandon = false
 
     var body: some View {
-        if task.primarySession == nil {
-            TaskChangesView(client: client, task: task, theme: theme)
-                .navigationTitle(task.title)
-                .navigationBarTitleDisplayMode(.inline)
-        } else {
-            SessionView(client: client, task: task, theme: theme, draft: $draft)
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button("Changes", systemImage: "plusminus") { showsChanges = true }
+        Group {
+            if task.primarySession == nil {
+                TaskChangesView(client: client, task: task, theme: theme)
+                    .navigationTitle(task.title)
+                    .navigationBarTitleDisplayMode(.inline)
+            } else {
+                SessionView(client: client, task: task, theme: theme, draft: $draft)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Changes", systemImage: "plusminus") { showsChanges = true }
+                        }
                     }
-                }
-                .sheet(isPresented: $showsChanges) {
-                    NavigationStack {
-                        TaskChangesView(client: client, task: task, theme: theme)
-                            .navigationTitle("Changes")
-                            .navigationBarTitleDisplayMode(.inline)
-                            .toolbar {
-                                ToolbarItem(placement: .confirmationAction) { Button("Done") { showsChanges = false } }
-                            }
+                    .sheet(isPresented: $showsChanges) {
+                        NavigationStack {
+                            TaskChangesView(client: client, task: task, theme: theme)
+                                .navigationTitle("Changes")
+                                .navigationBarTitleDisplayMode(.inline)
+                                .toolbar {
+                                    ToolbarItem(placement: .confirmationAction) { Button("Done") { showsChanges = false } }
+                                }
+                        }
+                        .tint(theme.palette.accentInk)
+                        .presentationDetents([.medium, .large])
                     }
-                    .tint(theme.palette.accentInk)
-                    .presentationDetents([.medium, .large])
-                }
+            }
         }
+        .safeAreaInset(edge: .bottom) {
+            if let directory = completionDirectory,
+               let request = client.interaction.taskExecution(issue: task.identifier ?? task.work.id, directory: directory) {
+                PendingOperationRow(operation: request, interaction: client.interaction, edit: { _ in }, context: .conversation)
+                    .padding(8)
+            }
+        }
+        .toolbar {
+            if abandon != nil {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        if let execute {
+                            TaskExecutionActions(execute: execute)
+                        }
+                        if let edit {
+                            TaskOwnershipActions(completed: (facts?.states.contains(.done) ?? task.states.contains(.done)) || completionPending,
+                                owned: facts?.owned, edit: edit)
+                        }
+                        if let move {
+                            TaskMoveMenu(waves: waves, move: move)
+                        }
+                        Button("Abandon", role: .destructive) { confirmingAbandon = true }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                    }.accessibilityLabel("Task actions")
+                }
+            }
+            if let complete, !(facts?.states.contains(.done) ?? task.states.contains(.done)) || completionPending {
+                ToolbarItem(placement: .topBarTrailing) {
+                    TaskCompleteButton(complete: complete, pending: completionPending)
+                }
+            }
+        }
+        .confirmationDialog("Abandon \(task.identifier ?? task.work.id)?", isPresented: $confirmingAbandon) {
+            Button("Abandon Task", role: .destructive) { abandon?() }
+        } message: {
+            Text("Cancels the Task, closes its PRs and deletes its branches. Unassign it instead to keep its work for later.")
+        }
+        .task(id: client.interaction.creations.map { "\($0.id):\($0.taskID ?? "")" }) {
+            try? await client.interaction.presented(.task(task.work.id))
+        }
+        .onAppear { PerfClock.interaction(.taskSelect, .contentMounted, id: task.work.id) }
+    }
+}
+
+struct TaskExecutionActions: View {
+    let execute: (WorkInteraction.TaskCommand) -> Void
+    var body: some View {
+        Button("Start") { execute(.start(graph: nil, from: nil)) }.accessibilityIdentifier("task-start")
+        Button("Auto-Ship") { execute(.ship) }.accessibilityIdentifier("task-ship")
+        Button("Stop Auto-Ship") { execute(.stopShipping) }.accessibilityIdentifier("task-ship-stop")
+    }
+}
+
+struct TaskOwnershipActions: View {
+    let completed: Bool
+    let owned: Bool?
+    let edit: (WorkInteraction.TaskEdit) -> Void
+
+    var body: some View {
+        if completed {
+            Button("Reopen") { edit(.reopen) }.accessibilityIdentifier("task-reopen")
+        } else {
+            Button(owned == true ? "Unassign" : "Claim") { edit(owned == true ? .unassign : .claim) }
+                .disabled(owned == nil).accessibilityIdentifier("task-claim-unassign")
+        }
+    }
+}
+
+struct TaskMoveMenu: View {
+    let waves: [Wave]
+    let move: (String?) -> Void
+    var body: some View {
+        Menu("Move to Wave") {
+            Button("No Wave") { move(nil) }
+            ForEach(waves) { wave in Button(wave.displayName) { move(wave.id) } }
+        }
+    }
+}
+
+struct TaskCompleteButton: View {
+    let complete: () -> Void
+    var pending = false
+    var body: some View {
+        Button(pending ? OperationDeclaration.completionProgress : "Complete", action: complete)
+            .disabled(pending).accessibilityIdentifier("task-complete")
     }
 }
 

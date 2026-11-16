@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex, Weak};
 
 use anyhow::Result;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use tokio::sync::{broadcast, watch, Notify};
 use tokio::task::AbortHandle;
 
@@ -439,6 +440,11 @@ impl Producer {
             ..
         } = self;
         let ends = query.clone();
+        let query_identity = format!(
+            "{:x}",
+            Sha256::digest(serde_json::to_vec(&(&query, &select, &self.key.directory))?)
+        );
+        let complete = select.is_none();
         #[cfg(test)]
         let mut pause = super::service::subscription_measurement::take_pause(_id, "setup");
         let notify = wake.clone();
@@ -504,7 +510,11 @@ impl Producer {
             }
             let mut reason = None;
             let mut last = false;
-            let mut bytes = update.frame.as_ref().map_or(0, Vec::len);
+            // The served query hash replaces null after the raw frame is read.
+            let mut bytes = update
+                .frame
+                .as_ref()
+                .map_or(0, |frame| frame.len() + query_identity.len());
             for event in &update.events {
                 bytes += serde_json::to_vec(event)?.len() + 1024;
                 anyhow::ensure!(
@@ -516,11 +526,18 @@ impl Producer {
             let mut reading = None;
             if let Some(frame) = update.frame {
                 let mut frame: Value = serde_json::from_slice(&frame)?;
+                if let Some(stamp) = frame.get_mut("stamp").filter(|stamp| stamp.is_object()) {
+                    stamp["query"] = Value::String(query_identity.clone());
+                    stamp["complete"] = Value::Bool(complete);
+                }
                 reason = frame["unavailable"].as_str().map(str::to_owned);
                 last = ends.ends_after(&frame["body"]);
                 // Internal generations never appear in a consumer's envelope.
-                let identity =
-                    crate::lf::commands::subscribe::identity(reason.as_deref(), frame.get("body"))?;
+                let identity = crate::lf::commands::subscribe::identity(
+                    reason.as_deref(),
+                    frame.get("body"),
+                    frame.pointer("/stamp/observations"),
+                )?;
                 frame["answers"] = Value::Null;
                 reading = Some(Arc::new(Reading {
                     generation,
@@ -745,8 +762,12 @@ mod tests {
             });
             Arc::new(Reading {
                 generation,
-                identity: crate::lf::commands::subscribe::identity(None, frame.get("body"))
-                    .unwrap(),
+                identity: crate::lf::commands::subscribe::identity(
+                    None,
+                    frame.get("body"),
+                    frame.pointer("/stamp/observations"),
+                )
+                .unwrap(),
                 frame,
                 _retained: Arc::new(Retained::empty()),
             })
@@ -848,8 +869,12 @@ mod tests {
                 "generated_at": at, "evidence_age_secs": at,
                 "condition": { "observed_at": at, "state": "ready" }, "title": "same"
             }});
-            let identity =
-                crate::lf::commands::subscribe::identity(None, frame.get("body")).unwrap();
+            let identity = crate::lf::commands::subscribe::identity(
+                None,
+                frame.get("body"),
+                frame.pointer("/stamp/observations"),
+            )
+            .unwrap();
             Arc::new(Reading {
                 generation,
                 frame,
@@ -892,7 +917,7 @@ mod tests {
         let frame =
             serde_json::json!({"answers": null, "unavailable": "snapshot failed", "body": null});
         let identity =
-            crate::lf::commands::subscribe::identity(Some("snapshot failed"), None).unwrap();
+            crate::lf::commands::subscribe::identity(Some("snapshot failed"), None, None).unwrap();
         let (latest, receiver) = tokio::sync::watch::channel(Latest {
             ready: true,
             events: 0,
@@ -941,7 +966,8 @@ mod tests {
         use std::sync::Mutex;
 
         let reason = Some("snapshot failed".to_owned());
-        let identity = crate::lf::commands::subscribe::identity(reason.as_deref(), None).unwrap();
+        let identity =
+            crate::lf::commands::subscribe::identity(reason.as_deref(), None, None).unwrap();
         let (latest, receiver) = tokio::sync::watch::channel(Latest {
             ready: true,
             events: 0,
@@ -994,6 +1020,46 @@ mod tests {
             ServerMessage::Error { .. }
         ));
         task.await.unwrap();
+    }
+
+    #[test]
+    fn reading_stamps_distinguish_scope_and_selection_and_follow_commits() {
+        with_store(|store| {
+            Box::pin(async move {
+                let registry = Arc::new(Subscriptions::default());
+                let mut first = Consumer::new(&registry, "whole", Read::ProcessList, None);
+                let initial = first.initial().await;
+                let stamp = initial["stamp"].clone();
+                assert_eq!(
+                    stamp["machine"],
+                    store.local_machine().unwrap().id.to_string()
+                );
+                assert_eq!(stamp["schema"], crate::server::wire::REVISION);
+                assert_eq!(stamp["complete"], true);
+                assert_eq!(stamp["query"].as_str().unwrap().len(), 64);
+                let mut second = Consumer::new(&registry, "same", Read::ProcessList, None);
+                assert_eq!(second.initial().await["stamp"], stamp);
+                let mut selected = Consumer::new(
+                    &registry,
+                    "selected",
+                    Read::ProcessList,
+                    Some(vec!["processes".into()]),
+                );
+                let selected_stamp = selected.initial().await["stamp"].clone();
+                assert_eq!(selected_stamp["epoch"], stamp["epoch"]);
+                assert_ne!(selected_stamp["query"], stamp["query"]);
+                assert_eq!(selected_stamp["complete"], false);
+                store.test_session("later", &crate::session_record::new_artifact_key());
+                assert!(first.member.checkpoint(7));
+                let current = first.reading().await;
+                assert_eq!(current["answers"], 7);
+                assert_eq!(current["stamp"]["epoch"], stamp["epoch"]);
+                assert!(
+                    current["stamp"]["revisions"]["sessions"].as_i64().unwrap()
+                        > stamp["revisions"]["sessions"].as_i64().unwrap()
+                );
+            })
+        });
     }
 
     #[test]
@@ -1240,7 +1306,9 @@ mod tests {
                     read.clone(),
                     Some(vec!["task.title".into()]),
                 );
-                assert!(first.initial().await["unavailable"].is_string());
+                let failed = first.initial().await;
+                assert!(failed["unavailable"].is_string());
+                assert!(failed["stamp"].is_null());
                 let repo = loopflow_test_support::TestRepo::new();
                 store
                     .create_task(&crate::work::task::NewTask {

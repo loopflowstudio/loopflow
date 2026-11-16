@@ -5,7 +5,7 @@ use crate::work::edit::WorkValue as Edit;
 use rusqlite::TransactionBehavior;
 
 use crate::durable::{ProjectId, TaskId};
-use crate::store::planning_sync::PlanningChange;
+use crate::store::planning_sync::{PlanningChange, PlanningChangeRef};
 use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
 use crate::work::task::Task;
@@ -61,14 +61,29 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let current = validate_move(&tx, id, expected_project, destination)?;
-        if current.project_id.as_ref() == destination {
-            return Ok(());
-        }
-        PlanningChanges::Task(id).save(
-            &tx,
-            &[Edit::TaskProject(destination.map(ToString::to_string))],
-        )?;
+        let current = match validate_move(&tx, id, expected_project, destination) {
+            Ok(current) => current,
+            Err(error) => {
+                super::operations::refuse_current_in(
+                    &tx,
+                    "task.membership_changed",
+                    &[id.as_str()],
+                    &["planning"],
+                    &error,
+                )?;
+                tx.commit()?;
+                return Err(error);
+            }
+        };
+        let changes = if current.project_id.as_ref() != destination {
+            PlanningChanges::Task(id).save(
+                &tx,
+                &[Edit::TaskProject(destination.map(ToString::to_string))],
+            )?
+        } else {
+            Vec::new()
+        };
+        commit_edit_in(&tx, id, "task.membership_changed", changes)?;
         tx.commit()?;
         Ok(())
     }
@@ -108,7 +123,20 @@ impl SqliteStore {
     ) -> StoreResult<Task> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let task = validate_edit(&tx, id, expected_revision, patch)?;
+        let task = match validate_edit(&tx, id, expected_revision, patch) {
+            Ok(task) => task,
+            Err(error) => {
+                super::operations::refuse_current_in(
+                    &tx,
+                    "task.updated",
+                    &[id.as_str()],
+                    &["planning"],
+                    &error,
+                )?;
+                tx.commit()?;
+                return Err(error);
+            }
+        };
         let mut edits = Vec::new();
         if let Some(value) = &patch.title {
             edits.push(Edit::TaskTitle(Some(value.clone())));
@@ -119,14 +147,46 @@ impl SqliteStore {
         if let Some(value) = &patch.assignee {
             edits.push(Edit::TaskAssignee(value.clone()));
         }
-        PlanningChanges::Task(id).save(&tx, &edits)?;
+        let mut changes = PlanningChanges::Task(id).save(&tx, &edits)?;
         if let Some(rank) = patch.rank {
-            super::planning_order::reorder_in(&tx, &task, rank)?;
+            changes.extend(super::planning_order::reorder_in(&tx, &task, rank)?);
         }
         let task = super::children::task_on(&tx, id)?.ok_or(StoreError::NotFound)?;
+        commit_edit_in(&tx, id, "task.updated", changes)?;
         tx.commit()?;
         Ok(task)
     }
+}
+
+fn commit_edit_in(
+    conn: &rusqlite::Connection,
+    id: &TaskId,
+    stage: &str,
+    changes: Vec<PlanningChangeRef>,
+) -> StoreResult<()> {
+    if let Some(operation) = crate::journal::request::operation_id() {
+        let sync = super::planning_sync::task_planning_syncs_in(conn, std::slice::from_ref(id))?
+            .remove(id)
+            .ok_or(StoreError::NotFound)?;
+        let mut result = serde_json::to_value(crate::ops::task::TaskEdit {
+            id: id.to_string(),
+            sync,
+        })?;
+        if stage == "task.membership_changed" {
+            let task = super::children::task_on(conn, id)?.ok_or(StoreError::NotFound)?;
+            result["wave_id"] = serde_json::to_value(task.wave_id)?;
+            result["project_id"] = serde_json::to_value(task.project_id)?;
+        }
+        super::operations::commit_planning_edit_in(
+            conn,
+            &operation,
+            stage,
+            id.as_str(),
+            changes,
+            &result,
+        )?;
+    }
+    Ok(())
 }
 
 fn validate_edit(
@@ -189,6 +249,453 @@ mod tests {
     use crate::session_record::new_artifact_key;
     use crate::store::sqlite::SqliteStore;
     use crate::work::task::{NewTask, TaskUpdate};
+
+    #[test]
+    fn rank_recovery_names_the_project_delivery_in_the_same_edit_commit() {
+        use crate::store::planning_sync::PlanningChangeKind;
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let repository = home.path().canonicalize().unwrap();
+        let repository = repository.to_str().unwrap();
+        let repository_id = store.ensure_repository(repository).unwrap();
+        let project = store.ensure_wave_project(repository, "product").unwrap();
+        let mut tasks = Vec::new();
+        for title in ["First", "Second"] {
+            tasks.push(
+                store
+                    .create_task(&NewTask {
+                        id: TaskId::new(),
+                        repository_id: repository_id.clone(),
+                        project_id: Some(project.id.clone()),
+                        title: title.into(),
+                        description: String::new(),
+                        due_date: None,
+                    })
+                    .unwrap(),
+            );
+        }
+        let task = &tasks[1];
+        store
+            .admit_operation(
+                &store.reading_identity().unwrap().1,
+                "rank",
+                "task.update",
+                "hash",
+                &serde_json::json!({}),
+            )
+            .unwrap();
+        crate::journal::request::with_operation(Some("rank".into()), || {
+            store
+                .edit_task(
+                    &task.id,
+                    task.revision,
+                    &TaskUpdate {
+                        rank: Some(0),
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+        });
+        let receipt = store.operation_receipt("rank").unwrap().unwrap();
+        let changes = &receipt.commits[0].planning_changes;
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].kind, PlanningChangeKind::Project);
+        assert_eq!(changes[0].owner, project.id.as_str());
+        assert_eq!(receipt.planning.unwrap().changes[0].change, changes[0]);
+    }
+
+    #[test]
+    fn planning_recovery_tracks_the_exact_change_across_newer_edits_and_restart() {
+        use super::super::operations::PlanningDeliveryState;
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("db");
+        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let repository_id = store.ensure_repository("/planning-recovery").unwrap();
+        let task = store
+            .create_task(&NewTask {
+                id: TaskId::new(),
+                repository_id,
+                project_id: None,
+                title: "Original".into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap();
+        let epoch = store.reading_identity().unwrap().1;
+        // Provider completion is held. Each operation owns just its new change,
+        // even when the Task has older outstanding delivery receipts.
+        for (operation, title) in [("older", "First"), ("newer", "Second")] {
+            store
+                .admit_operation(
+                    &epoch,
+                    operation,
+                    "task.update",
+                    "hash",
+                    &serde_json::json!({}),
+                )
+                .unwrap();
+            store.dispatch_operation(operation).unwrap();
+            let revision = store.task(&task.id).unwrap().unwrap().revision;
+            crate::journal::request::with_operation(Some(operation.into()), || {
+                store
+                    .edit_task(
+                        &task.id,
+                        revision,
+                        &TaskUpdate {
+                            title: Some(title.into()),
+                            ..Default::default()
+                        },
+                    )
+                    .unwrap();
+            });
+            let receipt = store.operation_receipt(operation).unwrap().unwrap();
+            assert_eq!(receipt.commits[0].planning_changes.len(), 1);
+            assert_eq!(
+                receipt.planning.as_ref().unwrap().changes[0].state,
+                PlanningDeliveryState::Pending
+            );
+            let change = &receipt.commits[0].planning_changes[0];
+            if operation == "older" {
+                store
+                    .conn
+                    .lock()
+                    .unwrap()
+                    .execute(
+                        "UPDATE task_changes SET attempted=1,error='reply lost' WHERE id=?1",
+                        [&change.id],
+                    )
+                    .unwrap();
+            }
+            store
+                .finish_operation(operation, Err("output lost"))
+                .unwrap();
+        }
+        let older = store.operation_receipt("older").unwrap().unwrap();
+        let original = older.commits[0].result.clone();
+        let saved_change = older.commits[0].planning_changes[0].clone();
+        assert_eq!(
+            older.planning.unwrap().changes[0].state,
+            PlanningDeliveryState::Uncertain
+        );
+        drop(store);
+        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        assert!(store
+            .recover_operation_result("older", "task.updated")
+            .unwrap());
+        let recovered = store.operation_receipt("older").unwrap().unwrap();
+        assert_eq!(recovered.result.as_ref(), Some(&original));
+        assert_eq!(
+            recovered.planning.as_ref().unwrap().changes[0].change,
+            saved_change
+        );
+        // The old provider acknowledgment resolves only that delivery. It does
+        // not overwrite the second edit or certify the newer delivery.
+        let subscription_revision = store.operation_revision().unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE task_changes SET acknowledged=1,error=NULL WHERE id=?1",
+                [&saved_change.id],
+            )
+            .unwrap();
+        assert!(store.operation_revision().unwrap() > subscription_revision);
+        let delivered = store.operation_receipt("older").unwrap().unwrap();
+        assert!(delivered.revision > recovered.revision);
+        assert_eq!(delivered.result, Some(original));
+        assert_eq!(delivered.error.as_deref(), Some("output lost"));
+        let current = delivered.planning.unwrap();
+        assert_eq!(current.changes[0].state, PlanningDeliveryState::Delivered);
+        assert!(current.changes[0].error.is_none());
+        assert_eq!(current.fence.epoch, epoch);
+        assert_eq!(
+            current.fence.revisions["planning"],
+            store.revisions().unwrap().planning
+        );
+        assert_eq!(store.task(&task.id).unwrap().unwrap().title, "Second");
+        let newer = store.operation_receipt("newer").unwrap().unwrap();
+        assert_eq!(
+            newer.planning.unwrap().changes[0].state,
+            PlanningDeliveryState::Pending
+        );
+        // Missing evidence stays unavailable, never inferred from the Task value.
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute("DELETE FROM task_changes WHERE id=?1", [&saved_change.id])
+            .unwrap();
+        assert_eq!(
+            store
+                .operation_receipt("older")
+                .unwrap()
+                .unwrap()
+                .planning
+                .unwrap()
+                .changes[0]
+                .state,
+            PlanningDeliveryState::Unavailable
+        );
+    }
+
+    #[test]
+    fn superseded_unsent_delivery_clears_only_its_current_failure() {
+        use super::super::operations::PlanningDeliveryState;
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let repository_id = store.ensure_repository("/planning-recovery").unwrap();
+        let task = store
+            .create_task(&NewTask {
+                id: TaskId::new(),
+                repository_id,
+                project_id: None,
+                title: "Original".into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap();
+        store
+            .admit_operation(
+                &store.reading_identity().unwrap().1,
+                "saved",
+                "task.update",
+                "hash",
+                &serde_json::json!({}),
+            )
+            .unwrap();
+        crate::journal::request::with_operation(Some("saved".into()), || {
+            store
+                .edit_task(
+                    &task.id,
+                    task.revision,
+                    &TaskUpdate {
+                        title: Some("First".into()),
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+        });
+        let saved = store.operation_receipt("saved").unwrap().unwrap();
+        let change = &saved.commits[0].planning_changes[0];
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE task_changes SET error='offline' WHERE id=?1",
+                [&change.id],
+            )
+            .unwrap();
+        let pending = store.operation_receipt("saved").unwrap().unwrap();
+        assert_eq!(
+            pending.planning.unwrap().changes[0].error.as_deref(),
+            Some("offline")
+        );
+        store
+            .edit_task(
+                &task.id,
+                store.task(&task.id).unwrap().unwrap().revision,
+                &TaskUpdate {
+                    title: Some("Second".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let superseded = store.operation_receipt("saved").unwrap().unwrap();
+        assert!(superseded.revision > pending.revision);
+        let current = superseded.planning.unwrap();
+        assert_eq!(current.changes[0].state, PlanningDeliveryState::Superseded);
+        assert!(current.changes[0].error.is_none());
+        // A conflict is separate from both delivery and supersession.
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE task_changes SET conflict_json='{}' WHERE id=?1",
+                [&change.id],
+            )
+            .unwrap();
+        assert_eq!(
+            store
+                .operation_receipt("saved")
+                .unwrap()
+                .unwrap()
+                .planning
+                .unwrap()
+                .changes[0]
+                .state,
+            PlanningDeliveryState::Conflict
+        );
+        assert_eq!(
+            store.operation_receipt("saved").unwrap().unwrap().commits,
+            saved.commits
+        );
+    }
+
+    #[test]
+    fn validation_refusal_resolves_only_the_uncommitted_edit_and_never_supplies_success() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let repository = home.path().canonicalize().unwrap();
+        let repository = repository.to_str().unwrap();
+        let repository_id = store.ensure_repository(repository).unwrap();
+        let task = store
+            .create_task(&NewTask {
+                id: TaskId::new(),
+                repository_id,
+                project_id: None,
+                title: "Current".into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap();
+        let expected = store.ensure_wave_project(repository, "expected").unwrap();
+        let destination = store
+            .ensure_wave_project(repository, "destination")
+            .unwrap();
+        let epoch = store.reading_identity().unwrap().1;
+        for (id, kind, stage) in [
+            ("refused-edit", "task.update", "task.updated"),
+            ("refused-move", "task.move", "task.membership_changed"),
+        ] {
+            store
+                .admit_operation(&epoch, id, kind, "hash", &serde_json::json!({}))
+                .unwrap();
+            assert!(store.dispatch_operation(id).unwrap());
+            let before = store.revisions().unwrap();
+            crate::journal::request::with_operation(Some(id.into()), || {
+                if kind == "task.update" {
+                    assert!(store
+                        .edit_task(
+                            &task.id,
+                            task.revision + 1,
+                            &TaskUpdate {
+                                title: Some("Rejected".into()),
+                                ..Default::default()
+                            }
+                        )
+                        .is_err());
+                } else {
+                    assert!(store
+                        .move_task(&task.id, Some(&expected.id), Some(&destination.id))
+                        .is_err());
+                }
+            });
+            let receipt = store.operation_receipt(id).unwrap().unwrap();
+            assert_eq!(receipt.commits.len(), 1);
+            let resolution = &receipt.commits[0];
+            assert_eq!(resolution.stage, stage);
+            assert_eq!(
+                resolution.resolution,
+                super::super::operations::OperationResolution::DefinitelyRefused
+            );
+            assert_eq!(resolution.resources, [task.id.to_string()]);
+            assert!(resolution.result["error"].is_string());
+            assert_eq!(resolution.fence.revisions["planning"], before.planning);
+            assert!(!store.recover_operation_result(id, stage).unwrap());
+            assert_eq!(store.revisions().unwrap(), before);
+            assert!(store.pending_task_changes(&task.id).unwrap().is_empty());
+        }
+        assert_eq!(store.task(&task.id).unwrap().unwrap().title, "Current");
+        assert!(store.task(&task.id).unwrap().unwrap().project_id.is_none());
+    }
+
+    #[test]
+    fn edit_and_membership_fences_cover_noops_and_roll_back_with_their_facts() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let repository = home.path().canonicalize().unwrap();
+        let repository = repository.to_str().unwrap();
+        let repository_id = store.ensure_repository(repository).unwrap();
+        let task = store
+            .create_task(&NewTask {
+                id: TaskId::new(),
+                repository_id,
+                project_id: None,
+                title: "Original".into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap();
+        let epoch = store.reading_identity().unwrap().1;
+        for (id, kind, stage) in [
+            ("noop-edit", "task.update", "task.updated"),
+            ("noop-move", "task.move", "task.membership_changed"),
+        ] {
+            store
+                .admit_operation(&epoch, id, kind, "hash", &serde_json::json!({}))
+                .unwrap();
+            let before = store.revisions().unwrap().planning;
+            crate::journal::request::with_operation(Some(id.into()), || {
+                if kind == "task.update" {
+                    store
+                        .edit_task(
+                            &task.id,
+                            task.revision,
+                            &TaskUpdate {
+                                title: Some(task.title.clone()),
+                                ..Default::default()
+                            },
+                        )
+                        .unwrap();
+                } else {
+                    store.move_task(&task.id, None, None).unwrap();
+                }
+            });
+            let receipt = store.operation_receipt(id).unwrap().unwrap();
+            assert_eq!(receipt.commits.len(), 1);
+            assert_eq!(receipt.commits[0].stage, stage);
+            assert_eq!(receipt.commits[0].fence.revisions["planning"], before);
+            assert_eq!(store.revisions().unwrap().planning, before);
+        }
+        let project = store.ensure_wave_project(repository, "product").unwrap();
+        for (id, kind) in [("failed-edit", "task.update"), ("failed-move", "task.move")] {
+            store
+                .admit_operation(&epoch, id, kind, "hash", &serde_json::json!({}))
+                .unwrap();
+            // Fail the receipt write after the domain write. Both must roll back.
+            store.conn.lock().unwrap().execute_batch(
+                "CREATE TEMP TRIGGER reject_commit BEFORE UPDATE OF commits ON creation_receipts
+                 BEGIN SELECT RAISE(ABORT,'held receipt write'); END;"
+            ).unwrap();
+            let before = store.revisions().unwrap();
+            crate::journal::request::with_operation(Some(id.into()), || {
+                if kind == "task.update" {
+                    assert!(store
+                        .edit_task(
+                            &task.id,
+                            task.revision,
+                            &TaskUpdate {
+                                title: Some("Must roll back".into()),
+                                ..Default::default()
+                            }
+                        )
+                        .is_err());
+                } else {
+                    assert!(store.move_task(&task.id, None, Some(&project.id)).is_err());
+                }
+            });
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .execute_batch("DROP TRIGGER reject_commit")
+                .unwrap();
+            assert_eq!(store.revisions().unwrap(), before);
+            assert!(store
+                .operation_receipt(id)
+                .unwrap()
+                .unwrap()
+                .commits
+                .is_empty());
+            let current = store.task(&task.id).unwrap().unwrap();
+            assert_eq!(current.title, task.title);
+            assert_eq!(current.project_id, None);
+            assert!(store.pending_task_changes(&task.id).unwrap().is_empty());
+        }
+    }
 
     #[test]
     fn rank_edits_stay_within_repository_and_project_membership() {
@@ -313,7 +820,27 @@ mod tests {
                 .unwrap();
             assert!(store.task(&task.id).unwrap().unwrap().project_id.is_none());
         }
-        store.move_task(&task.id, None, Some(&product.id)).unwrap();
+        store
+            .admit_operation(
+                &store.reading_identity().unwrap().1,
+                "move",
+                "task.move",
+                "hash",
+                &serde_json::json!({}),
+            )
+            .unwrap();
+        crate::journal::request::with_operation(Some("move".into()), || {
+            store.move_task(&task.id, None, Some(&product.id)).unwrap();
+        });
+        let committed = store.operation_receipt("move").unwrap().unwrap();
+        assert_eq!(
+            committed.commits[0].result["wave_id"],
+            serde_json::json!(product.wave_id)
+        );
+        assert_eq!(
+            committed.commits[0].result["project_id"],
+            serde_json::json!(product.id)
+        );
         assert_eq!(store.session_history(&session.id, 0, 0).unwrap(), before);
         assert_eq!(
             store.session(&session.id).unwrap().unwrap().wave_id,

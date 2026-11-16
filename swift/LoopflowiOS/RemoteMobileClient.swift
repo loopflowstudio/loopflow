@@ -6,12 +6,26 @@ import Loopflow
 @MainActor
 final class RemoteMobileClient: MobileTaskCreationClient {
     let savedMachine: SavedMachine
-    private var opening: Task<ServerLink, any Error>?
+    nonisolated let connection: MachineConnection
+    #if DEBUG
+    var attachForTesting: ((String, TerminalGeometry) async throws -> RemoteAttachment)?
+    #endif
 
     /// How long a request may wait for its answer.
     static let requestDeadline = Duration.seconds(15)
 
-    init(savedMachine: SavedMachine) { self.savedMachine = savedMachine }
+    init(savedMachine: SavedMachine) {
+        self.savedMachine = savedMachine
+        connection = MachineConnection(machine: savedMachine.machineID) {
+            let link = try await ServerLink.open(.machine(savedMachine.endpoint))
+            do {
+                guard try Self.identity(link.welcome) == savedMachine.machineID else {
+                    throw RegistryQueryError("This address now identifies a different Machine. Forget this connection and scan its code again.")
+                }
+                return link
+            } catch { await link.close(); throw error }
+        }
+    }
 
     static func connect(endpoint: URL, replacing: SavedMachine? = nil) async throws -> SavedMachine {
         let link = try await ServerLink.open(.machine(endpoint))
@@ -29,26 +43,41 @@ final class RemoteMobileClient: MobileTaskCreationClient {
 
 
     /// Creations saved before their first send, for this Machine.
-    private lazy var journal: CreationSubmissions = {
+    lazy var journal: ClientWorkStore = {
         let directory = URL.applicationSupportDirectory.appending(path: "submissions-\(savedMachine.machineID)")
         let machineID = savedMachine.machineID
-        return CreationSubmissions(directory: directory, machine: { machineID }, lookup: { [self] id in
-            try await connection().request(.read(.creationGet(requestID: id)), deadline: Self.requestDeadline).printed
-        }, send: { [self] payload in
+        let connection = connection
+        return ClientWorkStore(directory: directory, connection: connection, prepareDirectory: { directory in
+            try FileManager.default.setAttributes([.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
+                ofItemAtPath: directory.path)
+        }, machine: { machineID }, read: { query in
+            return try await connection.link().request(.read(query), deadline: Self.requestDeadline).printed
+        }, observe: { id in
+            return ServerLink.subscribe(.operationGet(requestID: id), reconnect: true, connection: connection) { update in
+                guard case .reading(let frame) = update else { return nil }
+                return try frame.decode(SubscriptionReading<OperationReceipt>.self)
+            }
+        }, send: { payload in
             let creation = try JSONDecoder().decode(JSONValue.self, from: payload)
-            return String(decoding: try await connection().request(.submittedCreation(creation), deadline: Self.requestDeadline).bytes,
-                          as: UTF8.self)
+            let link = try await connection.link()
+            do { _ = try await link.request(.submittedOperation(creation), deadline: Self.requestDeadline) }
+            catch {
+                if await link.isClosed { throw ServerConnectionUnavailable(error) }
+                throw error
+            }
         })
     }()
 
+    lazy var interaction = WorkInteraction(machine: savedMachine.machineID, store: journal)
+
     /// The Machine's typed reads and writes, as Desktop makes them.
     var query: RegistryQuery {
-        RegistryQuery.served(deadline: Self.requestDeadline) { [self] in try await connection() }
+        RegistryQuery.served(deadline: Self.requestDeadline) { [self] in try await connection.link() }
     }
 
     /// Every repository's Tasks matching `expression`, kept current.
     func observeTasks(expression: String) -> RemoteTaskObservation {
-        RemoteTaskObservation(query: .viewSelect(expression: expression)) { [self] in try await connection() }
+        RemoteTaskObservation(query: .viewSelect(expression: expression), interaction: interaction, connection: connection)
     }
 
     /// The Machine's Waves that are still in use.
@@ -60,6 +89,9 @@ final class RemoteMobileClient: MobileTaskCreationClient {
 
     /// Attaching takes the keyboard and fits the terminal to `size`.
     func attach(sessionID: String, size: TerminalGeometry) async throws -> RemoteAttachment {
+        #if DEBUG
+        if let attachForTesting { return try await attachForTesting(sessionID, size) }
+        #endif
         let ticket: String
         do { ticket = try decode(Ticket.self, await request(.sessionAttach(session: sessionID))).ticket }
         catch let error as ServerError where error.code == .notFound { throw SessionNotRunning() }
@@ -87,80 +119,43 @@ final class RemoteMobileClient: MobileTaskCreationClient {
         return MobileCreationContext(machineID: machineID, name: savedMachine.endpoint.host ?? "Machine", repositories: portfolio.repos)
     }
 
-    /// Saved before it is sent; a repeat asks the Machine first and resends the
-    /// same payload only when the Machine says to continue.
-    func createTask(_ submission: MobileTaskSubmission) async throws -> MobileTaskOutcome {
-        try verifySubmission(submission)
-        let id = submission.id.uuidString.lowercased()
-        let record = try await journal.record(.taskCreate(directory: submission.directory, requestID: id, title: nil,
-            request: submission.request, wave: nil, graph: nil, session: nil, run: true), requestID: id)
-        guard let lookup = try await journal.reconcile(record) else {
-            throw RegistryQueryError("This request is already being sent")
-        }
-        guard lookup.kind == "task.create", lookup.run, let taskID = lookup.taskId else {
-            throw RegistryQueryError("The Machine returned a different creation receipt")
-        }
-        let receipt = try lookup.result.map { try JSONDecoder().decode(TaskCreateReceipt.self, from: JSONEncoder().encode($0)) }
-        guard receipt == nil || receipt?.task.id == taskID else {
-            throw RegistryQueryError("The creation receipt names a different Task")
-        }
-        return MobileTaskOutcome(taskId: taskID,
-            state: lookup.disposition == .complete ? .started : .unknown,
-            receipt: receipt, message: lookup.disposition == .inspect ? lookup.explanation : nil)
+    func draftSubmitted(_ id: String, machine: String?) async throws -> Bool {
+        guard let machine, machine != savedMachine.machineID else { return try await journal.draftSubmitted(id) }
+        return try await ClientWorkStore.draftSubmitted(id,
+            directory: URL.applicationSupportDirectory.appending(path: "submissions-\(machine)"),
+            prepareDirectory: { directory in
+                try FileManager.default.setAttributes([.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
+                    ofItemAtPath: directory.path)
+            })
     }
 
-    /// The created Task is on screen: its saved creation is done.
-    func taskPresented(_ submission: MobileTaskSubmission) async throws {
-        try await journal.presented(submission.id.uuidString.lowercased())
-    }
 
-    func createdTask(_ submission: MobileTaskSubmission, taskID: String) async throws -> WorkViewPlan.Content {
-        try verifySubmission(submission)
-        let plan = try await query.viewPlan(expression: "task:\(taskID)", repoPath: submission.directory)
-        guard let task = try mobileTasks(plan).first(where: { $0.work.id == taskID }) else {
-            throw RegistryQueryError("The Task was created, but its workspace is not available yet. Try Open Task again.")
-        }
-        return task
-    }
-
-    private func verifySubmission(_ submission: MobileTaskSubmission) throws {
-        guard submission.machineID == savedMachine.machineID else {
-            throw RegistryQueryError("Reconnect \(submission.machineName) to recover this request. Nothing was sent to this Machine.")
+    func importLegacyCreations(_ values: [LegacyOperation]) async throws {
+        for (machine, records) in Dictionary(grouping: values, by: { $0.record.destination }) {
+            if machine == savedMachine.machineID { try await journal.importLegacy(records) }
+            else {
+                // Import to the original Machine's owner without opening or sending
+                // through the currently connected Machine.
+                let directory = URL.applicationSupportDirectory.appending(path: "submissions-\(machine)")
+                try await ClientWorkStore.importLegacy(records, directory: directory, prepareDirectory: { directory in
+                    try FileManager.default.setAttributes([.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
+                        ofItemAtPath: directory.path)
+                })
+            }
         }
     }
 
     /// The Machine's identity from its welcome. The negotiated revision is the
     /// compatibility check; a server that speaks it offers every operation here.
-    private static func identity(_ welcome: ServerWelcome) throws -> String {
+    private nonisolated static func identity(_ welcome: ServerWelcome) throws -> String {
         guard case .object(let fields) = welcome.machine, case .string(let machineID) = fields["id"], !machineID.isEmpty else {
             throw RegistryQueryError("The Machine did not return its identity")
         }
         return machineID
     }
 
-    /// The live control connection, opened once for concurrent callers.
-    private func connection() async throws -> ServerLink {
-        let link: ServerLink
-        if let opening, let live = try? await opening.value, await !live.isClosed {
-            link = live
-        } else {
-            let endpoint = ServerEndpoint.machine(savedMachine.endpoint)
-            let task = Task { try await ServerLink.open(endpoint) }
-            opening = task
-            do { link = try await task.value } catch {
-                if opening == task { opening = nil }
-                throw error
-            }
-            if opening != task { await link.close(); return try await connection() }
-        }
-        guard try Self.identity(link.welcome) == savedMachine.machineID else {
-            throw RegistryQueryError("This address now identifies a different Machine. Forget this connection and scan its code again.")
-        }
-        return link
-    }
-
     private func request(_ operation: ServerOperation) async throws -> RawJSON {
-        try await connection().request(operation, deadline: Self.requestDeadline)
+        try await connection.link().request(operation, deadline: Self.requestDeadline)
     }
 
     private func read(_ query: ServedRead) async throws -> RawJSON {

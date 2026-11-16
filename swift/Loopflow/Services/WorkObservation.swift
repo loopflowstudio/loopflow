@@ -81,7 +81,7 @@ public enum WorkPart: String, CaseIterable, Sendable {
         switch self {
         case .planning: return .allPlans
         case .activity: return .processList
-        case .selections: return scope.repo.map { .desktopViewList(directory: $0) }
+        case .selections: return scope.repo.map { .desktopViewList(directory: $0) } ?? .viewSelect(expression: nil)
         case .taskList:
             return scope.repo.map { .desktopViewGet(directory: $0, expression: TaskList.started.expression(wave: scope.taskListWave)) }
         case .peerPlanning: return scope.repo.map { .repoPlan(directory: $0) }
@@ -164,6 +164,8 @@ public struct WorkFrame: Sendable {
     /// Orders every frame of one observation.
     public let sequence: Int
     public let answers: Int?
+    public let stamp: ReadingStamp?
+    public let receivingLink: ReceivingLink?
     public let unavailable: String?
     public let content: Content
     /// Wire text of the parts a saved workspace keeps, exactly as a one-shot
@@ -178,9 +180,11 @@ public struct WorkFrame: Sendable {
         public let sessionPage: String?
     }
 
-    public init(sequence: Int, answers: Int?, unavailable: String?, content: Content, wire: Wire?) {
+    public init(sequence: Int, answers: Int?, unavailable: String?, content: Content, wire: Wire?, stamp: ReadingStamp? = nil, receivingLink: ReceivingLink? = nil) {
         self.sequence = sequence
         self.answers = answers
+        self.stamp = stamp
+        self.receivingLink = receivingLink
         self.unavailable = unavailable
         self.content = content
         self.wire = wire
@@ -188,26 +192,10 @@ public struct WorkFrame: Sendable {
 
     /// The same reading answering a later request.
     func answering(_ answers: Int, sequence: Int) -> WorkFrame {
-        WorkFrame(sequence: sequence, answers: answers, unavailable: unavailable, content: content, wire: wire)
+        WorkFrame(sequence: sequence, answers: answers, unavailable: unavailable, content: content, wire: wire, stamp: stamp, receivingLink: receivingLink)
     }
 
-    /// Every field is required; an absent one is a parse error, not a nil.
-    private struct Envelope<Body: Decodable>: Decodable {
-        let answers: Int?
-        let unavailable: String?
-        let body: Body?
-
-        enum CodingKeys: String, CodingKey { case answers, unavailable, body }
-
-        init(from decoder: any Decoder) throws {
-            let container = try decoder.container(keyedBy: CodingKeys.self)
-            answers = try container.decode(Int?.self, forKey: .answers)
-            unavailable = try container.decode(String?.self, forKey: .unavailable)
-            body = try container.decode(Body?.self, forKey: .body)
-        }
-    }
-
-    public struct TaskStatusReading: Decodable {
+    public struct TaskStatusReading: Decodable, Sendable {
         public let overview: TaskOverview?
         public let graphProcesses: [GraphProcessDetail]
         public let comments: TaskComments?
@@ -225,14 +213,20 @@ public struct WorkFrame: Sendable {
     }
 
     /// Decode one line of `part`'s subscription, read for `scope`.
-    public static func decode(part: WorkPart, scope: WorkScope, sequence: Int, line: Data) throws -> WorkFrame {
-        func envelope<Body: Decodable>(_: Body.Type) throws -> Envelope<Body> {
-            try JSONDecoder().decode(Envelope<Body>.self, from: line)
+    public static func decode(part: WorkPart, scope: WorkScope, sequence: Int, line: Data, receivingLink: ReceivingLink? = nil) throws -> WorkFrame {
+        func envelope<Body: Decodable>(_: Body.Type) throws -> SubscriptionReading<Body> {
+            try JSONDecoder().decode(SubscriptionReading<Body>.self, from: line)
         }
-        func frame<Body>(_ envelope: Envelope<Body>, _ content: Content, unavailable: String? = nil,
-                         wire: Wire? = nil) -> WorkFrame {
-            WorkFrame(sequence: sequence, answers: envelope.answers, unavailable: envelope.unavailable ?? unavailable,
-                      content: content, wire: wire)
+        func frame<Body>(_ envelope: SubscriptionReading<Body>, _ content: Content, unavailable: String? = nil,
+                         wire: Wire? = nil) throws -> WorkFrame {
+            let answers = try envelope.answers.map { value in
+                guard let result = Int(exactly: value) else {
+                    throw RegistryQueryError("Subscription checkpoint is outside the supported range")
+                }
+                return result
+            }
+            return WorkFrame(sequence: sequence, answers: answers, unavailable: envelope.unavailable ?? unavailable,
+                      content: content, wire: wire, stamp: envelope.stamp, receivingLink: receivingLink)
         }
         func text(_ value: Any?) -> String? {
             guard let value, let data = try? JSONSerialization.data(withJSONObject: value) else { return nil }
@@ -244,50 +238,50 @@ public struct WorkFrame: Sendable {
         switch part {
         case .planning:
             let read = try envelope(RoadmapSnapshot.self)
-            guard let roadmap = read.body else { return frame(read, .planning(nil)) }
+            guard let roadmap = read.body else { return try frame(read, .planning(nil)) }
             let waves = roadmap.waves.map(\.wave).sorted { ($0.repo, $0.name) < ($1.repo, $1.name) }
             let raw = try body()
             let rows = ((raw as? [String: Any])?["waves"] as? [[String: Any]] ?? [])
                 .compactMap { $0["wave"] as? [String: Any] }
                 .sorted { ($0["repo"] as? String ?? "", $0["name"] as? String ?? "")
                     < ($1["repo"] as? String ?? "", $1["name"] as? String ?? "") }
-            return frame(read, .planning(Planning(roadmap: roadmap, waves: waves)),
+            return try frame(read, .planning(Planning(roadmap: roadmap, waves: waves)),
                          wire: Wire(roadmap: text(raw), waves: text(rows), sessionPage: nil))
         case .selections:
             let read = try envelope([WorkViewPlan].self)
-            return frame(read, .selections(read.body))
+            return try frame(read, .selections(read.body))
         case .taskList:
             let read = try envelope(WorkViewPlan.self)
-            return frame(read, .taskList(read.body))
+            return try frame(read, .taskList(read.body))
         case .peerPlanning:
             let read = try envelope(PeerPlanningReading.self)
-            return frame(read, .peerPlanning(read.body.map {
+            return try frame(read, .peerPlanning(read.body.map {
                 PeerPlanning(repo: scope.repo ?? "", destinations: $0.destinations)
             }))
         case .sessions:
             let read = try envelope([SessionRecord].self)
             let entries = try body() as? [Any]
-            return frame(read, .sessions(read.body.map {
+            return try frame(read, .sessions(read.body.map {
                 Sessions(repo: scope.repo ?? "", includesHeadless: scope.headless, entries: $0)
             }), wire: Wire(roadmap: nil, waves: nil,
                            sessionPage: entries.flatMap { text(["entries": $0, "next": NSNull()] as [String: Any]) }))
         case .task:
             let read = try envelope(TaskStatusReading.self)
-            guard let task = scope.task, let status = read.body else { return frame(read, .task(nil)) }
+            guard let task = scope.task, let status = read.body else { return try frame(read, .task(nil)) }
             guard let work = status.overview, let comments = status.comments else {
-                return frame(read, .task(nil), unavailable: "Task \(task) is not registered on this Machine")
+                return try frame(read, .task(nil), unavailable: "Task \(task) is not registered on this Machine")
             }
-            return frame(read, .task(TaskPart(task: task, row: status.row, work: work,
+            return try frame(read, .task(TaskPart(task: task, row: status.row, work: work,
                                               graphProcesses: status.graphProcesses,
                                               comments: comments, execution: status.execution)))
         case .workActivity:
             let read = try envelope(WorkActivitySnapshot.self)
-            return frame(read, .workActivity(zip(scope.activity, read.body).map {
+            return try frame(read, .workActivity(zip(scope.activity, read.body).map {
                 WorkActivityPart(scope: $0, snapshot: $1)
             }))
         case .activity:
             let read = try envelope(ActivitySnapshot.self)
-            return frame(read, .activity(read.body))
+            return try frame(read, .activity(read.body))
         }
     }
 }
@@ -299,13 +293,13 @@ private func zip<A, B>(_ a: A?, _ b: B?) -> (A, B)? {
 
 /// One served subscription speaking `lf <read> --json --subscribe`'s newline-delimited JSON.
 public struct LineSubscription: Sendable {
-    public let lines: AsyncThrowingStream<Data, any Error>
+    public let lines: AsyncThrowingStream<ReceivedReading, any Error>
     /// Queue one newline-terminated request line.
     public let send: @Sendable (Data) -> Void
     /// Returns only after the subscription has ended.
     public let cancel: @Sendable () async -> Void
 
-    public init(lines: AsyncThrowingStream<Data, any Error>, send: @escaping @Sendable (Data) -> Void,
+    public init(lines: AsyncThrowingStream<ReceivedReading, any Error>, send: @escaping @Sendable (Data) -> Void,
                 cancel: @escaping @Sendable () async -> Void) {
         self.lines = lines
         self.send = send
@@ -411,12 +405,12 @@ public final class WorkSubscriptions: @unchecked Sendable {
         settleCheckpoints()
     }
 
-    private func receive(_ part: WorkPart, _ generation: Int, line: Data) {
+    private func receive(_ part: WorkPart, _ generation: Int, line: ReceivedReading) {
         lock.withLock {
             guard !finished, var current = running[part], current.generation == generation else { return }
             do {
                 sequence += 1
-                let decoded = try WorkFrame.decode(part: part, scope: scope, sequence: sequence, line: line)
+                let decoded = try WorkFrame.decode(part: part, scope: scope, sequence: sequence, line: line.bytes, receivingLink: line.link)
                 let frame = decoded.answering(max(decoded.answers ?? 0, current.floor), sequence: sequence)
                 current.last = frame
                 running[part] = current

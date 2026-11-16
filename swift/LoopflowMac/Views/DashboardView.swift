@@ -4,7 +4,7 @@ import UniformTypeIdentifiers
 
 struct DashboardEditor: View {
     let model: WorkModel
-    let plan: WorkViewPlan
+    let plan: ProjectedWorkPlan
     @Environment(\.dismiss) private var dismiss
     @State private var id = UUID().uuidString
     @State private var name = ""
@@ -45,7 +45,7 @@ struct DashboardEditor: View {
 /// Working Tasks or an unsaved view it opens the edited query as a view.
 struct DashboardQueryField: View {
     let model: WorkModel
-    let plan: WorkViewPlan
+    let plan: ProjectedWorkPlan
     @State private var draft = ""
 
     var body: some View {
@@ -96,6 +96,7 @@ struct DashboardView: View {
                 }.padding(10)
                 if let error = model.dashboardError ?? model.selectionPlans.errorMessage {
                     Text(error).foregroundStyle(palette.warning).textSelection(.enabled)
+                    Button("Retry") { model.retrySelectedQuery() }
                 }
                 // One line: membership may be incomplete; every reason stays in its help.
                 if let first = plan.resolution.unavailable.first {
@@ -128,9 +129,13 @@ struct DashboardView: View {
                     }.font(.caption).padding(8)
                 }
             } else {
-                ContentUnavailableView("Dashboard unavailable", systemImage: "exclamationmark.triangle",
-                    description: Text(model.selectionPlans.errorMessage ?? "This Dashboard is no longer available."))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                if workingTasks ? model.selectionPlans.isLoading : model.queryPlans.isLoading {
+                    ProgressView("Loading Dashboard…").frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ContentUnavailableView("Dashboard unavailable", systemImage: "exclamationmark.triangle",
+                        description: Text(model.queryPlans.errorMessage ?? model.selectionPlans.errorMessage ?? "This Dashboard is no longer available."))
+                    Button("Retry") { model.retrySelectedQuery() }
+                }
             }
         }.padding(10).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top).background(palette.surfaceMuted)
             .sheet(isPresented: $editing) {
@@ -141,7 +146,7 @@ struct DashboardView: View {
 
     private var workingTasks: Bool { model.navigation.destination == .workingTasks }
 
-    private func writeSlots(_ plan: WorkViewPlan, _ slots: DashboardSlotLayout?) {
+    private func writeSlots(_ plan: ProjectedWorkPlan, _ slots: DashboardSlotLayout?) {
         guard let id = plan.dashboardID, let revision = plan.savedRevision else { return }
         Task { await model.setDashboardSlots(id, slots: slots, revision: revision) }
     }
@@ -188,7 +193,7 @@ struct DashboardTile: View {
     let workspaces: SessionsWorkspaceRegistry
     let sessions: SessionsStore
     let member: WorkMemberRef
-    let plan: WorkViewPlan
+    let plan: ProjectedWorkPlan
     let workingTasks: Bool
     let focused: Bool
     /// A Wave view keeps the Wave selected, so its tiles never take the window's focus.
@@ -210,7 +215,7 @@ struct DashboardTile: View {
                 }.buttonStyle(.plain)
                 Spacer(minLength: 0)
                 if let task {
-                    Menu { TaskActionItems(model: model, task: task.task, wave: task.wave?.wave) }
+                    Menu { TaskActionItems(completionOrder: plan.projection.visible.map(\.work), model: model, task: task.task, wave: task.wave?.wave) }
                         label: { Image(systemName: "ellipsis") }
                         .menuStyle(.button).buttonStyle(.plain).fixedSize().help("Task actions")
                 }
@@ -324,7 +329,7 @@ extension WorkModel {
     }
 
     /// Hide or restore a tile. Rust decides the mode; hiding never touches the order.
-    func setTile(_ plan: WorkViewPlan, _ member: WorkMemberRef, hidden: Bool) {
+    func setTile(_ plan: ProjectedWorkPlan, _ member: WorkMemberRef, hidden: Bool) {
         guard let id = plan.dashboardID else {
             dashboardError = "Save this Dashboard before arranging its Work."; return
         }

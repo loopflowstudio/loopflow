@@ -80,11 +80,31 @@ pub fn selected_answer<T: Serialize>(answer: &T) -> Result<serde_json::Value> {
     })
 }
 
+/// SQLite facts read in the same snapshot as a subscription's body. External
+/// observations (Git, providers, process liveness) are not certified by this fence.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ReadingStamp {
+    pub machine: String,
+    pub epoch: String,
+    pub schema: u32,
+    /// SHA-256 of the served read and selection; absent on ordinary CLI streams.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub query: Option<String>,
+    /// The whole scoped query was returned, rather than a selected JSON fragment.
+    pub complete: bool,
+    pub revisions: StoreRevisions,
+    /// Null when consumed external answers changed during computation.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub observations: Option<crate::observe::ObservationEvidence>,
+}
+
 /// One line of a subscription.
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 pub struct SubscriptionFrame<'a, T> {
     /// The newest request this reading began after.
     pub answers: Option<u64>,
+    /// Null when the reading could not establish a database snapshot.
+    pub stamp: Option<ReadingStamp>,
     /// Why the read failed. `body` is then `null`.
     pub unavailable: Option<String>,
     pub body: Option<&'a T>,
@@ -141,6 +161,16 @@ where
     F: FnMut(Option<SharedStore>, A) -> Fut,
     Fut: std::future::Future<Output = Result<T>>,
 {
+    run_with_interest(args, read, false)
+}
+
+fn run_with_interest<A, T, F, Fut>(args: A, read: F, operations: bool) -> Result<()>
+where
+    A: DeserializeOwned + Clone + Send + 'static,
+    T: Serialize,
+    F: FnMut(Option<SharedStore>, A) -> Fut,
+    Fut: std::future::Future<Output = Result<T>>,
+{
     // Read before anything can be scheduled: a parent that exits after this
     // is noticed even if it exits before the observer starts.
     let parent = parent_process();
@@ -148,6 +178,7 @@ where
     let input = shared.clone();
     std::thread::spawn(move || read_requests(&input));
     let mut reader = Reader::new(shared.clone(), parent, args, read, selected())?;
+    reader.operation_updates = operations;
     let mut stdout = std::io::stdout().lock();
     loop {
         let step = reader.step()?;
@@ -206,13 +237,42 @@ where
     F: FnMut(Option<SharedStore>, A) -> Fut + Send + 'static,
     Fut: std::future::Future<Output = Result<T>>,
 {
+    start_with_interest(args, read, transport, false)
+}
+
+pub(crate) fn start_receipts<A, T, F, Fut>(
+    args: A,
+    read: F,
+    transport: Transport,
+) -> Result<Option<Subscription>>
+where
+    A: DeserializeOwned + Clone + Send + 'static,
+    T: Serialize,
+    F: FnMut(Option<SharedStore>, A) -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = Result<T>>,
+{
+    start_with_interest(args, read, transport, true)
+}
+
+fn start_with_interest<A, T, F, Fut>(
+    args: A,
+    read: F,
+    transport: Transport,
+    operations: bool,
+) -> Result<Option<Subscription>>
+where
+    A: DeserializeOwned + Clone + Send + 'static,
+    T: Serialize,
+    F: FnMut(Option<SharedStore>, A) -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = Result<T>>,
+{
     match transport {
-        Transport::Stdio => run(args, read).map(|()| None),
+        Transport::Stdio => run_with_interest(args, read, operations).map(|()| None),
         Transport::Pull {
             wake,
             select,
             events,
-        } => start_pull(args, read, wake, select, events).map(Some),
+        } => start_pull(args, read, wake, select, events, operations).map(Some),
     }
 }
 
@@ -306,6 +366,7 @@ fn start_pull<A, T, F, Fut>(
     wake: Box<dyn Fn() + Send + Sync>,
     select: Option<Vec<String>>,
     events: bool,
+    operations: bool,
 ) -> Result<Subscription>
 where
     A: DeserializeOwned + Clone + Send + 'static,
@@ -316,6 +377,7 @@ where
     let shared = mailbox();
     let inbox: Arc<dyn Inbox> = shared.clone();
     let mut reader = Reader::new(shared.clone(), None, args, read, select)?;
+    reader.operation_updates = operations;
     reader.observer = events.then(crate::server::events::Observer::default);
     lock(&shared).pull_at = Some(Instant::now());
     let waker = shared.clone();
@@ -368,6 +430,7 @@ where
         SubscriptionUpdate {
             frame: encode(&SubscriptionFrame::<()> {
                 answers: None,
+                stamp: None,
                 unavailable: Some(error),
                 body: None,
             })
@@ -449,6 +512,8 @@ struct Reader<A, F> {
     answers: Option<u64>,
     force: bool,
     read_at: Option<StoreRevisions>,
+    operation_at: Option<i64>,
+    operation_updates: bool,
     read_on: Option<Instant>,
     cost: Duration,
     failures: u32,
@@ -492,6 +557,8 @@ where
             answers: None,
             force: true,
             read_at: None,
+            operation_at: None,
+            operation_updates: false,
             read_on: None,
             cost: Duration::ZERO,
             failures: 0,
@@ -541,14 +608,25 @@ where
             .and_then(|store| store.sqlite.revisions().ok());
         let now = Instant::now();
         let observed_changes = self.dependencies.changed();
+        let operation_revision = if self.operation_updates {
+            self.store
+                .as_ref()
+                .and_then(|store| store.sqlite.operation_revision().ok())
+        } else {
+            None
+        };
         let due = self.force
             || match self.read_on {
                 None => true,
                 Some(read_on) => {
-                    let changed = match (self.read_at, revisions) {
-                        (Some(old), Some(new)) => changed(old, new),
-                        (None, None) => false,
-                        _ => true,
+                    let changed = if self.operation_updates {
+                        self.operation_at != operation_revision
+                    } else {
+                        match (self.read_at, revisions) {
+                            (Some(old), Some(new)) => changed(old, new),
+                            (None, None) => false,
+                            _ => true,
+                        }
                     };
                     retry_due(self.failures, read_on, now)
                         || (now - read_on >= self.cost.saturating_mul(BUSY_SHARE)
@@ -596,12 +674,37 @@ where
                 Ok(body) => (None, Some(body)),
                 Err(error) => (Some(format!("{error:#}")), None),
             };
+            let stamp = if body.is_some() {
+                store
+                    .as_ref()
+                    .zip(revisions)
+                    .map(|(store, revisions)| {
+                        let (machine, epoch) = store.sqlite.reading_identity()?;
+                        Ok::<_, crate::store::StoreError>(ReadingStamp {
+                            machine,
+                            epoch,
+                            schema: crate::server::wire::REVISION,
+                            query: None,
+                            complete: false,
+                            revisions,
+                            observations: self.observations.evidence(&self.dependencies),
+                        })
+                    })
+                    .transpose()?
+            } else {
+                None
+            };
             drop(snapshot);
             self.cost = began.elapsed();
-            let identity = identity(unavailable.as_deref(), body.as_ref())?;
+            let observations = stamp
+                .as_ref()
+                .map(|stamp| serde_json::to_value(&stamp.observations))
+                .transpose()?;
+            let identity = identity(unavailable.as_deref(), body.as_ref(), observations.as_ref())?;
             if self.force || self.sent != Some(identity) {
                 update.frame = Some(encode(&SubscriptionFrame {
                     answers: self.answers,
+                    stamp,
                     unavailable,
                     body: body.as_ref(),
                 })?);
@@ -613,6 +716,7 @@ where
             };
             self.sent = Some(identity);
             self.read_at = revisions;
+            self.operation_at = operation_revision;
             self.read_on = Some(began);
             self.force = false;
         }
@@ -664,6 +768,7 @@ fn strip_reading_time(value: &mut serde_json::Value) {
 pub(crate) fn identity(
     unavailable: Option<&str>,
     body: Option<&serde_json::Value>,
+    observations: Option<&serde_json::Value>,
 ) -> Result<[u8; 32]> {
     let mut value = body.cloned().unwrap_or(serde_json::Value::Null);
     strip_reading_time(&mut value);
@@ -671,6 +776,7 @@ pub(crate) fn identity(
     let mut hash = Sha256::new();
     serde_json::to_writer(&mut hash, &unavailable)?;
     serde_json::to_writer(&mut hash, &value)?;
+    serde_json::to_writer(&mut hash, &observations)?;
     Ok(hash.finalize().into())
 }
 
@@ -679,6 +785,7 @@ fn encode<T: Serialize>(frame: &SubscriptionFrame<'_, T>) -> Result<Vec<u8>> {
     if bytes.len() > MAX_FRAME {
         bytes = serde_json::to_vec(&SubscriptionFrame::<()> {
             answers: frame.answers,
+            stamp: None,
             unavailable: Some("subscription frame exceeds the 64 MiB transport limit".into()),
             body: None,
         })?;
@@ -824,6 +931,80 @@ mod tests {
     }
 
     #[test]
+    fn reading_stamp_fixture_requires_its_complete_wire_shape() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/dto/server/reading_stamped.json"
+        ))
+        .unwrap();
+        let wire = fixture["frame"]["stamp"].clone();
+        let stamp: super::ReadingStamp = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(serde_json::to_value(stamp).unwrap(), wire);
+        for key in [
+            "machine",
+            "epoch",
+            "schema",
+            "query",
+            "complete",
+            "revisions",
+            "observations",
+        ] {
+            let mut incomplete = wire.clone();
+            incomplete.as_object_mut().unwrap().remove(key);
+            assert!(
+                serde_json::from_value::<super::ReadingStamp>(incomplete).is_err(),
+                "{key}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_commit_during_projection_cannot_advance_the_frames_stamp() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let _home =
+            crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+        let writer = Arc::new(
+            crate::store::sqlite::SqliteStore::open_ephemeral(&home.path().join("loopflow.db"))
+                .unwrap(),
+        );
+        let before = writer.revisions().unwrap();
+        let (sender, wakes) = mpsc::channel();
+        let mut first = true;
+        let subscription = start_pull(
+            (),
+            move |store, ()| {
+                let store = store.unwrap();
+                if first {
+                    // The subscription has already pinned its revisions. Commit on
+                    // the independent writer before it reads the body.
+                    writer.test_session("during", &crate::session_record::new_artifact_key());
+                    first = false;
+                }
+                async move {
+                    Ok(store
+                        .sqlite
+                        .session_summary("during", 1)?
+                        .map(|session| session.title))
+                }
+            },
+            Box::new(move || {
+                let _ = sender.send(());
+            }),
+            None,
+            false,
+            false,
+        )
+        .unwrap();
+        let first = next_frame(&subscription, &wakes);
+        assert!(first["body"].is_null());
+        assert_eq!(first["stamp"]["revisions"]["sessions"], before.sessions);
+        subscription.checkpoint(1);
+        let next = next_frame(&subscription, &wakes);
+        assert_eq!(next["body"], "Retained");
+        assert!(next["stamp"]["revisions"]["sessions"].as_i64().unwrap() > before.sessions);
+    }
+
+    #[test]
     fn git_changes_reach_shared_subscriptions_without_registered_checkouts() {
         let _env = loopflow_test_support::env_lock().lock().unwrap();
         let home = tempfile::tempdir().unwrap();
@@ -848,6 +1029,7 @@ mod tests {
                     let _ = sender.send(());
                 }),
                 None,
+                false,
                 false,
             )
             .unwrap();
@@ -922,6 +1104,7 @@ mod tests {
                 let _ = sender.send(());
             }),
             None,
+            false,
             false,
         )
         .unwrap();
@@ -1024,6 +1207,7 @@ mod tests {
             }),
             None,
             false,
+            false,
         )
         .unwrap();
         let agent = |expected: serde_json::Value| {
@@ -1068,11 +1252,11 @@ mod tests {
                 "task": {"acquisition": {"state": "available", "observed_at": at}},
                 "project_readiness": {"state": "ready", "observed_at": at}}])
         };
-        let read = |body| identity(None, Some(&body)).unwrap();
+        let read = |body| identity(None, Some(&body), None).unwrap();
         assert_eq!(read(rows(1)), read(rows(2)));
         assert_ne!(
             read(rows(1)),
-            identity(Some("gone"), Some(&rows(1))).unwrap()
+            identity(Some("gone"), Some(&rows(1)), None).unwrap()
         );
     }
 }

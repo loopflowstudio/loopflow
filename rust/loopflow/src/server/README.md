@@ -34,7 +34,22 @@ address and its lock remain stable so already-running relays can recover across
 the rename. There is one listener, with no alias or alternate protocol path.
 Work and credentials stay in place.
 
-## Local protocol, revision 5
+## External observation provenance
+
+The welcome names the active cache in `observations`, separately from the server
+`instance` and the database epoch. `stamp.observations` carries that source,
+opaque fact/token pairs, and the clock at which the consumed set was validated.
+Repeated reads and inherited workers reuse captured answers. Changes during the
+capture leave observation evidence null and trigger a normal refresh. Eviction
+never reuses a token; a replacement cache has another source.
+
+Clients establish sources from the current connection's welcome before accepting
+readings. Disconnect and reconnect invalidate external coverage, including a
+reconnect to the same cache. Persisted readings remain last-known; a welcome
+alone revalidates no field. SQLite revisions retain their independent meaning.
+Observation evidence grants no terminal input readiness.
+
+## Local protocol, revision 6
 
 One connection per client over the same-user Unix socket. Every message is one
 JSON object per line (`serde_json` never emits a raw newline). Control messages
@@ -90,8 +105,8 @@ a described kind with exactly its fields, every client fixture must be encoded
 by a test and every server fixture must decode.
 
 ```text
-→ {"type":"hello","revision":5,"min_revision":5,"client":{"kind":"desktop","platform":"macos","name":"Loopflow","version":"0.15.1"}}
-← {"type":"welcome","client_id":"…","revision":5,"server_revision":5,"min_revision":5,"instance":"…","build":"0.15.1","executable_sha256":"…","machine":{…},"limits":{"max_message":1048576,"max_connections":64,"max_open":256,"max_retained_bytes":67108864}}
+→ {"type":"hello","revision":6,"min_revision":6,"client":{"kind":"desktop","platform":"macos","name":"Loopflow","version":"0.15.1"}}
+← {"type":"welcome","client_id":"…","revision":6,"server_revision":6,"min_revision":6,"instance":"…","build":"0.15.1","executable_sha256":"…","machine":{…},"limits":{"max_message":1048576,"max_connections":64,"max_open":256,"max_retained_bytes":67108864}}
 → {"type":"request","id":"a","operation":{"kind":"plan.list","directory":"/","wave":null,"task":null,"all":true},"select":null}
 → {"type":"subscribe","id":"b","operation":{"kind":"session.list","directory":"/repo","headless":false,"after":null,"limit":null,"task":null},"select":["id","title","state"],"resume":null}
 ← {"type":"response","id":"a","trace_id":"…","result":{…}}
@@ -115,13 +130,13 @@ unavailable or uninitialized) and limits. The negotiated revision is the whole
 compatibility check: a server that speaks it offers every operation below, so
 no capability list travels. With no revision in
 common it answers `error {code: incompatible}` naming the side to update in
-its message and in `data.update` (`client` or `server`), then closes. This build speaks revision 5 only; the shape lets a later server speak
+its message and in `data.update` (`client` or `server`), then closes. This build speaks revision 6 only; the shape lets a later server speak
 two. A revision-1 client's four-byte length prefix starts below `0x20`; the
 server answers it a revision-1 framed `incompatible` error carrying `instance`
 and closes. That sniff is the whole compatibility layer and goes with revision 1.
 
-Revision 5 combines bulk/upload tickets, mobile access, shared subscription
-readers and typed events. Control messages are limited to 1 MiB; ticketed
+Revision 6 adds durable command admission/receipt reads and snapshot stamps to the shared subscription readers and typed
+events, alongside bulk/upload tickets and mobile access. Control messages are limited to 1 MiB; ticketed
 messages retain the shared engine's 32 MiB response limit and 64 MiB per-client
 budget, leaving headroom for other reads during one large transfer. Older
 clients must update. Install the matching Desktop/CLI/server together and
@@ -203,6 +218,103 @@ itself, without a separate clock, checkout or probe policy for each operation.
 Database-derived joins retain their transactional snapshot; external
 observations do not share that transaction.
 
+### Durable command admission
+
+The required `epoch` comes from the receipt subscription that authorized the send.
+Admission checks it in the receipt transaction, including duplicate submissions;
+a delayed send after database replacement changes nothing and starts no worker.
+An old domain-recovery reply cannot authorize a command in the replacement epoch.
+
+`operation.submit {request_id, epoch, command}` accepts any typed `Write` and returns
+its durable `OperationReceipt` before Git discovery, planning, creation locks or
+provider startup. Admission saves a versioned submitted-content identity and exact
+typed command. The worker resolves the canonical creation `fingerprint` separately;
+it remains null until established. `submitted_fingerprint` identifies the saved
+content, excluding the request ID and incidental JSON key order.
+`operation.get {request_id}` reads or subscribes to that same receipt. Null means
+confirmed absence; an unavailable read says nothing about whether it ran.
+The command and its ID are immutable. Reusing the ID with different content is
+`conflict`. Creations use their existing request ID and receipt row.
+
+Validation is `pending` for a new creation, `candidate` while adopting a released
+receipt, `bound` after validation, `conflict` for incompatible content, or `unbound`
+for a released receipt without an envelope. A candidate reserves one spelling;
+equivalent root, subdirectory and symlink spellings can bind the canonical identity.
+A wrong candidate releases its reservation without changing the saved creation
+result. An unavailable repository keeps validation pending. Reservation generations
+prevent held validation from changing a newer candidate. Once bound, submitted
+content is immutable, including its path spelling.
+
+Delivery is `queued`, `dispatched`, `finished` or `uncertain`; historical creation
+rows without an envelope are `untracked`. A duplicate reads the same outcome and
+never generically dispatches a sent command again. Adopted creations consult their
+existing Complete/Continue/Inspect recovery rules; only a domain-proven continuation
+can resume after dispatch. Completion continues only its saved domain request;
+reopening or requesting completion again cannot authorize replay of that request.
+Settlement records `task.completed` for every receipt waiting on that exact request,
+including when a periodic check settles it after the original worker exits or
+command output has already returned. Reopen, replacement PR insertion and a newer
+accepted planning status resolve a withdrawn request as `superseded` in their own
+transaction. Late settlement cannot overwrite that resolution or borrow a newer
+request's completion. Recovery never repeats a superseded request.
+Claim and Unassign record `task.claimed` and `task.unassigned` with the actual
+ownership result in the ownership transaction, including successful no-ops.
+Unassign clears the planning assignee in that transaction. Recovery returns the
+original result without changing a later claim. Ownership permission refusals and
+Reopen of deleted or abandoned Tasks record `definitely_refused` before changing
+facts. Display labels in a saved ownership result are historical command output;
+the planning fence does not certify current configuration labels.
+Completion and reopen recover their original committed Task result after a lost
+reply, even if the Task has since changed. Later failures remain in `error`: the
+recovered Task result does not certify cleanup or planning delivery. Task field
+edits and Wave membership moves record `task.updated` and
+`task.membership_changed` with their saved `TaskEdit` result in the local write
+transaction. No-ops record the current result and fence without advancing Work
+revisions. Recovery returns that saved result without repeating an edit or move;
+its planning status describes the local commit, before subsequent delivery.
+Validation refused by either SQLite writer records `definitely_refused` for that
+stage before changing facts in the same transaction. A later persistence or
+delivery error remains uncertain; absence of a stage is never a refusal. Machine transfers have separate
+effects and do not use the Wave-move recovery rule. Other sent commands remain
+inspectable unless their domain authorizes continuation. There is no generic
+retry of uncertain effects.
+
+`commits` contains semantic stages with resource IDs, a result and
+Machine/epoch/schema/domain revision fences written in the domain transaction.
+Every entry requires `resolution`: `committed`, `definitely_refused` or
+`superseded`, and `planning_effect`: `none` or `correlated`. The domain writer
+sets `none` only when that stage has no external planning obligation; missing
+correlation or status for a `correlated` stage stays unavailable. Task filing
+correlates its original `task_creation` export receipt and field changes from
+the promotion transaction. Later edits are separate changes. Session input
+replacement declares no planning effect. The stage names the intended effect;
+a superseded `task.completed`
+is not a completion. Its result identifies the withdrawn request, and its fence
+requires a covering replacement reading before dropping the pending membership
+projection. Only `committed` entries can supply recovered command output.
+Refusal is reserved for domain-established noncommit, never inferred from an
+error or missing stage. Delivery, resolution and query incorporation are separate.
+Each receipt's monotonic `revision` orders updates within its database epoch;
+a held admission reply cannot supersede a newer receipt. Command output is
+separate: `finished` alone cannot retire an optimistic layer or
+certify provider/input readiness. Completion request, completion settlement,
+reopen, Claim, Unassign, field editing, Wave membership, Task filing and Session
+input replacement currently emit stages. Other writers still require their domain
+commits before client projection cutover.
+Receipt changes wake receipt subscriptions without changing Work revisions.
+
+Session rename records `session.renamed` with the actual Session ID, name and
+name source, and a sessions-domain fence in the same transaction. Rejection
+records a definite refusal before returning its error. An interrupted worker
+recovers that result by its original operation ID. Clients normalize these name
+facts with stamped Session readings; a name result does not certify query
+membership or native readiness.
+
+```sh
+lf server receipt operation-id --operation --json
+lf server receipt operation-id --operation --subscribe --json
+```
+
 Every operation names its `kind` as a dotted resource and verb, beside its
 fields. `lf/commands/read.rs` (`Read`) and `lf/commands/write.rs` (`Write`) own
 the shared kinds; `wire::ServerOperation` owns the server's own.
@@ -222,6 +334,8 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `task.runs` | `lf task runs <issue>` | read |
 | `task.wait` | `lf task wait <issue> --until <state>` | `engine::task` |
 | `task.create` | `lf task create [--session <id>] [--run] --request-id <id>` | write |
+| `operation.submit` | native command envelope | server admission, then shared write |
+| `operation.get` | `lf server receipt <request-id> --operation --json` | read/subscribe; never dispatches |
 | `creation.get` | `lf server receipt <request-id> --json` | read; no creation or launch |
 | `task.run` | `lf task run <issue>` | `engine::task` |
 | `task.ship` | `lf ship` | `engine::task` |
@@ -231,7 +345,7 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `task.interrupt` | `lf task interrupt <issue>` | `engine::task` |
 | `task.update` | `lf task update <issue>` | write |
 | `task.move`, `.claim`, `.unassign`, `.save`, `.complete`, `.reopen`, `.abandon` | `lf task <verb>` | write |
-| `session.list` | `lf session list` | read |
+| `session.list` | `lf session list` | read/subscribe, including stable-ID pages; each page carries its own reading stamp |
 | `session.card` | `lf session card <id>` | read |
 | `session.start` | a managed launch: `lf task run`, `lf resume --task`, Wave session commands, Desktop panes | server |
 | `session.attach` | Desktop panes' relay and other clients that speak only the server protocol; CLI views of a held terminal enter `held.sock` directly | server |
@@ -295,6 +409,20 @@ nothing gets a namespace of its own for a client.
 Dashboards. The portfolio is the Machine's repository set: Desktop's sidebar,
 the phone's `view.select` Task list and its creation destinations all read it.
 
+Work view plans include a required `membership` program: fixed `members`, dynamic
+`select`, `compose` and `intersect` nodes, an ordered repository manifest, declared
+fact domains and unavailable reasons. A `select` predicate describes a default
+repository/Wave view, Wave descendants, Work kind or selection state. Rust resolves
+names, named queries and occurrence source paths before emitting it; parent and
+state changes reevaluate against the manifest without recompiling identities.
+Explicit-only programs retain just their referenced facts. Both the Rust reader
+and shared Swift projection evaluate that program. Its declared display effects identify their confirming semantic stages,
+fact domains and selection-state changes; they never establish native readiness.
+The current effect vocabulary covers Complete, Abandon and Move. Move stages
+include the actual `wave_id` and `project_id` saved in the same transaction.
+Confirmed plans remain unchanged
+beneath ordered per-query effects, including after command retirement and restart.
+
 - `config.*` is `engine::config`, which `lf config` calls too: `config.catalog`
   lists the typed settings, `config.settings {directory, wave, skill, graph,
   step}` resolves them with their sources, and `config.get`, `config.set
@@ -323,11 +451,43 @@ the phone's `view.select` Task list and its creation destinations all read it.
   defaults, so a selected answer would not decode: it sends `null`, and gets
   a smaller payload only through a read with its own DTO.
 - `subscribe` takes a read with a subscription: `desktop.view.list`, `view.select`,
-  `session.list` without `limit`, `task.get`, `task.wait`, `session.history`,
+  `session.list` (whole lists or stable-ID pages), `task.get`, `task.wait`, `session.history`,
   `plan.list`, `repo.plan` and `process.list`. It answers
   a null `response`, then `reading {id,checkpoint,frame}` messages wrapping
-  the existing complete `answers/unavailable/body` subscription frame. Typed
-  [events](#events-alongside-readings) can arrive on the same subscription. `checkpoint
+  the existing complete `answers/stamp/unavailable/body` subscription frame.
+  A successful database reading's `stamp` carries `machine`, `epoch`, `schema`,
+  `query`, `complete` and the `planning/sessions/graphs/processes/usage` revision
+  vector from the same pinned snapshot as its body. The epoch is persisted in
+  the database and survives server restart; a newly initialized database gets
+  another epoch. `query` hashes the exact read arguments, JSON selection and
+  resolution directory.
+  Work membership facts carry separate `parent`, `disposition`, `ownership`,
+  `publication`, `execution` and `activity` values. Disposition correlates
+  completion, required nullable `completed_at` and pending completion identity.
+  Execution retains checkout, held position, running Graph work, the Auto-Ship
+  carrier and approval even for completed Tasks. These four input facts use
+  `value/known/support`; `ownership.value: null` means unowned only when `known`
+  is true. Ownership supplies a known null
+  or the actual SQL identity; its Machine label stays unknown without a live label
+  reading. Clients derive lifecycle and section from these inputs. Reopen clears
+  completion time and conditionally withdraws approval/carrier; a no-op keeps both.
+  Page content cannot establish dated membership. Each value's `support`
+  declares its derivation, Machine, epoch, schema
+  and consumed SQLite revisions. Observation support distinguishes SQL-only,
+  captured (including an empty validated dependency set), and unavailable.
+  Activity carries raw reports even for terminal Tasks; membership masks them
+  while terminal and reevaluates them on Reopen. Its derivation is `work.activity/2`.
+  Activity capture uses the existing invocation's answers, including inherited
+  workers; unrelated invalid observations do not invalidate SQL-only fields.
+  Current activity support conservatively includes the repository Session read's
+  consumed observations. Field support does not establish query completeness,
+  command settlement or native input readiness.
+  Selected fragments have `complete: false`; a failed read has `stamp: null`.
+  CLI streams have no served-query identity (`query: null`, `complete: false`).
+  A stamp certifies only SQLite facts, never external observations or native
+  input readiness. It is not a write receipt. Checkpoints still order delivery;
+  a replayed consumer acknowledgement keeps the original reading's stamp.
+  Typed [events](#events-alongside-readings) can arrive on the same subscription. `checkpoint
   {id,checkpoint}` asks for a reading now; the next reading's `answers` carries
   that consumer's newest requested number, changed or not; numbers need not
   increase. Concurrent checkpoints coalesce. The answer comes from a read begun
@@ -457,7 +617,7 @@ The [attachment contract above](#terminal-attachment) applies over the remote
 carrier (`lf server mobile`), with these transport differences.
 
 Connect to the host's `/v1/machine` WebSocket, complete
-[`hello`/`welcome`](#local-protocol-revision-5), and request `session.attach`
+[`hello`/`welcome`](#local-protocol-revision-6), and request `session.attach`
 with a Session ID from `session.list`:
 
 ```text
@@ -530,7 +690,7 @@ OpenCode plugin and the Pi extension send the same request from inside the
 provider ([below](#opencode-and-pi-report-from-inside-the-provider)):
 
 ```text
-→ {"type":"hello","revision":5,"min_revision":5,"client":{"kind":"hook","platform":"macos","name":"lf __context-block","version":"0.15.1"}}
+→ {"type":"hello","revision":6,"min_revision":6,"client":{"kind":"hook","platform":"macos","name":"lf __context-block","version":"0.15.1"}}
 ← {"type":"welcome",…}
 → {"type":"request","id":"stop","operation":{"kind":"session.boundary","moment":"stop","delivery":"/Users/me/.lf/context-deliveries/0b9f….json","adapter":{…},"callback":{"hook_event_name":"Stop","session_id":"5f1c…","prompt_id":"p-12",…},"gap":null,"printed":[],"inbox":"/Users/me/.claude/sessions/4242.9c1d….key"},"select":null}
 ← {"type":"response","id":"stop","trace_id":"…","result":{"steers":null,"update":null,"waiting":false}}
@@ -675,7 +835,7 @@ the `hello` a hook sends, makes one request and closes the connection when the
 answer arrives:
 
 ```text
-→ {"type":"hello","revision":5,"min_revision":5,"client":{"kind":"plugin","platform":"macos","name":"lf pi extension","version":"0.15.1"}}
+→ {"type":"hello","revision":6,"min_revision":6,"client":{"kind":"plugin","platform":"macos","name":"lf pi extension","version":"0.15.1"}}
 ← {"type":"welcome",…}
 → {"type":"request","id":"boundary","operation":{"kind":"session.boundary","moment":"event","delivery":"…","adapter":{…},"callback":{"type":"tool_execution_end","turn":"7d0e…",…},"gap":null,"printed":[],"inbox":null},"select":null}
 ← {"type":"response","id":"boundary","trace_id":"…","result":{"steers":null,"update":null,"waiting":false}}
@@ -860,7 +1020,7 @@ selecting fields out of any typed response can make it undecodable. Request
 the screen read when a typed client needs a smaller payload. Desktop's
 outline continues to use `plan.list` for its richer runtime data.
 
-Handle failures through the [protocol error codes](#local-protocol-revision-5).
+Handle failures through the [protocol error codes](#local-protocol-revision-6).
 Check the named Task or Session when it cannot be found. If the host cannot
 answer, retain any previous display as stale and retry the read after recovery;
 an unavailable Session card does not establish that the Session ended.
@@ -1109,6 +1269,47 @@ Show result and retires the request after displaying the recovered resource.
 Failed removal repeats lookup and presentation safely. Inspect retains unresolved
 outcomes and exposes the raw receipt. This is neither an editable
 outbox nor offline creation, cross-device submission sync or generic replay.
+
+### Planning status after result recovery
+
+Task edits, local Wave moves, completion and reopening save the exact planning
+change identities in `commits[].planning_changes`, alongside the original result
+and commit fence. `kind` distinguishes Task fields (`task`), Project order
+(`project`), Task state delivery (`task_state`) and ownership comments
+(`task_comment`). Ownership stages correlate the exact authored comment; comments
+are pending, uncertain after failed delivery, delivered after acknowledgment, or
+conflicting after a contrary provider observation. A comment never supersedes
+another comment. Completion settlement attaches
+its state delivery to every receipt for that exact completion request, even when
+a periodic writer settles it. Reopen names only its own new delivery. No-op saves
+add no delivery identity. The saved `TaskEdit.sync` is historical; recovering it
+never repeats its words.
+
+`operation.get` returns current evidence for these identities in `planning`, with
+its own snapshot fence. `pending` and `uncertain` keep their current diagnostic;
+`delivered`, `superseded` and `conflict` resolve that delivery wait. A later unsent
+change supersedes an older unsent change; an older attempted write stays uncertain
+until its planning owner acknowledges or resolves it. Missing evidence is
+`unavailable`. A null reading means no correlated changes, not confirmation of
+other external effects. The snapshot fence dates the planning evidence; it does
+not certify an external provider write by itself.
+
+Receipt subscriptions observe planning changes as well as receipt writes. Their
+`revision` orders both within one epoch, so a delayed saved reply cannot replace
+newer delivery status. The saved result and command error remain unchanged;
+current recovery actions use `planning`, never the historical `sync` or error.
+State delivery recovers the oldest unresolved attempted write under its existing
+Task delivery lock before sending a newer decision. A held acknowledgment or
+provider observation resolves that exact delivery without replacing the newer
+local state. Proven noncommit supersedes the old attempt; unavailable history
+keeps it uncertain, including across restart and explicit Retry. Resolution moves
+the unsent successor's provider baseline forward so it can deliver its own intent.
+A settled conflict records a different provider state, not successful delivery of
+the requested value. Only the current decision may adopt that state locally.
+Recovering command output never repeats completion or reopens a Task to repair
+planning delivery.
+These reads authorize no generic retry; continuations stay with planning delivery.
+Other mutation families still require their own correlation contracts.
 
 ### Terminal and provider recovery
 

@@ -22,7 +22,7 @@ impl Store {
         session: Option<crate::session::LfSession>,
         destination: Option<std::path::PathBuf>,
         acquisition: Option<Arc<super::PlanningLocks>>,
-        receipt: Option<super::sqlite::creation::CreationIdentity>,
+        receipt: Option<super::sqlite::operations::CreationIdentity>,
     ) -> StoreResult<Task> {
         let task_id = task_id.clone();
         run_planning_write(&self.sqlite, acquisition, move |store| {

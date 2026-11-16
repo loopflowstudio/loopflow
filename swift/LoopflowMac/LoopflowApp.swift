@@ -82,7 +82,9 @@ struct LoopflowApp: App {
         if AppTestMode.current() == nil {
             _desktopServer = State(initialValue: DesktopServer.start())
             AppUpdater.shared.start()
-            CreationRecovery.shared.start()
+            Task {
+                if let machine = try? await ClientWorkStore.localMachine() { WorkInteraction.local(machine).start() }
+            }
         }
     }
 

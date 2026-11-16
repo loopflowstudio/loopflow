@@ -457,6 +457,7 @@ pub(super) async fn welcome<C: Carrier>(
             server_revision: REVISION,
             min_revision: MIN_REVISION,
             instance: instance.into(),
+            observations: crate::observe::Cache::shared().incarnation().into(),
             build: crate::build_info::BUILD_VERSION.to_owned(),
             executable_sha256: executable_sha256.into(),
             machine,
@@ -815,7 +816,11 @@ pub(super) async fn session<C: Carrier>(
                 }
             }
             Start::Request(operation, select) => {
-                let write = if matches!(operation, Operation::Write(_)) {
+                let write = if matches!(
+                    operation,
+                    Operation::Write(_)
+                        | Operation::Server(ServerOperation::OperationSubmit { .. })
+                ) {
                     let Ok(write) = writes.clone().try_acquire_owned() else {
                         send(lines, &busy(&id, "writes", MAX_WRITES)).await?;
                         continue;
@@ -1189,7 +1194,10 @@ async fn request(
 ) {
     #[cfg(test)]
     let completion = tests::take_request_completion(&id);
-    let write = matches!(operation, Operation::Write(_));
+    let write = matches!(
+        operation,
+        Operation::Write(_) | Operation::Server(ServerOperation::OperationSubmit { .. })
+    );
     let started = Instant::now();
     let trace_id = crate::id::TraceId::default();
     let result = match operation {
@@ -1288,6 +1296,33 @@ async fn operate(
         .await
         .map_err(unavailable)?
         .map_err(unavailable),
+        Operation::Server(ServerOperation::OperationSubmit {
+            request_id,
+            epoch,
+            command,
+        }) => {
+            // The request worker only waits for the local admission transaction.
+            // Its continuation retains the existing admission slots and is not
+            // cancelled with the connection or its transport request.
+            let trace = trace_id.clone();
+            tokio::task::spawn_blocking(move || {
+                crate::journal::request::isolate(|| {
+                    let (store,receipt) = crate::engine::operation::admit(&request_id,&epoch,&command)?;
+                    let target = serde_json::json!({"kind":"operation.submit","request_id":request_id,"command_kind":receipt.kind});
+                    tokio::task::spawn_blocking(move || {
+                        let _held = reservation;
+                        let result = crate::journal::request::run(&trace,&target, || {
+                            crate::engine::operation::execute(&store,&request_id)
+                        });
+                        if let Err(error) = result {
+                            tracing::error!(%error,"operation execution recording failed; inspect its receipt");
+                        }
+                    });
+                    Ok(serde_json::to_value(receipt)?)
+                })
+            }).await.map_err(|join| Error::outcome_unknown(&join.into()))?
+              .map_err(|failure: anyhow::Error| Error::written(&failure))
+        }
         Operation::Write(change) => {
             let mut target = serde_json::to_value(&change).map_err(unavailable)?;
             if let Some(fields) = target.as_object_mut() {
@@ -1409,8 +1444,11 @@ fn busy(id: &str, limit: &str, max: usize) -> ServerMessage {
 /// Recomputing it needs no retained payloads or disconnected subscriptions.
 pub(super) fn reading_checkpoint(scope: &[u8], frame: &serde_json::Value) -> Result<String> {
     use sha2::{Digest, Sha256};
-    let reading =
-        crate::lf::commands::subscribe::identity(frame["unavailable"].as_str(), frame.get("body"))?;
+    let reading = crate::lf::commands::subscribe::identity(
+        frame["unavailable"].as_str(),
+        frame.get("body"),
+        frame.pointer("/stamp/observations"),
+    )?;
     let mut hash = Sha256::new();
     hash.update(scope);
     hash.update(reading);
@@ -1631,6 +1669,210 @@ mod tests {
             .build()
             .unwrap()
             .block_on(body);
+    }
+
+    /// Hold only the first Git invocation, using FIFOs rather than elapsed time.
+    struct HeldGit {
+        _directory: tempfile::TempDir,
+        entered: std::fs::File,
+        release: std::fs::File,
+        _path: crate::lf::commands::graph::EnvVarGuard,
+    }
+
+    impl HeldGit {
+        fn new() -> Self {
+            use std::os::unix::fs::PermissionsExt;
+            let directory = tempfile::tempdir().unwrap();
+            let real_git = std::process::Command::new("which")
+                .arg("git")
+                .output()
+                .unwrap();
+            assert!(real_git.status.success());
+            let real_git = String::from_utf8(real_git.stdout).unwrap();
+            let entered = directory.path().join("entered");
+            let release = directory.path().join("release");
+            assert!(std::process::Command::new("mkfifo")
+                .args([&entered, &release])
+                .status()
+                .unwrap()
+                .success());
+            // O_RDWR keeps release nonblocking even during panic cleanup.
+            let release = std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(release)
+                .unwrap();
+            let entered = std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(entered)
+                .unwrap();
+            let quote = |name: &str| {
+                crate::os_process::shell_escape(&directory.path().join(name).to_string_lossy())
+            };
+            let script = format!("#!/bin/sh\nif /bin/mkdir {} 2>/dev/null; then\n  printf x > {}\n  read -r release < {}\nfi\nexec {} \"$@\"\n",
+                quote("held"),quote("entered"),quote("release"),crate::os_process::shell_escape(real_git.trim()));
+            let git = directory.path().join("git");
+            std::fs::write(&git, script).unwrap();
+            std::fs::set_permissions(&git, std::fs::Permissions::from_mode(0o755)).unwrap();
+            let path = format!(
+                "{}:{}",
+                directory.path().display(),
+                std::env::var("PATH").unwrap()
+            );
+            let path = crate::lf::commands::graph::EnvVarGuard::set("PATH", &path);
+            Self {
+                _directory: directory,
+                entered,
+                release,
+                _path: path,
+            }
+        }
+
+        fn wait(&self) {
+            use std::io::Read;
+            let mut entered = &self.entered;
+            entered.read_exact(&mut [0]).unwrap();
+        }
+    }
+
+    impl Drop for HeldGit {
+        fn drop(&mut self) {
+            use std::io::Write;
+            let _ = self.release.write_all(b"continue\n");
+        }
+    }
+
+    #[test]
+    fn operation_admission_answers_while_git_is_held_and_survives_disconnect() {
+        with_empty_home(async {
+            let repo = loopflow_test_support::TestRepo::new();
+            let path = crate::store::default_db_path();
+            let store = crate::store::sqlite::SqliteStore::new(&path).unwrap();
+            let id = "held-creation";
+            let held = HeldGit::new();
+            let mut client = Client::connect();
+            client.hello(REVISION, REVISION).await;
+            let command = crate::lf::commands::write::Write::TaskCreate {
+                directory: repo.path().to_owned(),
+                request_id: id.into(),
+                title: Some("Receipt fixture".into()),
+                request: None,
+                wave: None,
+                graph: None,
+                session: None,
+                run: false,
+            };
+            client
+                .send(&ClientMessage::Request {
+                    id: "admit".into(),
+                    operation: Operation::Server(ServerOperation::OperationSubmit {
+                        request_id: id.into(),
+                        epoch: store.reading_identity().unwrap().1,
+                        command: command.clone(),
+                    }),
+                    select: None,
+                })
+                .await;
+            let ServerMessage::Response { result, .. } = client.receive().await.unwrap() else {
+                panic!("expected durable admission")
+            };
+            assert_eq!(result["delivery"], "queued");
+            assert_eq!(result["validation"], "pending");
+            held.wait();
+            assert_eq!(
+                store.operation_receipt(id).unwrap().unwrap().validation,
+                crate::store::sqlite::operations::OperationValidation::Pending
+            );
+            assert!(
+                store.creation_receipt(id).unwrap().is_none(),
+                "the domain writer is still held"
+            );
+            // A direct CLI creation can win the canonical claim while the
+            // envelope's repository discovery is held. Both retain one result.
+            let directory = repo.path().to_path_buf();
+            let direct = tokio::task::spawn_blocking(move || {
+                crate::engine::creation::create(
+                    id,
+                    crate::engine::creation::TaskCreation {
+                        directory,
+                        title: Some("Receipt fixture".into()),
+                        request: None,
+                        wave: None,
+                        graph: None,
+                        session: None,
+                        worktree: None,
+                        run: false,
+                        agent: None,
+                        approve: false,
+                    },
+                )
+            })
+            .await
+            .unwrap()
+            .unwrap();
+            drop(client.writer);
+            drop(client.reader);
+            client.server.await.unwrap().unwrap();
+            // Observe on a new connection before releasing the domain writer.
+            let mut observer = Client::connect();
+            observer.hello(REVISION, REVISION).await;
+            observer
+                .send(&ClientMessage::Subscribe {
+                    id: "receipt".into(),
+                    operation: Read::OperationGet {
+                        request_id: id.into(),
+                    },
+                    select: None,
+                    resume: None,
+                })
+                .await;
+            assert!(matches!(
+                observer.receive().await,
+                Some(ServerMessage::Response { .. })
+            ));
+            drop(held);
+            let final_receipt = tokio::time::timeout(Duration::from_secs(20), async {
+                loop {
+                    let ServerMessage::Reading { frame, .. } = observer.receive().await.unwrap()
+                    else {
+                        panic!("expected operation reading")
+                    };
+                    let receipt: crate::store::sqlite::operations::OperationReceipt =
+                        serde_json::from_value(frame["body"].clone()).unwrap();
+                    if matches!(
+                        receipt.delivery,
+                        crate::store::sqlite::operations::OperationDelivery::Finished
+                            | crate::store::sqlite::operations::OperationDelivery::Uncertain
+                    ) {
+                        break receipt;
+                    }
+                }
+            })
+            .await
+            .unwrap();
+            assert_eq!(
+                final_receipt.delivery,
+                crate::store::sqlite::operations::OperationDelivery::Finished,
+                "{final_receipt:?}"
+            );
+            assert_eq!(final_receipt.commits[0].stage, "task.filed");
+            let task = final_receipt.result.as_ref().unwrap()["task"]["id"].clone();
+            assert_eq!(task, serde_json::to_value(&direct.task.id).unwrap());
+            assert_eq!(store.list_tasks(None).unwrap().len(), 1);
+            let (reopened, duplicate) =
+                crate::engine::operation::admit(id, &store.reading_identity().unwrap().1, &command)
+                    .unwrap();
+            crate::engine::operation::execute(&reopened, id).unwrap();
+            assert_eq!(duplicate.result.as_ref().unwrap()["task"]["id"], task);
+            assert_eq!(
+                reopened.operation_receipt(id).unwrap().unwrap().commits,
+                final_receipt.commits
+            );
+            drop(observer.writer);
+            drop(observer.reader);
+            observer.server.await.unwrap().unwrap();
+        });
     }
 
     #[test]
@@ -2208,6 +2450,24 @@ mod tests {
         assert_ne!(
             baseline,
             super::reading_checkpoint(&original, &frame("changed", 1, None)).unwrap()
+        );
+        let mut observed = frame("first", 1, None);
+        observed["stamp"] = serde_json::json!({"observations": {
+            "source": "cache", "validated_at": 4,
+            "dependencies": [{"fact": "opaque", "token": 3}]
+        }});
+        let supported = super::reading_checkpoint(&original, &observed).unwrap();
+        observed["stamp"]["observations"]["dependencies"][0]["token"] = 5.into();
+        observed["stamp"]["observations"]["validated_at"] = 5.into();
+        assert_ne!(
+            supported,
+            super::reading_checkpoint(&original, &observed).unwrap(),
+            "changed support must reach a client even when the derived value is unchanged"
+        );
+        observed["stamp"]["observations"]["source"] = "replacement".into();
+        assert_ne!(
+            supported,
+            super::reading_checkpoint(&original, &observed).unwrap()
         );
         for changed in [
             scope("restarted-server", &query, None),
@@ -3267,6 +3527,38 @@ mod tests {
             .unwrap_err();
             assert_eq!(missing.code, ErrorCode::NotFound);
             assert_eq!(missing.message, "Session is unavailable");
+        });
+    }
+
+    #[test]
+    fn session_pages_subscribe_with_their_names_provenance_and_cursor() {
+        with_empty_home(async {
+            let store = home_store();
+            for id in ["first", "second"] {
+                store.test_session(id, &crate::session_record::new_artifact_key());
+            }
+            let mut client = Client::connect();
+            client.hello(REVISION, REVISION).await;
+            let page = |after| Read::SessionList {
+                directory: "/".into(),
+                headless: false,
+                after,
+                limit: Some(1),
+                task: None,
+            };
+            let first = subscribe(&mut client, "first-page", page(None)).await;
+            assert!(first["unavailable"].is_null(), "{first}");
+            assert_eq!(first["body"]["entries"][0]["id"], "first", "{first}");
+            assert_eq!(first["body"]["next"], "first", "{first}");
+            let before = first["stamp"]["revisions"]["sessions"].as_i64().unwrap();
+            store
+                .rename_session("second", "Renamed", crate::session::TitleSource::Human)
+                .unwrap();
+            let second = subscribe(&mut client, "second-page", page(Some("first".into()))).await;
+            assert_eq!(second["body"]["entries"][0]["title"], "Renamed", "{second}");
+            assert!(second["body"]["next"].is_null(), "{second}");
+            assert!(second["stamp"]["revisions"]["sessions"].as_i64().unwrap() > before);
+            assert_eq!(first["stamp"]["machine"], second["stamp"]["machine"]);
         });
     }
 

@@ -1,0 +1,73 @@
+{
+  "type": "response",
+  "id": "receipt",
+  "trace_id": "trace_fixture",
+  "result": {
+    "request_id": "operation_fixture",
+    "kind": "task.unassign",
+    "fingerprint": null,
+    "submitted_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "validation": "bound",
+    "delivery": "finished",
+    "revision": 14,
+    "result": {
+      "owner": null,
+      "superseded_by": null,
+      "log": []
+    },
+    "error": "planning response lost",
+    "commits": [
+      {
+        "resolution": "committed",
+        "stage": "task.unassigned",
+        "resources": [
+          "task_0123456789ab40008000000000000001"
+        ],
+        "fence": {
+          "machine": "machine_fixture",
+          "epoch": "ab0123456789ab0123456789ab01234567",
+          "schema": 6,
+          "revisions": {
+            "planning": 7
+          }
+        },
+        "result": {
+          "owner": null,
+          "superseded_by": null,
+          "log": []
+        },
+        "planning_changes": [
+          {
+            "kind": "task_comment",
+            "owner": "task_0123456789ab40008000000000000001",
+            "id": "comment_fixture"
+          }
+        ],
+        "planning_effect": "correlated"
+      }
+    ],
+    "planning": {
+      "fence": {
+        "machine": "machine_fixture",
+        "epoch": "ab0123456789ab0123456789ab01234567",
+        "schema": 6,
+        "revisions": {
+          "planning": 12
+        }
+      },
+      "changes": [
+        {
+          "change": {
+            "kind": "task_comment",
+            "owner": "task_0123456789ab40008000000000000001",
+            "id": "comment_fixture"
+          },
+          "state": "uncertain",
+          "error": "planning response lost"
+        }
+      ]
+    },
+    "created_at": 1,
+    "updated_at": 2
+  }
+}

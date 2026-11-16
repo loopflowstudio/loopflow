@@ -507,7 +507,7 @@ pub(crate) async fn deliver_task_state(store: &Store, task: &Task, retry: bool) 
         // The reserved row carries the attempt and any base evidence moved forward.
         let history = match store
             .sqlite
-            .pending_task_state(&delivery.task_id)
+            .task_state_delivery(&delivery.id)
             .map_err(message)?
         {
             Some(reserved) if reserved.id == delivery.id => {

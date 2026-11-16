@@ -1,12 +1,13 @@
 //! Saved selection and layout intent share one transaction and one Work snapshot.
 mod panes;
 use super::SqliteStore;
-use crate::durable::{RepositoryId, TaskSection, TaskState};
+use crate::durable::RepositoryId;
 use crate::store::{StoreError, StoreResult};
 use crate::work::selection::{
-    move_into_place, Arrangement, ArrangementEdit, ArrangementMode, Dashboard, DashboardId,
-    DashboardReading, Selection, SelectionExpression, SelectionId, SelectionResolution,
-    SelectionState, SelectionWork, SlotLayout, WorkWorkspaceKey, WorkWorkspaceKind,
+    move_into_place, task_selection_states, Arrangement, ArrangementEdit, ArrangementMode,
+    Dashboard, DashboardId, DashboardReading, Selection, SelectionExpression, SelectionId,
+    SelectionResolution, SelectionState, SelectionWork, SlotLayout, WorkWorkspaceKey,
+    WorkWorkspaceKind,
 };
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -82,6 +83,9 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
         name: repo.clone(),
         states: BTreeSet::new(),
         activity_known: false,
+        activity_states: BTreeSet::new(),
+        inputs: None,
+        support: None,
     };
     let mut wave_work = Vec::with_capacity(waves.len());
     for wave in &waves {
@@ -91,36 +95,41 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
             name: wave.name().to_string(),
             states: BTreeSet::new(),
             activity_known: false,
+            activity_states: BTreeSet::new(),
+            inputs: None,
+            support: None,
         });
     }
     let tasks = super::children::repository_tasks_in(conn, repository)?;
-    let reading = task_selection_in(conn, repository, &repo)?;
+    let (reading, capture) = crate::observe::field(|| task_selection_in(conn, repository, &repo));
+    let reading = reading?;
     // State, publication and ownership for every Task in a fixed number of
     // statements: a query per Task costs thousands on a large repository.
     let ids: Vec<_> = tasks.iter().map(|task| task.id.clone()).collect();
-    let task_states = super::task_details::states_in(
+    let task_inputs = super::task_details::state_inputs_in(
         conn,
         &super::children::ids_json(ids.iter().map(|id| id.as_str())),
     )?;
     let published = super::project_adoption::published_in(conn, &ids)?;
-    let owners = super::task_ownership::owners_in(conn, &ids)?;
+    let owners = super::task_ownership::owner_identities_in(conn, &ids)?;
     let mut task_work = Vec::with_capacity(tasks.len());
     for task in tasks {
-        let state = *task_states
+        let inputs = task_inputs
             .get(&task.id)
-            .ok_or_else(|| invalid(format!("Task {} has no state", task.id)))?;
+            .ok_or_else(|| invalid(format!("Task {} has no state inputs", task.id)))?;
+        let state = inputs.state();
         let owned = owners.contains_key(&task.id);
         let states = task_selection_states(
             state,
             owned,
             published.contains(&task.id),
-            task.state.as_deref(),
-            reading.activity.get(&task.id),
+            inputs.planning_state.as_deref(),
+            &reading
+                .activity
+                .get(&task.id)
+                .map(|a| a.states.clone())
+                .unwrap_or_default(),
         );
-        let activity_known = reading
-            .activity
-            .get(&task.id)
-            .is_none_or(|activity| activity.known);
         let order = reading.order.key(task.id.as_str(), task.rank, &states);
         task_work.push((
             order,
@@ -129,24 +138,97 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
                 parent_wave: task.wave_id,
                 name: task.identifier,
                 states,
-                activity_known,
+                activity_known: reading.activity.get(&task.id).is_none_or(|a| a.known),
+                activity_states: reading
+                    .activity
+                    .get(&task.id)
+                    .map(|a| a.states.clone())
+                    .unwrap_or_default(),
+                inputs: Some(crate::work::selection::TaskMembershipInputs {
+                    disposition: crate::work::selection::TaskDisposition {
+                        completed: inputs.completed,
+                        abandoned: inputs.abandoned,
+                        completed_at: inputs.completed_at.clone(),
+                        planning_state: inputs.planning_state.clone(),
+                        completion_request: inputs.completion_request,
+                    },
+                    ownership: owners.get(&task.id).cloned(),
+                    publication: published.contains(&task.id),
+                    execution: inputs.execution,
+                }),
+                support: None,
             },
         ));
     }
     task_work.sort_by(|left, right| left.0.cmp(&right.0));
     // Tasks precede the already alphabetized Waves, then the repository.
+    let (machine, epoch) = conn.query_row(
+        "SELECT machines.id,client_store_epoch.epoch FROM machines CROSS JOIN client_store_epoch
+         WHERE machines.is_local=1 AND singleton=1",
+        [],
+        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+    )?;
+    let mut query = conn.prepare("SELECT domain,revision FROM store_revisions WHERE domain IN ('planning','sessions','graphs','processes')")?;
+    let revisions: BTreeMap<String, i64> = query
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<Result<_, _>>()?;
+    let support =
+        |derivation: &str, domains: &[&str], observations| crate::work::selection::FieldSupport {
+            machine: machine.clone(),
+            epoch: epoch.clone(),
+            schema: crate::server::wire::REVISION,
+            derivation: derivation.into(),
+            revisions: domains
+                .iter()
+                .map(|domain| (domain.to_string(), revisions[*domain]))
+                .collect(),
+            observations,
+        };
+    use crate::work::selection::{FieldObservations, MembershipSupport};
+    let support = MembershipSupport {
+        parent: support("work.parent/1", &["planning"], FieldObservations::Sqlite),
+        disposition: support(
+            "work.disposition/1",
+            &["planning"],
+            FieldObservations::Sqlite,
+        ),
+        ownership: support("work.ownership/1", &["planning"], FieldObservations::Sqlite),
+        publication: support(
+            "work.publication/1",
+            &["planning"],
+            FieldObservations::Sqlite,
+        ),
+        execution: support(
+            "work.execution/1",
+            &["planning", "graphs", "processes"],
+            FieldObservations::Sqlite,
+        ),
+        activity: support(
+            "work.activity/2",
+            &["planning", "sessions", "graphs", "processes"],
+            capture
+                .and_then(|capture| capture.evidence())
+                .map_or(FieldObservations::Unavailable, |evidence| {
+                    FieldObservations::Captured { evidence }
+                }),
+        ),
+    };
     Ok(task_work
         .into_iter()
         .map(|(_, task)| task)
         .chain(wave_work)
         .chain([repository_work])
+        .map(|mut work| {
+            work.support = Some(support.clone());
+            work
+        })
         .collect())
 }
 
 /// Conversation activity is independent of Task lifecycle and ownership.
 #[derive(Debug, Clone)]
 pub(crate) struct TaskActivity {
-    states: BTreeSet<SelectionState>,
+    pub(crate) states: BTreeSet<SelectionState>,
     known: bool,
 }
 
@@ -176,36 +258,6 @@ impl TaskOrder {
             id.to_owned(),
         )
     }
-}
-
-/// The same lifecycle, section and activity set for roadmap rows and selections.
-pub(crate) fn task_selection_states(
-    runtime: TaskState,
-    owned: bool,
-    published: bool,
-    plan_state: Option<&str>,
-    activity: Option<&TaskActivity>,
-) -> BTreeSet<SelectionState> {
-    let state = runtime.lifecycle(plan_state);
-    let mut states = activity.map_or_else(BTreeSet::new, |activity| activity.states.clone());
-    if (owned || published) && !state.is_terminal() {
-        states.insert(SelectionState::Open);
-    }
-    states.insert(match state {
-        TaskState::Unstarted => SelectionState::Unstarted,
-        TaskState::Idle => SelectionState::Idle,
-        TaskState::Active => SelectionState::Active,
-        TaskState::Moving => SelectionState::Moving,
-        TaskState::Shipping => SelectionState::Shipping,
-        TaskState::Done | TaskState::Abandoned => SelectionState::Done,
-    });
-    states.insert(match TaskSection::of(runtime, owned, plan_state) {
-        TaskSection::Backlog => SelectionState::Backlog,
-        TaskSection::Working => SelectionState::Working,
-        TaskSection::Autonomous => SelectionState::Autonomous,
-        TaskSection::Done | TaskSection::Abandoned => SelectionState::Done,
-    });
-    states
 }
 
 fn task_selection_in(
@@ -331,9 +383,10 @@ fn plan_in(
     work: &[SelectionWork],
 ) -> StoreResult<crate::work::selection::ViewPlan> {
     use crate::work::selection::{PaneIntent, ViewContent, ViewLocation, ViewPlan};
-    let resolution = selection
-        .resolve(repository.as_str(), work, queries)
+    let membership = selection
+        .membership_plan(repository.as_str(), work, queries)
         .map_err(StoreError::from)?;
+    let resolution = membership.resolve();
     let mut arrangement = saved.map_or_else(
         || Arrangement::automatic(&[]),
         |saved| saved.arrangement.clone(),
@@ -455,6 +508,7 @@ fn plan_in(
         selection,
         saved_revision: saved.map(|saved| saved.revision),
         resolution,
+        membership,
         projection: arrangement.project(),
         arrangement,
         slots: saved
@@ -955,6 +1009,150 @@ mod tests {
             .unwrap();
         let repo = RepositoryId::parse("repo_11111111111111111111111111111111").unwrap();
         (dir, store, repo)
+    }
+
+    #[test]
+    fn membership_fields_declare_independent_support_from_the_pinned_snapshot() {
+        use crate::work::selection::FieldObservations;
+        let (_dir, store, repo) = fixture();
+        let cache = std::sync::Arc::new(crate::observe::Cache::default());
+        let (plan, _) = cache.capture(|| store.view_plan(&repo, Some("state:backlog")).unwrap());
+        let fact = &plan.membership.facts[0];
+        let parent = fact.parent.support.as_ref().unwrap();
+        let lifecycle = fact.execution.support.as_ref().unwrap();
+        let activity = fact.activity.support.as_ref().unwrap();
+        assert_eq!(parent.revisions.keys().collect::<Vec<_>>(), ["planning"]);
+        assert_eq!(parent.machine, store.reading_identity().unwrap().0);
+        assert!(matches!(parent.observations, FieldObservations::Sqlite));
+        assert!(matches!(lifecycle.observations, FieldObservations::Sqlite));
+        let FieldObservations::Captured { evidence } = &activity.observations else {
+            panic!("served capture")
+        };
+        assert_eq!(evidence.source, cache.incarnation());
+        assert_ne!(parent.derivation, lifecycle.derivation);
+        let bare = store.view_plan(&repo, Some("state:backlog")).unwrap();
+        assert!(matches!(
+            bare.membership.facts[0]
+                .activity
+                .support
+                .as_ref()
+                .unwrap()
+                .observations,
+            FieldObservations::Unavailable
+        ));
+    }
+
+    #[test]
+    fn lifecycle_time_tracks_complete_reopen_complete_in_one_supported_snapshot() {
+        let (_dir, store, repo) = fixture();
+        let id = crate::durable::TaskId::parse("task_33333333333333333333333333333333").unwrap();
+        let read = || {
+            store
+                .view_plan(&repo, Some("kind:task"))
+                .unwrap()
+                .membership
+                .facts
+                .into_iter()
+                .find(|fact| fact.work.id == id.as_str())
+                .unwrap()
+                .disposition
+        };
+        let decide = |target| {
+            super::super::task_state_delivery::queue_in(&store.conn.lock().unwrap(), &id, target)
+                .unwrap();
+        };
+        decide("completed");
+        // A fixed old date keeps this test independent of the clock's precision.
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE tasks SET planning_completed_at='2026-06-01T12:00:00Z' WHERE id=?1",
+                [id.as_str()],
+            )
+            .unwrap();
+        let d1 = read();
+        assert!(d1.value.completed);
+        assert_eq!(
+            d1.value.completed_at.as_deref(),
+            Some("2026-06-01T12:00:00Z")
+        );
+        decide("started");
+        let reopened = read();
+        assert!(!reopened.value.completed);
+        assert_eq!(reopened.value.completed_at, None);
+        decide("completed");
+        let d2 = read();
+        assert!(d2.value.completed);
+        assert!(d2.value.completed_at.is_some());
+        assert_ne!(d2.value.completed_at, d1.value.completed_at);
+        assert!(
+            d2.support.as_ref().unwrap().revisions["planning"]
+                > d1.support.as_ref().unwrap().revisions["planning"]
+        );
+        let wire = serde_json::to_value(&reopened).unwrap();
+        assert_eq!(wire["value"]["completed_at"], serde_json::Value::Null);
+        let mut missing = wire;
+        missing["value"]
+            .as_object_mut()
+            .unwrap()
+            .remove("completed_at");
+        assert!(serde_json::from_value::<
+            crate::work::selection::ValueFact<crate::work::selection::TaskDisposition>,
+        >(missing)
+        .is_err());
+    }
+
+    #[test]
+    fn completion_removes_actionable_membership_while_retaining_unknown_session_execution() {
+        let (_dir, store, repo) = fixture();
+        let id = crate::durable::TaskId::parse("task_22222222222222222222222222222222").unwrap();
+        store.test_session("still-retained", &crate::session_record::new_artifact_key());
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET repo='/repo',task_id=?1,wave_id='11111111-1111-1111-1111-111111111111' WHERE id='still-retained'",
+                [id.as_str()],
+            )
+            .unwrap();
+        let _attachment = store
+            .claim_session_attachment("still-retained", None, &store.test_lf_process(), true)
+            .unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE tasks SET workspace_slug='fix-2' WHERE id=?1",
+                [id.as_str()],
+            )
+            .unwrap();
+        let task = store.task(&id).unwrap().unwrap();
+        let request = store.request_task_completion(&id, None).unwrap().unwrap();
+        assert!(store.complete_task(&task, request).unwrap());
+        for state in ["working", "available", "busy", "blocked"] {
+            let resolution = store
+                .resolve_selection(
+                    &repo,
+                    &Selection::parse(&format!("state:{state}"), None).unwrap(),
+                )
+                .unwrap();
+            assert!(!resolution.task_ids().contains(&id.to_string()));
+            assert!(resolution.unavailable.is_empty());
+        }
+        let selected = store
+            .resolve_selection(
+                &repo,
+                &Selection::parse(&format!("task:{id}"), None).unwrap(),
+            )
+            .unwrap();
+        assert_eq!(selected.task_ids(), [id.to_string()]);
+        // Selection's known absence certifies no native readiness or termination.
+        let session = store.session("still-retained").unwrap().unwrap();
+        assert!(session.completed_at.is_none());
     }
 
     fn selection() -> Selection {
@@ -1971,6 +2169,82 @@ mod tests {
                 3
             );
         });
+    }
+
+    #[test]
+    fn process_exit_changes_selection_without_advancing_sqlite_provenance() {
+        struct Child(std::process::Child);
+        impl Drop for Child {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+        let mut child = Child(
+            std::process::Command::new("sleep")
+                .arg("60")
+                .spawn()
+                .unwrap(),
+        );
+        let (_dir, store, repo) = fixture();
+        store.test_session(
+            "external-activity",
+            &crate::session_record::new_artifact_key(),
+        );
+        store.conn.lock().unwrap().execute(
+            "UPDATE agent_sessions SET repo='/repo', task_id='task_22222222222222222222222222222222', wave_id='11111111-1111-1111-1111-111111111111' WHERE id='external-activity'",
+            [],
+        ).unwrap();
+        let attachment = store
+            .claim_session_attachment("external-activity", None, &store.test_lf_process(), true)
+            .unwrap();
+        store
+            .record_agent_process_identity(
+                "external-activity",
+                &attachment,
+                child.0.id(),
+                crate::journal::process_started_at(child.0.id())
+                    .unwrap()
+                    .unwrap(),
+            )
+            .unwrap();
+        store
+            .begin_program_status(
+                "external-activity",
+                Some(&attachment.agent_process_id),
+                "external-surface",
+            )
+            .unwrap();
+        store
+            .record_program_status(
+                "external-activity",
+                Some(&attachment.agent_process_id),
+                "external-surface",
+                1,
+                &crate::program_status::Records {
+                    seen: true,
+                    records: vec![crate::program_status::Report {
+                        state: crate::program_status::State::Working,
+                        id: None,
+                        kind: None,
+                        progress: None,
+                        app: None,
+                        title: None,
+                        msg: None,
+                    }],
+                },
+            )
+            .unwrap();
+        let query = Selection::parse("state:busy", None).unwrap();
+        let revisions = store.revisions().unwrap();
+        let before = store.resolve_selection(&repo, &query).unwrap();
+        child.0.kill().unwrap();
+        child.0.wait().unwrap();
+        let after = store.resolve_selection(&repo, &query).unwrap();
+        assert_eq!(before.members.len(), 1);
+        assert!(after.members.is_empty());
+        assert!(after.unavailable.is_empty());
+        assert_eq!(store.revisions().unwrap(), revisions);
     }
 
     #[test]

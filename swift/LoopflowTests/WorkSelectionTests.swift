@@ -5,6 +5,26 @@ import Testing
 
 @Suite("Shared Work selection")
 struct WorkSelectionTests {
+    @Test func typedFieldSupportKeepsSQLiteIndependentOfUnavailableActivity() throws {
+        let data = try loadFixtureData("membership_fields.json")
+        let facts = try JSONDecoder().decode([WorkMembershipPlan.Facts].self, from: data)
+        #expect(facts[0].parent.support?.revisions == ["planning": 7])
+        #expect(facts[0].parent.support?.observations == .sqlite)
+        #expect(facts[0].activity.support?.observations == .unavailable)
+        guard case .captured(let evidence) = facts[1].activity.support?.observations else {
+            Issue.record("Empty validated capture must remain distinct from unavailable"); return
+        }
+        #expect(evidence.dependencies.isEmpty)
+        #expect(try JSONDecoder().decode([WorkMembershipPlan.Facts].self, from: JSONEncoder().encode(facts)) == facts)
+        for field in ["parent", "disposition", "ownership", "publication", "execution", "activity"] {
+            var raw = try #require((JSONSerialization.jsonObject(with: data) as? [[String: Any]])?.first)
+            var value = try #require(raw[field] as? [String: Any])
+            value.removeValue(forKey: "support"); raw[field] = value
+            let selected = try JSONSerialization.data(withJSONObject: raw)
+            #expect(throws: DecodingError.self) { try JSONDecoder().decode(WorkMembershipPlan.Facts.self, from: selected) }
+        }
+    }
+
     @Test func viewPlanRetainsOccurrencesAndMissingPrimaryWithoutExecution() async throws {
         let text = String(decoding: try loadFixtureData("view_plan.json"), as: UTF8.self)
         let query = RegistryQuery { args, cwd in
@@ -91,11 +111,12 @@ struct WorkSelectionTests {
 }
 
 func fixtureViewPlan(owner: WorkWorkspaceKey, members: [WorkViewPlan.Content],
-                     slots: DashboardSlotLayout = DashboardSlotLayout(root: .slot(0))) -> WorkViewPlan {
+                     facts: [WorkMembershipPlan.Facts]? = nil, slots: DashboardSlotLayout = DashboardSlotLayout(root: .slot(0))) -> WorkViewPlan {
     let refs = members.map { WorkMemberRef(source: [owner.id], work: $0.work) }
     return WorkViewPlan(name: nil, pinned: false, dashboardID: nil, repository: owner.repository, repositoryPath: "/src/fixture",
         selection: WorkSelection(id: owner.id, expression: owner.kind == .repository ? .repository : .wave(owner.id)), savedRevision: nil,
         resolution: WorkSelectionResolution(attention: [], members: refs, unavailable: []),
+        membership: WorkMembershipPlan(domains: [], effects: [:], root: .members(refs), facts: facts ?? members.map { membershipFact(work: $0.work, name: $0.identifier ?? $0.work.id, parent: .init(wave: nil, support: nil), lifecycle: .init(completedAt: nil, states: $0.states.filter { ![.available, .busy, .blocked].contains($0) }, known: true, support: nil), activity: .init(states: $0.states.filter { [.available, .busy, .blocked].contains($0) }, known: true, support: nil)) }, unavailable: []),
         arrangement: WorkArrangement(order: refs, hidden: [], mode: .auto),
         projection: WorkArrangementProjection(visible: refs, suppressed: []), slots: slots, contents: members)
 }
@@ -118,4 +139,30 @@ extension WorkModel {
 func fixtureViewContent(work: WorkWorkspaceKey, title: String) -> WorkViewPlan.Content {
     WorkViewPlan.Content(paneRevision: nil, face: nil, work: work, title: title,
         states: [.open], identifier: nil, primarySession: nil, location: nil, argv: nil, unavailable: [])
+}
+
+/// A full captured manifest for presentation fixtures, independent of roadmap grouping.
+func fixtureInventoryPlan(_ snapshot: RoadmapSnapshot) -> WorkViewPlan {
+    let tasks = snapshot.tasks.items
+    let contents = tasks.map { task in
+        WorkViewPlan.Content(paneRevision: nil, face: nil, work: .init(repository: "repo", kind: .task, id: task.id),
+            title: task.task.name, states: Array(task.selectionStates), identifier: task.task.identifier,
+            primarySession: nil, location: nil, argv: nil, unavailable: [])
+    }
+    let facts = tasks.map { task in
+        membershipFact(work: .init(repository: "repo", kind: .task, id: task.id), name: task.task.identifier,
+            parent: .init(wave: task.task.waveId, support: nil),
+            lifecycle: .init(completedAt: nil, states: Array(task.selectionStates).filter { ![.available, .busy, .blocked].contains($0) }, known: true, support: nil),
+            activity: .init(states: Array(task.selectionStates).filter { [.available, .busy, .blocked].contains($0) }, known: true, support: nil))
+    } + snapshot.waves.map { wave in
+        membershipFact(work: .init(repository: "repo", kind: .wave, id: wave.wave.id), name: wave.wave.name,
+            parent: .init(wave: wave.wave.parentWaveId, support: nil),
+            lifecycle: .init(completedAt: nil, states: [], known: true, support: nil), activity: .init(states: [], known: true, support: nil))
+    }
+    let template = fixtureViewPlan(owner: .init(repository: "repo", kind: .repository, id: "repo"), members: contents)
+    return WorkViewPlan(name: nil, pinned: false, dashboardID: nil, repository: "repo", repositoryPath: "/src/fixture",
+        selection: template.selection, savedRevision: nil, resolution: template.resolution,
+        membership: WorkMembershipPlan(domains: [], effects: [:], root: .select(source: ["scope"], predicate: .default(wave: nil)),
+            facts: facts, unavailable: []), arrangement: template.arrangement, projection: template.projection,
+        slots: template.slots, contents: contents)
 }

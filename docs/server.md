@@ -36,9 +36,9 @@ those facts directly, so they need no running server or saved server cache.
 ## Keep editing through a connection loss
 
 Keep a Task list open while Desktop reconnects: live Work updates resume
-automatically from the last retained reading. An unchanged list does not need
-to be downloaded again. If Work changed or the server restarted, Desktop receives
-a complete current reading. If recovery fails, the window reports unavailability
+automatically while the last retained reading stays visible. The new connection
+receives a current reading to revalidate live status, even when the list has not
+changed. If recovery fails, the window reports unavailability
 and retries. Task and Session creations recover through their saved request and
 server receipt. Other changes submitted before the connection dropped are never
 repeated automatically; check the current Work before submitting them again.
@@ -72,22 +72,41 @@ afterward.
 
 ## Recover a submitted creation
 
-Submit once. When the Task or conversation appears, Desktop clears the saved
-submission. If Desktop closes before showing the result, reopening recovers it
-on the original Machine. **Show result** displays the recovered Task or Session
+Submit once. New Task opens a conversation view immediately with your request
+and **Starting conversation…**. This view stays visible while preparation runs;
+typing becomes available when the live conversation is ready. Errors and recovery
+for this request appear there. Other unresolved submissions remain available
+separately. After admission, an attachment error keeps **Retry opening** available
+even when recovery also offers **Inspect**. Retrying opens the admitted Session;
+it does not submit another Task.
+
+Desktop keeps launch presentation rules until a current reading of that Task
+arrives after admission. A current result without a Graph returns to ordinary
+Task controls. An unavailable reading shows its explanation; input readiness
+alone does not confirm the Task update.
+
+Desktop clears the saved submission when the actual Task or Session result
+appears, after preparation. If Desktop closes with a saved submission before
+showing that result, reopening recovers it on the original Machine.
+**Show result** displays the recovered Task or Session
 and clears the submission after it appears. Switching repositories or opening
 another window does not submit it somewhere else.
 
 This recovery also covers **Create Task from this conversation** and starting a
 new thread in an existing Session. Desktop saves each submitted request on this
-device before sending it. If saving fails, the form stays open with the error
-and nothing is sent. This saves submitted creations, not an editable offline
+device before sending it. If saving a New Task request fails, its starting view
+shows the error and keeps your words available to edit; return to the New Task
+editor to submit again. Nothing was sent. Other creation forms stay open with
+the save error. This saves submitted creations, not an editable offline
 queue; submissions do not sync to other devices.
 
-The server's receipt determines what happened. Desktop checks it after reconnect
-or app restart, and sends the identical creation again only when the server
-confirms it is absent or safe to continue. An unavailable server leaves the
-submission unresolved. Once Desktop presents a confirmed result, it removes the
+The server's receipt determines what happened. Desktop subscribes after reconnect
+or app restart and sends the identical saved envelope only when its receipt
+confirms absence in the original database lifetime or a safe creation continuation.
+Admission checks that lifetime before saving or starting a worker. A replacement
+database or an unavailable server leaves an unanswered submission unresolved.
+Released journal files import with their original words and identities; missing
+receipts cannot authorize resending those files because they have no saved lifetime. Once Desktop presents a confirmed result, it removes the
 saved request.
 
 **Task created; start unconfirmed** means the Task exists but its launch has not

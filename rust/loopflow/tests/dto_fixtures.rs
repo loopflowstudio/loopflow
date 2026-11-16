@@ -597,6 +597,7 @@ fn subscribe_frames_carry_each_reads_json_result() {
     };
     let written = serde_json::to_value(SubscriptionFrame::<()> {
         answers: None,
+        stamp: None,
         unavailable: Some("gone".into()),
         body: None,
     })
@@ -1370,7 +1371,7 @@ fn session_open_intents_distinguish_explicit_resume_from_passive_reveal() {
 #[test]
 fn creation_recovery_dispositions_round_trip() {
     let json = include_str!("../../../tests/fixtures/dto/creation_lookup.json");
-    let receipts: Vec<loopflow::store::sqlite::creation::CreationReceipt> =
+    let receipts: Vec<loopflow::store::sqlite::operations::CreationReceipt> =
         serde_json::from_str(json).unwrap();
     assert_eq!(
         serde_json::to_value(receipts).unwrap(),
@@ -1400,4 +1401,119 @@ fn opening_receipts_distinguish_focus_from_attachment() {
         serde_json::to_value(receipts).unwrap(),
         serde_json::from_str::<serde_json::Value>(json).unwrap()
     );
+}
+
+#[test]
+fn ownership_planning_evidence_keeps_the_original_comment_identity() {
+    use loopflow::store::planning_sync::PlanningChangeKind;
+    use loopflow::store::sqlite::operations::OperationReceipt;
+    let wire: serde_json::Value = serde_json::from_str(include_str!(
+        "fixtures/dto/server/operation_ownership_planning.json"
+    ))
+    .unwrap();
+    let receipt: OperationReceipt = serde_json::from_value(wire["result"].clone()).unwrap();
+    assert_eq!(serde_json::to_value(&receipt).unwrap(), wire["result"]);
+    assert_eq!(receipt.commits[0].stage, "task.unassigned");
+    assert_eq!(
+        receipt.commits[0].planning_changes[0].kind,
+        PlanningChangeKind::TaskComment
+    );
+    assert_eq!(
+        receipt.commits[0].planning_changes[0],
+        receipt.planning.unwrap().changes[0].change
+    );
+}
+
+#[test]
+fn completion_planning_evidence_keeps_the_original_task_and_state_delivery() {
+    use loopflow::store::planning_sync::PlanningChangeKind;
+    use loopflow::store::sqlite::operations::{OperationReceipt, PlanningDeliveryState};
+    let wire: serde_json::Value = serde_json::from_str(include_str!(
+        "fixtures/dto/server/operation_state_planning.json"
+    ))
+    .unwrap();
+    let receipt: OperationReceipt = serde_json::from_value(wire["result"].clone()).unwrap();
+    assert_eq!(serde_json::to_value(&receipt).unwrap(), wire["result"]);
+    let task: loopflow::work::task::Task = serde_json::from_value(receipt.result.unwrap()).unwrap();
+    assert_eq!(task.state.as_deref(), Some("completed"));
+    let current = receipt.planning.unwrap();
+    assert_eq!(
+        current.changes[0].change.kind,
+        PlanningChangeKind::TaskState
+    );
+    assert_eq!(current.changes[0].change.owner, task.id.as_str());
+    assert_eq!(
+        current.changes[0].change,
+        receipt.commits[0].planning_changes[0]
+    );
+    assert_eq!(current.changes[0].state, PlanningDeliveryState::Uncertain);
+}
+
+#[test]
+fn creation_planning_evidence_keeps_the_original_export_identity() {
+    use loopflow::store::planning_sync::PlanningChangeKind;
+    use loopflow::store::sqlite::operations::{OperationReceipt, PlanningEffect};
+    let wire: serde_json::Value = serde_json::from_str(include_str!(
+        "fixtures/dto/server/operation_creation_planning.json"
+    ))
+    .unwrap();
+    let receipt: OperationReceipt = serde_json::from_value(wire["result"].clone()).unwrap();
+    assert_eq!(serde_json::to_value(&receipt).unwrap(), wire["result"]);
+    let change = &receipt.commits[0].planning_changes[0];
+    assert_eq!(
+        receipt.commits[0].planning_effect,
+        PlanningEffect::Correlated
+    );
+    assert_eq!(change.kind, PlanningChangeKind::TaskCreation);
+    assert_eq!(
+        change.id,
+        receipt.result.as_ref().unwrap()["task"]["id"]
+            .as_str()
+            .unwrap()
+    );
+    assert_eq!(
+        change,
+        &receipt.planning.as_ref().unwrap().changes[0].change
+    );
+}
+
+#[test]
+fn operation_planning_evidence_round_trips_without_losing_required_nullable_keys() {
+    use loopflow::store::sqlite::operations::{OperationReceipt, PlanningDeliveryState};
+    let wire: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/dto/server/operation_planning.json")).unwrap();
+    let receipt: OperationReceipt = serde_json::from_value(wire["result"].clone()).unwrap();
+    assert_eq!(serde_json::to_value(&receipt).unwrap(), wire["result"]);
+    let current = receipt.planning.as_ref().unwrap();
+    assert_eq!(
+        current
+            .changes
+            .iter()
+            .map(|change| change.state)
+            .collect::<Vec<_>>(),
+        [
+            PlanningDeliveryState::Pending,
+            PlanningDeliveryState::Uncertain,
+            PlanningDeliveryState::Delivered,
+            PlanningDeliveryState::Superseded,
+            PlanningDeliveryState::Conflict,
+            PlanningDeliveryState::Unavailable,
+        ]
+    );
+    assert_eq!(current.fence.revisions["planning"], 12);
+    assert_eq!(receipt.commits[0].fence.revisions["planning"], 7);
+    assert_eq!(receipt.error.as_deref(), Some("planning response lost"));
+    for path in ["planning", "planning_changes", "error"] {
+        let mut missing = wire["result"].clone();
+        let object = match path {
+            "planning_changes" => &mut missing["commits"][0],
+            "error" => &mut missing["planning"]["changes"][2],
+            _ => &mut missing,
+        };
+        object.as_object_mut().unwrap().remove(path);
+        assert!(
+            serde_json::from_value::<OperationReceipt>(missing).is_err(),
+            "{path}"
+        );
+    }
 }

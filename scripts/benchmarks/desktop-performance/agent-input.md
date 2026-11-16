@@ -76,6 +76,30 @@ mark `hook_review_begin` and `hook_review_end` with captures when applicable. Ho
 review duration is reported alongside total time; it is never subtracted. An
 unfinished review stays unmeasured.
 
+## New Task launch
+
+On an owned demo repository, press **⌘N**, enter a disposable request and press
+**⌘Return**. Record two endpoints from the Start action:
+
+- **Start to conversation surface:** the new conversation is visible with the
+  submitted request and **Starting conversation…**. Capture the native view;
+  sheet dismissal or a navigation signpost alone does not establish this endpoint.
+- **Start to input ready:** the attached provider accepts native input. Keep the
+  exact-Session key event, draw and visible unsent probe evidence described above.
+  A creation reply or visible starting view does not establish input readiness.
+
+Correlate `creation_start`, `creation_surface`, `creation_admitted` and
+`creation_input_ready` signposts by the creation request UUID, then the admitted
+Task and Session IDs. The surface signpost observes SwiftUI mounting; retain the
+native capture for the visible endpoint. Keep prompt contents out of timing logs.
+Record at least twenty starts on the same display host and build mode before reporting P95; retain failed
+and interrupted attempts. The LOO-906 proposed target is surface P95 below 100 ms.
+Report input readiness separately, including provider startup and any review time.
+Headless presentation checks establish ordering, not native latency. Missing launch
+trace phases or native captures leave that endpoint unmeasured.
+
+## Interpreting traces
+
 Phase durations overlap and must not be summed. lf signpost spans include subprocess
 waits; Rust wall events expose lock wait and launch selection/spawn. Local CPU stacks
 and cumulative CPU snapshots complement those wall intervals. Network/I/O waits and
@@ -86,5 +110,5 @@ condition, ownership fence or Session state.
 The recorder adds all-process sampling, 100 ms process polling and optional small
 lf file appends. Marker times include capture and observer delay. Run both variants
 with identical observer settings; report those limits with the measured difference.
-No numeric performance target is imposed. A missing display, trust review, profiling
+The sidebar-input cases have no numeric target. A missing display, trust review, profiling
 permission or unavailable symbol/export facility leaves a named demo proof gap.

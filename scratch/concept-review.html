@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LOO-906 · Execution requests</title>
+<style>
+:root{color-scheme:light dark;--bg:#faf8f4;--fg:#292924;--muted:#67665e;--line:#cdc9bd;--example:#e4efe6}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.45 system-ui,sans-serif}main{max-width:800px;margin:auto;padding:26px 22px}header,small{font-size:12px;color:var(--muted)}h1{font-size:28px;line-height:1.15;margin:20px 0 12px}h2{font-size:18px;margin:24px 0 8px}p{margin:10px 0}table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;vertical-align:top;border-bottom:1px solid var(--line);padding:8px 6px}pre{background:var(--example);padding:12px;font-size:13px;white-space:pre-wrap}code{font-size:12px;overflow-wrap:anywhere}li{margin:12px 0}@media(prefers-color-scheme:dark){:root{--bg:#20221f;--fg:#ecece4;--muted:#b5b5a8;--line:#4c5046;--example:#2c382f}}@media(max-width:540px){main{padding:20px 12px}table{font-size:12px}th,td{padding:6px 3px}h1{font-size:24px}}
+</style>
+<main>
+<header>LOO-906 · concept-review · 2026-11-15 · headless Graph step<br>
+Sources: scratch/{instant-task-session,questions,desktop-reactivity-feedback}.md;
+HEAD 3bc9365e8c; Rust engine/operation.rs; Swift WorkInteraction.swift,
+ClientWorkDatabase.swift, OperationDeclaration.swift, PendingOperation.swift,
+WorkModel.swift, TaskWorkView.swift, TaskWorkspaceView.swift,
+ClientWorkQueryTests.swift and both app READMEs.<br>
+Source review only; no new runtime measurements.</header>
+<h1>Decide offline Abandon, cancellation and phone names.</h1>
+<p><strong>Status:</strong> Blocked for loop-or-next: questions 1–3 remain unanswered. Start, Auto-Ship and Stop Auto-Ship are checkpointed; those questions do not block this cut. No further concept change follows. Rewrite iteration stops here until the independent benchmark is available, following the recorded continuation direction.</p>
+<p><strong>Biggest remaining mismatch:</strong> disconnected Complete, rename and Move have a stated contract. Abandon also queues cleanup, but that behavior has no recorded answer. A mistaken unsent removal currently cannot be canceled.</p>
+<pre>Before: Auto-Ship → command → refresh barrier → “is shipping”
+Built:  Auto-Ship → “Auto-Ship requested…” → save → dispatch
+        successful finished dispatch → request clears
+        Machine readings → actual approval, Graph and PR state
+
+Offline restart → exact request waits for its original Machine
+Lost dispatch result → Check request / Inspect, never resubmit
+Stop behind uncertain Auto-Ship → queued intent, not a stopped Process
+
+Conversation, route and drafts stay intact.</pre>
+<h2>Actions → concepts → APIs</h2>
+<table>
+<thead><tr><th>Action</th><th>Concept</th><th>Before → built</th></tr></thead>
+<tbody>
+<tr><td>Start / Start from</td><td>Exact execution request</td><td>Window draft and refresh barrier → synchronous <code>WorkInteraction.executeTask(.start)</code>; <code>task.run</code> retains graph/from. Phone offers default/existing Workflow Start.</td></tr>
+<tr><td>Auto-Ship / Stop Auto-Ship</td><td>Intent, separate from execution success</td><td><code>performTaskAction</code> and success toast removed → shared <code>.ship</code> / <code>.stopShipping</code>, <code>task.ship</code> / <code>task.hold</code>; request feedback on both hosts</td></tr>
+<tr><td>Deliver / recover</td><td>Saved request and canonical Task lane</td><td>Shared SQLite outbox saves before send. Finished dispatch releases ordering; successful dispatch retires the request. Failed dispatch stays inspectable. Uncertainty holds conflicting sends and checks the original ID.</td></tr>
+<tr><td>Read actual progress</td><td>Supported Machine facts and native readiness</td><td>Request creates no membership effect or synthetic fence. Existing stamped readings determine approval, Graph/carrier and PR state; native owners still determine input readiness.</td></tr>
+</tbody></table>
+<p><strong>Built usage:</strong> Start continues the Task’s Workflow. Auto-Ship requests the remaining delivery steps; Stop Auto-Ship requests withdrawal. Feedback appears immediately and survives disconnected restart. Successful dispatch clears the request without promising a running Graph, merged PR or stopped Process. Both app READMEs describe this distinction; no builtin skill change is needed.</p>
+<p><strong>Failure and recovery:</strong> a save failure offers Try again. A lost reply keeps the original Machine, ID and exact command; Check request looks up that outcome without another submission. A finished failure releases ordering while remaining inspectable: it cannot assert rollback. Generic dispatch has no domain-authorized replay after a crash.</p>
+<p><strong>Counterexamples:</strong> Stop behind an uncertain Auto-Ship cannot promise immediate withdrawal. A finished Stop cannot certify Process exit; independent Graph work may still be Moving. An unrelated or old reading cannot turn request progress into execution success. The earlier Reopen rules remain: already-open no-op preserves approval, and missing inputs cannot certify a destination.</p>
+<p><strong>Validation and next demonstration:</strong> the working design records passing Swift build, focused Desktop/iOS, platform checks and documented-command tests. Source review found request retirement, failure ordering and original-ID recovery covered; no runtime checks were rerun for this prose update. After the independent benchmark is available, demonstrate restart, uncertain dispatch and later Machine readings on both hosts; measure request publication separately from runtime and native input. Remaining mutation families, mobile Session retention and cache ownership stay open in the responsibility inventory.</p>
+<h2>Questions for the next conversation</h2>
+<ol>
+<li><strong>Abandon while disconnected.</strong> It closes PRs and removes branches; the recorded “1a” named Complete, rename and move.<br>1a — Save Abandon and deliver on reconnect (built provisionally).<br>1b — Require a reachable Machine and keep the Task until then.</li>
+<li><strong>Take back a change before it was sent.</strong> A mistaken offline removal currently has no cancellation action.<br>2a — Keep that behavior; Reopen afterwards where supported (Abandon cannot be reopened).<br>2b — Offer Cancel only before first send, removing the request and its projection.</li>
+<li><strong>Conversation names on the phone.</strong><br>3a — Keep Task titles and Desktop-only Session rename (built).<br>3b — Show Session names and offer rename on the phone too.</li>
+</ol>
+<small>Exact replies and prior check results remain in the working design. Native latency remains unmeasured; gate owns the recorded nextest LEAK. No implementation, publish or merge in this step.</small>
+</main>
+</html>

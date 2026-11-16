@@ -24,7 +24,8 @@ final class SessionLink {
         case disconnected(String), unavailable(String)
     }
 
-    let task: WorkViewPlan.Content
+    let title: String
+    let sessionID: String?
     private(set) var state: State = .opening
     /// Draws terminal bytes; `true` clears the screen first.
     @ObservationIgnored var render: ((Data, Bool) -> Void)?
@@ -40,11 +41,17 @@ final class SessionLink {
     @ObservationIgnored private var opening: Perf.Wait?
     @ObservationIgnored private var echo: Perf.Wait?
 
-    init(client: RemoteMobileClient, task: WorkViewPlan.Content) {
+    convenience init(client: RemoteMobileClient, task: WorkViewPlan.Content) {
+        self.init(client: client, sessionID: task.primarySession, title: task.title,
+            unavailable: task.unavailable.first)
+    }
+
+    init(client: RemoteMobileClient, sessionID: String?, title: String, unavailable: String? = nil) {
         self.client = client
-        self.task = task
-        if task.primarySession == nil {
-            state = .unavailable(task.unavailable.first ?? "This Task has no Session on this Machine.")
+        self.sessionID = sessionID
+        self.title = title
+        if sessionID == nil {
+            state = .unavailable(unavailable ?? "This Task has no Session on this Machine.")
             wantsOpen = false
         }
     }
@@ -67,7 +74,7 @@ final class SessionLink {
     }
 
     func open() async {
-        guard let session = task.primarySession else { return }
+        guard let session = sessionID else { return }
         guard let size else { wantsOpen = true; return }
         close()
         state = .opening
@@ -100,7 +107,7 @@ final class SessionLink {
 
     /// Continue a recorded conversation whose terminal stopped, then open it.
     func start() async {
-        guard canStart, let session = task.primarySession, let size else { return }
+        guard canStart, let session = sessionID, let size else { return }
         close()
         state = .opening
         let opening = generation

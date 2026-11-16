@@ -1,0 +1,61 @@
+{
+  "type": "response",
+  "id": "receipt",
+  "trace_id": "trace_fixture",
+  "result": {
+    "request_id": "operation_fixture",
+    "kind": "task.complete",
+    "fingerprint": null,
+    "delivery": "uncertain",
+    "result": null,
+    "error": "Task requires a verified merge",
+    "commits": [
+      {
+        "stage": "task.completion_requested",
+        "resources": [
+          "task_fixture"
+        ],
+        "fence": {
+          "machine": "machine_fixture",
+          "epoch": "ab0123456789ab0123456789ab01234567",
+          "schema": 6,
+          "revisions": {
+            "planning": 7
+          }
+        },
+        "result": {
+          "request": 42
+        },
+        "resolution": "committed",
+        "planning_changes": [],
+        "planning_effect": "none"
+      },
+      {
+        "stage": "task.completed",
+        "resources": [
+          "task_fixture"
+        ],
+        "fence": {
+          "machine": "machine_fixture",
+          "epoch": "ab0123456789ab0123456789ab01234567",
+          "schema": 6,
+          "revisions": {
+            "planning": 8
+          }
+        },
+        "result": {
+          "request": 42
+        },
+        "resolution": "superseded",
+        "planning_changes": [],
+        "planning_effect": "none"
+      }
+    ],
+    "created_at": 1,
+    "updated_at": 2,
+    "revision": 3,
+    "submitted_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "validation": "bound",
+    "planning": null
+  }
+}

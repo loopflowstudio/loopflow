@@ -14,8 +14,30 @@ enum ServerClient {
     static func read(_ query: ServedRead, location: ServerLocation = .shared,
                      deadline: Duration = readDeadline) async throws -> String {
         try Task.checkCancellation()
-        let link = try await links.link(for: location)
+        let link = try await location.connection.link()
         return try await link.request(.read(query), deadline: deadline).printed
+    }
+
+    /// One pinned reading, including the provenance of its body.
+    static func reading(_ query: ServedRead, location: ServerLocation = .shared) async throws -> RawJSON {
+        let watch = ServerLink.subscribe(query, connection: location.connection) { update -> RawJSON? in
+            guard case .reading(let frame) = update else { return nil }
+            return RawJSON(frame.bytes)
+        }
+        defer { watch.cancel() }
+        return try await withThrowingTaskGroup(of: RawJSON.self) { group in
+            group.addTask {
+                for try await reading in watch.updates { return reading }
+                throw RegistryQueryError("Session reading ended before answering")
+            }
+            group.addTask {
+                try await Task.sleep(for: readDeadline)
+                throw RegistryQueryError(ServerLink.unanswered)
+            }
+            defer { group.cancelAll() }
+            guard let reading = try await group.next() else { throw CancellationError() }
+            return reading
+        }
     }
 
     /// What the write returned, as JSON: what `lf <write> --json` prints.
@@ -23,9 +45,21 @@ enum ServerClient {
         String(decoding: try await request(.command(change), location: location).bytes, as: UTF8.self)
     }
 
-    static func submittedCreation(_ payload: Data) async throws -> String {
+    static func submittedOperation(_ payload: Data) async throws -> String {
         let value = try JSONDecoder().decode(JSONValue.self, from: payload)
-        return String(decoding: try await request(.submittedCreation(value), location: .shared).bytes, as: UTF8.self)
+        let link = try await ServerLocation.shared.connection.link()
+        do { return String(decoding: try await link.request(.submittedOperation(value)).bytes, as: UTF8.self) }
+        catch {
+            if await link.isClosed { throw ServerConnectionUnavailable(error) }
+            throw error
+        }
+    }
+
+    static func operationReceipts(_ id: String) -> ClientWorkStore.ReceiptWatch {
+        ServerLink.subscribe(.operationGet(requestID: id), reconnect: true, connection: ServerLocation.shared.connection) { update in
+            guard case .reading(let frame) = update else { return nil }
+            return try frame.decode(SubscriptionReading<OperationReceipt>.self)
+        }
     }
 
     static func configuration(_ operation: ConfigOperation, location: ServerLocation = .shared) async throws -> Data {
@@ -34,16 +68,16 @@ enum ServerClient {
 
     private static func request(_ operation: ServerOperation, location: ServerLocation) async throws -> RawJSON {
         try Task.checkCancellation()
-        let link = try await links.link(for: location)
+        let link = try await location.connection.link()
         return try await link.request(operation)
     }
 
     /// A subscription on the location's connection; `send` carries checkpoints,
     /// `cancel` ends it. After a reading, connection loss resumes the same stream.
     static func subscribe(_ query: ServedRead, location: ServerLocation = .shared) -> LineSubscription {
-        let watch = ServerLink.subscribe(query, connect: { try await links.link(for: location) }) { update -> Data? in
+        let watch = ServerLink.subscribe(query, connection: location.connection) { update -> ReceivedReading? in
             guard case .reading(let frame) = update else { return nil }
-            return Data(frame.bytes)
+            return frame
         }
         return LineSubscription(lines: watch.updates, send: checkpoints(watch), cancel: watch.cancel)
     }
@@ -51,7 +85,7 @@ enum ServerClient {
     /// Readings and occurrences share one stream so the consumer applies its
     /// baseline before events. Reconnect replaces state without replaying events.
     static func subscribeEvents(_ query: ServedRead, location: ServerLocation = .shared) -> ServerEventSubscription {
-        let watch = ServerLink.subscribe(query, events: true, connect: { try await links.link(for: location) }) { $0 }
+        let watch = ServerLink.subscribe(query, events: true, connection: location.connection) { $0 }
         return ServerEventSubscription(updates: watch.updates, send: checkpoints(watch), cancel: watch.cancel)
     }
 
@@ -66,8 +100,6 @@ enum ServerClient {
             watch.checkpoint(checkpoint.id)
         }
     }
-
-    private static let links = ServerLinks()
 }
 
 private struct SubscriptionCheckpoint: Decodable {
@@ -88,51 +120,29 @@ struct ServerEventSubscription: Sendable {
     let cancel: @Sendable () async -> Void
 }
 
-/// One live connection per server location, reopened on demand with bounded
-/// backoff after consecutive failures to open.
-private actor ServerLinks {
-    private var links: [ObjectIdentifier: Task<ServerLink, any Error>] = [:]
-    private var failures: [ObjectIdentifier: Int] = [:]
-
-    func link(for location: ServerLocation) async throws -> ServerLink {
-        let key = ObjectIdentifier(location)
-        while let opening = links[key] {
-            // A failed open answers everyone it kept waiting; only a link that
-            // opened and later closed is worth another attempt.
-            let link = try await opening.value
-            if await !link.isClosed { return link }
-            if links[key] == opening { links[key] = nil }
-        }
-        let attempt = failures[key] ?? 0
-        let opening = Task {
-            if attempt > 0 { try await Task.sleep(for: .milliseconds(min(100 << (attempt - 1), 3200))) }
-            let path = try await location.path()
-            return try await ServerLink.open(.unix(path: path))
-        }
-        links[key] = opening
-        do {
-            let link = try await opening.value
-            failures[key] = 0
-            return link
-        } catch {
-            failures[key] = attempt + 1
-            if links[key] == opening { links[key] = nil }
-            throw error
-        }
-    }
-}
-
 actor ServerLocation {
     static let shared = ServerLocation()
-    private let query: @Sendable ([String]) async throws -> String
-    private var endpoint: Task<String, any Error>?
-    private var setupError: String?
+    nonisolated let connection: MachineConnection
+    private let endpoint: ServerLocationEndpoint
 
     init(query: @escaping @Sendable ([String]) async throws -> String = {
         try await LocalWaveAgentLauncher.queryLf($0, cwd: "/")
     }) {
-        self.query = query
+        let endpoint = ServerLocationEndpoint(query: query)
+        self.endpoint = endpoint
+        connection = MachineConnection {
+            try await ServerLink.open(.unix(path: endpoint.path()))
+        }
     }
+
+    func path() async throws -> String { try await endpoint.path() }
+}
+
+private actor ServerLocationEndpoint {
+    private let query: @Sendable ([String]) async throws -> String
+    private var endpoint: Task<String, any Error>?
+    private var setupError: String?
+    init(query: @escaping @Sendable ([String]) async throws -> String) { self.query = query }
 
     func path() async throws -> String {
         if let endpoint { return try await endpoint.value }

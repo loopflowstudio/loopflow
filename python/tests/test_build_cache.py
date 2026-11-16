@@ -1,9 +1,14 @@
 """Derived cache configuration follows Git's worktrees without daemon control."""
 
 import json
+import os
+import socket
 import subprocess
+import sys
+import tempfile
 from pathlib import Path
 
+import build_cache
 import pytest
 from build_cache import configure_cargo, install_hook, refresh
 
@@ -95,8 +100,6 @@ def test_worktree_hook_keeps_existing_content_and_runs_fail_soft(tmp_path):
     "running,loaded,expected", [(False, False, 0), (True, False, 3), (True, True, 0)]
 )
 def test_status_classifies_loaded_roots(tmp_path, monkeypatch, running, loaded, expected):
-    import build_cache
-
     monkeypatch.setenv("HOME", str(tmp_path))
     wrapper = tmp_path / ".local/share/loopflow/sccache" / build_cache.REVISION / "bin/sccache"
     wrapper.parent.mkdir(parents=True)
@@ -139,9 +142,55 @@ def test_status_classifies_loaded_roots(tmp_path, monkeypatch, running, loaded, 
 
 
 def test_missing_wrapper_is_actionable(tmp_path, monkeypatch):
-    import build_cache
-
     monkeypatch.setattr(build_cache, "configured_cache", lambda: (tmp_path / "missing", {}))
     monkeypatch.setattr(build_cache, "inventory_path", lambda: tmp_path / "inventory")
     monkeypatch.setattr(subprocess, "check_output", lambda *args, **kwargs: str(tmp_path))
     assert build_cache.cache_status(tmp_path)["exit_code"] == 1
+
+
+def test_git_worktree_add_registers_the_new_root(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    (repo / "scripts").mkdir(parents=True)
+    source = Path(__file__).resolve().parents[2] / "scripts/build_cache.py"
+    (repo / "scripts/build_cache.py").write_text(source.read_text())
+    _git(repo, "init", "-q")
+    _git(repo, "add", ".")
+    _git(
+        repo,
+        "-c",
+        "user.name=Fixture",
+        "-c",
+        "user.email=fixture@example.com",
+        "commit",
+        "-qm",
+        "fixture",
+    )
+    install_hook(repo)
+    commands = tmp_path / "bin"
+    commands.mkdir()
+    # Keep the socket short on macOS; pytest's canonical temp path can exceed it.
+
+    with tempfile.TemporaryDirectory(prefix="lf-hook-", dir="/tmp") as short:
+        notify = Path(short) / "ready.sock"
+        stub = commands / "uv"
+        stub.write_text(
+            f"#!{sys.executable}\nimport os, socket, subprocess, sys\n"
+            "result = subprocess.run([sys.executable, *sys.argv[3:]])\n"
+            "with socket.socket(socket.AF_UNIX) as client:\n"
+            '    client.connect(os.environ["CACHE_TEST_NOTIFY"])\n'
+            "    client.sendall(str(result.returncode).encode())\n"
+        )
+        stub.chmod(0o755)
+        monkeypatch.setenv("PATH", f"{commands}:{os.environ['PATH']}")
+        monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+        monkeypatch.setenv("CACHE_TEST_NOTIFY", str(notify))
+        with socket.socket(socket.AF_UNIX) as listener:
+            listener.bind(str(notify))
+            listener.listen(1)
+            listener.settimeout(10)
+            tree = tmp_path / "new tree"
+            _git(repo, "worktree", "add", "--detach", str(tree))
+            with listener.accept()[0] as client:
+                assert client.recv(100) == b"0"
+        config = json.loads((tmp_path / "cache/loopflow/sccache.json").read_text())
+        assert set(config["basedirs"]) == {str(repo.resolve()), str(tree.resolve())}

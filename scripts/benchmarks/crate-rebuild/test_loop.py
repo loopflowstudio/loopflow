@@ -188,7 +188,9 @@ def main() -> None:
             "cpus": os.cpu_count(),
             "machine": list(os.uname()),
             "jobs": tomlkit.loads(cargo_configuration().read_text()).get("build", {}).get("jobs"),
-            "profiles": tomlkit.loads((ROOT / "Cargo.toml").read_text()).get("profile", {}),
+            "profiles": tomlkit.loads((ROOT / "Cargo.toml").read_text())
+            .unwrap()
+            .get("profile", {}),
             "filters": FILTERS,
             "created": time.time(),
             "trees": {},

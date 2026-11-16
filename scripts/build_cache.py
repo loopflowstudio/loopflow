@@ -79,7 +79,7 @@ def _default_configuration() -> dict:
         candidates = [directory / "sccache/config"]
     for source in candidates:
         if source.exists():
-            return tomlkit.loads(source.read_text())
+            return tomlkit.loads(source.read_text()).unwrap()
     return {}
 
 
@@ -201,7 +201,7 @@ def install(repo: Path, revision: str) -> None:
 
 def configured_cache() -> tuple[Path | None, dict[str, str]]:
     path = cargo_configuration()
-    config = tomlkit.loads(path.read_text()) if path.exists() else {}
+    config = tomlkit.loads(path.read_text()).unwrap() if path.exists() else {}
     wrapper = config.get("build", {}).get("rustc-wrapper")
     env = {}
     for key, value in config.get("env", {}).items():

@@ -33,12 +33,15 @@
   `LinearSyncOptions.plan` are gone. Wave `field` effects (slice 3) restore it
   with a receipt.
 
+- **Losing value after a conflict shows in `lf task show`** (`sync.conflict`),
+  the surface the Demo reads; Desktop follows from the DTO. Alternatives were
+  `lf repo plan` or Desktop first.
+- **Effects only for bound owners or a pending create.** A Task made before
+  a tracker was connected does not export on connect. Not yet checked against
+  what the old export drain does for such a Task.
+
 ## Open
 
 - Wire `linear_id` → a neutral name crosses Rust, Swift and ~10 DTO fixtures.
   Planned as a follow-up Task, not here. Is a neutral name wanted at all while
   Linear is the only tracker in use?
-- `docs/work.md` says that after a field conflict "the tracker's value wins and
-  the Task shows both". Which surface shows the losing value: `lf task show`,
-  `lf repo plan`, Desktop's Task detail, or all three? `conflict_json` holds
-  it; no reader prints it to a person today.

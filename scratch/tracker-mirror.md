@@ -106,12 +106,13 @@ never split; reuse its ideas and inventories, not its diff.
 |---|---|
 | `seq` INTEGER PK AUTOINCREMENT | global send order |
 | `id` TEXT UNIQUE | effect identity; the journal mutation id when there is one; the provider idempotency key where the provider accepts one (Linear create, comment) |
-| `wave_id` / `project_id` / `task_id` / `comment_id` | exactly one owner (CHECK); a Wave's name and summary are its Linear Initiative or Asana team fields |
+| `wave_id` / `project_id` / `task_id` | exactly one owner (CHECK): the tracker object the request addresses |
+| `subject` | what on the owner: the field name, the comment id, `pr:<url>`; NULL for `create`/`delete`/`state` |
 | `kind` | `create` · `field` · `order` · `state` · `comment` · `delete` · `link` (Initiative link or PR link) |
 | `value_json` | the `WorkValue` (or, for `create`, the creation baseline `Vec<WorkValue>`); never provider input |
 | `base_json`, `conflict_json` | provider baseline at enqueue; losing value after a conflict |
 | `phase` | `pending` · `attempted` · `acknowledged` · `retired` |
-| `provider` | the bridge that was asked, set at attempt |
+| `provider` | the bridge the effect is for, set at enqueue (see Concept review) |
 | `remote_id`, `acknowledged_revision` | what the provider answered |
 | `error`, `attempted_at`, `looked_at` | delivery evidence |
 
@@ -178,6 +179,41 @@ PR, status, subscribe, Task launch, Wave resolution: almost none of it Linear)
 becomes `tests/work/`; `tests/README.md:400` names a missing
 `adoption_tests`.
 `planning.md`, `docs/work.md`, README say Linear or Asana.
+
+### Concept review (2026-11-16): settled for slice 3
+
+Implied by the design; implement builds these. No product choice in them.
+
+- **An effect is addressed to a bridge, at enqueue.** `provider` comes from
+  the owner's binding (`pm_items`/`pm_projects`/the Wave's Initiative), or
+  for `create` from the configured bridge the caller passes to
+  `planning_write::create`. An owner with no binding and no pending `create`
+  gets no effect: a Git-only repository, a Wave on Asana (no Initiative) and
+  a Task made before a tracker was connected enqueue nothing, so `lf repo
+  plan` never lists rows no bridge will drain. A pending effect whose
+  provider is not the configured bridge retires with an error naming both.
+  This removes the "Asana team fields" Wave mapping: Asana has no Wave
+  object, matching `parity.md`'s n/m.
+- **Comments and PR links are owned by their Task.** `comment_id` as an owner
+  let a comment send before its Task's `create` settled. Head-of-line is per
+  owner, so a Task's comments wait behind its creation.
+- **Cross-owner waits are `Hold`.** A Task `create` or `task_project` field
+  naming a Project with no remote id holds until that Project's `create`
+  settles; the drain moves to the next owner. Nothing else orders owners.
+- **Coalescing keeps today's rule.** Today only the newest unattempted row per
+  `(owner, field)` is sent (`planning_changes.rs:62,108,411`). Enqueueing a
+  `field`, `order` or `state` effect retires older *pending* effects with the
+  same owner and subject in the same transaction; `attempted` ones stay for
+  the lost-reply look. Comments and links never coalesce. Without this, 20
+  requests a pass would spend on superseded values.
+- **A conflict's losing value is shown by `lf task show`** (`sync.conflict` in
+  `--json`, one line in text) from the newest settled effect with
+  `conflict_json`, until a later local edit to that field settles. That is
+  the surface the Demo already reads; Desktop reads the same DTO later.
+  `docs/work.md:281` ("the Task shows both") then states built behavior.
+- **Phases at settlement:** `Acknowledged` and `Adopt` → `acknowledged`
+  (`Adopt` writes `conflict_json`); coalesced, superseded deletion, wrong
+  provider → `retired`; `Hold` and `Send` leave the phase unchanged.
 
 ### Migration (one, additive): `tracker_effects`
 
@@ -287,7 +323,8 @@ Deepest deletions first, then the queue, then the bridges. Commit at each.
    `loopflow_storage::planning::{TrackerItem, TrackerObservation,
    TrackerComment, TrackerProject, StateHistory}`; `PlanningResponse` dies with
    the old drains.
-3. **Next.** Migration + writer enqueues + `rules.rs` + bounded `drain.rs`;
+3. **Next.** Migration + writer enqueues + `rules.rs` + bounded `drain.rs`,
+   built to "Concept review (2026-11-16)" above;
    delete the old drains and storage GraphQL. Focused tests per kind on the
    Linear fake: lost reply, conflict adopt, deletion retire, order evidence;
    plus `a_pass_with_nothing_unsettled_sends_no_request` and

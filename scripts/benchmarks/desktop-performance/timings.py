@@ -471,6 +471,64 @@ def render_html(report: dict) -> str:
                 + "".join(f'<td class="num">{v}</td>' for v in numbers)
                 + "</tr>"
             )
+    # One workflow chart per build and measurement source; never pool revisions.
+    workflows = {}
+    for group in journal["groups"]:
+        if group["usable"]["median_ms"] is not None:
+            key = (
+                group["name"],
+                group["scenario"],
+                json.dumps(group["build"], sort_keys=True),
+                group["measurement"],
+            )
+            workflows.setdefault(key, []).append(group)
+    largest = max(
+        (g["usable"]["median_ms"] for groups in workflows.values() for g in groups), default=1
+    )
+    magnitude = 10 ** math.floor(math.log10(max(largest, 1)))
+    ceiling = next(step * magnitude for step in (1, 2, 5, 10) if step * magnitude >= largest)
+    charts = []
+    experience_labels = {name: label for name, label, *_ in definitions}
+    for (name, scenario, _, measurement), groups in sorted(workflows.items()):
+        title = (
+            "Board: "
+            + scenario.removeprefix("board_").replace("_to_", " → ").replace("_", " ").title()
+            if scenario.startswith("board_")
+            else experience_labels[name] + " · " + scenario.replace("_", " ")
+        )
+        bars = []
+        for group in sorted(groups, key=lambda g: g["repository"] or ""):
+            repo = Path((group["repository"] or "").rstrip("/")).name or "Repository not recorded"
+            label = {"loopflow": "Loopflow", "manabot": "Manabot", "kata": "Kata"}.get(repo, repo)
+            value = group["usable"]["median_ms"]
+            bars.append(
+                f'<div class="bar-row"><div class="repo">{escape(label)}</div>'
+                '<div class="track">'
+                f'<div class="bar" style="width:{100 * value / ceiling:.3f}%"></div></div>'
+                f'<div class="bar-value">{value:,.1f}'
+                f"<small>ms · n={group['samples']}</small></div></div>"
+            )
+        source = (
+            "Capture-inclusive upper bound"
+            if measurement == "capture_upper_bound"
+            else "Presented frame"
+        )
+        charts.append(
+            f'<section class="workflow"><h2>{escape(title)}</h2>'
+            "<p>Click the section → matching list visible and selectable</p>"
+            if scenario.startswith("board_")
+            else f'<section class="workflow"><h2>{escape(title)}</h2><p>Input → usable result</p>'
+        )
+        charts[-1] += (
+            "".join(bars) + f'<div class="axis"><span>0</span><span>{ceiling / 2:g}</span>'
+            f"<span>{ceiling:g} ms</span></div>"
+            + f'<p class="chart-source">{escape(source)}</p></section>'
+        )
+    if not charts:
+        charts.append(
+            '<p class="empty">No completed workflow measurements yet. See coverage below.</p>'
+        )
+
     stall_summary = journal["stall_summary"]
     stall_text = (
         f"{stall_summary['samples']} main-thread busy turns of at least 50 ms. "
@@ -523,6 +581,28 @@ def render_html(report: dict) -> str:
 body {{font:15px system-ui; color:#203c32; background:#f3f5ef;
 max-width:1320px; margin:48px auto; padding:0 24px}}
 h1 {{font-size:38px; letter-spacing:-1.3px; margin-bottom:8px}}
+h2 {{font-size:23px; font-weight:600; margin:0 0 8px}}
+.intro {{font-size:18px; color:#52665e; margin-bottom:36px}}
+.charts {{display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,460px),1fr));
+gap:24px}}
+.workflow {{background:white; padding:28px; border:1px solid #d5dfd4; border-radius:14px}}
+.workflow h2 {{text-transform:none}} .workflow p {{color:#647469; line-height:1.5; margin:0 0 30px}}
+.bar-row {{display:grid; grid-template-columns:80px minmax(70px,1fr) 86px; gap:12px;
+align-items:center; margin:22px 0}}
+.repo {{font-weight:600}} .track {{height:28px; background:#edf1ea; border-radius:4px}}
+.bar {{height:100%; background:#378267; border-radius:4px}}
+.bar-value {{font-size:21px; text-align:right; font-variant-numeric:tabular-nums}}
+.bar-value small {{display:block; font-size:11px; color:#647469; margin-top:3px}}
+.axis {{display:flex; justify-content:space-between; margin:0 98px 24px 92px;
+color:#647469; font-size:11px}}
+.axis span {{display:inline; height:auto; background:none}}
+.workflow p.chart-source {{font-size:12px; margin:28px 0 0}}
+.below-fold {{margin-top:64px; padding-top:28px; border-top:1px solid #d5dfd4}}
+@media(max-width:560px) {{
+body {{margin:24px auto; padding:0 14px}} .workflow {{padding:20px}}
+.bar-row {{grid-template-columns:65px minmax(40px,1fr) 80px; gap:8px}}
+.axis {{margin-left:73px; margin-right:88px}}
+}}
 .note {{background:#fff5d8; padding:18px; border-left:4px solid #bc8b2b; line-height:1.6}}
 select {{font:inherit; padding:8px 16px; margin:12px}}
 .table {{overflow:auto; background:white; border-radius:12px; border:1px solid #d5dfd4}}
@@ -530,15 +610,21 @@ table {{border-collapse:collapse; width:100%; font-size:13px}}
 th {{background:#e2ebe1; text-align:left; padding:15px 12px; white-space:nowrap}}
 td {{padding:12px; border-top:1px solid #e6ece4}}
 .num {{text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap}}
-td:last-child {{min-width:110px}} span {{display:block; height:9px; background:#378267}}
+td:last-child {{min-width:110px}} td > span {{display:block; height:9px; background:#378267}}
 .missing {{color:#6c766c}} td p {{margin:8px 0 0; color:#647469; line-height:1.5}}
 pre {{white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.6; font-size:12px}}
 details {{background:white; margin:20px 0; padding:20px; border-radius:12px}}
 summary {{cursor:pointer; font-weight:600}} [hidden] {{display:none}}
 </style>
 <main>
-<h1>The waits in everyday use</h1>
-<p>From your action to a usable result · milliseconds, lower is faster</p>
+<h1>Live app performance</h1>
+<p class="intro">How long until the result is usable?<br>
+Median time from your click · milliseconds · shorter bars are faster.</p>
+<div class="charts">{"".join(charts)}</div>
+<p>Same scale across workflows. Capture cost is included. P95 needs 20 samples per case.</p>
+<section class="below-fold"><h2>Measurement details</h2>
+<p>Builds, acknowledgment times, outcomes and coverage.</p>
+<details id="experience-details"><summary>Samples, timing stages and unmeasured workflows</summary>
 <p class="note">These times come from the app journal, starting at the input event’s timestamp.
 Acknowledgment and usability need frame evidence. Native capture observations are upper bounds
 including image acquisition cost; they are grouped separately from presentation callbacks.
@@ -552,6 +638,7 @@ P95 needs 20 completed samples per build and case. Missing measurements remain u
 <p>{escape(stall_text)}</p>
 <p>Agent clicks provide the stimulus; app event/frame timestamps provide the measurement.
 The earlier observer-inclusive pilot is diagnostic only and is not a reactivity baseline.</p>
+</details>
 <details id="diagnostics"><summary>Diagnostics · what happened inside the app</summary>
 <p>Real app journals · local Machine. These are internal phase timings, not all-in UX results.</p>
 <p class="note">These are ordinary-use observations, including busy-host samples.
@@ -572,7 +659,8 @@ Exact tail values remain in the table.</p>
 <details><summary>All versions, launch failures and raw summary</summary>
 <pre>{details}</pre></details>
 </details>
-<p>Source: {escape(report["source"])}. Journals rotate; this is the retained window.</p></main>
+<p>Source: {escape(report["source"])}. Journals rotate; this is the retained window.</p>
+</section></main>
 <script>
 const selector = document.getElementById('version');
 selector.selectedIndex = selector.options.length - 1;

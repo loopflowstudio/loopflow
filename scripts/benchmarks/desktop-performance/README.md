@@ -42,8 +42,10 @@ runs on the interaction path. Export journals before retention expires for trend
 uv run python scripts/benchmarks/desktop-performance/timings.py --html /tmp/loopflow-performance.html
 ```
 
-The headline table separates acknowledgment and usable-result medians/P95 for each
-experience, scenario and revision. P95 needs twenty completed samples. Failures,
+The HTML starts with one bar chart per workflow and one bar per repository, showing
+median input-to-usable time on a shared scale. Build and capture sources remain
+separate. Expand the details below the charts for acknowledgment/usable medians,
+P95, individual attempts, outcomes and unmeasured workflows. P95 needs twenty completed samples. Failures,
 superseded, cancelled, unmeasured and unfinished attempts remain counts. Unknown
 revisions stay per-launch. App-state and commit callbacks cannot supply frame
 latencies. Desktop uses ScreenCaptureKit to acquire its visible window; phone uses

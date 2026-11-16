@@ -298,3 +298,5 @@ Loopflow Dev capture access is on, and the app was quit/reopened through System 
 Build `22d6885a6504d06094d64af0e1134763374c86d5`; macOS 26.0.1; live `~/.lf` store. After-run load averages: [54.73291015625, 75.42529296875, 100.28369140625]. Before-run load was not sampled. These are ordinary-use visual upper bounds including acquisition cost, not a speedup comparison or a quiet-host baseline. P95 remains unmeasured (n=5 per case).
 
 Raw records, conditions and summary: `~/.lf/performance/live/20261116-app-journal/`. Updated HTML: `/tmp/loo916-live-performance.html`. Phone ReplayKit capture and the other experience drivers remain unverified/unmeasured.
+
+Jack Heart: “one bar per repo, one graph per workflow”, with “more detaield info somewhere below-the-fold”. Lead with median usable-result charts; retain acknowledgment, P95, outcomes, work receipts and coverage in the lower details.

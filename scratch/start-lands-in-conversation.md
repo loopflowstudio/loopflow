@@ -255,29 +255,26 @@ the answer is the only read. Two things to change, then the phone:
   close stays and `start`'s goes only if the frame check still passes.
   (Doc comment "One resolved opening…" is back on `LinkedSession`.)
 
+Slice 2, phone half built. A first Start is `startTask`:
+`CreationSubmissions.submit` saves, sends once and decodes `TaskCreated`
+(`MobileTaskStart`); the model keeps its `MobileTask` (ID, identifier, title,
+primary Session; also built from a reading's row in the Task list) in memory,
+so Open Task reads nothing and `SessionLink` attaches on the first terminal
+fit. "Check status" is `recoverTask` (`reconcile`); a request recovered after
+a restart still reads `task:<id>` through `createdTask`, since its receipt has
+no Session. `SessionLink` takes the Session ID; its no-Session branch is gone
+(`TaskWorkspaceView` shows Changes then). `MobileTaskCreationTests` checks
+Start's log is `task.create` alone and the opening names the answer's Session
+(fixture `task_create_receipt.json`). Not covered by a test: the
+`RemoteMobileClient` wire half (no fake Machine in the iOS suite).
+
 Remaining, in order:
-1. Phone. `RemoteMobileClient.createTask` goes record → `reconcile`, which
-   looks up (`creation.get`), sends, throws the send's answer away
-   (`_ = try await send(...)`) and looks up again; the stored receipt holds no
-   Session or overview, so `openTask` then reads `task:<id>` (`createdTask`).
-   Three round trips and a view-plan read before the conversation.
-   `CreationSubmissions` already has the two blocks this needs: a first Start
-   uses `submit` (save, send, return the live answer) and decodes
-   `TaskCreated`; `reconcile` stays the path for a saved request being
-   recovered. `TaskWorkspaceView`/`SessionView` read only the Task's ID,
-   identifier, title and primary Session from `WorkViewPlan.Content`; give
-   them a small value with those four fields, built from `TaskCreated` on
-   Start and from `Content` in the Task list, push it on the answer and
-   `session.attach` at once. Delete `createdTask` for the normal path; a
-   recovered request whose answer was lost keeps reading `task:<id>` (its
-   lookup has no Session). Test in `MobileTaskCreationTests`: Start's request
-   log is `task.create` alone and the opening names the answer's Session.
-2. `Perf.retarget(.startTask, from: "new-task", …)`: key by request ID from the
+1. `Perf.retarget(.startTask, from: "new-task", …)`: key by request ID from the
    click (slice 5).
-3. Checkout without network for a new branch: `fetch_task_refs`, the base
+2. Checkout without network for a new branch: `fetch_task_refs`, the base
    fetch and `assert_assignee` still run inside setup (off the answer path,
    on the typing path); with slice 3.
-4. Slices 3–5.
+3. Slices 3–5.
 
 ## Slices
 
@@ -306,7 +303,8 @@ Remaining, in order:
 ## Checks
 
 - `cargo test -p loopflow --test integration task_create_` — slices 1, 3, 4; gate.
-- `swift test --package-path swift --filter 'WorkDestinationTests|NewTaskTests|MobileTaskCreationTests'` — 73 passed (Mac; Mobile suite is iOS-only: `uv run python scripts/test_ios.py`, gate).
+- `swift test --package-path swift --filter 'WorkDestinationTests|NewTaskTests|MobileTaskCreationTests'` — 73 passed (Mac).
+- `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/MobileTaskCreationTests` — 20 passed; full iOS suite at gate.
 - `uv run pytest python/tests/test_desktop_timings.py` — slice 5; gate.
 - Live Start → typing, local and remote Machine — qa (remote needs a rented or
   tailnet Machine; not a gate requirement).

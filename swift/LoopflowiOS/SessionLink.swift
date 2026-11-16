@@ -24,7 +24,8 @@ final class SessionLink {
         case disconnected(String), unavailable(String)
     }
 
-    let task: WorkViewPlan.Content
+    let task: MobileTask
+    let session: String
     private(set) var state: State = .opening
     /// Draws terminal bytes; `true` clears the screen first.
     @ObservationIgnored var render: ((Data, Bool) -> Void)?
@@ -43,13 +44,10 @@ final class SessionLink {
     @ObservationIgnored private var hasSnapshot = false
     @ObservationIgnored private var openingObserved = false
 
-    init(client: RemoteMobileClient, task: WorkViewPlan.Content) {
+    init(client: RemoteMobileClient, task: MobileTask, session: String) {
         self.client = client
         self.task = task
-        if task.primarySession == nil {
-            state = .unavailable(task.unavailable.first ?? "This Task has no Session on this Machine.")
-            wantsOpen = false
-        }
+        self.session = session
     }
 
     var canStart: Bool { state == .ended || state == .notRunning }
@@ -70,13 +68,12 @@ final class SessionLink {
     }
 
     func open() async {
-        guard let session = task.primarySession else { return }
         guard let size else { wantsOpen = true; return }
         close()
         state = .opening
         hasSnapshot = false
         openingObserved = false
-        self.opening = Perf.takeOpening(task.work.id) ?? Perf.begin("return_session", scenario: "remote_attach")
+        self.opening = Perf.takeOpening(task.id) ?? Perf.begin("return_session", scenario: "remote_attach")
         let opening = generation
         do {
             let link = try await client.attach(sessionID: session, size: size)
@@ -105,7 +102,7 @@ final class SessionLink {
 
     /// Continue a recorded conversation whose terminal stopped, then open it.
     func start() async {
-        guard canStart, let session = task.primarySession, let size else { return }
+        guard canStart, let size else { return }
         close()
         state = .opening
         let opening = generation

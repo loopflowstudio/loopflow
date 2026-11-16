@@ -154,12 +154,12 @@ struct TaskListView: View {
     let onChangeAddress: () -> Void
     @State private var feed: TaskFeed
     @State private var search = ""
-    @State private var drafts: [WorkWorkspaceKey: String] = [:]
+    @State private var drafts: [String: String] = [:]
     @State private var creation: MobileTaskCreation?
-    @State private var created: WorkViewPlan.Content?
+    @State private var created: MobileTask?
     @State private var showingCreated = false
     @State private var captureError: String?
-    @State private var selectedTask: WorkViewPlan.Content?
+    @State private var selectedTask: MobileTask?
     /// The repository shown, by durable ID; empty shows every repository.
     @AppStorage("repository") private var repository = ""
     @Environment(\.colorScheme) private var colorScheme
@@ -347,7 +347,7 @@ struct TaskListView: View {
     private func link(_ task: WorkViewPlan.Content) -> some View {
         Button {
             if task.primarySession != nil { Perf.opening(task.work.id) }
-            selectedTask = task
+            selectedTask = MobileTask(task)
         } label: {
             HStack { row(task); Spacer(); Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary) }
         }
@@ -356,10 +356,10 @@ struct TaskListView: View {
             .listRowBackground(theme.palette.background)
     }
 
-    private func workspace(_ task: WorkViewPlan.Content) -> some View {
+    private func workspace(_ task: MobileTask) -> some View {
         TaskWorkspaceView(client: client, task: task, theme: theme, draft: Binding(
-            get: { drafts[task.work] ?? "" },
-            set: { drafts[task.work] = $0 }))
+            get: { drafts[task.id] ?? "" },
+            set: { drafts[task.id] = $0 }))
     }
 
     private func row(_ task: WorkViewPlan.Content) -> some View {

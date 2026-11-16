@@ -1,53 +1,14 @@
 //! Diagnose current storage, execution records and the installation.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::Path;
 
 use anyhow::{anyhow, Result};
 
-use crate::lf::output::Colors;
+use crate::output::Colors;
+use crate::process::diagnosis::{check_lineage, Check, Status};
 use crate::process::ProcessEntry;
 use crate::store::contention::read_contention;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
-#[serde(rename_all = "snake_case")]
-#[non_exhaustive]
-pub enum Status {
-    Ok,
-    Warn,
-    Fail,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
-pub struct Check {
-    pub name: &'static str,
-    pub status: Status,
-    pub detail: String,
-}
-
-impl Check {
-    pub(crate) fn ok(name: &'static str, detail: impl Into<String>) -> Self {
-        Self {
-            name,
-            status: Status::Ok,
-            detail: detail.into(),
-        }
-    }
-    pub(crate) fn warn(name: &'static str, detail: impl Into<String>) -> Self {
-        Self {
-            name,
-            status: Status::Warn,
-            detail: detail.into(),
-        }
-    }
-    fn fail(name: &'static str, detail: impl Into<String>) -> Self {
-        Self {
-            name,
-            status: Status::Fail,
-            detail: detail.into(),
-        }
-    }
-}
 
 /// Exits non-zero when any check fails, so a caller can gate on it.
 /// What `lf doctor --json` prints.
@@ -483,33 +444,6 @@ fn check_identity(events: &[ProcessEntry]) -> Check {
         "identity",
         format!("{invalid}/{} repo value(s) are not absolute", repos.len()),
     )
-}
-
-pub(crate) fn check_lineage(events: &[ProcessEntry], repairable: usize) -> Check {
-    let processes: HashMap<&str, &str> = events
-        .iter()
-        .map(|event| (event.id(), event.trace_id().as_str()))
-        .collect();
-    let dangling: HashSet<&str> = events
-        .iter()
-        .filter_map(|event| {
-            let parent = event.parent_lf_process_id()?.as_str();
-            (processes.get(parent).copied() != Some(event.trace_id().as_str())).then_some(parent)
-        })
-        .collect();
-    if dangling.is_empty() {
-        return Check::ok("lineage", "every parent process resolves");
-    }
-    let mut detail = format!(
-        "{} parent process id(s) are missing or belong to another trace",
-        dangling.len()
-    );
-    if repairable > 0 {
-        detail.push_str(&format!(
-            "; {repairable} AgentProcess parent(s) were never recorded, and `lf monitor prune` repairs them"
-        ));
-    }
-    Check::fail("lineage", detail)
 }
 
 fn print_checks(store: &StoreReport, checks: &[Check], rows: usize) {

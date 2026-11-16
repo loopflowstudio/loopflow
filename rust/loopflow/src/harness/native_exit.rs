@@ -83,7 +83,7 @@ pub(crate) fn settle(exit: &NativeExit, status: ExitStatus) -> Settled {
     {
         pin_account(store, &exit.provider, account, key);
     }
-    let command = crate::lf::commands::util::SessionCommandOutcome {
+    let command = crate::harness::native_session::SessionCommandOutcome {
         status,
         interrupted: interrupted || lost,
         moved: lost.then(|| owner.as_ref().and_then(departure)).flatten(),
@@ -197,7 +197,9 @@ pub(crate) fn departure((store, session, attachment): &AttachmentOwner) -> Optio
     let notice = || -> Result<Option<String>> {
         store
             .attachment_departure(session, attachment)?
-            .map(|departure| crate::lf::commands::util::departure_notice(store, session, departure))
+            .map(|departure| {
+                crate::harness::native_session::departure_notice(store, session, departure)
+            })
             .transpose()
     };
     notice().unwrap_or_else(|error| {

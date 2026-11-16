@@ -2,6 +2,7 @@ pub(crate) mod adoption;
 pub(crate) mod limit_recovery;
 pub use adoption::TaskAdoptionOptions;
 pub(crate) mod remote;
+pub use remote::TASK_SOURCE_ENV;
 mod workspace;
 pub use workspace::{watch_task_files, TaskFilesFrame};
 mod planning_explain;

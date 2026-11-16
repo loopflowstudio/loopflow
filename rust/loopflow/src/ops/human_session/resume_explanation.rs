@@ -274,7 +274,7 @@ async fn read_resume(
         }
         if provider.is_some() {
             if let Err(error) =
-                crate::lf::commands::util::require_session_task(&store.sqlite, &session)
+                crate::harness::native_session::require_session_task(&store.sqlite, &session)
             {
                 report.impediments.push(error.to_string());
             }

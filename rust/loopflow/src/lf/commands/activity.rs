@@ -5,9 +5,9 @@ use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::lf::commands::util::parse_since;
 use crate::lf::commands::work_catalog::{WorkCatalog, WorkOwner};
 use crate::lf::commands::WorkFilter;
+use crate::output::parse_since;
 use crate::session_record::SessionHistory;
 use loopflow_model::durable::WorkRef;
 use loopflow_storage::rows::unix_to_datetime;
@@ -96,9 +96,9 @@ impl HistoryWindow {
 /// the window.
 pub(crate) fn subscribe(
     window: HistoryWindow,
-    transport: super::subscribe::Transport,
-) -> Result<Option<super::subscribe::Subscription>> {
-    super::subscribe::start(
+    transport: crate::read_stream::Transport,
+) -> Result<Option<crate::read_stream::Subscription>> {
+    crate::read_stream::start(
         window,
         |store, window| async move { read(store.as_ref().map(|store| &store.sqlite), &window) },
         transport,
@@ -114,13 +114,13 @@ pub fn run(options: &super::history::HistoryFeed) -> Result<()> {
         task: options.task.clone(),
     };
     if options.subscribe {
-        return subscribe(window, super::subscribe::Transport::Stdio).map(drop);
+        return subscribe(window, crate::read_stream::Transport::Stdio).map(drop);
     }
     let snapshot = snapshot(&window)?;
     if options.json {
         println!(
             "{}",
-            serde_json::to_string(&super::subscribe::selected_answer(&snapshot)?)?
+            serde_json::to_string(&crate::read_stream::selected_answer(&snapshot)?)?
         );
     } else {
         print_snapshot(&snapshot);

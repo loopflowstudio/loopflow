@@ -432,7 +432,7 @@ fn ask_server(
         inbox: adapter.and_then(|_| claude_inbox()),
     }));
     let answered = crate::server::socket_path().and_then(|socket| {
-        crate::server::client::hook_request(
+        crate::machine::client::hook_request(
             &socket,
             operation,
             crate::server::boundary::HOOK_DEADLINE,

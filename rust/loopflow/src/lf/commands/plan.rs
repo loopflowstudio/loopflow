@@ -11,7 +11,7 @@ use crate::store::Store;
 pub fn run(cmd: Option<&PlanCommand>, json: bool, subscribe: bool) -> Result<()> {
     let repo = status_repository(&std::env::current_dir()?)?;
     if cmd.is_none() && subscribe {
-        return subscribe_status(&repo, super::subscribe::Transport::Stdio).map(drop);
+        return subscribe_status(&repo, crate::read_stream::Transport::Stdio).map(drop);
     }
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(run_async(&repo, cmd, json))
@@ -106,10 +106,10 @@ async fn run_async(repo: &Path, cmd: Option<&PlanCommand>, status_json: bool) ->
 /// foreground providers exchange planning.
 pub(crate) fn subscribe_status(
     repo: &Path,
-    transport: super::subscribe::Transport,
-) -> Result<Option<super::subscribe::Subscription>> {
+    transport: crate::read_stream::Transport,
+) -> Result<Option<crate::read_stream::Subscription>> {
     let repo_key = repo.to_string_lossy().into_owned();
-    super::subscribe::start(
+    crate::read_stream::start(
         (),
         move |store, ()| {
             let repo_key = repo_key.clone();
@@ -186,7 +186,7 @@ async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
     if json {
         println!(
             "{}",
-            serde_json::to_string(&super::subscribe::selected_answer(&status.report())?)?
+            serde_json::to_string(&crate::read_stream::selected_answer(&status.report())?)?
         );
         return Ok(());
     }

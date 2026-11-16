@@ -214,7 +214,7 @@ fn apply_limit_recovery(
             snapshot.state = TaskExecutionState::Waiting;
             snapshot.reason = format!(
                 "{label} is waiting for {provider} capacity until {}: {reason}. It goes on by itself.",
-                crate::lf::output::format_time(retry_at)
+                crate::output::format_time(retry_at)
             );
         }
         (TaskExecutionState::Running, None) => {
@@ -227,7 +227,7 @@ fn apply_limit_recovery(
         }
         (TaskExecutionState::Blocked, Some(retry_at)) => {
             snapshot.state = TaskExecutionState::Waiting;
-            let after = crate::lf::output::format_time(retry_at);
+            let after = crate::output::format_time(retry_at);
             snapshot.reason = if restarts_by_itself() {
                 format!("{label} ended while waiting for {provider} capacity; the run starts again at it by itself after {after}")
             } else {

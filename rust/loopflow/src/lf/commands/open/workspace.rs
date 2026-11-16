@@ -629,7 +629,7 @@ fn remote_open(
         argv.extend(["--into".into(), into.clone()]);
     }
     let bytes = tokio::runtime::Runtime::new()?
-        .block_on(super::super::ssh::request(&machine, &argv, None))?;
+        .block_on(crate::machine::ssh::request(&machine, &argv, None))?;
     serde_json::from_slice(&bytes)
         .context("Remote workspace receipt is unavailable; creation may have succeeded")
 }
@@ -991,16 +991,16 @@ fn follow(cli: &crate::lf::Cli, session: &str, args: &WorkspaceArgs) -> Result<(
     let mut remotes = Placement::parse(&args.remote)?;
     println!("Loopflow workspace\nNewly started Tasks appear without taking focus. Close this tab to stop following.");
     let subscribed = repository.clone();
-    let subscribing = super::super::subscribe::start(
+    let subscribing = crate::read_stream::start(
         selected.clone(),
         move |store, selected| {
             let repository = subscribed.clone();
             async move {
-                let store = super::super::subscribe::require_store(store)?;
+                let store = crate::read_stream::require_store(store)?;
                 workspace_plan(&store.sqlite, &repository, selected)
             }
         },
-        super::super::subscribe::Transport::Pull {
+        crate::read_stream::Transport::Pull {
             events: false,
             wake: Box::new(|| {}),
             select: None,

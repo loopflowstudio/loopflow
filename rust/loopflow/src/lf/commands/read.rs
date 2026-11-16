@@ -19,11 +19,11 @@ use serde::{Deserialize, Serialize};
 use super::activity::HistoryWindow;
 use super::graph_inventory;
 use super::machine::{local_machine, machines};
-use super::subscribe::{Subscription, Transport};
 use super::usage;
 use super::waves::list as list_waves;
 use crate::lf::SessionListArgs;
 use crate::ops::task::{task_changes, task_diff, task_file};
+use crate::read_stream::{Subscription, Transport};
 use crate::session::SessionFilter;
 use loopflow_model::durable::RepositoryId;
 
@@ -323,7 +323,7 @@ pub enum Read {
     /// `lf repo ci --since <since> [--wave <wave>] [--repo <repo>]`:
     /// how failed CI was detected, repaired and landed on this Machine.
     #[serde(rename = "repo.ci")]
-    #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::ci::CiReportDto>()))]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::ops::ci::CiReportDto>()))]
     RepoCi {
         since: String,
         wave: Option<String>,

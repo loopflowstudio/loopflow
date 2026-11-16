@@ -202,9 +202,9 @@ set -- "$group"
 /// hook sends, under the plugin's own name. Null when the socket has no
 /// address, so every boundary is a recording gap rather than a failed launch.
 fn server_spec(name: &str) -> Value {
-    match crate::server::socket_path() {
-        Ok(socket) => json!({"socket":socket, "revision":crate::server::wire::REVISION,
-            "min_revision":crate::server::wire::MIN_REVISION, "platform":std::env::consts::OS,
+    match crate::machine::socket_path() {
+        Ok(socket) => json!({"socket":socket, "revision":crate::machine::wire::REVISION,
+            "min_revision":crate::machine::wire::MIN_REVISION, "platform":std::env::consts::OS,
             "name":name, "version":crate::build_info::BUILD_VERSION}),
         Err(error) => {
             tracing::warn!(error = %format!("{error:#}"), "plugin starts without a server address");
@@ -442,7 +442,7 @@ await new Promise((resolve) => server.listen(SOCKET, resolve));
 
     /// Run `source` under Node beside a stand-in server.
     fn run_probe(directory: &std::path::Path, turns: bool, frozen: bool, source: &str) -> Probe {
-        let socket = crate::server::socket_path().unwrap();
+        let socket = crate::machine::socket_path().unwrap();
         let seen = directory.join("server.json");
         let server = STAND_IN_SERVER
             .replace("SEEN", &serde_json::to_string(&seen).unwrap())

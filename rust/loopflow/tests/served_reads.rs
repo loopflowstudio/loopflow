@@ -33,7 +33,7 @@ fn configuration_readiness_recognizes_an_older_server_for_replacement() {
         socket.read_exact(&mut header).unwrap();
         assert_eq!(&header, b"{\"ty");
     });
-    let status = loopflow::server::client::status().unwrap();
+    let status = loopflow::machine::client::status().unwrap();
     older.join().unwrap();
     assert!(!status.ready);
     assert!(status.listening);
@@ -78,7 +78,7 @@ fn a_client_that_closes_at_once_leaves_the_server_listening() {
     // Closed clients leave as their connections notice; until then it may be `busy`.
     let deadline = std::time::Instant::now() + Duration::from_secs(20);
     loop {
-        match loopflow::server::client::Connection::open() {
+        match loopflow::machine::client::Connection::open() {
             Ok(_) => break,
             Err(error) => {
                 let busy = error
@@ -112,7 +112,7 @@ fn configuration_edits_use_the_server_without_work_processes() {
     let status: Value =
         serde_json::from_str(&read(repo.path(), home.path(), &["server", "status"], None)).unwrap();
     assert_eq!(status["ready"], true, "{status}");
-    let mut connection = loopflow::server::client::Connection::open().unwrap();
+    let mut connection = loopflow::machine::client::Connection::open().unwrap();
     assert!(
         connection.welcome().machine.is_none(),
         "an unreadable registry leaves the Machine unknown, not the connection refused"
@@ -357,7 +357,7 @@ fn served_session_adoption_matches_cli_without_new_execution() {
         };
         let served = |change| {
             let before = processes(&database);
-            let answer = loopflow::server::client::Connection::open()
+            let answer = loopflow::machine::client::Connection::open()
                 .unwrap()
                 .request(Operation::Write(change));
             assert_eq!(processes(&database), before, "request fabricated execution");
@@ -606,7 +606,7 @@ fn observed_git_changes_reach_subscriptions_and_requests_on_the_same_connection(
     repo.commit("Comparison base");
     register_task_with_pr(home.path(), repo.path(), "main", &repo.head_sha());
     let _server = Server::start(repo.path(), home.path());
-    let mut connection = loopflow::server::client::Connection::open().unwrap();
+    let mut connection = loopflow::machine::client::Connection::open().unwrap();
     let pane = || Read::TaskGet {
         directory: repo.path().to_owned(),
         issue: "INF-123".into(),
@@ -722,7 +722,7 @@ fn screen_reads_are_compact_passive_and_match_cli() {
     )
     .unwrap();
     let _server = Server::start(repo.path(), home.path());
-    let mut connection = loopflow::server::client::Connection::open().unwrap();
+    let mut connection = loopflow::machine::client::Connection::open().unwrap();
     let directory = repo.path().to_owned();
     let board = Read::PlanBoard {
         directory: directory.clone(),
@@ -1270,7 +1270,7 @@ fn server_operations_match_their_lf_commands() {
         let mut frame = Value::Null;
         let words: Vec<&str> = argv.iter().map(String::as_str).collect();
         unchanged(&words, &mut || {
-            let mut connection = loopflow::server::client::Connection::open().unwrap();
+            let mut connection = loopflow::machine::client::Connection::open().unwrap();
             let id = connection.subscribe(served.clone()).unwrap();
             frame = connection.reading(&id).unwrap().expect("a reading");
         });
@@ -1452,7 +1452,7 @@ fn server_operations_match_their_lf_commands() {
                     task: None,
                     wave: None,
                     agent: None,
-                    intent: loopflow::lf::commands::write::SessionOpenIntent::Resume,
+                    intent: loopflow::session::SessionOpenIntent::Resume,
                 },
                 Write::SessionResume {
                     directory: directory.clone(),
@@ -1460,7 +1460,7 @@ fn server_operations_match_their_lf_commands() {
                     task: None,
                     wave: None,
                     agent: None,
-                    intent: loopflow::lf::commands::write::SessionOpenIntent::Resume,
+                    intent: loopflow::session::SessionOpenIntent::Resume,
                 },
                 Write::SessionNew {
                     request_id: "new-thread-parity".into(),
@@ -1521,7 +1521,7 @@ fn server_operations_match_their_lf_commands() {
                 }),
                 // A hidden tile is no longer one to hide: show it before each hide.
                 Box::new(|| {
-                    let _ = loopflow::server::client::Connection::open().and_then(|mut c| {
+                    let _ = loopflow::machine::client::Connection::open().and_then(|mut c| {
                         c.request(loopflow::server::wire::Operation::Write(
                             Write::DesktopDashboardShow {
                                 directory: directory.clone(),
@@ -1761,7 +1761,7 @@ fn server_operations_match_their_lf_commands() {
         id: session.clone(),
         name: " ".into(),
     };
-    let refused = loopflow::server::client::Connection::open()
+    let refused = loopflow::machine::client::Connection::open()
         .unwrap()
         .request(Operation::Write(failure.clone()))
         .unwrap_err()
@@ -1802,10 +1802,10 @@ fn server_operations_match_their_lf_commands() {
                     name: name.into(),
                 };
                 threads.spawn(move || {
-                    let loopflow::server::client::Response {
+                    let loopflow::machine::client::Response {
                         trace_id,
                         result: saved,
-                    } = loopflow::server::client::Connection::open()
+                    } = loopflow::machine::client::Connection::open()
                         .unwrap()
                         .request(Operation::Write(change))
                         .unwrap();
@@ -1861,7 +1861,7 @@ fn server_operations_match_their_lf_commands() {
                         task: None,
                         wave: None,
                         agent: None,
-                        intent: loopflow::lf::commands::write::SessionOpenIntent::Resume,
+                        intent: loopflow::session::SessionOpenIntent::Resume,
                     });
                     assert_eq!(
                         Path::new(saved["cwd"].as_str().unwrap())
@@ -1883,7 +1883,7 @@ fn server_operations_match_their_lf_commands() {
     // persisted result after dropping the connection while the write is held.
     let lock = rusqlite::Connection::open(&database).unwrap();
     lock.execute_batch("BEGIN IMMEDIATE").unwrap();
-    let mut connection = loopflow::server::client::Connection::open().unwrap();
+    let mut connection = loopflow::machine::client::Connection::open().unwrap();
     connection
         .send(Operation::Write(Write::SessionRename {
             directory: directory.clone(),
@@ -1939,7 +1939,7 @@ fn server_operations_match_their_lf_commands() {
         agent: None,
         approve: false,
     };
-    let refused = loopflow::server::client::Connection::open()
+    let refused = loopflow::machine::client::Connection::open()
         .unwrap()
         .request(loopflow::server::wire::Operation::Write(run))
         .unwrap_err()
@@ -2055,7 +2055,7 @@ impl Server {
         let deadline = std::time::Instant::now() + Duration::from_secs(20);
         // Readiness as a client sees it; `status()` would compare the server's
         // executable with this test binary.
-        while loopflow::server::client::Connection::open().is_err() {
+        while loopflow::machine::client::Connection::open().is_err() {
             assert!(std::time::Instant::now() < deadline, "server did not start");
             std::thread::sleep(Duration::from_millis(20));
         }
@@ -2072,7 +2072,7 @@ impl Drop for Server {
 
 fn server_read(query: loopflow::lf::commands::read::Read) -> Value {
     let kind = serde_json::to_value(&query).unwrap()["kind"].clone();
-    let result = loopflow::server::client::Connection::open()
+    let result = loopflow::machine::client::Connection::open()
         .unwrap()
         .request(loopflow::server::wire::Operation::Read(query))
         .unwrap()
@@ -2101,7 +2101,7 @@ fn assert_declared_result(kind: &str, result: &Value) {
 }
 
 fn server_write(change: loopflow::lf::commands::write::Write) -> Value {
-    loopflow::server::client::Connection::open()
+    loopflow::machine::client::Connection::open()
         .unwrap()
         .request(loopflow::server::wire::Operation::Write(change))
         .unwrap()
@@ -3110,7 +3110,7 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
     }
     drop(reader);
     drop(socket);
-    let mut connection = loopflow::server::client::Connection::open().unwrap();
+    let mut connection = loopflow::machine::client::Connection::open().unwrap();
     let first = connection
         .request(Operation::Write(change.clone()))
         .unwrap()
@@ -3119,7 +3119,7 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
     drop(connection);
     drop(server);
     let _server = Server::start(repo.path(), home.path());
-    let mut connection = loopflow::server::client::Connection::open().unwrap();
+    let mut connection = loopflow::machine::client::Connection::open().unwrap();
     let second = connection
         .request(Operation::Write(change.clone()))
         .unwrap()
@@ -3130,7 +3130,7 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
             .map(|_| {
                 let change = change.clone();
                 scope.spawn(move || {
-                    loopflow::server::client::Connection::open()
+                    loopflow::machine::client::Connection::open()
                         .unwrap()
                         .request(Operation::Write(change))
                         .unwrap()
@@ -3329,7 +3329,7 @@ fn served_session_new_recovers_its_input_after_a_lost_reply_and_restart() {
     }
     drop(reader);
     drop(socket);
-    let result = loopflow::server::client::Connection::open()
+    let result = loopflow::machine::client::Connection::open()
         .unwrap()
         .request(Operation::Write(change.clone()))
         .unwrap()
@@ -3338,7 +3338,7 @@ fn served_session_new_recovers_its_input_after_a_lost_reply_and_restart() {
     assert_eq!(captures(), before + 1);
     drop(server);
     let _server = Server::start(repo.path(), home.path());
-    let again = loopflow::server::client::Connection::open()
+    let again = loopflow::machine::client::Connection::open()
         .unwrap()
         .request(Operation::Write(change))
         .unwrap()

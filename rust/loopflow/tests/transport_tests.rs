@@ -225,7 +225,7 @@ read -r answer < /dev/tty
             ("PATH", "/usr/bin:/bin"),
             ("RUST_LOG", "off"),
         ];
-        let started = loopflow::server::client::Connection::open_at(&self.endpoint("machine"))
+        let started = loopflow::machine::client::Connection::open_at(&self.endpoint("machine"))
             .unwrap()
             .request(loopflow::server::wire::Operation::Server(
                 loopflow::server::wire::ServerOperation::SessionStart {
@@ -1352,7 +1352,7 @@ printf '%s\n' "$answer" >> "$HOME/answers"
     let session = session_of(&fixture.sql(), &fixture.launches(1)[0]);
     let terminal = fixture.terminal_of(&session);
     let attach = |control: bool| {
-        let socket = loopflow::server::client::attach(
+        let socket = loopflow::machine::client::attach(
             &fixture.endpoint("machine"),
             &session.as_str().into(),
         )
@@ -1373,7 +1373,7 @@ printf '%s\n' "$answer" >> "$HOME/answers"
     fixture.held_ends(&terminal);
     assert_eq!(fixture.launches(1).len(), 1);
     assert!(!fixture.home.path().join("answers").exists());
-    assert!(loopflow::server::client::attach(
+    assert!(loopflow::machine::client::attach(
         &fixture.endpoint("machine"),
         &session.as_str().into(),
     )
@@ -1391,7 +1391,7 @@ printf '%s\n' "$answer" >> "$HOME/answers"
     fixture.held_ends(&successor);
     assert_eq!(fixture.launches(2).len(), 2);
     assert_eq!(fixture.wait_file("answers"), "once\n");
-    assert!(loopflow::server::client::attach(
+    assert!(loopflow::machine::client::attach(
         &fixture.endpoint("machine"),
         &session.as_str().into(),
     )
@@ -2163,7 +2163,7 @@ impl<'a> ServerProof<'a> {
         let deadline = Instant::now() + Duration::from_secs(20);
         loop {
             if let Ok(connection) =
-                loopflow::server::client::Connection::open_at(&self.fixture.endpoint("machine"))
+                loopflow::machine::client::Connection::open_at(&self.fixture.endpoint("machine"))
             {
                 if self.remote_address.is_none_or(|address| {
                     std::net::TcpStream::connect_timeout(&address, Duration::from_millis(100))
@@ -2211,9 +2211,9 @@ impl<'a> ServerProof<'a> {
         }
     }
 
-    fn connect(&self) -> loopflow::server::client::Connection {
+    fn connect(&self) -> loopflow::machine::client::Connection {
         let connection =
-            loopflow::server::client::Connection::open_at(&self.fixture.endpoint("machine"))
+            loopflow::machine::client::Connection::open_at(&self.fixture.endpoint("machine"))
                 .unwrap();
         connection
             .set_read_timeout(Some(Duration::from_secs(15)))
@@ -2223,7 +2223,9 @@ impl<'a> ServerProof<'a> {
 
     fn request(&self, operation: Value) -> Value {
         self.connect()
-            .request(serde_json::from_value(operation).unwrap())
+            .request(
+                serde_json::from_value::<loopflow::server::wire::Operation>(operation).unwrap(),
+            )
             .unwrap()
             .result
     }
@@ -2265,7 +2267,9 @@ fn server_task_watch_replaces_readings_across_repositories() {
     let query = json!({"kind":"view.select","expression":"kind:task state:open"});
     let mut watch = service.connect();
     let tasks = watch
-        .subscribe(serde_json::from_value(query.clone()).unwrap())
+        .subscribe(
+            serde_json::from_value::<loopflow::lf::commands::read::Read>(query.clone()).unwrap(),
+        )
         .unwrap();
     let first = watch.reading(&tasks).unwrap().expect("a reading");
     let contents = |frame: &Value| -> Vec<Value> {
@@ -2570,7 +2574,9 @@ fn server_mobile_changes_preserve_local_connections_and_saved_disable() {
     let roadmap = json!({"kind":"plan.list","directory":"/","wave":null,"task":null,"all":true});
     let mut watch = service.connect();
     let watched = watch
-        .subscribe(serde_json::from_value(roadmap.clone()).unwrap())
+        .subscribe(
+            serde_json::from_value::<loopflow::lf::commands::read::Read>(roadmap.clone()).unwrap(),
+        )
         .unwrap();
     let initial = watch.reading(&watched).unwrap().expect("a reading");
     assert!(initial["unavailable"].is_null(), "{initial}");
@@ -2583,8 +2589,10 @@ fn server_mobile_changes_preserve_local_connections_and_saved_disable() {
     let mut abandoned = service.connect();
     abandoned
         .send(
-            serde_json::from_value(json!({"kind":"mobile.configure","configuration":proposed}))
-                .unwrap(),
+            serde_json::from_value::<loopflow::server::wire::Operation>(
+                json!({"kind":"mobile.configure","configuration":proposed}),
+            )
+            .unwrap(),
         )
         .unwrap();
     assert_eq!(fixture.wait_file("certificate-requested"), "ready");
@@ -3896,7 +3904,7 @@ fn session_attach_waits_for_a_holder_stopped_at_server_startup() {
     signal(libc::SIGCONT);
     let deadline = Instant::now() + Duration::from_secs(30);
     let mut socket = loop {
-        match loopflow::server::client::attach(&fixture.endpoint("machine"), &session) {
+        match loopflow::machine::client::attach(&fixture.endpoint("machine"), &session) {
             Ok(socket) => break socket,
             Err(failure) => {
                 let waiting = refused(failure);

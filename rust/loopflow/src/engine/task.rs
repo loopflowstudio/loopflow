@@ -14,9 +14,9 @@ use std::time::Duration;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use super::{launch, Error, ErrorCode, Result};
-use crate::lf::commands::subscribe::{Subscription, Transport};
 use crate::ops::task::{TaskControlResult, TaskSnapshot, TaskWaitUntil};
 use crate::ops::task_ownership::OwnershipChange;
+use crate::read_stream::{Subscription, Transport};
 use loopflow_model::comment::TaskComments;
 use loopflow_model::durable::TaskOwnership;
 use loopflow_model::id::LfProcessId;
@@ -284,10 +284,10 @@ pub fn subscribe_wait(
     until: TaskWaitUntil,
     transport: Transport,
 ) -> anyhow::Result<Option<Subscription>> {
-    crate::lf::commands::subscribe::start(
+    crate::read_stream::start(
         (issue, until),
         |store, (issue, until): (String, TaskWaitUntil)| async move {
-            let store = crate::lf::commands::subscribe::require_store(store)?;
+            let store = crate::read_stream::require_store(store)?;
             match crate::ops::task::task_wait_reading(&store, &issue, until).await? {
                 Some((task, reached)) => Ok(Waited { reached, task }),
                 None => Err(missing(&issue).into()),

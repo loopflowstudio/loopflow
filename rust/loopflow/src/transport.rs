@@ -375,7 +375,7 @@ pub(crate) fn start_held(
     session: Option<&LfSessionId>,
     inherit: &dyn Fn(&mut Command),
 ) -> Result<TerminalId> {
-    use crate::server::wire::{Operation, ServerOperation, SessionStarted};
+    use crate::machine::wire::{ServerOperation, SessionStarted};
     let mut edits = Command::new(&argv[0]);
     inherit(&mut edits);
     let mut env: std::collections::BTreeMap<_, _> = std::env::vars_os().collect();
@@ -391,8 +391,8 @@ pub(crate) fn start_held(
         .collect();
     let (rows, cols) = size();
     crate::harness::agent_process::require_server()?;
-    let mut server = crate::server::client::Connection::open()?;
-    let answer = server.request(Operation::Server(ServerOperation::SessionStart {
+    let mut server = crate::machine::client::Connection::open()?;
+    let answer = server.request(ServerOperation::SessionStart {
         session: session.cloned(),
         request: uuid::Uuid::new_v4().to_string(),
         argv: argv.to_vec(),
@@ -401,7 +401,7 @@ pub(crate) fn start_held(
         rows,
         cols,
         placement: crate::session_record::current_terminal_id(),
-    }))?;
+    })?;
     let started: SessionStarted = serde_json::from_value(answer.result)
         .context("Loopflow server answered session.start without a terminal")?;
     Ok(started.terminal_id)
@@ -2300,7 +2300,7 @@ fn record_relay_terminal(held: &TerminalId) -> Result<()> {
     }
     if let Some(attachment) = store.session_attachment(&session)? {
         let terminal = crate::session_record::current_terminal_id()
-            .or_else(crate::lf::commands::open::host_placement);
+            .or_else(crate::terminal_host::host_placement);
         store.record_session_terminal(&session, &attachment, terminal.as_deref())?;
     }
     Ok(())

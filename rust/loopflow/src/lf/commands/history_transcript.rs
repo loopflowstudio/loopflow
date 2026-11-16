@@ -351,7 +351,8 @@ pub(crate) fn search(
     json: bool,
 ) -> Result<()> {
     anyhow::ensure!(!query.trim().is_empty(), "Search text is empty");
-    let since = super::util::parse_since(since, time::OffsetDateTime::now_utc())?.unix_timestamp();
+    let since =
+        crate::output::parse_since(since, time::OffsetDateTime::now_utc())?.unix_timestamp();
     let mut results = SearchResults {
         query: query.to_owned(),
         since,

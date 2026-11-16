@@ -396,7 +396,7 @@ def main() -> None:
         Path(__file__),
         Path("rust/loopflow/src/server/subscription_measurement.rs"),
         Path("rust/loopflow/src/performance/subscription_measurement.rs"),
-        Path("rust/loopflow/src/lf/commands/subscribe.rs"),
+        Path("rust/loopflow/src/read_stream.rs"),
         Path("rust/loopflow/src/server/service.rs"),
     ]
     metadata = dict(

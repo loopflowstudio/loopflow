@@ -6,7 +6,8 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use serde_json::Value;
 
-use super::{subscribe, waves};
+use super::waves;
+use crate::read_stream as subscribe;
 
 pub fn run(repo: &Path, issue: Option<&str>, once: bool) -> Result<()> {
     let status = crate::ops::task::task_status(repo, issue)?;

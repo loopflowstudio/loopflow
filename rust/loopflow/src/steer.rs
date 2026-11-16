@@ -147,3 +147,15 @@ pub(crate) fn idle_conversations(
         })
         .collect())
 }
+
+/// Publication is local; Session claims and receipts never enter planning sync.
+pub async fn save_steer(
+    store: &crate::store::SharedStore,
+    wave: &str,
+    author: &str,
+    message: &str,
+) -> anyhow::Result<crate::steer::Steer> {
+    let wave = crate::work::wave::context::resolve_in(store, &std::env::current_dir()?, Some(wave))
+        .await?;
+    Ok(store.sqlite.save_wave_steer(wave.id(), author, message)?)
+}

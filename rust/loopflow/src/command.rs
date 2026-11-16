@@ -70,3 +70,16 @@ pub fn run_command(cmd: &mut Command) -> Result<Output, CommandError> {
         Err(CommandError::from_output(command, args, &output))
     }
 }
+
+/// A command's streams belong to its caller, never to the server process.
+pub struct CommandIo<'a> {
+    pub input: &'a mut dyn io::Read,
+    pub output: &'a mut dyn io::Write,
+    pub error: &'a mut dyn io::Write,
+}
+
+impl std::fmt::Debug for CommandIo<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CommandIo").finish_non_exhaustive()
+    }
+}

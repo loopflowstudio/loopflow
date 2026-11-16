@@ -193,7 +193,7 @@ impl Forward {
         self,
         cli: &Cli,
         directory: &Path,
-        io: &mut super::mutation::CommandIo<'_>,
+        io: &mut crate::command::CommandIo<'_>,
     ) -> Result<()> {
         // `directory` selected Work on this host. Its spelling is not a
         // destination path; the route carries the repository's portable ID.
@@ -280,7 +280,7 @@ pub fn forward(cli: &Cli, args: &[String], directory: &Path) -> Result<Option<Fo
         return Ok(None);
     }
     if !crate::journal::request::active()
-        && std::env::var_os(super::ssh::EXPECTED_MACHINE_ID_ENV).is_some()
+        && std::env::var_os(crate::machine::ssh::EXPECTED_MACHINE_ID_ENV).is_some()
     {
         return Err(anyhow!("Task {selector} resolves to Machine {} on the destination; reconcile its planning/location before retrying (no work was started)", route.machine_id));
     }
@@ -392,7 +392,7 @@ pub(crate) fn run_remote(
         args,
         Some(route),
         directory,
-        Some(&mut super::mutation::CommandIo {
+        Some(&mut crate::command::CommandIo {
             input: &mut std::io::empty(),
             output: &mut output,
             error: &mut error,
@@ -443,7 +443,7 @@ fn moved_session(cli: &Cli, args: &[String]) -> Result<Option<Forward>> {
         return Ok(None);
     };
     if !crate::journal::request::active()
-        && std::env::var_os(super::ssh::EXPECTED_MACHINE_ID_ENV).is_some()
+        && std::env::var_os(crate::machine::ssh::EXPECTED_MACHINE_ID_ENV).is_some()
     {
         return Ok(None);
     }
@@ -503,7 +503,7 @@ fn primary_session(cli: &Cli, args: &[String], directory: &Path) -> Result<Optio
         return Ok(None);
     };
     if !crate::journal::request::active()
-        && std::env::var_os(super::ssh::EXPECTED_MACHINE_ID_ENV).is_some()
+        && std::env::var_os(crate::machine::ssh::EXPECTED_MACHINE_ID_ENV).is_some()
     {
         return Ok(None);
     }

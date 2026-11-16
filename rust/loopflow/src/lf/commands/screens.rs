@@ -244,7 +244,7 @@ pub fn session_card(id: &str) -> Result<SessionCard> {
 }
 
 pub fn print(read: super::read::Read) -> Result<()> {
-    println!("{}", super::subscribe::selected_answer(&read.read()?)?);
+    println!("{}", crate::read_stream::selected_answer(&read.read()?)?);
     Ok(())
 }
 

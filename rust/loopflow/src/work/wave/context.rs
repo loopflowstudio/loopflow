@@ -380,6 +380,33 @@ pub(crate) fn planning_wave(
     }
 }
 
+/// The Wave `requested` names, as a command run in `directory` resolves it.
+pub async fn resolve_in(
+    store: &crate::store::SharedStore,
+    directory: &Path,
+    requested: Option<&str>,
+) -> anyhow::Result<Wave> {
+    // One shared rule for `--wave` and ambient `LF_WAVE_ID`: durable UUID or
+    // repository-scoped registered name. Status consumes the resolved row
+    // directly, so no second lookup can cross repositories.
+    let repo = crate::repo::discover_repo_root(directory)?;
+    crate::work::wave::context::resolve_managed_wave(
+        Some(&**store),
+        repo.as_deref(),
+        requested,
+        ambient_wave().as_deref(),
+    )
+    .await
+    .map_err(|err| anyhow::anyhow!("{err}"))
+}
+
+pub(crate) fn ambient_wave() -> Option<String> {
+    std::env::var(crate::work::wave::context::WAVE_ID_ENV)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use super::super::wire::{frame, parse_position, Decoder, Incoming, Own, Request, Tag};
 use super::{connect, Registry, Start};
 use crate::journal::TestLedgerGuard;
-use crate::server::holder::{serve, Place};
+use crate::terminal_holder::{serve, Place};
 use loopflow_model::id::{LfSessionId, TerminalId};
 
 /// Stands in for the executable hash both the holder and the server compute.
@@ -21,7 +21,7 @@ fn holder() -> Place {
     let (ready, listening) = std::sync::mpsc::channel();
     let served = place.clone();
     std::thread::spawn(move || {
-        crate::server::holder::TEST_IDLE.set(Duration::from_secs(60));
+        crate::terminal_holder::TEST_IDLE.set(Duration::from_secs(60));
         serve(&served, BUILD, move || ready.send(()).unwrap()).unwrap()
     });
     listening.recv_timeout(Duration::from_secs(10)).unwrap();
@@ -180,7 +180,7 @@ fn an_interrupted_paste_ends_before_the_next_view_types() {
         next.type_in(b"next\n");
         next.wait_for("reply:next");
         wait_until("paste child exit receipt", || {
-            crate::server::holder::recorded_exit(&place, terminal.as_str())
+            crate::terminal_holder::recorded_exit(&place, terminal.as_str())
                 .unwrap()
                 .is_some()
         });
@@ -215,7 +215,7 @@ fn a_held_terminal_outlives_the_server_that_started_it() {
     // The server goes; the child and its PTY stay with the holder.
     first.close();
     drop(view);
-    let held = crate::server::holder::client::Client::connect(&place)
+    let held = crate::terminal_holder::client::Client::connect(&place)
         .unwrap()
         .list()
         .unwrap();
@@ -301,7 +301,7 @@ fn a_resumed_session_gets_a_new_terminal_and_the_old_position_is_refused() {
     let refused = connect(&ended).unwrap_err();
     let refused = refused.downcast_ref::<crate::engine::Error>().unwrap();
     assert_eq!(refused.code, crate::engine::ErrorCode::NotFound);
-    let unheld = crate::server::holder::client::Client::connect(&place)
+    let unheld = crate::terminal_holder::client::Client::connect(&place)
         .unwrap()
         .read(ended.as_str(), left)
         .unwrap_err();
@@ -322,13 +322,13 @@ fn an_exit_with_no_server_running_is_settled_by_the_next_one() {
         .start(shell(None, "request-1", "read line; exit 4"))
         .unwrap();
     first.close();
-    let mut input = crate::server::holder::client::Client::connect(&place)
+    let mut input = crate::terminal_holder::client::Client::connect(&place)
         .unwrap()
         .write(terminal.as_str())
         .unwrap();
     input.write_all(b"go\n").unwrap();
     wait_until("the holder to see the exit", || {
-        crate::server::holder::recorded_exit(&place, terminal.as_str())
+        crate::terminal_holder::recorded_exit(&place, terminal.as_str())
             .unwrap()
             .is_some()
     });
@@ -388,13 +388,13 @@ fn an_exit_record_kept_while_no_server_ran_is_settled_by_the_next_one() {
         .unwrap();
     let attachment = kept_exit_record(&place, &terminal);
     first.close();
-    let mut input = crate::server::holder::client::Client::connect(&place)
+    let mut input = crate::terminal_holder::client::Client::connect(&place)
         .unwrap()
         .write(terminal.as_str())
         .unwrap();
     input.write_all(b"go\n").unwrap();
     wait_until("the holder to see the exit", || {
-        crate::server::holder::recorded_exit(&place, terminal.as_str())
+        crate::terminal_holder::recorded_exit(&place, terminal.as_str())
             .unwrap()
             .is_some()
     });
@@ -437,15 +437,15 @@ const COUNTER: &str = "i=0; while :; do i=$((i+1)); printf 'tick:%d\\n' $i; slee
 
 /// The PTY bytes the holder keeps for `terminal` from `from` up to `until`.
 fn ring(place: &Place, terminal: &TerminalId, from: u64, until: u64) -> Vec<u8> {
-    let mut output = crate::server::holder::client::Client::connect(place)
+    let mut output = crate::terminal_holder::client::Client::connect(place)
         .unwrap()
         .read(terminal.as_str(), from)
         .unwrap();
     let mut bytes = Vec::new();
     while from + (bytes.len() as u64) < until {
         match output.frame().unwrap() {
-            crate::server::holder::wire::Frame::Out(out) => bytes.extend(out),
-            crate::server::holder::wire::Frame::Mode(_) => {}
+            crate::terminal_holder::wire::Frame::Out(out) => bytes.extend(out),
+            crate::terminal_holder::wire::Frame::Mode(_) => {}
             other => panic!("unexpected holder frame {other:?}"),
         }
     }
@@ -454,7 +454,7 @@ fn ring(place: &Place, terminal: &TerminalId, from: u64, until: u64) -> Vec<u8> 
 }
 
 fn kill(place: &Place, terminal: &TerminalId) {
-    let held = crate::server::holder::client::Client::connect(place)
+    let held = crate::terminal_holder::client::Client::connect(place)
         .unwrap()
         .list()
         .unwrap();
@@ -531,7 +531,7 @@ fn a_view_the_ring_no_longer_reaches_is_painted_afresh() {
         ))
         .unwrap();
     wait_until("the ring to pass its start", || {
-        crate::server::holder::client::Client::connect(&place)
+        crate::terminal_holder::client::Client::connect(&place)
             .unwrap()
             .list()
             .unwrap()
@@ -542,7 +542,7 @@ fn a_view_the_ring_no_longer_reaches_is_painted_afresh() {
     view.wait_for(LIVE);
     assert!(view.tags.contains(&Tag::Snapshot), "{:?}", view.tags);
     let at = view.position.unwrap();
-    let ring_start = crate::server::holder::client::Client::connect(&place)
+    let ring_start = crate::terminal_holder::client::Client::connect(&place)
         .unwrap()
         .list()
         .unwrap()[0]
@@ -639,7 +639,7 @@ read answer",
     store
         .bind_session_terminal(session.id.as_str(), &attachment, &terminal)
         .unwrap();
-    let pid = crate::server::holder::client::Client::connect(&place)
+    let pid = crate::terminal_holder::client::Client::connect(&place)
         .unwrap()
         .list()
         .unwrap()

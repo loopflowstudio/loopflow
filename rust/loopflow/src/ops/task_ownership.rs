@@ -121,7 +121,7 @@ pub fn runs_elsewhere(ownership: &TaskOwnership, local: &MachineId) -> Option<St
     Some(format!(
         "Runs on {} since {}",
         machine.name(),
-        crate::lf::output::format_time(since)
+        crate::output::format_time(since)
     ))
 }
 
@@ -185,7 +185,7 @@ pub(crate) fn describe_check(
         .map_or_else(|| from.to_string(), |machine| machine.name());
     Ok(Some(format!(
         "Checked move from {from} at {}\n  retry: lf task move {identifier} --machine {}",
-        crate::lf::output::format_time(check.at),
+        crate::output::format_time(check.at),
         crate::store::ownership::local_label(),
     )))
 }
@@ -231,7 +231,7 @@ fn moving_to(store: &SqliteStore, moving: &MoveInFlight) -> StoreResult<(String,
     };
     let line = format!(
         "Moving to {place} since {}: {progress}",
-        crate::lf::output::format_time(moving.at)
+        crate::output::format_time(moving.at)
     );
     Ok((place, line))
 }
@@ -247,7 +247,7 @@ pub fn render(ownership: &TaskOwnership) -> String {
     for entry in &ownership.log {
         lines.push(format!(
             "  {}  {}  {}",
-            crate::lf::output::format_time(entry.at),
+            crate::output::format_time(entry.at),
             entry.kind.label(),
             entry.owner()
         ));

@@ -52,7 +52,9 @@ same Mac connects; create it only on a Mac with one account. Setup saves the end
 Machine-local `mobile.yaml`, using the shared atomic file writer. It does not
 add service state to `config.yaml` or the preferences catalogue.
 
-`wire.rs` owns the Rust types; `swift/Loopflow/Services/ServerProtocol.swift`
+`machine/wire.rs` owns the envelope, endpoint and native request types;
+`server/wire.rs` instantiates the envelope with the CLI read/write operations.
+The Machine client and runtime depend on those values without importing dispatch; `swift/Loopflow/Services/ServerProtocol.swift`
 mirrors them. Executable fixtures live in `rust/loopflow/tests/fixtures/dto/server/`.
 `nc -U machine.sock` is a debugging tool: type `{"type":"status"}`.
 

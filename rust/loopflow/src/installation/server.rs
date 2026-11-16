@@ -9,16 +9,16 @@ use std::path::Path;
 use std::process::Command;
 use std::time::{Duration, Instant};
 
-pub fn ensure() -> Result<crate::server::client::Status> {
+pub fn ensure() -> Result<crate::machine::client::Status> {
     let lock = fs::OpenOptions::new()
         .create(true)
         .truncate(false)
         .read(true)
         .write(true)
         .mode(0o600)
-        .open(crate::server::socket_path()?.with_extension("install-lock"))?;
+        .open(crate::machine::socket_path()?.with_extension("install-lock"))?;
     lock.lock_exclusive()?;
-    let before = crate::server::client::status()?;
+    let before = crate::machine::client::status()?;
     if before.ready {
         return Ok(before);
     }
@@ -27,7 +27,7 @@ pub fn ensure() -> Result<crate::server::client::Status> {
     register(&home, &executable, before.listening)?;
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
-        let status = crate::server::client::status()?;
+        let status = crate::machine::client::status()?;
         if status.ready {
             return Ok(status);
         }
@@ -232,7 +232,7 @@ fn checked(command: &mut Command) -> Result<()> {
 /// promotion lock is released. First installation remains demand-driven.
 pub fn refresh_after_promotion() {
     let refresh = || -> Result<()> {
-        if !crate::server::socket_path()?.exists() {
+        if !crate::machine::socket_path()?.exists() {
             return Ok(());
         }
         let executable = crate::installation::installed_cli()?;

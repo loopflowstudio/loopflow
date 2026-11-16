@@ -298,7 +298,7 @@ fn launch_environment(
         "LF_SETTINGS",
         "LF_TRACE_ID",
         "LF_PROCESS_ID",
-        crate::lf::WORK_DECLARATION_ENV,
+        crate::ops::WORK_DECLARATION_ENV,
     ]
     .into_iter()
     .filter_map(|key| std::env::var(key).ok().map(|value| (key, value)))
@@ -322,7 +322,7 @@ fn shell_command(cwd: &Path, argv: &[String], env: &[(&str, &str)]) -> String {
         .join(" ");
     let env = env
         .iter()
-        .filter(|(key, value)| *key != crate::lf::WORK_DECLARATION_ENV || !value.is_empty())
+        .filter(|(key, value)| *key != crate::ops::WORK_DECLARATION_ENV || !value.is_empty())
         .map(|(key, value)| format!("{}={}", shell_escape(key), shell_escape(value)))
         .collect::<Vec<_>>()
         .join(" ");
@@ -344,7 +344,7 @@ fn shell_command(cwd: &Path, argv: &[String], env: &[(&str, &str)]) -> String {
 /// session starts without any of it and receives only what its launch names.
 const PROCESS_CONTEXT_ENV: &[&str] = &[
     crate::config::AGENT_OVERRIDE_ENV,
-    crate::lf::WORK_DECLARATION_ENV,
+    crate::ops::WORK_DECLARATION_ENV,
     crate::ops::human_session::HUMAN_SESSION_ENV,
     crate::ops::human_session::PREPARED_CAPTURE_ENV,
     "LF_RUN_DIR",
@@ -359,7 +359,7 @@ const PROCESS_CONTEXT_ENV: &[&str] = &[
     crate::session_record::PROVIDER_ACCOUNT_ID_ENV,
     crate::ops::graph_process::GRAPH_ID_ENV,
     crate::installation::INSTALL_SWITCH_ENV,
-    crate::lf::commands::ssh::EXPECTED_MACHINE_ID_ENV,
+    crate::machine::ssh::EXPECTED_MACHINE_ID_ENV,
     "LF_TERMINAL_ID",
     "LF_TERMINAL_TTY",
     "LOOPFLOW_DIRECTIVE_FILE",

@@ -294,7 +294,7 @@ pub fn write(
     command: Option<&PortfolioCommand>,
     json: bool,
     directory: &Path,
-    io: &mut crate::lf::commands::mutation::CommandIo<'_>,
+    io: &mut crate::command::CommandIo<'_>,
 ) -> Result<()> {
     let portfolio = match command {
         Some(command) => change(command, directory)?,

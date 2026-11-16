@@ -290,8 +290,8 @@ impl LfProcessRuntime {
             CAPTURE_KEY_ENV.to_string(),
             runtime.recorder.manifest.artifact_key.to_string(),
         )]);
-        if let Ok(declaration) = std::env::var(crate::lf::WORK_DECLARATION_ENV) {
-            environment.insert(crate::lf::WORK_DECLARATION_ENV.to_string(), declaration);
+        if let Ok(declaration) = std::env::var(crate::ops::WORK_DECLARATION_ENV) {
+            environment.insert(crate::ops::WORK_DECLARATION_ENV.to_string(), declaration);
         }
         if let Some((_, session, attachment)) = &runtime.owner {
             environment.insert(

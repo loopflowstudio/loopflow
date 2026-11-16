@@ -37,7 +37,7 @@ async fn observe_peer(
     request: &str,
 ) -> TaskLocationObservation {
     let result = async {
-        let bytes = crate::lf::commands::ssh::request(
+        let bytes = crate::machine::ssh::request(
             machine,
             &[
                 "--repo-id".into(),

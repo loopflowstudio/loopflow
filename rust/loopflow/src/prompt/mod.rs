@@ -3,6 +3,7 @@
 //! This module handles gathering all context components (docs, diff, clipboard, etc.)
 //! and assembling them into a formatted prompt.
 
+pub(crate) mod attribution;
 pub mod context_budget;
 pub mod process;
 pub mod structured_reply;

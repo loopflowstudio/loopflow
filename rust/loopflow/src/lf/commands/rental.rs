@@ -785,7 +785,7 @@ fn checkout_script(
         .file_name()
         .and_then(|name| name.to_str())
         .ok_or_else(|| anyhow!("{} has no directory name", repo.display()))?;
-    let q = super::ssh::sh_quote;
+    let q = crate::machine::ssh::sh_quote;
     // gh clones `owner/name` over HTTPS with the GitHub login just connected;
     // handed an SSH origin it would use SSH, which a fresh machine cannot verify.
     let clone = match crate::git::worktrees::github_nwo(&origin) {
@@ -804,7 +804,7 @@ fn checkout_script(
         .collect();
     let script = format!(
         "{} && {identity}mkdir -p ~/src && cd ~/src && {{ [ -d {dir} ] || {clone} {dir}; }} && cd {dir} && lf config repo --bind {repository}",
-        super::machine::REMOTE_PATH,
+        crate::machine::ssh::REMOTE_PATH,
         dir = q(directory),
     );
     Ok((origin, script))
@@ -1053,8 +1053,8 @@ fn copy_up(sqlite: &SqliteStore, rental: &Rental, machine: &Machine) -> anyhow::
         .format(&time::format_description::well_known::Rfc3339)?;
     let script = format!(
         "{}; lf history export --since {}",
-        super::machine::REMOTE_PATH,
-        super::ssh::sh_quote(&since)
+        crate::machine::ssh::REMOTE_PATH,
+        crate::machine::ssh::sh_quote(&since)
     );
     let output = Command::new("ssh")
         .args(crate::machine_route::bounded_ssh_args(

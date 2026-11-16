@@ -43,8 +43,6 @@
   crate needs them; the alternative (all saved records in `loopflow-model`)
   widens every record edit's rebuild to the terminal. Steer markers count as
   storage's own files and keep their touch inside the write transaction.
-- After the storage crate moves, measure before choosing the next cut: `ops` and
-  `lf` (about 123k of 331k lines) stay in the application either way.
 - Capacity commands retain the configuration editor's file lock through the SQL
   command. This serializes declaration removal with admission without extending a
   SQL transaction across file acquisition; the same file editor handles ordinary
@@ -102,3 +100,13 @@
 - The clean-to-dirty lower-crate provenance check now passes with the production
   build script and real Cargo. It is independent of the older sequential
   shipping/Task-record timing cases.
+
+- November 15 native/Machine cut: use a generic protocol envelope instantiated
+  with typed CLI operations only at dispatch. Native clients serialize their own
+  typed operation values, and the peer keeps validation. Wire fields/revision,
+  native provider byte paths and readiness remain unchanged. This removes the
+  client dependency on `Read`/`Write` without a second protocol implementation.
+- Landing-command semantics currently depend on full Clap normalization. Keep
+  alias/abbreviation/global-flag behavior when supplying typed catalogue values;
+  no prefix-based command classifier is selected. Application provenance must
+  enter the reusable execution library as an input, not as compiled root bytes.

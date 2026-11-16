@@ -3934,7 +3934,7 @@ fn a_moved_session_clones_its_repository_where_none_is_checked_out() {
 #[test]
 fn served_ownership_routes_to_its_writer_and_never_falls_back_locally() {
     use loopflow::lf::commands::write::Write as Mutation;
-    use loopflow::server::client::Connection;
+    use loopflow::machine::client::Connection;
     use loopflow::server::wire::Operation;
     use std::io::Read;
     use std::time::{Duration, Instant};
@@ -4181,7 +4181,7 @@ read -r answer < /dev/tty
         fixture.root.path().join("bin").display()
     );
     let started =
-        loopflow::server::client::Connection::open_at(&server_socket(&local_home, "machine"))
+        loopflow::machine::client::Connection::open_at(&server_socket(&local_home, "machine"))
             .unwrap()
             .request(loopflow::server::wire::Operation::Server(
                 loopflow::server::wire::ServerOperation::SessionStart {

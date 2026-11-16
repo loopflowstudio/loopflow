@@ -518,11 +518,11 @@ fn remote_inspect(machine: &Machine, args: &[&str]) -> Result<bool> {
 fn remote_command(machine: &Machine, args: &[&str], input: Option<&[u8]>) -> Result<Vec<u8>> {
     let script = format!(
         "{}; export {}={}; exec lf {}",
-        super::machine::REMOTE_PATH,
-        super::ssh::EXPECTED_MACHINE_ID_ENV,
-        super::ssh::sh_quote(machine.id.as_str()),
+        crate::machine::ssh::REMOTE_PATH,
+        crate::machine::ssh::EXPECTED_MACHINE_ID_ENV,
+        crate::machine::ssh::sh_quote(machine.id.as_str()),
         args.iter()
-            .map(|arg| super::ssh::sh_quote(arg))
+            .map(|arg| crate::machine::ssh::sh_quote(arg))
             .collect::<Vec<_>>()
             .join(" "),
     );

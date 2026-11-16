@@ -32,7 +32,7 @@ pub enum Receiver {
 /// The receiver's argv before the URL: `lf open` without terminal-host context.
 fn receiver_argv(lf: &Path) -> Vec<String> {
     let mut argv = vec!["/usr/bin/env".to_owned()];
-    for name in crate::lf::commands::open::HOST_CONTEXT {
+    for name in crate::terminal_host::HOST_CONTEXT {
         argv.extend(["-u".to_owned(), (*name).to_owned()]);
     }
     argv.extend([lf.display().to_string(), "open".into(), "--".into()]);
@@ -329,7 +329,7 @@ mod tests {
     fn receiver_passes_only_the_url_to_lf_open() {
         let argv = receiver_argv(Path::new("/opt/lf bin/lf"));
         assert_eq!(&argv[argv.len() - 3..], ["/opt/lf bin/lf", "open", "--"]);
-        for name in crate::lf::commands::open::HOST_CONTEXT {
+        for name in crate::terminal_host::HOST_CONTEXT {
             assert!(argv.windows(2).any(|pair| pair == ["-u", *name]));
         }
     }

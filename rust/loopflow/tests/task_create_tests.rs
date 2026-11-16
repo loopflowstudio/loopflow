@@ -5,7 +5,7 @@ use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
 use crate::support;
-use loopflow::server::client::Connection;
+use loopflow::machine::client::Connection;
 use loopflow_test_support::TestRepo;
 use sha2::{Digest, Sha256};
 

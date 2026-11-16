@@ -35,8 +35,8 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::machine::wire::SubscriptionEvent;
 use crate::observe::{Cache, Dependencies};
-use crate::server::wire::SubscriptionEvent;
 use crate::store::{SharedStore, StorageConfig};
 use loopflow_storage::changes::StoreChanges;
 use loopflow_storage::sqlite::StoreRevisions;

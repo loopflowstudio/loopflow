@@ -1411,8 +1411,7 @@ fn busy(id: &str, limit: &str, max: usize) -> ServerMessage {
 /// Recomputing it needs no retained payloads or disconnected subscriptions.
 pub(super) fn reading_checkpoint(scope: &[u8], frame: &serde_json::Value) -> Result<String> {
     use sha2::{Digest, Sha256};
-    let reading =
-        crate::lf::commands::subscribe::identity(frame["unavailable"].as_str(), frame.get("body"))?;
+    let reading = crate::read_stream::identity(frame["unavailable"].as_str(), frame.get("body"))?;
     let mut hash = Sha256::new();
     hash.update(scope);
     hash.update(reading);

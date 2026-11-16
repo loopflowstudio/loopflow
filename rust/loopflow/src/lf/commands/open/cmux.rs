@@ -13,20 +13,7 @@ use loopflow_storage::work::selection::SplitAxis;
 /// The app bundles its CLI without adding it to PATH.
 const BUNDLED: &str = "/Applications/cmux.app/Contents/Resources/bin/cmux";
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
-pub(super) struct CmuxLocation {
-    socket: String,
-    workspace: String,
-}
-
-impl CmuxLocation {
-    pub(super) fn current() -> Option<Self> {
-        Some(Self {
-            socket: std::env::var("CMUX_SOCKET_PATH").ok()?,
-            workspace: std::env::var("CMUX_WORKSPACE_ID").ok()?,
-        })
-    }
-}
+use crate::terminal_host::CmuxLocation;
 
 pub(super) struct Cmux {
     cli: PathBuf,

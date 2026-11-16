@@ -14,10 +14,10 @@ use crate::graph::ConcreteStep;
 use crate::graph::ConcreteXor;
 use crate::graph::GraphDefinition;
 use crate::journal::{self, LfEventFields, LfEventType, LfNode};
-use crate::lf::output::Colors;
 use crate::lf::{Cli, Commands, PrCommand};
 use crate::ops::graph_process;
 use crate::ops::WorkBinding;
+use crate::output::Colors;
 use crate::process::launch_log::{release_launcher, PendingLog};
 use crate::store::SharedStore;
 use anyhow::{Context, Result};
@@ -267,7 +267,7 @@ pub fn run_task_graph_for(
                 {
                     eprintln!(
                         "The run of {run} is waiting on a limit until {}; it starts again at {step} then.",
-                        crate::lf::output::format_time(retry_at),
+                        crate::output::format_time(retry_at),
                     );
                     return Err(exit_of(status).into());
                 }

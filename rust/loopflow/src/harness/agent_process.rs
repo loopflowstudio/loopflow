@@ -121,7 +121,7 @@ pub(crate) fn spawn_native(
 /// will need it to. A stopped server is started the way a managed view starts
 /// it: by the selected installation, never by this build.
 pub(crate) fn require_server() -> Result<()> {
-    use crate::server::client::Connection;
+    use crate::machine::client::Connection;
     if Connection::open().is_ok() {
         return Ok(());
     }
@@ -855,8 +855,8 @@ mod tests {
         (session.id.to_string(), ghost, attachment.agent_process_id)
     }
 
-    fn lineage(store: &SqliteStore) -> crate::lf::commands::doctor::Check {
-        crate::lf::commands::doctor::check_lineage(
+    fn lineage(store: &SqliteStore) -> crate::process::diagnosis::Check {
+        crate::process::diagnosis::check_lineage(
             &store.processes_since(0).unwrap(),
             store.unrecorded_agent_ancestry().unwrap().len(),
         )
@@ -918,7 +918,7 @@ mod tests {
         assert_eq!(fact["unrecorded_parent_lf_process_id"], ghost.as_str());
         assert_eq!(fact["released_attached_lf_process_id"], ghost.as_str());
         assert_eq!(events(&sql), before + 1);
-        assert!(lineage(&store).status == crate::lf::commands::doctor::Status::Ok);
+        assert!(lineage(&store).status == crate::process::diagnosis::Status::Ok);
 
         let rerun = super::repair_unrecorded_ancestry_in(&store, Some(&resumer), false).unwrap();
         assert!(rerun.records.is_empty());
@@ -937,7 +937,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(thread.as_deref(), Some("thread-1"));
-        assert!(lineage(&store).status == crate::lf::commands::doctor::Status::Ok);
+        assert!(lineage(&store).status == crate::process::diagnosis::Status::Ok);
     }
 
     #[test]
@@ -967,7 +967,7 @@ mod tests {
         let report = super::repair_unrecorded_ancestry_in(&store, None, false).unwrap();
         assert!(report.records.is_empty());
         let check = lineage(&store);
-        assert!(check.status == crate::lf::commands::doctor::Status::Fail);
+        assert!(check.status == crate::process::diagnosis::Status::Fail);
         assert!(!check.detail.contains("lf monitor prune"), "{check:?}");
     }
 
@@ -988,7 +988,7 @@ mod tests {
             let agent = store.agent_process(&attachment.agent_process_id)?.unwrap();
             assert_eq!(agent.trace_id, parent.trace_id);
             assert!(parent.command.is_some());
-            assert!(lineage(&store).status == crate::lf::commands::doctor::Status::Ok);
+            assert!(lineage(&store).status == crate::process::diagnosis::Status::Ok);
             Ok(())
         })
         .unwrap();

@@ -4,7 +4,7 @@
 //! `build_prompt` → `build_prompt_at`: it selects the command line's settings,
 //! loads personal and repository config at the checkout, and
 //! `prepare_process_prompt` returns the `AgentConfig`. `launch_session`
-//! (`lf/commands/util.rs`) and the Claude stream (`harness/claude.rs`) turn
+//! (`harness/native_session.rs`) and the Claude stream (`harness/claude.rs`) turn
 //! that into argv with `build_session_command`. `lf session resume` selects the
 //! command line's settings in `bin/lf.rs`; `resume_session_with_env` then calls
 //! `resolve_session_config(session, serde_yaml_ng::Value::Null, None, false)` and

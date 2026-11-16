@@ -1,6 +1,3 @@
-/// Explicit Work declaration inherited by descendants; checkout inference never writes it.
-pub const WORK_DECLARATION_ENV: &str = "LF_AS";
-
 /// The caller's prompt and provider flags for the Task Graph it launches.
 #[doc(hidden)]
 use std::path::PathBuf;
@@ -10,7 +7,6 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 pub mod aliases;
 pub mod commands;
 pub mod navigation;
-pub mod output;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum BrowserMode {
@@ -1665,8 +1661,8 @@ pub struct SessionConnectionArgs {
 }
 
 impl SessionConnectionArgs {
-    pub fn intent(&self) -> crate::lf::commands::write::SessionOpenIntent {
-        use crate::lf::commands::write::SessionOpenIntent;
+    pub fn intent(&self) -> crate::session::SessionOpenIntent {
+        use crate::session::SessionOpenIntent;
         if self.reveal_existing {
             SessionOpenIntent::Reveal
         } else if self.start_if_free {
@@ -4863,6 +4859,3 @@ pub enum DiscordCommand {
     /// Poll a configured channel and post each Session's final answer
     Serve { wave: String },
 }
-
-/// Pushed code requirements for one remote Task invocation.
-pub const TASK_SOURCE_ENV: &str = "LF_TASK_SOURCE";

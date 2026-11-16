@@ -23,7 +23,7 @@ use anyhow::{anyhow, Result};
 use serde::Serialize;
 
 use crate::journal::open_ledger;
-use crate::lf::output::{format_int, truncate, Colors};
+use crate::output::{format_int, truncate, Colors};
 use crate::prompt::count_tokens;
 use loopflow_storage::sqlite::SqliteStore;
 

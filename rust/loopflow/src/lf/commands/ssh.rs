@@ -3,14 +3,13 @@
 
 use crate::durable::TaskExecutionRoute;
 use crate::lf::Cli;
+use crate::machine::ssh::{build_preamble, request, EXPECTED_MACHINE_ID_ENV};
 use crate::ops::task::remote::TaskSource;
 use crate::provider_account::selection::AccountSelection;
 use anyhow::{anyhow, Context};
 use clap::Parser;
 use std::io::IsTerminal;
 use std::process::{Command, Stdio};
-
-pub const EXPECTED_MACHINE_ID_ENV: &str = "LF_EXPECTED_MACHINE_ID";
 
 /// Whether `lf --machine <target> <args>` runs on this Machine: the target is
 /// this Machine, or the command is `task move X --machine <target>` and this
@@ -76,7 +75,7 @@ pub(super) fn run_with_io(
     lf_args: &[String],
     task_route: Option<TaskExecutionRoute>,
     directory: &std::path::Path,
-    mut io: Option<&mut super::mutation::CommandIo<'_>>,
+    mut io: Option<&mut crate::command::CommandIo<'_>>,
 ) -> anyhow::Result<()> {
     let preview = cli.context
         || cli.explain
@@ -209,7 +208,7 @@ pub(super) fn run_with_io(
         extra_env.push(("LF_SETTINGS", settings));
     }
     if let Some(source) = source_json.as_deref() {
-        extra_env.push((crate::lf::TASK_SOURCE_ENV, source));
+        extra_env.push((crate::ops::task::TASK_SOURCE_ENV, source));
     }
     let mut cmd = vec!["lf".to_string()];
     if cli.repository.is_none() {
@@ -240,9 +239,8 @@ pub(super) fn run_with_io(
         }) if !preview => Some(connection),
         _ => None,
     };
-    let replace = connection.is_none_or(|connection| {
-        connection.intent() == crate::lf::commands::write::SessionOpenIntent::Resume
-    });
+    let replace = connection
+        .is_none_or(|connection| connection.intent() == crate::session::SessionOpenIntent::Resume);
     // Only a person at a terminal views the remote Session; scripts and pipes
     // keep the plain SSH command, whose stdin reaches the provider directly.
     let attended = !cli.batch && std::io::stdin().is_terminal();
@@ -349,7 +347,7 @@ pub(super) fn run_with_io(
     }
 }
 
-fn output(io: &mut Option<&mut super::mutation::CommandIo<'_>>, text: &str) -> anyhow::Result<()> {
+fn output(io: &mut Option<&mut crate::command::CommandIo<'_>>, text: &str) -> anyhow::Result<()> {
     match io {
         Some(io) => io.output.write_all(text.as_bytes())?,
         None => {
@@ -365,7 +363,7 @@ fn run_ssh_io(
     forward_agent: bool,
     preamble: &str,
     cli: &Cli,
-    io: &mut super::mutation::CommandIo<'_>,
+    io: &mut crate::command::CommandIo<'_>,
 ) -> anyhow::Result<()> {
     use std::io::Write;
     let args = ssh_argv(dest, forward_agent, preamble)?;
@@ -555,21 +553,6 @@ pub(super) async fn resolve_target(
     Ok(machine)
 }
 
-fn build_preamble(cmd: &[String], extra_env: &[(&str, &str)]) -> String {
-    let mut lines = vec![super::machine::REMOTE_PATH.to_string()];
-    for (name, value) in extra_env {
-        lines.push(format!("export {name}={}", sh_quote(value)));
-    }
-    lines.push(format!(
-        "exec {}",
-        cmd.iter()
-            .map(|arg| sh_quote(arg))
-            .collect::<Vec<_>>()
-            .join(" ")
-    ));
-    lines.join("\n") + "\n"
-}
-
 /// The caller's repository by identity; `None` outside a repository or before
 /// `lf repo`, when the destination runs in its home directory.
 fn current_repository(
@@ -582,22 +565,6 @@ fn current_repository(
         return Ok(None);
     };
     Ok(store.sqlite.repository_id(&repo.to_string())?)
-}
-
-/// POSIX single-quote escaping: wrap in `'…'`, and render any embedded single
-/// quote as `'\''`. Safe for arbitrary bytes including secrets.
-pub(super) fn sh_quote(value: &str) -> String {
-    let mut quoted = String::with_capacity(value.len() + 2);
-    quoted.push('\'');
-    for ch in value.chars() {
-        if ch == '\'' {
-            quoted.push_str("'\\''");
-        } else {
-            quoted.push(ch);
-        }
-    }
-    quoted.push('\'');
-    quoted
 }
 
 /// Classify an ssh exit code. `255` is ssh's reserved transport-error code;
@@ -643,54 +610,6 @@ fn run_ssh(dest: &str, forward_agent: bool, preamble: &str) -> anyhow::Result<()
         .status()
         .context("ssh did not complete")?;
     command_result(dest, status.code())
-}
-
-/// One bounded request through the ordinary SSH envelope, with `input` on its
-/// stdin. No probes, credentials, provider launch or local fallback; callers
-/// validate the request-bound reply. A request carrying input (a moved
-/// conversation) may check out its branch there, so it waits longer.
-pub(crate) async fn request(
-    machine: &loopflow_model::durable::Machine,
-    args: &[String],
-    input: Option<&[u8]>,
-) -> anyhow::Result<Vec<u8>> {
-    use tokio::io::AsyncWriteExt;
-    let cmd = std::iter::once("lf".to_string())
-        .chain(args.iter().cloned())
-        .collect::<Vec<_>>();
-    let preamble = build_preamble(&cmd, &[(EXPECTED_MACHINE_ID_ENV, machine.id.as_str())]);
-    let mut command = tokio::process::Command::new("ssh");
-    command
-        .args(crate::machine_route::bounded_ssh_args(
-            &machine.route,
-            false,
-        )?)
-        .arg(preamble)
-        .stdin(if input.is_some() {
-            Stdio::piped()
-        } else {
-            Stdio::null()
-        })
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
-    let bound = std::time::Duration::from_secs(if input.is_some() { 300 } else { 20 });
-    let exchange = async {
-        let mut child = command.spawn()?;
-        if let (Some(input), Some(mut stdin)) = (input, child.stdin.take()) {
-            stdin.write_all(input).await?;
-        }
-        child.wait_with_output().await
-    };
-    let output = tokio::time::timeout(bound, exchange)
-        .await
-        .context("Machine command unavailable: peer timed out")??;
-    anyhow::ensure!(
-        output.status.success(),
-        "Machine command unavailable: {}",
-        String::from_utf8_lossy(&output.stderr).trim()
-    );
-    Ok(output.stdout)
 }
 
 #[cfg(test)]

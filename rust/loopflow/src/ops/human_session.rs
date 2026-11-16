@@ -18,9 +18,8 @@ use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::lf::commands::write::SessionOpenIntent;
 use crate::provider_account::LaunchCapacity;
-use crate::session::{LfSession, WorkSource};
+use crate::session::{LfSession, SessionOpenIntent, WorkSource};
 use crate::session_record::SessionTitleSource;
 use crate::store::SharedStore;
 use loopflow_model::durable::WorkRef;
@@ -1157,11 +1156,11 @@ pub(crate) async fn open(
                             &session.id,
                             &attachment,
                             crate::session_record::current_terminal_id()
-                                .or_else(crate::lf::commands::open::host_placement)
+                                .or_else(crate::terminal_host::host_placement)
                                 .as_deref(),
                         )?;
                     }
-                    let moved = crate::lf::commands::util::departure_notice(
+                    let moved = crate::harness::native_session::departure_notice(
                         &store.sqlite,
                         &session.id,
                         departure_here(),
@@ -1193,7 +1192,7 @@ pub(crate) async fn open(
     }
     let native = NativeSession::of(session)?;
     if resume {
-        crate::lf::commands::util::require_provider_session_process(&native.dir)?;
+        crate::harness::native_session::require_provider_session_process(&native.dir)?;
     }
     let Some(provider_session) = provider_session else {
         let surface = surface(store, session).await?;
@@ -1217,7 +1216,7 @@ pub(crate) async fn open(
                 session.provider.as_deref().unwrap_or("provider")
             ));
         }
-        crate::lf::commands::util::resume_session(
+        crate::harness::native_session::resume_session(
             session.input_key()?,
             &provider_session,
             named_work,
@@ -1346,7 +1345,7 @@ pub(crate) async fn open_without_replacing(
         HUMAN_SESSION_ENV.to_string(),
         serde_json::to_string(&session_token(&session))?,
     )]);
-    crate::lf::commands::util::resume_session_with_env(
+    crate::harness::native_session::resume_session_with_env(
         session.input_key()?,
         Some(&native),
         &environment,
@@ -1459,7 +1458,7 @@ pub(crate) fn run_refusal(store: &SqliteStore, session: &LfSession) -> Result<Op
 fn departure_here() -> crate::process::Departure {
     let to = if crate::session_record::current_terminal_id().is_some() {
         Some("Desktop".to_string())
-    } else if let Some(placement) = crate::lf::commands::open::host_placement() {
+    } else if let Some(placement) = crate::terminal_host::host_placement() {
         Some(placement.replacen(':', " ", 1))
     } else {
         crate::session_record::stdin_tty().map(|tty| tty.trim_start_matches("/dev/").to_string())
@@ -2044,7 +2043,7 @@ pub(crate) fn resume_native_session(
             return Ok(false);
         }
     }
-    crate::lf::commands::util::require_provider_session_process(&native.dir)?;
+    crate::harness::native_session::require_provider_session_process(&native.dir)?;
     crate::harness::agent_process::stop_session_agent(
         &store.sqlite,
         &session.id,
@@ -2053,7 +2052,7 @@ pub(crate) fn resume_native_session(
     let environment =
         BTreeMap::from([(HUMAN_SESSION_ENV.to_string(), serde_json::to_string(token)?)]);
     crate::agent_input_timing::record("native_resume_selected", &session.id);
-    crate::lf::commands::util::resume_session_with_env(
+    crate::harness::native_session::resume_session_with_env(
         session.input_key()?,
         provider_session.as_ref(),
         &environment,

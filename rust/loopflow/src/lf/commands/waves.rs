@@ -24,8 +24,8 @@ use crate::durable::{TaskSection, TaskState};
 use crate::lf::commands::session::SessionFacts;
 use crate::lf::commands::session_history::format_tokens;
 use crate::lf::commands::task_row::{TaskDetail, TaskGraphRow, TaskNames, TaskThread};
-use crate::lf::output::Colors;
 use crate::ops::task_execution::{TaskExecutionSnapshot, TaskExecutionState};
+use crate::output::Colors;
 use crate::session_record::SessionHistory;
 use crate::store::{open_existing_store, SharedStore};
 use crate::work::wave::metrics::{
@@ -563,17 +563,6 @@ pub(crate) async fn wave_snapshots(store: &SharedStore, all: bool) -> Result<Vec
     Ok(snapshots)
 }
 
-/// Publication is local; Session claims and receipts never enter planning sync.
-pub async fn save_steer(
-    store: &SharedStore,
-    wave: &str,
-    author: &str,
-    message: &str,
-) -> Result<crate::steer::Steer> {
-    let wave = resolve_status_wave(store, Some(wave)).await?;
-    Ok(store.sqlite.save_wave_steer(wave.id(), author, message)?)
-}
-
 /// `lf wave status [wave]` — one Wave's current plan, Tasks and Session evidence.
 /// `lf wave status [<wave>]` observes the tracker first; `lf wave plan
 /// <wave>` reads what the store records and `lf wave sync` exchanges planning.
@@ -613,7 +602,7 @@ async fn read_status(
     let Some(store) = open_existing_store().await?.map(std::sync::Arc::new) else {
         return Ok(None);
     };
-    let wave = resolve_wave_in(&store, directory, wave).await?;
+    let wave = crate::work::wave::context::resolve_in(&store, directory, wave).await?;
     if observe {
         crate::ops::linear_observe::sync_repository(&store, wave.repo()).await;
     }
@@ -648,10 +637,10 @@ pub const CLOSED_TASK_PAGE: usize = 50;
 /// `lf wave status --subscribe`: `lf wave status --json` now and each time it
 /// changes. The subscription reads the store; it does not observe the tracker.
 pub fn subscribe_status(wave: Option<String>) -> Result<()> {
-    super::subscribe::run((), |store, ()| {
+    crate::read_stream::run((), |store, ()| {
         let wave = wave.clone();
         async move {
-            let store = super::subscribe::require_store(store)?;
+            let store = crate::read_stream::require_store(store)?;
             let wave = resolve_status_wave(&store, wave.as_deref()).await?;
             Ok(serde_json::to_value(wave_detail(&store, &wave).await?)?)
         }
@@ -710,7 +699,7 @@ pub fn show(
     let roadmap = show_snapshot(&directory, wave, task, all, observe)?;
     if json {
         let shown = serde_json::to_value(roadmap)?;
-        println!("{}", super::subscribe::selected_answer(&shown)?);
+        println!("{}", crate::read_stream::selected_answer(&shown)?);
     } else {
         print_roadmap(&roadmap);
     }
@@ -738,9 +727,9 @@ pub fn subscribe_show(
     wave: Option<String>,
     task: Option<String>,
     all: bool,
-    transport: super::subscribe::Transport,
-) -> Result<Option<super::subscribe::Subscription>> {
-    super::subscribe::start(
+    transport: crate::read_stream::Transport,
+) -> Result<Option<crate::read_stream::Subscription>> {
+    crate::read_stream::start(
         (),
         move |store, ()| {
             let (wave, task, directory) = (wave.clone(), task.clone(), directory.clone());
@@ -913,7 +902,7 @@ pub fn list_tasks(repo: &Path, query: &TaskListArgs, json: bool) -> Result<()> {
 
 /// `lf task list --subscribe`: `lf task list --json` now and each time it changes.
 pub fn subscribe_tasks(repo: &Path, args: TaskListArgs) -> Result<()> {
-    super::subscribe::run(args, |store, args| {
+    crate::read_stream::run(args, |store, args| {
         let repo = repo.to_owned();
         async move {
             let Some(store) = store else {
@@ -936,8 +925,8 @@ struct TaskStatusArgs {
 pub fn subscribe_task_status(
     repo: &Path,
     issue: String,
-    transport: super::subscribe::Transport,
-) -> Result<Option<super::subscribe::Subscription>> {
+    transport: crate::read_stream::Transport,
+) -> Result<Option<crate::read_stream::Subscription>> {
     watch_task(repo, issue, transport, |store, status| async move {
         task_detail(&store, status).await
     })
@@ -948,8 +937,8 @@ pub fn subscribe_task_status(
 pub fn subscribe_task_pane(
     repo: &Path,
     issue: String,
-    transport: super::subscribe::Transport,
-) -> Result<Option<super::subscribe::Subscription>> {
+    transport: crate::read_stream::Transport,
+) -> Result<Option<crate::read_stream::Subscription>> {
     watch_task(repo, issue, transport, |store, status| async move {
         task_pane(&store, status).await
     })
@@ -958,22 +947,22 @@ pub fn subscribe_task_pane(
 fn watch_task<T, F, R>(
     repo: &Path,
     issue: String,
-    transport: super::subscribe::Transport,
+    transport: crate::read_stream::Transport,
     reading: F,
-) -> Result<Option<super::subscribe::Subscription>>
+) -> Result<Option<crate::read_stream::Subscription>>
 where
     T: Serialize,
     F: Fn(SharedStore, crate::ops::task::TaskStatus) -> R + Clone + Send + Sync + 'static,
     R: std::future::Future<Output = Result<T>> + Send,
 {
     let repo = repo.to_owned();
-    super::subscribe::start(
+    crate::read_stream::start(
         TaskStatusArgs { issue },
         move |store, args| {
             let repo = repo.to_owned();
             let reading = reading.clone();
             async move {
-                let store = super::subscribe::require_store(store)?;
+                let store = crate::read_stream::require_store(store)?;
                 let status = crate::ops::task::read_task_status(&store, &repo, &args.issue).await?;
                 Ok(serde_json::to_value(reading(store, status).await?)?)
             }
@@ -1015,7 +1004,7 @@ pub fn print_task_detail(status: crate::ops::task::TaskStatus) -> Result<()> {
         let detail = task_detail(&store, status).await?;
         println!(
             "{}",
-            serde_json::to_string_pretty(&super::subscribe::selected_answer(&detail)?)?
+            serde_json::to_string_pretty(&crate::read_stream::selected_answer(&detail)?)?
         );
         Ok(())
     })
@@ -1190,7 +1179,7 @@ async fn closed_task_page(
     };
     let since = since
         .map(|since| -> Result<String> {
-            let since = super::util::parse_since(since, now())?
+            let since = crate::output::parse_since(since, now())?
                 .to_offset(time::UtcOffset::UTC)
                 .replace_nanosecond(0)
                 .expect("zero nanoseconds are valid");
@@ -1405,27 +1394,7 @@ async fn wave_tasks(
 /// The wave `lf wave status` is about: the name the caller typed, else the wave this
 /// process is running inside.
 async fn resolve_status_wave(store: &SharedStore, requested: Option<&str>) -> Result<Wave> {
-    resolve_wave_in(store, &std::env::current_dir()?, requested).await
-}
-
-/// The Wave `requested` names, as a command run in `directory` resolves it.
-async fn resolve_wave_in(
-    store: &SharedStore,
-    directory: &Path,
-    requested: Option<&str>,
-) -> Result<Wave> {
-    // One shared rule for `--wave` and ambient `LF_WAVE_ID`: durable UUID or
-    // repository-scoped registered name. Status consumes the resolved row
-    // directly, so no second lookup can cross repositories.
-    let repo = crate::repo::discover_repo_root(directory)?;
-    crate::work::wave::context::resolve_managed_wave(
-        Some(&**store),
-        repo.as_deref(),
-        requested,
-        ambient_wave().as_deref(),
-    )
-    .await
-    .map_err(|err| anyhow!("{err}"))
+    crate::work::wave::context::resolve_in(store, &std::env::current_dir()?, requested).await
 }
 
 fn age_secs(since: &str, now: time::OffsetDateTime) -> Option<i64> {
@@ -2428,13 +2397,6 @@ fn next_move_for_task(
         owner,
         reason: status.reason().to_string(),
     }
-}
-
-fn ambient_wave() -> Option<String> {
-    std::env::var(crate::work::wave::context::WAVE_ID_ENV)
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
 }
 
 fn format_time(ts: time::OffsetDateTime) -> Option<String> {

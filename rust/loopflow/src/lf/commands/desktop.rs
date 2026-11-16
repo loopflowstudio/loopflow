@@ -4,10 +4,10 @@ use anyhow::{bail, Context, Result};
 use loopflow_storage::work::selection::{WorkWorkspaceKey, WorkWorkspaceKind};
 use serde::{Deserialize, Serialize};
 
-use super::subscribe::{Subscription, Transport};
 use crate::ops::human_session::SessionAction;
 use crate::ops::task_actions::TaskActionModel;
 use crate::ops::task_run::TaskRunControl;
+use crate::read_stream::{Subscription, Transport};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DesktopInspection {
@@ -639,7 +639,7 @@ pub fn task_pane(issue: &str, subscribe: bool) -> Result<()> {
     let pane = read_task_pane(&std::env::current_dir()?, issue)?;
     println!(
         "{}",
-        serde_json::to_string(&super::subscribe::selected_answer(&pane)?)?
+        serde_json::to_string(&crate::read_stream::selected_answer(&pane)?)?
     );
     Ok(())
 }
@@ -692,7 +692,7 @@ fn plans(cli: &crate::lf::Cli, subscribe: bool) -> Result<()> {
         let plans = read_plans(cli.repository.as_ref(), &std::env::current_dir()?)?;
         println!(
             "{}",
-            serde_json::to_string(&super::subscribe::selected_answer(&plans)?)?
+            serde_json::to_string(&crate::read_stream::selected_answer(&plans)?)?
         );
         return Ok(());
     }
@@ -724,7 +724,7 @@ pub(crate) fn subscribe_plans(
     directory: std::path::PathBuf,
     transport: Transport,
 ) -> Result<Option<Subscription>> {
-    super::subscribe::start(
+    crate::read_stream::start(
         (),
         move |store, ()| {
             let result = store
@@ -750,7 +750,7 @@ pub(crate) fn subscribe_view_plan(
     if let Some(expression) = &expression {
         loopflow_storage::work::selection::Selection::parse(expression, None)?;
     }
-    super::subscribe::start(
+    crate::read_stream::start(
         (),
         move |store, ()| {
             let result = store
@@ -807,10 +807,10 @@ pub(crate) fn subscribe_all_view_plans(
     struct Arguments {
         expression: Option<String>,
     }
-    super::subscribe::start(
+    crate::read_stream::start(
         Arguments { expression },
         |store, args| async move {
-            let store = super::subscribe::require_store(store)?;
+            let store = crate::read_stream::require_store(store)?;
             Ok(selections::all_view_plans(
                 &store.sqlite,
                 args.expression.as_deref(),
@@ -1364,9 +1364,9 @@ fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result
             }
             println!(
                 "{}",
-                serde_json::to_string(&super::subscribe::selected_answer(&read_all_view_plans(
-                    expression.as_deref()
-                )?)?)?
+                serde_json::to_string(&crate::read_stream::selected_answer(
+                    &read_all_view_plans(expression.as_deref())?
+                )?)?
             );
             return Ok(());
         }

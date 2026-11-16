@@ -1047,7 +1047,7 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             loopflow::lf::commands::task_create::create(
                 repo,
                 command,
-                &mut loopflow::lf::commands::mutation::CommandIo {
+                &mut loopflow::command::CommandIo {
                     input: if stdin.is_terminal() {
                         &mut empty
                     } else {
@@ -1078,7 +1078,7 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                 return loopflow::lf::commands::waves::subscribe_task_status(
                     repo,
                     task.identifier,
-                    loopflow::lf::commands::subscribe::Transport::Stdio,
+                    loopflow::read_stream::Transport::Stdio,
                 )
                 .map(drop);
             }
@@ -1383,7 +1383,7 @@ fn main() -> std::process::ExitCode {
     // The holder outlives servers and installs. It records no Process itself
     // and opens no store, so it runs before any of that is set up.
     if std::env::args().skip(1).eq(["holder", "run"]) {
-        return match loopflow::server::holder::run() {
+        return match loopflow::terminal_holder::run() {
             Ok(()) => std::process::ExitCode::SUCCESS,
             Err(error) => {
                 eprintln!("lf holder: {error:#}");
@@ -1776,7 +1776,7 @@ fn run() -> anyhow::Result<()> {
     }
     loopflow::installation::canonicalize_selected_home()?;
     let _settings = loopflow::config::settings::select_invocation(cli.setting_values()?);
-    loopflow::lf::commands::subscribe::select_output(loopflow::lf::selected_paths(&args));
+    loopflow::read_stream::select_output(loopflow::lf::selected_paths(&args));
     let planning_read = matches!(
         &cli.command,
         Some(Commands::Wave {
@@ -2587,7 +2587,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
             &cli,
             args,
             &directory,
-            &mut loopflow::lf::commands::mutation::CommandIo {
+            &mut loopflow::command::CommandIo {
                 input: if terminal_create {
                     &mut empty
                 } else {
@@ -2881,13 +2881,13 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
             let directory = loopflow::repo::working_directory()?;
             let repo = selected_task_repository(&cli, &directory, Some(task))?;
             let mut binding = prepare_work_binding(&format!("task:{task}"), &repo)?;
-            std::env::remove_var(loopflow::lf::TASK_SOURCE_ENV);
+            std::env::remove_var(loopflow::ops::task::TASK_SOURCE_ENV);
             if let Some(cwd) = cli.cwd.clone() {
                 binding.cwd = cwd;
             }
             _task_cwd = Some(CwdGuard::enter(&binding.cwd)?);
             _work_declaration = Some(EnvGuard::set(
-                loopflow::lf::WORK_DECLARATION_ENV,
+                loopflow::ops::WORK_DECLARATION_ENV,
                 format!("task:{}", binding.work.id()),
             ));
             binding.cwd = std::env::current_dir()?;
@@ -3201,7 +3201,7 @@ fn execute_command(
                     wave.clone(),
                     task.clone(),
                     *all,
-                    loopflow::lf::commands::subscribe::Transport::Stdio,
+                    loopflow::read_stream::Transport::Stdio,
                 )
                 .map(drop)
             } else {
@@ -3242,7 +3242,7 @@ fn execute_command(
                     wave.clone(),
                     task.clone(),
                     *all,
-                    loopflow::lf::commands::subscribe::Transport::Stdio,
+                    loopflow::read_stream::Transport::Stdio,
                 )
             })
             .map(drop),

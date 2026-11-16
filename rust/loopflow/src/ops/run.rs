@@ -1,3 +1,6 @@
+/// Explicit Work declaration inherited by descendants; checkout inference never writes it.
+pub const WORK_DECLARATION_ENV: &str = "LF_AS";
+
 use std::path::{Path, PathBuf};
 
 use crate::store::SharedStore;
@@ -317,7 +320,7 @@ pub(crate) async fn select_execution_work(
     if crate::journal::request::active() {
         return Ok(None);
     }
-    match std::env::var(crate::lf::WORK_DECLARATION_ENV) {
+    match std::env::var(crate::ops::WORK_DECLARATION_ENV) {
         Ok(selector) => select_work(store, cwd, WorkSelection::parse(&selector)?).await,
         Err(_) => Ok(None),
     }
@@ -728,7 +731,7 @@ mod tests {
                 );
             }
             assert!(!prepared.config.system_prompt.contains(goal));
-            let context = crate::lf::commands::run::attributed_context(
+            let context = crate::prompt::attribution::attributed_context(
                 &prepared.components,
                 &prepared.config.system_prompt,
                 &prepared.config.task_prompt,
@@ -1056,13 +1059,13 @@ mod tests {
                 "LF_HOME",
                 "LF_RUN_DIR",
                 "LF_CAPTURE_KEY",
-                crate::lf::WORK_DECLARATION_ENV,
+                crate::ops::WORK_DECLARATION_ENV,
             ]
             .map(|name| (name, std::env::var_os(name)));
             std::env::set_var("LF_HOME", directory.path());
             std::env::set_var("LF_RUN_DIR", capture.artifact_dir());
             std::env::set_var("LF_CAPTURE_KEY", capture.artifact_key().as_str());
-            std::env::set_var(crate::lf::WORK_DECLARATION_ENV, format!("task:{selector}"));
+            std::env::set_var(crate::ops::WORK_DECLARATION_ENV, format!("task:{selector}"));
             crate::session_record::write_provider_session(
                 &capture.artifact_dir(),
                 &"saved-session".into(),
@@ -1076,7 +1079,7 @@ mod tests {
             let resumed = crate::journal::with_test_ledger(
                 crate::store::database_path_from_env().unwrap(),
                 || {
-                    crate::lf::commands::util::resume_session(
+                    crate::harness::native_session::resume_session(
                         &capture.artifact_key(),
                         &history,
                         false,

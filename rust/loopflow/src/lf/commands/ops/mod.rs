@@ -6,7 +6,6 @@ use crate::git::worktrees::{
     WorktreePruneReport,
 };
 use crate::lf::commands::util::find_repo_root;
-use crate::lf::output::{column_width, Colors};
 use crate::lf::{PrCommand, ReleaseCommand, WtCommand};
 use crate::naming::git_user;
 use crate::ops::branch_prune::{
@@ -16,6 +15,7 @@ use crate::ops::{
     current_pr, preview_release_notes, release_bump, release_check, release_issues, release_notes,
     release_promote, release_publish, release_regress, release_status, release_tag, Progress,
 };
+use crate::output::{column_width, Colors};
 use crate::skills::sync_skills;
 use crate::skills::SkillSyncOptions;
 use crate::work::wave::context::planning_wave;

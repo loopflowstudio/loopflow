@@ -351,7 +351,7 @@ fn admit_ci_fix(
             .map(|id| format!("task:{id}"))
             .unwrap_or_default();
         let environment = [
-            (crate::lf::WORK_DECLARATION_ENV, work.as_str()),
+            (crate::ops::WORK_DECLARATION_ENV, work.as_str()),
             ("LF_USER_NAME", ""),
         ];
         let worker = crate::os_process::detached::start_lf(

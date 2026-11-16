@@ -73,7 +73,7 @@ pub(super) fn missing_task_registry() -> OpsError {
 pub(super) async fn resolve_managed_task(repo: &Path) -> OpsResult<ManagedTask> {
     let store = match authority_store().await? {
         Some(store) => store,
-        None if std::env::var_os(crate::lf::WORK_DECLARATION_ENV).is_none() => {
+        None if std::env::var_os(crate::ops::WORK_DECLARATION_ENV).is_none() => {
             return Ok(ManagedTask::Unmanaged);
         }
         None => return Err(missing_task_registry()),

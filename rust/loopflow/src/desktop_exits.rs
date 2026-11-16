@@ -22,7 +22,7 @@ use chrono::{DateTime, Local, Utc};
 use serde_json::{Map, Value};
 
 use crate::diagnostic_log::{field, log_path, read_tail};
-use crate::lf::commands::doctor::Check;
+use crate::process::diagnosis::Check;
 
 const NAME: &str = "desktop-exit";
 const RECENT: chrono::TimeDelta = chrono::TimeDelta::hours(24);
@@ -533,7 +533,7 @@ mod tests {
     use chrono::{DateTime, TimeDelta, Utc};
 
     use super::{clock, minute, parse_termination, report, SystemRecord, Termination};
-    use crate::lf::commands::doctor::Status;
+    use crate::process::diagnosis::Status;
 
     fn now() -> DateTime<Utc> {
         "2026-10-29T16:30:00Z".parse().unwrap()

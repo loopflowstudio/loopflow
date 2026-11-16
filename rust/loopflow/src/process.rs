@@ -27,3 +27,5 @@ pub struct GraphHeld(pub String);
 impl GraphHeld {
     pub const EXIT: u8 = 3;
 }
+
+pub mod diagnosis;

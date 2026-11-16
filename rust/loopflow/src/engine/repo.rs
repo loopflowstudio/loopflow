@@ -7,13 +7,13 @@
 use std::path::Path;
 
 use super::{launch, Error, ErrorCode, Result};
-use crate::lf::commands::ci::CiReportDto;
+use crate::ops::ci::CiReportDto;
 use crate::ops::{Progress, ReleaseRunOutcome};
 
 /// `repo.ci`: how failed CI was detected, repaired and landed since
 /// `since` (`7d`, `24h`, or an RFC 3339 instant), as `lf repo ci` does.
 pub fn ci(since: &str, wave: Option<&str>, repo: Option<&str>) -> Result<CiReportDto> {
-    crate::lf::commands::ci::report(since, wave, repo)
+    crate::ops::ci::report(since, wave, repo)
         .map_err(|error| Error::refused(&error, ErrorCode::Unavailable))
 }
 

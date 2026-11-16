@@ -18,6 +18,7 @@ mod fact;
 mod fact_writer;
 mod lf_tag;
 pub(crate) mod native_exit;
+pub(crate) mod native_session;
 pub mod opencode;
 mod opencode_decode;
 pub mod pi;

@@ -10,12 +10,13 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 
 use super::wire::{
-    ClientIdentity, ClientMessage, ConnectedClient, Hello, Operation, ServerMessage,
-    ServerOperation, SessionAttached, Welcome, MAX_BULK, MAX_MESSAGE, MIN_REVISION, REVISION,
+    ClientIdentity, ConnectedClient, Hello, ServerMessage, ServerOperation, SessionAttached,
+    Welcome, MAX_BULK, MAX_MESSAGE, MIN_REVISION, REVISION,
 };
 use crate::engine::Error;
-use crate::lf::commands::read::Read;
 use loopflow_model::id::LfSessionId;
+
+type ClientMessage = super::wire::ClientMessage;
 
 /// How long the server has to answer `status`, `hello`, `session.attach` or
 /// a ticket. A session's later waits are unbounded unless the caller sets its
@@ -195,11 +196,11 @@ impl Connection {
     /// Send a request without waiting; its answer arrives through
     /// [`Self::request`] or [`Self::reading`]. A request over the control limit
     /// travels on a ticketed connection and is answered here like any other.
-    pub fn send(&mut self, operation: Operation) -> Result<String> {
+    pub fn send(&mut self, operation: impl serde::Serialize) -> Result<String> {
         let id = uuid::Uuid::new_v4().to_string();
         let line = Socket::line(&ClientMessage::Request {
             id: id.clone(),
-            operation,
+            operation: serde_json::to_value(operation)?,
             select: None,
         })?;
         if line.len() <= MAX_MESSAGE {
@@ -216,9 +217,7 @@ impl Connection {
             "Server request exceeds {MAX_BULK} bytes"
         );
         let ticket = self
-            .request(Operation::Server(ServerOperation::RequestUpload {
-                bytes: line.len(),
-            }))?
+            .request(ServerOperation::RequestUpload { bytes: line.len() })?
             .result;
         let ticket = ticket["ticket"]
             .as_str()
@@ -243,7 +242,7 @@ impl Connection {
     }
 
     /// One request and its answer; other ids' messages wait in `pending`.
-    pub fn request(&mut self, operation: Operation) -> Result<Response> {
+    pub fn request(&mut self, operation: impl serde::Serialize) -> Result<Response> {
         let id = self.send(operation)?;
         match self.wait(|message| answers(message, &id))? {
             ServerMessage::Response {
@@ -265,11 +264,11 @@ impl Connection {
     }
 
     /// Start a subscription and return its id once the server confirms it.
-    pub fn subscribe(&mut self, operation: Read) -> Result<String> {
+    pub fn subscribe(&mut self, operation: impl serde::Serialize) -> Result<String> {
         let id = uuid::Uuid::new_v4().to_string();
         self.socket.send(&ClientMessage::Subscribe {
             id: id.clone(),
-            operation,
+            operation: serde_json::to_value(operation)?,
             select: None,
             resume: None,
         })?;
@@ -377,7 +376,11 @@ fn identity(kind: &str, name: &str) -> ClientIdentity {
 
 /// A provider hook's one request: connecting, `hello` and the answer share
 /// `within`, so a stopped, restarting or slow server costs the turn at most that.
-pub fn hook_request(path: &Path, operation: Operation, within: Duration) -> Result<Response> {
+pub fn hook_request(
+    path: &Path,
+    operation: impl serde::Serialize,
+    within: Duration,
+) -> Result<Response> {
     let deadline = std::time::Instant::now() + within;
     let stream = connect(path)?;
     stream.set_write_timeout(Some(within))?;
@@ -429,10 +432,10 @@ fn accepted(message: ServerMessage) -> Result<ServerMessage> {
 pub fn attach(path: &Path, session: &LfSessionId) -> Result<UnixStream> {
     let mut connection = Connection::start(connect(path)?, path, identity("cli", "lf"), HANDSHAKE)?;
     let issued = connection
-        .request(Operation::Server(ServerOperation::SessionAttach {
+        .request(ServerOperation::SessionAttach {
             session: session.clone(),
             terminal_id: None,
-        }))
+        })
         .map_err(|error| stalled(error, "issue the attach ticket", HANDSHAKE))?;
     let issued: SessionAttached = serde_json::from_value(issued.result)
         .context("Loopflow server answered session.attach without a ticket")?;
@@ -587,7 +590,7 @@ mod tests {
     use std::time::Instant;
 
     use super::{attach, hook_request, Connection, HANDSHAKE};
-    use crate::server::wire::{
+    use crate::machine::wire::{
         Limits, ServerMessage, Welcome, MAX_CONNECTIONS, MAX_MESSAGE, MIN_REVISION, REVISION,
     };
     use loopflow_model::id::LfSessionId;
@@ -613,11 +616,12 @@ mod tests {
                     build: "test".into(),
                     executable_sha256: "f".repeat(64),
                     machine: None,
+                    // A peer advertises its own admission limits.
                     limits: Limits {
                         max_message: MAX_MESSAGE,
                         max_connections: MAX_CONNECTIONS,
-                        max_open: super::super::outbox::MAX_OPEN,
-                        max_retained_bytes: super::super::outbox::MAX_RETAINED,
+                        max_open: 256,
+                        max_retained_bytes: 64 * 1024 * 1024,
                     },
                 });
                 let mut text = serde_json::to_string(&welcome).unwrap();
@@ -660,19 +664,17 @@ mod tests {
         );
     }
 
-    fn boundary() -> crate::server::wire::Operation {
-        crate::server::wire::Operation::Server(
-            crate::server::wire::ServerOperation::SessionBoundary(
-                crate::server::wire::SessionBoundary {
-                    moment: crate::server::wire::BoundaryMoment::Tool,
-                    delivery: "/nonexistent/delivery.json".into(),
-                    adapter: None,
-                    callback: serde_json::json!({}),
-                    gap: None,
-                    printed: Vec::new(),
-                    inbox: None,
-                },
-            ),
+    fn boundary() -> crate::machine::wire::ServerOperation {
+        crate::machine::wire::ServerOperation::SessionBoundary(
+            crate::machine::wire::SessionBoundary {
+                moment: crate::machine::wire::BoundaryMoment::Tool,
+                delivery: "/nonexistent/delivery.json".into(),
+                adapter: None,
+                callback: serde_json::json!({}),
+                gap: None,
+                printed: Vec::new(),
+                inbox: None,
+            },
         )
     }
 

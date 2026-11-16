@@ -585,7 +585,7 @@ fn selection_states_fixture_lists_every_state() {
 
 #[test]
 fn subscribe_frames_carry_each_reads_json_result() {
-    use loopflow::lf::commands::subscribe::SubscriptionFrame;
+    use loopflow::read_stream::SubscriptionFrame;
     let entries: Vec<serde_json::Value> = serde_json::from_str(include_str!(
         "../../../tests/fixtures/dto/subscribe_frames.json"
     ))
@@ -1350,7 +1350,7 @@ fn wave_graph_reports_its_default_with_or_without_a_wave() {
 
 #[test]
 fn session_open_intents_distinguish_explicit_resume_from_passive_reveal() {
-    use loopflow::lf::commands::write::SessionOpenIntent;
+    use loopflow::session::SessionOpenIntent;
     let wire: serde_json::Value = serde_json::from_str(include_str!(
         "../../../tests/fixtures/dto/session_open_intents.json"
     ))

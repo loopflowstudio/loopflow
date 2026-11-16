@@ -14,7 +14,7 @@ pub fn run(command: &ServerCommand) -> anyhow::Result<()> {
         ServerCommand::Status => {
             println!(
                 "{}",
-                serde_json::to_string(&crate::server::client::status()?)?
+                serde_json::to_string(&crate::machine::client::status()?)?
             );
             Ok(())
         }

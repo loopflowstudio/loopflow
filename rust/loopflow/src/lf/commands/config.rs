@@ -3,7 +3,7 @@ use std::path::Path;
 use serde_json::Value;
 
 use crate::config::catalog::{definition, Category};
-use crate::lf::output::{column_width, truncate, Colors};
+use crate::output::{column_width, truncate, Colors};
 
 #[derive(Debug, clap::Args)]
 pub struct ShowOptions {

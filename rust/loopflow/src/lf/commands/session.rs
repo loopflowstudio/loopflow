@@ -5,11 +5,11 @@ use anyhow::{bail, Context};
 
 use serde::{Deserialize, Serialize};
 
-use super::write::SessionOpenIntent;
 use crate::lf::SessionCommand;
 use crate::lf::SessionConnectionArgs;
 use crate::lf::SessionListArgs;
 use crate::ops::human_session::{SessionRecord, SessionState};
+use crate::session::SessionOpenIntent;
 use crate::session_record::SessionTitleSource;
 use crate::store::{open_store, storage_config_from_env, Store};
 
@@ -404,7 +404,7 @@ pub fn list_sessions(args: &SessionListArgs) -> anyhow::Result<()> {
         // transcripts the way the Machine server does.
         let observations = crate::observe::Cache::shared();
         let _transcripts = crate::transcript::watch::watch(&observations);
-        return subscribe_list(filter, super::subscribe::Transport::Stdio).map(drop);
+        return subscribe_list(filter, crate::read_stream::Transport::Stdio).map(drop);
     }
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_shared_store().await?;
@@ -463,15 +463,15 @@ struct SessionWatchArgs {
 
 pub(crate) fn subscribe_list(
     filter: crate::session::SessionFilter,
-    transport: super::subscribe::Transport,
-) -> anyhow::Result<Option<super::subscribe::Subscription>> {
+    transport: crate::read_stream::Transport,
+) -> anyhow::Result<Option<crate::read_stream::Subscription>> {
     let args = SessionWatchArgs {
         repo: filter.repo.clone(),
         task: filter.task.clone(),
         search: filter.search.clone(),
         headless: filter.headless,
     };
-    super::subscribe::start(
+    crate::read_stream::start(
         args,
         move |store, args| {
             let filter = crate::session::SessionFilter {
@@ -650,7 +650,7 @@ async fn list(
     if json || filter.after.is_some() {
         println!(
             "{}",
-            serde_json::to_string_pretty(&super::subscribe::selected_answer(
+            serde_json::to_string_pretty(&crate::read_stream::selected_answer(
                 &read_list(store, filter).await?
             )?)?
         );
@@ -1074,7 +1074,7 @@ pub(super) fn mutate(
     cli: &crate::lf::Cli,
     directory: &Path,
     command: &SessionCommand,
-    io: &mut super::mutation::CommandIo<'_>,
+    io: &mut crate::command::CommandIo<'_>,
 ) -> anyhow::Result<()> {
     if let SessionCommand::Resume { connection, .. } | SessionCommand::New { connection, .. } =
         command

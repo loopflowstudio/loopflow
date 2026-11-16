@@ -52,11 +52,9 @@ pub async fn steer(
                 .save_session_steer(&session.id, &author, message)
                 .map_err(written)
         }
-        SteerScope::Wave(wave) => {
-            crate::lf::commands::waves::save_steer(store, wave, &author, message)
-                .await
-                .map_err(written)
-        }
+        SteerScope::Wave(wave) => crate::steer::save_steer(store, wave, &author, message)
+            .await
+            .map_err(written),
         SteerScope::Task { issue, wave } => {
             if message.trim().is_empty() {
                 return Err(Error::new(

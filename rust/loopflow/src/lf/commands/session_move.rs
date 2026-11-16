@@ -50,7 +50,7 @@ async fn relay(store: &SharedStore, session: &LfSession, target: &Machine) -> Re
     let moved = match moved_to {
         Some(machine) => {
             let source = registered(store, &machine)?;
-            let bytes = super::ssh::request(
+            let bytes = crate::machine::ssh::request(
                 &source,
                 &[
                     "session".into(),
@@ -331,7 +331,7 @@ pub(crate) fn arrived_on(task: &loopflow_model::durable::TaskId, to: &MachineId)
         let asked = async {
             let target = super::ssh::resolve_target(to.as_str(), false).await?;
             let args = ["session", "receive", "--arrived", task.as_str()].map(String::from);
-            super::ssh::request(&target, &args, None).await
+            crate::machine::ssh::request(&target, &args, None).await
         };
         if let Err(error) = asked.await {
             tracing::info!("{to} did not say Task {task} arrived there: {error:#}");
@@ -394,7 +394,7 @@ async fn send_from(
         to.to_string(),
     ];
     args.extend(last.map(str::to_string));
-    super::ssh::request(&source, &args, None).await
+    crate::machine::ssh::request(&source, &args, None).await
 }
 
 /// Before anything is committed, pushed, stopped or handed off, `target`
@@ -436,7 +436,7 @@ async fn ready(
             args.extend(["--planning-key".into(), key]);
         }
     }
-    super::ssh::request(target, &args, None)
+    crate::machine::ssh::request(target, &args, None)
         .await
         .map(drop)
         .map_err(|error| {
@@ -455,7 +455,7 @@ async fn receive(store: &SharedStore, moved: &Move, target: Option<&Machine>) ->
     let input = serde_json::to_vec(moved)?;
     match target {
         Some(target) if target.id != crate::store::machines::local_machine(&store.sqlite)?.id => {
-            super::ssh::request(target, &args, Some(&input)).await?;
+            crate::machine::ssh::request(target, &args, Some(&input)).await?;
         }
         _ => receive_here(&args, &input).await?,
     }

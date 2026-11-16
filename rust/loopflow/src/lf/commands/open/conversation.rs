@@ -10,8 +10,8 @@ use super::{
     OpenHost, OpenReceipt, OpenRoute, OpenStatus, Opening, Resolved,
 };
 use crate::lf::commands::desktop::{self, DesktopOpeningStatus};
-use crate::lf::commands::write::SessionOpenIntent;
 use crate::ops::human_session::{select_connection, SessionTarget};
+use crate::session::SessionOpenIntent;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Mode {

@@ -387,7 +387,7 @@ impl CapacityWait {
             self.announced = Some(retry_at);
             eprintln!(
                 "Waiting for {provider} capacity until {}: {reason}",
-                crate::lf::output::format_time(retry_at)
+                crate::output::format_time(retry_at)
             );
             _record_limit_recovery(provider, reason, Some(retry_at));
         }
@@ -1869,7 +1869,7 @@ fn _run_agent_once(
         return _run_harness_once(launch, process, model, retry);
     }
     if matches!(harness.as_str(), "codex" | "opencode") {
-        let result = crate::lf::commands::util::run_native_agent(launch)
+        let result = crate::harness::native_session::run_native_agent(launch)
             .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
         return Ok(AgentAttempt::Finished {
             result,
@@ -2077,7 +2077,7 @@ fn run_interactive(
         )));
     }
     let exit_code = if holder == crate::session::Holder::Caller {
-        crate::lf::commands::util::SessionCommandOutcome {
+        crate::harness::native_session::SessionCommandOutcome {
             status,
             interrupted: foreground
                 .as_ref()

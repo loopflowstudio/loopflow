@@ -14,7 +14,7 @@ use crate::journal::{
     prune_process_receipts_at, read_process_receipts_at, recorded_process_evidence,
     recorded_process_receipt, OsProcess, ProcessIdentityEvidence, ProcessReceipt,
 };
-use crate::lf::output::truncate;
+use crate::output::truncate;
 use loopflow_model::id::LfProcessId;
 use loopflow_storage::rows::unix_to_datetime;
 use loopflow_storage::sqlite::SqliteStore;
@@ -141,9 +141,9 @@ pub fn run_top() -> Result<()> {
 
 /// Stream the call trees as stored Process rows or observed OS states change.
 pub fn subscribe_ps(
-    transport: super::subscribe::Transport,
-) -> Result<Option<super::subscribe::Subscription>> {
-    super::subscribe::start(
+    transport: crate::read_stream::Transport,
+) -> Result<Option<crate::read_stream::Subscription>> {
+    crate::read_stream::start(
         (),
         {
             let mut reader = ActivityReader::default();
@@ -514,7 +514,7 @@ fn print_snapshot(snapshot: &ActivitySnapshot, json: bool) -> Result<()> {
     if json {
         println!(
             "{}",
-            serde_json::to_string_pretty(&super::subscribe::selected_answer(snapshot)?)?
+            serde_json::to_string_pretty(&crate::read_stream::selected_answer(snapshot)?)?
         );
     } else {
         print!("{}", render_snapshot(snapshot));

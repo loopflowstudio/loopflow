@@ -47,7 +47,7 @@ pub fn run(command: &ProcessCommand) -> anyhow::Result<()> {
     match command {
         ProcessCommand::List {
             subscribe: true, ..
-        } => super::top::subscribe_ps(super::subscribe::Transport::Stdio).map(drop),
+        } => super::top::subscribe_ps(crate::read_stream::Transport::Stdio).map(drop),
         ProcessCommand::List { json, .. } => super::top::run_ps(*json),
         ProcessCommand::Top => super::top::run_top(),
         ProcessCommand::Show { id, json } => super::graph_inventory::inspect(id, *json),

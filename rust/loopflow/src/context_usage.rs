@@ -510,8 +510,8 @@ pub fn render_report(report: &ContextReport) -> String {
     for step in &report.steps {
         let mut line = format!(
             "{:<12}  {:<16}",
-            crate::lf::output::format_time(step.observed_at),
-            crate::lf::output::truncate(step.skill.as_deref().unwrap_or(&step.harness), 16)
+            crate::output::format_time(step.observed_at),
+            crate::output::truncate(step.skill.as_deref().unwrap_or(&step.harness), 16)
         );
         for usage in &step.sources {
             line.push_str(&format!(
@@ -523,7 +523,7 @@ pub fn render_report(report: &ContextReport) -> String {
             "  {:>WIDTH$}  {:>WIDTH$}  {}",
             cell(step.assembled_tokens),
             cell(step.peak_request_tokens),
-            crate::lf::commands::util::short_id(&step.input)
+            crate::output::short_id(&step.input)
         ));
         lines.push(line);
     }
@@ -561,7 +561,7 @@ pub fn render_report(report: &ContextReport) -> String {
 }
 
 fn budget_note(budget: Option<u64>, over: bool) -> Option<String> {
-    let budget = crate::lf::output::format_int(budget?);
+    let budget = crate::output::format_int(budget?);
     Some(if over {
         format!("OVER budget {budget}")
     } else {
@@ -570,7 +570,7 @@ fn budget_note(budget: Option<u64>, over: bool) -> Option<String> {
 }
 
 fn cell(tokens: Option<u64>) -> String {
-    tokens.map_or_else(|| "-".to_string(), crate::lf::output::format_int)
+    tokens.map_or_else(|| "-".to_string(), crate::output::format_int)
 }
 
 #[cfg(test)]

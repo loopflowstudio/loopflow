@@ -1,4 +1,6 @@
+use anyhow::{anyhow, Result};
 use std::io::IsTerminal;
+use time::{format_description::well_known::Rfc3339, Duration, OffsetDateTime};
 
 /// Local wall-clock time for a Unix timestamp, e.g. `Oct 21 14:02`.
 pub(crate) fn format_time(unix: i64) -> String {
@@ -200,6 +202,38 @@ pub fn format_reproducible_command(
         parts.push(format!("-a {}", agent));
     }
     parts.join(" ")
+}
+
+pub(crate) fn parse_since(value: &str, now: OffsetDateTime) -> Result<OffsetDateTime> {
+    if let Ok(timestamp) = OffsetDateTime::parse(value, &Rfc3339) {
+        return Ok(timestamp);
+    }
+    let (amount, unit) = value.split_at(value.len().saturating_sub(1));
+    let amount: i64 = amount
+        .parse()
+        .map_err(|_| anyhow!("invalid --since '{value}'; use 7d, 24h, 30m, or RFC3339"))?;
+    if amount < 0 {
+        return Err(anyhow!("--since duration must be non-negative"));
+    }
+    let seconds_per_unit = match unit {
+        "d" => 86_400,
+        "h" => 3_600,
+        "m" => 60,
+        _ => {
+            return Err(anyhow!(
+                "invalid --since '{value}'; use 7d, 24h, 30m, or RFC3339"
+            ));
+        }
+    };
+    let seconds = amount
+        .checked_mul(seconds_per_unit)
+        .ok_or_else(|| anyhow!("--since duration is too large"))?;
+    now.checked_sub(Duration::seconds(seconds))
+        .ok_or_else(|| anyhow!("--since duration is too large"))
+}
+
+pub(crate) fn short_id(id: &str) -> String {
+    id.chars().take(8).collect()
 }
 
 #[cfg(test)]

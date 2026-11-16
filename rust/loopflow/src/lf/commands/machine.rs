@@ -7,6 +7,7 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use crate::lf::MachineCommand;
+use crate::machine::ssh::REMOTE_PATH;
 use crate::store::Store;
 use loopflow_model::durable::{DefaultScope, Machine, MachineDefault, MachineId, MachineSetting};
 
@@ -204,7 +205,7 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
                         // A move that has not arrived reads as that, as in `lf task status`.
                         let place = crate::ops::task_ownership::move_line(&store.sqlite, &task.id)?
                             .unwrap_or_else(|| {
-                                format!("since {}", crate::lf::output::format_time(task.since))
+                                format!("since {}", crate::output::format_time(task.since))
                             });
                         println!("  {} {place}", task.identifier);
                     }
@@ -353,10 +354,6 @@ pub(super) struct Probe {
     pub version: String,
 }
 
-// Non-interactive SSH skips shell profiles. Agent CLIs installed with npm live
-// under its configured prefix, which a user-level prefix moves out of PATH.
-pub(super) const REMOTE_PATH: &str = "export PATH=\"$HOME/.cargo/bin:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\"; if command -v npm >/dev/null 2>&1; then PATH=\"$PATH:$(npm config get prefix 2>/dev/null)/bin\"; fi";
-
 // Public installer, identical to the first-install command in README.md.
 pub(super) const INSTALL_COMMAND: &str = "curl -fsSL https://github.com/loopflowstudio/loopflow/releases/latest/download/install.sh | sh";
 
@@ -379,7 +376,7 @@ struct ConnectionFailure {
 fn connection_failure(target: &str, kind: FailureKind, detail: &str) -> anyhow::Error {
     let ssh = format!(
         "ssh -o ControlPath=none -- {}",
-        super::ssh::sh_quote(target)
+        crate::machine::ssh::sh_quote(target)
     );
     let guidance = match kind {
         FailureKind::NeedsSignIn => format!("needs-sign-in: run `{ssh}` to set up SSH key access, then retry"),
@@ -497,8 +494,8 @@ pub(super) async fn probe(target: &str, forward_agent: bool) -> anyhow::Result<P
 fn install_command(target: &str) -> String {
     format!(
         "ssh -- {} {}",
-        super::ssh::sh_quote(target),
-        super::ssh::sh_quote(INSTALL_COMMAND)
+        crate::machine::ssh::sh_quote(target),
+        crate::machine::ssh::sh_quote(INSTALL_COMMAND)
     )
 }
 
@@ -563,7 +560,10 @@ fn release_number(version: &str) -> Vec<u64> {
 }
 
 fn update_command(target: &str) -> String {
-    format!("ssh -- {} 'lf install'", super::ssh::sh_quote(target))
+    format!(
+        "ssh -- {} 'lf install'",
+        crate::machine::ssh::sh_quote(target)
+    )
 }
 
 fn default_label(target: &str) -> String {
@@ -583,7 +583,7 @@ fn default_label(target: &str) -> String {
 }
 
 fn validate_expected_machine(local: &loopflow_model::durable::MachineId) -> anyhow::Result<()> {
-    let Ok(raw) = std::env::var(crate::lf::commands::ssh::EXPECTED_MACHINE_ID_ENV) else {
+    let Ok(raw) = std::env::var(crate::machine::ssh::EXPECTED_MACHINE_ID_ENV) else {
         return Ok(());
     };
     let expected = loopflow_model::durable::MachineId::parse(&raw)
@@ -597,7 +597,7 @@ fn validate_expected_machine(local: &loopflow_model::durable::MachineId) -> anyh
 }
 
 pub fn validate_expected_machine_process() -> anyhow::Result<()> {
-    if std::env::var_os(crate::lf::commands::ssh::EXPECTED_MACHINE_ID_ENV).is_none() {
+    if std::env::var_os(crate::machine::ssh::EXPECTED_MACHINE_ID_ENV).is_none() {
         return Ok(());
     }
     let store = crate::store::read_existing_registry()

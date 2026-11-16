@@ -3,9 +3,9 @@
 use anyhow::Result;
 use time::OffsetDateTime;
 
-use crate::lf::commands::util::short_id;
 use crate::lf::commands::WorkFilter;
-use crate::lf::output::{format_cost, format_int, truncate, Colors};
+use crate::output::short_id;
+use crate::output::{format_cost, format_int, truncate, Colors};
 use crate::session_record::SessionHistory;
 
 const REPO_WIDTH: usize = 18;
@@ -117,7 +117,7 @@ fn print_report(runs: &[SessionHistory], days: u32) {
     for run in runs {
         println!(
             "{time:<12}  {repo:<REPO_WIDTH$}  {work:<WORK_WIDTH$}  {run:<SESSION_WIDTH$}  {input:>NUM_WIDTH$}  {output:>NUM_WIDTH$}  {cache:>NUM_WIDTH$}  {cost:>9}  {finality:>9}  {gaps:>5}  {id}",
-            time = crate::lf::output::format_time(run.observed_at),
+            time = crate::output::format_time(run.observed_at),
             repo = truncate(&display_repo(run.repo.as_deref()), REPO_WIDTH),
             work = truncate(&run.work_label(), WORK_WIDTH),
             run = truncate(run.label(), SESSION_WIDTH),

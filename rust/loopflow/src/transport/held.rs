@@ -10,9 +10,9 @@ use std::os::unix::process::ExitStatusExt;
 use std::process::ExitStatus;
 use std::time::{Duration, Instant};
 
-use crate::server::holder::client::Client;
-use crate::server::holder::wire::{self, Decoder, Exit, Frame, Request};
-use crate::server::holder::Place;
+use crate::terminal_holder::client::Client;
+use crate::terminal_holder::wire::{self, Decoder, Exit, Frame, Request};
+use crate::terminal_holder::Place;
 use loopflow_model::id::TerminalId;
 
 use super::hosted::Chunk;
@@ -252,7 +252,7 @@ impl Source {
 
     fn settle_without_holder(&mut self) {
         self.ended = Some(
-            match crate::server::holder::recorded_exit(&self.place, self.terminal.as_str()) {
+            match crate::terminal_holder::recorded_exit(&self.place, self.terminal.as_str()) {
                 Ok(Some(exit)) => Ended::Exited(exit),
                 Ok(None) => Ended::Unknown,
                 Err(error) => {
@@ -507,8 +507,8 @@ mod tests {
 
     use super::Source;
     use crate::id::TerminalId;
-    use crate::server::holder::wire::{Answer, Request};
-    use crate::server::holder::Place;
+    use crate::terminal_holder::wire::{Answer, Request};
+    use crate::terminal_holder::Place;
     use crate::transport::input::PendingInput;
 
     #[test]
@@ -546,7 +546,7 @@ mod tests {
                         };
                         socket
                             .get_mut()
-                            .write_all(&crate::server::holder::wire::line(&answer))
+                            .write_all(&crate::terminal_holder::wire::line(&answer))
                             .unwrap();
                     }
                     let mut bytes = Vec::new();

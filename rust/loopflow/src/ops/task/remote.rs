@@ -1,4 +1,6 @@
 //! Portable code requirements for one SSH invocation; no execution state travels.
+/// Pushed code requirements for one remote Task invocation.
+pub const TASK_SOURCE_ENV: &str = "LF_TASK_SOURCE";
 
 use std::path::Path;
 
@@ -67,7 +69,7 @@ pub(crate) fn source_for_task(issue: &str) -> OpsResult<Option<TaskSource>> {
     if crate::journal::request::active() {
         return Ok(None);
     }
-    let Some(value) = std::env::var_os(crate::lf::TASK_SOURCE_ENV) else {
+    let Some(value) = std::env::var_os(crate::ops::task::TASK_SOURCE_ENV) else {
         return Ok(None);
     };
     let source: TaskSource = serde_json::from_str(&value.to_string_lossy())

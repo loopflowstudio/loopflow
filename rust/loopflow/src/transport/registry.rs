@@ -19,9 +19,9 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::server::holder::client::Client;
-use crate::server::holder::wire::{self, Held};
-use crate::server::holder::Place;
+use crate::terminal_holder::client::Client;
+use crate::terminal_holder::wire::{self, Held};
+use crate::terminal_holder::Place;
 use loopflow_model::id::{LfSessionId, TerminalId};
 use loopflow_model::program_status::Records;
 
@@ -278,7 +278,7 @@ impl Unsettled {
     /// A terminal that ended with nobody watching: its holder's record says
     /// how, else the outcome is unknown.
     fn recorded(place: &Place, terminal: TerminalId) -> Self {
-        let code = crate::server::holder::recorded_exit(place, terminal.as_str())
+        let code = crate::terminal_holder::recorded_exit(place, terminal.as_str())
             .ok()
             .flatten()
             .map(|exit| exit.status());
@@ -452,7 +452,7 @@ impl Registry {
         crate::journal::process_ledger()?.create_terminal(&terminal, &self.build)?;
         let mut client = Client::ensure(&self.place)?;
         let holder = client.hello()?;
-        crate::server::holder::client::record(holder.pid);
+        crate::terminal_holder::client::record(holder.pid);
         let (rows, cols) = dimensions(start.rows, start.cols);
         let mut env: Vec<(String, String)> = start
             .env
@@ -598,7 +598,7 @@ impl Registry {
             }
             unsettled.push(Unsettled::recorded(&place, terminal));
         }
-        crate::server::holder::client::settle_departed();
+        crate::terminal_holder::client::settle_departed();
         (entries, pending)
     }
 
@@ -606,7 +606,7 @@ impl Registry {
     fn take_up(&self, place: &Place, mut client: Client) -> Result<TakenUp> {
         let holder = client.hello()?;
         let listed = client.list()?;
-        crate::server::holder::client::adopt(place, holder.pid);
+        crate::terminal_holder::client::adopt(place, holder.pid);
         let mut taken = TakenUp {
             entries: Vec::new(),
             unsettled: Vec::new(),
@@ -654,7 +654,7 @@ impl Registry {
                         .iter()
                         .map(|terminal| Unsettled::recorded(&holder.place, terminal.clone()))
                         .collect();
-                    crate::server::holder::client::settle_departed();
+                    crate::terminal_holder::client::settle_departed();
                     (Vec::new(), unsettled)
                 }
                 Ok(client) => match self.take_up(&holder.place, client) {

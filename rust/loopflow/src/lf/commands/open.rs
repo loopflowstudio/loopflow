@@ -13,7 +13,7 @@ mod workspace;
 
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
 use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
@@ -28,7 +28,6 @@ use crate::work::link::{WorkTarget, WorkUrl};
 use loopflow_storage::work::selection::WorkWorkspaceKind;
 
 pub(crate) const DESKTOP_BUNDLE: &str = "com.loopflow.mac";
-const HOST_TIMEOUT: Duration = Duration::from_secs(2);
 pub(crate) const NO_DESKTOP: &str = "no installed Loopflow Desktop; `lf install` places it";
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Serialize, Deserialize, schemars::JsonSchema,
@@ -812,42 +811,9 @@ fn route(requested: OpenHost) -> OpenRoute {
     }
 }
 
-fn set(name: &str) -> bool {
-    std::env::var_os(name).is_some_and(|value| !value.is_empty())
-}
-
-const CMUX_WORKSPACE: &str = "CMUX_WORKSPACE_ID";
-const CMUX_SOCKET: &str = "CMUX_SOCKET_PATH";
-const HERDR_ENV: &str = "HERDR_ENV";
-const HERDR_SOCKET: &str = "HERDR_SOCKET_PATH";
-const HERDR_WORKSPACE: &str = "HERDR_WORKSPACE_ID";
-const HERDR_PANE: &str = "HERDR_PANE_ID";
-const TMUX: &str = "TMUX";
-const TMUX_PANE: &str = "TMUX_PANE";
-/// Set by Loopflow Desktop on every child, including its terminals' agents,
-/// to its own bundle identifier.
 const DESKTOP: &str = "LF_DESKTOP";
 
-/// Terminal-host context a direct caller carries. The link receiver removes
-/// it: an OS receiver's environment belongs to its first launch, not the click.
-pub(crate) const HOST_CONTEXT: &[&str] = &[
-    "REX_SERVER",
-    "REX_SESSION",
-    "REX_BLOCK",
-    CMUX_WORKSPACE,
-    CMUX_SOCKET,
-    HERDR_ENV,
-    HERDR_SOCKET,
-    HERDR_WORKSPACE,
-    HERDR_PANE,
-    TMUX,
-    TMUX_PANE,
-    DESKTOP,
-];
-
-fn in_cmux() -> bool {
-    set(CMUX_WORKSPACE) && set(CMUX_SOCKET)
-}
+use crate::terminal_host::{in_cmux, in_herdr, in_rex, in_tmux, run_host, HOST_TIMEOUT};
 
 /// The Desktop a caller runs in, else the installed app.
 pub(crate) fn desktop_bundle() -> String {
@@ -897,44 +863,6 @@ impl DesktopApp {
             Self::Installed(app) => ["-a".as_ref(), app.as_os_str()],
         }
     }
-}
-
-fn in_rex() -> bool {
-    set("REX_SESSION") || set("REX_BLOCK")
-}
-
-fn in_herdr() -> bool {
-    std::env::var(HERDR_ENV).as_deref() == Ok("1") && set(HERDR_SOCKET) && set(HERDR_PANE)
-}
-
-fn in_tmux() -> bool {
-    set(TMUX) && set(TMUX_PANE)
-}
-
-/// The host workspace this direct process runs in, recorded as its attached
-/// terminal placement (host endpoint and view identity)
-/// so a later opening can focus that conversation instead of starting another client.
-pub(crate) fn host_placement() -> Option<String> {
-    if in_rex() {
-        let location = rex::RexLocation::current().ok()?;
-        return Some(format!("rex:{}", serde_json::to_string(&location).ok()?));
-    }
-    if in_herdr() {
-        return Some(format!(
-            "herdr:{}",
-            serde_json::to_string(&herdr::HerdrLocation::current()?).ok()?
-        ));
-    }
-    if in_cmux() {
-        return Some(format!(
-            "cmux:{}",
-            serde_json::to_string(&cmux::CmuxLocation::current()?).ok()?
-        ));
-    }
-    Some(format!(
-        "tmux:{}",
-        serde_json::to_string(&tmux::TmuxLocation::current()?).ok()?
-    ))
 }
 
 /// Where an agent caller's own conversation is viewed now. Its environment
@@ -1123,39 +1051,6 @@ fn open_desktop(url: &str, focus: bool) -> Result<()> {
     }
     command.arg(url);
     run_host(command, "Launch Services").map(drop)
-}
-
-/// Run one host request with a finite timeout and return its stdout.
-fn run_host(mut command: Command, host: &str) -> Result<String> {
-    // Native inventories can exceed a pipe buffer. Spool while the child runs
-    // so waiting for exit cannot deadlock behind an unread stdout/stderr pipe.
-    let mut stdout = tempfile::tempfile()?;
-    let mut stderr = tempfile::tempfile()?;
-    let mut child = command
-        .stdin(Stdio::null())
-        .stdout(stdout.try_clone()?)
-        .stderr(stderr.try_clone()?)
-        .spawn()
-        .with_context(|| format!("cannot run {host}"))?;
-    let (status, timed_out) =
-        crate::os_process::wait_for_exit(&mut child, Some(HOST_TIMEOUT), || {})?;
-    if timed_out {
-        let _ = child.kill();
-        let _ = child.wait();
-        bail!("{host} did not answer within {}s", HOST_TIMEOUT.as_secs());
-    }
-    use std::io::Seek;
-    stdout.rewind()?;
-    stderr.rewind()?;
-    let stdout = std::io::read_to_string(stdout)?;
-    let stderr = std::io::read_to_string(stderr)?;
-    if status.success() {
-        Ok(stdout)
-    } else {
-        let detail = stderr.trim();
-        anyhow::ensure!(!detail.is_empty(), "{host} exited with {status}");
-        bail!("{host} refused: {detail}")
-    }
 }
 
 // ---------------------------------------------------------------------------

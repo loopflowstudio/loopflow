@@ -394,7 +394,7 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
                     cli,
                     &std::env::args().collect::<Vec<_>>(),
                     &cwd,
-                    &mut crate::lf::commands::mutation::CommandIo {
+                    &mut crate::command::CommandIo {
                         input: &mut std::io::stdin(),
                         output: &mut std::io::stdout(),
                         error: &mut std::io::stderr(),

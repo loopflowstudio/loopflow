@@ -1,22 +1,10 @@
 //! Ordinary mutations shared by CLI dispatch and server requests.
-use std::io::{Read, Write};
+use crate::command::CommandIo;
+use std::io::Read;
 use std::path::Path;
 
 use crate::lf::{Cli, Commands, TaskCommand, WaveCommand};
 use anyhow::{Context, Result};
-
-/// A command's streams belong to its caller, never to the server process.
-pub struct CommandIo<'a> {
-    pub input: &'a mut dyn Read,
-    pub output: &'a mut dyn Write,
-    pub error: &'a mut dyn Write,
-}
-
-impl std::fmt::Debug for CommandIo<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CommandIo").finish_non_exhaustive()
-    }
-}
 
 pub fn accepts(cli: &Cli) -> bool {
     match &cli.command {

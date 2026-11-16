@@ -7,26 +7,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::engine::task;
-
-/// Whether opening may take control, start a thread, or only reveal history.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum SessionOpenIntent {
-    Resume,
-    Start,
-    Reveal,
-}
-
-impl SessionOpenIntent {
-    /// The `lf session resume` flag carrying this intent; ordinary resume has none.
-    pub fn flag(self) -> Option<&'static str> {
-        match self {
-            Self::Resume => None,
-            Self::Start => Some("--start-if-free"),
-            Self::Reveal => Some("--reveal-existing"),
-        }
-    }
-}
+use crate::session::SessionOpenIntent;
 
 /// Moving a Task changes its Wave membership or its Machine ownership.
 #[derive(Debug, Serialize, schemars::JsonSchema)]
@@ -1141,7 +1122,7 @@ impl Write {
         let ran = forward.run(
             &cli,
             directory,
-            &mut super::mutation::CommandIo {
+            &mut crate::command::CommandIo {
                 input: &mut std::io::empty(),
                 output: &mut output,
                 error: &mut error,

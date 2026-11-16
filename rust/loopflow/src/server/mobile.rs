@@ -8,38 +8,15 @@ use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
 
-use super::client::Connection;
 use super::wire::{Operation, ServerOperation};
+use crate::machine::client::Connection;
 use anyhow::{Context, Result};
 use fs2::FileExt;
 use rustls::pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer};
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio_rustls::{rustls, TlsAcceptor};
 
-/// A device's Tailscale identity, as `tailscale status` and `whois` report it.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, schemars::JsonSchema)]
-pub struct TailscaleIdentity {
-    /// The device's Tailscale StableID.
-    pub node: String,
-    /// The Tailscale user ID that owns the device.
-    pub user: u64,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
-pub struct Configuration {
-    pub enabled: bool,
-    pub endpoint: String,
-    /// The Machine owner's identity: their other devices are admitted.
-    pub owner: TailscaleIdentity,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
-pub struct Status {
-    pub configuration: Option<Configuration>,
-    pub ready: bool,
-    pub error: Option<String>,
-}
+pub use crate::machine::mobile::{Configuration, Status, TailscaleIdentity};
 
 pub fn status() -> Result<Status> {
     match Connection::open().and_then(|mut connection| {

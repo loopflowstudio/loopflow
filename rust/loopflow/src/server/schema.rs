@@ -1,7 +1,6 @@
 //! The JSON Schema of the protocol, generated from the wire types. `lf server
 //! describe` prints it; the fixtures in `rust/loopflow/tests/fixtures/dto/server/` validate
 //! against it.
-use std::borrow::Cow;
 
 use schemars::generate::SchemaSettings;
 use schemars::{json_schema, JsonSchema, Schema, SchemaGenerator};
@@ -323,21 +322,7 @@ pub fn summary() -> String {
 #[cfg(test)]
 pub(crate) use crate::store::TimeTuple;
 
-/// A result that is `serde_json::Value` on the wire: this build promises no
-/// shape for it, and the schema says so rather than inventing one.
-#[derive(Debug)]
-pub struct Untyped;
-
-impl JsonSchema for Untyped {
-    fn schema_name() -> Cow<'static, str> {
-        "Untyped".into()
-    }
-    fn json_schema(_: &mut SchemaGenerator) -> Schema {
-        json_schema!({
-            "description": "Untyped on the wire: any JSON value, with no shape promised.",
-        })
-    }
-}
+pub use crate::machine::schema::Untyped;
 
 /// A result whose shape the request's own fields choose.
 pub(crate) fn either<A: JsonSchema, B: JsonSchema>(generator: &mut SchemaGenerator) -> Schema {

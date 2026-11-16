@@ -11,8 +11,8 @@ use serde::Serialize;
 use time::OffsetDateTime;
 
 use crate::lf::commands::WorkFilter;
-use crate::lf::output::{format_int, truncate, Colors};
 use crate::ops::metrics::MetricProducerObservation;
+use crate::output::{format_int, truncate, Colors};
 use crate::session_record::{SessionHistory, SILENCE_SECONDS};
 
 /// 2026-09-23T00:00:00Z: the baseline week ends on 2026-09-30.

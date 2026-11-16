@@ -81,7 +81,9 @@ impl Client {
         }
         let notice = store
             .attachment_departure(session, expected)?
-            .map(|departure| crate::lf::commands::util::departure_notice(store, session, departure))
+            .map(|departure| {
+                crate::harness::native_session::departure_notice(store, session, departure)
+            })
             .transpose()?;
         let mut state = self.0.lock().expect("client attachment lock poisoned");
         if state.attached != attached {

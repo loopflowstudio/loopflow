@@ -4,7 +4,7 @@ use anyhow::Context;
 use clap::Subcommand;
 
 use crate::lf::commands::session_history::SessionView;
-use crate::lf::output::print_process;
+use crate::output::print_process;
 use crate::process::{
     ProcessCursor, ProcessEntry, ProcessFilter, ProcessOutcomeFilter, ProcessWorkFilter,
 };
@@ -183,7 +183,7 @@ impl HistoryCommand {
 }
 
 fn export(since: &str) -> anyhow::Result<()> {
-    let since = super::util::parse_since(since, time::OffsetDateTime::now_utc())?;
+    let since = crate::output::parse_since(since, time::OffsetDateTime::now_utc())?;
     let runtime = tokio::runtime::Runtime::new()?;
     let store = runtime.block_on(open_store(&storage_config_from_env()?))?;
     let stdout = std::io::stdout();
@@ -432,7 +432,7 @@ pub(crate) fn render(
             let summary = if json {
                 String::new()
             } else {
-                format!("{}\n", crate::lf::output::render_process(&process))
+                format!("{}\n", crate::output::render_process(&process))
             };
             Ok(format!(
                 "{summary}{}\n",

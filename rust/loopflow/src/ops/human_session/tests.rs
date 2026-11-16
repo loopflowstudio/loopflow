@@ -269,8 +269,8 @@ use crate::provider_account::LaunchCapacity;
 use std::ffi::OsString;
 
 use super::human_session_argv;
-use crate::lf::commands::write::SessionOpenIntent;
 use crate::session::LfSession;
+use crate::session::SessionOpenIntent;
 use crate::store::{open_ephemeral_store, SharedStore, StorageConfig};
 use loopflow_storage::work::task::TaskId;
 

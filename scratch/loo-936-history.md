@@ -1,6 +1,6 @@
 # LOO-936: record only what the product reads, history apart from state
 
-Status: 2026-11-16, slice 1 committed (`0cdba4ed89`), slice 2 and `opened_at` committed; Process placement revised and settled (see the last sections); slice 3 next.
+Status: 2026-11-16, slice 1 committed (`0cdba4ed89`), slice 2 (`be56185174`) and `opened_at` (`808f3821c7`) committed; Process placement settled (last sections); slice 3 next. `history.rs` has no production writer yet: `SqliteStore::write_history` waits for slice 3's kinds.
 Old `provider_session_observed`/`provider_account_selected` rows still sit in
 live stores (tests seed them); slice 5's move pass deletes them. The inventory below is the review a person reads before
 code changes (brief: "Start with an inventory a person reviews before code
@@ -59,9 +59,9 @@ read every row; both read the history file after the change.
 
 | Rows | Reader | Fate |
 | --- | --- | --- |
-| Unfinished `lf` and `agent` rows | liveness, `lf top`, Task moving/shipping (`durable.rs:403`, `task_work.rs:644`), idle wake (`steers.rs:229`) | **main** |
-| Finished rows a main record references (Graph, Graph step, `task_graphs`, ship, `ci_incidents`, `agent_sessions.agent_process_id`/`transport_lf_process_id`, `desktop_shells`, `agent_limit_recoveries`, steer tables): ~48,100 today, 21,851 agent rows and 21,579 Graph rows among them | Graph inventory, failure cause (`processes.rs:916`), "started by Session" (`processes.rs:862`) | **main** |
-| Every other finished row: 127,320 agent-issued commands, children of finished parents, rows pinned only by a `session_events` reference | `lf history list/show` (`history.rs:292`), `lf context --process`, Task Work list (`task_work.rs:812`), `lf doctor`, PR-landing blockers (`pr_landing.rs:445`) | **moved to the history file at exit** |
+| Unfinished `lf` and `agent` rows | liveness, `lf top`, Task moving/shipping (`durable.rs:403`, `task_work.rs:644`), idle wake (`steers.rs:229`) | **history file**; the attachment moves to `agent_sessions`, Task state reads records' `ended_at` |
+| Finished rows a main record references (Graph, Graph step, `task_graphs`, ship, `ci_incidents`, `agent_sessions.agent_process_id`/`transport_lf_process_id`, `desktop_shells`, `agent_limit_recoveries`, steer tables): ~48,100 today, 21,851 agent rows and 21,579 Graph rows among them | Graph inventory, failure cause (`processes.rs:916`), "started by Session" (`processes.rs:862`) | **history file**; the pointing record keeps its own result and `ended_at` |
+| Every other finished row: 127,320 agent-issued commands, children of finished parents, rows pinned only by a `session_events` reference | `lf history list/show` (`history.rs:292`), `lf context --process`, Task Work list (`task_work.rs:812`), `lf doctor`, PR-landing blockers (`pr_landing.rs:445`) | **history file** |
 
 Columns with no production writer or reader (`viewed`, `native_input`,
 `viewer_hold`, `viewer_hold_at`, `caller_provider_generation`,
@@ -78,21 +78,19 @@ with its own write lock, WAL and revision row.
    `loopflow-storage`, schema owned in code with `PRAGMA user_version` (a
    journal; no migration catalog). Tables: `session_history` (the
    `session_events` columns minus foreign keys; history kinds only) and
-   `process_history` (the `processes` columns Process readers use: id, trace,
+   `processes` (every Process row, live and finished; today `process_history`
+   at `user_version` 1, renamed with slice 4; columns: id, trace,
    parent, caller Session/agent, kind, command, repo, cwd, times, outcome,
    exit code, signal, error). Readers `ATTACH` it as `history` and name
-   `history.session_history` / `history.process_history`; cross-file joins
+   `history.session_history` / `history.processes`; cross-file joins
    keep working, with indexes in the history file.
 2. **Writes.** History rows go through a connection whose main database is
    `history.db`, with `loopflow.db` attached read-only (`?mode=ro`) for the
    attachment-token fence. `BEGIN IMMEDIATE` then locks only `history.db`.
    A failed history write is a `store::RecordingGap` in `lf.log`, never a
    failed turn.
-3. **Process exit moves, never copies.** `FORGETTABLE` drops the
-   `via_agent IS NOT 1` and `session_events` clauses; what it selects is
-   inserted into `process_history` and deleted from `processes` (history
-   insert first; a crash between leaves a duplicate the prune pass removes by
-   id, never a lost row). The retention prune runs the same move for leftovers.
+3. **Every Process row in the history file** from its start; nothing moves
+   at exit. See "Revised direction" and "Settled in concept review".
 4. **State facts become columns on their owner** (one migration, additive):
    `agent_sessions.opened_at`, `agent_sessions.transition` (latest provider
    transition JSON), `agent_sessions.independent` (from the manifest flow
@@ -113,7 +111,7 @@ with its own write lock, WAL and revision row.
    (`planning_update_triggers_compare_every_column`). Nothing that reads the
    stamp is a subscription: retirement reads it on its own clock.
 6. **Retention** (`lf process prune`, `store/retention.rs`, run by the
-   Machine server on a clock; today nothing schedules it): `process_history` 30 days; `session_history` 90 days
+   Machine server on a clock; today nothing schedules it): finished `history.processes` rows 30 days; `session_history` 90 days
    (weekly usage and Task history read back weeks); `captured` inputs in main
    are kept (they anchor Sessions; 21k rows, 5 MB). Deleting history is one
    `DELETE … WHERE observed_at < ?` per table in batches, then incremental
@@ -140,12 +138,6 @@ with its own write lock, WAL and revision row.
 - **Per-Session JSONL files** (like `runs/<capture>/events.jsonl`). No
   lock at all, but `pending_inputs` and usage reports read time windows
   across Sessions; files make those scans. Rejected.
-- **Read finished Processes from both files with a UNION view.** Avoided by
-  the move rule: each Process is in one file, and `lf history` reads
-  `process_history` plus the main rows a record pins through one query in
-  `processes.rs`, not a view every caller sees. (Moot under the revised
-  direction: every Process row is in one table.)
-
 ### Wild success / failure
 
 Success: `lf install` takes seconds because `loopflow.db` is ~60 MB; Desktop
@@ -174,8 +166,8 @@ lf history list --caller <session>                  # agent-issued commands as b
   `session_events` holds only `captured`; `history.session_history` holds the
   history kinds; dead kinds gone. `lf session history <id> --json` output is
   unchanged for a seeded Session (snapshot compared before/after).
-- A fixture agent runs `lf commit` (via_agent): after exit the row is in
-  `process_history`, not `processes`; `lf history list --caller` lists it.
+- A fixture agent runs `lf commit` (via_agent): the row is in
+  `history.processes` from its start and main has no row for it; `lf history list --caller` lists it.
 - Held-terminal viewer heartbeat × 10 → `processes` revision unchanged.
 - History write with `history.db` locked by another connection → the turn
   completes, `lf.log` has one recording gap, and a main-store writer was not
@@ -197,16 +189,7 @@ lf history list --caller <session>                  # agent-issued commands as b
    `history_apart_from_state.sql`: held-terminal update trigger ignores
    heartbeat re-stamps; `task_update_session_events_*` lose the
    `task_update` JSON arm. `compact_usage` waits for slice 3 (usage moves).
-2. History file: open, schema, write connection, recording gap.
-3. Move session history kinds; state columns on `agent_sessions` and
-   `session_events.provider_thread` on the input (same migration, edited in
-   place), backfilled from the `provider-session:*` rows before they go;
-   `history` declared by every projection naming `history.*`; repoint
-   readers (`session_events.rs`, `sessions.rs` `pending_inputs`,
-   `session_record.rs`, `provider_transitions.rs`, `graph_inventory.rs`,
-   `task_work.rs`, `machine_records.rs`).
-4. Move finished Processes; `FORGETTABLE` widened; `lf history`, Task Work
-   list, `lf doctor`, PR-landing blockers read `process_history`.
+2–4. See "Revised slices" at the end.
 5. Retention on the Machine server's clock, move pass for existing rows, `history` revision for Session
    History subscriptions, `data.md` ("Loopflow keeps no copy of the
    stream" becomes true again once `output` is gone; check the doc).
@@ -223,8 +206,7 @@ Remaining: `retention.rs` `compact_usage`, `Cursor`, `.usage-cursor` file
 ## Forbidden outcomes
 
 A history kind readable from both files; a reader falling back from
-`history.session_history` to `session_events`; copying a Process to history
-while it stays in main; a history write that opens `loopflow.db` for writing.
+`history.session_history` to `session_events`; a Process row in both files; a history write that opens `loopflow.db` for writing.
 
 ## Exclusions
 
@@ -238,7 +220,8 @@ Renaming `session_events` (now only inputs) and `agent_sessions`: LOO-937.
   rebuild `session_events` as the inputs table without history-only columns
   and indexes (`session_turn_*`, `session_observation_receipt`,
   `session_events_provider_session`, …); expand step = this Task's migration.
-- Drop `processes` columns LOO-935 does not take, and `usage` revision domain.
+- Drop main's `processes` table once its rows have moved (expand step =
+  this Task's migration), and the `usage` revision domain.
 
 ## Before / after to report
 

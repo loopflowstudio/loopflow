@@ -342,15 +342,8 @@ Task, since an older lf locks the same inode (`planning_sync.rs:594`).
   `task_comments.rs`, and `task_creation_intents`/`project_transitions` export
   columns' writers. Behavior that survives: every rule above, the #1829 window,
   `lf task sync`, `--retry-updates`, `PlanningSyncStatus` fields.
-- **`pm_issue_changes`:** the brief says it has no production writer; the
-  sweep found one. `observe_pm_issue_change` (`sqlite/linear_observations.rs:10`)
-  records a provider removal from `tracker_observe.rs`, and its readers
-  (`linear/acceptance.rs` ×3, `sqlite/linear_acceptance.rs` ×2,
-  `sqlite/children.rs`) use it as removal/invalidation evidence. Slice 3
-  first writes `a_tracker_removal_withdraws_new_launches`; if
-  `tasks.planning_deleted_at` and `task_deletions` already carry that fact the
-  writer and readers go; otherwise removal becomes a column on `pm_items`
-  in the migration and the table goes in the contract.
+- **`pm_issue_changes`: stays** (concept review after the cut): released
+  stores hold removals only it records.
 - **Receipt-skipping writers:** PR links (`link_pr_with_client`,
   `ops/linear.rs:749`, saves ids after the call;
   `ops/task.rs:2481` reposts an id-less Asana comment on every publish) become
@@ -420,15 +413,12 @@ Deepest deletions first, then the queue, then the bridges. Commit at each.
    above). Fake tests: lost field reply, conflict adopt, restored deletion
    (`ops/linear/planning_effect_tests.rs`). Docs: `planning.md` "One outbound
    queue", `reference.md`, `reference-code.md`, `ops/README.md`. Filed:
-   contract migration (771562), wire names (9fbce4).
-7. **Remaining.**
-   - File with the PR: GOAL.md name/summary as Wave `field` effects
-     (`EffectKind::of` queues nothing for Wave values; never sent by a
-     released lf, so no regression).
-   - `uncreated()`'s Project half scans `project_transitions` per unbound
-     Project (small table); `task_creation_intents` and `project_transitions`
-     stay live as creation record and plan transitions, only their export
-     columns are dead (contract Task).
+   contract migration (LOO-941), wire names (LOO-942).
+7. **Follow-ups filed:** GOAL.md name/summary as Wave `field` effects
+   (LOO-944; never sent by a released lf, so no regression). `uncreated()`'s
+   Project half scans `project_transitions` per unbound Project (small table);
+   `task_creation_intents` and `project_transitions` stay live as creation
+   record and plan transitions, only their export columns are dead (LOO-941).
 
 ### Concept review (2026-11-16, after 7e6a2ce054): nothing left to build
 
@@ -493,5 +483,5 @@ as commits that build; old rows are marked settled in the same migration.
 existing `lf repo plan` (there is no `lf planning` command); its text output
 is documented as one line per unsettled effect: owner, kind, `pending` or
 "sent, waiting for <tracker> to confirm". `lf task sync <id>` drains that
-owner now. Still to update with the code: `docs/dev/planning.md`,
-`docs/dev/reference.md:89`, `rust/loopflow-execution/src/ops/README.md:10`.
+owner now. The dev docs (`planning.md`, `reference.md`, `ops/README.md`) were
+updated in slice 6.

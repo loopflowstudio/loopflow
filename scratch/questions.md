@@ -87,5 +87,5 @@
   behavior people may rely on.
 
 - Wire `linear_id` → a neutral name crosses Rust, Swift and ~10 DTO fixtures.
-  Filed as Task 9fbce4, which opens with this question: is a neutral name
+  Filed as LOO-942, which opens with this question: is a neutral name
   wanted at all while Linear is the only tracker in use?

@@ -216,6 +216,7 @@ mod tests {
             let store = SqliteStore {
                 token_key: crate::store::token_key::encryption_key,
                 conn: Arc::new(Mutex::new(conn)),
+                history: Default::default(),
             };
             let saved = store.task(&task).unwrap().unwrap();
             assert_eq!(saved.title, "Saved Task");

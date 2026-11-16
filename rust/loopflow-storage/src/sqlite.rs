@@ -183,6 +183,11 @@ pub struct SqliteStore {
     pub token_key: token_crypto::TokenKeySource,
     #[cfg(not(feature = "test-support"))]
     pub(crate) token_key: token_crypto::TokenKeySource,
+    /// This connection's writer of `history.db`, opened at its first write.
+    #[cfg(feature = "test-support")]
+    pub history: Arc<crate::history::HistoryFile>,
+    #[cfg(not(feature = "test-support"))]
+    pub(crate) history: Arc<crate::history::HistoryFile>,
 }
 
 fn waves_in(conn: &Connection, repo: Option<&str>) -> StoreResult<Vec<Wave>> {
@@ -226,6 +231,23 @@ impl SqliteStore {
     pub fn home_dir(&self) -> StoreResult<PathBuf> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         home_dir_in(&conn)
+    }
+
+    /// Run `write` on this store's `history.db`, never under the store's write
+    /// lock. A failure is a recording gap for `what`, and `None`.
+    // Session history kinds move onto this writer later in LOO-936's PR.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn write_history<T>(
+        &self,
+        what: &str,
+        write: impl FnOnce(&rusqlite::Transaction<'_>) -> StoreResult<T>,
+    ) -> Option<T> {
+        let Some(path) = self.path() else {
+            crate::RecordingGap::default()
+                .note(what, &"the store has no file beside which to keep history");
+            return None;
+        };
+        self.history.write(&path, what, write)
     }
 }
 
@@ -637,9 +659,11 @@ impl SqliteStore {
         crate::instrumentation::observe_sqlite(&conn);
         configure_write_connection(&mut conn, path, SQLITE_WRITE_BUSY_TIMEOUT)?;
         super::migration_runner::apply_sqlite(build, &conn, observers)?;
+        crate::history::attach(&conn, path, true);
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
             token_key,
+            history: Default::default(),
         })
     }
 
@@ -708,10 +732,12 @@ impl SqliteStore {
         if may_apply_migrations {
             migrate_plaintext_provider_tokens(&mut conn, token_key)?;
         }
+        crate::history::attach(&conn, path, true);
 
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
             token_key,
+            history: Default::default(),
         })
     }
 
@@ -748,9 +774,11 @@ impl SqliteStore {
         conn.prepare(
             "SELECT id, trace_id, parent_lf_process_id, started_at, completed_at, outcome, exit_code, pid FROM processes LIMIT 0",
         )?;
+        crate::history::attach(&conn, path, false);
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
             token_key,
+            history: Default::default(),
         })
     }
 
@@ -764,9 +792,11 @@ impl SqliteStore {
         )?;
         crate::instrumentation::observe_sqlite(&conn);
         conn.execute_batch("PRAGMA query_only = ON; PRAGMA busy_timeout = 5000;")?;
+        crate::history::attach(&conn, path, false);
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
             token_key,
+            history: Default::default(),
         })
     }
 
@@ -2065,6 +2095,7 @@ mod fixture_tests {
         let store = SqliteStore {
             token_key: crate::test_fixture::key,
             conn: std::sync::Arc::new(std::sync::Mutex::new(conn)),
+            history: Default::default(),
         };
         let identities = store.work_identities().unwrap();
         assert_eq!(identities.len(), 4);

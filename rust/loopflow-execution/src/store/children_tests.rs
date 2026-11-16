@@ -843,6 +843,7 @@ fn local_planning_migration_preserves_released_links_and_orphan_deletion_evidenc
     let store = SqliteStore {
         token_key: crate::store::token_key::encryption_key,
         conn: Arc::new(Mutex::new(conn)),
+        history: Default::default(),
     };
     let observation: crate::test_linear_input::IssueFixture =
         loopflow_test_support::retained_task_input_in(

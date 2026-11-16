@@ -132,13 +132,16 @@ one frame, with accepted and confirmed times beside it.
   reconnect. Blip: outstanding changes stay in memory and are resent with
   their request IDs when the link returns. Away: change controls disabled,
   last readings shown read-only; outstanding changes wait for the link or
-  quit. Nothing new on disk.
+  quit. Nothing new on disk. The link lives on the per-Machine
+  `PendingChanges`, shared by every Desktop window on that Machine (concept
+  review, item 5); today it is one per `WorkModel`.
 - **`Notice`**: `{ id, text, action: (title, handler)?, kind: event | condition }`.
   One `NoticeCenter` per window (Desktop) and per app (phone); one
   `NoticeView` in shared Swift: an overlay at the bottom, one line, at most
   one action. Events dismiss after six seconds; conditions (away) dismiss when
-  they end. A new Notice replaces the current one. Posting the same key while
-  shown refreshes it instead of stacking.
+  they end. A new event replaces the current event; conditions stand
+  underneath it (concept review, item 6). Posting the same key while shown
+  refreshes it instead of stacking.
 - **Next-Task rule** (Complete, Abandon of the selected Task): the next row
   below in the patched list order, else the row above, else the empty state.
   Selection happens in the click, before the write is sent.

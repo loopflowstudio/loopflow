@@ -11,16 +11,18 @@ the way you work and share it.
 ## Skills
 
 ```bash
-lf skill customize pr-message    # copies the builtin to .lf/skills/pr-message.md and prints the path
+lf skill customize pr-message    # writes .lf/skills/pr-message.md, an extension of the builtin, and prints the path
+lf skill customize gate --full   # copies the builtin's whole text instead
 lf audit focus on the token refresh path   # your .lf/skills/audit.md, with a message
 lf -a codex audit                # the same Skill on Codex
 ```
 
-A repository Skill replaces the builtin of the same name, for everyone who has
-your commit. Customize copies once, then keeps printing the existing file.
+Customize writes once, then keeps printing the existing file. A repository
+Skill without `extends` replaces the builtin of the same name, for everyone who
+has your commit; `--full` starts you from the builtin's text.
 
-To add to a builtin and keep following it as it changes, write only your
-section:
+The file customize writes adds to the builtin and keeps following it as it
+changes. Write only your section:
 
 ```markdown
 ---

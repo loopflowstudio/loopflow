@@ -402,10 +402,10 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
                 )?;
             }
             Commands::Skill {
-                cmd: SkillCommand::Customize { name },
+                cmd: SkillCommand::Customize { name, full },
             } => println!(
                 "{}",
-                loopflow_execution::skills::customize(name, &repo)?.display()
+                loopflow_execution::skills::customize(name, &repo, *full)?.display()
             ),
             _ => unreachable!("inspection command selected above"),
         }

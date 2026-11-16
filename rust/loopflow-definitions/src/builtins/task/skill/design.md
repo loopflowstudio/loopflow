@@ -57,7 +57,8 @@ follow-ups; keep an indivisible change whole.
 - **Constraints** — choices that force a rewrite if guessed wrong.
 - **Done when** — a headless command and its expected result.
 - **Delete — do not maintain** — removal targets and what must survive.
-- **Slices** — for an indivisible change, deepest deletions first.
+- **Slices** — a suggested order to build in, each running end to end; the
+  first is the one that could prove the plan wrong.
 - **Measure** — only when a real before and after number exists.
 
 For managed work, name the one Wave whose objective fits, or say placement is

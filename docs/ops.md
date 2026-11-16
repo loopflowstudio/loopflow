@@ -116,7 +116,7 @@ unreadable CI status stays unavailable. A local pass is reported as local.
 
 If your CI only tests PRs in some state (a label, no draft, a cleared notes
 directory), name that step in your agent guide. Gate does it before publishing.
-`lf skill customize gate` copies the Skill to change the rest.
+`lf skill customize gate --full` copies the Skill to change the rest.
 
 ### When CI fails
 

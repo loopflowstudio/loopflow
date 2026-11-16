@@ -109,7 +109,8 @@ impl SkillSource {
     /// The skill's text. A Loopflow file whose frontmatter says
     /// `extends: builtin` is the builtin of the same name with the file's body
     /// appended, so a repository adds its own section and keeps following the
-    /// builtin as it changes.
+    /// builtin as it changes. The builtin's frontmatter stands under the
+    /// file's: a key the file sets wins.
     pub fn read(&self) -> Result<String, LoadError> {
         let Some(path) = &self.path else {
             return Ok(builtins::get_builtin_skill(&self.name)
@@ -138,9 +139,16 @@ impl SkillSource {
                             self.name
                         ))
                     })?;
-                let base = split_frontmatter(base).map_or(base, |(_, body)| body);
+                let (inherited, base) = split_frontmatter(base).unwrap_or(("", base));
+                let mut merged = serde_yaml_ng::from_str::<serde_yaml_ng::Mapping>(inherited)
+                    .unwrap_or_default();
+                if let Ok(own) = serde_yaml_ng::from_str::<serde_yaml_ng::Mapping>(frontmatter) {
+                    merged.extend(own);
+                }
+                let frontmatter = serde_yaml_ng::to_string(&merged)
+                    .map_err(|error| LoadError::InvalidSkill(error.to_string()))?;
                 Ok(format!(
-                    "---{frontmatter}---\n{}\n\n{}",
+                    "---\n{frontmatter}---\n{}\n\n{}",
                     base.trim_end(),
                     addition.trim_start()
                 ))

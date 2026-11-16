@@ -25,7 +25,7 @@ surprising prerequisite is design feedback.
 
 3. **Read it as a user.** Can someone follow the example without knowing the
    implementation? Settle details the direction implies. If writing exposes a
-   real product choice, write the exact question into the working design and
+   real product choice, write the exact question into the plan and
    report it.
 
 4. **Show it.** Run `lf open --host desktop --file <path>`, repeating `--file`

@@ -141,7 +141,7 @@ involved. A finished
 A child does the work itself and starts no children unless its brief says to.
 
 A child job that recurs belongs in a skill under `.lf/skills/`, so the next
-child starts from it; `lf skill customize NAME` copies a builtin there to edit.
+child starts from it; `lf skill customize NAME` writes an extension of a builtin there to edit.
 Work that ends in its own PR is a Task; wait for it with `lf task wait`.
 
 ## Steer

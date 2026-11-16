@@ -1564,9 +1564,14 @@ pub struct DesktopWindowArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum SkillCommand {
-    /// Print the repository file that defines a skill, creating
-    /// it from the builtin when the repository has none
-    Customize { name: String },
+    /// Print the repository file that defines a skill. When the repository
+    /// has none, write one that extends the builtin with its own section
+    Customize {
+        name: String,
+        /// Write the builtin's whole text instead, replacing it here
+        #[arg(long)]
+        full: bool,
+    },
     #[command(external_subcommand)]
     External(Vec<String>),
 }

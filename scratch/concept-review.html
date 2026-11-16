@@ -2,97 +2,66 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-650 · storage ownership</title>
+<title>LOO-650 · shared operations</title>
 <style>
-:root{color-scheme:light dark;font:16px/1.5 system-ui,sans-serif}
+:root{color-scheme:light dark;font:16px/1.45 system-ui,sans-serif}
 body{max-width:760px;margin:2rem auto;padding:0 1rem 2rem}
 header{font-size:.78rem;color:light-dark(#555,#bbb)}
-h1{font-size:1.6rem;line-height:1.2}h2{font-size:1.05rem;margin:1.3rem 0 .4rem}
+h1{font-size:1.6rem;line-height:1.2}h2{font-size:1.05rem;margin:1.2rem 0 .4rem}
 p{margin:.6rem 0}code{font:.85em ui-monospace,monospace;overflow-wrap:anywhere}
 aside{border-left:3px solid light-dark(#96471c,#edb58b);padding-left:1rem}
 table{border-collapse:collapse;width:100%;font-size:.86rem}
 th,td{text-align:left;vertical-align:top;padding:.5rem .3rem;border-bottom:1px solid light-dark(#ccc,#555);overflow-wrap:anywhere}
-li{margin:.4rem 0}.proposed{border-left:3px solid light-dark(#23734c,#8cd6ad);padding-left:.7rem}
+li{margin:.4rem 0}
 @media(max-width:520px){body{margin-top:1rem}table{font-size:.76rem}}
 </style>
 <header>LOO-650 · concept-review · November 15, 2026<br>
-Reviewed at <code>b86c3e720d</code> plus the interrupted workspace edits. Built from <code>scratch/loo-650.md</code>, retained relocation compiler logs,
-<code>store/sqlite/{desktop_shells,linear_observations,session_events,steers_tests,rentals_tests}.rs</code>,
-<code>store/children_tests.rs</code>,
-<code>store/{native_usage_tests,rental_lifecycle_tests,test_fixture}.rs</code>,
-<code>store/{session,execution,pr_landing,opening,migration_runner,migration_fixtures,migration_lifecycle_tests,opening_frontier_tests,canonical_ids_tests}.rs</code>,
-<code>store/sqlite/{linear_acceptance,planning_write}.rs</code>, <code>linear/acceptance.rs</code>,
-<code>harness/fact_writer.rs</code> and migration build/check/package scripts.</header>
+Checkout reviewed: <code>4771dfab90</code>. Sources: <code>scratch/loo-650.md</code>,
+<code>scratch/publishing-discussion.md</code>, <code>scratch/measure.html</code>,
+<code>engine/{mod,account,launch,pr}.rs</code>, <code>lf/commands/graph.rs</code>,
+<code>ops/task/ship.rs</code>, application <code>build.rs</code>, storage and rebuild-probe READMEs.</header>
 <main>
-<h1>Continue the existing design: finish the storage extraction.</h1>
-<aside><strong>Biggest mismatch.</strong> Production storage takes prepared facts,
-but mixed tests still acquire application state and call private SQL helpers in
-one function. Moving that function across a crate boundary cannot retain both owners.
-The withdrawn attempt also left fixture includes relative to their old locations.</aside>
-<p><strong>Review outcome:</strong> No further design change or open product choice.
-The remaining implementation follows the existing ownership contract.</p>
-<p><strong>Built preparation:</strong> Desktop and Linear SQL now live under
-<code>store/sqlite/</code>; tally arithmetic and pure record operations live with
-their values. Migration history includes both source paths. Full-manifest history
-projection and activity’s early stop remain. Admission, ownership, steer, rental
-and native-usage lifecycle tests now sit above SQL; prepared storage fixtures
-supply build and observer values. Linear acceptance transactions now sit beside
-their private SQL helpers; async attribution remains above. Migration settings
-export and landing reconciliation remain application scenarios. Local title repair
-and Task-field persistence have separate prepared SQL checks. <strong>Pending:</strong>
-remaining mixed-test splits, the storage
-crate, its independent test build, and rebuild measurements.</p>
+<h1>Next cut: shared operations below CLI and server.</h1>
+<aside><strong>Biggest mismatch.</strong> The shared engine calls CLI handlers.
+Changing command presentation still shares a compiler unit with execution and
+recovery. Storage is now independent; another small leaf alone leaves this coupling.</aside>
+<p><strong>Built:</strong> model, definitions, terminal and synchronous storage
+crates; independent storage fixtures; cross-root reuse. <strong>Measured:</strong>
+one whole-build comparison, timing inconclusive. The prior page’s unfinished
+storage extraction is complete.</p>
 <h2>Actions → concepts → APIs</h2>
 <table>
-<tr><th>Action / concept</th><th>Current checkout</th><th>Proposed extraction</th></tr>
-<tr><td>Open shell / consumed receipt</td><td>Storage-classified SQL, application launch</td><td>Move SQL owner unchanged; lost acknowledgment still consumes launch once</td></tr>
-<tr><td>Acquire Linear changes / saved evidence</td><td><code>linear::acceptance</code> attributes requests; <code>sqlite::linear_acceptance</code> commits facts and Work together</td><td>Move the SQL owner with its private helpers; acquisition remains above</td></tr>
-<tr><td>Inspect context / tally</td><td><code>TurnContext::request/compacted</code>; writer interprets events</td><td>Move saved tally and arithmetic together; keep token counting above</td></tr>
-<tr><td>Build a worktree / migration identity</td><td>Both source paths contribute first-addition history</td><td>One SQL directory and catalogue generator; application supplies provenance</td></tr>
-<tr><td>Check continuity / fixture inputs</td><td>Migration lifecycle scenarios stay above; prepared SQL checks retain local title and field behavior</td><td>Finish remaining mixed fixtures; compile each crate’s tests independently</td></tr>
+<tr><th>Action / concept</th><th>Existing</th><th>Proposed</th></tr>
+<tr><td>Change a login / provider selection</td><td><code>engine::account</code> constructs <code>lf::AccountCommand</code></td><td>CLI and server call one typed account operation; parsing and rendering stay outside</td></tr>
+<tr><td>Run work / execution Process</td><td><code>engine::launch</code> uses CLI Graph log/release helpers</td><td>Execution owns launch bookkeeping and receipts; request lifetime stays separate</td></tr>
+<tr><td>Submit or land / delivery receipt</td><td><code>engine::pr</code> calls CLI sync/retry orchestration</td><td>One shared orchestration, same exact-head and uncertain-result handling</td></tr>
+<tr><td>Build a new worktree / derived cache roots</td><td>Private refresh probe passes; shared upkeep is missing</td><td>One owner refreshes the shared daemon while idle; normal builds need no manual root editing</td></tr>
 </table>
-<h2>Proposed source contract</h2>
-<p class="proposed">Application acquisition and policy → synchronous storage →
-saved records. The same direction holds in tests. Split mixed tests by behavior
-before relocating them; a single function can contain both owners. Keep the full
-application recovery scenario through public operations and test private SQL
-separately with prepared facts. Shared setup does not determine ownership.</p>
-<p>Keep raw-schema and private transaction checks in storage. Keep CLI execution,
-repository/Wave bootstrap and process attachment in application tests. Storage
-fixtures use the prepared opener with explicit build, upgrade and key inputs.
-A dev-only inspection feature must not reconstruct application modules inside
-storage. Historical SQL fixtures retain one source; includes use each consuming
-crate’s manifest path. Generated schema fixtures follow the catalogue owner.</p>
-<p>Keep non-exhaustive enums and the planned owner operations. Dispatch,
-recommendation and uncertain-receipt handling remain application decisions;
-unsupported values never invent a launch or completion.</p>
+<h2>Proposed implementation direction</h2>
+<p>Move operation implementations and results below both adapters, removing their
+old bodies. Trace the production dependency closure before choosing the execution
+crate’s membership. Keep saved facts in storage, resolved launch settings above it,
+and command parsing and presentation in the CLI. Add no new Work lifecycle or
+parallel resolver. A lower-crate-only edit must also refresh dirty build identity.</p>
 <h2>Normal → failure → recovery</h2>
-<p><strong>Proposed, not measured:</strong> a shipping edit should reuse storage; a Task-record edit rebuilds storage and
-application. A fresh root should reuse unchanged libraries. Measure these three
-cases separately, including CPU, memory and cache receipts.</p>
-<p>A shell’s lost acknowledgment leaves its consumed receipt discoverable.
-The current application regression replaces an attachment and input and keeps once-only native usage on the
-original input with its original attribution; the replacement inherits neither,
-and native completion invents no command outcome. Private summary selection is
-checked separately beside SQL. Stale hand-back leaves both claims unchanged;
-the public retry returns both Tasks. Retain these scenarios during relocation. Fixtures
-must admit stale and contradictory facts so failure paths remain testable.</p>
-<p>
-An interrupted upgrade keeps its transaction, export fences and existing refusal
-policy. A migration move retains ordered SQL bytes and staging age; refreshing
-only origin/main updates the catalogue. No new recovery lifecycle is proposed.</p>
-<h2>What to show next</h2>
-<p>Finish the mixed fixtures and extract storage with its schema and catalogue.
-Compile storage tests independently before compiling application tests with the
-dev-only inspection feature. This exposes misplaced acquisition before feature
-unification can hide it. Then run continuity, history and migration checks and
-measure the three rebuild cases. Root upkeep still needs a shared-daemon owner;
-the private refresh probe establishes no live integration. Whole-application cost, interactive
-demo and review remain open.</p>
+<p>A terminal or Desktop starts the same Task operation and retains its cursor,
+native thread and input. A lost launch reply retains the creation key and receipt;
+retry cannot launch twice. Ending a served request cannot stop its detached
+execution. Preserve request-local directory and I/O, uncertain outcomes, once-only
+usage and waited landing.</p>
+<p>A new root may miss until idle refresh. Refresh cannot interrupt another build;
+cache failure permits direct compilation. Keep separate targets, correct checkout
+identity and <code>scripts/dev-lf --isolated-build</code> for source debugging.</p>
+<h2>Show next</h2>
+<p>Independent shared-owner compilation, terminal/served recovery checks, command
+versus runtime rebuild sets, and late-root reuse under the production cache.
+Repeat alternating whole-build trials before claiming savings. Interactive demo
+and review remain before merge.</p>
 <h2>Review questions</h2>
 <ol>
-<li>Does a product choice remain? No; fixture ownership follows the existing production design.</li>
-<li>What changed for loop-or-next? Nothing further in the design; advance this review. Remaining mixed-test splits, fixture paths and independent test compilation are implementation work already specified.</li>
+<li>Does a product choice remain? No. Commands, saved data and recovery stay the same.</li>
+<li>What changes for loop-or-next? <strong>Design changed: iterate to implement</strong>
+shared operation ownership, then the substantial execution/application cut.</li>
 </ol>
 </main>
 </html>

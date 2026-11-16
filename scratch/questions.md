@@ -1,5 +1,11 @@
 # Open choices
 
+- November 15 concept review: begin the next substantial cut by moving shared
+  operations below CLI/server adapters. Final crate membership and the existing
+  entry point for idle cache refresh remain engineering choices; neither changes
+  commands, recovery or approval. Keep ordinary build/debug instructions until
+  automatic root upkeep is implemented. No new product answer is assumed.
+
 - Use two disposable source roots for the initial cache comparison and one
   sequential late-root fixture for refresh; one build at a time. Admission/job budgets and shared-cache
   quiescent refresh stay outside this probe. No Machine-wide restart belongs to this probe.

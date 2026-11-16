@@ -1198,6 +1198,7 @@ pub(super) fn unavailable(error: impl Into<anyhow::Error>) -> Error {
     Error::refused(&error.into(), ErrorCode::Unavailable)
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn request(
     id: String,
     operation: Operation,

@@ -234,12 +234,41 @@ subscription checkpoint, never `plan.list`. The position line says
 "Starting <graph>" for a claimed Task at `start`. `WorkDestinationTests` checks
 the request log after Start holds only `task.create`.
 
+Concept review of 149dbbfae3: the stand-in pane keyed by request ID holds, and
+the answer is the only read. Two things to change, then the phone:
+- **Once `task.create` answers, the Task exists; nothing may offer to file it
+  again.** Today a throw from `openCreatedTask` (planning never shows the row,
+  or `installConversation` fails) lands in `createTask`'s generic `catch`, sets
+  `startingTask.error`, and `StartingTaskView` offers Try again, which files a
+  second Task under a new request ID. After the answer, clear `startingTask`,
+  select the Task, and put the failure on its workspace
+  (`conversationError`), the same place an existing Task's failed open shows.
+  Try again stays only for a failure before filing. Test in
+  `WorkDestinationTests`: answer arrives, `installConversation`'s prepare
+  fails → no `startingTask`, selection is the Task, the workspace carries the
+  error.
+- Small: `StartingTaskView.start` and `createTask` both close the palette;
+  `createTask` owns it (the failure test calls it directly). The doc comment
+  "One resolved opening…" now sits on `StartingTask`; move it back to
+  `LinkedSession`.
+
 Remaining, in order:
-1. Phone: `RemoteMobileClient.createTask` answers from `journal.reconcile`'s
-   lookup, whose stored receipt holds no Session or overview; `openTask` then
-   reads `task:<id>` (`createdTask`). Carry the live `TaskCreated` answer
-   through the journal, push `TaskWorkspaceView` from it, `session.attach` at
-   once, and delete `createdTask`'s view-plan read.
+1. Phone. `RemoteMobileClient.createTask` goes record → `reconcile`, which
+   looks up (`creation.get`), sends, throws the send's answer away
+   (`_ = try await send(...)`) and looks up again; the stored receipt holds no
+   Session or overview, so `openTask` then reads `task:<id>` (`createdTask`).
+   Three round trips and a view-plan read before the conversation.
+   `CreationSubmissions` already has the two blocks this needs: a first Start
+   uses `submit` (save, send, return the live answer) and decodes
+   `TaskCreated`; `reconcile` stays the path for a saved request being
+   recovered. `TaskWorkspaceView`/`SessionView` read only the Task's ID,
+   identifier, title and primary Session from `WorkViewPlan.Content`; give
+   them a small value with those four fields, built from `TaskCreated` on
+   Start and from `Content` in the Task list, push it on the answer and
+   `session.attach` at once. Delete `createdTask` for the normal path; a
+   recovered request whose answer was lost keeps reading `task:<id>` (its
+   lookup has no Session). Test in `MobileTaskCreationTests`: Start's request
+   log is `task.create` alone and the opening names the answer's Session.
 2. `Perf.retarget(.startTask, from: "new-task", …)`: key by request ID from the
    click (slice 5).
 3. Checkout without network for a new branch: `fetch_task_refs`, the base

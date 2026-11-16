@@ -23,4 +23,5 @@
   arm and keeps reading the current input's `provider-session:*` row, not
   `agent_sessions.provider_thread`: a new input must not borrow an older
   input's resume reference (`recovery_refresh_recognizes_imported_history_before_attachment`).
-  Slice 3 needs a per-input answer that does not read the history file.
+  Settled in the design: the per-input thread becomes a column on the
+  `captured` row in main, so it never reads the history file.

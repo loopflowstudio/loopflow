@@ -35,7 +35,7 @@ product needs it now; "log" = diagnostics for `logs/lf.log`.
 | `observed` `task_update` (0 since #1923, 8,231 rows, 87 MB) | none (writer and reader deleted 2026-11-14) | — | **delete rows**; drop the JSON arm of `task_update_session_events_*` |
 | `codex_relay`, `codex_submission`, `provider_launch`, `driver_exit`, `legacy_flow*` (0) | none | — | **delete rows** |
 | `events.jsonl` `provider_account_selected` (~1,070) | fallback in `provider_session_from_history` (`loopflow-storage/src/session_record.rs:648`) | account evidence for removed accounts (LOO-913) | **stop writing**, delete rows |
-| `events.jsonl` `provider_session_observed` (~1,070) | same fallback; `has_provider_history` EXISTS (`sessions.rs:386`) | duplicates the `provider-session:*` row and `agent_sessions.provider_thread` (20,240 of 21,156 Sessions have it) | **stop writing**, delete rows; `has_provider_history` reads `provider_thread IS NOT NULL` |
+| `events.jsonl` `provider_session_observed` (~1,070) | same fallback; `has_provider_history` EXISTS (`sessions.rs:386`) | duplicates the `provider-session:*` row and `agent_sessions.provider_thread` (20,240 of 21,156 Sessions have it) | **stop writing**, delete rows; `has_provider_history` reads the current input's resume thread (see `provider-session:*`), not `agent_sessions.provider_thread`, so a new input never borrows an older one's |
 | `events.jsonl` `provider_attempt_started/finished` (~2,140) | `project_provider_history` → "Recorded …" status in Telemetry and Task history | history | **history file** |
 | `events.jsonl` `conversation` (~1,070) | `input_events` → `graph.rs:921` holds or fails a step | history read once by the Graph | **history file** |
 | `manifest.json` (1,076, ~1 KB) | `pending_inputs`, `project_input_history`, summary "independent" flag (`sessions.rs:372`) | history; the independent flag is state | **history file**; independent flag becomes a column, see below |
@@ -43,7 +43,7 @@ product needs it now; "log" = diagnostics for `logs/lf.log`.
 | `attachment_exit` (1,097) | `attachment_departure` (`processes.rs:1626`) reads only `departure`; the row pins its Process | history when a departure exists, else nothing | **history file, only with a departure**; stop writing `processes.attachment_exit_seq` (no reader) |
 | `provider_transition` (~1,030) | latest → Session summary and Desktop explanation (`sessions.rs:458`, `SessionsView.swift:1703`); list → `lf session history show` | latest is state; the list is history | list → **history file**; latest → **`agent_sessions` column** |
 | `interactive_opened` (51) | `task_conversations` (`sessions.rs:887`), `checkout_conversation` (`:914`) choose which conversation `lf resume` opens | state | **`agent_sessions.opened_at`** |
-| `provider-session:*` | resume thread (`input_provider_session`), `sessions_for_agent_session` (`sessions.rs:1042`) | state already on `agent_sessions.provider_thread` | **history file**; readers that need the current thread read the column |
+| `provider-session:*` | resume thread (`input_provider_session`), `sessions_for_agent_session` (`sessions.rs:1042`) | state: which provider thread resumes *this input*; `agent_sessions.provider_thread` is the Session's latest and cannot answer per input | **column on the `captured` input row** (`session_events.provider_thread`, written when the reference is observed); no history row: the fact lives once, in main, and `lf session history` renders it from the input |
 | `provider_lineage`, `legacy_review_feedback`, `silence:N` (~40) | fork classification, `ready_summary`, `lf session usage --weekly` | history | **history file** |
 | `store-gap` (212) | none typed; `lf session history` prints it | history: AGENTS.md requires the gap in Session history | **history file** |
 | `agent_process_replaced`, `agent_process_ancestry_repaired` (42) | none outside tests | log | **`tracing::info!` to `lf.log`**, stop writing rows |
@@ -98,7 +98,13 @@ with its own write lock, WAL and revision row.
    kind). Written in the same call that appends the history row.
 5. **Wake-ups.** `StoreRevisions` gains `history`, read from `history.db`.
    `changed()` ignores it (as it ignores `usage`) except for reads that
-   declare it: Session History and `lf session history --subscribe`. The
+   declare it: every projection that names a `history.*` table declares it
+   (Session History, `lf session history --subscribe`, Telemetry, the Task
+   view's final answers), so a view showing `output` or usage still refreshes
+   when the row lands. Task updates (`harness/task_updates.rs`) read only
+   `captured`, Graph and Process state, so history writes never advance
+   `task_updates`; after slice 3 the `task_update_session_events_*` triggers
+   see only `captured` rows. The
    `usage` domain, which wakes nothing, goes with `session_events` usage rows.
    `held_terminals` update trigger advances `processes` only when
    `viewer_hold` or `viewed` changes value or `viewer_hold_at` goes NULL ↔
@@ -147,7 +153,7 @@ shows what an agent ran last week. Failure modes to design against: a reader
 that silently returns nothing because it still names `session_events` for a
 history kind (every moved kind gets one reader test through the history file);
 a history file that grows without bound because the prune never runs on a
-Machine (the prune is the same hourly job as today; `lf doctor` reports the
+Machine (the Machine server runs the prune on its clock, slice 5; `lf doctor` reports the
 file's size and oldest row); a Graph step that cannot find its `output` row
 because the write was a recording gap (the step already fails with "no
 recorded conclusion" today; unchanged).
@@ -191,7 +197,10 @@ lf history list --caller <session>                  # agent-issued commands as b
    heartbeat re-stamps; `task_update_session_events_*` lose the
    `task_update` JSON arm. `compact_usage` waits for slice 3 (usage moves).
 2. History file: open, schema, write connection, recording gap.
-3. Move session history kinds; state columns on `agent_sessions`; repoint
+3. Move session history kinds; state columns on `agent_sessions` and
+   `session_events.provider_thread` on the input (same migration, edited in
+   place), backfilled from the `provider-session:*` rows before they go;
+   `history` declared by every projection naming `history.*`; repoint
    readers (`session_events.rs`, `sessions.rs` `pending_inputs`,
    `session_record.rs`, `provider_transitions.rs`, `graph_inventory.rs`,
    `task_work.rs`, `machine_records.rs`).

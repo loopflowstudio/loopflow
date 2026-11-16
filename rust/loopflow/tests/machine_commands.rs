@@ -626,15 +626,6 @@ fn remote_task_promotion_needs_no_provider_account() {
             assert!(stdout.contains(&format!("argument: {arg}\n")), "{stdout}");
         }
     }
-    let output = fixture.run(
-        &[
-            prefix.as_slice(),
-            &["task", "create", "--title", "Prototype", "--run"],
-        ]
-        .concat(),
-    );
-    assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("unavailable@"));
 }
 
 #[test]

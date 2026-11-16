@@ -243,6 +243,13 @@ definitions! {
 }
 
 definitions! {
+    #[derive(schemars::JsonSchema)]
+    ForwardConfig, FORWARD_DEFINITIONS, "forward.", {};
+    env: Vec<String> = "[]", Personal, AppendReset, HostLocal, NextLaunch, Machines, "Environment variables a remote launch carries from this Machine's environment or Doppler; lf does not interpret them";
+    files: Vec<String> = "[]", Personal, AppendReset, HostLocal, NextLaunch, Machines, "Home-relative files a remote launch copies to the same path when the destination has none";
+}
+
+definitions! {
     Config, DEFINITIONS, "", {
         skills: BTreeMap<String, Value> = BTreeMap::new();
         graphs: BTreeMap<String, Value> = BTreeMap::new();
@@ -265,6 +272,7 @@ definitions! {
     supported_harnesses: Vec<String> = "[]", General, AppendReset, Portable, NextRead, Agents, "Harnesses offered by model selection";
     automation: AutomationConfig = "{retries: 1}", General, Merge, Portable, NextRead, Agents, "Automatic retry count";
     pools: BTreeMap<String, placement::PoolDeclaration> = "{}", Personal, Merge, HostLocal, NextLaunch, Machines, "Local pools accepting new work; held work stays";
+    forward: ForwardConfig = "{}", Personal, Merge, HostLocal, NextLaunch, Machines, "What a remote launch carries from this Machine";
     ondemands: BTreeMap<String, placement::OnDemandDeclaration> = "{}", Personal, Replace, HostLocal, NextLaunch, Machines, "Local rental templates and admission limits; active rentals keep their admitted budget";
     machine: placement::Placement = "{}", PersonalScoped, Merge, Portable, NextLaunch, Machines, "Preferred durable Machine IDs or local capacity; existing Task assignments survive";
     machines: BTreeMap<String, placement::MachineDeclaration> = "{}", Personal, Merge, Portable, NextRead, Machines, "Aliases for durable Machine identities";
@@ -289,6 +297,7 @@ fn all_definitions() -> impl Iterator<Item = &'static Definition> {
     DEFINITIONS
         .iter()
         .chain(CONTEXT_DEFINITIONS)
+        .chain(FORWARD_DEFINITIONS)
         .chain(CODEX_DEFINITIONS)
         .chain(CLAUDE_DEFINITIONS)
 }

@@ -90,12 +90,49 @@ ssh mini                         # sign in with claude or codex on mini
 lf --machine mini -a codex implement
 ```
 
-Install and authenticate the native client on the destination before unattended
-work, including on rentals. The destination's environment and native login own
-authentication. Missing authentication reaches the native client's login error.
-Loopflow does not transfer Claude/Codex credentials, provision subscription
-logins or renew rental subscription tokens. Machine routing, repository setup
-and execution restrictions still apply. See [Security](security.md).
+A Machine you own can keep its own native login. An on-demand rental has none,
+so name what its launch should carry:
+
+```bash
+claude setup-token                                       # once, on this Machine
+doppler secrets set CLAUDE_CODE_OAUTH_TOKEN > /dev/null  # paste the token
+lf set --global forward.env '[CLAUDE_CODE_OAUTH_TOKEN]'
+lf set --global forward.files '[~/.codex/auth.json]'
+```
+
+| Setting | What a remote launch does |
+| --- | --- |
+| `forward.env` | Sets each named variable from this Machine's environment, else Doppler |
+| `forward.files` | Copies each home-relative file to the same path, mode 0600 in a 0700 directory, when the destination has none |
+
+Values and file contents travel on the SSH connection's input, never in
+arguments, logs, the store or Session records. The forwarded environment is
+read and its file removed before the remote command starts. A destination that
+already has a named file keeps its own, and the launch says so. A named
+variable with no value, or a named file missing here, stops the launch, and an
+on-demand rental, before anything is rented or sent. Loopflow does not read,
+choose among or refresh what it forwards.
+
+Claude: `claude setup-token` creates a long-lived token for scripts; forward it
+as `CLAUDE_CODE_OAUTH_TOKEN`. An `ANTHROPIC_API_KEY` forwards the same way and
+bills at API rates.
+
+Codex on a Plus or Pro plan: forward `~/.codex/auth.json`, the login file the
+[Codex authentication docs](https://learn.chatgpt.com/docs/auth) describe
+copying to a headless machine. Treat it like a password. On this Mac, Codex
+0.169.0 keeps its login in that file; a Codex configured to keep credentials in
+the OS credential store has no file to copy. Copies of one login share its
+refresh credential, so one copy refreshing can sign the others out; use a
+separate login, `codex login --device-auth` on the destination, or an API key
+(`printenv OPENAI_API_KEY | codex login --with-api-key`, billed at API rates)
+when that matters. Codex access tokens exist only for ChatGPT Business and
+Enterprise workspaces whose owner allows them; there, forward
+`CODEX_ACCESS_TOKEN`, which Codex reads from its environment without
+`codex login`.
+
+Without forwarding, install and authenticate the native client on the
+destination before unattended work. Machine routing, repository setup and
+execution restrictions still apply. See [Security](security.md).
 
 ## Service authentication
 

@@ -461,6 +461,11 @@ and Graph topology still come from the selected or captured definitions.
 | Laptop, targeting a remote machine | Laptop's |
 | Shell directly on the remote | Remote's saved preferences |
 
+Credentials stay on the executor unless you name them: `forward.env` and
+`forward.files` carry named variables and home files from the initiating
+Machine to a remote launch. See
+[Remote Machines and rentals](subscriptions.md#remote-machines-and-rentals).
+
 Forward authored declarations with their scope, target and choice/fallback
 meaning. Do not turn the effective result into command-line overrides or combine
 two personal profiles into an undocumented precedence layer.

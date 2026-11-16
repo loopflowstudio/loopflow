@@ -423,7 +423,7 @@ the wait is announced; schedule and final stop are unit-tested.
 Open, noted for review: whether `CredentialInvalidated` also waits (currently
 stops), and restart-at-first-rung versus retrying only the last rung.
 
-## Named secret and file forwarding — 2026-11-16 (next implement step)
+## Named secret and file forwarding — 2026-11-16 (built)
 
 Steers 3a44d344, 7b5bdd97, d0965a15 (comments by Session
 `session_b8d40af2618248bfad63f072df86cb63` for Jack Heart). Jack Heart on “a
@@ -432,23 +432,31 @@ environment …”: “This is good, include in current task worker”. On which
 Codex rentals use (every saved Codex login here is personal Pro/Plus): “auth.json
 copy”.
 
-- Personal configuration names environment variables and home-relative files to
-  forward to remote launches; lf does not interpret them.
-- Variables: initiating Machine's environment, else Doppler; passed over the
-  existing SSH launch channel; never in argv, logs, store, Session records or a
-  destination file. Missing value stops before renting, naming the variable.
-- Files: copied to the same home-relative path, mode 0600 in a 0700 parent, over
-  the existing SSH channel; contents never in argv/logs/store. Missing local
-  file stops before renting. Replaces “lf still never reads a native credential
-  file” with “lf copies only files the person named”.
-- Docs facts (checked 2026-11-16 per steer, learn.chatgpt.com/docs/auth and
-  /docs/enterprise/access-tokens, codex-cli 0.169.0): Codex access tokens only
-  for ChatGPT Business/Enterprise; Plus/Pro use device login, auth.json copy or
-  API key. Claude: `claude setup-token` → `CLAUDE_CODE_OAUTH_TOKEN`. Copies of one
-  login share a refresh credential; one refreshing can sign the others out.
-- Still to verify against installed Codex before documenting: whether
-  lf-launched Codex (app-server and exec) reads `CODEX_ACCESS_TOKEN` with no
-  login step, which API-key variable `codex exec` reads, and whether macOS Codex
-  keeps credentials in a credential store instead of auth.json.
+Built: personal `forward.env` / `forward.files` (HostLocal, Machines);
+`machine::forward::{read, deliver}`. `read` runs before any SSH in
+`lf --machine` launches, owner-Machine `task run`, and both rental paths; a
+missing value or file stops there. `deliver` is one SSH exchange whose script
+carries names and lengths, values on stdin (`dd bs=1 count=N`). Env values land
+in `~/.lf/forward/<uuid>` (0600 under umask 077), which the launch preamble
+sources and removes before `exec`. Files land at the same home-relative path;
+new parents get 0700.
+
+Decision (reversible): a destination that already has a named file keeps its
+own and the launch prints “<machine> keeps its own ~/<path>”; nothing replaces
+a Machine's newer login. Session viewers (`session new/resume` through the
+server's prepare) carry nothing: the server, not the SSH command, starts them.
+
+Observed 2026-11-16, codex-cli 0.169.0, empty isolated `CODEX_HOME`,
+`codex login status`: with `CODEX_ACCESS_TOKEN=<junk>` → “failed to decode agent
+identity JWT” (read from env, no login step); with `CODEX_API_KEY` or
+`OPENAI_API_KEY` → “Not logged in”. Whether `codex exec`/app-server use an
+API-key variable without `codex login` stays unverified; docs give only the
+`--with-api-key` route. This Mac's `~/.codex/auth.json` exists (0600) and
+`config.toml` sets no `cli_auth_credentials_store`.
+
+Checks: `test(setup_token_and_codex_auth_json_reach_a_remote_launch_only_by_name)`,
+`test(machine::forward::)`, `test(pinned_headless_refusal_shows_provider_message_and_waits_before_trying_again)`,
+`test(agent::tests::)`, `test(documented_commands::)`, workspace clippy — pass
+locally; gate/CI run the suites.
 
 Do not publish, merge or land. Auto-Ship is on hold for this run.

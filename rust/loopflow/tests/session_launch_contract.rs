@@ -103,7 +103,7 @@ if '--version' in args:
     print('fixture'); sys.exit(0)
 if '--dangerously-bypass-hook-trust' in args:
     sys.exit(2)
-record = {'args': args, 'cwd': os.getcwd(), 'opencode': os.environ.get('OPENCODE_CONFIG_CONTENT'), 'participant': os.environ.get('LF_USER_NAME'), 'account': os.environ.get('LF_PROVIDER_ACCOUNT_ID'), 'codex_home': os.environ.get('CODEX_HOME')}
+record = {'args': args, 'cwd': os.getcwd(), 'opencode': os.environ.get('OPENCODE_CONFIG_CONTENT'), 'participant': os.environ.get('LF_USER_NAME'), 'account': os.environ.get('LF_PROVIDER_ACCOUNT_ID'), 'codex_home': os.environ.get('CODEX_HOME'), 'forwarded': os.environ.get('CLAUDE_CODE_OAUTH_TOKEN')}
 if os.path.basename(sys.argv[0]) in ('claude','codex'):
     provider = os.path.basename(sys.argv[0])
     native = os.environ['CLAUDE_CONFIG_DIR' if provider == 'claude' else 'CODEX_HOME']
@@ -674,6 +674,133 @@ fn machine_dispatch_resolves_destination_policy_and_forwards_launch_and_resume_o
     pair(&explicit, "--model", "haiku");
     assert!(args(&explicit).contains(&"--chrome"));
     assert_eq!(remote.session(), session);
+}
+
+/// Rentals authenticate from names: Claude's `claude setup-token` value as
+/// `CLAUDE_CODE_OAUTH_TOKEN`, and a Plus/Pro Codex login as `~/.codex/auth.json`
+/// (Codex access tokens exist only for Business and Enterprise workspaces).
+#[test]
+fn setup_token_and_codex_auth_json_reach_a_remote_launch_only_by_name() {
+    const TOKEN: &str = "fixture-setup-token-secret";
+    const AUTH: &str = r#"{"tokens":{"refresh_token":"fixture-auth-json-secret"}}"#;
+    let local = Fixture::new("claude:opus");
+    let remote = Fixture::new("claude:opus");
+    fs::write(
+        local.home.path().join("machine/config.yaml"),
+        "forward:\n  env: [CLAUDE_CODE_OAUTH_TOKEN]\n  files: [~/.codex/auth.json]\n",
+    )
+    .unwrap();
+    fs::create_dir_all(local.home.path().join(".codex")).unwrap();
+    fs::write(local.home.path().join(".codex/auth.json"), AUTH).unwrap();
+    let remote_bin = remote.home.path().join(".local/bin");
+    fs::create_dir_all(&remote_bin).unwrap();
+    std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_lf"), remote_bin.join("lf")).unwrap();
+    let environment = serde_json::json!({
+        "HOME": remote.home.path(),
+        "LF_HOME": remote.home.path().join("machine"),
+        "LF_BIN": env!("CARGO_BIN_EXE_lf"),
+        "PATH": format!("{}:/usr/bin:/bin", remote.home.path().join("bin").display()),
+        "CLAUDE_CONFIG_DIR": remote.home.path().join(".claude"),
+    });
+    let argv_log = local.home.path().join("ssh-argv");
+    let ssh = local.home.path().join("bin/ssh");
+    fs::write(
+        &ssh,
+        format!(
+            "#!/usr/bin/python3\nimport json, os, sys\nopen({log}, 'a').write(json.dumps(sys.argv) + '\\n')\nos.chdir({cwd})\nos.execve('/bin/bash', ['bash', '-c', sys.argv[-1]], {environment})\n",
+            log = serde_json::to_string(&argv_log).unwrap(),
+            cwd = serde_json::to_string(remote.repo.path()).unwrap(),
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(ssh, fs::Permissions::from_mode(0o755)).unwrap();
+    success(
+        &local
+            .command()
+            .args(["machine", "add", "fixture", "--repo"])
+            .arg(remote.repo.path())
+            .output()
+            .unwrap(),
+    );
+    let launch = |token: Option<&str>| {
+        let mut command = local.command();
+        if let Some(token) = token {
+            command.env("CLAUDE_CODE_OAUTH_TOKEN", token);
+        }
+        command
+            .args(["--machine", "fixture", "-b", ":", "say done"])
+            .output()
+            .unwrap()
+    };
+
+    let output = launch(Some(TOKEN));
+    success(&output);
+    assert_eq!(remote.received()["forwarded"], TOKEN);
+    let copied = remote.home.path().join(".codex/auth.json");
+    assert_eq!(fs::read_to_string(&copied).unwrap(), AUTH);
+    assert_eq!(
+        fs::metadata(&copied).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    assert_eq!(
+        fs::metadata(copied.parent().unwrap())
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o700
+    );
+    // The forwarded environment's transient file is gone once the launch read it.
+    assert_eq!(
+        fs::read_dir(remote.home.path().join(".lf/forward"))
+            .unwrap()
+            .count(),
+        0
+    );
+    let mut seen = vec![
+        fs::read(&argv_log).unwrap(),
+        output.stdout.clone(),
+        output.stderr.clone(),
+    ];
+    for fixture in [&local, &remote] {
+        for file in files_named(&fixture.home.path().join("machine"), "loopflow.db")
+            .into_iter()
+            .chain(files_named(
+                &fixture.home.path().join("machine"),
+                "loopflow.db-wal",
+            ))
+            .chain(files_named(&fixture.home.path().join("machine"), "lf.log"))
+        {
+            seen.push(fs::read(file).unwrap());
+        }
+    }
+    for bytes in &seen {
+        let text = String::from_utf8_lossy(bytes);
+        assert!(!text.contains(TOKEN), "a forwarded value leaked: {text}");
+        assert!(
+            !text.contains("fixture-auth-json-secret"),
+            "a file leaked: {text}"
+        );
+    }
+
+    // A destination with its own login keeps it.
+    fs::write(&copied, "destination login").unwrap();
+    let output = launch(Some(TOKEN));
+    success(&output);
+    assert_eq!(fs::read_to_string(&copied).unwrap(), "destination login");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("keeps its own ~/.codex/auth.json"));
+
+    // A named value this Machine cannot supply stops before anything reaches SSH.
+    fs::remove_file(&argv_log).unwrap();
+    let output = launch(None);
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("forward.env names CLAUDE_CODE_OAUTH_TOKEN"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!argv_log.exists());
 }
 
 #[path = "support/mod.rs"]

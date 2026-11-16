@@ -115,6 +115,10 @@ pub(super) fn run_with_io(
             cmd: crate::lf::WaveCommand::Show { .. }
         })
     );
+    // A named value this Machine cannot supply stops the launch before any SSH.
+    let forwarded = (!preview && !resident_operation)
+        .then(|| loopflow_execution::machine::forward::read(directory))
+        .transpose()?;
     let runtime = tokio::runtime::Runtime::new()?;
     if let Some(id) = super::work_route::resumed_session(cli).filter(|_| !preview) {
         // Resuming a Session that lives here, or moved elsewhere, moves it (or its Task) there first.
@@ -314,7 +318,11 @@ pub(super) fn run_with_io(
     if viewer {
         extra_env.push((loopflow_execution::transport::STREAM_ENV, "1"));
     }
-    let preamble = build_preamble(&cmd, &extra_env);
+    let mut preamble = build_preamble(&cmd, &extra_env);
+    if let Some(forwarded) = &forwarded {
+        preamble =
+            loopflow_execution::machine::forward::deliver(&target, forwarded)?.apply(&preamble);
+    }
     match io {
         Some(io) => {
             let reads_input = matches!(

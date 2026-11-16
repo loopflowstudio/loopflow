@@ -247,6 +247,7 @@ pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
             max_usd,
             json,
         } => {
+            loopflow_execution::machine::forward::read(&std::env::current_dir()?)?;
             let (rental, machine) = rent(&runtime, sqlite, name, *hours, *max_usd, true)?;
             if *json {
                 println!("{}", serde_json::to_string(&rental)?);
@@ -619,6 +620,8 @@ pub fn place(
     let (_, task) = runtime.block_on(loopflow_execution::ops::task::resolve_saved_task(
         repo, None, issue,
     ))?;
+    // A rental that could not authenticate its launch is money for nothing.
+    loopflow_execution::machine::forward::read(repo)?;
     let (rental, machine) = rent(&runtime, sqlite, name, None, None, false)?;
     let label = machine.name();
     if let Err(error) = prepare(&runtime, &label, repo, &task.repository_id, batch) {

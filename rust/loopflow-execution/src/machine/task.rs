@@ -224,6 +224,9 @@ pub fn run_remote(
     args: &[String],
     operation: RemoteTaskOperation<'_>,
 ) -> Result<serde_json::Value> {
+    let forwarded = matches!(operation, RemoteTaskOperation::Run { .. })
+        .then(|| crate::machine::forward::read(directory))
+        .transpose()?;
     let runtime = tokio::runtime::Runtime::new()?;
     let resident = matches!(operation, RemoteTaskOperation::Ownership);
     let task = matches!(operation, RemoteTaskOperation::Ship).then(|| route.task_id.to_string());
@@ -262,7 +265,10 @@ pub fn run_remote(
         .iter()
         .map(|(name, value)| (name.as_str(), value.as_str()))
         .collect();
-    let preamble = crate::machine::ssh::build_preamble(&command, &environment);
+    let mut preamble = crate::machine::ssh::build_preamble(&command, &environment);
+    if let Some(forwarded) = &forwarded {
+        preamble = crate::machine::forward::deliver(&target, forwarded)?.apply(&preamble);
+    }
     let (mut output, mut error) = (Vec::new(), Vec::new());
     let ran = crate::machine::ssh::run_ssh_io(
         &target.route,

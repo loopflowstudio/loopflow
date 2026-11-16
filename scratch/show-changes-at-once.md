@@ -209,6 +209,17 @@ one frame, with accepted and confirmed times beside it.
 - An on-disk queue of commands.
 - Two reading wrappers: `WorkReading` and `Reading` must not coexist.
 
+## User docs (written ahead of the code)
+
+- `docs/surfaces.md` § Changes show at once — the table, the refusal Notice,
+  blip/away. The section anchor is linked from `docs/server.md` and
+  `swift/README.md`.
+- `docs/server.md` § Keep editing through a connection loss; the paragraph
+  after creation recovery.
+- `swift/README.md` — read failures as Notices, Auto-Ship Undo, Complete
+  without Retry completion, the maintainer paragraph on revisions and request IDs.
+- `swift/LoopflowiOS/README.md` § Tasks — swipe Complete, toolbar actions.
+
 ## Slices
 
 All in one PR; deepest first.

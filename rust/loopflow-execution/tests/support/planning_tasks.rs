@@ -25,6 +25,7 @@ pub async fn planning_repo(fixture: &Fixture) -> (PathBuf, crate::work::wave::Wa
         "initiative-1",
         &project,
         now(),
+        loopflow_storage::provider::Provider::Linear,
     )
     .unwrap();
     loopflow_storage::sqlite::project_selection::write_project_binding(

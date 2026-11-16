@@ -123,6 +123,7 @@ impl SeedLinearSqlite for SqliteStore {
             input.project.as_ref(),
             input.observed_at,
             confirmed,
+            loopflow_storage::provider::Provider::Linear,
         )
     }
 }

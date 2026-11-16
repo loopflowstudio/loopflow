@@ -114,15 +114,23 @@ pub(crate) async fn drain_repository(
         .sqlite
         .enqueue_tracker_creations(repo, provider)
         .map_err(message)?;
-    if store
+    let unsettled = store
         .sqlite
         .unsettled_tracker_effects(repo)
-        .map_err(message)?
-        .is_empty()
-    {
+        .map_err(message)?;
+    if unsettled.is_empty() {
         return Ok(Pass::default());
     }
-    let tracker = Tracker::for_repository(Path::new(repo)).await?;
+    // Only a creation puts an item in the repository's Team, which Linear
+    // validates once per process; edits address items that already name it.
+    let tracker = if unsettled
+        .iter()
+        .any(|effect| effect.kind == EffectKind::Create)
+    {
+        Tracker::for_repository(Path::new(repo)).await?
+    } else {
+        Tracker::for_items(Path::new(repo)).await?
+    };
     drain(store, repo, &tracker, scope, bound).await
 }
 
@@ -150,23 +158,6 @@ pub async fn drain(
             _ => None,
         })
         .collect();
-    let mut owners: Vec<(EffectOwner, Vec<TrackerEffect>)> = Vec::new();
-    for effect in effects {
-        match owners.iter_mut().find(|(owner, _)| *owner == effect.owner) {
-            Some((_, queued)) => queued.push(effect),
-            None => owners.push((effect.owner.clone(), vec![effect])),
-        }
-    }
-    match scope {
-        Scope::All => {}
-        Scope::First(first) => {
-            if let Some(at) = owners.iter().position(|(owner, _)| owner == first) {
-                let owner = owners.remove(at);
-                owners.insert(0, owner);
-            }
-        }
-        Scope::Only(only) => owners.retain(|(owner, _)| owner == only),
-    }
     let budget = Budget {
         left: AtomicUsize::new(bound.requests),
         used: AtomicUsize::new(0),
@@ -178,25 +169,46 @@ pub async fn drain(
     } else {
         0
     };
-    let results: Vec<OpsResult<()>> = futures_util::stream::iter(owners)
-        .map(|(owner, queued)| {
-            drain_owner(
-                store,
-                Path::new(repo),
-                tracker,
-                owner,
-                queued,
-                &creating,
-                &budget,
-                window,
-            )
-        })
-        .buffer_unordered(bound.concurrency.max(1))
-        .collect()
-        .await;
-    for result in results {
-        if let Err(error) = result {
-            tracing::debug!(%error, "tracker effect pending");
+    let mut owners = grouped(effects, scope);
+    // Owners run concurrently, so a Task can wait on a Project created in the
+    // same round; those get one more turn once the round has settled it.
+    for round in 0..2 {
+        if round == 1 {
+            let effects = store
+                .sqlite
+                .unsettled_tracker_effects(repo)
+                .map_err(message)?;
+            owners = grouped(effects, scope);
+            owners.retain(|(_, queued)| {
+                queued.iter().any(|effect| {
+                    parent_named(effect).is_some_and(|project| creating.contains(&project))
+                        && !parent_pending(store, effect, &creating)
+                })
+            });
+            if owners.is_empty() {
+                break;
+            }
+        }
+        let results: Vec<OpsResult<()>> = futures_util::stream::iter(std::mem::take(&mut owners))
+            .map(|(owner, queued)| {
+                drain_owner(
+                    store,
+                    Path::new(repo),
+                    tracker,
+                    owner,
+                    queued,
+                    &creating,
+                    &budget,
+                    window,
+                )
+            })
+            .buffer_unordered(bound.concurrency.max(1))
+            .collect()
+            .await;
+        for result in results {
+            if let Err(error) = result {
+                tracing::debug!(%error, "tracker effect pending");
+            }
         }
     }
     Ok(Pass {
@@ -256,9 +268,34 @@ async fn send(store: &Store, repo: &Path, tracker: &Tracker, effect: &TrackerEff
         .unwrap_or_else(|_| Sent::Unknown("Request timed out; its reply is unknown".into()))
 }
 
-/// Whether this effect names a Project whose creation has not settled.
-fn parent_pending(effect: &TrackerEffect, creating: &HashSet<String>) -> bool {
-    let project = match effect.kind {
+/// Effects by owner, owners in order of their oldest effect, narrowed to `scope`.
+fn grouped(
+    effects: Vec<TrackerEffect>,
+    scope: Scope<'_>,
+) -> Vec<(EffectOwner, Vec<TrackerEffect>)> {
+    let mut owners: Vec<(EffectOwner, Vec<TrackerEffect>)> = Vec::new();
+    for effect in effects {
+        match owners.iter_mut().find(|(owner, _)| *owner == effect.owner) {
+            Some((_, queued)) => queued.push(effect),
+            None => owners.push((effect.owner.clone(), vec![effect])),
+        }
+    }
+    match scope {
+        Scope::All => {}
+        Scope::First(first) => {
+            if let Some(at) = owners.iter().position(|(owner, _)| owner == first) {
+                let owner = owners.remove(at);
+                owners.insert(0, owner);
+            }
+        }
+        Scope::Only(only) => owners.retain(|(owner, _)| owner == only),
+    }
+    owners
+}
+
+/// The Project a Task creation or membership edit names.
+fn parent_named(effect: &TrackerEffect) -> Option<String> {
+    match effect.kind {
         EffectKind::Create => serde_json::from_value::<Vec<WorkValue>>(effect.value.clone())
             .ok()
             .and_then(|values| {
@@ -272,8 +309,20 @@ fn parent_pending(effect: &TrackerEffect, creating: &HashSet<String>) -> bool {
             _ => None,
         },
         _ => None,
+    }
+}
+
+/// Whether this effect names a Project being created that has no remote id yet.
+fn parent_pending(store: &Store, effect: &TrackerEffect, creating: &HashSet<String>) -> bool {
+    let Some(project) = parent_named(effect).filter(|project| creating.contains(project)) else {
+        return false;
     };
-    project.is_some_and(|project| creating.contains(&project))
+    store
+        .sqlite
+        .project(&loopflow_model::durable::ProjectId::from_raw(project))
+        .ok()
+        .flatten()
+        .is_none_or(|project| project.linear_id.is_none())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -290,113 +339,149 @@ async fn drain_owner(
     let Some(_lock) = lock(store, &owner)? else {
         return Ok(());
     };
+    // Everything on an owner waits behind its unsettled creation; otherwise
+    // only effects on the same subject wait behind each other.
+    let mut waiting = HashSet::new();
     for effect in queued {
-        if effect.provider != tracker.provider() {
-            let reason = format!(
-                "queued for {}, but this repository uses {}",
-                effect.provider.display_name(),
-                tracker.provider().display_name()
-            );
-            settle(store, budget, &effect, &Settlement::Retire { reason })?;
+        let key = (effect.kind, effect.subject.clone());
+        if waiting.contains(&key) {
             continue;
         }
-        let parent = parent_pending(&effect, creating);
-        let decision = match effect.phase {
-            EffectPhase::Attempted => {
-                let now = loopflow_storage::rows::now_unix();
-                match rules::lost_reply(&effect, tracker.idempotent(effect.kind), now, window) {
-                    LostReply::Wait => return Ok(()),
-                    LostReply::Resend => Decision::Send,
-                    LostReply::Look => {
-                        if !budget.take() {
-                            return Ok(());
-                        }
-                        let observed = look(store, repo, tracker, &effect).await;
-                        store
-                            .sqlite
-                            .look_tracker_effect(&effect.id, now)
-                            .map_err(message)?;
-                        match observed {
-                            Ok(observed) => rules::decide(&effect, observed.as_ref(), parent),
-                            Err(error) => {
-                                store
-                                    .sqlite
-                                    .tracker_effect_error(&effect.id, &error)
-                                    .map_err(message)?;
-                                return Ok(());
-                            }
+        match drain_effect(store, repo, tracker, effect, creating, budget, window).await? {
+            Step::Done => {}
+            Step::Wait if key.0 == EffectKind::Create => return Ok(()),
+            Step::Wait => {
+                waiting.insert(key);
+            }
+            Step::Spent => return Ok(()),
+        }
+    }
+    Ok(())
+}
+
+/// What one effect left its owner's pass to do next.
+enum Step {
+    Done,
+    /// This effect waits; later effects on its subject wait with it.
+    Wait,
+    /// The pass's budget is spent.
+    Spent,
+}
+
+async fn drain_effect(
+    store: &Store,
+    repo: &Path,
+    tracker: &Tracker,
+    effect: TrackerEffect,
+    creating: &HashSet<String>,
+    budget: &Budget,
+    window: i64,
+) -> OpsResult<Step> {
+    if effect.provider != tracker.provider() {
+        let reason = format!(
+            "queued for {}, but this repository uses {}",
+            effect.provider.display_name(),
+            tracker.provider().display_name()
+        );
+        settle(store, budget, &effect, &Settlement::Retire { reason })?;
+        return Ok(Step::Done);
+    }
+    let parent = parent_pending(store, &effect, creating);
+    let decision = match effect.phase {
+        EffectPhase::Attempted => {
+            let now = loopflow_storage::rows::now_unix();
+            match rules::lost_reply(&effect, tracker.idempotent(effect.kind), now, window) {
+                LostReply::Wait => return Ok(Step::Wait),
+                LostReply::Resend => Decision::Send,
+                LostReply::Look => {
+                    if !budget.take() {
+                        return Ok(Step::Spent);
+                    }
+                    let observed = look(store, repo, tracker, &effect).await;
+                    store
+                        .sqlite
+                        .look_tracker_effect(&effect.id, now)
+                        .map_err(message)?;
+                    match observed {
+                        Ok(observed) => rules::decide(&effect, observed.as_ref(), parent),
+                        Err(error) => {
+                            store
+                                .sqlite
+                                .tracker_effect_error(&effect.id, &error)
+                                .map_err(message)?;
+                            return Ok(Step::Wait);
                         }
                     }
                 }
             }
-            _ if parent => Decision::Hold,
-            _ if effect.kind == EffectKind::Order => {
-                // Moving Tasks needs the provider's complete list first.
-                if !budget.take() {
-                    return Ok(());
-                }
-                match look(store, repo, tracker, &effect).await {
-                    Ok(observed) => rules::decide(&effect, observed.as_ref(), parent),
-                    Err(error) => {
-                        store
-                            .sqlite
-                            .tracker_effect_error(&effect.id, &error)
-                            .map_err(message)?;
-                        return Ok(());
-                    }
+        }
+        _ if parent => Decision::Hold,
+        _ if effect.kind == EffectKind::Order => {
+            // Moving Tasks needs the provider's complete list first.
+            if !budget.take() {
+                return Ok(Step::Spent);
+            }
+            match look(store, repo, tracker, &effect).await {
+                Ok(observed) => rules::decide(&effect, observed.as_ref(), parent),
+                Err(error) => {
+                    store
+                        .sqlite
+                        .tracker_effect_error(&effect.id, &error)
+                        .map_err(message)?;
+                    return Ok(Step::Wait);
                 }
             }
-            _ => Decision::Send,
-        };
-        match decision {
-            Decision::Hold => return Ok(()),
-            Decision::Settle(settlement) => settle(store, budget, &effect, &settlement)?,
-            Decision::Send => {
-                if !budget.take() {
-                    return Ok(());
-                }
-                if !store
-                    .sqlite
-                    .attempt_tracker_effect(&effect.id)
-                    .map_err(message)?
-                {
-                    continue;
-                }
-                match send(store, repo, tracker, &effect).await {
-                    Sent::Acknowledged {
+        }
+        _ => Decision::Send,
+    };
+    match decision {
+        Decision::Hold => return Ok(Step::Wait),
+        Decision::Settle(settlement) => settle(store, budget, &effect, &settlement)?,
+        Decision::Send => {
+            if !budget.take() {
+                return Ok(Step::Spent);
+            }
+            if !store
+                .sqlite
+                .attempt_tracker_effect(&effect.id)
+                .map_err(message)?
+            {
+                return Ok(Step::Done);
+            }
+            match send(store, repo, tracker, &effect).await {
+                Sent::Acknowledged {
+                    revision,
+                    remote_id,
+                } => settle(
+                    store,
+                    budget,
+                    &effect,
+                    &Settlement::Acknowledged {
                         revision,
                         remote_id,
-                    } => settle(
-                        store,
-                        budget,
-                        &effect,
-                        &Settlement::Acknowledged {
-                            revision,
-                            remote_id,
-                        },
-                    )?,
-                    Sent::Rejected(error) => {
-                        store
-                            .sqlite
-                            .reject_tracker_effect(&effect.id, &error)
-                            .map_err(message)?;
-                        return Ok(());
-                    }
-                    Sent::Unknown(error) => {
-                        store
-                            .sqlite
-                            .tracker_effect_error(&effect.id, &error)
-                            .map_err(message)?;
-                        return Ok(());
-                    }
-                    Sent::Unsupported(reason) => {
-                        settle(store, budget, &effect, &Settlement::Retire { reason })?
-                    }
+                    },
+                )?,
+                Sent::Rejected(error) => {
+                    store
+                        .sqlite
+                        .reject_tracker_effect(&effect.id, &error)
+                        .map_err(message)?;
+                    return Ok(Step::Wait);
+                }
+                Sent::Unknown(error) => {
+                    store
+                        .sqlite
+                        .tracker_effect_error(&effect.id, &error)
+                        .map_err(message)?;
+                    return Ok(Step::Wait);
+                }
+                Sent::Unsupported(reason) => {
+                    settle(store, budget, &effect, &Settlement::Retire { reason })?
                 }
             }
         }
     }
-    Ok(())
+    Ok(Step::Done)
 }
 
 fn settle(

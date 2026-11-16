@@ -38,6 +38,18 @@ fn comment(id: &str, created: Option<&str>, body: Option<&str>, user: Value) -> 
     node
 }
 
+/// One pass over the repository's queue, as a connected command makes.
+async fn deliver(store: &crate::store::Store, repo: &std::path::Path) -> crate::ops::OpsResult<()> {
+    crate::ops::tracker::drain::drain_repository(
+        store,
+        &repo.to_string_lossy(),
+        crate::ops::tracker::drain::Scope::All,
+        crate::ops::tracker::drain::Bound::PASS,
+    )
+    .await
+    .map(|_| ())
+}
+
 fn page(nodes: Vec<Value>, next: Option<&str>, has_next: bool) -> Value {
     json!({"nodes": nodes, "pageInfo": {"hasNextPage": has_next, "endCursor": next}})
 }
@@ -292,8 +304,11 @@ async fn task_comments_read_and_publish_without_starting_work() {
 
             let task = store.get_task_by_issue("FIX-7").await.unwrap().unwrap();
             rusqlite::Connection::open(directory.path().join("loopflow.db")).unwrap()
-                .execute("INSERT INTO task_state_deliveries(id,task_id,target,error,base_state,base_revision,attempted)
-                    VALUES('pending-completion',?1,'completed','unrelated completion remains pending','unstarted','2026-09-29T12:00:00.123Z',1)",
+                .execute("INSERT INTO tracker_effects(id,task_id,kind,value_json,base_json,phase,provider,error,attempted_at,looked_at)
+                    VALUES('00000000-0000-4000-8000-00000000c0de',?1,'state',
+                        '{\"field\":\"disposition\",\"value\":{\"planning_state\":\"completed\",\"planning_completed\":true,\"planning_completed_at\":null}}',
+                        '{\"revision\":\"2026-09-29T12:00:00.123Z\",\"value\":{\"field\":\"disposition\",\"value\":{\"planning_state\":\"unstarted\",\"planning_completed\":false,\"planning_completed_at\":null}}}',
+                        'attempted','linear','unrelated completion remains pending',unixepoch(),unixepoch())",
                     [task.id.as_str()]).unwrap();
             provider.lock().await.thread = Thread::Failing;
             let saved = task_comment_async(&repo, None, "FIX-7", Some("Keep the public name"), true)
@@ -303,7 +318,7 @@ async fn task_comments_read_and_publish_without_starting_work() {
             let id = saved.pending_sync[0].clone();
             assert!(provider.lock().await.posted.is_empty());
             assert!(!store.task_owned(&task.id).await.unwrap());
-            crate::ops::tracker_observe::sync_task_comments(&store, &task).await.unwrap();
+            deliver(&store, &repo).await.unwrap();
             assert_eq!(store.sqlite.pending_task_comments(&task.id).unwrap().len(), 1);
             let saved_steers = store.task_steers(&task.id).await.unwrap();
 
@@ -311,8 +326,8 @@ async fn task_comments_read_and_publish_without_starting_work() {
             // The provider commits but loses its first reply. Concurrent catch-up
             // keeps the same UUID and confirms the exact issue and body.
             let (one, two) = tokio::join!(
-                crate::ops::tracker_observe::sync_task_comments(&store, &task),
-                crate::ops::tracker_observe::sync_task_comments(&store, &task),
+                deliver(&store, &repo),
+                deliver(&store, &repo),
             );
             one.unwrap(); two.unwrap();
             assert_eq!(provider.lock().await.posted.len(), 1);
@@ -337,14 +352,13 @@ async fn task_comments_read_and_publish_without_starting_work() {
                 Some("2026-09-27T00:00:03Z"), Some("Provider value survives"),
                 json!({"id":"person-1","displayName":"Maya","name":null})));
             crate::ops::tracker_observe::refresh_task_comments(&store, &task).await.unwrap();
-            crate::ops::tracker_observe::sync_task_comments(&store, &task).await.unwrap();
+            deliver(&store, &repo).await.unwrap();
             let conflict = store.task_comments(&task.id).unwrap();
             assert!(conflict.conflicts[&collision].starts_with("Local value survives"));
             assert!(conflict.comments.iter().find(|c| c.id == collision).unwrap().body == "Provider value survives");
             assert!(!conflict.pending_sync.contains(&collision));
             // A late acknowledgement records delivery, not authority to discard
             // the newer remote value acquired while the create was in flight.
-            store.sqlite.record_comment_delivery(&collision, None).unwrap();
             crate::ops::tracker_observe::refresh_task_comments(&store, &task).await.unwrap();
             assert_eq!(store.task_comments(&task.id).unwrap().conflicts, conflict.conflicts);
 
@@ -362,7 +376,7 @@ async fn task_comments_read_and_publish_without_starting_work() {
 
             let before_retry = store.task_steers(&task.id).await.unwrap();
             let posted_before = provider.lock().await.posted.len();
-            crate::ops::tracker_observe::sync_task_comments(&store, &task).await.unwrap();
+            deliver(&store, &repo).await.unwrap();
             crate::ops::tracker_observe::refresh_task_comments(&store, &task).await.unwrap();
             assert!(store.sqlite.pending_task_comments(&task.id).unwrap().is_empty());
             assert_eq!(provider.lock().await.posted.len(), posted_before);

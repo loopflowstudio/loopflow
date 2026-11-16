@@ -98,6 +98,7 @@ mod tests {
             "initiative",
             &observed,
             17,
+            crate::provider::Provider::Linear,
         )
         .unwrap();
         let project = store.list_projects(Some(wave.id())).unwrap().remove(0);
@@ -152,6 +153,7 @@ mod tests {
             "initiative",
             &observed,
             1,
+            crate::provider::Provider::Linear,
         )
         .unwrap();
         let project = store.list_projects(Some(wave.id())).unwrap().remove(0);
@@ -170,6 +172,7 @@ mod tests {
             "initiative",
             &observed,
             2,
+            crate::provider::Provider::Linear,
         )
         .unwrap();
         // The unsent save is sent after the observed prose, so it wins and
@@ -209,6 +212,7 @@ mod tests {
             "initiative",
             &observed,
             17,
+            crate::provider::Provider::Linear,
         )
         .unwrap();
         let project = store.list_projects(Some(wave.id())).unwrap().remove(0);
@@ -221,6 +225,7 @@ mod tests {
             "initiative",
             &observed,
             29,
+            crate::provider::Provider::Linear,
         )
         .unwrap();
         let saved = store.project(&project.id).unwrap().unwrap();
@@ -258,6 +263,7 @@ mod tests {
             "initiative",
             &observed,
             30,
+            crate::provider::Provider::Linear,
         )
         .unwrap();
         assert_eq!(

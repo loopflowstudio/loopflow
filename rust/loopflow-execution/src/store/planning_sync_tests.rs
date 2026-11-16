@@ -33,12 +33,18 @@ fn disconnected_planning_keeps_uncertain_and_conflicting_receipts() {
     let task = task(&store.sqlite, &repo);
     {
         let conn = store.sqlite.conn.lock().unwrap();
-        for (id, attempted, conflict) in [
-            ("uncertain", true, None),
-            ("conflict", false, Some(r#"{"state":"started"}"#)),
-            ("pending", false, None),
+        let completed = r#"{"field":"disposition","value":{"planning_state":"completed","planning_completed":true,"planning_completed_at":null}}"#;
+        let started = r#"{"revision":"r2","value":{"field":"disposition","value":{"planning_state":"started","planning_completed":false,"planning_completed_at":null}}}"#;
+        for (id, phase, conflict) in [
+            ("00000000-0000-4000-8000-000000000001", "attempted", None),
+            (
+                "00000000-0000-4000-8000-000000000002",
+                "acknowledged",
+                Some(started),
+            ),
+            ("00000000-0000-4000-8000-000000000003", "pending", None),
         ] {
-            conn.execute("INSERT INTO task_state_deliveries(id,task_id,target,attempted,conflict_json) VALUES(?1,?2,'completed',?3,?4)", rusqlite::params![id, task.id.as_str(), attempted, conflict]).unwrap();
+            conn.execute("INSERT INTO tracker_effects(id,task_id,kind,value_json,phase,provider,conflict_json) VALUES(?1,?2,'state',?3,?4,'linear',?5)", rusqlite::params![id, task.id.as_str(), completed, phase, conflict]).unwrap();
         }
     }
     let receipts = store.sqlite.task_planning_receipts(&task.id).unwrap();
@@ -46,7 +52,7 @@ fn disconnected_planning_keeps_uncertain_and_conflicting_receipts() {
     assert!(connected
         .changes
         .iter()
-        .any(|change| change.id == "pending"));
+        .any(|change| change.id == "00000000-0000-4000-8000-000000000003"));
     let disconnected = store.task_planning_sync(&task.id).unwrap();
     assert!(!disconnected.connected);
     assert_eq!(
@@ -56,8 +62,14 @@ fn disconnected_planning_keeps_uncertain_and_conflicting_receipts() {
             .map(|change| (change.id.as_str(), change.state))
             .collect::<Vec<_>>(),
         [
-            ("uncertain", PlanningSyncState::Uncertain),
-            ("conflict", PlanningSyncState::AdoptedLinear),
+            (
+                "00000000-0000-4000-8000-000000000001",
+                PlanningSyncState::Uncertain
+            ),
+            (
+                "00000000-0000-4000-8000-000000000002",
+                PlanningSyncState::AdoptedLinear
+            ),
         ]
     );
     assert_eq!(

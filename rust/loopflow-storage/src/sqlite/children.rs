@@ -1503,8 +1503,8 @@ pub(super) fn task_acquisitions_in(
          OR COALESCE(changes.removed,0),
          changes.issue_id IS NOT NULL
          FROM tasks t JOIN repository_plans w ON w.id=t.repository_id LEFT JOIN projects p ON p.id=t.project_id
-         LEFT JOIN pm_items i ON i.repo=w.repo AND i.provider='linear' AND i.id=t.external_issue_id
-         LEFT JOIN pm_projects parent ON parent.repo=w.repo AND parent.provider='linear'
+         LEFT JOIN pm_items i ON i.repo=w.repo AND i.provider IN ('linear','asana') AND i.id=t.external_issue_id
+         LEFT JOIN pm_projects parent ON parent.repo=w.repo AND parent.provider IN ('linear','asana')
                                      AND parent.id=p.external_project_id
          LEFT JOIN pm_projects observed ON observed.repo=i.repo AND observed.provider=i.provider
                                        AND observed.id=i.project_id

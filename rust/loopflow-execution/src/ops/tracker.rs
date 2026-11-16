@@ -425,6 +425,7 @@ pub(crate) async fn ingest_task(
         confirmed
             .as_ref()
             .map(|(wave, initiative)| (wave, initiative.as_str())),
+        configured(repo).unwrap_or(Provider::Linear),
     )
     .map_err(message)
 }

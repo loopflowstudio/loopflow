@@ -1132,6 +1132,7 @@ fn project_creation_binding_and_activation_save_offline() {
                     "initiative",
                     &incoming,
                     20,
+                    loopflow_storage::provider::Provider::Linear,
                 )
                 .unwrap();
                 // The unsent activation is sent last, so it stays pending and
@@ -1418,6 +1419,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
             "initiative",
             &project,
             17,
+            loopflow_storage::provider::Provider::Linear,
         )
         .unwrap();
         let id = store.list_projects(Some(wave.id())).unwrap()[0].id.clone();
@@ -1530,6 +1532,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
                 "initiative",
                 &incoming,
                 18,
+                loopflow_storage::provider::Provider::Linear,
             )
             .unwrap();
             let read = project_with_sync(&store, &id);
@@ -1563,6 +1566,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
                 "initiative",
                 &incoming,
                 19,
+                loopflow_storage::provider::Provider::Linear,
             )
             .unwrap();
             let read = project_with_sync(&store, &id);
@@ -1621,6 +1625,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
                 "initiative",
                 &incoming,
                 20,
+                loopflow_storage::provider::Provider::Linear,
             )
             .unwrap();
             let read = project_with_sync(&store, &id);
@@ -1688,6 +1693,7 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
             "initiative",
             &project,
             17,
+            loopflow_storage::provider::Provider::Linear,
         )
         .unwrap();
         let project_id = store.list_projects(Some(wave.id())).unwrap()[0].id.clone();
@@ -2053,6 +2059,7 @@ fn moving_saves_membership_offline_and_retains_inbound_changes() {
                     name,
                     &observed,
                     1,
+                    loopflow_storage::provider::Provider::Linear,
                 )
                 .unwrap();
                 observations.push(observed);
@@ -3117,6 +3124,7 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
         "initiative",
         &observed,
         17,
+        loopflow_storage::provider::Provider::Linear,
     )
     .unwrap();
     let db = rusqlite::Connection::open(&path).unwrap();

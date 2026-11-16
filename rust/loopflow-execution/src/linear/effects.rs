@@ -646,6 +646,7 @@ fn accept_project(
         initiative,
         project,
         now(),
+        loopflow_storage::provider::Provider::Linear,
     )
     .map_err(message)
 }

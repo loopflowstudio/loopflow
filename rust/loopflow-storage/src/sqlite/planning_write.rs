@@ -223,12 +223,15 @@ fn read_record(
     decode(rows.next()?.ok_or(StoreError::NotFound)?)
 }
 
+/// `queue`: whether a `Local` write's changes are effects. A record created in
+/// this write is not edited by it: its tracker learns it through `create`.
 fn write_record(
     conn: &Connection,
     table: &str,
     id: &str,
     edits: &[WorkEdit],
     origin: WriteOrigin,
+    queue: bool,
 ) -> StoreResult<bool> {
     let before = read(conn, table, id)?;
     let mut columns = BTreeMap::new();
@@ -297,7 +300,7 @@ fn write_record(
             previous_identifier.as_deref(),
         )?;
     }
-    if origin == WriteOrigin::Local {
+    if origin == WriteOrigin::Local && queue {
         for change in changes {
             super::tracker_effects::enqueue_local(conn, table, id, change)?;
         }
@@ -540,7 +543,7 @@ pub(crate) fn write(
         .collect::<StoreResult<Vec<_>>>()?;
     let mut changed = false;
     for ((table, id), values) in grouped(&edits) {
-        changed |= write_record(conn, table, id, &values, origin)?;
+        changed |= write_record(conn, table, id, &values, origin, true)?;
     }
     Ok(changed)
 }
@@ -570,21 +573,31 @@ pub(crate) fn create(
     let records = grouped(&edits);
     // Foreign-key parents exist before children even when the caller's edits
     // arrive in a different order. Capturing fields still uses the common writer.
+    let mut created = BTreeSet::new();
     for table in WORK_TABLES {
         for (&(record_table, id), values) in &records {
-            if record_table == table
-                && ensure_record(conn, repo, table, id, values)?
-                && origin == WriteOrigin::Local
-            {
-                // A new record's values are all changes, though the insert
-                // already holds them.
-                for value in values {
-                    super::tracker_effects::enqueue_local(conn, table, id, &value.change)?;
+            if record_table == table && ensure_record(conn, repo, table, id, values)? {
+                created.insert((table, id));
+                // A new comment is a change to its Task, though the insert
+                // already holds it. A new Task or Project is a `create`.
+                if origin == WriteOrigin::Local && table == "task_comments" {
+                    for value in values {
+                        super::tracker_effects::enqueue_local(conn, table, id, &value.change)?;
+                    }
                 }
             }
         }
     }
-    write(conn, &edits, origin)?;
+    for (&(table, id), values) in &records {
+        write_record(
+            conn,
+            table,
+            id,
+            values,
+            origin,
+            !created.contains(&(table, id)),
+        )?;
+    }
     Ok(())
 }
 

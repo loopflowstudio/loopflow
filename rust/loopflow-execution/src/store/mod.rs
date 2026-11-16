@@ -1363,7 +1363,15 @@ mod tests {
                 )
                 .await
                 .unwrap();
-            assert!(store.sqlite.pending_task_state(&task.id).unwrap().is_none());
+            assert!(store
+                .sqlite
+                .tracker_effects_for(
+                    &loopflow_storage::sqlite::tracker_effects::EffectOwner::Task(task.id.clone())
+                )
+                .unwrap()
+                .iter()
+                .all(|effect| effect.kind
+                    != loopflow_storage::sqlite::tracker_effects::EffectKind::State));
             store
                 .sqlite
                 .reopen_task(&task.id, Some("New scope"))
@@ -2175,7 +2183,8 @@ mod tests {
                 wave.id(),
                 &snapshot.initiative,
                 &old,
-                20
+                20,
+                loopflow_storage::provider::Provider::Linear
             )
             .is_err()
         );
@@ -2225,6 +2234,7 @@ mod tests {
             &snapshot.initiative,
             &confirmed,
             10,
+            loopflow_storage::provider::Provider::Linear,
         )
         .unwrap();
         let accepted = store
@@ -2256,7 +2266,8 @@ mod tests {
                 other.id(),
                 &snapshot.initiative,
                 &confirmed,
-                20
+                20,
+                loopflow_storage::provider::Provider::Linear
             )
             .is_err()
         );
@@ -2836,6 +2847,7 @@ mod tests {
             &snapshot.initiative,
             &observed,
             10,
+            loopflow_storage::provider::Provider::Linear,
         )
         .unwrap();
 

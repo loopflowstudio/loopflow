@@ -14,7 +14,7 @@ use crate::{StoreError, StoreResult};
 use loopflow_model::durable::{ProjectId, TaskId};
 use loopflow_model::id::WaveId;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum EffectKind {
     Create,

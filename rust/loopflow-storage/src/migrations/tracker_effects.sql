@@ -216,6 +216,27 @@ WHERE d.acknowledged=0 AND d.conflicting_comment_json IS NULL
     AND (t.external_issue_id IS NOT NULL OR EXISTS(SELECT 1 FROM tracker_effects e WHERE e.task_id=c.task_id AND e.kind='create'))
 ORDER BY d.rowid;
 
+-- Follow-up relations a filing recorded and no confirmation settled: a link
+-- on the source Task under the relation's own id, held until both Tasks have
+-- tracker objects. An older lf still looks before it relates, so it cannot
+-- relate them twice.
+INSERT OR IGNORE INTO tracker_effects(id,task_id,subject,kind,value_json,phase,provider)
+SELECT lower(json_extract(e.kind_json,'$.intent.relation_id')),source.id,
+    'relation:'||lower(json_extract(e.kind_json,'$.intent.relation_id')),'link',
+    json_object('target',min(target.id)),'pending','linear'
+FROM task_events e JOIN tasks source ON source.id=e.task_id
+JOIN tasks target ON target.id=json_extract(e.kind_json,'$.intent.issue_id')
+    OR target.external_issue_id=json_extract(e.kind_json,'$.intent.issue_id')
+    OR target.id='task_'||replace(lower(json_extract(e.kind_json,'$.intent.issue_id')),'-','')
+WHERE json_extract(e.kind_json,'$.kind')='follow_through_intent'
+    AND json_extract(e.kind_json,'$.intent.relation_id') IS NOT NULL
+    AND source.planning_deleted_at IS NULL AND target.planning_deleted_at IS NULL
+    AND NOT EXISTS(SELECT 1 FROM task_events c WHERE c.task_id=source.id
+        AND json_extract(c.kind_json,'$.kind')='follow_through_relation_confirmed'
+        AND json_extract(c.kind_json,'$.relation_id')=json_extract(e.kind_json,'$.intent.relation_id'))
+GROUP BY e.id
+ORDER BY e.id;
+
 -- An older lf still running on this store reads the old receipts. Mark every
 -- unsettled one settled so it sends nothing this queue now owns. A creation has
 -- no settled flag: it becomes attempted and looked at far in the future, so the

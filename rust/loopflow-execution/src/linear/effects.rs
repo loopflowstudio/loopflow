@@ -18,7 +18,9 @@ use loopflow_model::durable::{ProjectId, TaskId};
 use loopflow_model::id::WaveId;
 use loopflow_storage::planning::rules::Observed;
 use loopflow_storage::planning::{StateHistory, TrackerProject};
-use loopflow_storage::sqlite::tracker_effects::{EffectKind, EffectOwner, TrackerEffect};
+use loopflow_storage::sqlite::tracker_effects::{
+    EffectKind, EffectOwner, EffectPhase, TaskLink, TrackerEffect,
+};
 use loopflow_storage::work::edit::WorkValue;
 
 impl LinearClient {
@@ -51,6 +53,9 @@ impl LinearClient {
             }
             (EffectOwner::Project(project), EffectKind::Link) => {
                 self.link(store, repo, project).await
+            }
+            (EffectOwner::Task(task), EffectKind::Link) => {
+                self.task_link(store, task, effect).await
             }
             (owner, kind) => Err(message(format!(
                 "Linear carries no {} effect for {owner:?}",
@@ -396,6 +401,86 @@ impl LinearClient {
         })
     }
 
+    async fn task_link(
+        &self,
+        store: &Store,
+        task: &TaskId,
+        effect: &TrackerEffect,
+    ) -> OpsResult<Sent> {
+        let issue = remote_task(store, task).await?;
+        match effect.task_link() {
+            Some(TaskLink::Relation { id, target }) => {
+                let related = remote_task(store, &target).await?;
+                match self.ensure_follow_up_relation(&issue, &related, &id).await {
+                    Ok(()) => Ok(Sent::Acknowledged {
+                        revision: None,
+                        remote_id: Some(id),
+                    }),
+                    Err(error) => Ok(Sent::failed(error)),
+                }
+            }
+            // PR links spend the reserved budget so they never wait behind sync.
+            Some(TaskLink::Pr { url }) => {
+                let posted = store
+                    .sqlite
+                    .tracker_effects_for(&effect.owner)
+                    .map_err(message)?
+                    .iter()
+                    .any(|earlier| {
+                        earlier.subject == effect.subject
+                            && earlier.phase == EffectPhase::Acknowledged
+                    });
+                Ok(super::urgent(self.pr_link(task, &issue, &url, effect, posted)).await)
+            }
+            None => Err(message("link effect names nothing to link")),
+        }
+    }
+
+    /// The PR as an attachment, whose subtitle is its state, and one managed
+    /// comment. Linear keeps one attachment per URL and the comment keeps one
+    /// id per PR, so sending again refreshes both instead of adding more.
+    async fn pr_link(
+        &self,
+        task: &TaskId,
+        issue: &str,
+        url: &str,
+        effect: &TrackerEffect,
+        posted: bool,
+    ) -> Sent {
+        let (number, state) = (&effect.value["number"], &effect.value["state"]);
+        let state = state.as_str().unwrap_or("Open");
+        let title = format!("GitHub PR #{number}");
+        let body = format!("[GitHub PR #{number}]({url}) — {state}");
+        // An earlier lf recorded the id Linear gave its comment.
+        let recorded = effect.value["comment_id"].as_str();
+        let comment = match recorded {
+            Some(id) => id.to_owned(),
+            None => match pr_comment_id(task, url) {
+                Ok(id) => id,
+                Err(error) => return Sent::Rejected(error.to_string()),
+            },
+        };
+        let attachment = match self.link_attachment(issue, url, &title).await {
+            Ok(id) => id,
+            Err(error) => return Sent::failed(error),
+        };
+        if let Err(error) = self.update_attachment(&attachment, &title, state).await {
+            return Sent::failed(error);
+        }
+        let commented = if posted || recorded.is_some() {
+            self.update_comment(&comment, &body).await
+        } else {
+            self.sync_comment(&comment, issue, &body).await
+        };
+        match commented {
+            Ok(()) => Sent::Acknowledged {
+                revision: None,
+                remote_id: Some(attachment),
+            },
+            Err(error) => Sent::failed(error),
+        }
+    }
+
     /// A Task response is accepted into Work, which settles a creation by its id.
     async fn accepted(
         &self,
@@ -594,6 +679,15 @@ impl LinearClient {
             ..Observed::default()
         }))
     }
+}
+
+/// The id of a PR's managed comment: one per Task and PR URL.
+fn pr_comment_id(task: &TaskId, url: &str) -> OpsResult<String> {
+    let id = uuid::Uuid::new_v5(
+        &uuid::Uuid::NAMESPACE_URL,
+        format!("loopflow/task/{task}/pr/{url}").as_bytes(),
+    );
+    super::comment_delivery_id(&id.to_string()).map_err(message)
 }
 
 fn value(effect: &TrackerEffect) -> OpsResult<WorkValue> {

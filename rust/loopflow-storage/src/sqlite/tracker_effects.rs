@@ -75,9 +75,10 @@ impl EffectKind {
         }
     }
 
-    /// Only the newest unsent value of these is worth sending.
+    /// Only the newest unsent value of these is worth sending. A link's
+    /// subject names what it links, so a newer one replaces an unsent one.
     fn coalesces(self) -> bool {
-        matches!(self, Self::Field | Self::Order | Self::State)
+        matches!(self, Self::Field | Self::Order | Self::State | Self::Link)
     }
 }
 
@@ -159,6 +160,38 @@ pub struct TrackerEffect {
     pub error: Option<String>,
     pub attempted_at: Option<i64>,
     pub looked_at: Option<i64>,
+}
+
+/// What a Task's `link` effect connects it to, named by its subject.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TaskLink {
+    /// A follow-up relation to another Task, sent once both have tracker objects.
+    Relation { id: String, target: TaskId },
+    /// The Task's pull request, shown on its tracker item.
+    Pr { url: String },
+}
+
+const RELATION: &str = "relation:";
+const PR: &str = "pr:";
+
+impl TrackerEffect {
+    /// The link a Task `link` effect carries; `None` for every other effect.
+    pub fn task_link(&self) -> Option<TaskLink> {
+        if self.kind != EffectKind::Link || !matches!(self.owner, EffectOwner::Task(_)) {
+            return None;
+        }
+        let subject = self.subject.as_deref()?;
+        if let Some(id) = subject.strip_prefix(RELATION) {
+            let target = self.value["target"].as_str()?;
+            return Some(TaskLink::Relation {
+                id: id.to_owned(),
+                target: TaskId::from_raw(target),
+            });
+        }
+        subject.strip_prefix(PR).map(|url| TaskLink::Pr {
+            url: url.to_owned(),
+        })
+    }
 }
 
 /// What a pass decided for one effect. `Send` and `Hold` leave it unsettled.
@@ -803,6 +836,29 @@ pub(crate) fn retain_filing_create_in(
     Ok(())
 }
 
+/// A follow-up relation a historical filing recorded, unless it was confirmed:
+/// a `link` on the source Task, held until both Tasks have tracker objects. Its
+/// id is the relation's, which Linear keeps, so recording it twice queues it once.
+pub(crate) fn retain_relation_in(
+    conn: &Connection,
+    source: &TaskId,
+    relation: &str,
+    target: &str,
+) -> StoreResult<()> {
+    conn.execute(
+        "INSERT OR IGNORE INTO tracker_effects(id,task_id,subject,kind,value_json,phase,provider)
+         SELECT lower(?2),?1,'relation:'||lower(?2),'link',json_object('target',t.id),'pending','linear'
+         FROM tasks t WHERE (t.id=?3 OR t.external_issue_id=?3 OR t.id='task_'||replace(lower(?3),'-',''))
+            AND t.planning_deleted_at IS NULL
+            AND NOT EXISTS(SELECT 1 FROM task_events c WHERE c.task_id=?1
+                AND json_extract(c.kind_json,'$.kind')='follow_through_relation_confirmed'
+                AND json_extract(c.kind_json,'$.relation_id')=lower(?2))
+         LIMIT 1",
+        params![source.as_str(), relation, target],
+    )?;
+    Ok(())
+}
+
 /// Unbound local Projects, then Tasks, in `repo` with no live `create`.
 fn uncreated(conn: &Connection, repo: &str) -> StoreResult<Vec<EffectOwner>> {
     let mut query = conn.prepare_cached(
@@ -883,6 +939,50 @@ impl SqliteStore {
         }
         tx.commit()?;
         Ok(owners.len())
+    }
+
+    /// Show the Task's pull request in its tracker: `state` is what the PR
+    /// line says (Open, Merged, Abandoned). Returns the effect id, or `None`
+    /// when no bridge carries the Task. A later state replaces an unsent one.
+    pub fn enqueue_pr_link(
+        &self,
+        task: &TaskId,
+        url: &str,
+        number: u64,
+        state: &str,
+        comment_id: Option<&str>,
+    ) -> StoreResult<Option<String>> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let value = serde_json::json!({
+            "number": number,
+            "state": state,
+            "comment_id": comment_id,
+        });
+        let id = enqueue(
+            &tx,
+            &EffectOwner::Task(task.clone()),
+            EffectKind::Link,
+            Some(&format!("{PR}{url}")),
+            &value,
+            None,
+        )?;
+        tx.commit()?;
+        Ok(id)
+    }
+
+    /// One effect by id, settled or not.
+    pub fn tracker_effect(&self, id: &str) -> StoreResult<Option<TrackerEffect>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let effect = conn
+            .query_row(
+                &format!("SELECT {COLUMNS} FROM tracker_effects e WHERE e.id=?1"),
+                [id],
+                |row| Ok(read_effect(row)),
+            )
+            .optional()?
+            .transpose()?;
+        Ok(effect.and_then(Result::ok))
     }
 
     /// Unsettled effects for `repo` in send order.
@@ -1218,6 +1318,7 @@ mod upgrade_tests {
                 "project-bound order - attempted linear",
                 "task-bound state - pending linear",
                 "task-bound comment comment-proof attempted linear",
+                "task-bound link relation:0b7c8f0e-1d2a-4e3b-9c4d-5e6f7a8b9c0d pending linear",
             ]
         );
         assert_eq!(

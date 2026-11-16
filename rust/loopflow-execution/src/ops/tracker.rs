@@ -136,11 +136,12 @@ impl Tracker {
     }
 
     /// A send carrying our own id cannot duplicate, so a lost reply repeats
-    /// it: Linear creations and comments take the id we give them.
+    /// it: Linear comments take the id we give them, and every link reads
+    /// what the provider holds before it adds anything.
     pub fn idempotent(&self, kind: EffectKind) -> bool {
         match self {
-            Self::Linear(_) => matches!(kind, EffectKind::Comment),
-            Self::Asana(_) => false,
+            Self::Linear(_) => matches!(kind, EffectKind::Comment | EffectKind::Link),
+            Self::Asana(_) => kind == EffectKind::Link,
             #[cfg(test)]
             Self::Fake(fake) => fake.idempotent.contains(&kind),
         }

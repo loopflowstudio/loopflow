@@ -31,3 +31,7 @@ INSERT INTO task_comments(id,task_id,body,author,created_at)
 VALUES('comment-proof','task-bound','first comment','{"kind":"person","name":"Proof"}',2);
 INSERT INTO task_comment_deliveries(comment_id,comment_json,acknowledged)
 VALUES('comment-proof','{"id":"comment-proof","body":"first comment","author":{"kind":"person","name":"Proof"},"created_at":2}',0);
+INSERT INTO task_events(task_id,kind_json,created_at)
+VALUES('task-bound','{"kind":"follow_through_intent","intent":{"relation_id":"0b7c8f0e-1d2a-4e3b-9c4d-5e6f7a8b9c0d","issue_id":"task-new"}}',3),
+      ('task-bound','{"kind":"follow_through_intent","intent":{"relation_id":"1b7c8f0e-1d2a-4e3b-9c4d-5e6f7a8b9c0d","issue_id":"task-git"}}',4),
+      ('task-bound','{"kind":"follow_through_relation_confirmed","relation_id":"1b7c8f0e-1d2a-4e3b-9c4d-5e6f7a8b9c0d","source_issue_id":"linear-issue","target_issue_id":"x"}',5);

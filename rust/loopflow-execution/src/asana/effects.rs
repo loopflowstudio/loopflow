@@ -18,7 +18,7 @@ use crate::store::Store;
 use loopflow_model::durable::{ProjectId, TaskId};
 use loopflow_storage::planning::rules::Observed;
 use loopflow_storage::planning::TrackerProject;
-use loopflow_storage::sqlite::tracker_effects::{EffectKind, EffectOwner, TrackerEffect};
+use loopflow_storage::sqlite::tracker_effects::{EffectKind, EffectOwner, TaskLink, TrackerEffect};
 use loopflow_storage::work::edit::WorkValue;
 
 const PROJECT_EDITS: &str =
@@ -46,6 +46,12 @@ impl AsanaClient {
                 self.task_comment(store, task, effect).await
             }
             (EffectOwner::Task(task), EffectKind::Delete) => self.delete(store, task).await,
+            (EffectOwner::Task(task), EffectKind::Link) => match effect.task_link() {
+                Some(TaskLink::Pr { url }) => self.pr_link(store, task, &url, effect).await,
+                _ => Ok(Sent::Unsupported(
+                    "Asana has no follow-up relations; the follow-up stays a comment".into(),
+                )),
+            },
             (EffectOwner::Project(_), _) => Ok(Sent::Unsupported(PROJECT_EDITS.into())),
             (owner, kind) => Ok(Sent::Unsupported(format!(
                 "Asana carries no {} effect for {owner:?}",
@@ -233,6 +239,31 @@ impl AsanaClient {
             Ok(()) => Ok(Sent::Acknowledged {
                 revision: None,
                 remote_id: effect.subject.clone(),
+            }),
+            Err(error) => Ok(Sent::failed(error)),
+        }
+    }
+
+    /// One comment per PR state: Asana keeps no id of ours, so a comment
+    /// with the same text already there is this one.
+    async fn pr_link(
+        &self,
+        store: &Store,
+        task: &TaskId,
+        url: &str,
+        effect: &TrackerEffect,
+    ) -> OpsResult<Sent> {
+        let external = remote_task(store, task).await?;
+        let number = &effect.value["number"];
+        let state = effect.value["state"].as_str().unwrap_or("Open");
+        let body = format!("[GitHub PR #{number}]({url}) — {state}");
+        match self
+            .sync_comment(&external, &super::comment_markdown(&body))
+            .await
+        {
+            Ok(()) => Ok(Sent::Acknowledged {
+                revision: None,
+                remote_id: None,
             }),
             Err(error) => Ok(Sent::failed(error)),
         }

@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use futures_util::StreamExt;
 use loopflow_storage::planning::rules::{self, Decision, LostReply, Observed};
 use loopflow_storage::sqlite::tracker_effects::{
-    EffectKind, EffectOwner, EffectPhase, Settlement, TrackerEffect,
+    EffectKind, EffectOwner, EffectPhase, Settlement, TaskLink, TrackerEffect,
 };
 use loopflow_storage::work::edit::WorkValue;
 
@@ -107,9 +107,6 @@ pub(crate) async fn drain_repository(
     let Some(provider) = super::configured(Path::new(repo)) else {
         return Ok(Pass::default());
     };
-    if provider == loopflow_storage::provider::Provider::Linear {
-        crate::ops::linear::sync_retained_relations(store, Path::new(repo)).await?;
-    }
     store
         .sqlite
         .enqueue_tracker_creations(repo, provider)
@@ -357,6 +354,14 @@ fn parent_pending(store: &Store, effect: &TrackerEffect, creating: &HashSet<Stri
         .is_none_or(|project| project.linear_id.is_none())
 }
 
+/// Whether this effect relates its Task to one with no tracker object yet.
+fn target_pending(store: &Store, effect: &TrackerEffect) -> bool {
+    let Some(TaskLink::Relation { target, .. }) = effect.task_link() else {
+        return false;
+    };
+    !matches!(bound(store, &EffectOwner::Task(target)), Ok(Some(_)))
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn drain_owner(
     store: &Store,
@@ -434,7 +439,7 @@ async fn drain_effect(
             return Ok(Step::Done);
         }
     }
-    let parent = parent_pending(store, &effect, creating);
+    let parent = parent_pending(store, &effect, creating) || target_pending(store, &effect);
     let decision = match effect.phase {
         EffectPhase::Attempted => {
             let now = loopflow_storage::rows::now_unix();
@@ -743,6 +748,40 @@ mod tests {
             Some(
                 json!({"revision":"2026-11-02T00:00:00Z","value":{"field":"task_title","value":"Theirs"}})
             )
+        );
+    }
+
+    #[tokio::test]
+    async fn a_relation_waits_until_its_target_has_a_tracker_object() {
+        let f = fixture();
+        let source = f.bound_task();
+        let target = f.bound_task();
+        f.sql(
+            "UPDATE tasks SET external_issue_id=NULL WHERE id=?1",
+            &[target.as_str()],
+        );
+        let relation = uuid::Uuid::new_v4().to_string();
+        f.sql(
+            "INSERT INTO tracker_effects(id,task_id,subject,kind,value_json,phase,provider)
+             VALUES(?1,?2,'relation:'||?1,'link',json_object('target',?3),'pending','linear')",
+            &[&relation, source.as_str(), target.as_str()],
+        );
+        f.title(&source, "Renamed", "pending", None);
+        f.pass().await;
+        assert_eq!(
+            f.phases(&source),
+            [EffectPhase::Pending, EffectPhase::Acknowledged]
+        );
+        f.sql(
+            "UPDATE tasks SET external_issue_id=?2 WHERE id=?1",
+            &[target.as_str(), &uuid::Uuid::new_v4().to_string()],
+        );
+        let before = f.fake.requests();
+        f.pass().await;
+        assert_eq!(f.fake.requests(), before + 1);
+        assert_eq!(
+            f.phases(&source),
+            [EffectPhase::Acknowledged, EffectPhase::Acknowledged]
         );
     }
 

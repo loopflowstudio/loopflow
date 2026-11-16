@@ -2046,55 +2046,6 @@ fn linear_error(err: LinearError) -> OpsError {
     OpsError::Message(err.to_string())
 }
 
-// Local filing settles independently. Exporting either endpoint makes its retained
-// relation eligible, including after the source Task has already completed.
-pub(crate) async fn sync_retained_relations(
-    store: &crate::store::Store,
-    repo: &std::path::Path,
-) -> OpsResult<()> {
-    for relation in store
-        .sqlite
-        .pending_retained_relations(&repo.to_string_lossy())
-        .map_err(|error| OpsError::Message(error.to_string()))?
-    {
-        let path = store
-            .sqlite
-            .home_dir()
-            .map_err(|error| OpsError::Message(error.to_string()))?
-            .join("locks/follow-through-relations")
-            .join(format!("{}.lock", relation.task_id));
-        let Some(_lock) = super::tracker::drain::lock_delivery(&path)? else {
-            continue;
-        };
-        let attempt = async {
-            issue_client()
-                .await?
-                .for_repository(repo)
-                .ensure_follow_up_relation(
-                    &relation.source_issue_id,
-                    &relation.target_issue_id,
-                    &relation.relation_id,
-                )
-                .await
-                .map_err(|error| OpsError::Message(error.to_string()))?;
-            store
-                .sqlite
-                .confirm_retained_relation(&relation)
-                .map_err(|error| OpsError::Message(error.to_string()))
-        };
-        match tokio::time::timeout(std::time::Duration::from_secs(5), attempt).await {
-            Ok(Ok(())) => {}
-            Ok(Err(error)) => {
-                tracing::debug!(%error, task = %relation.task_id, "follow-up relation synchronization pending")
-            }
-            Err(_) => {
-                tracing::debug!(task = %relation.task_id, "follow-up relation synchronization timed out; receipt retained")
-            }
-        }
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -387,7 +387,7 @@ mod tests {
 
     #[test]
     fn local_identifier_matches_the_task_identifier() {
-        let task = crate::durable::TaskId::new();
+        let task = loopflow_model::durable::TaskId::new();
         let uuid = uuid::Uuid::parse_str(task.as_str().trim_start_matches("task_")).unwrap();
         assert_eq!(
             crate::linear::local_identifier(&uuid.to_string()),

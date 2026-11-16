@@ -2,9 +2,10 @@
 use std::path::PathBuf;
 
 use crate::error::LoadError;
+use crate::graph::return_target;
 use crate::graph::ConcreteStep;
 use crate::graph::Skill;
-use crate::graph::{return_target, split_frontmatter};
+use loopflow_definitions::text::split_frontmatter;
 
 pub fn render_graph_instructions(
     name: &str,
@@ -27,7 +28,8 @@ fn conversational_skill(skill: &Skill) -> String {
 }
 
 fn is_builtin_decision(skill: &Skill, name: &str) -> bool {
-    let source = crate::builtins::get_builtin_skill(name).expect("known builtin decision skill");
+    let source = loopflow_definitions::builtins::get_builtin_skill(name)
+        .expect("known builtin decision skill");
     let body = split_frontmatter(source).map_or(source, |(_, body)| body);
     skill.name == name && skill.source.is_none() && skill.content.as_deref() == Some(body)
 }

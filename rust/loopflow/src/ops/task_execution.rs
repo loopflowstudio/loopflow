@@ -7,15 +7,15 @@ use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
 
 use crate::durable::GraphProcessDetail;
-use crate::durable::TaskId;
+use crate::graph::process::GraphProcess;
 use crate::journal::ProcessIdentityEvidence;
-use crate::ops::graph_process::GraphProcess;
 use crate::process::ProcessEntry;
 use crate::session::GraphProcessSummaryState;
 use crate::session_record::activity::{self, Activity};
-use crate::store::sqlite::{entry_of, AgentLimitRecovery, GraphExecutionFacts, SqliteStore};
 use crate::store::{SharedStore, StoreResult};
-use crate::work::task::Task;
+use loopflow_model::durable::TaskId;
+use loopflow_storage::sqlite::{entry_of, AgentLimitRecovery, GraphExecutionFacts, SqliteStore};
+use loopflow_storage::work::task::Task;
 
 use super::error::{OpsError, OpsResult};
 
@@ -81,7 +81,12 @@ pub(crate) async fn execution_of_latest_graph(
         None => crate::journal::lf_process_evidence(
             process,
             &match facts.receipts.get(&process.id) {
-                Some(path) => crate::journal::read_process_receipt(path),
+                Some(locator) => match facts.receipt_home.as_deref() {
+                    Some(home) => crate::journal::read_process_receipt(
+                        &crate::journal::process_receipt_path(home, locator),
+                    ),
+                    None => Ok(None),
+                },
                 None => Ok(None),
             },
             crate::journal::process_identity_evidence,
@@ -148,7 +153,12 @@ fn open_graph_execution_from_facts(
 ) -> Option<TaskExecutionSnapshot> {
     for (graph, process) in facts.open_processes.get(task).into_iter().flatten() {
         let receipt = match facts.receipts.get(&process.id) {
-            Some(path) => crate::journal::read_process_receipt(path),
+            Some(locator) => match facts.receipt_home.as_deref() {
+                Some(home) => crate::journal::read_process_receipt(
+                    &crate::journal::process_receipt_path(home, locator),
+                ),
+                None => Ok(None),
+            },
             None => Ok(None),
         };
         let state = match crate::journal::lf_process_evidence(
@@ -366,8 +376,7 @@ mod tests {
     };
     use crate::journal::ProcessIdentityEvidence::{Dead, Live, Unknown};
     use crate::session::GraphProcessSummaryState;
-    use crate::store::sqlite::AgentLimitRecovery;
-    use crate::store::sqlite::SqliteStore;
+    use loopflow_storage::sqlite::AgentLimitRecovery;
 
     fn snapshot(state: TaskExecutionState) -> TaskExecutionSnapshot {
         TaskExecutionSnapshot {
@@ -463,7 +472,7 @@ mod tests {
     #[test]
     fn a_graph_runs_while_its_processes_do_and_blocks_on_a_failed_step() {
         let directory = tempfile::tempdir().unwrap();
-        let store = SqliteStore::new(&directory.path().join("loopflow.db")).unwrap();
+        let store = crate::store::open_sqlite(&directory.path().join("loopflow.db")).unwrap();
         let graph = |outcome| {
             let graph_process =
                 store.test_graph("feature", "/repo", &[("implement", outcome)], None);

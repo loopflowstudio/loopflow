@@ -10,14 +10,14 @@ use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::id::LfProcessId;
 use crate::journal::{
     prune_process_receipts_at, read_process_receipts_at, recorded_process_evidence,
     recorded_process_receipt, OsProcess, ProcessIdentityEvidence, ProcessReceipt,
 };
 use crate::lf::output::truncate;
-use crate::store::rows::unix_to_datetime;
-use crate::store::sqlite::SqliteStore;
+use loopflow_model::id::LfProcessId;
+use loopflow_storage::rows::unix_to_datetime;
+use loopflow_storage::sqlite::SqliteStore;
 
 const SCHEMA_VERSION: u32 = 1;
 const COMMAND_WIDTH: usize = 82;
@@ -84,7 +84,7 @@ pub struct ProcessPruneReport {
     pub reaped_agent_process_groups: u32,
     pub agent_process_records: Vec<crate::harness::agent_process::AgentProcessCleanup>,
     /// Store retention; absent on a dry run or before the store exists.
-    pub store: Option<crate::store::sqlite::retention::RetentionReport>,
+    pub store: Option<loopflow_storage::sqlite::retention::RetentionReport>,
     pub errors: u32,
 }
 
@@ -185,7 +185,7 @@ pub fn run_prune(json: bool, dry_run: bool) -> Result<()> {
         // their receipts go.
         let database = crate::store::database_path_from_env()?;
         if database.exists() {
-            match crate::store::sqlite::retention::prune(&database, now) {
+            match crate::store::retention::prune(&database, now) {
                 Ok(store) => report.store = Some(store),
                 Err(error) => {
                     tracing::warn!(%error, "failed to apply store retention");
@@ -257,8 +257,10 @@ impl ActivityReader {
                 if !path.exists() {
                     return Ok(ActivitySnapshot { nodes: Vec::new() });
                 }
-                self.store
-                    .insert(SqliteStore::open_processes_read_only(&path)?)
+                self.store.insert(SqliteStore::open_processes_read_only(
+                    &path,
+                    crate::store::token_key::encryption_key,
+                )?)
             }
         };
         // Rows change only with the revision, read before them; liveness is
@@ -676,8 +678,8 @@ fn format_duration(seconds: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::{collect_activity, ActivityNodeKind, OsProcess};
-    use crate::id::{AgentProcessId, LfProcessId, TraceId};
     use crate::process::{AgentProcess, ProcessEntry};
+    use loopflow_model::id::{AgentProcessId, LfProcessId, TraceId};
 
     #[test]
     fn activity_fold_keeps_unknown_parents_and_rejects_cycles() {
@@ -735,7 +737,6 @@ mod tests {
     fn uncertain_records_stay_visible_and_share_the_gate_judgment() {
         use super::{activity_state, fold_process_state, load_snapshot, ActivityState};
         use crate::journal::{recorded_process_evidence, ProcessIdentityEvidence};
-        use crate::store::sqlite::SqliteStore;
 
         let _lock = crate::journal::test_env_lock();
         let _ambient = crate::test_ambient::EnvGuard::new();
@@ -743,7 +744,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         std::env::set_var("LF_HOME", home.path());
         let path = home.path().join("loopflow.db");
-        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let store = crate::store::opening::open_ephemeral(&path).unwrap();
         let sql = rusqlite::Connection::open(path).unwrap();
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
         let parent = LfProcessId::new();
@@ -760,9 +761,9 @@ mod tests {
         )
         .unwrap();
 
-        let wave = crate::id::WaveId::new();
-        let project = crate::durable::ProjectId::new();
-        let task = crate::durable::TaskId::new();
+        let wave = loopflow_model::id::WaveId::new();
+        let project = loopflow_model::durable::ProjectId::new();
+        let task = loopflow_model::durable::TaskId::new();
         sql.execute(
             "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'proof','/repo',1)",
             [&wave],
@@ -879,7 +880,7 @@ mod tests {
     #[cfg(unix)]
     fn activity_reads_only_the_receipts_of_unfinished_rows() {
         use super::{load_snapshot, ActivitySnapshot, ActivityState, ProcessReceipt};
-        use crate::store::sqlite::SqliteStore;
+
         use std::os::unix::fs::PermissionsExt;
 
         let _lock = crate::journal::test_env_lock();
@@ -888,7 +889,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         std::env::set_var("LF_HOME", home.path());
         let path = home.path().join("loopflow.db");
-        SqliteStore::open_ephemeral(&path).unwrap();
+        crate::store::opening::open_ephemeral(&path).unwrap();
         let sql = rusqlite::Connection::open(path).unwrap();
         let live = LfProcessId::new();
         let pid = std::process::id();
@@ -944,7 +945,6 @@ mod tests {
     #[cfg(unix)]
     fn a_watch_reads_each_dead_row_once() {
         use super::ActivityReader;
-        use crate::store::sqlite::SqliteStore;
 
         let _lock = crate::journal::test_env_lock();
         let _ambient = crate::test_ambient::EnvGuard::new();
@@ -952,7 +952,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         std::env::set_var("LF_HOME", home.path());
         let path = home.path().join("loopflow.db");
-        SqliteStore::open_ephemeral(&path).unwrap();
+        crate::store::opening::open_ephemeral(&path).unwrap();
         let sql = rusqlite::Connection::open(path).unwrap();
         let pid = std::process::id();
         let started = crate::journal::process_started_at(pid).unwrap().unwrap();

@@ -1347,10 +1347,7 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
 }
 
 /// `lf task report` prints the thread with the new entry.
-fn print_thread(
-    result: &loopflow::work::task::comment::TaskComments,
-    json: bool,
-) -> anyhow::Result<()> {
+fn print_thread(result: &loopflow_model::comment::TaskComments, json: bool) -> anyhow::Result<()> {
     if json {
         println!("{}", serde_json::to_string(&result)?);
     } else if result.comments.is_empty() {

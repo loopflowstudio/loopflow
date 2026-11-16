@@ -1,6 +1,6 @@
 //! `lf steer` and `lf task report` against an isolated Linear GraphQL fixture.
 
-use crate::work::task::comment::TaskCommentAuthor;
+use loopflow_model::comment::TaskCommentAuthor;
 
 use clap::Parser;
 use std::sync::Arc;
@@ -218,7 +218,7 @@ async fn task_comments_read_and_publish_without_starting_work() {
     for name in ["product", "other"] {
         store
             .create_wave(&crate::work::wave::Wave::new(
-                crate::id::WaveId::new(),
+                loopflow_model::id::WaveId::new(),
                 name.into(),
                 repo.display().to_string(),
             ))
@@ -322,7 +322,7 @@ async fn task_comments_read_and_publish_without_starting_work() {
             crate::ops::linear_observe::refresh_task_comments(&store, &task).await.unwrap();
             crate::ops::linear_observe::refresh_task_comments(&store, &task).await.unwrap();
             assert_eq!(store.task_steers(&task.id).await.unwrap(), saved_steers);
-            assert_eq!(store.sqlite.task_comments(&task.id).unwrap().comments.len(), 5);
+            assert_eq!(store.task_comments(&task.id).unwrap().comments.len(), 5);
 
             provider.lock().await.posted.push(comment("incoming-after-reconnect",
                 Some("2026-09-27T00:00:01Z"), Some("Keep inbound independent"),
@@ -339,7 +339,7 @@ async fn task_comments_read_and_publish_without_starting_work() {
                 json!({"id":"person-1","displayName":"Maya","name":null})));
             crate::ops::linear_observe::refresh_task_comments(&store, &task).await.unwrap();
             crate::ops::linear_observe::sync_task_comments(&store, &task).await.unwrap();
-            let conflict = store.sqlite.task_comments(&task.id).unwrap();
+            let conflict = store.task_comments(&task.id).unwrap();
             assert!(conflict.conflicts[&collision].starts_with("Local value survives"));
             assert!(conflict.comments.iter().find(|c| c.id == collision).unwrap().body == "Provider value survives");
             assert!(!conflict.pending_sync.contains(&collision));
@@ -347,7 +347,7 @@ async fn task_comments_read_and_publish_without_starting_work() {
             // the newer remote value acquired while the create was in flight.
             store.sqlite.record_comment_delivery(&collision, None).unwrap();
             crate::ops::linear_observe::refresh_task_comments(&store, &task).await.unwrap();
-            assert_eq!(store.sqlite.task_comments(&task.id).unwrap().conflicts, conflict.conflicts);
+            assert_eq!(store.task_comments(&task.id).unwrap().conflicts, conflict.conflicts);
 
             // An acknowledged create with a retained collision must not hide
             // newer provider direction as an echo of the saved local body.
@@ -358,7 +358,7 @@ async fn task_comments_read_and_publish_without_starting_work() {
                 amended["updatedAt"] = json!("2026-09-25T09:00:01Z");
             }
             crate::ops::linear_observe::refresh_task_comments(&store, &task).await.unwrap();
-            assert_eq!(store.sqlite.task_comments(&task.id).unwrap().comments.iter().find(|c| c.id == collision).unwrap().body, "Provider correction survives");
+            assert_eq!(store.task_comments(&task.id).unwrap().comments.iter().find(|c| c.id == collision).unwrap().body, "Provider correction survives");
             assert!(store.task_steers(&task.id).await.unwrap().iter().any(|steer| steer.text.contains("Provider correction survives")));
 
             let before_retry = store.task_steers(&task.id).await.unwrap();
@@ -373,8 +373,8 @@ async fn task_comments_read_and_publish_without_starting_work() {
             let delivered = store.task_steers(&task.id).await.unwrap();
             assert_eq!(delivered.iter().filter(|steer| steer.text.contains("incoming-after-reconnect")).count(), 1);
             assert!(matches!(store.get_task(&task.id).await.unwrap().unwrap().pm_writeback,
-                crate::work::task::LinearWritebackState::Pending {
-                    operation: crate::work::task::LinearWritebackOperation::CompleteTask, ..
+                loopflow_storage::work::task::LinearWritebackState::Pending {
+                    operation: loopflow_storage::work::task::LinearWritebackOperation::CompleteTask, ..
                 }));
             assert!(!store.task_owned(&task.id).await.unwrap());
 

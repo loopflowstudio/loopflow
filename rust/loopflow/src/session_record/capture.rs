@@ -28,7 +28,7 @@ pub(crate) struct CaptureHandoff {
     event_seq: u64,
     account_id: Option<crate::store::ProviderAccountId>,
     account_observed: bool,
-    agent_session: Option<crate::id::AgentSessionId>,
+    agent_session: Option<loopflow_model::id::AgentSessionId>,
 }
 
 impl SessionRecorder {
@@ -284,7 +284,8 @@ impl SessionRecorder {
             task.as_ref().map(|task| task.title.as_str()),
             &manifest.cwd,
         );
-        let session = store.create_session(
+        let session = crate::store::sessions::create_session(
+            &store,
             crate::session::LfSession {
                 captured: None,
                 caller_artifact_key: manifest.caller_artifact_key.clone(),
@@ -328,7 +329,7 @@ impl SessionRecorder {
         &self,
         account_id: Option<crate::store::ProviderAccountId>,
         account_observed: bool,
-        agent_session: Option<crate::id::AgentSessionId>,
+        agent_session: Option<loopflow_model::id::AgentSessionId>,
     ) -> CaptureHandoff {
         CaptureHandoff {
             key: self.artifact_key(),
@@ -361,8 +362,8 @@ impl SessionRecorder {
 #[cfg(test)]
 mod tests {
     use super::SessionRecorder;
-    use crate::chat::types::ConversationEvent;
     use crate::session_record::{SessionCaptureSpec, SessionGraphMembership};
+    use loopflow_model::chat::types::ConversationEvent;
     use time::OffsetDateTime;
 
     fn spec(home: &std::path::Path) -> SessionCaptureSpec {

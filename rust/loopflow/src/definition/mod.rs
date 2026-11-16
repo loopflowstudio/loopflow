@@ -1,4 +1,4 @@
-pub mod name;
+pub use loopflow_definitions::name;
 
 use std::path::Path;
 
@@ -90,7 +90,7 @@ mod tests {
             serde_json::json!({
                 "kind": "graph",
                 "token": {
-                    "task_id": crate::work::task::TaskId::new(),
+                    "task_id": loopflow_storage::work::task::TaskId::new(),
                     "invocation_id": "legacy",
                     "graph": "legacy",
                     "node_id": "review",

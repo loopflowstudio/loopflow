@@ -24,17 +24,17 @@ pub mod pi;
 mod pi_decode;
 pub(crate) mod task_updates;
 
-use crate::id::AgentSessionId;
 /// Name a codex rate-limit window by duration — shared with the subscription
 /// poller so stream and poll observations land on the same window key.
 pub(crate) use codex_decode::window_name as codex_window_name;
+use loopflow_model::id::AgentSessionId;
 
 use anyhow::Result;
 use async_trait::async_trait;
 use tokio::sync::mpsc;
 
 use crate::agent::AgentConfig;
-use crate::chat::types::ConversationEvent;
+use loopflow_model::chat::types::ConversationEvent;
 
 pub(crate) fn configure_vendor_std_env(command: &mut std::process::Command) -> Result<()> {
     let context = crate::os_process::execution_context()?;
@@ -368,8 +368,8 @@ pub fn default_create_harness(
 pub(crate) fn admit_for_test(config: &mut AgentConfig) -> crate::journal::TestLedgerGuard {
     let ledger = crate::journal::TestLedgerGuard::new();
     let database = ledger.home().join("loopflow.db");
-    let store = crate::store::sqlite::SqliteStore::open_ephemeral(&database).unwrap();
-    let process = crate::id::LfProcessId::new();
+    let store = crate::store::opening::open_ephemeral(&database).unwrap();
+    let process = loopflow_model::id::LfProcessId::new();
     rusqlite::Connection::open(&database)
         .unwrap()
         .execute(
@@ -378,9 +378,10 @@ pub(crate) fn admit_for_test(config: &mut AgentConfig) -> crate::journal::TestLe
         )
         .unwrap();
     store.test_session("fixture", &crate::session_record::new_artifact_key());
-    let attachment = store
-        .claim_session_attachment("fixture", None, &process, true)
-        .unwrap();
+    let attachment = crate::process::attachment::claim_session_attachment(
+        &store, "fixture", None, &process, true,
+    )
+    .unwrap();
     config.session_attachment = Some(("fixture".into(), attachment));
     ledger
 }

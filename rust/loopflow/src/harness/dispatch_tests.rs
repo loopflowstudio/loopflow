@@ -1,6 +1,7 @@
 //! Run the deadlock regression in a child so its watchdog does not depend on
 //! the reactor (or store mutex) under test.
 
+use crate::process::attachment;
 use std::process::Command;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
@@ -13,10 +14,9 @@ use tokio_tungstenite::{tungstenite::protocol::Role, tungstenite::Message, WebSo
 
 use super::codex::CodexStream;
 use super::fact_writer::FactWriter;
-use crate::id::LfProcessId;
 use crate::session::SessionEventKind;
-use crate::store::sqlite::SqliteStore;
 use crate::store::StoreError;
+use loopflow_model::id::LfProcessId;
 
 #[test]
 fn history_and_other_writers_progress_during_stalled_dispatch() {
@@ -59,7 +59,7 @@ fn history_and_other_writers_progress_during_stalled_dispatch() {
 async fn stalled_dispatch() {
     let home = tempfile::tempdir().unwrap();
     let path = home.path().join("history.db");
-    let store = SqliteStore::open_ephemeral(&path).unwrap();
+    let store = crate::store::opening::open_ephemeral(&path).unwrap();
     let sql = rusqlite::Connection::open(&path).unwrap();
     sql.busy_timeout(Duration::from_millis(100)).unwrap();
     let process = LfProcessId::new();
@@ -69,9 +69,9 @@ async fn stalled_dispatch() {
     )
     .unwrap();
     store.test_session("conversation", "run_00000000000000000000000000000001");
-    let attachment = store
-        .claim_session_attachment("conversation", None, &process, false)
-        .unwrap();
+    let attachment =
+        attachment::claim_session_attachment(&store, "conversation", None, &process, false)
+            .unwrap();
     let (socket, _unread_peer) = UnixStream::pair().unwrap();
     let mut socket = WebSocketStream::from_raw_socket(socket, Role::Client, None).await;
     let (entered, ready) = oneshot::channel();
@@ -136,7 +136,7 @@ async fn stalled_dispatch() {
         [replacement.as_str()],
     )
     .unwrap();
-    let other_store = SqliteStore::open_ephemeral(&path).unwrap();
+    let other_store = crate::store::opening::open_ephemeral(&path).unwrap();
     let (entered, ready) = mpsc::channel();
     let (release, released) = mpsc::channel();
     let dispatch_store = store.clone();
@@ -155,9 +155,14 @@ async fn stalled_dispatch() {
     let transfer_store = other_store.clone();
     let original = attachment.clone();
     let claimant = std::thread::spawn(move || {
-        let attachment = transfer_store
-            .claim_session_attachment("conversation", Some(&original), &replacement, false)
-            .unwrap();
+        let attachment = attachment::claim_session_attachment(
+            &transfer_store,
+            "conversation",
+            Some(&original),
+            &replacement,
+            false,
+        )
+        .unwrap();
         transferred.send(attachment).unwrap();
     });
     // Transfer must wait for the native write, but history must not.

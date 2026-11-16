@@ -2,9 +2,9 @@
 
 use std::sync::Arc;
 
-use crate::id::WaveId;
-use crate::work::project::{Project, ProjectEvent, ProjectEventKind, ProjectId};
-use crate::work::task::{
+use loopflow_model::id::WaveId;
+use loopflow_storage::work::project::{Project, ProjectEvent, ProjectEventKind, ProjectId};
+use loopflow_storage::work::task::{
     LinearObservationOutcome, Task, TaskEvent, TaskEventKind, TaskId, TaskLinearObservation,
     TaskPr, TaskPrId,
 };
@@ -17,7 +17,7 @@ impl Store {
     pub(crate) async fn promote_task(
         &self,
         task_id: &TaskId,
-        creation: Option<crate::work::task::NewTask>,
+        creation: Option<loopflow_storage::work::task::NewTask>,
         placement: Option<(std::path::PathBuf, TaskPr)>,
         session: Option<crate::session::LfSession>,
         destination: Option<std::path::PathBuf>,
@@ -26,7 +26,8 @@ impl Store {
     ) -> StoreResult<Task> {
         let task_id = task_id.clone();
         run_planning_write(&self.sqlite, acquisition, move |store| {
-            store.promote_task(
+            crate::store::ownership::promote_task(
+                &store,
                 &task_id,
                 creation.as_ref(),
                 placement.as_ref(),
@@ -42,7 +43,7 @@ impl Store {
         &self,
         id: &TaskId,
         expected_revision: u64,
-        patch: &crate::work::task::TaskUpdate,
+        patch: &loopflow_storage::work::task::TaskUpdate,
     ) -> StoreResult<Task> {
         let id = id.clone();
         let patch = patch.clone();
@@ -68,8 +69,7 @@ impl Store {
         roots: Vec<std::path::PathBuf>,
     ) -> StoreResult<Vec<Arc<std::fs::File>>> {
         run_sqlite(&self.sqlite, move |store| {
-            store
-                .lock_checkout_roots(&[], &roots)
+            super::admission::lock_checkout_roots(&store, &roots)
                 .map(|locks| locks.into_iter().map(Arc::new).collect())
         })
         .await
@@ -88,7 +88,7 @@ impl Store {
         let workspace_slug = workspace_slug.to_string();
         let pr = pr.clone();
         run_planning_write(&self.sqlite, acquisition, move |store| {
-            store.place_task(&task_id, &worktree, &workspace_slug, &pr)
+            crate::store::ownership::place_task(&store, &task_id, &worktree, &workspace_slug, &pr)
         })
         .await
     }
@@ -175,7 +175,7 @@ impl Store {
     pub(crate) async fn record_task_pr_repair_incident(
         &self,
         pr_id: &TaskPrId,
-        kind: crate::work::task::TaskPrRepairKind,
+        kind: loopflow_storage::work::task::TaskPrRepairKind,
         occurred_at: OffsetDateTime,
     ) -> StoreResult<bool> {
         let pr_id = pr_id.clone();
@@ -243,7 +243,7 @@ impl Store {
     pub async fn latest_project_failure(
         &self,
         project_id: &ProjectId,
-    ) -> StoreResult<Option<crate::work::project::HistoricalFailure>> {
+    ) -> StoreResult<Option<loopflow_storage::work::project::HistoricalFailure>> {
         let project_id = project_id.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.latest_project_failure(&project_id)
@@ -292,13 +292,19 @@ impl Store {
     pub(crate) async fn apply_linear_observation(
         &self,
         task_id: &TaskId,
-        observation: crate::linear::LinearIssueObservation,
+        observation: loopflow_storage::linear_records::LinearIssueObservation,
         observed_at: OffsetDateTime,
         planning_connected: bool,
     ) -> StoreResult<LinearObservationOutcome> {
         let task_id = task_id.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.apply_linear_observation(&task_id, &observation, observed_at, planning_connected)
+            crate::store::ownership::apply_linear_observation(
+                &store,
+                &task_id,
+                &observation,
+                observed_at,
+                planning_connected,
+            )
         })
         .await
     }
@@ -407,6 +413,138 @@ impl Store {
 #[cfg(test)]
 impl Store {
     pub(crate) async fn seed_task(&self, task: &Task, pr: &TaskPr) -> StoreResult<Task> {
-        self.sqlite.seed_task(task, pr)
+        let me = task
+            .worktree
+            .is_some()
+            .then(|| {
+                crate::store::ownership::acquire(
+                    &self.sqlite,
+                    self.sqlite
+                        .new_task_scope(&task.repository_id, task.project_id.as_ref())?,
+                )
+            })
+            .transpose()?;
+        self.sqlite.seed_task(task, pr, me.as_ref())
     }
 }
+
+/// Observe repository aliases outside SQL, then resolve against the same saved addresses.
+pub(crate) fn resolve_task_id(
+    store: &super::sqlite::SqliteStore,
+    issue: &str,
+    repo: Option<&str>,
+) -> StoreResult<Option<TaskId>> {
+    let Some(repo) = repo else {
+        return store.resolve_task_id(issue, None);
+    };
+    loop {
+        let saved = store.task_identity_candidates(issue)?;
+        let canonical = crate::repository::discover(std::path::Path::new(repo)).ok();
+        let matching = saved
+            .iter()
+            .filter_map(|(_, _, owner)| owner.as_ref())
+            .filter(|owner| {
+                owner.as_str() == repo
+                    || canonical.as_ref().is_some_and(|canonical| {
+                        crate::repository::discover(std::path::Path::new(owner))
+                            .is_ok_and(|other| &other == canonical)
+                    })
+            })
+            .cloned()
+            .collect();
+        let scope = super::sqlite::children::TaskRepositoryScope { saved, matching };
+        match store.resolve_task_id(issue, Some(&scope)) {
+            Err(super::StoreError::Stale(_)) => continue,
+            result => return result,
+        }
+    }
+}
+
+#[cfg(test)]
+mod identity_tests {
+    use super::resolve_task_id;
+    use loopflow_test_support::TestRepo;
+
+    #[test]
+    fn a_task_prefix_resolves_in_its_repository_from_a_linked_checkout() {
+        let repo = TestRepo::new();
+        let checkout = repo.create_named_worktree("scope-child");
+        let home = tempfile::tempdir().unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let first = "task_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1";
+        let second = "task_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa2";
+        // Historical addresses can name a linked checkout rather than its main root.
+        for (repo_id, path, task) in [
+            (
+                "repo_11111111111111111111111111111111",
+                checkout.display().to_string(),
+                first,
+            ),
+            (
+                "repo_22222222222222222222222222222222",
+                "/other-repository".into(),
+                second,
+            ),
+        ] {
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .execute(
+                    "INSERT INTO repository_plans(id,repo,selected) VALUES(?1,?2,1)",
+                    rusqlite::params![repo_id, path],
+                )
+                .unwrap();
+            store
+                .create_task(&loopflow_storage::work::task::NewTask {
+                    id: loopflow_model::durable::TaskId::parse(task).unwrap(),
+                    repository_id: loopflow_model::durable::RepositoryId::parse(repo_id).unwrap(),
+                    project_id: None,
+                    title: task.into(),
+                    description: String::new(),
+                    due_date: None,
+                })
+                .unwrap();
+        }
+        assert!(resolve_task_id(&store, "lf-aaaaaa", None).is_err());
+        for requested in [repo.path(), checkout.as_path()] {
+            let selected = resolve_task_id(&store, "lf-aaaaaa", Some(requested.to_str().unwrap()))
+                .unwrap()
+                .unwrap();
+            assert_eq!(selected.as_str(), first);
+            assert_eq!(store.task(&selected).unwrap().unwrap().id, selected);
+        }
+        assert!(
+            resolve_task_id(&store, "lf-aaaaaa", Some("/missing-repository"))
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            resolve_task_id(&store, "lf-aaaaaa", Some("/other-repository"))
+                .unwrap()
+                .unwrap()
+                .as_str(),
+            second
+        );
+    }
+
+    #[test]
+    fn changed_task_identity_candidates_reject_a_stale_lookup() {
+        let home = tempfile::tempdir().unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let scope = loopflow_storage::sqlite::children::TaskRepositoryScope {
+            saved: store.task_identity_candidates("lf-aaaaaa").unwrap(),
+            matching: vec!["/repo".into()],
+        };
+        store.conn.lock().unwrap().execute("INSERT INTO repository_plans(id,repo,selected) VALUES('repo_11111111111111111111111111111111','/repo',1)", []).unwrap();
+        store.conn.lock().unwrap().execute("INSERT INTO tasks(id,repository_id,issue_identifier,created_at) VALUES('task_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','repo_11111111111111111111111111111111','LOOKUP-1',1)", []).unwrap();
+        assert!(matches!(
+            store.resolve_task_id("lf-aaaaaa", Some(&scope)),
+            Err(crate::store::StoreError::Stale(_))
+        ));
+    }
+}
+
+#[cfg(test)]
+#[path = "children_tests.rs"]
+mod tests;

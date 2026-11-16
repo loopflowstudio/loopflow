@@ -277,11 +277,14 @@ for line in sys.stdin:
         let source_id = source.artifact_key();
         source.finish("completed").unwrap();
 
-        let session = crate::store::sqlite::SqliteStore::open_processes_read_only(&registry)
-            .unwrap()
-            .session_for_artifact(&source_id)
-            .unwrap()
-            .unwrap();
+        let session = loopflow_storage::sqlite::SqliteStore::open_processes_read_only(
+            &registry,
+            crate::store::token_key::encryption_key,
+        )
+        .unwrap()
+        .session_for_artifact(&source_id)
+        .unwrap()
+        .unwrap();
         assert_ne!(session.id.as_str(), source_id);
         // The replaying invocation and its capture share this fixture's store.
         let child_id = crate::journal::with_test_ledger(registry.clone(), || {

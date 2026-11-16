@@ -1,12 +1,12 @@
 use std::path::{Path, PathBuf};
 
-use crate::durable::WorkRef;
-use crate::id::WaveId;
 use crate::store::SharedStore;
-use crate::work::project::Project;
+use loopflow_model::durable::WorkRef;
+use loopflow_model::id::WaveId;
+use loopflow_storage::work::project::Project;
 
-use crate::work::task::{Task, TaskPr};
 use crate::work::wave::Wave;
+use loopflow_storage::work::task::{Task, TaskPr};
 
 use super::{OpsError, OpsResult};
 
@@ -65,7 +65,7 @@ pub(crate) fn render_task_context(
     context
 }
 
-fn render_project_context(project: &crate::work::project::Project) -> String {
+fn render_project_context(project: &loopflow_storage::work::project::Project) -> String {
     let targets = serde_json::to_string_pretty(&project.metric_targets)
         .expect("validated metric targets serialize");
     let mut content = format!(
@@ -149,9 +149,7 @@ pub(crate) async fn select_work(
         None => None,
     };
     let (task, source) = if let Some(value) = selection.task {
-        let id = store
-            .sqlite
-            .resolve_task_id(value.trim(), None)
+        let id = crate::store::children::resolve_task_id(&store.sqlite, value.trim(), None)
             .map_err(run_error)?
             .ok_or_else(|| run_error(format!("Task {value:?} is not registered")))?;
         let task = store
@@ -234,7 +232,7 @@ async fn bind_selected_work(
             pr.as_ref(),
             wave.as_ref().map(Wave::slug),
         );
-        if let Ok(Some(graph)) = store.sqlite.task_graph(&task.id) {
+        if let Ok(Some(graph)) = crate::store::task_work::task_graph(&store.sqlite, &task.id) {
             context.push_str(&format!("\n\n{}", graph.guidance(&task.identifier)));
         }
         let cwd = task.worktree()?.clone();
@@ -265,9 +263,9 @@ async fn bind_selected_work(
         )
         .await,
     );
-    let cwd = if crate::repository::CanonicalRepo::discover(Path::new(wave.repo()))
-        .is_ok_and(|canonical| canonical.contains(repo))
-    {
+    let cwd = if crate::repository::discover(Path::new(wave.repo())).is_ok_and(|canonical| {
+        crate::repository::discover(repo).is_ok_and(|other| other == canonical)
+    }) {
         crate::git::worktree_root(repo).unwrap_or_else(|_| repo.to_path_buf())
     } else {
         PathBuf::from(wave.repo())
@@ -329,7 +327,7 @@ async fn resolve_wave(store: &SharedStore, repo: &Path, value: &str) -> OpsResul
     let wave = if let Ok(id) = WaveId::parse(value) {
         store.get_wave(&id).await.map_err(run_error)?
     } else {
-        let locator = crate::work::wave::WaveLocator::discover(repo, value).map_err(run_error)?;
+        let locator = crate::work::wave::discover(repo, value).map_err(run_error)?;
         store.get_wave_at(&locator).await.map_err(run_error)?
     };
     wave.ok_or_else(|| run_error(format!("Wave {value:?} is not registered")))
@@ -347,17 +345,17 @@ mod tests {
     use time::OffsetDateTime;
 
     use super::{resolve_work_binding, resolve_work_selection, WorkSelection};
-    use crate::durable::{ProjectId, TaskId, WorkRef};
-    use crate::id::WaveId;
     use crate::linear::LinearProject;
     use crate::linear::{LinearIssueId, LinearProjectId};
     use crate::store::SharedStore;
     use crate::store::StorageConfig;
     use crate::test_linear_input::Inventory;
-    use crate::work::project::Project;
-    use crate::work::project::ProjectKR;
-    use crate::work::task::{LinearWritebackState, Observation, Task, TaskPr, TaskPrId};
     use crate::work::wave::Wave;
+    use loopflow_model::durable::{ProjectId, TaskId, WorkRef};
+    use loopflow_model::id::WaveId;
+    use loopflow_storage::work::project::Project;
+    use loopflow_storage::work::project::ProjectKR;
+    use loopflow_storage::work::task::{LinearWritebackState, Observation, Task, TaskPr, TaskPrId};
     use std::path::PathBuf;
 
     async fn test_store() -> (tempfile::TempDir, SharedStore) {
@@ -376,7 +374,7 @@ mod tests {
             id: ProjectId::new(),
 
             summary: String::new(),
-            status: crate::work::project::ProjectStatus::Started,
+            status: loopflow_storage::work::project::ProjectStatus::Started,
             linear_id: Some(LinearProjectId::new(planning_id).unwrap()),
             slug: slug.to_string(),
             name: slug.to_string(),
@@ -394,7 +392,11 @@ mod tests {
     async fn task(store: &SharedStore, wave: &Wave, project: &Project, worktree: PathBuf) -> Task {
         let now = OffsetDateTime::now_utc();
         let task = Task {
-            repository_id: store.sqlite.ensure_repository(wave.repo()).unwrap(),
+            repository_id: crate::repository::location::ensure_repository(
+                &store.sqlite,
+                wave.repo(),
+            )
+            .unwrap(),
             id: TaskId::new(),
 
             revision: 0,
@@ -440,7 +442,7 @@ mod tests {
             created_at: now,
             updated_at: now,
         };
-        crate::store::sqlite::project_selection::write_project_binding(
+        loopflow_storage::sqlite::project_selection::write_project_binding(
             &store.sqlite,
             wave.id(),
             None,
@@ -464,7 +466,7 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         let project = project(&wave, "runtime", "project-runtime");
         store.create_project(&project).await.unwrap();
-        crate::store::sqlite::project_selection::write_project_binding(
+        loopflow_storage::sqlite::project_selection::write_project_binding(
             &store.sqlite,
             wave.id(),
             None,
@@ -474,8 +476,12 @@ mod tests {
         .unwrap();
         let task = store
             .sqlite
-            .create_task(&crate::work::task::NewTask {
-                repository_id: store.sqlite.ensure_repository(wave.repo()).unwrap(),
+            .create_task(&loopflow_storage::work::task::NewTask {
+                repository_id: crate::repository::location::ensure_repository(
+                    &store.sqlite,
+                    wave.repo(),
+                )
+                .unwrap(),
                 due_date: None,
                 id: TaskId::new(),
                 project_id: Some(project.id),
@@ -508,7 +514,9 @@ mod tests {
         ));
         assert!(store.task_prs(&task.id).await.unwrap().is_empty());
         assert!(store.task_checkout(&task.id).await.unwrap().is_none());
-        assert!(store.sqlite.task_graph(&task.id).unwrap().is_none());
+        assert!(crate::store::task_work::task_graph(&store.sqlite, &task.id)
+            .unwrap()
+            .is_none());
         assert!(report.render().contains("Checkout: unbound"));
         assert!(report
             .render()
@@ -944,7 +952,7 @@ mod tests {
         store
             .save_steer(
                 &WorkRef::Task(task.id.clone()),
-                crate::durable::Author::User,
+                loopflow_model::durable::Author::User,
                 "ADVANCER ONLY",
             )
             .await
@@ -1172,38 +1180,42 @@ mod tests {
             task.id.as_str(),
             task.linear_id.as_ref().unwrap().as_str(),
         ] {
-            let rows = store
-                .sqlite
-                .conversation_history(
-                    Some(wave.slug()),
-                    Some(project.id.as_str()),
-                    Some(selector),
-                    None,
-                    0,
-                    false,
-                )
-                .unwrap();
-            assert_eq!(rows.len(), 2);
-            for snapshot in &rows {
-                assert_eq!(snapshot.task_id.as_ref(), Some(&task.id));
-            }
-            assert!(store
-                .sqlite
-                .conversation_history(None, Some("other"), Some(selector), None, 0, false)
-                .unwrap()
-                .is_empty());
-        }
-        let children = store
-            .sqlite
-            .conversation_history(
+            let rows = crate::store::sessions::conversation_history(
+                &store.sqlite,
+                Some(wave.slug()),
+                Some(project.id.as_str()),
+                Some(selector),
                 None,
-                None,
-                None,
-                Some(worker.input_key().unwrap().as_str()),
                 0,
                 false,
             )
             .unwrap();
+            assert_eq!(rows.len(), 2);
+            for snapshot in &rows {
+                assert_eq!(snapshot.task_id.as_ref(), Some(&task.id));
+            }
+            assert!(crate::store::sessions::conversation_history(
+                &store.sqlite,
+                None,
+                Some("other"),
+                Some(selector),
+                None,
+                0,
+                false
+            )
+            .unwrap()
+            .is_empty());
+        }
+        let children = crate::store::sessions::conversation_history(
+            &store.sqlite,
+            None,
+            None,
+            None,
+            Some(worker.input_key().unwrap().as_str()),
+            0,
+            false,
+        )
+        .unwrap();
         assert_eq!(
             children[0].artifact_key.as_deref(),
             Some(helper.input_key().unwrap().as_str())
@@ -1217,17 +1229,16 @@ mod tests {
                 .await
                 .unwrap();
         }
-        let children = store
-            .sqlite
-            .conversation_history(
-                None,
-                None,
-                None,
-                Some(worker.input_key().unwrap().as_str()),
-                0,
-                false,
-            )
-            .unwrap();
+        let children = crate::store::sessions::conversation_history(
+            &store.sqlite,
+            None,
+            None,
+            None,
+            Some(worker.input_key().unwrap().as_str()),
+            0,
+            false,
+        )
+        .unwrap();
         assert_eq!(
             children.len(),
             56,
@@ -1320,7 +1331,7 @@ mod tests {
                 summary: String::new(),
 
                 metric_targets: Vec::new(),
-                status: crate::work::project::ProjectStatus::Started,
+                status: loopflow_storage::work::project::ProjectStatus::Started,
                 krs: vec![ProjectKR {
                     text: "One model everywhere".to_string(),
                     holds: false,

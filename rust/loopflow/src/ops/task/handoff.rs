@@ -9,7 +9,7 @@ use super::{block_on_task, lock_task_pr_mutation, task_error, task_for_checkout,
 use crate::git::worktrees::git_common_dir;
 use crate::git::{rev_parse, worktree_root};
 use crate::ops::error::OpsResult;
-use crate::work::task::{Task, TaskId};
+use loopflow_storage::work::task::{Task, TaskId};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) struct DesignHandoff {

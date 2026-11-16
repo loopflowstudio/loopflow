@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::git::{acquire_worktree_lease, worktrees::is_persistent_worktree};
 use crate::os_process::bounded_output;
-use crate::store::sqlite::{read_task_worktree_ownership, SqliteStore};
+use loopflow_storage::sqlite::{read_task_worktree_ownership, SqliteStore};
 
 #[cfg(test)]
 thread_local! {
@@ -103,10 +103,13 @@ fn ownership(worktree: &Path, registries: &[PathBuf]) -> Result<()> {
         if associated.is_empty() {
             continue;
         }
-        let store = SqliteStore::open_processes_read_only(registry)
-            .context("execution inspection unavailable")?;
+        let store = SqliteStore::open_processes_read_only(
+            registry,
+            crate::store::token_key::encryption_key,
+        )
+        .context("execution inspection unavailable")?;
         for owner in associated {
-            let task = crate::durable::TaskId::parse(&owner.task)?;
+            let task = loopflow_model::durable::TaskId::parse(&owner.task)?;
             let blockers = crate::ops::task_execution::task_execution_blockers(&store, &task)
                 .context("execution inspection unavailable")?;
             if !blockers.is_empty() {
@@ -325,7 +328,7 @@ pub(crate) fn prune_builds(
 mod tests {
     use super::{prune_builds, BuildCleanupPolicy, BuildCleanupReport, AFTER_SELECTION};
     use crate::git::{worktree_add, worktree_lease_path, WorktreeBranch};
-    use crate::store::sqlite::SqliteStore;
+
     use loopflow_test_support::TestRepo;
     use rusqlite::{params, Connection};
     use std::fs::{self, File, FileTimes};
@@ -428,10 +431,10 @@ mod tests {
         fs::write(checkout.join("target/artifact"), "old output").unwrap();
         old(&checkout.join("target"));
         let db = temp.path().join("db");
-        let store = SqliteStore::open_ephemeral(&db).unwrap();
-        let task = crate::durable::TaskId::new();
-        let wave = crate::id::WaveId::new();
-        let project = crate::work::project::ProjectId::new();
+        let store = crate::store::opening::open_ephemeral(&db).unwrap();
+        let task = loopflow_model::durable::TaskId::new();
+        let wave = loopflow_model::id::WaveId::new();
+        let project = loopflow_storage::work::project::ProjectId::new();
         let conn = Connection::open(&db).unwrap();
         conn.execute(
             "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'proof',?2,1)",

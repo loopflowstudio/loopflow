@@ -3,19 +3,20 @@ use super::{
     checkout_execution_boundary, lock_task_pr_mutation, resolve_task_create_input,
     task_event_process_refusal,
 };
-use crate::child::ChildRef;
-use crate::durable::{TaskState, WorkRef, WorkStatus};
+use crate::durable::TaskState;
 use crate::linear::{LinearIssueId, LinearProjectId};
 use crate::ops::pr_landing::{reconcile_pr_landing, wait_with_io, LandingIo, LandingObservation};
-use crate::pr_landing::{NewPrLanding, PrLanding, PrLandingState};
 use crate::store::{SharedStore, StorageConfig};
 use crate::test_linear_input::SeedLinear;
-use crate::work::project::{Project, ProjectId};
-use crate::work::task::{
+use crate::work::wave::Wave;
+use loopflow_model::durable::{WorkRef, WorkStatus};
+use loopflow_storage::child::ChildRef;
+use loopflow_storage::pr_landing::{NewPrLanding, PrLanding, PrLandingState};
+use loopflow_storage::work::project::{Project, ProjectId};
+use loopflow_storage::work::task::{
     GithubPr, Observation, PrMergeMode, PrMergeRequest, PrPresentation, PrPublication, Task,
     TaskEventKind, TaskId, TaskPr, TaskPrId,
 };
-use crate::work::wave::Wave;
 use std::ffi::OsString;
 use std::os::unix::fs::PermissionsExt;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -170,9 +171,9 @@ fn task_decision_preserves_unknown_history_and_live_process_protection() {
         .unwrap();
     let process = crate::process::LfProcess {
         os_started_at: None,
-        id: crate::id::LfProcessId::new(),
+        id: loopflow_model::id::LfProcessId::new(),
         pid: None,
-        trace_id: crate::id::TraceId::new(),
+        trace_id: loopflow_model::id::TraceId::new(),
         parent_lf_process_id: None,
         via_agent: None,
         caller_session_id: None,
@@ -313,7 +314,7 @@ fn prepared_placement_consumes_accepted_facts_before_checkout_or_execution() {
         snapshot.projects.truncate(1);
         snapshot.items.truncate(1);
         snapshot.projects[0].id = "999bdbdd-c045-41a6-8ffc-a97c4a40b0b3".into();
-        snapshot.projects[0].status = crate::work::project::ProjectStatus::Started;
+        snapshot.projects[0].status = loopflow_storage::work::project::ProjectStatus::Started;
         snapshot.items[0].id = "new-issue".into();
         snapshot.items[0].completed = false;
         snapshot.items[0].completed_at = None;
@@ -541,10 +542,7 @@ fn adopting_a_checkout_with_a_running_graph_prevents_another_run() {
         assert_eq!(snapshot.execution.state, state);
         assert_eq!(snapshot.status, TaskState::Moving);
         assert_eq!(
-            fixture
-                .store
-                .sqlite
-                .task_detail_facts(&[&fixture.task])
+            crate::store::ownership::task_detail_facts(&fixture.store.sqlite, &[&fixture.task])
                 .unwrap()
                 .states[&fixture.task.id],
             TaskState::Moving
@@ -644,9 +642,9 @@ fn a_dead_graph_is_history_while_a_live_graph_process_retains_the_checkout() {
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
     let process = crate::process::LfProcess {
         os_started_at: None,
-        id: crate::id::LfProcessId::new(),
+        id: loopflow_model::id::LfProcessId::new(),
         pid: None,
-        trace_id: crate::id::TraceId::new(),
+        trace_id: loopflow_model::id::TraceId::new(),
         parent_lf_process_id: None,
         via_agent: None,
         caller_session_id: None,
@@ -722,7 +720,7 @@ async fn task_fixture_at(identifier: &str, repository: std::path::PathBuf) -> Ta
     );
     let now = time::OffsetDateTime::now_utc();
     let wave = Wave::new(
-        crate::id::WaveId::new(),
+        loopflow_model::id::WaveId::new(),
         "task-recovery".to_string(),
         repository.display().to_string(),
     );
@@ -730,7 +728,7 @@ async fn task_fixture_at(identifier: &str, repository: std::path::PathBuf) -> Ta
         id: ProjectId::new(),
 
         summary: String::new(),
-        status: crate::work::project::ProjectStatus::Started,
+        status: loopflow_storage::work::project::ProjectStatus::Started,
         linear_id: Some(LinearProjectId::new("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3").unwrap()),
         slug: "task-recovery".to_string(),
         name: "Task recovery".to_string(),
@@ -744,7 +742,8 @@ async fn task_fixture_at(identifier: &str, repository: std::path::PathBuf) -> Ta
         updated_at: now,
     };
     let task = Task {
-        repository_id: store.sqlite.ensure_repository(wave.repo()).unwrap(),
+        repository_id: crate::repository::location::ensure_repository(&store.sqlite, wave.repo())
+            .unwrap(),
         id: TaskId::new(),
 
         revision: 0,
@@ -754,7 +753,7 @@ async fn task_fixture_at(identifier: &str, repository: std::path::PathBuf) -> Ta
         description: String::new(),
         pm_snapshot_synced_at: Some(now.unix_timestamp()),
 
-        pm_writeback: crate::work::task::LinearWritebackState::Current,
+        pm_writeback: loopflow_storage::work::task::LinearWritebackState::Current,
         wave_id: Some(wave.id().clone()),
         project_id: Some(project.id.clone()),
         worktree: Some(repository),
@@ -792,7 +791,7 @@ async fn task_fixture_at(identifier: &str, repository: std::path::PathBuf) -> Ta
     };
     store.create_wave(&wave).await.unwrap();
     store.create_project(&project).await.unwrap();
-    crate::store::sqlite::project_selection::write_project_binding(
+    loopflow_storage::sqlite::project_selection::write_project_binding(
         &store.sqlite,
         wave.id(),
         None,
@@ -819,12 +818,11 @@ fn task_checkout_machine_survives_without_lifecycle_reconciliation() {
     let repo = loopflow_test_support::TestRepo::new();
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let fixture = runtime.block_on(task_fixture_at("FILES-1", repo.path().to_path_buf()));
-    let local = fixture.store.sqlite.local_machine().unwrap().id;
-    let remote = crate::durable::MachineId::new();
-    fixture
-        .store
-        .sqlite
-        .add_machine(&remote, "worker", "worker")
+    let local = crate::store::machines::local_machine(&fixture.store.sqlite)
+        .unwrap()
+        .id;
+    let remote = loopflow_model::durable::MachineId::new();
+    crate::store::machines::add_machine(&fixture.store.sqlite, &remote, "worker", "worker")
         .unwrap();
     let mut pr = runtime
         .block_on(fixture.store.active_task_pr(&fixture.task.id))
@@ -857,10 +855,7 @@ fn task_checkout_machine_survives_without_lifecycle_reconciliation() {
         )
         .unwrap();
     assert_eq!(
-        fixture
-            .store
-            .sqlite
-            .task_work(&fixture.task.id)
+        crate::store::task_work::task_work(&fixture.store.sqlite, &fixture.task.id)
             .unwrap()
             .sessions
             .len(),
@@ -1011,7 +1006,8 @@ fn task_without_a_local_checkout_never_reads_a_local_path() {
                 .unwrap_err()
                 .to_string()
                 .contains(expected));
-            let work = fixture.store.sqlite.task_work(&fixture.task.id).unwrap();
+            let work = crate::store::task_work::task_work(&fixture.store.sqlite, &fixture.task.id)
+                .unwrap();
             assert_eq!(
                 work.sessions
                     .iter()
@@ -1432,7 +1428,7 @@ async fn waited_landing_survives_pending_and_repair_then_completes_requested_tas
                 },
                 1 => LandingObservation::Failing {
                     head_sha: "original".into(),
-                    failing_checks: vec![crate::work::task::CiCheck {
+                    failing_checks: vec![loopflow_storage::work::task::CiCheck {
                         name: "rust".into(),
                         url: None,
                     }],
@@ -1618,8 +1614,8 @@ async fn watched_landing_completes_task_only_from_merged_pr_evidence() {
         }),
     });
     store.update_task_pr(&pr).await.unwrap();
-    let landing = crate::pr_landing::PrLanding::new(
-        crate::pr_landing::NewPrLanding {
+    let landing = loopflow_storage::pr_landing::PrLanding::new(
+        loopflow_storage::pr_landing::NewPrLanding {
             repo: "loopflowstudio/loopflow".to_string(),
             pr_number: 248,
             worktree: task.worktree.as_ref().unwrap().clone(),
@@ -1640,7 +1636,7 @@ async fn watched_landing_completes_task_only_from_merged_pr_evidence() {
 
     pr.merge_commit = Some(landed_head);
     store.settle_task_pr(&pr).await.unwrap();
-    let follow_up = crate::work::task::TaskFollowUp {
+    let follow_up = loopflow_storage::work::task::TaskFollowUp {
         outcome: "Installed latency meets budget".into(),
         evidence: "20 samples below 1s p95".into(),
         check_at: now.unix_timestamp() - 1,
@@ -1882,7 +1878,6 @@ async fn steering_publication_resolves_empty_participant_from_config_or_git() {
             super::append_task_comment(&fixture.store, &fixture.task, "Keep going", true).unwrap();
         let comments = fixture
             .store
-            .sqlite
             .task_comments(&fixture.task.id)
             .unwrap()
             .comments;
@@ -1898,7 +1893,7 @@ async fn steering_publication_resolves_empty_participant_from_config_or_git() {
             "{body}"
         );
         assert_eq!(
-            crate::ops::linear_observe::comment_requester(body, Some("Publisher")),
+            loopflow_model::comment::comment_requester(body, Some("Publisher")),
             Some(expected.to_string())
         );
     }
@@ -2674,7 +2669,7 @@ esac
                     .unwrap()
                     .unwrap()
                     .phase(),
-                crate::work::task::PrPhase::Merged
+                loopflow_storage::work::task::PrPhase::Merged
             );
             continue;
         }
@@ -2699,7 +2694,7 @@ esac
                     .unwrap()
                     .unwrap()
                     .phase(),
-                crate::work::task::PrPhase::Abandoned
+                loopflow_storage::work::task::PrPhase::Abandoned
             );
             assert_eq!(
                 crate::git::rev_parse(repo.bare_path(), &parent.task.branch).unwrap(),

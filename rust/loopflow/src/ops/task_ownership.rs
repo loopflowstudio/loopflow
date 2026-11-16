@@ -2,11 +2,11 @@
 //! writer: entry dispatch forwards them over `lf --machine` before they arrive.
 use std::path::Path;
 
-use crate::durable::{MachineId, TaskId, TaskOwnership};
 use crate::ops::{OpsError, OpsResult};
-use crate::store::sqlite::task_moves::{MoveInFlight, MoveStage};
-use crate::store::sqlite::SqliteStore;
 use crate::store::StoreResult;
+use loopflow_model::durable::{MachineId, TaskId, TaskOwnership};
+use loopflow_storage::sqlite::task_moves::{MoveInFlight, MoveStage};
+use loopflow_storage::sqlite::SqliteStore;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OwnershipChange {
@@ -23,16 +23,17 @@ fn message(error: impl std::fmt::Display) -> OpsError {
 
 /// A registered Machine label, this Machine's hostname, or a Machine id.
 pub(crate) fn resolve_machine(store: &SqliteStore, target: &str) -> OpsResult<MachineId> {
-    if let Some(machine) = store
-        .machines()
+    if let Some(machine) = crate::store::machines::machines(store)
         .map_err(message)?
         .into_iter()
         .find(|machine| machine.label.as_deref() == Some(target))
     {
         return Ok(machine.id);
     }
-    if target == crate::store::sqlite::task_ownership::local_label() {
-        return Ok(store.local_machine().map_err(message)?.id);
+    if target == crate::store::ownership::local_label() {
+        return Ok(crate::store::machines::local_machine(store)
+            .map_err(message)?
+            .id);
     }
     // A handoff needs only the target's identity, not a connection to it.
     MachineId::parse(target).map_err(|_| {
@@ -47,17 +48,15 @@ pub fn change(repo: &Path, issue: &str, change: OwnershipChange) -> OpsResult<Ta
         let (store, task) = super::task::resolve_saved_task(repo, None, issue).await?;
         match &change {
             OwnershipChange::Claim => {
-                store.sqlite.claim_task(&task.id).map_err(message)?;
+                crate::store::ownership::claim_task(&store.sqlite, &task.id).map_err(message)?;
             }
             OwnershipChange::Move(target) => {
                 let target = resolve_machine(&store.sqlite, target)?;
-                store
-                    .sqlite
-                    .move_claim(&task.id, &target)
+                crate::store::ownership::move_claim(&store.sqlite, &task.id, &target)
                     .map_err(message)?;
             }
             OwnershipChange::Unassign => {
-                store.sqlite.unassign_task(&task.id).map_err(message)?;
+                crate::store::ownership::unassign_task(&store.sqlite, &task.id).map_err(message)?;
                 store
                     .sqlite
                     .assign_task_owner(&task.id, None)
@@ -67,7 +66,7 @@ pub fn change(repo: &Path, issue: &str, change: OwnershipChange) -> OpsResult<Ta
         let repository = super::task::repository_for_task(&store, &task)?;
         assert_assignee(&store.sqlite, &repository, &task.id).await;
         super::planning_sync::sync_after_save(&store, &repository.to_string_lossy()).await;
-        store.sqlite.task_ownership(&task.id).map_err(message)
+        crate::store::ownership::task_ownership(&store.sqlite, &task.id).map_err(message)
     })
 }
 
@@ -131,7 +130,9 @@ pub fn runs_elsewhere_here(ownership: &TaskOwnership) -> OpsResult<Option<String
     let Some(store) = crate::store::read_existing_registry().map_err(message)? else {
         return Ok(None);
     };
-    let local = store.sqlite.local_machine().map_err(message)?.id;
+    let local = crate::store::machines::local_machine(&store.sqlite)
+        .map_err(message)?
+        .id;
     Ok(runs_elsewhere(ownership, &local))
 }
 
@@ -140,7 +141,7 @@ pub fn runs_elsewhere_here(ownership: &TaskOwnership) -> OpsResult<Option<String
 pub fn not_checked_out_here() -> String {
     format!(
         "Not checked out on {}",
-        crate::store::sqlite::task_ownership::local_label()
+        crate::store::ownership::local_label()
     )
 }
 
@@ -180,13 +181,12 @@ pub(crate) fn describe_check(
         return Ok(None);
     };
     let from = &check.from_machine_id;
-    let from = store
-        .machine_by_id(from)?
+    let from = crate::store::machines::machine_by_id(store, from)?
         .map_or_else(|| from.to_string(), |machine| machine.name());
     Ok(Some(format!(
         "Checked move from {from} at {}\n  retry: lf task move {identifier} --machine {}",
         crate::lf::output::format_time(check.at),
-        crate::store::sqlite::task_ownership::local_label(),
+        crate::store::ownership::local_label(),
     )))
 }
 
@@ -223,8 +223,7 @@ pub(crate) fn move_line(store: &SqliteStore, task: &TaskId) -> StoreResult<Optio
 /// `Moving to mini since Nov 12 10:42: sent, not arrived`.
 fn moving_to(store: &SqliteStore, moving: &MoveInFlight) -> StoreResult<(String, String)> {
     let to = &moving.to_machine_id;
-    let place = store
-        .machine_by_id(to)?
+    let place = crate::store::machines::machine_by_id(store, to)?
         .map_or_else(|| to.to_string(), |machine| machine.name());
     let progress = match moving.stage {
         MoveStage::Leaving { .. } => "not sent",
@@ -259,7 +258,7 @@ pub fn render(ownership: &TaskOwnership) -> String {
 #[cfg(test)]
 mod tests {
     use super::render;
-    use crate::durable::{
+    use loopflow_model::durable::{
         MachineId, OwnershipEntryId, OwnershipKind, TaskId, TaskOwnership, TaskOwnershipEntry,
     };
 

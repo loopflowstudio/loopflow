@@ -8,6 +8,19 @@ use std::process::Command;
 use loopflow_test_support::TestRepo;
 use serde_json::Value;
 
+fn project_with_sync(
+    store: &crate::store::sqlite::SqliteStore,
+    project: &loopflow_model::durable::ProjectId,
+) -> Value {
+    let application = crate::store::Store {
+        sqlite: store.clone(),
+    };
+    serde_json::json!({
+        "project": store.project(project).unwrap().unwrap(),
+        "sync": application.project_planning_sync(project).unwrap(),
+    })
+}
+
 fn command(repo: &Path, home: &Path, args: &[&str]) -> Command {
     let mut command = Command::new(loopflow_test_support::lf_binary());
     for (name, _) in std::env::vars_os() {
@@ -553,8 +566,7 @@ fn public_task_prefixes_resolve_and_report_ambiguity() {
         home.path(),
         &["wave", "add", "inbox", "--json"],
     );
-    let store =
-        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     let project: String = conn
         .query_row(
@@ -566,9 +578,11 @@ fn public_task_prefixes_resolve_and_report_ambiguity() {
     for (id, title) in [(first, "First"), (second, "Second")] {
         store
             .create_task(&loopflow::work::task::NewTask {
-                repository_id: store
-                    .ensure_repository(repo.path().canonicalize().unwrap().to_str().unwrap())
-                    .unwrap(),
+                repository_id: crate::repository::location::ensure_repository(
+                    &store,
+                    repo.path().canonicalize().unwrap().to_str().unwrap(),
+                )
+                .unwrap(),
                 due_date: None,
                 id: loopflow::durable::TaskId::parse(id).unwrap(),
                 project_id: Some(loopflow::durable::ProjectId::parse(&project).unwrap()),
@@ -1001,14 +1015,14 @@ fn project_creation_binding_and_activation_save_offline() {
             );
         }
         let path = home.path().join("loopflow.db");
-        let store = loopflow::store::sqlite::SqliteStore::new(&path).unwrap();
-        let canonical = loopflow::repository::CanonicalRepo::discover(repo.path()).unwrap();
+        let store = loopflow::store::open_sqlite(&path).unwrap();
+        let canonical = loopflow::repository::discover(repo.path()).unwrap();
         let wave = loopflow::work::wave::Wave::new(
             loopflow::id::WaveId::new(),
             "product".into(),
             canonical.to_string(),
         );
-        store.create_wave(&wave).unwrap();
+        loopflow::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
         let args = ["wave", "add", "product", "--json"];
         let mut first = command(repo.path(), home.path(), &args)
             .stdout(std::process::Stdio::null())
@@ -1112,7 +1126,7 @@ fn project_creation_binding_and_activation_save_offline() {
                     "initiative_ids": ["initiative"], "team_ids": ["fixture-team"]
                 }))
                 .unwrap();
-                loopflow::linear::acceptance::accept_linear_project_in(
+                loopflow::store::sqlite::linear_acceptance::accept_linear_project_in(
                     &store,
                     wave.id(),
                     "initiative",
@@ -1207,15 +1221,14 @@ fn project_reads_keep_canonical_identity_and_authored_order_after_edits() {
             .unwrap();
         }
         let home = tempfile::tempdir().unwrap();
-        let store =
-            loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
-        let canonical = loopflow::repository::CanonicalRepo::discover(repo.path()).unwrap();
+        let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
+        let canonical = loopflow::repository::discover(repo.path()).unwrap();
         let wave = loopflow::work::wave::Wave::new(
             loopflow::id::WaveId::new(),
             "product".into(),
             canonical.to_string(),
         );
-        store.create_wave(&wave).unwrap();
+        loopflow::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
         let projects = ["first", "second"]
             .into_iter()
             .map(|name| {
@@ -1373,15 +1386,14 @@ fn project_edits_save_offline_in_both_connection_modes() {
             )
             .unwrap();
         }
-        let store =
-            loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
-        let canonical = loopflow::repository::CanonicalRepo::discover(repo.path()).unwrap();
+        let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
+        let canonical = loopflow::repository::discover(repo.path()).unwrap();
         let wave = loopflow::work::wave::Wave::new(
             loopflow::id::WaveId::new(),
             "product".into(),
             canonical.to_string(),
         );
-        store.create_wave(&wave).unwrap();
+        loopflow::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
         let project = loopflow::linear::LinearProject {
             description: None,
             id: "provider-project".into(),
@@ -1398,7 +1410,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
             initiative_ids: vec!["initiative".into()],
             team_ids: vec!["fixture-team".into()],
         };
-        loopflow::linear::acceptance::accept_linear_project_in(
+        loopflow::store::sqlite::linear_acceptance::accept_linear_project_in(
             &store,
             wave.id(),
             "initiative",
@@ -1458,7 +1470,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
         )
         .unwrap();
         fs2::FileExt::lock_exclusive(&writer).unwrap();
-        let saved = serde_json::json!({"project":store.project(&id).unwrap().unwrap(), "sync":store.project_planning_sync(&id).unwrap()});
+        let saved = project_with_sync(&store, &id);
         drop(writer);
         assert_eq!(saved["project"]["id"], id.as_str());
         assert_eq!(
@@ -1479,10 +1491,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
             !connected
         );
         if mapped {
-            assert_eq!(
-                serde_json::json!({"project":store.project(&id).unwrap().unwrap(), "sync":store.project_planning_sync(&id).unwrap()}),
-                saved
-            );
+            assert_eq!(project_with_sync(&store, &id), saved);
         }
         assert_eq!(store.project(&shadow.id).unwrap().unwrap(), shadow);
         let changes = store.pending_project_changes(&id).unwrap();
@@ -1505,15 +1514,14 @@ fn project_edits_save_offline_in_both_connection_modes() {
         );
         // Repeated commands and reopened stores retain the original delivery identities.
         drop(store);
-        let store =
-            loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+        let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
         assert_eq!(store.pending_project_changes(&id).unwrap(), changes);
         if mapped {
             let mut incoming = project.clone();
             incoming.name = "Remote name".into();
             incoming.revision = Some("2026-10-08T11:00:00Z".into());
             incoming.krs[0].holds = true;
-            loopflow::linear::acceptance::accept_linear_project_in(
+            loopflow::store::sqlite::linear_acceptance::accept_linear_project_in(
                 &store,
                 wave.id(),
                 "initiative",
@@ -1521,7 +1529,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
                 18,
             )
             .unwrap();
-            let read = serde_json::json!({"project":store.project(&id).unwrap().unwrap(), "sync":store.project_planning_sync(&id).unwrap()});
+            let read = project_with_sync(&store, &id);
             // The unsent rename is sent last and wins; unsaved fields follow Linear.
             assert_eq!(read["project"]["name"], "Saved");
             assert_eq!(read["project"]["krs"][0]["holds"], true);
@@ -1546,7 +1554,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
             // A provider edit matching the save neither settles nor duplicates it.
             incoming.name = "Saved".into();
             incoming.revision = Some("2026-10-08T12:00:00Z".into());
-            loopflow::linear::acceptance::accept_linear_project_in(
+            loopflow::store::sqlite::linear_acceptance::accept_linear_project_in(
                 &store,
                 wave.id(),
                 "initiative",
@@ -1554,7 +1562,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
                 19,
             )
             .unwrap();
-            let read = serde_json::json!({"project":store.project(&id).unwrap().unwrap(), "sync":store.project_planning_sync(&id).unwrap()});
+            let read = project_with_sync(&store, &id);
             assert_eq!(store.pending_project_changes(&id).unwrap(), pending);
             assert_eq!(read["sync"]["changes"], Value::Array(conflicts.clone()));
         }
@@ -1582,7 +1590,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
             String::from_utf8_lossy(&output.stderr).contains("pending planning sync"),
             connected
         );
-        let saved = serde_json::json!({"project":store.project(&id).unwrap().unwrap(), "sync":store.project_planning_sync(&id).unwrap()});
+        let saved = project_with_sync(&store, &id);
         assert_eq!(saved["project"]["krs"], content["krs"]);
         assert_eq!(saved["project"]["id"], id.as_str());
         assert_eq!(
@@ -1598,13 +1606,13 @@ fn project_edits_save_offline_in_both_connection_modes() {
         assert_eq!(saved["project"]["summary"], "");
         assert_eq!(store.pending_project_changes(&id).unwrap().len(), 4);
         lf(repo.path(), home.path(), &args);
-        let repeated = serde_json::json!({"project":store.project(&id).unwrap().unwrap(), "sync":store.project_planning_sync(&id).unwrap()});
+        let repeated = project_with_sync(&store, &id);
         assert_eq!(repeated, saved);
         if mapped {
             let mut incoming = project.clone();
             incoming.revision = Some("2026-10-08T13:00:00Z".into());
             incoming.krs[0].text = "Keep the concurrent provider plan".into();
-            loopflow::linear::acceptance::accept_linear_project_in(
+            loopflow::store::sqlite::linear_acceptance::accept_linear_project_in(
                 &store,
                 wave.id(),
                 "initiative",
@@ -1612,7 +1620,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
                 20,
             )
             .unwrap();
-            let read = serde_json::json!({"project":store.project(&id).unwrap().unwrap(), "sync":store.project_planning_sync(&id).unwrap()});
+            let read = project_with_sync(&store, &id);
             // The unsent plan is sent after the concurrent provider plan and wins.
             assert_eq!(
                 read["project"]["krs"][0]["text"],
@@ -1650,14 +1658,14 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
             .unwrap();
         }
         let path = home.path().join("loopflow.db");
-        let store = loopflow::store::sqlite::SqliteStore::new(&path).unwrap();
-        let canonical = loopflow::repository::CanonicalRepo::discover(repo.path()).unwrap();
+        let store = loopflow::store::open_sqlite(&path).unwrap();
+        let canonical = loopflow::repository::discover(repo.path()).unwrap();
         let wave = loopflow::work::wave::Wave::new(
             loopflow::id::WaveId::new(),
             "product".into(),
             canonical.to_string(),
         );
-        store.create_wave(&wave).unwrap();
+        loopflow::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
         let project = loopflow::linear::LinearProject {
             description: None,
             id: "provider-project".into(),
@@ -1671,7 +1679,7 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
             initiative_ids: vec!["initiative".into()],
             team_ids: vec!["fixture-team".into()],
         };
-        loopflow::linear::acceptance::accept_linear_project_in(
+        loopflow::store::sqlite::linear_acceptance::accept_linear_project_in(
             &store,
             wave.id(),
             "initiative",
@@ -1869,7 +1877,11 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
         assert_eq!(status["task"]["description"], "");
         assert_eq!(status["task"]["rank"], 0);
         assert_eq!(status["task"]["assignee"], "person-id");
-        let sync = store.task_planning_sync(&second).unwrap();
+        let sync = crate::store::Store {
+            sqlite: store.clone(),
+        }
+        .task_planning_sync(&second)
+        .unwrap();
         assert_eq!(sync.connected, connected);
         assert_eq!(status["sync"], serde_json::to_value(&sync).unwrap());
         assert_eq!(
@@ -1920,7 +1932,11 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
                 .unwrap();
             // Unsent title and assignee saves are sent last and win; status
             // follows Linear.
-            let sync = store.task_planning_sync(&second).unwrap();
+            let sync = crate::store::Store {
+                sqlite: store.clone(),
+            }
+            .task_planning_sync(&second)
+            .unwrap();
             assert!(sync.changes.iter().all(
                 |c| c.state != loopflow::store::planning_sync::PlanningSyncState::AdoptedLinear
             ));
@@ -1961,7 +1977,7 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
             assert_eq!(store.pending_task_changes(&second).unwrap(), changes);
         }
         lf(repo.path(), home.path(), &["task", "unassign", selector]);
-        let reopened = loopflow::store::sqlite::SqliteStore::new(&path).unwrap();
+        let reopened = loopflow::store::open_sqlite(&path).unwrap();
         assert!(reopened.task(&second).unwrap().unwrap().assignee.is_none());
         assert_eq!(reopened.task(&second).unwrap().unwrap().id, second);
         assert!(reopened
@@ -1996,8 +2012,8 @@ fn moving_saves_membership_offline_and_retains_inbound_changes() {
             );
         }
         let path = home.path().join("loopflow.db");
-        let store = loopflow::store::sqlite::SqliteStore::new(&path).unwrap();
-        let canonical = loopflow::repository::CanonicalRepo::discover(repo.path()).unwrap();
+        let store = loopflow::store::open_sqlite(&path).unwrap();
+        let canonical = loopflow::repository::discover(repo.path()).unwrap();
         let db = rusqlite::Connection::open(&path).unwrap();
         let mut projects = Vec::new();
         let mut observations = Vec::new();
@@ -2007,7 +2023,7 @@ fn moving_saves_membership_offline_and_retains_inbound_changes() {
                 name.into(),
                 canonical.to_string(),
             );
-            store.create_wave(&wave).unwrap();
+            loopflow::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
             lf(repo.path(), home.path(), &["wave", "add", name, "--json"]);
             let mut project = store.list_projects(Some(wave.id())).unwrap().remove(0);
             if mapped {
@@ -2028,7 +2044,7 @@ fn moving_saves_membership_offline_and_retains_inbound_changes() {
                     team_ids: vec!["fixture-team".into()],
                     revision: None,
                 };
-                loopflow::linear::acceptance::accept_linear_project_in(
+                loopflow::store::sqlite::linear_acceptance::accept_linear_project_in(
                     &store,
                     wave.id(),
                     name,
@@ -2042,9 +2058,11 @@ fn moving_saves_membership_offline_and_retains_inbound_changes() {
         }
         let task = store
             .create_task(&NewTask {
-                repository_id: store
-                    .ensure_repository(repo.path().canonicalize().unwrap().to_str().unwrap())
-                    .unwrap(),
+                repository_id: crate::repository::location::ensure_repository(
+                    &store,
+                    repo.path().canonicalize().unwrap().to_str().unwrap(),
+                )
+                .unwrap(),
                 due_date: None,
                 id: TaskId::new(),
                 project_id: Some(projects[0].id.clone()),
@@ -2181,7 +2199,7 @@ fn moving_saves_membership_offline_and_retains_inbound_changes() {
             [projects[2].id.as_str()],
         )
         .unwrap();
-        let reopened = loopflow::store::sqlite::SqliteStore::new(&path).unwrap();
+        let reopened = loopflow::store::open_sqlite(&path).unwrap();
         assert_eq!(
             reopened.task(&task.id).unwrap().unwrap().project_id,
             Some(projects[1].id.clone())
@@ -2379,8 +2397,7 @@ fn deletion_saves_offline_and_retains_execution_and_retry_identity() {
         )["task"]
             .clone();
         let id = task["id"].as_str().unwrap();
-        let store =
-            loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+        let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
         let task_id = loopflow::durable::TaskId::parse(id).unwrap();
         let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
         if connected {
@@ -2415,8 +2432,7 @@ fn deletion_saves_offline_and_retains_execution_and_retry_identity() {
         assert_eq!(status["plan_state"], "removed");
         assert!(store.list_tasks(None).unwrap().is_empty());
         drop(store);
-        let reopened =
-            loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+        let reopened = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
         assert_eq!(reopened.pending_task_deletion(&task_id).unwrap(), changes);
     }
 }
@@ -2790,8 +2806,7 @@ fn wave_planning_reads_current_and_historical_chapters_without_starting_work() {
     )["task"]
         .clone();
     let task_id = loopflow::durable::TaskId::parse(created["id"].as_str().unwrap()).unwrap();
-    let store =
-        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     let task = store.task(&task_id).unwrap().unwrap();
     let current = store
         .project(task.project_id.as_ref().unwrap())
@@ -3076,7 +3091,7 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
     let id = created["id"].as_str().unwrap();
     let id = TaskId::parse(id).unwrap();
     let path = home.path().join("loopflow.db");
-    let store = loopflow::store::sqlite::SqliteStore::new(&path).unwrap();
+    let store = loopflow::store::open_sqlite(&path).unwrap();
     let task = store.task(&id).unwrap().unwrap();
     let mut project = store
         .project(task.project_id.as_ref().unwrap())
@@ -3089,7 +3104,7 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
         "summary":"", "description":"Saved Project prose", "status":"started",
         "krs":[], "metric_targets":[], "initiative_ids":["initiative"], "team_ids":["team"], "revision":null
     })).unwrap();
-    loopflow::linear::acceptance::accept_linear_project_in(
+    loopflow::store::sqlite::linear_acceptance::accept_linear_project_in(
         &store,
         task.wave_id.as_ref().unwrap(),
         "initiative",
@@ -3109,7 +3124,7 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
             "team_id":"team","due_date":"2026-10-11", "assignee":null, "url":null},
         "project":observed,"observed_at":17
     })).unwrap();
-    let scope = loopflow::repository::CanonicalRepo::discover(repo.path())
+    let scope = loopflow::repository::discover(repo.path())
         .unwrap()
         .to_string();
     store
@@ -3680,7 +3695,7 @@ fn task_creation_defaults_to_standalone_in_bound_contexts() {
             assert!(task["worktree"].is_null());
         }
     }
-    let store = crate::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     let retained = store
         .task(&crate::durable::TaskId::parse(parent_id).unwrap())
         .unwrap()

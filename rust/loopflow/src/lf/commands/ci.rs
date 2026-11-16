@@ -8,8 +8,8 @@ use time::{format_description::well_known::Rfc3339, Duration, OffsetDateTime};
 
 use crate::lf::commands::util::parse_since;
 use crate::lf::output::truncate;
-use crate::store::ci_incidents::CiIncidentReportRow;
 use crate::store::open_existing_store;
+use crate::store::CiIncidentReportRow;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]

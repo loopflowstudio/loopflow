@@ -23,7 +23,7 @@ pub fn runs_here(target: &str, lf_args: &[String]) -> anyhow::Result<bool> {
     };
     let store = &store.sqlite;
     let target = crate::ops::task_ownership::resolve_machine(store, target)?;
-    if target == store.local_machine()?.id {
+    if target == crate::store::machines::local_machine(store)?.id {
         return Ok(true);
     }
     let Ok(cli) = parse_remote_command(lf_args) else {
@@ -482,7 +482,7 @@ async fn resolve_task_source(
                 if let Err(error) = crate::ops::planning_export::sync_export(
                     &store,
                     &repo,
-                    &crate::durable::WorkRef::Task(task.id),
+                    &loopflow_model::durable::WorkRef::Task(task.id),
                 )
                 .await
                 {
@@ -535,12 +535,12 @@ pub fn parse_remote_command(lf_args: &[String]) -> anyhow::Result<Cli> {
 pub(super) async fn resolve_target(
     target: &str,
     forward_agent: bool,
-) -> anyhow::Result<crate::durable::Machine> {
+) -> anyhow::Result<loopflow_model::durable::Machine> {
     let store = crate::store::open_existing_store()
         .await?
         .ok_or_else(|| anyhow!("machine commands need an initialized local store"))?;
     let machine = super::machine::find_machine(&store, target).await?;
-    if machine.id == store.sqlite.local_machine()?.id {
+    if machine.id == crate::store::machines::local_machine(&store.sqlite)?.id {
         return Ok(machine);
     }
     let probe = super::machine::probe(&machine.route, forward_agent).await?;
@@ -574,8 +574,8 @@ fn build_preamble(cmd: &[String], extra_env: &[(&str, &str)]) -> String {
 /// `lf repo`, when the destination runs in its home directory.
 fn current_repository(
     directory: &std::path::Path,
-) -> anyhow::Result<Option<crate::durable::RepositoryId>> {
-    let Some(repo) = crate::repository::CanonicalRepo::containing(directory)? else {
+) -> anyhow::Result<Option<loopflow_model::durable::RepositoryId>> {
+    let Some(repo) = crate::repository::containing(directory)? else {
         return Ok(None);
     };
     let Some(store) = crate::store::read_existing_registry()? else {
@@ -650,7 +650,7 @@ fn run_ssh(dest: &str, forward_agent: bool, preamble: &str) -> anyhow::Result<()
 /// validate the request-bound reply. A request carrying input (a moved
 /// conversation) may check out its branch there, so it waits longer.
 pub(crate) async fn request(
-    machine: &crate::durable::Machine,
+    machine: &loopflow_model::durable::Machine,
     args: &[String],
     input: Option<&[u8]>,
 ) -> anyhow::Result<Vec<u8>> {

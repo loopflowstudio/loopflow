@@ -3,11 +3,12 @@
 use anyhow::{ensure, Context, Result};
 
 use crate::durable::{
-    Machine, OwningMachineSource, RepositoryId, TaskExecutionRoute, TaskExecutionSource, TaskId,
-    TaskLocation, TaskLocationObservation,
+    OwningMachineSource, TaskExecutionRoute, TaskExecutionSource, TaskLocation,
+    TaskLocationObservation,
 };
 use crate::ops::context::{ContextExplanation, ContextFact};
-use crate::store::sqlite::SqliteStore;
+use loopflow_model::durable::{Machine, RepositoryId, TaskId};
+use loopflow_storage::sqlite::SqliteStore;
 
 pub async fn observe(
     store: &SqliteStore,
@@ -19,7 +20,7 @@ pub async fn observe(
     let local = store.observe_task_location(repository, task, request)?;
     let mut observations = vec![local];
     if peers {
-        for machine in store.machines()? {
+        for machine in crate::store::machines::machines(store)? {
             if machine.id == observations[0].machine_id {
                 continue;
             }
@@ -92,14 +93,7 @@ pub fn render(readings: &[TaskLocationObservation]) -> String {
     readings
         .iter()
         .map(|reading| {
-            let location = match &reading.location {
-                TaskLocation::Recorded { task_id, checkout } => format!(
-                    "recorded Task {task_id}: {}",
-                    checkout.as_deref().unwrap_or("checkout unavailable")
-                ),
-                TaskLocation::Unrecorded => "no local execution record".into(),
-                TaskLocation::Unavailable { reason } => format!("unavailable: {reason}"),
-            };
+            let location = reading.location.description();
             format!(
                 "{} at {}: {location}",
                 reading.machine_id, reading.observed_at
@@ -115,7 +109,7 @@ pub fn explain(
     task: &TaskId,
     resolution: &mut ContextExplanation,
 ) -> Result<TaskExecutionRoute> {
-    let route = match store.task_execution_route(task) {
+    let route = match crate::store::ownership::task_execution_route(store, task) {
         Ok(route) => route,
         Err(error) => {
             resolution.execution_machine = ContextFact::Unavailable {
@@ -147,9 +141,8 @@ pub fn explain(
 #[cfg(test)]
 mod tests {
     use super::validate_reply;
-    use crate::durable::{
-        Machine, MachineId, RepositoryId, TaskId, TaskLocation, TaskLocationObservation,
-    };
+    use crate::durable::{TaskLocation, TaskLocationObservation};
+    use loopflow_model::durable::{Machine, MachineId, RepositoryId, TaskId};
 
     #[test]
     fn peer_readings_bind_to_their_request_and_machine() {

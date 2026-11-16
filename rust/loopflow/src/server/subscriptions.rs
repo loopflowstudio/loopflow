@@ -256,7 +256,7 @@ impl Delivery {
                     outgoing,
                     ServerMessage::Response {
                         id: id.into(),
-                        trace_id: crate::id::TraceId::default(),
+                        trace_id: loopflow_model::id::TraceId::default(),
                         result: Value::Null,
                     },
                 )
@@ -571,7 +571,7 @@ mod tests {
     use crate::server::outbox::Outbox;
     use crate::server::service::subscription_measurement::pause;
     use crate::server::wire::ServerMessage;
-    use crate::store::sqlite::SqliteStore;
+    use loopflow_storage::sqlite::SqliteStore;
 
     async fn receive(messages: &mut mpsc::Receiver<crate::server::outbox::Frame>) -> ServerMessage {
         let frame = messages.recv().await.unwrap();
@@ -632,7 +632,8 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let _home =
             crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
-        let store = SqliteStore::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
+        let store =
+            crate::store::opening::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .max_blocking_threads(2)
@@ -669,7 +670,7 @@ mod tests {
     async fn events_survive_coalescing_or_end_a_lagging_consumer() {
         use super::{Events, Latest, Pending, Retained};
         use crate::server::wire::SubscriptionEvent;
-        use crate::work::task::{TaskId, TaskPrId};
+        use loopflow_storage::work::task::{TaskId, TaskPrId};
         use std::sync::Mutex;
 
         for count in [2, 17] {
@@ -1229,7 +1230,7 @@ mod tests {
         with_store(|store| {
             Box::pin(async move {
                 let registry = Arc::new(Subscriptions::default());
-                let id = crate::durable::TaskId::new();
+                let id = loopflow_model::durable::TaskId::new();
                 let read = Read::TaskWait {
                     issue: id.to_string(),
                     until: crate::ops::task::TaskWaitUntil::Terminal,
@@ -1243,10 +1244,12 @@ mod tests {
                 assert!(first.initial().await["unavailable"].is_string());
                 let repo = loopflow_test_support::TestRepo::new();
                 store
-                    .create_task(&crate::work::task::NewTask {
-                        repository_id: store
-                            .ensure_repository(repo.path().to_str().unwrap())
-                            .unwrap(),
+                    .create_task(&loopflow_storage::work::task::NewTask {
+                        repository_id: crate::repository::location::ensure_repository(
+                            &store,
+                            repo.path().to_str().unwrap(),
+                        )
+                        .unwrap(),
                         id: id.clone(),
                         project_id: None,
                         title: "Recovered".into(),

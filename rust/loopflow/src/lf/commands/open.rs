@@ -2,6 +2,7 @@
 //! `workspace` applies layouts and follows Task arrivals. Both use the shared
 //! non-replacing Session connection; explicit resume owns input takeover.
 
+use crate::store::session_projection;
 mod cmux;
 mod conversation;
 mod files;
@@ -24,7 +25,7 @@ use crate::ops::context::{ContextExplanation, ContextFact};
 use crate::session::PrimaryScope;
 use crate::store::Store;
 use crate::work::link::{WorkTarget, WorkUrl};
-use crate::work::selection::WorkWorkspaceKind;
+use loopflow_storage::work::selection::WorkWorkspaceKind;
 
 pub(crate) const DESKTOP_BUNDLE: &str = "com.loopflow.mac";
 const HOST_TIMEOUT: Duration = Duration::from_secs(2);
@@ -157,7 +158,7 @@ struct Resolved {
     label: String,
     repository_path: PathBuf,
     repository_id: Option<String>,
-    task: Option<crate::work::task::Task>,
+    task: Option<loopflow_storage::work::task::Task>,
     wave: Option<String>,
     /// An exact Session: explicit, or an available secondary conversation.
     session: Option<String>,
@@ -314,10 +315,8 @@ pub(crate) fn selected_context(
     if cli.selects_repository() {
         if let ContextFact::Bound { value, .. } = &resolution.repository_path {
             anyhow::ensure!(
-                crate::repository::CanonicalRepo::current()?.as_ref()
-                    == Some(&crate::repository::CanonicalRepo::discover(Path::new(
-                        value
-                    ))?),
+                crate::repository::current()?.as_ref()
+                    == Some(&crate::repository::discover(Path::new(value))?),
                 "Work does not belong to the selected repository. Nothing was opened."
             );
         }
@@ -343,7 +342,7 @@ fn work_context(
         && session.is_none()
         && crate::store::read_existing_registry()?.is_none()
     {
-        let repo = crate::repository::CanonicalRepo::containing(directory)?
+        let repo = crate::repository::containing(directory)?
             .context("select a Git repository with --repo before opening it")?;
         let mut resolution = ContextExplanation::empty();
         resolution.repository_path = ContextFact::bound(repo, "local_locator");
@@ -366,7 +365,7 @@ fn work_context(
         _ => super::context::explain_in(directory, wave, task, None, None)?,
     };
     if let ContextFact::Bound { value, .. } = &resolution.task {
-        let task = crate::durable::TaskId::parse(value)?;
+        let task = loopflow_model::durable::TaskId::parse(value)?;
         if let Some(store) = crate::store::read_existing_registry()? {
             // The shared reader retains failures in the explanation; opening
             // refuses unavailable execution without losing the other Work facts.
@@ -413,7 +412,7 @@ fn describe(
     let repository_path = PathBuf::from(repo);
     let task = match &context.task {
         ContextFact::Bound { value, .. } => {
-            let id = crate::durable::TaskId::parse(value)?;
+            let id = loopflow_model::durable::TaskId::parse(value)?;
             let store = store.context("Task records are unavailable on this Machine")?;
             Some(
                 store
@@ -426,7 +425,7 @@ fn describe(
     };
     let wave = match (&task, &context.wave) {
         (None, ContextFact::Bound { value, .. }) => {
-            let id = crate::id::WaveId::parse(value)?;
+            let id = loopflow_model::id::WaveId::parse(value)?;
             let store = store.context("Wave records are unavailable on this Machine")?;
             Some(
                 store
@@ -488,34 +487,32 @@ fn describe(
             let scope = match (&task, &context.wave) {
                 (Some(task), _) => PrimaryScope::Task(task.id.clone()),
                 (None, ContextFact::Bound { value, .. }) => {
-                    PrimaryScope::Wave(crate::id::WaveId::parse(value)?)
+                    PrimaryScope::Wave(loopflow_model::id::WaveId::parse(value)?)
                 }
-                _ => PrimaryScope::Repository(crate::repository::CanonicalRepo::discover(
-                    &repository_path,
-                )?),
+                _ => PrimaryScope::Repository(crate::repository::discover(&repository_path)?),
             };
             // A Task's primary follows its claim; a Wave's or repository's
             // follows your Session Machine for it.
-            let setting = crate::durable::MachineSetting::Session;
-            let local = store.sqlite.local_machine()?.id;
-            let remote = |machine: crate::durable::MachineId| {
+            let setting = loopflow_model::durable::MachineSetting::Session;
+            let local = crate::store::machines::local_machine(&store.sqlite)?.id;
+            let remote = |machine: loopflow_model::durable::MachineId| {
                 (machine != local).then(|| machine.to_string())
             };
             let machine = match (&scope, &repository_id) {
                 (PrimaryScope::Task(_), _) => execution_machine.clone(),
-                (PrimaryScope::Wave(wave), _) => {
-                    remote(store.sqlite.wave_owning_machine(wave, setting)?.0)
-                }
+                (PrimaryScope::Wave(wave), _) => remote(
+                    crate::store::placement::wave_owning_machine(&store.sqlite, wave, setting)?.0,
+                ),
                 (PrimaryScope::Repository(_), Some(repository)) => remote(
-                    store
-                        .sqlite
-                        .repository_owning_machine(
-                            &crate::durable::RepositoryId::from_raw(repository.clone()),
-                            setting,
-                        )?
-                        .0,
+                    crate::store::placement::repository_owning_machine(
+                        &store.sqlite,
+                        &loopflow_model::durable::RepositoryId::from_raw(repository.clone()),
+                        setting,
+                    )?
+                    .0,
                 ),
                 (PrimaryScope::Repository(_), None) => None,
+                _ => bail!("Unsupported conversation scope: {scope:?}"),
             };
             match machine {
                 Some(machine) => (None, Some(machine)),
@@ -556,8 +553,8 @@ fn describe(
 struct Registered {
     path: PathBuf,
     canonical: PathBuf,
-    id: Option<crate::durable::RepositoryId>,
-    locators: Vec<crate::durable::RepositoryId>,
+    id: Option<loopflow_model::durable::RepositoryId>,
+    locators: Vec<loopflow_model::durable::RepositoryId>,
 }
 
 fn registered(store: Option<&Store>) -> Result<Vec<Registered>> {
@@ -617,7 +614,7 @@ fn repository_for(store: Option<&Store>, url: &WorkUrl, directory: &Path) -> Res
         [repo] => Ok(repo.path.clone()),
         [] => {
             // The current checkout locates a plain repository before it has a plan.
-            let current = crate::repository::CanonicalRepo::containing(directory)
+            let current = crate::repository::containing(directory)
                 .ok()
                 .flatten()
                 .map(|repo| repo.as_path().to_path_buf())
@@ -650,7 +647,7 @@ fn qualifier_for(
     registered: &[Registered],
     own: &Registered,
     short_name: &str,
-) -> Option<crate::durable::RepositoryId> {
+) -> Option<loopflow_model::durable::RepositoryId> {
     let shared = registered.iter().any(|repo| {
         repo.canonical != own.canonical
             && folder_name(&repo.path) == Some(short_name)
@@ -684,7 +681,7 @@ fn available(cli: &crate::lf::Cli) -> Result<(Vec<Resolved>, Vec<String>)> {
             on: None,
             orphan: false,
             repo: if scoped {
-                crate::repository::CanonicalRepo::current()?.map(|repo| repo.to_string())
+                crate::repository::current()?.map(|repo| repo.to_string())
             } else {
                 None
             },
@@ -737,7 +734,7 @@ fn available_target(
         .repo
         .clone()
         .or_else(|| {
-            crate::repository::CanonicalRepo::discover(&session.cwd)
+            crate::repository::discover(&session.cwd)
                 .ok()
                 .map(|repo| repo.to_string())
         })
@@ -945,15 +942,14 @@ pub(crate) fn host_placement() -> Option<String> {
 fn viewed_placement() -> Option<(OpenHost, String)> {
     let caller = crate::journal::agent_caller()?;
     let store = crate::store::read_existing_registry().ok().flatten()?;
-    let placement = store
-        .sqlite
-        .session_summary(
-            caller.session_id.as_str(),
-            time::OffsetDateTime::now_utc().unix_timestamp(),
-        )
-        .ok()
-        .flatten()?
-        .terminal_id?;
+    let placement = session_projection::session_summary(
+        &store.sqlite,
+        caller.session_id.as_str(),
+        time::OffsetDateTime::now_utc().unix_timestamp(),
+    )
+    .ok()
+    .flatten()?
+    .terminal_id?;
     placement_host(&placement).map(|(host, id)| (host, id.to_owned()))
 }
 
@@ -1066,7 +1062,7 @@ fn conversation_view(target: &Resolved) -> Result<Option<ConversationView>> {
         return Ok(desktop);
     };
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    let Some(summary) = store.sqlite.session_summary(id, now)? else {
+    let Some(summary) = session_projection::session_summary(&store.sqlite, id, now)? else {
         return Ok(desktop);
     };
     // The terminal's stored viewer flag can lag the attachment handshake.

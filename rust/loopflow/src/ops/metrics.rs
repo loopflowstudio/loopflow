@@ -369,12 +369,12 @@ mod tests {
     use tempfile::tempdir;
     use time::Duration;
 
-    use crate::id::WaveId;
     use crate::store::StorageConfig;
-    use crate::work::project::ProjectKR;
     use crate::work::wave::metrics::{
         load_metric_contract, MetricEvidenceDto, MetricObservation, MetricStage,
     };
+    use loopflow_model::id::WaveId;
+    use loopflow_storage::work::project::ProjectKR;
 
     use super::*;
     use crate::linear::LinearProject;
@@ -389,7 +389,7 @@ mod tests {
             summary: String::new(),
 
             metric_targets: Vec::new(),
-            status: crate::work::project::ProjectStatus::Started,
+            status: loopflow_storage::work::project::ProjectStatus::Started,
             krs: vec![ProjectKR {
                 text: "Proof holds for one week".to_string(),
                 holds: false,
@@ -553,7 +553,7 @@ mod tests {
             },
         };
         store.seed_inventory(snapshot.clone(), None).await.unwrap();
-        crate::store::sqlite::project_selection::write_project_binding(
+        loopflow_storage::sqlite::project_selection::write_project_binding(
             &store.sqlite,
             wave.id(),
             None,

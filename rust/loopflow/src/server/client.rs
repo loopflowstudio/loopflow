@@ -14,8 +14,8 @@ use super::wire::{
     ServerOperation, SessionAttached, Welcome, MAX_BULK, MAX_MESSAGE, MIN_REVISION, REVISION,
 };
 use crate::engine::Error;
-use crate::id::LfSessionId;
 use crate::lf::commands::read::Read;
+use loopflow_model::id::LfSessionId;
 
 /// How long the server has to answer `status`, `hello`, `session.attach` or
 /// a ticket. A session's later waits are unbounded unless the caller sets its
@@ -114,7 +114,7 @@ const OLDER_PROTOCOL: &str = "Loopflow server closed the connection without answ
 /// What a request returned, and the trace that correlates its diagnostics.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Response {
-    pub trace_id: crate::id::TraceId,
+    pub trace_id: loopflow_model::id::TraceId,
     pub result: serde_json::Value,
 }
 
@@ -587,10 +587,10 @@ mod tests {
     use std::time::Instant;
 
     use super::{attach, hook_request, Connection, HANDSHAKE};
-    use crate::id::LfSessionId;
     use crate::server::wire::{
         Limits, ServerMessage, Welcome, MAX_CONNECTIONS, MAX_MESSAGE, MIN_REVISION, REVISION,
     };
+    use loopflow_model::id::LfSessionId;
 
     /// A server that accepts one connection and answers nothing until the
     /// client gives up; `welcome` first when `after_hello`.

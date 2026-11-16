@@ -37,9 +37,9 @@ use sha2::{Digest, Sha256};
 
 use crate::observe::{Cache, Dependencies};
 use crate::server::wire::SubscriptionEvent;
-use crate::store::changes::StoreChanges;
-use crate::store::sqlite::StoreRevisions;
 use crate::store::{SharedStore, StorageConfig};
+use loopflow_storage::changes::StoreChanges;
+use loopflow_storage::sqlite::StoreRevisions;
 
 /// A burst is read once it has been quiet this long…
 const QUIET: Duration = Duration::from_millis(100);
@@ -809,7 +809,7 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use super::{changed, identity, retry_due, start_pull, Subscription};
-    use crate::store::sqlite::StoreRevisions;
+    use loopflow_storage::sqlite::StoreRevisions;
 
     fn next_frame(subscription: &Subscription, wakes: &mpsc::Receiver<()>) -> serde_json::Value {
         let deadline = Instant::now() + Duration::from_secs(5);

@@ -14,8 +14,8 @@ use serde::{Deserialize, Serialize};
 use crate::harness::agent_process::AttachmentOwner;
 use crate::process::SessionAttachment;
 use crate::session_record::CaptureHandoff;
-use crate::store::sqlite::SqliteStore;
 use crate::store::{ProviderAccountId, StoreError};
+use loopflow_storage::sqlite::SqliteStore;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct NativeExit {
@@ -164,7 +164,9 @@ pub(crate) fn settle(exit: &NativeExit, status: ExitStatus) -> Settled {
 }
 
 fn open_store() -> Result<SqliteStore> {
-    Ok(SqliteStore::new(&crate::store::database_path_from_env()?)?)
+    Ok(crate::store::open_sqlite(
+        &crate::store::database_path_from_env()?,
+    )?)
 }
 
 /// Record the provider's exit under its attachment; whether an interrupt ended it.
@@ -230,13 +232,14 @@ fn pin_account(
 
 #[cfg(test)]
 mod tests {
+    use crate::process::attachment;
+
     use std::os::unix::process::ExitStatusExt;
     use std::process::ExitStatus;
 
     use crate::journal::{self, TestLedgerGuard};
     use crate::process::Departure;
     use crate::session_record::{SessionCaptureSpec, SessionGraphMembership};
-    use crate::store::sqlite::SqliteStore;
 
     use super::{settle, NativeExit};
 
@@ -261,15 +264,15 @@ mod tests {
                 },
             )
             .unwrap();
-            let store = SqliteStore::new(&home.join("loopflow.db")).unwrap();
+            let store = crate::store::open_sqlite(&home.join("loopflow.db")).unwrap();
             let session = store
                 .session_for_artifact(&capture.artifact_key())
                 .unwrap()
                 .unwrap();
             let launcher = store.test_lf_process();
-            let attachment = store
-                .claim_session_attachment(&session.id, None, &launcher, true)
-                .unwrap();
+            let attachment =
+                attachment::claim_session_attachment(&store, &session.id, None, &launcher, true)
+                    .unwrap();
             let exit = NativeExit {
                 session: session.id.to_string(),
                 attachment,
@@ -329,15 +332,20 @@ mod tests {
                     },
                 )
                 .unwrap();
-                let store = SqliteStore::new(&home.join("loopflow.db")).unwrap();
+                let store = crate::store::open_sqlite(&home.join("loopflow.db")).unwrap();
                 let session = store
                     .session_for_artifact(&capture.artifact_key())
                     .unwrap()
                     .unwrap();
                 let launcher = journal::current_lf_process_id().unwrap();
-                let attachment = store
-                    .claim_session_attachment(&session.id, None, &launcher, true)
-                    .unwrap();
+                let attachment = attachment::claim_session_attachment(
+                    &store,
+                    &session.id,
+                    None,
+                    &launcher,
+                    true,
+                )
+                .unwrap();
                 let exit = NativeExit {
                     session: session.id.to_string(),
                     attachment,
@@ -394,15 +402,15 @@ mod tests {
                 },
             )
             .unwrap();
-            let store = SqliteStore::new(&home.join("loopflow.db")).unwrap();
+            let store = crate::store::open_sqlite(&home.join("loopflow.db")).unwrap();
             let session = store
                 .session_for_artifact(&capture.artifact_key())
                 .unwrap()
                 .unwrap();
             let launcher = journal::current_lf_process_id().unwrap();
-            let attachment = store
-                .claim_session_attachment(&session.id, None, &launcher, true)
-                .unwrap();
+            let attachment =
+                attachment::claim_session_attachment(&store, &session.id, None, &launcher, true)
+                    .unwrap();
             let exit = NativeExit {
                 session: session.id.to_string(),
                 attachment: attachment.clone(),
@@ -414,26 +422,26 @@ mod tests {
                 account: None,
                 diagnostics: (home.join("absent.log"), 0),
             };
-            store
-                .finish_session_attachment(
-                    &session.id,
-                    &attachment,
-                    "completed",
-                    Some(&Departure::Terminal {
-                        to: Some("tmux %9".into()),
-                    }),
-                    || Ok(true),
-                )
-                .unwrap();
+            attachment::finish_session_attachment(
+                &store,
+                &session.id,
+                &attachment,
+                "completed",
+                Some(&Departure::Terminal {
+                    to: Some("tmux %9".into()),
+                }),
+                || Ok(true),
+            )
+            .unwrap();
             let current = store.session_attachment(&session.id).unwrap();
-            let next = store
-                .claim_session_attachment(
-                    &session.id,
-                    current.as_ref(),
-                    &store.test_lf_process(),
-                    true,
-                )
-                .unwrap();
+            let next = attachment::claim_session_attachment(
+                &store,
+                &session.id,
+                current.as_ref(),
+                &store.test_lf_process(),
+                true,
+            )
+            .unwrap();
             let before = store
                 .agent_process(&next.agent_process_id)
                 .unwrap()

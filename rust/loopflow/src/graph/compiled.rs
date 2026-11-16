@@ -17,54 +17,10 @@ use std::path::Path;
 use crate::graph::runner::{ExecutionCursor, NestedCursor};
 use crate::graph::ConcreteStep;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct CompiledGraph {
-    pub name: String,
-    pub steps: Vec<GraphNode>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct GraphNode {
-    pub key: u32,
-    /// Authored occurrence id, when the definition names one.
-    pub id: Option<String>,
-    /// Literal skill name, operation, or XOR router.
-    pub label: String,
-    pub kind: GraphNodeKind,
-    // Retained Graph records predate the public field rename.
-    #[serde(alias = "human")]
-    pub interactive: bool,
-    /// Key of the earlier node this deciding occurrence can return to.
-    pub returns_to: Option<u32>,
-    /// Composed Graphs this occurrence was compiled from, outermost first.
-    pub sources: Vec<String>,
-    /// XOR alternatives, sorted by name; empty for other kinds.
-    pub paths: Vec<CompiledGraphPath>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum GraphNodeKind {
-    Skill,
-    Op,
-    Xor,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct CompiledGraphPath {
-    pub name: String,
-    pub description: String,
-    pub steps: Vec<GraphNode>,
-}
-
-/// Execution evidence for one backward edge in the pinned invocation. The edge
-/// itself is the deciding node's `returns_to`; this carries only its counts.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct GraphReturn {
-    /// Key of the deciding occurrence that owns the edge.
-    pub decider: u32,
-    pub traversals: u32,
-}
+pub use loopflow_storage::graph::{
+    project_position, CompiledGraph, CompiledGraphPath, GraphNode, GraphNodeKind, GraphReturn,
+    PositionProjection,
+};
 
 /// Disclosure structure from the same resolution that supplies the execution graph.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -158,7 +114,7 @@ pub fn graph_catalog_entry(
                 items: composition_items(&resolved, &mut 0, &mut 0),
             };
             Ok((
-                CompiledGraph::new(&graph.name, &flatten_resolved(&resolved)),
+                crate::graph::compiled::compile(&graph.name, &flatten_resolved(&resolved)),
                 composition,
             ))
         }),
@@ -183,26 +139,10 @@ pub fn graph_catalog_entry(
     })
 }
 
-impl CompiledGraph {
-    pub fn new(name: impl Into<String>, steps: &[ConcreteStep]) -> Self {
-        Self {
-            name: name.into(),
-            steps: nodes(steps, &mut 0),
-        }
-    }
-
-    /// Look up a captured node, including nodes inside unselected alternatives.
-    pub(crate) fn node_at(&self, id: u32) -> Option<&GraphNode> {
-        fn find(nodes: &[GraphNode], id: u32) -> Option<&GraphNode> {
-            nodes.iter().find_map(|node| {
-                if node.key == id {
-                    Some(node)
-                } else {
-                    node.paths.iter().find_map(|path| find(&path.steps, id))
-                }
-            })
-        }
-        find(&self.steps, id)
+pub fn compile(name: impl Into<String>, steps: &[ConcreteStep]) -> CompiledGraph {
+    CompiledGraph {
+        name: name.into(),
+        steps: nodes(steps, &mut 0),
     }
 }
 
@@ -342,111 +282,13 @@ pub fn graph_iterations(steps: &[ConcreteStep], cursor: &ExecutionCursor) -> Vec
 
 /// Recorded return counts (see `graph_iterations`) in words: the pass each
 /// returned loop is on, loops numbered in authored order. `None` on a first pass.
-pub fn loop_passes(iterations: &[Vec<u32>]) -> Option<String> {
-    let counts: Vec<u32> = iterations.iter().flatten().copied().collect();
-    let passes: Vec<String> = counts
-        .iter()
-        .enumerate()
-        .filter(|(_, count)| **count > 0)
-        .map(|(index, count)| {
-            let pass = u64::from(*count) + 1;
-            if counts.len() == 1 {
-                format!("pass {pass}")
-            } else {
-                format!("loop {} pass {pass}", index + 1)
-            }
-        })
-        .collect();
-    (!passes.is_empty()).then(|| passes.join(", "))
-}
-
-/// Where a recorded step stands inside its compiled Graph.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PositionProjection {
-    /// Key of the current occurrence; `None` once the Graph finished.
-    pub current: Option<u32>,
-    /// Occurrences already finished in the current pass, including the router of
-    /// a selected XOR. Earlier passes' completions are not carried forward.
-    pub completed: Vec<u32>,
-    pub returns: Vec<GraphReturn>,
-}
-
-/// Project the step at `key`, which recorded `iterations` (see
-/// `graph_iterations`), onto `graph`. Deciders outside the step's own path
-/// report no traversals.
-pub fn project_position(
-    compiled: &CompiledGraph,
-    key: u32,
-    iterations: &[Vec<u32>],
-    finished: bool,
-) -> PositionProjection {
-    fn contains(node: &GraphNode, key: u32) -> bool {
-        node.key == key
-            || node
-                .paths
-                .iter()
-                .any(|path| path.steps.iter().any(|node| contains(node, key)))
-    }
-    fn walk(
-        nodes: &[GraphNode],
-        key: u32,
-        levels: &[Vec<u32>],
-        active: bool,
-        projection: &mut PositionProjection,
-    ) {
-        let counts = levels.first().filter(|_| active);
-        let on_path = nodes.iter().position(|node| active && contains(node, key));
-        let mut decider = 0;
-        for (index, node) in nodes.iter().enumerate() {
-            if on_path.is_some_and(|current| index < current) {
-                projection.completed.push(node.key);
-            }
-            if node.returns_to.is_some() {
-                projection.returns.push(GraphReturn {
-                    decider: node.key,
-                    traversals: counts
-                        .and_then(|counts| counts.get(decider))
-                        .copied()
-                        .unwrap_or(0),
-                });
-                decider += 1;
-            }
-            let here = on_path == Some(index);
-            if here && node.key == key {
-                projection.current = Some(key);
-            } else if here {
-                projection.completed.push(node.key);
-            }
-            for path in &node.paths {
-                let selected = here && path.steps.iter().any(|node| contains(node, key));
-                walk(
-                    &path.steps,
-                    key,
-                    levels.get(1..).unwrap_or_default(),
-                    selected,
-                    projection,
-                );
-            }
-        }
-    }
-    let mut projection = PositionProjection {
-        current: None,
-        completed: Vec::new(),
-        returns: Vec::new(),
-    };
-    walk(&compiled.steps, key, iterations, true, &mut projection);
-    if finished {
-        projection.current = None;
-        projection.completed = compiled.steps.iter().map(|node| node.key).collect();
-    }
-    projection
-}
+pub use loopflow_storage::graph::loop_passes;
 
 #[cfg(test)]
 mod tests {
     #[test]
     fn template_resolution_preserves_composition_and_execution() {
-        use super::{graph_catalog, CompiledGraph, GraphCompositionItem};
+        use super::{graph_catalog, GraphCompositionItem};
         use crate::graph::{compile_graph, load_graph};
         let repo = tempfile::tempdir().unwrap();
         let graphs = repo.path().join(".lf/graphs");
@@ -487,7 +329,10 @@ mod tests {
         let expanded =
             compile_graph(&load_graph("study", repo.path()).unwrap(), repo.path()).unwrap();
         let compiled = entry.compiled.unwrap();
-        assert_eq!(compiled, CompiledGraph::new("study", &expanded));
+        assert_eq!(
+            compiled,
+            crate::graph::compiled::compile("study", &expanded)
+        );
         assert_eq!(
             compiled
                 .steps
@@ -547,7 +392,7 @@ mod tests {
 
     use crate::graph::compile_graph;
     use crate::graph::compiled::{
-        graph_iterations, project_position, CompiledGraph, GraphNodeKind, PositionProjection,
+        graph_iterations, project_position, GraphNodeKind, PositionProjection,
     };
     use crate::graph::load_graph;
     use crate::graph::runner::{ExecutionCursor, NestedCursor};
@@ -556,7 +401,12 @@ mod tests {
     /// The projection of the step `cursor` selects, as its Graph process records it.
     fn project(steps: &[ConcreteStep], cursor: &ExecutionCursor) -> PositionProjection {
         let (key, iterations) = super::location(steps, cursor).unwrap();
-        project_position(&CompiledGraph::new("", steps), key, &iterations, false)
+        project_position(
+            &crate::graph::compiled::compile("", steps),
+            key,
+            &iterations,
+            false,
+        )
     }
 
     fn skill(
@@ -632,7 +482,10 @@ mod tests {
         ];
         for (name, labels, interactive, returns) in cases {
             let graph = load_graph(name, repo.path()).unwrap();
-            let compiled = CompiledGraph::new(*name, &compile_graph(&graph, repo.path()).unwrap());
+            let compiled = crate::graph::compiled::compile(
+                *name,
+                &compile_graph(&graph, repo.path()).unwrap(),
+            );
             assert_eq!(
                 compiled
                     .steps
@@ -668,8 +521,10 @@ mod tests {
     fn refresh_integrates_upstream_before_realigning() {
         let repo = tempfile::tempdir().unwrap();
         let graph = load_graph("refresh", repo.path()).unwrap();
-        let compiled =
-            CompiledGraph::new(&graph.name, &compile_graph(&graph, repo.path()).unwrap());
+        let compiled = crate::graph::compiled::compile(
+            &graph.name,
+            &compile_graph(&graph, repo.path()).unwrap(),
+        );
         let labels: Vec<_> = compiled
             .steps
             .iter()
@@ -684,8 +539,10 @@ mod tests {
     fn pursue_loops_to_a_published_pr() {
         let repo = tempfile::tempdir().unwrap();
         let graph = load_graph("pursue", repo.path()).unwrap();
-        let compiled =
-            CompiledGraph::new(&graph.name, &compile_graph(&graph, repo.path()).unwrap());
+        let compiled = crate::graph::compiled::compile(
+            &graph.name,
+            &compile_graph(&graph, repo.path()).unwrap(),
+        );
         let labels: Vec<_> = compiled
             .steps
             .iter()
@@ -797,7 +654,7 @@ mod tests {
             skill("kickoff", None, false, None),
             ConcreteStep::Xor(branch),
         ];
-        let compiled = CompiledGraph::new("routed", &steps);
+        let compiled = crate::graph::compiled::compile("routed", &steps);
         let xor = &compiled.steps[1];
         assert_eq!(xor.kind, GraphNodeKind::Xor);
         assert_eq!(
@@ -894,7 +751,7 @@ mod tests {
             "../../../../tests/fixtures/dto/graph_numeric_nested.json"
         ))
         .unwrap();
-        let compiled = CompiledGraph::new("nested", &steps);
+        let compiled = crate::graph::compiled::compile("nested", &steps);
         assert_eq!(compiled, pinned.compiled);
         // Root 0, XOR 1, alpha 2/3/(fix 4/5)/6, zeta 7/8, root 9.
         // Compare every cursor with the existing storage identity algorithm.

@@ -9,14 +9,14 @@
 use serde::{Deserialize, Serialize};
 
 use crate::durable::TaskState;
-use crate::id::LfProcessId;
 use crate::journal::ProcessIdentityEvidence;
 use crate::ops::error::OpsResult;
 use crate::ops::pr::PrReadFreshness;
-use crate::pr_landing::{PrLanding, PrLandingState};
-use crate::store::sqlite::TaskShipping;
 use crate::task_graph::{TaskGraph, TaskGraphPosition, END};
-use crate::work::task::{PrPhase, Task};
+use loopflow_model::id::LfProcessId;
+use loopflow_storage::pr_landing::{PrLanding, PrLandingState};
+use loopflow_storage::sqlite::TaskShipping;
+use loopflow_storage::work::task::{PrPhase, Task};
 
 use super::{block_on_task, task_error, task_store, SharedStore, TaskRunSelection};
 
@@ -78,7 +78,7 @@ async fn task_by_issue(store: &SharedStore, issue: &str) -> OpsResult<Task> {
 /// Who started `process`, read from its ancestry, with the person named as
 /// in `repo`; no process leaves attribution unresolved.
 pub(crate) fn starter(
-    sqlite: &crate::store::sqlite::SqliteStore,
+    sqlite: &loopflow_storage::sqlite::SqliteStore,
     repo: &std::path::Path,
     process: Option<&LfProcessId>,
 ) -> crate::store::StoreResult<crate::process::Starter> {
@@ -91,9 +91,9 @@ pub(crate) fn starter(
 
 /// A served stop retains the person at admission, independent of later settings.
 pub(crate) fn stopper(
-    sqlite: &crate::store::sqlite::SqliteStore,
+    sqlite: &loopflow_storage::sqlite::SqliteStore,
     repo: &std::path::Path,
-    stop: &crate::store::sqlite::task_work::ShipStop,
+    stop: &loopflow_storage::sqlite::task_work::ShipStop,
 ) -> crate::store::StoreResult<crate::process::Starter> {
     match stop.by.as_ref() {
         Some(process) => starter(sqlite, repo, Some(process)),
@@ -106,7 +106,7 @@ pub(crate) fn stopper(
 /// Whether the process carrying a shipping Task has exited. Unknown evidence
 /// is never read as a dead process; no carrier at all is.
 fn carrier_evidence(
-    sqlite: &crate::store::sqlite::SqliteStore,
+    sqlite: &loopflow_storage::sqlite::SqliteStore,
     shipping: &TaskShipping,
 ) -> ProcessIdentityEvidence {
     match &shipping.process {
@@ -123,7 +123,7 @@ fn restart_due(shipping: &TaskShipping, failed_at: i64) -> i64 {
 
 /// When the ship process failed, and the error that caused it.
 fn carrier_failure(
-    sqlite: &crate::store::sqlite::SqliteStore,
+    sqlite: &loopflow_storage::sqlite::SqliteStore,
     shipping: &TaskShipping,
 ) -> crate::store::StoreResult<Option<(i64, String)>> {
     match &shipping.process {
@@ -172,7 +172,7 @@ pub(crate) fn shipping_snapshot(
             .unwrap_or_default()
             .trim()
             .trim_end_matches('.');
-        let wait = due - crate::store::rows::now_unix();
+        let wait = due - loopflow_storage::rows::now_unix();
         let when = match wait {
             ..=0 => "retrying on the next read of this Machine's Tasks".to_string(),
             1..=60 => "retrying within a minute".to_string(),
@@ -209,8 +209,8 @@ pub(crate) fn shipping_snapshot(
 
 /// Read a Task's shipping from the store: its handoff, its ship process and its landing.
 pub(crate) fn read_shipping(
-    sqlite: &crate::store::sqlite::SqliteStore,
-    task: &crate::work::task::TaskId,
+    sqlite: &loopflow_storage::sqlite::SqliteStore,
+    task: &loopflow_storage::work::task::TaskId,
     graph: Option<&TaskGraph>,
     status: TaskState,
 ) -> crate::store::StoreResult<Option<ShippingSnapshot>> {
@@ -269,7 +269,8 @@ pub fn ship_begin(issue: &str, graph: Option<&str>, note: Option<&str>) -> OpsRe
                 });
             }
         }
-        let current = store.sqlite.task_graph(&task.id).map_err(task_error)?;
+        let current =
+            crate::store::task_work::task_graph(&store.sqlite, &task.id).map_err(task_error)?;
         if current.is_none() || graph.is_some() {
             let TaskRunSelection {
                 graph: selected,
@@ -277,9 +278,7 @@ pub fn ship_begin(issue: &str, graph: Option<&str>, note: Option<&str>) -> OpsRe
                 ..
             } = super::select_task_run(&store, &task, task.worktree()?, graph, Some("start"))?;
             if take_up {
-                store
-                    .sqlite
-                    .take_up_task_graph(&task.id, &selected)
+                crate::store::task_work::take_up_task_graph(&store.sqlite, &task.id, &selected)
                     .map_err(task_error)?;
             }
         } else if current.as_ref().is_some_and(
@@ -299,7 +298,7 @@ pub fn ship_begin(issue: &str, graph: Option<&str>, note: Option<&str>) -> OpsRe
         // Shipping claims an unowned Task, as `lf task run` would; unassigning
         // it later is what stops shipping.
         if !store.sqlite.task_owned(&task.id).map_err(task_error)? {
-            store.sqlite.claim_task(&task.id).map_err(task_error)?;
+            crate::store::ownership::claim_task(&store.sqlite, &task.id).map_err(task_error)?;
         }
         store
             .sqlite
@@ -347,8 +346,8 @@ fn withdraw(issue: &str, withdrawal: Withdrawal<'_>) -> OpsResult<bool> {
                 } else {
                     None
                 };
-                let stop = crate::store::sqlite::task_work::ShipStop {
-                    at: crate::store::rows::now_unix(),
+                let stop = loopflow_storage::sqlite::task_work::ShipStop {
+                    at: loopflow_storage::rows::now_unix(),
                     by: process.clone(),
                     person,
                 };
@@ -470,7 +469,8 @@ pub fn ship_settle_merge(issue: &str) -> OpsResult<ShipMerge> {
         {
             return Ok(ShipMerge::Open);
         }
-        let row = store.sqlite.task_graph_row(&task.id).map_err(task_error)?;
+        let row =
+            crate::store::task_work::task_graph_row(&store.sqlite, &task.id).map_err(task_error)?;
         // A Task already at `end` has checked the merge; it only completes.
         if let Some(row) = row.as_ref().filter(|row| row.step != END) {
             if let Some(step) = post_merge_step(&row.graph) {
@@ -523,9 +523,7 @@ pub fn ship_next(issue: &str) -> OpsResult<ShipStep> {
         {
             return Ok(ShipStep::Stopped);
         }
-        let graph = store
-            .sqlite
-            .task_graph(&task.id)
+        let graph = crate::store::task_work::task_graph(&store.sqlite, &task.id)
             .map_err(task_error)?
             .ok_or_else(|| task_error(format!("Task {issue} has no graph to ship")))?;
         next_step(&graph, &task.identifier)
@@ -546,7 +544,7 @@ fn next_step(graph: &TaskGraph, issue: &str) -> OpsResult<ShipStep> {
 }
 
 /// A ship step completed, so a later failure restarts after the shortest wait.
-pub fn ship_progressed(task: &crate::work::task::TaskId) -> OpsResult<()> {
+pub fn ship_progressed(task: &loopflow_storage::work::task::TaskId) -> OpsResult<()> {
     block_on_task(async {
         let store = task_store().await?;
         store.sqlite.reset_ship_restarts(task).map_err(task_error)
@@ -583,7 +581,7 @@ pub(super) fn restart_lf_in(
 pub(crate) fn restart_ships() -> OpsResult<()> {
     block_on_task(async {
         let store = task_store().await?;
-        let now = crate::store::rows::now_unix();
+        let now = loopflow_storage::rows::now_unix();
         for (id, shipping) in store.sqlite.local_shipping_tasks().map_err(task_error)? {
             let state = store.sqlite.task_state(&id).map_err(task_error)?;
             if state.is_terminal()
@@ -594,9 +592,7 @@ pub(crate) fn restart_ships() -> OpsResult<()> {
             }
             // A run another `lf task run` carries, such as one a move continued
             // on this Machine, ships once it stops.
-            if store
-                .sqlite
-                .task_graph(&id)
+            if crate::store::task_work::task_graph(&store.sqlite, &id)
                 .map_err(task_error)?
                 .is_some_and(|graph| {
                     matches!(graph.position, TaskGraphPosition::Run { running: true, .. })
@@ -640,11 +636,11 @@ pub(crate) fn restart_ships() -> OpsResult<()> {
 mod tests {
     use super::{next_step, shipping_snapshot, ShipStep, ShippingState};
     use crate::durable::TaskState;
-    use crate::id::LfProcessId;
     use crate::journal::ProcessIdentityEvidence;
-    use crate::pr_landing::{NewPrLanding, PrLanding, PrLandingState};
-    use crate::store::sqlite::TaskShipping;
     use crate::task_graph::{CapturedGraph, TaskGraph, TaskGraphPosition};
+    use loopflow_model::id::LfProcessId;
+    use loopflow_storage::pr_landing::{NewPrLanding, PrLanding, PrLandingState};
+    use loopflow_storage::sqlite::TaskShipping;
 
     fn feature_at(position: TaskGraphPosition) -> TaskGraph {
         let repo = tempfile::tempdir().unwrap();
@@ -673,7 +669,7 @@ mod tests {
         handoff.restarts = 20;
         assert_eq!(minutes(&handoff), 30);
 
-        let failed_at = crate::store::rows::now_unix();
+        let failed_at = loopflow_storage::rows::now_unix();
         let failure = (
             failed_at,
             "no eligible managed claude account.\ncaused by".into(),

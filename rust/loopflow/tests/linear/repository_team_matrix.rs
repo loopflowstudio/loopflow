@@ -7,7 +7,7 @@ use std::process::{Command, Output};
 use loopflow::id::WaveId;
 use loopflow::ops::linear::{canonical_wave_title_path, list_local_waves};
 use loopflow::store::sqlite::SqliteStore;
-use loopflow::work::wave::{Wave, WaveLocator};
+use loopflow::work::wave::Wave;
 
 fn git(repo: &Path, args: &[&str]) {
     let output = Command::new("git")
@@ -79,7 +79,7 @@ fn put_snapshot(
     snapshot: Inventory,
 ) {
     let registered = store
-        .get_wave_at(&WaveLocator::discover(repo, wave).unwrap())
+        .get_wave_at(&loopflow::work::wave::discover(repo, wave).unwrap())
         .unwrap()
         .expect("registered Wave");
     let goal = std::fs::read_to_string(repo.join(".lf/wave").join(wave).join("GOAL.md"))
@@ -159,8 +159,8 @@ fn repository_team_matrix() {
     seed_repository(&repo);
 
     let database = home.join("loopflow.db");
-    let store = SqliteStore::new(&database).unwrap();
-    let repo_locator = WaveLocator::discover(&repo, "survival").unwrap();
+    let store = loopflow::store::open_sqlite(&database).unwrap();
+    let repo_locator = loopflow::work::wave::discover(&repo, "survival").unwrap();
     let survival = Wave::new(
         WaveId::new(),
         "survival".to_string(),
@@ -177,18 +177,21 @@ fn repository_team_matrix() {
         "intelligence".to_string(),
         repo_locator.repo().to_string(),
     );
-    store.create_wave(&survival).unwrap();
-    store.create_wave(&infrastructure).unwrap();
-    store.create_wave(&intelligence).unwrap();
+    loopflow::work::wave::bootstrap::upsert_wave(&store, &survival).unwrap();
+    loopflow::work::wave::bootstrap::upsert_wave(&store, &infrastructure).unwrap();
+    loopflow::work::wave::bootstrap::upsert_wave(&store, &intelligence).unwrap();
     let foreign_repo = tempfile::tempdir().unwrap();
-    let foreign_locator = WaveLocator::discover(foreign_repo.path(), "intelligence").unwrap();
-    store
-        .create_wave(&Wave::new(
+    let foreign_locator =
+        loopflow::work::wave::discover(foreign_repo.path(), "intelligence").unwrap();
+    loopflow::work::wave::bootstrap::upsert_wave(
+        &store,
+        &Wave::new(
             WaveId::new(),
             "intelligence".to_string(),
             foreign_locator.repo().to_string(),
-        ))
-        .unwrap();
+        ),
+    )
+    .unwrap();
     let survival_snapshot = snapshot(
         "initiative-survival",
         "project-survival",
@@ -311,7 +314,7 @@ fn repository_team_matrix() {
     assert!(roadmap.contains("LOO-2"));
 
     // Reopening the store preserves the local ancestry and foreign collision.
-    let reopened = SqliteStore::new(&database).unwrap();
+    let reopened = loopflow::store::open_sqlite(&database).unwrap();
     assert_eq!(reopened.list_waves(None).unwrap().len(), 4);
 
     // Reject ambiguous ownership before replacing accepted planning facts.
@@ -328,7 +331,7 @@ fn repository_team_matrix() {
         .initiative_ids
         .push("initiative-survival".into());
     let survival = reopened
-        .get_wave_at(&WaveLocator::discover(&repo, "survival").unwrap())
+        .get_wave_at(&loopflow::work::wave::discover(&repo, "survival").unwrap())
         .unwrap()
         .unwrap();
     let accepted = reopened.list_projects(Some(survival.id())).unwrap();

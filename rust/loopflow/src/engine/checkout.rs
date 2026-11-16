@@ -11,8 +11,8 @@ use serde::{Deserialize, Serialize};
 
 use super::{launch, Error, ErrorCode, Result};
 use crate::git::worktrees::PlacementStrategy;
-use crate::id::LfProcessId;
 use crate::ops::{Progress, SyncPlan};
+use loopflow_model::id::LfProcessId;
 
 /// What `checkout.commit` left.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]

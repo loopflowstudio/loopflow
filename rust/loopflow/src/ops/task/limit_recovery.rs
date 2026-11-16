@@ -6,11 +6,11 @@
 //! agent the waiting step was explicitly given, not the one of whoever's read
 //! happened to trigger it.
 
-use crate::durable::TaskId;
 use crate::journal::ProcessIdentityEvidence;
 use crate::ops::task_execution::task_execution_blockers;
-use crate::store::sqlite::{AgentLimitRecovery, SqliteStore};
 use crate::store::StoreResult;
+use loopflow_model::durable::TaskId;
+use loopflow_storage::sqlite::{AgentLimitRecovery, SqliteStore};
 
 use super::super::error::OpsResult;
 use super::{block_on_task, task_error, task_store};
@@ -70,7 +70,7 @@ pub(crate) fn restarts_by_itself(store: &SqliteStore, task: &TaskId) -> OpsResul
 pub(crate) fn restart_waiting_runs() -> OpsResult<()> {
     block_on_task(async {
         let store = task_store().await?;
-        let now = crate::store::rows::now_unix();
+        let now = loopflow_storage::rows::now_unix();
         let waited = store
             .sqlite
             .tasks_past_a_limit_wait(now)

@@ -16,7 +16,6 @@ use crate::linear::LinearError;
 use crate::linear::LinearProject;
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
-use crate::ops::util::normalize_wave_name;
 use crate::provider_auth::{
     provider_token_refresh_due, refresh_stored_provider_token, Provider, TokenRefreshError,
 };
@@ -25,9 +24,10 @@ use crate::store::{
     open_existing_store, LinearIssueEvidence, PlanningState, ProviderToken,
     ProviderTokenReplacement, StorageConfig, Store,
 };
-use crate::work::task::Task;
 use crate::work::wave::config::{read_wave_config, update_wave_config};
 use crate::work::wave::Wave;
+use loopflow_storage::work::task::Task;
+use loopflow_storage::work::wave::normalize_wave_name;
 use serde::{Deserialize, Serialize};
 
 // ── Options and results ─────────────────────────────────────────────
@@ -507,7 +507,7 @@ pub(crate) async fn refresh_inventory(
     initiative: &str,
 ) -> OpsResult<()> {
     let store = planning_store().await?;
-    let locator = crate::work::wave::WaveLocator::discover(repo, wave)
+    let locator = crate::work::wave::discover(repo, wave)
         .map_err(|error| OpsError::Message(error.to_string()))?;
     let registered = store
         .get_wave_at(&locator)
@@ -576,13 +576,13 @@ async fn connect_async(
     progress: &impl Progress,
 ) -> OpsResult<LinearInitResult> {
     let wave = resolve_wave(options.wave.as_deref())?;
-    let main = crate::repository::CanonicalRepo::discover(repo)
+    let main = crate::repository::discover(repo)
         .map_err(|error| OpsError::Message(error.to_string()))?
         .as_path()
         .to_path_buf();
     let repo = main.as_path();
     let store = planning_store().await?;
-    let locator = crate::work::wave::WaveLocator::discover(repo, &wave)
+    let locator = crate::work::wave::discover(repo, &wave)
         .map_err(|error| OpsError::Message(error.to_string()))?;
     if store
         .get_wave_at(&locator)
@@ -829,7 +829,7 @@ pub(crate) async fn inspect_task_planning_async(
     issue: &str,
     refresh: LinearRefresh,
 ) -> OpsResult<TaskPlanningInspection> {
-    let scope = crate::repository::CanonicalRepo::discover(repo)
+    let scope = crate::repository::discover(repo)
         .map_err(|error| OpsError::Message(error.to_string()))?
         .to_string();
     let store = planning_store().await?;
@@ -880,7 +880,7 @@ pub(crate) async fn inspect_task_planning_async(
         let mut confirmed_wave = None;
         if let Some(initiative) = discovered_initiative {
             let wave = wave_for_initiative(repo, &initiative)?;
-            let locator = crate::work::wave::WaveLocator::discover(repo, &wave)
+            let locator = crate::work::wave::discover(repo, &wave)
                 .map_err(|error| OpsError::Message(error.to_string()))?;
             let registered = store
                 .get_wave_at(&locator)
@@ -1229,14 +1229,15 @@ async fn apply_or_plan_repository_reteam(
 
     if apply {
         // A clone's authored Waves join the store before the move; a removed one stays removed.
-        store
-            .sqlite
-            .register_authored_waves(&repo.to_string_lossy())
-            .map_err(|error| OpsError::Message(error.to_string()))?;
+        crate::work::wave::bootstrap::register_authored_waves(
+            &store.sqlite,
+            &repo.to_string_lossy(),
+        )
+        .map_err(|error| OpsError::Message(error.to_string()))?;
     }
     let mut registered = Vec::new();
     for wave in &waves {
-        let locator = crate::work::wave::WaveLocator::discover(repo, wave)
+        let locator = crate::work::wave::discover(repo, wave)
             .map_err(|error| OpsError::Message(error.to_string()))?;
         if let Some(wave) = store
             .get_wave_at(&locator)
@@ -1788,8 +1789,8 @@ pub(super) async fn archive_initiative(repo: &Path, initiative: &str) -> OpsResu
 }
 
 pub fn list_local_waves(repo: &Path) -> OpsResult<Vec<String>> {
-    let canonical = crate::repository::CanonicalRepo::discover(repo)
-        .map_err(|error| OpsError::Message(error.to_string()))?;
+    let canonical =
+        crate::repository::discover(repo).map_err(|error| OpsError::Message(error.to_string()))?;
     let crate::store::StorageConfig::Sqlite { path } =
         super::planning_sync::storage_config_from_env()?;
     if !path
@@ -1798,8 +1799,11 @@ pub fn list_local_waves(repo: &Path) -> OpsResult<Vec<String>> {
     {
         return Ok(Vec::new());
     }
-    let store = crate::store::sqlite::SqliteStore::open_read_only(&path)
-        .map_err(|error| OpsError::Message(error.to_string()))?;
+    let store = loopflow_storage::sqlite::SqliteStore::open_read_only(
+        &path,
+        crate::store::token_key::encryption_key,
+    )
+    .map_err(|error| OpsError::Message(error.to_string()))?;
     Ok(store
         .list_waves(Some(&canonical.to_string()))
         .map_err(|error| OpsError::Message(error.to_string()))?
@@ -1940,7 +1944,7 @@ pub(super) async fn checked_projects_with_store(
         .list_projects(initiative)
         .await
         .map_err(linear_error)?;
-    let locator = crate::work::wave::WaveLocator::discover(repo, wave)
+    let locator = crate::work::wave::discover(repo, wave)
         .map_err(|error| OpsError::Message(error.to_string()))?;
     if let Some(registered) = store
         .get_wave_at(&locator)
@@ -2037,7 +2041,7 @@ async fn canonical_wave_title_path_with_store(
     wave: &str,
     store: &Store,
 ) -> OpsResult<String> {
-    let locator = crate::work::wave::WaveLocator::discover(repo, wave)
+    let locator = crate::work::wave::discover(repo, wave)
         .map_err(|error| OpsError::Message(error.to_string()))?;
     let Some(mut current) = store
         .get_wave_at(&locator)
@@ -2114,7 +2118,7 @@ pub(crate) async fn chapter_sweep_candidates(repo: &Path) -> OpsResult<ChapterSw
     let mut skipped_ids = BTreeSet::new();
     for name in list_linear_waves(repo)? {
         let (ctx, initiative) = resolve_context(repo, &name).await?;
-        let locator = crate::work::wave::WaveLocator::discover(repo, &name)
+        let locator = crate::work::wave::discover(repo, &name)
             .map_err(|error| OpsError::Message(error.to_string()))?;
         let wave = store
             .get_wave_at(&locator)
@@ -2810,7 +2814,7 @@ mod tests {
                 );
                 for wave in ["survival", "survival/infrastructure"] {
                     assert!(read_initiative(repo.path(), wave).is_some());
-                    let locator = crate::work::wave::WaveLocator::discover(repo.path(), wave).unwrap();
+                    let locator = crate::work::wave::discover(repo.path(), wave).unwrap();
                     let registered = resolved.store.get_wave_at(&locator).await.unwrap().unwrap();
                     let projects = resolved.store.list_projects(Some(registered.id())).await.unwrap();
                     assert_eq!(projects.len(), 1);
@@ -3094,7 +3098,7 @@ mod tests {
             summary: String::new(),
 
             metric_targets: Vec::new(),
-            status: crate::work::project::ProjectStatus::Started,
+            status: loopflow_storage::work::project::ProjectStatus::Started,
             krs: Vec::new(),
             initiative_ids: vec!["initiative-1".to_string()],
             team_ids: vec!["team-loo".to_string()],

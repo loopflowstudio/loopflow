@@ -30,10 +30,11 @@ fn history_times_provider_work_from_its_first_recorded_attempt() {
         .unwrap();
     capture.finish("completed").unwrap();
 
-    let history = crate::session_record::row_store(&capture.artifact_dir())
-        .unwrap()
-        .input_history(capture.artifact_key().as_str())
-        .unwrap();
+    let history = crate::store::sessions::input_history(
+        &crate::session_record::row_store(&capture.artifact_dir()).unwrap(),
+        capture.artifact_key().as_str(),
+    )
+    .unwrap();
     let attempts = history
         .providers
         .iter()
@@ -181,8 +182,8 @@ fn a_panic_during_recording_still_settles_the_execution() {
 /// Opus on the same account. That retry resumes the thread it saved.
 #[test]
 fn a_retry_on_another_model_keeps_its_thread() {
-    let thread: crate::id::AgentSessionId = "thread".into();
-    let other: crate::id::AgentSessionId = "other".into();
+    let thread: loopflow_model::id::AgentSessionId = "thread".into();
+    let other: loopflow_model::id::AgentSessionId = "other".into();
     assert!(super::retry_keeps_its_thread(
         Some(&thread),
         Some(&thread),

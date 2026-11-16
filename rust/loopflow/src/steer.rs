@@ -1,141 +1,25 @@
 //! Launch-owned authority for provider context callbacks.
-use std::path::{Path, PathBuf};
-
-use serde::{Deserialize, Serialize};
+use std::path::Path;
 
 /// The [`SteerAdapter`] of a launch whose hooks report to the Machine server.
 pub(crate) const PROVIDER_CONTEXT_ENV: &str = "LF_PROVIDER_CONTEXT";
 /// The [`SteerAdapter`] of a bare launch, whose hook claims its steers from
 /// the store itself and reports to no server.
 pub(crate) const BARE_STEER_ENV: &str = "LF_BARE_STEER";
-/// The provider process's seen marker; see [`latest_marker`].
+/// The provider process's seen marker; see [`loopflow_storage::steer_markers::latest_marker`].
 pub(crate) const STEER_SEEN_ENV: &str = "LF_STEER_SEEN";
 
 /// The Session's own marker and, when it belongs to exactly one Task, that
-/// Task's; see [`latest_marker`].
+/// Task's; see [`loopflow_storage::steer_markers::latest_marker`].
 pub(crate) const STEER_SESSION_ENV: &str = "LF_STEER_SESSION";
 pub(crate) const STEER_TASK_ENV: &str = "LF_STEER_TASK";
 
-/// Touched when a Wave or repository steer is saved; a Task's or a Session's
-/// steer touches [`task_marker`] or [`session_marker`] instead, so it starts
-/// lf only in the conversations it can reach. A tool-boundary hook skips lf
-/// entirely while its provider's seen marker is strictly newer than all three,
-/// since no steer arrived after its last check. A managed prompt boundary
-/// always checks, which also catches Sessions newly associated with earlier
-/// steers.
-pub(crate) fn latest_marker(home: &Path) -> PathBuf {
-    home.join("steers").join("latest")
-}
-
-pub(crate) fn task_marker(home: &Path, task: &str) -> PathBuf {
-    home.join("steers").join("task").join(task)
-}
-
-pub(crate) fn session_marker(home: &Path, session: &str) -> PathBuf {
-    home.join("steers").join("session").join(session)
-}
-
-pub(crate) fn seen_marker(home: &Path, process: &crate::id::AgentProcessId) -> PathBuf {
-    home.join("steers").join("seen").join(process.as_str())
-}
-
-pub(crate) fn touch(path: &Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(path.parent().expect("marker has a parent"))?;
-    std::fs::OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .write(true)
-        .open(path)?
-        .set_modified(std::time::SystemTime::now())
-}
-
-/// Survives attachment-only handoff; replacement creates another capability.
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct SteerAdapter {
-    pub session: String,
-    pub agent_process_id: crate::id::AgentProcessId,
-    pub capability: String,
-}
-
-/// Where a provider context callback fires, which decides whether it may move
-/// the Session's selected native conversation.
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum NativeBoundary<'a> {
-    /// The provider declares the conversation it now runs (Claude/Codex
-    /// `SessionStart`: startup, resume, clear, compact).
-    Select {
-        source: &'a str,
-    },
-    /// Fires on every request, including subagents', so it only fills a
-    /// missing selection (OpenCode transforms, Pi).
-    Activate {
-        source: &'a str,
-    },
-    Turn,
-}
-
-/// A managed conversation whose last boundary was a turn end, and how the
-/// Machine server reaches it there.
-#[derive(Debug, Clone)]
-pub(crate) struct IdleConversation {
-    pub adapter: SteerAdapter,
-    /// The Session's selected native conversation.
-    pub thread: String,
-    /// The Session's working directory, where rendered steers are saved.
-    pub cwd: std::path::PathBuf,
-    pub reach: IdleReach,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum IdleReach {
-    /// The inbox key file Claude publishes beside its session record.
-    Claude(std::path::PathBuf),
-    /// The Session's private app-server.
-    Codex(std::path::PathBuf),
-}
-
-impl std::fmt::Debug for SteerAdapter {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SteerAdapter")
-            .field("session", &self.session)
-            .field("agent_process_id", &self.agent_process_id)
-            .finish_non_exhaustive()
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct Steer {
-    pub id: crate::id::SteerId,
-    pub sequence: i64,
-    pub source: String,
-    pub revision: String,
-    pub author: crate::durable::Author,
-    pub text: String,
-}
-
-/// One steer as a Session sees it.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionSteerStatus {
-    pub steer: Steer,
-    /// When the Session read it, in Unix seconds; null while it waits.
-    #[serde(deserialize_with = "Option::deserialize")]
-    pub delivered_at: Option<i64>,
-}
-
-/// A bounded page of the steers that apply to a Session or that it read.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionSteerPage {
-    pub items: Vec<SessionSteerStatus>,
-    #[serde(deserialize_with = "Option::deserialize")]
-    pub next_after: Option<i64>,
-    pub pending: i64,
-}
+pub use loopflow_storage::steer::*;
 
 /// Steers claimed for one conversation and rendered for its provider.
 #[derive(Debug)]
 pub(crate) struct ClaimedSteers {
-    pub steers: Vec<crate::id::SteerId>,
+    pub steers: Vec<loopflow_model::id::SteerId>,
     pub text: String,
 }
 
@@ -145,7 +29,7 @@ pub(crate) struct ClaimedSteers {
 /// twice and is never dropped. `boundary` says whether this callback may
 /// select the Session's native conversation.
 pub(crate) fn claim(
-    store: &crate::store::sqlite::SqliteStore,
+    store: &loopflow_storage::sqlite::SqliteStore,
     repo: &Path,
     adapter: &SteerAdapter,
     thread: &str,
@@ -169,7 +53,7 @@ pub(crate) fn claim(
 
 /// The conversation took the claimed steers.
 pub(crate) fn delivered(
-    store: &crate::store::sqlite::SqliteStore,
+    store: &loopflow_storage::sqlite::SqliteStore,
     session: &str,
     claimed: &ClaimedSteers,
 ) {
@@ -242,4 +126,24 @@ fn render(
         "{remaining} pending. Inspect: lf session steers {session} --json\n</lf:steers>\n"
     ));
     Ok(text)
+}
+
+/// Only confirmed live, managed conversations can be woken.
+pub(crate) fn idle_conversations(
+    store: &loopflow_storage::sqlite::SqliteStore,
+    session: Option<&str>,
+) -> crate::store::StoreResult<Vec<IdleConversation>> {
+    Ok(store
+        .idle_conversation_candidates(session)?
+        .into_iter()
+        .filter_map(|candidate| {
+            candidate
+                .identity
+                .is_some_and(|(pid, start)| {
+                    crate::journal::process_identity_evidence(pid, start)
+                        == crate::store::ProcessIdentityEvidence::Live
+                })
+                .then_some(candidate.conversation)
+        })
+        .collect())
 }

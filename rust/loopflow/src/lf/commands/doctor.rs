@@ -98,13 +98,16 @@ pub fn report() -> Result<DoctorReport> {
         None => Check::ok("store", "selected database is compatible with this build"),
     }];
     // The remedy hint counts exactly what `lf monitor prune` would repair.
-    let events = match crate::store::sqlite::SqliteStore::open_processes_read_only(&database_path)
-        .and_then(|store| {
-            Ok((
-                store.processes_since(0)?,
-                store.unrecorded_agent_ancestry()?.len(),
-            ))
-        }) {
+    let events = match loopflow_storage::sqlite::SqliteStore::open_processes_read_only(
+        &database_path,
+        crate::store::token_key::encryption_key,
+    )
+    .and_then(|store| {
+        Ok((
+            store.processes_since(0)?,
+            store.unrecorded_agent_ancestry()?.len(),
+        ))
+    }) {
         Ok(events) => Some(events),
         Err(error) => {
             checks.push(Check::fail(
@@ -590,9 +593,9 @@ mod tests {
     fn row(ts: i64, event: &str) -> LfProcess {
         LfProcess {
             os_started_at: None,
-            id: crate::id::LfProcessId::new(),
+            id: loopflow_model::id::LfProcessId::new(),
             pid: None,
-            trace_id: crate::id::TraceId::new(),
+            trace_id: loopflow_model::id::TraceId::new(),
             parent_lf_process_id: None,
             via_agent: Some(false),
             caller_session_id: None,

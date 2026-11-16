@@ -3,125 +3,94 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::id::{AgentSessionId, WaveId};
-use crate::profile::{
-    AccessProfile, AuthBrowserBinding, EmailAddress, ProfileId, ProviderRoute, RouteScope,
-};
+use crate::profile::{AccessProfile, AuthBrowserBinding, ProfileId, ProviderRoute};
 use crate::provider_auth::Provider;
 use crate::work::wave::{Wave, WaveLocator};
-mod canonical_ids;
-pub(crate) mod changes;
-mod children;
+use loopflow_model::id::{AgentSessionId, WaveId};
+pub use loopflow_storage::accounts;
+pub use loopflow_storage::address;
+pub(crate) mod admission;
+pub use loopflow_storage::canonical_ids;
+pub use loopflow_storage::capacity;
+pub use loopflow_storage::changes;
+pub use loopflow_storage::child;
+pub(crate) mod children;
 pub(crate) mod ci_incidents;
 pub mod contention;
-pub(crate) mod copy;
+pub use loopflow_storage::copy;
 mod durable;
+pub use loopflow_storage::error;
+pub use loopflow_storage::execution;
+pub use loopflow_storage::graph;
+pub use loopflow_storage::graph_process;
+pub use loopflow_storage::instrumentation;
+pub use loopflow_storage::linear_records;
+pub use loopflow_storage::machine_records;
+pub mod machines;
+pub use loopflow_storage::metric;
 mod metrics;
-#[cfg(test)]
-mod migration_build;
-mod migration_catalog;
-mod migration_schema;
+pub use loopflow_storage::migration_catalog;
+pub use loopflow_storage::migration_runner;
+pub use loopflow_storage::migration_schema;
 pub mod migrations;
-mod planning_peers;
-pub mod planning_sync;
+pub(crate) mod opening;
+pub use loopflow_storage::planning_destination;
+pub use loopflow_storage::planning_exchange;
+pub use loopflow_storage::pr_landing;
+pub use loopflow_storage::process;
+pub use loopflow_storage::profile;
+pub use loopflow_storage::provider;
+pub use loopflow_storage::rental;
+pub use loopflow_storage::session;
+pub use loopflow_storage::session_record;
+pub use loopflow_storage::steer;
+pub use loopflow_storage::task_session;
+pub use loopflow_storage::transcript;
+pub use loopflow_storage::work;
+pub use opening::open_sqlite;
+pub mod ownership;
+pub use loopflow_storage::peer_records;
+pub use loopflow_storage::people;
+pub mod placement;
+pub mod planning_peers;
+mod planning_reads;
+pub use loopflow_storage::planning_sync;
 mod pr_landings;
 mod processes;
 mod project_adoption;
-#[cfg(test)]
-pub(crate) mod query_plans;
-mod recording_gap;
+pub use loopflow_storage::recording_gap;
+pub use loopflow_storage::records;
+pub mod rentals;
 mod repositories;
-pub mod rows;
-mod sessions;
-pub mod sqlite;
-mod token_crypto;
+pub(crate) mod retention;
+pub use loopflow_storage::rows;
+pub(crate) mod selections;
+pub(crate) mod session_projection;
+pub mod sessions;
+pub use loopflow_storage::sqlite;
+pub use loopflow_storage::steer_markers;
+pub mod task_work;
+pub use loopflow_storage::token_crypto;
+pub(crate) mod token_key;
+pub use loopflow_storage::write_holds;
 
+#[cfg(test)]
+mod admission_lifecycle_tests;
+#[cfg(test)]
+mod native_usage_tests;
+#[cfg(test)]
+mod ownership_lifecycle_tests;
+#[cfg(test)]
+mod rental_lifecycle_tests;
+#[cfg(test)]
+mod steer_lifecycle_tests;
+
+pub use error::{StoreError, StoreResult};
 pub use planning_peers::{PeerPlanningStatus, PeerProjectionConflict, PlanningJournal};
 pub use recording_gap::{GapSpan, RecordingGap};
+pub use records::*;
 
-/// Availability of retained planning facts, independent of execution permission.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
-#[serde(rename_all = "snake_case")]
-#[non_exhaustive]
-pub enum PlanningState {
-    Available,
-    Invalid,
-    Removed,
-    Absent,
-    Unavailable,
-}
-
-/// Acquisition evidence is independent of saved Work and outbound delivery.
-#[derive(
-    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
-pub struct TaskAcquisition {
-    pub state: PlanningState,
-    pub observed_at: Option<i64>,
-}
-
-/// Retained Linear acquisition facts, including observations without owned Work.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LinearIssueEvidence {
-    pub issue_id: Option<String>,
-    pub revision: Option<String>,
-    pub observed_at: Option<i64>,
-    pub project_id: Option<String>,
-    pub initiative_ids: Vec<String>,
-    pub project_team_ids: Vec<String>,
-    pub team_id: Option<String>,
-    pub state: PlanningState,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct WaveLocatorUpdate {
-    pub wave_id: WaveId,
-    pub expected_repo: String,
-    pub expected_slug: String,
-    pub target: WaveLocator,
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum StoreError {
-    #[error(transparent)]
-    Selection(#[from] crate::work::selection::SelectionError),
-    #[error(transparent)]
-    Planning(#[from] crate::linear::LinearBindingError),
-    #[error(transparent)]
-    TaskData(#[from] crate::work::task::TaskDataError),
-    #[error("sqlite error: {0}")]
-    Sqlite(#[from] rusqlite::Error),
-    #[error("serialization error: {0}")]
-    Serde(#[from] serde_json::Error),
-    #[error("not found")]
-    NotFound,
-    /// A compare-and-swap named a revision that is no longer current.
-    #[error("{0}")]
-    Stale(String),
-    #[error("invalid data: {0}")]
-    InvalidData(String),
-    #[error("competing planning {effect} receipts")]
-    PlanningReceiptConflict { effect: &'static str },
-    #[error("invalid control authority: {0}")]
-    InvalidAuthority(String),
-}
-
-pub type StoreResult<T> = Result<T, StoreError>;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum TaskPrMergeEvidenceOutcome {
-    Accepted,
-    Repeated,
-    Missing,
-    Conflict { accepted_at: i64 },
-    SchemaUnavailable,
-}
-
-/// Keep live checkpoints at one-second precision for the longest public usage
-/// window. Older Turns retain only their final or latest receipt.
-pub const TURN_USAGE_LIVE_RETENTION_SECONDS: i64 = 86_400;
+pub use loopflow_storage::TURN_USAGE_LIVE_RETENTION_SECONDS;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StorageConfig {
@@ -266,21 +235,6 @@ pub fn storage_config_from_env() -> Result<StorageConfig, std::io::Error> {
     Ok(StorageConfig::sqlite(database_path_from_env()?))
 }
 
-/// The Wave's planning lock, retained by every queued writer using this
-/// acquisition and released when the last one drops it.
-#[derive(Debug, Clone)]
-pub struct PlanningLocks {
-    _wave: Arc<std::fs::File>,
-}
-
-impl PlanningLocks {
-    pub(crate) fn new(wave: std::fs::File) -> Self {
-        Self {
-            _wave: Arc::new(wave),
-        }
-    }
-}
-
 #[derive(Debug)]
 pub struct Store {
     pub(crate) sqlite: sqlite::SqliteStore,
@@ -388,7 +342,7 @@ impl Store {
         let Some(repo) = repo else {
             return run_sqlite(&self.sqlite, move |store| store.list_waves(None)).await;
         };
-        let canonical = match crate::repository::CanonicalRepo::discover(Path::new(repo)) {
+        let canonical = match crate::repository::discover(Path::new(repo)) {
             Ok(canonical) => canonical,
             Err(_) => {
                 let repo = repo.to_string();
@@ -402,7 +356,7 @@ impl Store {
             .into_iter()
             .filter(|wave| {
                 wave.repo() == canonical.to_string()
-                    || crate::repository::CanonicalRepo::discover(Path::new(wave.repo()))
+                    || crate::repository::discover(Path::new(wave.repo()))
                         .is_ok_and(|stored| stored == canonical)
             })
             .collect())
@@ -435,7 +389,7 @@ impl Store {
         let equivalent = candidates
             .into_iter()
             .filter(|wave| {
-                crate::repository::CanonicalRepo::discover(Path::new(wave.repo()))
+                crate::repository::discover(Path::new(wave.repo()))
                     .is_ok_and(|repo| &repo == locator.repo())
             })
             .collect::<Vec<_>>();
@@ -459,12 +413,18 @@ impl Store {
 
     pub async fn create_wave(&self, wave: &Wave) -> StoreResult<()> {
         let wave = wave.clone();
-        run_sqlite(&self.sqlite, move |store| store.create_wave(&wave)).await
+        run_sqlite(&self.sqlite, move |store| {
+            crate::work::wave::bootstrap::upsert_wave(&store, &wave)
+        })
+        .await
     }
 
     pub async fn update_wave(&self, wave: &Wave) -> StoreResult<()> {
         let wave = wave.clone();
-        run_sqlite(&self.sqlite, move |store| store.update_wave(&wave)).await
+        run_sqlite(&self.sqlite, move |store| {
+            crate::work::wave::bootstrap::upsert_wave(&store, &wave)
+        })
+        .await
     }
 
     pub(crate) async fn relocate_waves(&self, updates: Vec<WaveLocatorUpdate>) -> StoreResult<()> {
@@ -529,7 +489,7 @@ impl Store {
     pub async fn upsert_provider_account(&self, account: &ProviderAccount) -> StoreResult<()> {
         let account = account.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.upsert_provider_account(&account)
+            crate::provider_account::catalog::upsert_provider_account(&store, &account)
         })
         .await
     }
@@ -570,7 +530,7 @@ impl Store {
         let provider = provider.to_string();
         let account_id = account_id.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.get_provider_account(&provider, &account_id)
+            crate::provider_account::catalog::get_provider_account(&store, &provider, &account_id)
         })
         .await
     }
@@ -581,7 +541,7 @@ impl Store {
     ) -> StoreResult<Vec<ProviderAccount>> {
         let provider = provider.map(str::to_string);
         run_sqlite(&self.sqlite, move |store| {
-            store.list_provider_accounts(provider.as_deref())
+            crate::provider_account::catalog::list_provider_accounts(&store, provider.as_deref())
         })
         .await
     }
@@ -592,7 +552,7 @@ impl Store {
     ) -> StoreResult<()> {
         let account = account.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.update_provider_account_lifecycle(&account)
+            crate::provider_account::catalog::update_provider_account_lifecycle(&store, &account)
         })
         .await
     }
@@ -712,7 +672,7 @@ impl Store {
         let account = account.clone();
         let windows = windows.to_vec();
         run_sqlite(&self.sqlite, move |store| {
-            store.reconcile_provider_account_capacity(&account, revision, &windows)
+            crate::provider_account::capacity::reconcile(&store, &account, revision, &windows)
         })
         .await
     }
@@ -740,7 +700,7 @@ impl Store {
     ) -> StoreResult<Vec<AccountLimitRow>> {
         let provider = provider.map(str::to_string);
         run_sqlite(&self.sqlite, move |store| {
-            store.provider_account_limits(provider.as_deref())
+            crate::provider_account::capacity::limits(&store, provider.as_deref())
         })
         .await
     }
@@ -777,7 +737,12 @@ impl Store {
         let account_id = account_id.cloned();
         let profile_ids = profile_ids.to_vec();
         run_sqlite(&self.sqlite, move |store| {
-            store.set_auth_browser_profiles(provider, account_id.as_ref(), &profile_ids)
+            crate::provider_account::catalog::set_auth_browser_profiles(
+                &store,
+                provider,
+                account_id.as_ref(),
+                &profile_ids,
+            )
         })
         .await
     }
@@ -789,36 +754,19 @@ impl Store {
     ) -> StoreResult<Vec<AuthBrowserBinding>> {
         let account_id = account_id.cloned();
         run_sqlite(&self.sqlite, move |store| {
-            store.list_auth_browser_profiles(provider, account_id.as_ref())
+            crate::provider_account::catalog::list_auth_browser_profiles(
+                &store,
+                provider,
+                account_id.as_ref(),
+            )
         })
         .await
     }
 
     pub async fn set_provider_route(&self, route: &ProviderRoute) -> StoreResult<()> {
         let route = route.clone();
-        run_sqlite(&self.sqlite, move |store| store.set_provider_route(&route)).await
-    }
-
-    pub async fn clear_provider_route(
-        &self,
-        scope: &RouteScope,
-        provider: Provider,
-    ) -> StoreResult<bool> {
-        let scope = scope.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.clear_provider_route(&scope, provider)
-        })
-        .await
-    }
-
-    pub async fn provider_route(
-        &self,
-        scope: &RouteScope,
-        provider: Provider,
-    ) -> StoreResult<Option<ProviderRoute>> {
-        let scope = scope.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.provider_route(&scope, provider)
+            crate::provider_account::catalog::set_provider_route(&store, &route)
         })
         .await
     }
@@ -882,7 +830,12 @@ impl Store {
         let candidates = candidates.to_vec();
         let model = model.map(str::to_owned);
         run_sqlite(&self.sqlite, move |store| {
-            store.select_provider_account(provider, &candidates, model.as_deref())
+            crate::provider_account::selection::select(
+                &store,
+                provider,
+                &candidates,
+                model.as_deref(),
+            )
         })
         .await
     }
@@ -892,251 +845,19 @@ impl Store {
     }
 
     pub async fn schema_version(&self) -> StoreResult<String> {
-        run_sqlite(&self.sqlite, |store| store.schema_version()).await
+        run_sqlite(&self.sqlite, |store| {
+            store.schema_version(&migrations::build())
+        })
+        .await
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum CredentialType {
-    OAuth,
-    ApiKey,
-}
-
-impl CredentialType {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::OAuth => "oauth",
-            Self::ApiKey => "apikey",
-        }
-    }
-
-    pub fn from_db(value: &str) -> Self {
-        match value {
-            "apikey" => Self::ApiKey,
-            _ => Self::OAuth,
-        }
-    }
-}
-
-impl std::fmt::Display for CredentialType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-#[derive(Debug)]
-pub(crate) enum ProviderTokenReplacement {
-    Replaced,
-    Changed(ProviderToken),
-    Missing,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProviderToken {
-    pub provider: String,
-    pub access_token: String,
-    pub refresh_token: Option<String>,
-    pub oauth_client_id: Option<String>,
-    pub expires_at: Option<i64>,
-    pub login: Option<String>,
-    pub updated_at: i64,
-    pub credential_type: CredentialType,
-}
-
-#[derive(
-    schemars::JsonSchema,
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    serde::Serialize,
-    serde::Deserialize,
-)]
-#[serde(transparent)]
-pub struct ProviderAccountId(String);
-
-impl ProviderAccountId {
-    pub fn parse(value: &str) -> Result<Self, String> {
-        let value = value.trim();
-        if value.is_empty() || value.len() > 63 {
-            return Err("account id must be 1-63 characters".to_string());
-        }
-        let mut chars = value.chars();
-        let first = chars
-            .next()
-            .expect("non-empty account id has a first character");
-        if !first.is_ascii_lowercase() && !first.is_ascii_digit() {
-            return Err("account id must start with a lowercase letter or number".to_string());
-        }
-        if !chars.all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-' || ch == '_')
-        {
-            return Err(
-                "account id may contain lowercase letters, numbers, '-' and '_'".to_string(),
-            );
-        }
-        Ok(Self(value.to_string()))
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl std::fmt::Display for ProviderAccountId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct ProviderAccount {
-    pub provider: String,
-    pub account_id: ProviderAccountId,
-    pub home: Option<PathBuf>,
-    pub login_email: Option<EmailAddress>,
-    pub observed_email: Option<String>,
-    pub observed_subject: Option<String>,
-    pub observed_credential_digest: Option<String>,
-    pub observed_plan: Option<String>,
-    pub credential_state: CredentialState,
-    pub routing_state: RoutingState,
-    pub plan: Option<String>,
-    pub paid_through: Option<time::Date>,
-    pub utilization_percent: Option<u8>,
-    pub cooldown_until: Option<i64>,
-    pub cooldown_reason: Option<String>,
-    pub last_selected_at: Option<i64>,
-    pub created_at: i64,
-    pub updated_at: i64,
-}
-
-impl ProviderAccount {
-    pub fn effective_routing_state(&self, today: time::Date) -> RoutingState {
-        if self.routing_state == RoutingState::Automatic
-            && self.paid_through.is_some_and(|date| date < today)
-        {
-            RoutingState::ExplicitOnly
-        } else {
-            self.routing_state
-        }
-    }
-
-    pub fn eligible_for_automatic_routing(&self, today: time::Date) -> bool {
-        self.credential_state == CredentialState::Connected
-            && self.effective_routing_state(today) == RoutingState::Automatic
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CredentialState {
-    Connected,
-    Missing,
-}
-
-impl CredentialState {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Connected => "connected",
-            Self::Missing => "missing",
-        }
-    }
-
-    pub fn from_db(value: &str) -> Result<Self, String> {
-        match value {
-            "connected" => Ok(Self::Connected),
-            "missing" => Ok(Self::Missing),
-            other => Err(format!("unknown credential state '{other}'")),
-        }
-    }
-}
-
-#[derive(
-    schemars::JsonSchema, Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum RoutingState {
-    Automatic,
-    ExplicitOnly,
-    Disabled,
-}
-
-impl RoutingState {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Automatic => "automatic",
-            Self::ExplicitOnly => "explicit_only",
-            Self::Disabled => "disabled",
-        }
-    }
-
-    pub fn from_db(value: &str) -> Result<Self, String> {
-        match value {
-            "automatic" => Ok(Self::Automatic),
-            "explicit_only" => Ok(Self::ExplicitOnly),
-            "disabled" => Ok(Self::Disabled),
-            other => Err(format!("unknown routing state '{other}'")),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProviderAccountSelection {
-    pub account: ProviderAccount,
-}
-
-#[derive(Debug)]
-pub(crate) struct AccountCapacity {
-    pub utilization_percent: Option<u8>,
-    pub cooldown_until: Option<i64>,
-    pub cooldown_reason: Option<String>,
-    pub windows: Vec<AccountLimitWindow>,
-}
-
-/// One observed subscription rate-limit window: how much of the plan's
-/// `session`/`weekly`/`weekly:<model>` window an account has consumed.
-#[derive(
-    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
-pub struct AccountLimitWindow {
-    pub window: String,
-    pub used_percent: u8,
-    pub resets_at: Option<i64>,
-    pub plan: Option<String>,
-    /// The one model this window limits; `None` limits every model.
-    pub model: Option<String>,
-    /// Set while the window holds launches it affects back.
-    pub limited_until: Option<i64>,
-}
-
-/// A stored window observation for one managed account.
-#[derive(
-    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
-pub struct AccountLimitRow {
-    pub provider: String,
-    pub account_id: ProviderAccountId,
-    pub window: String,
-    pub used_percent: u8,
-    pub resets_at: Option<i64>,
-    pub plan: Option<String>,
-    pub observed_at: i64,
-    /// 'stream' when a running harness reported it; 'poll' when asked for.
-    pub source: String,
-    /// The one model this window limits; `None` limits every model.
-    pub model: Option<String>,
-    /// Set while the window holds launches it affects back.
-    pub limited_until: Option<i64>,
-}
+pub use accounts::*;
 
 pub async fn open_store(cfg: &StorageConfig) -> StoreResult<Store> {
     let StorageConfig::Sqlite { path } = cfg;
     Ok(Store {
-        sqlite: sqlite::SqliteStore::new(path)?,
+        sqlite: crate::store::open_sqlite(path)?,
     })
 }
 
@@ -1145,9 +866,9 @@ pub async fn open_store(cfg: &StorageConfig) -> StoreResult<Store> {
 /// long-lived reader never commits and never wakes itself.
 pub(crate) async fn open_read_only_store(cfg: &StorageConfig) -> StoreResult<Store> {
     let StorageConfig::Sqlite { path } = cfg;
-    drop(sqlite::SqliteStore::new(path)?);
+    drop(crate::store::open_sqlite(path)?);
     Ok(Store {
-        sqlite: sqlite::SqliteStore::open_read_only(path)?,
+        sqlite: sqlite::SqliteStore::open_read_only(path, crate::store::token_key::encryption_key)?,
     })
 }
 
@@ -1155,11 +876,11 @@ pub(crate) async fn open_read_only_store(cfg: &StorageConfig) -> StoreResult<Sto
 /// [`open_store`], it consults **no** ambient env or machine identity
 /// (`LF_HOME`, install selection, shared `~/.lf`), so the schema is deterministic
 /// under parallel test execution instead of racing on the draft-application
-/// decision. See [`sqlite::SqliteStore::open_ephemeral`].
+/// decision. See [`opening::open_ephemeral`].
 pub async fn open_ephemeral_store(cfg: &StorageConfig) -> StoreResult<Store> {
     let StorageConfig::Sqlite { path } = cfg;
     Ok(Store {
-        sqlite: sqlite::SqliteStore::open_ephemeral(path)?,
+        sqlite: crate::store::opening::open_ephemeral(path)?,
     })
 }
 
@@ -1174,7 +895,8 @@ pub(crate) fn read_existing_registry() -> StoreResult<Option<Store>> {
     {
         return Ok(None);
     }
-    let sqlite = sqlite::SqliteStore::open_read_only(&path)?;
+    let sqlite =
+        sqlite::SqliteStore::open_read_only(&path, crate::store::token_key::encryption_key)?;
     if sqlite.applied_schema_version()?.is_none() {
         return Ok(None);
     }
@@ -1200,18 +922,18 @@ mod tests {
         may_apply_migrations, read_nonterminal_task_worktrees, CredentialState, ProviderAccount,
         ProviderAccountId, RoutingState, StorageConfig,
     };
-    use crate::child::ChildRef;
-    use crate::durable::{Author, WorkRef};
-    use crate::id::WaveId;
-    use crate::linear::{LinearIssueId, LinearProjectId};
     use crate::profile::EmailAddress;
     use crate::test_linear_input::{InventoryFixture, SeedLinear};
-    use crate::work::project::{Project, ProjectId};
-    use crate::work::task::{
+    use crate::work::wave::Wave;
+    use loopflow_model::durable::{Author, WorkRef};
+    use loopflow_model::id::WaveId;
+    use loopflow_storage::child::ChildRef;
+    use loopflow_storage::linear_records::{LinearIssueId, LinearProjectId};
+    use loopflow_storage::work::project::{Project, ProjectId};
+    use loopflow_storage::work::task::{
         CiIncident, GithubPr, LinearWritebackState, PrPhase, PrPresentation, PrPublication, Task,
         TaskEventKind, TaskId, TaskPr, TaskPrId,
     };
-    use crate::work::wave::Wave;
     use std::env;
     use std::path::PathBuf;
     use time::OffsetDateTime;
@@ -1261,9 +983,10 @@ mod tests {
         let path = temp.path().join("released.db");
         let connection = rusqlite::Connection::open(&path).unwrap();
         connection
-            .execute_batch(include_str!(
-                "../../tests/fixtures/migrations/task_ownership_released.sql"
-            ))
+            .execute_batch(include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../loopflow-storage/tests/fixtures/migrations/task_ownership_released.sql"
+            )))
             .unwrap();
         drop(connection);
         let before = std::fs::read(&path).unwrap();
@@ -1285,9 +1008,10 @@ mod tests {
         let path = temp.path().join("released.db");
         let connection = rusqlite::Connection::open(&path).unwrap();
         connection
-            .execute_batch(include_str!(
-                "../../tests/fixtures/migrations/task_placement_released.sql"
-            ))
+            .execute_batch(include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../loopflow-storage/tests/fixtures/migrations/task_placement_released.sql"
+            )))
             .unwrap();
         drop(connection);
         let before = std::fs::read(&path).unwrap();
@@ -1336,7 +1060,11 @@ mod tests {
             .expect("current unix time");
         let id = TaskId::new();
         Task {
-            repository_id: store.sqlite.ensure_repository(wave.repo()).unwrap(),
+            repository_id: crate::repository::location::ensure_repository(
+                &store.sqlite,
+                wave.repo(),
+            )
+            .unwrap(),
             id: id.clone(),
 
             revision: 0,
@@ -1361,7 +1089,7 @@ mod tests {
             due_date: None,
             state: None,
             completed_at: None,
-            observation: crate::work::task::Observation::NotRequired,
+            observation: loopflow_storage::work::task::Observation::NotRequired,
         }
     }
 
@@ -1388,12 +1116,12 @@ mod tests {
     }
 
     fn select_project(store: &super::Store, project: &Project) {
-        let previous = crate::store::sqlite::project_selection::read_project_binding(
+        let previous = loopflow_storage::sqlite::project_selection::read_project_binding(
             &store.sqlite,
             &project.wave_id,
         )
         .unwrap();
-        crate::store::sqlite::project_selection::write_project_binding(
+        loopflow_storage::sqlite::project_selection::write_project_binding(
             &store.sqlite,
             &project.wave_id,
             previous.as_deref(),
@@ -1409,7 +1137,7 @@ mod tests {
             id: ProjectId::new(),
 
             summary: String::new(),
-            status: crate::work::project::ProjectStatus::Started,
+            status: loopflow_storage::work::project::ProjectStatus::Started,
             linear_id: Some(LinearProjectId::new("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3").unwrap()),
             slug: "developer-efficiency".to_string(),
             name: "Developer Efficiency".to_string(),
@@ -1550,7 +1278,7 @@ mod tests {
             select_project(&store, &project);
             let task = make_task(&store, &wave, &project);
             let mut snapshot = task_planning_snapshot(&wave, &project, &task);
-            snapshot.snapshot.projects[0].krs = vec![crate::work::project::ProjectKR {
+            snapshot.snapshot.projects[0].krs = vec![loopflow_storage::work::project::ProjectKR {
                 text: "Work remains readable".into(),
                 holds: false,
             }];
@@ -1586,10 +1314,10 @@ mod tests {
                 snapshot.snapshot.projects[1].krs
             );
             assert_eq!(record.pm_snapshot_synced_at, Some(17));
-            let process = crate::id::LfProcessId::new();
+            let process = loopflow_model::id::LfProcessId::new();
             rusqlite::Connection::open(directory.path().join("registry.db")).unwrap().execute(
                 "INSERT INTO processes(id,trace_id,started_at,completed_at,outcome) VALUES(?1,?2,1,2,'succeeded')",
-                rusqlite::params![process,crate::id::TraceId::new()],
+                rusqlite::params![process,loopflow_model::id::TraceId::new()],
             ).unwrap();
             let definition = crate::task_graph::CapturedGraph {
                 name: "review".into(),
@@ -1604,15 +1332,13 @@ mod tests {
                     },
                 )],
             };
-            store
-                .sqlite
-                .take_up_task_graph(&task.id, &definition)
+            crate::store::task_work::take_up_task_graph(&store.sqlite, &task.id, &definition)
                 .unwrap();
             store
                 .sqlite
                 .set_task_graph_step(&task.id, "review")
                 .unwrap();
-            let graph = store.sqlite.task_graph(&task.id).unwrap();
+            let graph = crate::store::task_work::task_graph(&store.sqlite, &task.id).unwrap();
             snapshot.snapshot.items[0].revision = Some("2026-10-05T12:01:00Z".into());
             snapshot.snapshot.items[0].state = None;
             snapshot.snapshot.items[0].completed = true;
@@ -1622,7 +1348,10 @@ mod tests {
                 store.sqlite.task(&task.id).unwrap().unwrap().completed_at,
                 snapshot.snapshot.items[0].completed_at
             );
-            assert_eq!(store.sqlite.task_graph(&task.id).unwrap(), graph);
+            assert_eq!(
+                crate::store::task_work::task_graph(&store.sqlite, &task.id).unwrap(),
+                graph
+            );
             store
                 .complete_task(
                     &task,
@@ -1643,7 +1372,7 @@ mod tests {
                 .sqlite
                 .set_task_graph_step(&task.id, "review")
                 .unwrap();
-            let reopened = store.sqlite.task_graph(&task.id).unwrap();
+            let reopened = crate::store::task_work::task_graph(&store.sqlite, &task.id).unwrap();
             snapshot.snapshot.items[0].state = Some("unstarted".into());
             snapshot.snapshot.items[0].completed = false;
             snapshot.snapshot.items[0].completed_at = None;
@@ -1665,7 +1394,10 @@ mod tests {
             assert_eq!(record.assignee, None);
             assert_eq!(record.rank, 0);
             assert_eq!(record.pm_snapshot_synced_at, Some(17));
-            assert_eq!(store.sqlite.task_graph(&task.id).unwrap(), reopened);
+            assert_eq!(
+                crate::store::task_work::task_graph(&store.sqlite, &task.id).unwrap(),
+                reopened
+            );
         }
     }
 
@@ -1680,7 +1412,7 @@ mod tests {
             let mut snapshot = task_planning_snapshot(&wave, &project, &task);
             snapshot.synced_at = 17;
             store.seed_inventory(snapshot.clone(), None).await.unwrap();
-            let krs = vec![crate::work::project::ProjectKR {
+            let krs = vec![loopflow_storage::work::project::ProjectKR {
                 text: "Saved plan survives an outage".into(),
                 holds: false,
             }];
@@ -1708,16 +1440,16 @@ mod tests {
             }
             for (status, readiness) in [
                 (
-                    crate::work::project::ProjectStatus::Started,
-                    crate::store::sqlite::ProjectReadinessState::Ready,
+                    loopflow_storage::work::project::ProjectStatus::Started,
+                    loopflow_storage::sqlite::ProjectReadinessState::Ready,
                 ),
                 (
-                    crate::work::project::ProjectStatus::Paused,
-                    crate::store::sqlite::ProjectReadinessState::Inactive,
+                    loopflow_storage::work::project::ProjectStatus::Paused,
+                    loopflow_storage::sqlite::ProjectReadinessState::Inactive,
                 ),
                 (
-                    crate::work::project::ProjectStatus::Completed,
-                    crate::store::sqlite::ProjectReadinessState::Terminal,
+                    loopflow_storage::work::project::ProjectStatus::Completed,
+                    loopflow_storage::sqlite::ProjectReadinessState::Terminal,
                 ),
             ] {
                 conn.execute(
@@ -1736,7 +1468,7 @@ mod tests {
                 assert_eq!(observed.observed_at, Some(17));
                 assert_eq!(
                     crate::ops::project::current_project(&store, &wave).is_err(),
-                    status == crate::work::project::ProjectStatus::Completed
+                    status == loopflow_storage::work::project::ProjectStatus::Completed
                 );
             }
         }
@@ -1769,7 +1501,7 @@ mod tests {
             );
             assert_eq!(
                 store.sqlite.project_readiness(wave.id()).unwrap().state,
-                crate::store::sqlite::ProjectReadinessState::Unavailable,
+                loopflow_storage::sqlite::ProjectReadinessState::Unavailable,
                 "{change}"
             );
             assert_eq!(store.get_project(&project.id).await.unwrap(), Some(saved));
@@ -1847,7 +1579,9 @@ mod tests {
                     crate::durable::TaskState::Unstarted
                 }
             );
-            assert!(store.sqlite.task_graph(&task.id).unwrap().is_none());
+            assert!(crate::store::task_work::task_graph(&store.sqlite, &task.id)
+                .unwrap()
+                .is_none());
             assert!(store.task_prs(&task.id).await.unwrap().is_empty());
             assert_eq!(store.task_events_after(&task.id, 0).await.unwrap(), events);
             snapshot.snapshot.items[0].revision = Some("2026-10-05T12:02:00Z".into());
@@ -1899,7 +1633,9 @@ mod tests {
             .await
             .unwrap()
             .is_empty());
-        assert!(store.sqlite.task_graph(&task.id).unwrap().is_none());
+        assert!(crate::store::task_work::task_graph(&store.sqlite, &task.id)
+            .unwrap()
+            .is_none());
     }
 
     #[tokio::test]
@@ -1922,19 +1658,20 @@ mod tests {
                     .unwrap()
                     .unwrap()
             } else {
-                let project = store
-                    .sqlite
-                    .ensure_wave_project(directory.path().to_str().unwrap(), "inbox")
-                    .unwrap();
+                let project = crate::work::wave::bootstrap::ensure_wave_project(
+                    &store.sqlite,
+                    directory.path().to_str().unwrap(),
+                    "inbox",
+                )
+                .unwrap();
                 store
                     .sqlite
-                    .create_task(&crate::work::task::NewTask {
-                        repository_id: store
-                            .sqlite
-                            .ensure_repository(
-                                directory.path().canonicalize().unwrap().to_str().unwrap(),
-                            )
-                            .unwrap(),
+                    .create_task(&loopflow_storage::work::task::NewTask {
+                        repository_id: crate::repository::location::ensure_repository(
+                            &store.sqlite,
+                            directory.path().canonicalize().unwrap().to_str().unwrap(),
+                        )
+                        .unwrap(),
                         due_date: None,
                         id: TaskId::new(),
                         project_id: Some(project.id),
@@ -2209,10 +1946,16 @@ mod tests {
         let database = _directory.path().join("registry.db");
         let before: crate::test_linear_input::IssueFixture =
             loopflow_test_support::retained_task_input(&database, wave.repo(), &task.identifier);
-        let other = Wave::new(crate::id::WaveId::new(), "other".into(), "/repo".into());
+        let other = Wave::new(
+            loopflow_model::id::WaveId::new(),
+            "other".into(),
+            "/repo".into(),
+        );
         store.create_wave(&other).await.unwrap();
         let mut foreign = make_project(&other);
-        foreign.linear_id = Some(crate::linear::LinearProjectId::new("foreign-project").unwrap());
+        foreign.linear_id = Some(
+            loopflow_storage::linear_records::LinearProjectId::new("foreign-project").unwrap(),
+        );
         store.create_project(&foreign).await.unwrap();
         let mut response = snapshot.clone();
         response.synced_at = 2;
@@ -2427,14 +2170,16 @@ mod tests {
             )
             .await
             .unwrap();
-        assert!(crate::linear::acceptance::accept_linear_project_in(
-            &store.sqlite,
-            wave.id(),
-            &snapshot.initiative,
-            &old,
-            20
-        )
-        .is_err());
+        assert!(
+            loopflow_storage::sqlite::linear_acceptance::accept_linear_project_in(
+                &store.sqlite,
+                wave.id(),
+                &snapshot.initiative,
+                &old,
+                20
+            )
+            .is_err()
+        );
         assert!(store.seed_inventory(snapshot, None).await.is_err());
         assert_eq!(wave_refresh_at(_directory.path(), &wave), None);
         assert!(store
@@ -2468,12 +2213,14 @@ mod tests {
         let mut confirmed = snapshot.snapshot.projects[0].clone();
         confirmed.name = "Ordinary work".into();
         confirmed.slug = "ordinary-work".into();
-        confirmed.krs.push(crate::work::project::ProjectKR {
-            text: "Preserve the authored proof".into(),
-            holds: false,
-        });
+        confirmed
+            .krs
+            .push(loopflow_storage::work::project::ProjectKR {
+                text: "Preserve the authored proof".into(),
+                holds: false,
+            });
         confirmed.revision = Some("2026-10-05T12:00:01Z".into());
-        crate::linear::acceptance::accept_linear_project_in(
+        loopflow_storage::sqlite::linear_acceptance::accept_linear_project_in(
             &store.sqlite,
             wave.id(),
             &snapshot.initiative,
@@ -2504,14 +2251,16 @@ mod tests {
         assert_eq!(durable.krs, confirmed.krs);
         let other = Wave::new(WaveId::new(), "other".into(), wave.repo().into());
         store.create_wave(&other).await.unwrap();
-        assert!(crate::linear::acceptance::accept_linear_project_in(
-            &store.sqlite,
-            other.id(),
-            &snapshot.initiative,
-            &confirmed,
-            20
-        )
-        .is_err());
+        assert!(
+            loopflow_storage::sqlite::linear_acceptance::accept_linear_project_in(
+                &store.sqlite,
+                other.id(),
+                &snapshot.initiative,
+                &confirmed,
+                20
+            )
+            .is_err()
+        );
         assert_eq!(
             store.get_project(&project.id).await.unwrap().unwrap(),
             durable
@@ -2542,8 +2291,9 @@ mod tests {
         store.create_project(&predecessor).await.unwrap();
         select_project(&store, &predecessor);
         let mut successor = make_project(&wave);
-        successor.linear_id =
-            Some(crate::linear::LinearProjectId::new("successor-project").unwrap());
+        successor.linear_id = Some(
+            loopflow_storage::linear_records::LinearProjectId::new("successor-project").unwrap(),
+        );
         let task = make_task(&store, &wave, &predecessor);
         let pr = make_task_pr(&task);
         store.seed_task(&task, &pr).await.unwrap();
@@ -2777,7 +2527,7 @@ mod tests {
         async fn stop(&mut self) -> anyhow::Result<()> {
             Ok(())
         }
-        fn agent_session(&self) -> Option<crate::id::AgentSessionId> {
+        fn agent_session(&self) -> Option<loopflow_model::id::AgentSessionId> {
             None
         }
     }
@@ -2894,7 +2644,7 @@ mod tests {
             )
             .await
             .expect("generic Run identity is opaque provenance, not planning authority");
-        let ownership = store.sqlite.task_ownership(&task.id).unwrap();
+        let ownership = crate::store::ownership::task_ownership(&store.sqlite, &task.id).unwrap();
         assert_eq!(ownership.owner.unwrap().machine.id, Some(home));
         let saved = store.get_task(&task.id).await.unwrap().unwrap();
         assert_eq!(saved.id, task.id);
@@ -3081,8 +2831,8 @@ mod tests {
 
         let mut snapshot = task_planning_snapshot(&wave, &project, &task);
         let mut observed = snapshot.snapshot.projects.remove(0);
-        observed.status = crate::work::project::ProjectStatus::Completed;
-        crate::linear::acceptance::accept_linear_project_in(
+        observed.status = loopflow_storage::work::project::ProjectStatus::Completed;
+        loopflow_storage::sqlite::linear_acceptance::accept_linear_project_in(
             &store.sqlite,
             wave.id(),
             &snapshot.initiative,
@@ -3139,18 +2889,18 @@ mod tests {
             }),
             merge: None,
         });
-        pr.ci_observation = Some(crate::work::task::CiObservation {
+        pr.ci_observation = Some(loopflow_storage::work::task::CiObservation {
             head_sha: "sha-abc".to_string(),
-            state: crate::work::task::CiState::Failing,
-            failing_checks: vec![crate::work::task::CiCheck {
+            state: loopflow_storage::work::task::CiState::Failing,
+            failing_checks: vec![loopflow_storage::work::task::CiCheck {
                 name: "build".to_string(),
                 url: Some("https://ci/build".to_string()),
             }],
             observed_at: OffsetDateTime::now_utc(),
         });
-        pr.github_observation = Some(crate::work::task::GithubObservation {
+        pr.github_observation = Some(loopflow_storage::work::task::GithubObservation {
             checked_at: OffsetDateTime::now_utc(),
-            result: crate::work::task::GithubObservationResult::Degraded {
+            result: loopflow_storage::work::task::GithubObservationResult::Degraded {
                 reason: "GitHub API rate limit exhausted".to_string(),
             },
         });
@@ -3161,7 +2911,7 @@ mod tests {
         assert_eq!(read.head_sha(), Some("sha-abc"));
         assert_eq!(read.presentation().unwrap().title, "Ship the proof");
         let ci = read.fresh_ci().expect("reading matches the current head");
-        assert_eq!(ci.state, crate::work::task::CiState::Failing);
+        assert_eq!(ci.state, loopflow_storage::work::task::CiState::Failing);
         assert_eq!(ci.failing_checks[0].name, "build");
         assert_eq!(read.github_observation, pr.github_observation);
     }
@@ -3867,3 +3617,62 @@ mod tests {
             .is_some());
     }
 }
+
+#[cfg(test)]
+mod account_lifecycle_tests;
+#[cfg(test)]
+mod linear_migration_tests;
+
+#[cfg(test)]
+mod repository_lifecycle_tests;
+
+#[cfg(test)]
+mod membership_lifecycle_tests;
+
+#[cfg(test)]
+mod attachment_lifecycle_tests;
+
+#[cfg(test)]
+mod program_status_tests;
+
+#[cfg(test)]
+mod linear_observation_tests;
+
+#[cfg(test)]
+mod settlement_lifecycle_tests;
+
+#[cfg(test)]
+mod planning_exchange_lifecycle_tests;
+
+#[cfg(test)]
+mod session_metadata_tests;
+
+#[cfg(test)]
+mod task_work_lifecycle_tests;
+
+#[cfg(test)]
+mod retention_lifecycle_tests;
+
+#[cfg(test)]
+mod retention_history_tests;
+
+#[cfg(test)]
+mod snapshot_projection_tests;
+
+#[cfg(test)]
+mod membership_projection_tests;
+
+#[cfg(test)]
+mod planning_sync_tests;
+
+#[cfg(test)]
+mod task_move_lifecycle_tests;
+
+#[cfg(test)]
+mod session_event_lifecycle_tests;
+
+#[cfg(test)]
+mod provider_transition_lifecycle_tests;
+
+#[cfg(test)]
+mod query_plan_lifecycle_tests;

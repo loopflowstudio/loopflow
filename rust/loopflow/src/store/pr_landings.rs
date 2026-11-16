@@ -2,7 +2,7 @@
 
 use time::OffsetDateTime;
 
-use crate::pr_landing::{LandingSupervisor, PrLanding, PrLandingId};
+use loopflow_storage::pr_landing::{LandingSupervisor, PrLanding, PrLandingId};
 
 use super::{run_sqlite, Store, StoreResult};
 

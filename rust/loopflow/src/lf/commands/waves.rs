@@ -10,6 +10,7 @@
 //! audit surface that renders "I could not look" as "nothing happened" is worse
 //! than one that says nothing at all.
 
+use crate::store::selections;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
@@ -19,24 +20,25 @@ use std::sync::{Arc, Mutex};
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::durable::{Machine, TaskSection, TaskState, WorkRef, WorkStatus};
+use crate::durable::{TaskSection, TaskState};
 use crate::lf::commands::session::SessionFacts;
 use crate::lf::commands::session_history::format_tokens;
 use crate::lf::commands::task_row::{TaskDetail, TaskGraphRow, TaskNames, TaskThread};
 use crate::lf::output::Colors;
 use crate::ops::task_execution::{TaskExecutionSnapshot, TaskExecutionState};
 use crate::session_record::SessionHistory;
-use crate::store::sqlite::selections::{task_selection_states, TaskSelectionReading};
 use crate::store::{open_existing_store, SharedStore};
-use crate::work::project::Project;
-use crate::work::task::{
-    CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase, Task, TaskPr,
-};
 use crate::work::wave::metrics::{
     MetricContractIssueDto, MetricEvidenceDto, MetricFreshnessDto, MetricPortfolioDto,
     MetricReadingDto, MetricStage, MetricUnknownCauseDto, Threshold,
 };
 use crate::work::wave::Wave;
+use loopflow_model::durable::{Machine, WorkRef, WorkStatus};
+use loopflow_storage::sqlite::selections::{task_selection_states, TaskSelectionReading};
+use loopflow_storage::work::project::Project;
+use loopflow_storage::work::task::{
+    CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase, Task, TaskPr,
+};
 
 /// One wave's registry snapshot — the `lf wave list` row and the `wave` field of
 /// `lf wave status`. Wire type consumed by Loopflow: every field is required or
@@ -68,7 +70,7 @@ pub struct WaveSnapshot {
 /// Task conditions and Session history. Wire type; no defaults.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WaveDetailSnapshot {
-    pub project_readiness: crate::store::sqlite::ProjectReadiness,
+    pub project_readiness: loopflow_storage::sqlite::ProjectReadiness,
     pub wave: WaveSnapshot,
     pub projects: Evidence<ProjectSummary>,
     pub tasks: Evidence<RoadmapTask>,
@@ -122,7 +124,7 @@ pub struct TaskSummary {
     pub project_id: Option<String>,
     pub wave_id: Option<String>,
     pub acquisition: crate::store::TaskAcquisition,
-    pub sync: crate::store::planning_sync::PlanningSyncStatus,
+    pub sync: loopflow_storage::planning_sync::PlanningSyncStatus,
     pub id: String,
     pub linear_id: Option<String>,
     pub identifier: String,
@@ -163,7 +165,7 @@ pub struct TaskRuntimeSnapshot {
     pub provider: Option<String>,
     /// Who owns the Task on which Machine, as this Machine reads the ownership
     /// log; absent when the Task is unowned.
-    pub owner: Option<crate::durable::TaskOwner>,
+    pub owner: Option<loopflow_model::durable::TaskOwner>,
 }
 
 /// A Task's derived operating condition. Sessions own review actions; this state
@@ -232,7 +234,7 @@ pub struct TaskReferenceSnapshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TaskWorktreeSnapshot {
-    pub machine_id: Option<crate::durable::MachineId>,
+    pub machine_id: Option<loopflow_model::durable::MachineId>,
     pub machine_label: Option<String>,
     pub slug: String,
     pub branch: Option<String>,
@@ -358,7 +360,7 @@ pub struct RoadmapSnapshot {
 pub struct WaveRoadmap {
     /// The graph the Wave's Tasks take up by default.
     pub graph: Option<String>,
-    pub project_readiness: crate::store::sqlite::ProjectReadiness,
+    pub project_readiness: loopflow_storage::sqlite::ProjectReadiness,
     pub wave: WaveSnapshot,
     pub projects: Evidence<ProjectSummary>,
     pub metric_portfolio: MetricPortfolioDto,
@@ -385,21 +387,21 @@ impl RoadmapSnapshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ProjectSummary {
-    pub sync: crate::store::planning_sync::PlanningSyncStatus,
+    pub sync: loopflow_storage::planning_sync::PlanningSyncStatus,
     pub current: bool,
     pub id: String,
     pub linear_id: Option<String>,
     pub slug: String,
     pub name: String,
-    pub status: crate::work::project::ProjectStatus,
+    pub status: loopflow_storage::work::project::ProjectStatus,
     pub metric_targets: Vec<crate::work::wave::metrics::MetricTarget>,
-    pub krs: Vec<crate::work::project::ProjectKR>,
+    pub krs: Vec<loopflow_storage::work::project::ProjectKR>,
 }
 
 async fn project_planning(store: &SharedStore, wave: &Wave) -> Evidence<ProjectSummary> {
     let result = async {
         let projects = store.list_projects(Some(wave.id())).await?;
-        let current = crate::store::sqlite::project_selection::read_project_binding(
+        let current = loopflow_storage::sqlite::project_selection::read_project_binding(
             &store.sqlite,
             wave.id(),
         )?;
@@ -407,7 +409,7 @@ async fn project_planning(store: &SharedStore, wave: &Wave) -> Evidence<ProjectS
             .into_iter()
             .map(|project| -> Result<ProjectSummary> {
                 Ok(ProjectSummary {
-                    sync: store.sqlite.project_planning_sync(&project.id)?,
+                    sync: store.project_planning_sync(&project.id)?,
                     current: current.as_deref().is_some_and(|id| {
                         id == project.id.as_str()
                             || project
@@ -479,7 +481,7 @@ pub struct RoadmapTask {
     /// Effective lifecycle, including planning withdrawal of never-started work.
     pub lifecycle: TaskState,
     /// The same lifecycle, section and conversation activity states as selections.
-    pub selection_states: BTreeSet<crate::work::selection::SelectionState>,
+    pub selection_states: BTreeSet<loopflow_storage::work::selection::SelectionState>,
     pub runtime: Option<TaskRuntimeSnapshot>,
     pub next_move: NextMove,
     pub condition: TaskConditionSnapshot,
@@ -509,12 +511,14 @@ fn scope_waves_to_repo(waves: Vec<Wave>, directory: &Path, all: bool) -> Result<
     if all {
         return Ok(waves);
     }
-    let Some(scope) = crate::repository::CanonicalRepo::containing(directory)? else {
+    let Some(scope) = crate::repository::containing(directory)? else {
         return Ok(waves);
     };
     Ok(waves
         .into_iter()
-        .filter(|wave| scope.contains(Path::new(wave.repo())))
+        .filter(|wave| {
+            crate::repository::discover(Path::new(wave.repo())).is_ok_and(|other| other == scope)
+        })
         .collect())
 }
 
@@ -766,7 +770,7 @@ fn removed_wave_at(
     let (Some(repo), Some(wave)) = (repo, wave) else {
         return Ok(None);
     };
-    let locator = crate::work::wave::WaveLocator::discover(repo, wave)?;
+    let locator = crate::work::wave::discover(repo, wave)?;
     Ok(store.sqlite.retired_wave_at(&locator)?)
 }
 
@@ -828,10 +832,13 @@ async fn show_roadmap(
             if task.is_some() && !all {
                 // Exact destinations carry a repository even when only its
                 // cached registration survives, without Git metadata.
-                let scope = crate::repository::CanonicalRepo::discover(directory)?;
+                let scope = crate::repository::discover(directory)?;
                 waves
                     .into_iter()
-                    .filter(|wave| scope.contains(Path::new(wave.repo())))
+                    .filter(|wave| {
+                        crate::repository::discover(Path::new(wave.repo()))
+                            .is_ok_and(|other| other == scope)
+                    })
                     .collect()
             } else {
                 scope_waves_to_repo(waves, directory, all)?
@@ -886,10 +893,10 @@ pub fn list_tasks(repo: &Path, query: &TaskListArgs, json: bool) -> Result<()> {
             println!("{}", serde_json::to_string(&tasks)?);
         } else if let Some(store) = &store {
             // Without a store there are no Tasks to print.
-            let local = store.sqlite.local_machine()?.id;
+            let local = crate::store::machines::local_machine(&store.sqlite)?.id;
             for task in tasks {
-                let id = crate::durable::TaskId::from_raw(task.task.id.clone());
-                let ownership = store.sqlite.task_ownership(&id)?;
+                let id = loopflow_model::durable::TaskId::from_raw(task.task.id.clone());
+                let ownership = crate::store::ownership::task_ownership(&store.sqlite, &id)?;
                 let mut owner = owner_text(task.runtime.as_ref()).to_string();
                 // A move that has not arrived reads as that, as in `lf task status`.
                 let place = crate::ops::task_ownership::move_line(&store.sqlite, &id)?
@@ -1091,7 +1098,7 @@ async fn open_tasks(
 /// The repository `lf task list` reads, and the Wave it narrows to.
 struct RepositoryScope {
     repo: String,
-    id: crate::durable::RepositoryId,
+    id: loopflow_model::durable::RepositoryId,
     wave: Option<Wave>,
 }
 
@@ -1101,7 +1108,7 @@ async fn repository_scope(
     repo: &Path,
     wave: Option<&str>,
 ) -> Result<Option<RepositoryScope>> {
-    let canonical = crate::repository::CanonicalRepo::discover(repo)?.to_string();
+    let canonical = crate::repository::discover(repo)?.to_string();
     let Some(id) = store.sqlite.repository_id(&canonical)? else {
         return Ok(None);
     };
@@ -1195,9 +1202,7 @@ async fn closed_task_page(
     };
     let after = after
         .map(|selector| {
-            store
-                .sqlite
-                .resolve_task_id(selector, Some(&scope.repo))?
+            crate::store::children::resolve_task_id(&store.sqlite, selector, Some(&scope.repo))?
                 .ok_or_else(|| anyhow!("no Task {selector} to continue after"))
         })
         .transpose()?;
@@ -1244,7 +1249,7 @@ async fn roadmap_snapshot(
         None => store.list_open_tasks(None).await?,
     };
     if let Some(repo) = repo_scope {
-        let repo = crate::repository::CanonicalRepo::discover(repo)?;
+        let repo = crate::repository::discover(repo)?;
         let repository = store.sqlite.repository_id(&repo.to_string())?;
         tasks.retain(|task| Some(&task.repository_id) == repository.as_ref());
     }
@@ -1259,7 +1264,9 @@ async fn roadmap_snapshot(
                 .sqlite
                 .repository_path(repository)?
                 .ok_or_else(|| anyhow!("Task repository {repository} has no local path"))?;
-            if let Some(id) = store.sqlite.resolve_task_id(selector, Some(&path))? {
+            if let Some(id) =
+                crate::store::children::resolve_task_id(&store.sqlite, selector, Some(&path))?
+            {
                 selected.insert(id);
             }
         }
@@ -1321,10 +1328,10 @@ async fn roadmap_snapshot(
 /// of a plan does not grow by a statement per Task.
 #[derive(Debug)]
 struct SharedTaskReads {
-    machines: Vec<crate::durable::Machine>,
-    local_machine: crate::durable::MachineId,
+    machines: Vec<loopflow_model::durable::Machine>,
+    local_machine: loopflow_model::durable::MachineId,
     /// One bulk activity and order reading per repository, shared across Waves.
-    selections: Mutex<HashMap<crate::durable::RepositoryId, Arc<TaskSelectionReading>>>,
+    selections: Mutex<HashMap<loopflow_model::durable::RepositoryId, Arc<TaskSelectionReading>>>,
 }
 
 impl SharedTaskReads {
@@ -1340,13 +1347,16 @@ impl SharedTaskReads {
     fn selections(
         &self,
         store: &SharedStore,
-        repository: &crate::durable::RepositoryId,
+        repository: &loopflow_model::durable::RepositoryId,
     ) -> Result<Arc<TaskSelectionReading>> {
         let mut selections = self.selections.lock().expect("selection memo poisoned");
         match selections.entry(repository.clone()) {
             std::collections::hash_map::Entry::Occupied(entry) => Ok(entry.get().clone()),
             std::collections::hash_map::Entry::Vacant(entry) => Ok(entry
-                .insert(Arc::new(store.sqlite.task_selection_reading(repository)?))
+                .insert(Arc::new(selections::task_selection_reading(
+                    &store.sqlite,
+                    repository,
+                )?))
                 .clone()),
         }
     }
@@ -1373,9 +1383,8 @@ async fn wave_tasks(
     };
     // Selection does not discard other Projects' backlog or ongoing work.
     if let Some(identifier) = identifier {
-        let selected = store
-            .sqlite
-            .resolve_task_id(identifier, Some(wave.repo()))?;
+        let selected =
+            crate::store::children::resolve_task_id(&store.sqlite, identifier, Some(wave.repo()))?;
         tasks.retain(|task| selected.as_ref() == Some(&task.id));
     }
     let (details, unavailable_tasks) = snapshot_tasks(
@@ -1458,7 +1467,7 @@ fn wave_checkout(wave: &Wave, checkouts: &mut Checkouts) -> Result<PathBuf> {
     if checkouts.current.is_none() {
         let current = match crate::repo::discover_repo_root(&std::env::current_dir()?)? {
             Some(checkout) => {
-                let repo = crate::repository::CanonicalRepo::discover(&checkout)?;
+                let repo = crate::repository::discover(&checkout)?;
                 Some((checkout, repo))
             }
             None => None,
@@ -1482,7 +1491,7 @@ async fn snapshot_wave(store: &SharedStore, wave: &Wave, checkout: &Path) -> Res
         .map_err(|err| anyhow!("failed to count active Tasks: {err}"))?;
     // Only a chosen Machine for the Wave's Tasks is named; unset runs on the reader.
     let (machine_id, source) = store
-        .wave_owning_machine(wave.id(), crate::durable::MachineSetting::Tasks)
+        .wave_owning_machine(wave.id(), loopflow_model::durable::MachineSetting::Tasks)
         .await
         .map_err(|error| anyhow!("failed to read your Wave Machine: {error}"))?;
     let machine = match source {
@@ -1517,7 +1526,7 @@ fn snapshot_task_runtime(
     task: &Task,
     status: TaskState,
     completion_pending: Option<String>,
-    owner: Option<crate::durable::TaskOwner>,
+    owner: Option<loopflow_model::durable::TaskOwner>,
     provider: Option<String>,
 ) -> TaskRuntimeSnapshot {
     TaskRuntimeSnapshot {
@@ -1662,28 +1671,33 @@ fn snapshot_task_details(
 /// reads, the durable facts of exactly these Tasks, and each Task's Workflow.
 struct DetailReads<'a> {
     shared: &'a SharedTaskReads,
-    selection_readings: HashMap<crate::durable::RepositoryId, Arc<TaskSelectionReading>>,
-    facts: crate::store::sqlite::TaskDetailFacts,
+    selection_readings: HashMap<loopflow_model::durable::RepositoryId, Arc<TaskSelectionReading>>,
+    facts: loopflow_storage::sqlite::TaskDetailFacts,
+    planning_connections: HashMap<String, bool>,
     /// Each Task's own Workflow, else its Wave's, repository's or the builtin
     /// default, with that source; a default is resolved once per Wave and repository.
-    selections: HashMap<crate::durable::TaskId, (String, Option<crate::config::ConfigSource>)>,
+    selections:
+        HashMap<loopflow_model::durable::TaskId, (String, Option<crate::config::ConfigSource>)>,
     /// Each Task Wave's name, which selects its agent; read once per Wave.
-    wave_names: HashMap<crate::id::WaveId, String>,
+    wave_names: HashMap<loopflow_model::id::WaveId, String>,
     /// Each Task Wave's and repository's checkout with your `lf set` values,
     /// which select its agent; read once per Wave and repository.
     personal: HashMap<
-        (Option<crate::id::WaveId>, crate::durable::RepositoryId),
+        (
+            Option<loopflow_model::id::WaveId>,
+            loopflow_model::durable::RepositoryId,
+        ),
         (std::path::PathBuf, crate::config::PersonalSettings),
     >,
     /// Each handed-off Task's Auto-Ship progress.
-    shipping: HashMap<crate::durable::TaskId, crate::ops::task::ship::ShippingSnapshot>,
+    shipping: HashMap<loopflow_model::durable::TaskId, crate::ops::task::ship::ShippingSnapshot>,
     /// Agents already resolved in this reading, by the configuration that chose
     /// them. Checkouts of one repository usually share their files, and resolving
     /// validates every setting, so each distinct configuration resolves once.
     agents: std::sync::Mutex<HashMap<String, Option<String>>>,
     /// Each Task's latest Graph and what its execution reads, asked once.
-    graphs: HashMap<crate::durable::TaskId, crate::ops::graph_process::GraphProcess>,
-    execution: crate::store::sqlite::GraphExecutionFacts,
+    graphs: HashMap<loopflow_model::durable::TaskId, crate::graph::process::GraphProcess>,
+    execution: loopflow_storage::sqlite::GraphExecutionFacts,
 }
 
 impl<'a> DetailReads<'a> {
@@ -1696,7 +1710,13 @@ impl<'a> DetailReads<'a> {
         {
             selection_readings.insert(repository.clone(), shared.selections(store, repository)?);
         }
-        let facts = store.sqlite.task_detail_facts(tasks)?;
+        let facts = crate::store::ownership::task_detail_facts(&store.sqlite, tasks)?;
+        let mut planning_connections = HashMap::new();
+        for receipts in facts.planning_receipts.values() {
+            planning_connections
+                .entry(receipts.repo.clone())
+                .or_insert_with(|| crate::ops::planning_client::connected(&receipts.repo));
+        }
         let graphs = store
             .sqlite
             .latest_task_graphs(&tasks.iter().map(|task| &task.id).collect::<Vec<_>>())?;
@@ -1750,7 +1770,7 @@ impl<'a> DetailReads<'a> {
                 .states
                 .get(&task.id)
                 .ok_or_else(|| anyhow!("Task {} has no state", task.id))?;
-            let graph = store.sqlite.task_graph(&task.id)?;
+            let graph = crate::store::task_work::task_graph(&store.sqlite, &task.id)?;
             if let Some(snapshot) = crate::ops::task::ship::read_shipping(
                 &store.sqlite,
                 &task.id,
@@ -1764,6 +1784,7 @@ impl<'a> DetailReads<'a> {
             shared,
             selection_readings,
             facts,
+            planning_connections,
             selections,
             wave_names,
             personal,
@@ -2006,10 +2027,14 @@ async fn snapshot_task_detail(
         task: task_summary(
             task,
             facts
-                .planning_sync
+                .planning_receipts
                 .get(&task.id)
-                .cloned()
-                .ok_or_else(|| anyhow!("Task {} has no planning sync", task.id))?,
+                .map(|receipts| {
+                    receipts
+                        .clone()
+                        .status(reads.planning_connections[&receipts.repo])
+                })
+                .ok_or_else(|| anyhow!("Task {} has no planning receipts", task.id))?,
             acquisition,
             facts
                 .repository_paths
@@ -2270,8 +2295,8 @@ fn derive_task_condition(
 fn task_reference(
     issue_url: Option<String>,
     task: Option<&Task>,
-    machines: &[crate::durable::Machine],
-    local_machine: &crate::durable::MachineId,
+    machines: &[loopflow_model::durable::Machine],
+    local_machine: &loopflow_model::durable::MachineId,
 ) -> TaskReferenceSnapshot {
     let workspace = task.and_then(|task| {
         let task_worktree = task.worktree.as_ref()?;
@@ -2319,7 +2344,7 @@ fn task_pr_empty(task: &Task, pr: &TaskPr) -> Option<bool> {
 
 fn task_summary(
     task: &Task,
-    sync: crate::store::planning_sync::PlanningSyncStatus,
+    sync: loopflow_storage::planning_sync::PlanningSyncStatus,
     acquisition: crate::store::TaskAcquisition,
     repo: String,
 ) -> TaskSummary {
@@ -3068,12 +3093,14 @@ fn truncate_start(value: &str, width: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    fn owned() -> crate::durable::TaskOwner {
-        crate::durable::TaskOwner {
+    use crate::process::attachment;
+
+    fn owned() -> loopflow_model::durable::TaskOwner {
+        loopflow_model::durable::TaskOwner {
             person: Some("Jack Heart".into()),
             person_key: Some("jack@loopflow.studio".into()),
             person_id: None,
-            machine: crate::durable::MachineRef {
+            machine: loopflow_model::durable::MachineRef {
                 id: None,
                 label: None,
             },
@@ -3089,20 +3116,23 @@ mod tests {
         LocalProgressEvidence, LocalProgressEvidenceState, NextMove, NextMoveOwner,
         TaskConditionState, TaskRuntimeSnapshot,
     };
-    use crate::durable::{TaskSection, TaskState, WorkStatus};
+    use crate::durable::{TaskSection, TaskState};
     use crate::ops::task_actions::TaskActionEvidence;
     use crate::ops::task_execution::{TaskExecutionSnapshot, TaskExecutionState};
-    use crate::work::task::{CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase};
     use crate::work::wave::metrics::{
         MetricEvidenceDto, MetricFreshnessDto, MetricIdentity, MetricPortfolioDto,
         MetricReadingDto, MetricStage, MetricUnknownCauseDto, Threshold,
     };
     use crate::work::wave::Wave;
+    use loopflow_model::durable::WorkStatus;
+    use loopflow_storage::work::task::{
+        CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase,
+    };
 
     #[tokio::test]
     async fn task_concepts_share_lifecycle_activity_membership_and_order() {
-        use crate::durable::{RepositoryId, TaskId};
-        use crate::work::selection::{Selection, SelectionState};
+        use loopflow_model::durable::{RepositoryId, TaskId};
+        use loopflow_storage::work::selection::{Selection, SelectionState};
         let directory = tempfile::tempdir().unwrap();
         let database = directory.path().join("registry.db");
         let store = Arc::new(
@@ -3208,11 +3238,15 @@ mod tests {
             [other],
         )
         .unwrap();
-        store.sqlite.reorder_task(&repo, active, other).unwrap();
-        let attachment = store
-            .sqlite
-            .claim_session_attachment("bound", None, &store.sqlite.test_lf_process(), true)
-            .unwrap();
+        crate::store::selections::reorder_task(&store.sqlite, &repo, active, other).unwrap();
+        let attachment = attachment::claim_session_attachment(
+            &store.sqlite,
+            "bound",
+            None,
+            &store.sqlite.test_lf_process(),
+            true,
+        )
+        .unwrap();
         store
             .sqlite
             .record_agent_process_identity(
@@ -3228,7 +3262,7 @@ mod tests {
             .sqlite
             .begin_program_status("bound", Some(&attachment.agent_process_id), "concepts")
             .unwrap();
-        let report = |state| crate::program_status::Report {
+        let report = |state| loopflow_model::program_status::Report {
             state,
             id: Some(format!("{state:?}").to_lowercase()),
             kind: None,
@@ -3244,11 +3278,11 @@ mod tests {
                 Some(&attachment.agent_process_id),
                 "concepts",
                 1,
-                &crate::program_status::Records {
+                &loopflow_model::program_status::Records {
                     seen: true,
                     records: vec![
-                        report(crate::program_status::State::Done),
-                        report(crate::program_status::State::Working),
+                        report(loopflow_model::program_status::State::Done),
+                        report(loopflow_model::program_status::State::Working),
                     ],
                 },
             )
@@ -3270,11 +3304,13 @@ mod tests {
             .iter()
             .any(|s| s == "busy"));
         assert_eq!(
-            store
-                .sqlite
-                .resolve_selection(&repo, &Selection::parse("state:busy", None).unwrap())
-                .unwrap()
-                .task_ids(),
+            crate::store::selections::resolve_selection(
+                &store.sqlite,
+                &repo,
+                &Selection::parse("state:busy", None).unwrap()
+            )
+            .unwrap()
+            .task_ids(),
             [active]
         );
         db.execute("INSERT INTO task_ownership(id,task_id,kind,person,machine_id,at,ordered_at,written_here)
@@ -3286,11 +3322,11 @@ mod tests {
                 Some(&attachment.agent_process_id),
                 "concepts",
                 2,
-                &crate::program_status::Records {
+                &loopflow_model::program_status::Records {
                     seen: true,
                     records: vec![
-                        report(crate::program_status::State::Blocked),
-                        report(crate::program_status::State::Working),
+                        report(loopflow_model::program_status::State::Blocked),
+                        report(loopflow_model::program_status::State::Working),
                     ],
                 },
             )
@@ -3302,11 +3338,13 @@ mod tests {
         assert!(states.contains(&SelectionState::Busy));
         for query in ["state:busy", "state:available", "state:blocked"] {
             assert_eq!(
-                store
-                    .sqlite
-                    .resolve_selection(&repo, &Selection::parse(query, None).unwrap())
-                    .unwrap()
-                    .task_ids(),
+                crate::store::selections::resolve_selection(
+                    &store.sqlite,
+                    &repo,
+                    &Selection::parse(query, None).unwrap()
+                )
+                .unwrap()
+                .task_ids(),
                 [active]
             );
         }
@@ -3383,7 +3421,7 @@ mod tests {
             .unwrap(),
         );
         let wave = Wave::new(
-            crate::id::WaveId::new(),
+            loopflow_model::id::WaveId::new(),
             "product".into(),
             directory.path().display().to_string(),
         );
@@ -3405,7 +3443,7 @@ mod tests {
             .await
             .unwrap();
         let task = store.list_tasks(Some(wave.id())).await.unwrap().remove(0);
-        let peer = crate::durable::MachineId::new();
+        let peer = loopflow_model::durable::MachineId::new();
         store
             .add_machine(&peer, "build-server.invalid", "build-server")
             .await
@@ -3449,7 +3487,7 @@ mod tests {
             .unwrap(),
         );
         let wave = Wave::new(
-            crate::id::WaveId::new(),
+            loopflow_model::id::WaveId::new(),
             "product".into(),
             directory.path().display().to_string(),
         );
@@ -3509,7 +3547,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let alias = directory.path().join("repo");
         let wave = Wave::new(
-            crate::id::WaveId::new(),
+            loopflow_model::id::WaveId::new(),
             "proof".into(),
             alias.display().to_string(),
         );
@@ -3533,7 +3571,7 @@ mod tests {
             .unwrap(),
         );
         let wave = Wave::new(
-            crate::id::WaveId::new(),
+            loopflow_model::id::WaveId::new(),
             "local".into(),
             directory
                 .path()
@@ -3561,7 +3599,7 @@ mod tests {
         for (name, repository) in [("ear", "first"), ("ear", "second"), ("duplicate", "first")] {
             std::fs::create_dir_all(directory.path().join(repository)).unwrap();
             let wave = Wave::new(
-                crate::id::WaveId::new(),
+                loopflow_model::id::WaveId::new(),
                 name.into(),
                 directory.path().join(repository).display().to_string(),
             );
@@ -3627,7 +3665,7 @@ mod tests {
             .unwrap(),
         );
         let wave = Wave::new(
-            crate::id::WaveId::new(),
+            loopflow_model::id::WaveId::new(),
             "product".into(),
             directory.path().display().to_string(),
         );
@@ -3682,7 +3720,8 @@ mod tests {
                 successor.id = "next".into();
                 successor.slug = "next".into();
                 successor.name = "Next chapter".into();
-                stale.snapshot.projects[0].status = crate::work::project::ProjectStatus::Completed;
+                stale.snapshot.projects[0].status =
+                    loopflow_storage::work::project::ProjectStatus::Completed;
                 stale.snapshot.projects[0].revision = Some("2026-09-30T00:00:01Z".into());
                 stale.snapshot.projects.push(successor);
                 for item in &mut stale.snapshot.items {
@@ -3721,7 +3760,7 @@ mod tests {
             .unwrap(),
         );
         let wave = Wave::new(
-            crate::id::WaveId::new(),
+            loopflow_model::id::WaveId::new(),
             "product".into(),
             directory.path().display().to_string(),
         );
@@ -3747,7 +3786,7 @@ mod tests {
                 "initiative_ids":["initiative"], "team_ids":["team"]
             }], "items":[]})).unwrap(),
         }, None).await.unwrap();
-        crate::store::sqlite::project_selection::write_project_binding(
+        loopflow_storage::sqlite::project_selection::write_project_binding(
             &store.sqlite,
             wave.id(),
             None,
@@ -3762,7 +3801,7 @@ mod tests {
         assert_eq!(items[0].krs[0].text, "Edited proof");
         assert_eq!(
             items[0].status,
-            crate::work::project::ProjectStatus::Started
+            loopflow_storage::work::project::ProjectStatus::Started
         );
         let unreadable = crate::test_linear_input::InventoryFixture {
             wave_id: wave.id().clone(),
@@ -3796,7 +3835,7 @@ mod tests {
         assert_eq!(items[0].krs[0].text, "Edited proof");
         assert_eq!(
             items[0].status,
-            crate::work::project::ProjectStatus::Started
+            loopflow_storage::work::project::ProjectStatus::Started
         );
         let missing =
             crate::ops::metrics::wave_metric_portfolio(&store, &wave, OffsetDateTime::now_utc())
@@ -3819,7 +3858,7 @@ mod tests {
             .unwrap(),
         );
         let wave = Wave::new(
-            crate::id::WaveId::new(),
+            loopflow_model::id::WaveId::new(),
             "product".into(),
             directory.path().display().to_string(),
         );
@@ -3833,7 +3872,7 @@ mod tests {
             slug: name.into(),
             summary: String::new(),
             revision: None,
-            status: crate::work::project::ProjectStatus::Started,
+            status: loopflow_storage::work::project::ProjectStatus::Started,
             metric_targets: Vec::new(),
             krs: Vec::new(),
             initiative_ids: vec!["initiative".into()],
@@ -3878,7 +3917,7 @@ mod tests {
         assert!(crate::ops::project::current_project(&store, &wave).is_err());
         assert!(!directory.path().join("waves").exists());
         let guard = crate::store::PlanningLocks::new(tempfile::tempfile().unwrap());
-        crate::store::sqlite::project_selection::write_project_binding(
+        loopflow_storage::sqlite::project_selection::write_project_binding(
             &store.sqlite,
             wave.id(),
             None,
@@ -3938,7 +3977,7 @@ mod tests {
         assert_eq!(before, after);
         // An unaccepted UUID cannot become a selection or silently pick another Project.
         assert!(
-            crate::store::sqlite::project_selection::write_project_binding(
+            loopflow_storage::sqlite::project_selection::write_project_binding(
                 &store.sqlite,
                 wave.id(),
                 Some(selected),
@@ -4505,7 +4544,7 @@ mod tests {
         let ci = CiObservation {
             head_sha: "head".to_string(),
             state: CiState::Failing,
-            failing_checks: vec![crate::work::task::CiCheck {
+            failing_checks: vec![loopflow_storage::work::task::CiCheck {
                 name: "scratch-clear".to_string(),
                 url: None,
             }],
@@ -4538,21 +4577,31 @@ mod tests {
         let database = directory.path().join("released.db");
         let conn = rusqlite::Connection::open(&database).unwrap();
         crate::store::migrations::apply_before_migration(&conn, "task_paused");
-        let task = crate::durable::TaskId::new();
-        let fixture = include_str!("../../../tests/fixtures/migrations/work_stream_released.sql")
-            .replace("{wave}", crate::id::WaveId::new().as_str())
-            .replace("{project}", crate::durable::ProjectId::new().as_str())
-            .replace("{task}", task.as_str())
-            .replace("{repo}", directory.path().to_str().unwrap())
-            // The upgrade keeps only Workflows standing at `end`.
-            .replace("}]}','demo',3)", "}]}','end',3)");
+        let task = loopflow_model::durable::TaskId::new();
+        let fixture = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../loopflow-storage/tests/fixtures/migrations/work_stream_released.sql"
+        ))
+        .replace("{wave}", loopflow_model::id::WaveId::new().as_str())
+        .replace(
+            "{project}",
+            loopflow_model::durable::ProjectId::new().as_str(),
+        )
+        .replace("{task}", task.as_str())
+        .replace("{repo}", directory.path().to_str().unwrap())
+        // The upgrade keeps only Workflows standing at `end`.
+        .replace("}]}','demo',3)", "}]}','end',3)");
         conn.execute_batch(&fixture).unwrap();
         crate::store::migrations::upgrade_from_migration(&conn, "task_paused");
         // The planning read, not this setup, fails.
         conn.execute_batch("DROP TABLE task_ship_events").unwrap();
         let frontier = crate::store::migrations::latest_applied_version_sqlite(&conn).unwrap();
         let store: crate::store::SharedStore = Arc::new(crate::store::Store {
-            sqlite: crate::store::sqlite::SqliteStore::open_read_only(&database).unwrap(),
+            sqlite: loopflow_storage::sqlite::SqliteStore::open_read_only(
+                &database,
+                crate::store::token_key::encryption_key,
+            )
+            .unwrap(),
         });
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let roadmap = runtime
@@ -4576,7 +4625,11 @@ mod tests {
             reason.contains("no such table: task_ship_events"),
             "{reason}"
         );
-        let graph = store.sqlite.task_overview(&task).unwrap().0.graph.unwrap();
+        let graph = crate::store::task_work::task_overview(&store.sqlite, &task)
+            .unwrap()
+            .0
+            .graph
+            .unwrap();
         assert_eq!(graph.name, "feature");
         assert!(
             matches!(graph.position, crate::task_graph::TaskGraphPosition::At { ref step } if step == "end")

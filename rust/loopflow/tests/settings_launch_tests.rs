@@ -220,8 +220,7 @@ for line in sys.stdin:
     }
     repo.stage_all();
     repo.commit("Define agent selection fixtures");
-    let store =
-        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     support::select_wave_graph(
         repo.path(),
         &store,

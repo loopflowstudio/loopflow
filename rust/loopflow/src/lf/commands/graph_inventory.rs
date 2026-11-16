@@ -5,7 +5,6 @@ use anyhow::{Context, Result};
 use clap::Args;
 
 use crate::durable::{GraphProcessDetail, GraphProcessFilter, GraphProcessPage};
-use crate::repository::CanonicalRepo;
 use crate::session::GraphProcessSummaryState;
 use crate::store::{open_store, storage_config_from_env};
 
@@ -78,16 +77,14 @@ pub fn page(directory: &Path, args: &GraphProcessInventoryArgs) -> Result<GraphP
         let repo = if args.all {
             None
         } else {
-            CanonicalRepo::containing(directory)?.map(|repo| repo.to_string())
+            crate::repository::containing(directory)?.map(|repo| repo.to_string())
         };
         let filter = GraphProcessFilter {
             task_id: args
                 .for_task
                 .as_deref()
                 .map(|task| {
-                    store
-                        .sqlite
-                        .resolve_task_id(task, repo.as_deref())
+                    crate::store::children::resolve_task_id(&store.sqlite, task, repo.as_deref())
                         .map_err(anyhow::Error::from)?
                         .context("Task was not found")
                 })

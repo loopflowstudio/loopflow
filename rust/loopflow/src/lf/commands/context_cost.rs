@@ -159,8 +159,12 @@ fn read_steps(filter: WorkFilter) -> Result<Vec<Step>> {
     if !database.exists() {
         return Ok(Vec::new());
     }
-    let store = crate::store::sqlite::SqliteStore::open_processes_read_only(&database)?;
-    let sessions = store.conversation_history(
+    let store = loopflow_storage::sqlite::SqliteStore::open_processes_read_only(
+        &database,
+        crate::store::token_key::encryption_key,
+    )?;
+    let sessions = crate::store::sessions::conversation_history(
+        &store,
         filter.wave,
         filter.project,
         filter.task,
@@ -391,7 +395,7 @@ fn publish(report: &ContextCostReport, now: OffsetDateTime) -> Vec<String> {
         return Vec::new();
     }
     let published = (|| -> Result<Vec<String>> {
-        let Some(repo) = crate::repository::CanonicalRepo::current()? else {
+        let Some(repo) = crate::repository::current()? else {
             return Ok(vec!["not in a repository; not persisted".to_string()]);
         };
         tokio::runtime::Runtime::new()?.block_on(async {

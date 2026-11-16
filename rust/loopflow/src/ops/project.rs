@@ -1,11 +1,11 @@
 use std::path::Path;
 
 use crate::ops::{OpsError, OpsResult};
-use crate::store::planning_sync::PlanningSyncStatus;
 use crate::store::{PlanningLocks, Store};
-use crate::work::project::Project;
-use crate::work::project::ProjectStatus;
 use crate::work::wave::Wave;
+use loopflow_storage::planning_sync::PlanningSyncStatus;
+use loopflow_storage::work::project::Project;
+use loopflow_storage::work::project::ProjectStatus;
 
 fn project_error(message: impl ToString) -> OpsError {
     OpsError::Message(message.to_string())
@@ -51,7 +51,7 @@ pub async fn bind_project(repo: &Path, name: &str, project_id: &str) -> OpsResul
 pub async fn update_plan(
     repo: &Path,
     wave: Option<&str>,
-    krs: &[crate::work::project::ProjectKR],
+    krs: &[loopflow_storage::work::project::ProjectKR],
     metric_targets: &[crate::work::wave::metrics::MetricTarget],
 ) -> OpsResult<(Project, PlanningSyncStatus)> {
     let store = super::planning_sync::planning_store().await?;
@@ -126,10 +126,10 @@ pub(crate) fn import_binding(store: &Store, wave: &Wave, guard: &PlanningLocks) 
 
 /// Address a retained Project by durable ID, provider ID, or unique slug/name.
 async fn resolve_project(store: &Store, repo: &Path, selector: &str) -> OpsResult<Project> {
-    let repo = crate::repository::CanonicalRepo::discover(repo)
+    let repo = crate::repository::discover(repo)
         .map_err(project_error)?
         .to_string();
-    if let Ok(id) = crate::durable::ProjectId::parse(selector) {
+    if let Ok(id) = loopflow_model::durable::ProjectId::parse(selector) {
         let project = store
             .get_project_by_project(id.as_str())
             .await
@@ -161,7 +161,7 @@ async fn resolve_project(store: &Store, repo: &Path, selector: &str) -> OpsResul
         project
             .linear_id
             .as_ref()
-            .is_some_and(|id| id.as_str() == crate::id::canonical_uuid(selector))
+            .is_some_and(|id| id.as_str() == loopflow_model::id::canonical_uuid(selector))
     }) {
         return Ok(project.clone());
     }
@@ -265,7 +265,7 @@ pub async fn edit(
     Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
 pub struct WaveGraph {
-    pub wave_id: Option<crate::id::WaveId>,
+    pub wave_id: Option<loopflow_model::id::WaveId>,
     pub wave: Option<String>,
     pub default: GraphDefault,
 }
@@ -301,16 +301,13 @@ pub async fn wave_graph(
 
 fn read_saved(
     store: &Store,
-    id: &crate::durable::ProjectId,
+    id: &loopflow_model::durable::ProjectId,
 ) -> OpsResult<(Project, PlanningSyncStatus)> {
     let project = store
         .sqlite
         .project(id)
         .map_err(project_error)?
         .ok_or_else(|| project_error("Project is unavailable"))?;
-    let sync = store
-        .sqlite
-        .project_planning_sync(id)
-        .map_err(project_error)?;
+    let sync = store.project_planning_sync(id).map_err(project_error)?;
     Ok((project, sync))
 }

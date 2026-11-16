@@ -1,3 +1,4 @@
+use crate::process::attachment;
 use std::os::unix::fs::PermissionsExt;
 use std::time::Duration;
 
@@ -9,7 +10,7 @@ use super::pi::PiHarness;
 use super::pi_decode::Turn;
 use super::{Harness, SendCurrentOutcome};
 use crate::agent::AgentConfig;
-use crate::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
+use loopflow_model::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
 
 async fn completed(rx: &mut mpsc::UnboundedReceiver<ConversationEvent>) -> Vec<ConversationEvent> {
     tokio::time::timeout(Duration::from_secs(10), async {
@@ -64,8 +65,7 @@ async fn pi_turns_resume_the_exact_conversation_and_capture_tools_usage() {
     // input or shutdown to that Machine's store.
     let other_home = tempfile::tempdir().unwrap();
     let other_store =
-        crate::store::sqlite::SqliteStore::open_ephemeral(&other_home.path().join("loopflow.db"))
-            .unwrap();
+        crate::store::opening::open_ephemeral(&other_home.path().join("loopflow.db")).unwrap();
     let selection = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
     std::env::set_var("LF_HOME", other_home.path());
     pi.send_input("tool").await.unwrap();
@@ -86,9 +86,7 @@ async fn pi_turns_resume_the_exact_conversation_and_capture_tools_usage() {
     drop(selection);
     let (store, session, attachment) =
         super::agent_process::open_owner(config.session_attachment.as_ref()).unwrap();
-    let next = store
-        .prepare_session_agent_process(&session, &attachment)
-        .unwrap();
+    let next = attachment::prepare_session_agent_process(&store, &session, &attachment).unwrap();
     config.session_attachment = Some((session, next));
     config.resume_token = Some(token.clone());
     let (tx, mut rx) = mpsc::unbounded_channel();
@@ -356,14 +354,14 @@ async fn pi_stale_attachment_cannot_send_or_stop_the_provider() {
     pi.start(&config).await.unwrap();
     let (store, session, previous) =
         super::agent_process::open_owner(config.session_attachment.as_ref()).unwrap();
-    let current = store
-        .claim_session_attachment(
-            &session,
-            Some(&previous),
-            previous.lf_process_id.as_ref().unwrap(),
-            false,
-        )
-        .unwrap();
+    let current = attachment::claim_session_attachment(
+        &store,
+        &session,
+        Some(&previous),
+        previous.lf_process_id.as_ref().unwrap(),
+        false,
+    )
+    .unwrap();
     assert!(pi.send_input("stale direction").await.is_err());
     assert!(pi.stop().await.is_err());
     let pid = pi.pid().unwrap();
@@ -530,7 +528,7 @@ fn bare_pi_names_its_thread_and_resumes_it_by_that_id() {
         cwd: Some(agent_dir.path().into()),
         ..Default::default()
     };
-    let id: crate::id::AgentSessionId = "8f0c5e2a-0000-4000-8000-944455556666".into();
+    let id: loopflow_model::id::AgentSessionId = "8f0c5e2a-0000-4000-8000-944455556666".into();
     let start = crate::agent::build_session_command(
         &config,
         crate::agent::ProviderInvocation::Terminal {

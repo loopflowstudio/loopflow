@@ -1,4 +1,5 @@
 //! What resume would do is a reading, never admission or a client reservation.
+use crate::store::session_projection;
 use std::path::Path;
 
 use anyhow::Result;
@@ -284,10 +285,12 @@ async fn read_resume(
         );
     }
     // Explanation and opening use the same recorded Process evidence.
-    let metadata = store
-        .sqlite
-        .session_summary(&session.id, report.resolution.observed_at)?
-        .ok_or_else(|| super::session_not_found(&session.id))?;
+    let metadata = session_projection::session_summary(
+        &store.sqlite,
+        &session.id,
+        report.resolution.observed_at,
+    )?
+    .ok_or_else(|| super::session_not_found(&session.id))?;
     let state = super::session_state(&metadata);
     report.state = Some(state);
     report.actions = super::projected_actions(&metadata);

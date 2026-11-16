@@ -178,7 +178,7 @@ cargo clippy --all-targets -- -D warnings
 uv sync
 ```
 
-`build.rs` downloads the pinned `libghostty-vt` archive once per target
+`rust/loopflow-terminal/build.rs` downloads the pinned `libghostty-vt` archive once per target
 directory; offline, point `LOOPFLOW_GHOSTTY_VT_DIR` at a directory holding
 `libghostty-vt.a`. Run one cargo command at a time: concurrent builds wait on
 one target lock. CI runs the full matrix; locally, run it only to reproduce a
@@ -248,7 +248,7 @@ results, not mock calls; no flaky tests (see Testing).
 **Typer CLI code:** lowercase short flags only; pass args through to the
 underlying tool; default to sensible behavior (whole repo as context).
 
-**Builtin skills (`rust/loopflow/src/builtins/**`):** self-contained, since they
+**Builtin skills (`rust/loopflow-definitions/src/builtins/**`):** self-contained, since they
 run in repos without our docs. Teach a rule only in the skill that uses it;
 `LOOPFLOW.md` is paid for on every run. Builtins are a starting point people
 copy with `lf skill customize`, so keep them short and plain.
@@ -267,7 +267,7 @@ plan, code and memory and keeps open findings with the work.
 - Test the merged frontier against the finished migration, not the steps between.
 - Tables read by Work projections use `store_revision_<table>_<insert|update|delete>` triggers to advance their domain in `store_revisions` inside the write. An observation stamp is a reading time, not a change: planning update triggers compare every other column and count a stamp only when it goes NULL ↔ value (`planning_update_triggers_compare_every_column`); a new column joins its table's `WHEN` clause.
 - Runtime migration preflights recognize draft markers inside release batches and keep external lock guards through commit or rollback. Upgrade fixtures start before the whole release batch.
-- Seed a released schema from SQL under `rust/loopflow/tests/fixtures/migrations/`; test sources name only current columns.
+- Seed a released schema from SQL under `rust/loopflow-storage/tests/fixtures/migrations/`; test sources name only current columns.
 
 **Load:** one Machine runs hundreds of concurrent agents over about 10,000
 recorded Tasks and every steer, turn and event they wrote. Every agent shares
@@ -322,6 +322,9 @@ them.
 - `unwrap()` is fine. Unit tests live in the same file; integration tests in `tests/`.
 - Register standalone test binaries in `rust/loopflow/Cargo.toml` (`autotests = false`); ordinary suites join `tests/integration.rs`. `tests/linear/` compiles into the library's test binary: `cargo test -p loopflow --lib task_graph_launch_tests::`.
 - Mock through closures or `#[cfg(test)]`, not factory traits.
+- Cross-crate fixtures enable existing inspection helpers through a `test-support`
+  dev-dependency feature; release builds omit them. Do not include library source
+  again in application fixtures.
 - Bare `task run` returns once the Graph registers; `lf -b task run` waits but runs interactive steps headless. A test reading state a stopping run writes waits for that run. `lf ship` and `-b` share one path. Changing when a command returns means updating its test callers (`grep -rn '"task", "run"' rust/loopflow/tests/`).
 - Pin fixture `LF_BIN` inside the network boundary; the runner clears inherited `LF_*`. Never let an installed provider outrank a stand-in.
 - From an lf-launched shell, run `cargo test` with `LF_*` unset and `< /dev/null`: fixtures follow `LF_HOME`, and `lf task create` reads open stdin. In zsh: `env $(env | grep '^LF_' | cut -d= -f1 | sed 's/^/-u /') cargo test …`. A leftover `LF_CAPTURE_KEY` fails store writes with CannotOpen or "capture does not belong to a recorded Session".
@@ -334,7 +337,7 @@ them.
 - Claims name their person by the repository's Git `user.email`; fixtures set a repository-local identity (`TestRepo` does).
 - Fixtures that change process environment share `loopflow_test_support::env_lock`.
 - macOS SMAppService fixtures register temporary bundles with LaunchServices and launch bundle-owned update code through it. An external test runner writing a registered app can fail App Management; it does not model an app update. Cleanup unregisters the unique service job and LaunchServices entry.
-- `SqliteStore::open_ephemeral` applies every migration; don't replay one with `apply_migration_for_test`.
+- `store::opening::open_ephemeral` applies every migration; don't replay one with `apply_migration_for_test`.
 - Fake `gh` scripts route `api graphql` calls by query name; renaming a query means grepping `rust/loopflow/tests/` for the old name.
 - Tests that redirect process-wide stdout/stderr run in isolated child processes.
 - Lifetime tests start a held terminal beside a `MachineServer` and view it from a PTY; a `--json` viewer on a pipe dies with its stdin and hides retirement bugs. With `RUST_LOG` set, diagnostics go to stderr, not `logs/lf.log`.

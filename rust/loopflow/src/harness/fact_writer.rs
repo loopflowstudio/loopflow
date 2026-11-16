@@ -16,15 +16,15 @@ use anyhow::Result;
 use serde_json::json;
 
 use super::fact::{Decoded, ProviderFact, ProviderTurn, Signal};
-use crate::chat::types::{ConversationEvent, ConversationItem};
-use crate::id::AgentSessionId;
 use crate::process::SessionAttachment;
 use crate::provider_account::ProviderAccountRoute;
 use crate::session::{
     SessionActivity, SessionEventKind, SessionPreview, SessionTurnOrigin, TurnContext,
 };
-use crate::store::sqlite::SqliteStore;
 use crate::store::{RecordingGap, StoreResult};
+use loopflow_model::chat::types::{ConversationEvent, ConversationItem};
+use loopflow_model::id::AgentSessionId;
+use loopflow_storage::sqlite::SqliteStore;
 
 /// Origins frozen when Loopflow sent each request, keyed by request id. The
 /// sending side fills it; the reader's writer takes each one once.
@@ -113,7 +113,7 @@ impl FactWriter {
         let mut signals = Vec::new();
         for decoded in decoded {
             match decoded {
-                Decoded::Display(event) => self.context.hear(event),
+                Decoded::Display(event) => hear_context(&mut self.context, event),
                 Decoded::Fact(ProviderFact::Activity(signal)) => signals.push(signal.clone()),
                 Decoded::Fact(ProviderFact::SessionObserved(thread)) => self.select_session(thread),
                 &Decoded::Fact(ProviderFact::Request { input_tokens }) => {
@@ -228,36 +228,22 @@ impl FactWriter {
     }
 }
 
-impl TurnContext {
-    fn request(&mut self, input_tokens: u64) {
-        self.first_request_tokens.get_or_insert(input_tokens);
-        self.peak_request_tokens = self.peak_request_tokens.max(Some(input_tokens));
-    }
-
-    fn compacted(&mut self, pre_tokens: Option<u64>) {
-        self.compactions += 1;
-        if let Some(pre_tokens) = pre_tokens {
-            *self.compaction_tokens.get_or_insert(0) += pre_tokens;
+/// A completed command, edit or tool returned its result into the
+/// conversation; an edit's result carries no output to count.
+fn hear_context(context: &mut TurnContext, event: &ConversationEvent) {
+    let ConversationEvent::ItemCompleted { item, .. } = event else {
+        return;
+    };
+    let output = match item {
+        ConversationItem::Command { output, .. } | ConversationItem::Tool { output, .. } => {
+            output.as_deref()
         }
-    }
-
-    /// A completed command, edit or tool returned its result into the
-    /// conversation; an edit's result carries no output to count.
-    fn hear(&mut self, event: &ConversationEvent) {
-        let ConversationEvent::ItemCompleted { item, .. } = event else {
-            return;
-        };
-        let output = match item {
-            ConversationItem::Command { output, .. } | ConversationItem::Tool { output, .. } => {
-                output.as_deref()
-            }
-            ConversationItem::File { .. } => None,
-            ConversationItem::Message { .. } | ConversationItem::Thought { .. } => return,
-        };
-        self.tool_results += 1;
-        if let Some(output) = output {
-            self.tool_output_tokens += crate::prompt::count_tokens(output) as u64;
-        }
+        ConversationItem::File { .. } => None,
+        _ => return,
+    };
+    context.tool_results += 1;
+    if let Some(output) = output {
+        context.tool_output_tokens += crate::prompt::count_tokens(output) as u64;
     }
 }
 
@@ -265,13 +251,13 @@ impl TurnContext {
 /// turn that ended without yielding.
 fn report(reading: &SessionActivity, failed: bool) {
     let state = if reading.pending_input > 0 {
-        crate::program_status::State::Blocked
+        loopflow_model::program_status::State::Blocked
     } else if reading.yielded {
-        crate::program_status::State::Idle
+        loopflow_model::program_status::State::Idle
     } else if failed {
-        crate::program_status::State::Error
+        loopflow_model::program_status::State::Error
     } else {
-        crate::program_status::State::Working
+        loopflow_model::program_status::State::Working
     };
     crate::transport::report(state, false, None);
 }
@@ -413,18 +399,20 @@ impl SessionActivityTracker {
 
 #[cfg(test)]
 mod tests {
+    use crate::process::attachment;
+
     use serde_json::{json, Value};
 
     use super::{FactWriter, SessionActivityTracker};
-    use crate::chat::types::Lifecycle;
     use crate::harness::claude_decode::ClaudeDecoder;
     use crate::harness::codex_decode::{turn_request, CodexDecoder};
     use crate::harness::fact::{trace, Decoded, ProviderFact, ProviderTurn, Signal};
     use crate::harness::opencode_decode::OpenCodeDecoder;
-    use crate::id::LfProcessId;
     use crate::process::SessionAttachment;
     use crate::session::SessionEventKind;
-    use crate::store::sqlite::SqliteStore;
+    use loopflow_model::chat::types::Lifecycle;
+    use loopflow_model::id::LfProcessId;
+    use loopflow_storage::sqlite::SqliteStore;
 
     const START: i64 = 1_000;
     const QUIET: i64 = crate::session::AVAILABILITY_QUIET_SECONDS;
@@ -433,7 +421,7 @@ mod tests {
     fn attached(interactive: bool) -> (tempfile::TempDir, SqliteStore, SessionAttachment) {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("facts.db");
-        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let store = crate::store::opening::open_ephemeral(&path).unwrap();
         store.test_session("conversation", "run_00000000000000000000000000000001");
         let conn = rusqlite::Connection::open(&path).unwrap();
         let process = LfProcessId::new();
@@ -444,9 +432,9 @@ mod tests {
         .unwrap();
         conn.execute("UPDATE agent_sessions SET interactive=?1", [interactive])
             .unwrap();
-        let attachment = store
-            .claim_session_attachment("conversation", None, &process, false)
-            .unwrap();
+        let attachment =
+            attachment::claim_session_attachment(&store, "conversation", None, &process, false)
+                .unwrap();
         store
             .record_agent_process_identity(
                 "conversation",
@@ -516,11 +504,14 @@ mod tests {
         /// Whether the inventory calls it Available `quiet` seconds after the
         /// last message.
         fn available_after(&self, quiet: i64) -> bool {
-            self.store
-                .session_summary("conversation", self.now + quiet)
-                .unwrap()
-                .unwrap()
-                .available
+            crate::store::session_projection::session_summary(
+                &self.store,
+                "conversation",
+                self.now + quiet,
+            )
+            .unwrap()
+            .unwrap()
+            .available
         }
     }
 
@@ -714,7 +705,11 @@ mod tests {
                 after: Some(String::new()),
                 ..Default::default()
             };
-            let rows = session.store.session_summaries(&filter, session.now);
+            let rows = crate::store::session_projection::session_summaries(
+                &session.store,
+                &filter,
+                session.now,
+            );
             rows.unwrap().remove(0).id
         };
         assert_eq!(page(false), "a");
@@ -819,9 +814,9 @@ mod tests {
         let original = store.session("conversation").unwrap().unwrap();
         let mut next = original.clone();
         next.artifact_key = Some(crate::session_record::new_artifact_key());
-        let next = store
-            .replace_session_input(original.captured, next, None)
-            .unwrap();
+        let next =
+            crate::store::sessions::replace_session_input(&store, original.captured, next, None)
+                .unwrap();
         hear(
             &mut decoder,
             &mut writer,
@@ -1061,8 +1056,7 @@ mod tests {
             assert_eq!(reading.provider_turn, turn);
             assert_eq!(reading.text, turn);
             assert_eq!(
-                store
-                    .session_summary("conversation", 1000)
+                crate::store::session_projection::session_summary(&store, "conversation", 1000)
                     .unwrap()
                     .unwrap()
                     .preview,
@@ -1082,8 +1076,7 @@ mod tests {
             .record_session_agent_session("conversation", &attachment, &"replacement".into())
             .unwrap();
         assert_eq!(
-            store
-                .session_summary("conversation", 1000)
+            crate::store::session_projection::session_summary(&store, "conversation", 1000)
                 .unwrap()
                 .unwrap()
                 .preview,
@@ -1120,17 +1113,31 @@ mod tests {
                 &mut writer_for(&first),
                 json!({"id":1,"method":"turn/start"}),
             );
-            let middle = store
-                .claim_session_attachment("conversation", Some(&first), &b, false)
-                .unwrap();
+            let middle = attachment::claim_session_attachment(
+                &store,
+                "conversation",
+                Some(&first),
+                &b,
+                false,
+            )
+            .unwrap();
             let mut next = original.clone();
             next.artifact_key = Some(crate::session_record::new_artifact_key());
-            let next = store
-                .replace_session_input(original.captured, next, None)
-                .unwrap();
-            let current = store
-                .claim_session_attachment("conversation", Some(&middle), &a, false)
-                .unwrap();
+            let next = crate::store::sessions::replace_session_input(
+                &store,
+                original.captured,
+                next,
+                None,
+            )
+            .unwrap();
+            let current = attachment::claim_session_attachment(
+                &store,
+                "conversation",
+                Some(&middle),
+                &a,
+                false,
+            )
+            .unwrap();
             assert_ne!(first.token, current.token);
             assert!(store.session_turn_origin("conversation", &first).is_err());
             // Both requests predate the start notification. A second reply for
@@ -1182,16 +1189,14 @@ mod tests {
                 .iter()
                 .all(|event| event.lf_process_id.as_deref() == Some(a.as_str())));
             assert_eq!(
-                store
-                    .input_history(original.input_key().unwrap())
+                crate::store::sessions::input_history(&store, original.input_key().unwrap())
                     .unwrap()
                     .usage
                     .total_input_tokens,
                 Some(12)
             );
             assert_eq!(
-                store
-                    .input_history(next.input_key().unwrap())
+                crate::store::sessions::input_history(&store, next.input_key().unwrap())
                     .unwrap()
                     .usage
                     .total_input_tokens,
@@ -1301,18 +1306,27 @@ mod tests {
         let previous = store.session("conversation").unwrap().unwrap();
         let mut next = previous.clone();
         next.artifact_key = Some(crate::session_record::new_artifact_key());
-        store
-            .replace_session_input(previous.captured, next.clone(), None)
-            .unwrap();
+        crate::store::sessions::replace_session_input(
+            &store,
+            previous.captured,
+            next.clone(),
+            None,
+        )
+        .unwrap();
         let replacement = LfProcessId::new();
         sql.execute(
             "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
             [&replacement],
         )
         .unwrap();
-        store
-            .claim_session_attachment("conversation", Some(&attachment), &replacement, true)
-            .unwrap();
+        attachment::claim_session_attachment(
+            &store,
+            "conversation",
+            Some(&attachment),
+            &replacement,
+            true,
+        )
+        .unwrap();
         let messages = vec![
             json!({"type":"user","id":request}),
             json!({"type":"assistant","id":"step1","time":{"completed":2},"content":[{"type":"tool","id":"tool","name":"shell","state":{"status":"completed"}}],"tokens":{"input":20,"output":5}}),

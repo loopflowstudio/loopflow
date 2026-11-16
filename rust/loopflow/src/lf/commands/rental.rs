@@ -11,16 +11,16 @@ use anyhow::{anyhow, Context};
 use serde::Serialize;
 use time::OffsetDateTime;
 
-use crate::durable::{CapacityDefault, Machine, MachineId, RepositoryId};
 use crate::lf::{OndemandCommand, PoolCommand};
 use crate::machine_records::CopyCounts;
 use crate::rental::sandbox::Sandboxes;
-use crate::rental::{
+use crate::store::Store;
+use loopflow_model::durable::{CapacityDefault, Machine, MachineId, RepositoryId};
+use loopflow_storage::rental::{
     self, GiveBack, Hardware, Holdings, OnDemand, Pool, PoolMachine, Provider, Rental, RentalState,
     Resolution, Usd,
 };
-use crate::store::sqlite::SqliteStore;
-use crate::store::Store;
+use loopflow_storage::sqlite::SqliteStore;
 
 /// An image-built sandbox answers SSH within seconds; RunPod and AWS
 /// install the tools on stock Ubuntu first, which takes minutes.
@@ -58,7 +58,7 @@ struct PoolListing {
 
 /// The scopes whose new Tasks go to this pool or on-demand.
 fn defaults_for(sqlite: &SqliteStore, capacity: &str) -> anyhow::Result<Vec<CapacityDefault>> {
-    let mut defaults = sqlite.capacity_defaults()?;
+    let mut defaults = crate::store::placement::capacity_defaults(sqlite)?;
     defaults.retain(|default| default.capacity == capacity);
     Ok(defaults)
 }
@@ -66,8 +66,8 @@ fn defaults_for(sqlite: &SqliteStore, capacity: &str) -> anyhow::Result<Vec<Capa
 fn print_defaults(defaults: &[CapacityDefault]) {
     for default in defaults {
         let scope = match default.scope {
-            crate::durable::DefaultScope::Wave(_) => "Wave",
-            crate::durable::DefaultScope::Repository(_) => "repository",
+            loopflow_model::durable::DefaultScope::Wave(_) => "Wave",
+            loopflow_model::durable::DefaultScope::Repository(_) => "repository",
         };
         println!("  takes new Tasks of {scope} {}", default.name);
     }
@@ -79,15 +79,14 @@ pub fn run_pool(cmd: &PoolCommand) -> anyhow::Result<()> {
     let sqlite = &store.sqlite;
     match cmd {
         PoolCommand::Add { name } => {
-            sqlite.add_pool(name)?;
+            crate::store::rentals::add_pool(sqlite, name)?;
             println!("Added pool {name}; `lf machine add <dest> --pool {name}` adds a machine");
         }
         PoolCommand::List { json } => {
-            let listings = sqlite
-                .pools()?
+            let listings = crate::store::rentals::pools(sqlite)?
                 .into_iter()
                 .map(|pool| {
-                    let machines = sqlite.pool_machines(&pool.name)?;
+                    let machines = crate::store::machines::pool_machines(sqlite, &pool.name)?;
                     let defaults = defaults_for(sqlite, &pool.name)?;
                     Ok(PoolListing {
                         pool,
@@ -126,15 +125,15 @@ pub fn run_pool(cmd: &PoolCommand) -> anyhow::Result<()> {
             }
         }
         PoolCommand::Off { name } => {
-            sqlite.set_pool_off(name, true)?;
+            crate::store::rentals::set_pool_off(sqlite, name, true)?;
             println!("Pool {name} takes no new work; what it holds stays");
         }
         PoolCommand::On { name } => {
-            sqlite.set_pool_off(name, false)?;
+            crate::store::rentals::set_pool_off(sqlite, name, false)?;
             println!("Pool {name} takes new work");
         }
         PoolCommand::Remove { name } => {
-            sqlite.remove_pool(name)?;
+            crate::store::rentals::remove_pool(sqlite, name)?;
             println!("Removed pool {name}; its machines stay added");
         }
     }
@@ -159,7 +158,7 @@ struct RentalListing {
     #[serde(flatten)]
     rental: Rental,
     machine: Option<String>,
-    tasks: Vec<crate::durable::TaskId>,
+    tasks: Vec<loopflow_model::durable::TaskId>,
     /// What has been copied from it, once anything has.
     copied: Option<CopyCounts>,
 }
@@ -197,7 +196,7 @@ pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
                 created_at: now(),
             };
             let price = ondemand.usd_per_hour().map_err(|reason| anyhow!(reason))?;
-            sqlite.add_ondemand(&ondemand)?;
+            crate::store::rentals::add_ondemand(sqlite, &ondemand)?;
             println!(
                 "Added on-demand {name}: {} on {} at {price}/h; at most {max} at once, {}h each",
                 ondemand.hardware,
@@ -219,8 +218,7 @@ pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
         OndemandCommand::List { json } => {
             // A listing, even one a client polls, never ends a paid machine.
             let unreached = refresh_all(sqlite);
-            let listings = sqlite
-                .ondemands()?
+            let listings = crate::store::rentals::ondemands(sqlite)?
                 .into_iter()
                 .map(|ondemand| {
                     let rentals = sqlite
@@ -248,7 +246,7 @@ pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
             }
         }
         OndemandCommand::Max { name, max } => {
-            sqlite.set_ondemand_max(name, *max)?;
+            crate::store::rentals::set_ondemand_max(sqlite, name, *max)?;
             println!("{name} rents at most {max} at once; current machines stay");
         }
         OndemandCommand::Rent {
@@ -278,7 +276,7 @@ pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
             }
         }
         OndemandCommand::Remove { name } => {
-            sqlite.remove_ondemand(name)?;
+            crate::store::rentals::remove_ondemand(sqlite, name)?;
             println!("Removed on-demand {name}; its rentals' history stays");
         }
     }
@@ -294,7 +292,7 @@ fn where_rented(provider: Provider) -> String {
 }
 
 fn require_ondemand(sqlite: &SqliteStore, name: &str) -> anyhow::Result<OnDemand> {
-    sqlite.ondemand(name)?.ok_or_else(|| {
+    crate::store::rentals::ondemand(sqlite, name)?.ok_or_else(|| {
         anyhow!("no on-demand {name}; `lf ondemand add {name} --provider daytona …` names one")
     })
 }
@@ -302,7 +300,7 @@ fn require_ondemand(sqlite: &SqliteStore, name: &str) -> anyhow::Result<OnDemand
 fn held_ids(
     sqlite: &SqliteStore,
     machine: &MachineId,
-) -> anyhow::Result<Vec<crate::durable::TaskId>> {
+) -> anyhow::Result<Vec<loopflow_model::durable::TaskId>> {
     let held = sqlite.tasks_held_by(machine)?;
     Ok(held.into_iter().map(|(task, _)| task).collect())
 }
@@ -310,7 +308,7 @@ fn held_ids(
 fn listing(sqlite: &SqliteStore, rental: Rental) -> anyhow::Result<RentalListing> {
     let (machine, tasks, copied) = match &rental.machine_id {
         Some(id) => (
-            sqlite.machine_by_id(id)?.and_then(|machine| machine.label),
+            crate::store::machines::machine_by_id(sqlite, id)?.and_then(|machine| machine.label),
             held_ids(sqlite, id)?,
             Some(sqlite.copy_counts(id)?).filter(|counts| counts.sessions + counts.processes > 0),
         ),
@@ -391,7 +389,7 @@ pub(crate) fn rent(
     let api = Sandboxes::from_env(ondemand.provider)?;
     let public_key = public_key()?;
     let linux_lf = linux_lf()?;
-    let rental = sqlite.admit_rental(name, hours, max_usd, by_hand)?;
+    let rental = crate::store::rentals::admit_rental(sqlite, name, hours, max_usd, by_hand)?;
     eprintln!(
         "Renting {} on {} at {}/h until {}",
         rental.hardware,
@@ -402,7 +400,11 @@ pub(crate) fn rent(
     let sandbox = match api.create(&rental, &public_key) {
         Ok(sandbox) => sandbox,
         Err(error) => {
-            sqlite.set_rental_state(&rental.id, RentalState::Unconfirmed)?;
+            crate::store::ownership::set_rental_state(
+                sqlite,
+                &rental.id,
+                RentalState::Unconfirmed,
+            )?;
             return Err(anyhow!(
                 "{error}; it is unknown whether {} created {}. `lf ondemand list` finds it by name \
                  and gives it back",
@@ -527,15 +529,14 @@ fn attach(
     }
     let probe = runtime.block_on(super::machine::probe(route, false))?;
     let label = next_label(sqlite, &rental.ondemand)?;
-    let machine = sqlite.add_machine(&probe.id?, route, &label)?;
+    let machine = crate::store::machines::add_machine(sqlite, &probe.id?, route, &label)?;
     sqlite.attach_rental(&rental.id, &machine.id)?;
     Ok(machine)
 }
 
 /// `code-1`, `code-2`, …: the first label no machine carries.
 fn next_label(sqlite: &SqliteStore, ondemand: &str) -> anyhow::Result<String> {
-    let taken = sqlite
-        .machines()?
+    let taken = crate::store::machines::machines(sqlite)?
         .into_iter()
         .filter_map(|machine| machine.label)
         .collect::<std::collections::HashSet<_>>();
@@ -589,10 +590,9 @@ pub fn place(
     let store = open_store(&runtime)?;
     let sqlite = &store.sqlite;
     if let Some(pool) = placement.pool {
-        let record = sqlite
-            .pool(pool)?
+        let record = crate::store::rentals::pool(sqlite, pool)?
             .ok_or_else(|| anyhow!("no pool {pool}; `lf pool add {pool}` creates it"))?;
-        let machines = sqlite.pool_machines(pool)?;
+        let machines = crate::store::machines::pool_machines(sqlite, pool)?;
         match rental::free_machine(&record, &machines, now()) {
             Ok(free) if placement.quote => {
                 println!(
@@ -670,14 +670,17 @@ pub fn place_by_default(repo: &std::path::Path, issue: &str, batch: bool) -> any
         return Ok(());
     };
     let sqlite = &store.sqlite;
-    if sqlite.task_ownership(&task.id)?.owner.is_some() {
+    if crate::store::ownership::task_ownership(sqlite, &task.id)?
+        .owner
+        .is_some()
+    {
         return Ok(());
     }
-    let Some(capacity) = sqlite.task_capacity(&task.id)? else {
+    let Some(capacity) = crate::store::placement::task_capacity(sqlite, &task.id)? else {
         return Ok(());
     };
-    let is_pool = sqlite.pool(&capacity)?.is_some();
-    if !is_pool && sqlite.ondemand(&capacity)?.is_none() {
+    let is_pool = crate::store::rentals::pool(sqlite, &capacity)?.is_some();
+    if !is_pool && crate::store::rentals::ondemand(sqlite, &capacity)?.is_none() {
         return Err(anyhow!(
             "{issue}'s default capacity {capacity} is no pool or on-demand here; \
              `lf set machine <machine>` replaces it"
@@ -702,7 +705,10 @@ fn hand_off(
     use crate::ops::task_ownership::{change, OwnershipChange};
     let (store, task) =
         runtime.block_on(crate::ops::task::resolve_saved_task(repo, None, issue))?;
-    if store.sqlite.task_ownership(&task.id)?.owner.is_none() {
+    if crate::store::ownership::task_ownership(&store.sqlite, &task.id)?
+        .owner
+        .is_none()
+    {
         change(repo, issue, OwnershipChange::Claim)?;
     }
     let ownership = change(repo, issue, OwnershipChange::Move(label.to_string()))?;
@@ -861,7 +867,7 @@ fn reconcile(sqlite: &SqliteStore, api: &Sandboxes, rental: &Rental) -> anyhow::
         }
         return Ok(());
     };
-    let Some(machine) = sqlite.machine_by_id(machine_id)? else {
+    let Some(machine) = crate::store::machines::machine_by_id(sqlite, machine_id)? else {
         return Ok(());
     };
     give_back(sqlite, api, &rental, &machine, false, false)
@@ -888,7 +894,7 @@ fn refresh(
                 return Ok(None);
             }
             Resolution::Lost => {
-                sqlite.set_rental_state(&rental.id, RentalState::Lost)?;
+                crate::store::ownership::set_rental_state(sqlite, &rental.id, RentalState::Lost)?;
                 return Ok(None);
             }
             Resolution::Wait => return Ok(None),
@@ -1015,7 +1021,7 @@ fn end_rental(
 }
 
 fn delete_sandbox(sqlite: &SqliteStore, api: &Sandboxes, rental: &Rental) -> anyhow::Result<()> {
-    sqlite.set_rental_state(&rental.id, RentalState::Ending)?;
+    crate::store::ownership::set_rental_state(sqlite, &rental.id, RentalState::Ending)?;
     let id = rental
         .provider_id
         .as_deref()
@@ -1028,8 +1034,9 @@ fn delete_sandbox(sqlite: &SqliteStore, api: &Sandboxes, rental: &Rental) -> any
 /// Every path to `ended` comes here: the Tasks the Machine still owns come
 /// back to this one, so the next `lf task run` runs here, not on a gone sandbox.
 fn mark_ended(sqlite: &SqliteStore, rental: &Rental) -> anyhow::Result<()> {
-    let (_, returned) = sqlite.set_rental_state(&rental.id, RentalState::Ended)?;
-    let here = crate::store::sqlite::task_ownership::local_label();
+    let (_, returned) =
+        crate::store::ownership::set_rental_state(sqlite, &rental.id, RentalState::Ended)?;
+    let here = crate::store::ownership::local_label();
     for task in returned {
         let name = sqlite
             .task(&task)?
@@ -1184,20 +1191,23 @@ mod tests {
     use std::rc::Rc;
 
     use super::{checkout_script, end_rental, read_holdings, reconcile, refresh, Ended};
-    use crate::durable::MachineId;
     use crate::machine_records::CopyCounts;
     use crate::rental::sandbox::Sandboxes;
-    use crate::rental::{Hardware, OnDemand, Provider, Rental, RentalState, Usd, BOOT_SECONDS};
-    use crate::store::sqlite::SqliteStore;
+    use loopflow_model::durable::MachineId;
+    use loopflow_storage::rental::{
+        Hardware, OnDemand, Provider, Rental, RentalState, Usd, BOOT_SECONDS,
+    };
+    use loopflow_storage::sqlite::SqliteStore;
 
     type Log = Rc<RefCell<Vec<String>>>;
 
     /// A running rental of `code-1` and a provider that knows its sandbox.
     /// Created and confirmed, with no Machine yet: what a boot leaves.
     fn booting(dir: &std::path::Path) -> (SqliteStore, Rental, Sandboxes, Log) {
-        let store = SqliteStore::open_ephemeral(&dir.join("db")).unwrap();
-        store
-            .add_ondemand(&OnDemand {
+        let store = crate::store::opening::open_ephemeral(&dir.join("db")).unwrap();
+        crate::store::rentals::add_ondemand(
+            &store,
+            &OnDemand {
                 name: "code".into(),
                 provider: Provider::Daytona,
                 hardware: Hardware {
@@ -1211,9 +1221,11 @@ mod tests {
                 max_usd_per_hour: Usd::parse("0.40").unwrap(),
                 hours: 4.0,
                 created_at: time::OffsetDateTime::now_utc(),
-            })
-            .unwrap();
-        let rental = store.admit_rental("code", None, None, false).unwrap();
+            },
+        )
+        .unwrap();
+        let rental =
+            crate::store::rentals::admit_rental(&store, "code", None, None, false).unwrap();
         let rental = store
             .confirm_rental(&rental.id, "sb-1", rental.usd_per_hour)
             .unwrap();
@@ -1232,9 +1244,13 @@ mod tests {
     fn running(dir: &std::path::Path) -> (SqliteStore, Rental, Sandboxes, Log) {
         let (store, rental, api, log) = booting(dir);
         let machine = MachineId::new();
-        store
-            .add_machine(&machine, "ssh://lf@203.0.113.7:40022", "code-1")
-            .unwrap();
+        crate::store::machines::add_machine(
+            &store,
+            &machine,
+            "ssh://lf@203.0.113.7:40022",
+            "code-1",
+        )
+        .unwrap();
         let rental = store.attach_rental(&rental.id, &machine).unwrap();
         (store, rental, api, log)
     }
@@ -1357,7 +1373,7 @@ mod tests {
             &["worktree", "add", "-q", worktree.to_str().unwrap()],
         );
         // No store records either checkout: the Task alone names the repository.
-        let repository = crate::durable::RepositoryId::new();
+        let repository = loopflow_model::durable::RepositoryId::new();
         let (_, script) = checkout_script(&worktree, &repository).unwrap();
         assert!(script.ends_with(&format!("lf config repo --bind {repository}")));
         assert!(script.contains("gh repo clone 'loopflowstudio/loopflow'"));

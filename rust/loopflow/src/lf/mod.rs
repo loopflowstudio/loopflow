@@ -150,7 +150,7 @@ pub struct Cli {
 
     /// Select a registered repository plan on this Machine, not a clone name
     #[arg(long = "repo-id", value_name = "ID")]
-    pub repository: Option<crate::durable::RepositoryId>,
+    pub repository: Option<loopflow_model::durable::RepositoryId>,
 
     /// Forward the SSH agent to the selected machine
     #[arg(long, requires = "machine")]
@@ -1947,7 +1947,7 @@ pub enum SessionCommand {
         issue: Option<String>,
         /// The Task's repository
         #[arg(long, requires = "task")]
-        repository: Option<crate::durable::RepositoryId>,
+        repository: Option<loopflow_model::durable::RepositoryId>,
         /// Where a Machine without the repository clones it from
         #[arg(long, requires = "task")]
         origin: Option<String>,
@@ -1957,11 +1957,11 @@ pub enum SessionCommand {
         planning_key: Option<String>,
         /// The Machine the Task moves from, which a retry here asks for it
         #[arg(long, requires = "task")]
-        from: Option<crate::durable::MachineId>,
+        from: Option<loopflow_model::durable::MachineId>,
         /// Read no move; exit non-zero unless this Task's last move arrived
         /// here. A Machine that sent it asks before taking it back.
         #[arg(long, hide = true, value_name = "TASK", conflicts_with = "check")]
-        arrived: Option<crate::durable::TaskId>,
+        arrived: Option<loopflow_model::durable::TaskId>,
         #[arg(long)]
         json: bool,
     },
@@ -3030,10 +3030,10 @@ pub enum ConfigCommand {
     Repo {
         /// Associate this checkout with a repository identity, retaining prior IDs
         #[arg(long)]
-        bind: Option<crate::durable::RepositoryId>,
+        bind: Option<loopflow_model::durable::RepositoryId>,
         /// Reconnect retained Work after a move predating its Git locator
         #[arg(long, conflicts_with = "bind")]
-        relocate: Option<crate::durable::RepositoryId>,
+        relocate: Option<loopflow_model::durable::RepositoryId>,
         #[arg(long)]
         json: bool,
     },
@@ -3088,7 +3088,7 @@ pub enum MachineCommand {
         pool: Option<String>,
         /// What it cost you, committed when added
         #[arg(long, value_name = "USD")]
-        cost_usd: Option<crate::rental::Usd>,
+        cost_usd: Option<loopflow_storage::rental::Usd>,
         /// After this RFC 3339 time it takes no new work
         #[arg(long, value_name = "RFC3339")]
         expires_at: Option<String>,
@@ -3153,7 +3153,7 @@ pub enum OndemandCommand {
     Add {
         name: String,
         #[arg(long, value_enum)]
-        provider: crate::rental::Provider,
+        provider: loopflow_storage::rental::Provider,
         #[arg(long)]
         vcpus: u32,
         #[arg(long)]
@@ -3170,14 +3170,14 @@ pub enum OndemandCommand {
         #[arg(long)]
         spot: bool,
         /// Hard deadline for each machine it rents, at most 24
-        #[arg(long, default_value_t = crate::rental::DEFAULT_HOURS)]
+        #[arg(long, default_value_t = loopflow_storage::rental::DEFAULT_HOURS)]
         hours: f64,
         /// Machines rented at once
         #[arg(long)]
         max: u32,
         /// Above this hourly price nothing is rented
         #[arg(long, value_name = "USD")]
-        max_usd_per_hour: crate::rental::Usd,
+        max_usd_per_hour: loopflow_storage::rental::Usd,
     },
     /// Templates, budgets and the machines each has rented
     List {
@@ -3193,7 +3193,7 @@ pub enum OndemandCommand {
         hours: Option<f64>,
         /// Spend at most this much on it
         #[arg(long, value_name = "USD")]
-        max_usd: Option<crate::rental::Usd>,
+        max_usd: Option<loopflow_storage::rental::Usd>,
         #[arg(long)]
         json: bool,
     },

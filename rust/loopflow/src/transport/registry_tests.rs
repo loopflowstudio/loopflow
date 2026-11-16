@@ -1,14 +1,16 @@
 //! A registry hosting terminals that a holder on another thread keeps.
 
+use crate::process::attachment;
+use crate::store::session_projection;
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::time::{Duration, Instant};
 
 use super::super::wire::{frame, parse_position, Decoder, Incoming, Own, Request, Tag};
 use super::{connect, Registry, Start};
-use crate::id::{LfSessionId, TerminalId};
 use crate::journal::TestLedgerGuard;
 use crate::server::holder::{serve, Place};
+use loopflow_model::id::{LfSessionId, TerminalId};
 
 /// Stands in for the executable hash both the holder and the server compute.
 const BUILD: &str = "feedfacefeedfacefeedfacefeedfacefeedfacefeedfacefeedfacefeedface";
@@ -347,9 +349,8 @@ fn kept_exit_record(place: &Place, terminal: &TerminalId) -> crate::process::Ses
     let store = crate::journal::process_ledger().unwrap();
     let session = store.test_session("held", &crate::session_record::new_artifact_key());
     let launcher = store.test_lf_process();
-    let attachment = store
-        .claim_session_attachment(&session.id, None, &launcher, true)
-        .unwrap();
+    let attachment =
+        attachment::claim_session_attachment(&store, &session.id, None, &launcher, true).unwrap();
     let record = crate::harness::native_exit::NativeExit {
         session: session.id.to_string(),
         attachment: attachment.clone(),
@@ -621,9 +622,9 @@ fn a_held_terminal_with_no_view_reports_that_it_waits() {
     let store = crate::journal::process_ledger().unwrap();
     let session = store.test_session("asking", &crate::session_record::new_artifact_key());
     let launcher = store.test_lf_process();
-    let attachment = store
-        .claim_session_attachment(session.id.as_str(), None, &launcher, true)
-        .unwrap();
+    let attachment =
+        attachment::claim_session_attachment(&store, session.id.as_str(), None, &launcher, true)
+            .unwrap();
     let ask = ledger.home().join("ask");
     let script = format!(
         r"printf '\033]7501;state=working:app=claude-code\033\\'
@@ -651,14 +652,14 @@ read answer",
         .record_agent_process_identity(session.id.as_str(), &attachment, pid, started)
         .unwrap();
     let available = || {
-        store
-            .session_summary(
-                session.id.as_str(),
-                time::OffsetDateTime::now_utc().unix_timestamp(),
-            )
-            .unwrap()
-            .unwrap()
-            .available
+        session_projection::session_summary(
+            &store,
+            session.id.as_str(),
+            time::OffsetDateTime::now_utc().unix_timestamp(),
+        )
+        .unwrap()
+        .unwrap()
+        .available
     };
     assert!(!available(), "a working agent waits on nobody");
     std::fs::write(&ask, "").unwrap();

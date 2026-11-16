@@ -1,3 +1,4 @@
+use crate::process::attachment;
 mod os_process;
 pub(crate) mod request;
 pub(crate) use os_process::OsProcess;
@@ -18,9 +19,9 @@ use time::OffsetDateTime;
 use tracing::{debug, warn};
 
 use crate::git::worktrees::main_repo_root;
-use crate::id::{LfProcessId, TraceId};
 use crate::process::{AgentCaller, LfProcess, AGENT_CALLER_ENV};
-use crate::store::sqlite::SqliteStore;
+use loopflow_model::id::{LfProcessId, TraceId};
+use loopflow_storage::sqlite::SqliteStore;
 
 const JOURNAL_ROOT: &str = ".lf/journal/traces";
 const JOURNAL_EXCLUDE_ENTRY: &str = ".lf/journal/";
@@ -203,13 +204,13 @@ pub struct ReceiptCost {
 /// attempt, so a held write lock delays a command once, not once per receipt.
 #[cfg(not(test))]
 fn receipt_wait() -> Duration {
-    crate::store::sqlite::SQLITE_WRITE_BUSY_TIMEOUT
+    loopflow_storage::sqlite::SQLITE_WRITE_BUSY_TIMEOUT
 }
 
 #[cfg(test)]
 thread_local! {
     static TEST_RECEIPT_WAIT: std::cell::Cell<Duration> =
-        const { std::cell::Cell::new(crate::store::sqlite::SQLITE_WRITE_BUSY_TIMEOUT) };
+        const { std::cell::Cell::new(loopflow_storage::sqlite::SQLITE_WRITE_BUSY_TIMEOUT) };
 }
 
 #[cfg(test)]
@@ -244,12 +245,7 @@ impl ProcessReceipt {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ProcessIdentityEvidence {
-    Live,
-    Dead,
-    Unknown,
-}
+pub(crate) use crate::store::ProcessIdentityEvidence;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -374,7 +370,11 @@ pub fn observe_process(command: &[String]) {
         if !path.exists() {
             return Ok(());
         }
-        let ledger = SqliteStore::open_existing_processes(&path, wait)?;
+        let ledger = SqliteStore::open_existing_processes(
+            &path,
+            wait,
+            crate::store::token_key::encryption_key,
+        )?;
         let directory = std::env::current_dir()?;
         let fields = LfEventFields {
             command: Some(command.to_vec()),
@@ -753,7 +753,7 @@ fn ledger_insert(context: &ProcessContext, event: &LfEvent, exit_code: Option<i3
         .waited;
     let recorded = match context.ledger.get().cloned().map_or_else(
         || {
-            let store = SqliteStore::new(&context.ledger_path)?;
+            let store = crate::store::open_sqlite(&context.ledger_path)?;
             let _ = context.ledger.set(store.clone());
             Ok::<_, crate::store::StoreError>(store)
         },
@@ -812,7 +812,7 @@ fn first_ledger_failure() -> bool {
 
 /// Open the local ledger store, creating and migrating it if needed.
 pub fn open_ledger() -> Result<SqliteStore, crate::store::StoreError> {
-    SqliteStore::new(&ledger_db_path()?)
+    crate::store::open_sqlite(&ledger_db_path()?)
 }
 
 /// Whether the ledger exists, so a read that could only find nothing can
@@ -1082,7 +1082,15 @@ fn parent_is_recorded(parent: &LfProcessId, ledger: Option<&SqliteStore>) -> boo
     };
     match ledger
         .cloned()
-        .map_or_else(|| SqliteStore::open_processes_read_only(&path), Ok)
+        .map_or_else(
+            || {
+                SqliteStore::open_processes_read_only(
+                    &path,
+                    crate::store::token_key::encryption_key,
+                )
+            },
+            Ok,
+        )
         .and_then(|store| store.process_is_recorded(parent.as_str()))
     {
         Ok(recorded) => recorded,
@@ -1225,7 +1233,7 @@ pub(crate) fn lf_evidence(store: &SqliteStore, process: &LfProcessId) -> Process
 /// A provider OS process's liveness, by its own recorded identity.
 pub(crate) fn agent_evidence(
     store: &SqliteStore,
-    process: &crate::id::AgentProcessId,
+    process: &loopflow_model::id::AgentProcessId,
 ) -> ProcessIdentityEvidence {
     let Ok(Some(record)) = store.agent_process(process) else {
         return ProcessIdentityEvidence::Unknown;
@@ -1279,10 +1287,7 @@ pub(crate) fn recorded_process_receipt(
     store: &SqliteStore,
     record: &crate::process::LfProcess,
 ) -> Result<Option<ProcessReceipt>, std::io::Error> {
-    match store
-        .process_receipt_path(&record.id)
-        .map_err(std::io::Error::other)?
-    {
+    match attachment::process_receipt_path(store, &record.id).map_err(std::io::Error::other)? {
         Some(path) => read_process_receipt(&path),
         None => Ok(None),
     }
@@ -1495,8 +1500,11 @@ pub(crate) fn prune_process_receipts_at(
     if pids.is_empty() {
         return Ok(0);
     }
-    let store = SqliteStore::open_processes_read_only(&lf_home.join("loopflow.db"))
-        .map_err(std::io::Error::other)?;
+    let store = SqliteStore::open_processes_read_only(
+        &lf_home.join("loopflow.db"),
+        crate::store::token_key::encryption_key,
+    )
+    .map_err(std::io::Error::other)?;
     let mut removed = 0;
     for (path, receipt) in read_process_receipt_files_at(lf_home)? {
         if !pids.contains(&receipt.pid)
@@ -1620,7 +1628,7 @@ mod tests {
         ProcessIdentityEvidence, TestLedgerGuard,
     };
     use crate::git::is_clean;
-    use crate::id::{LfProcessId, TraceId};
+    use loopflow_model::id::{LfProcessId, TraceId};
     use loopflow_test_support::{RunningParent, TestRepo};
     use std::path::PathBuf;
     use std::process::{Command, Stdio};

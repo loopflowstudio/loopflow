@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 use super::OpenHost;
 use crate::journal::OsProcess;
 use crate::transport::local_directory_report;
-use crate::work::selection::SplitAxis;
+use loopflow_storage::work::selection::SplitAxis;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub(super) struct RexLocation {

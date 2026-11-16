@@ -1,11 +1,12 @@
 //! Work chooses execution; SSH transports the ordinary command unchanged.
 use std::path::Path;
 
-use crate::durable::{MachineId, RepositoryId, RepositoryIdentity, TaskExecutionRoute, TaskId};
+use crate::durable::TaskExecutionRoute;
 use crate::lf::{Cli, Commands, SessionCommand, TaskCommand};
 use crate::ops::human_session::moves::conversation_task;
-use crate::store::sqlite::SqliteStore;
 use anyhow::{anyhow, Result};
+use loopflow_model::durable::{MachineId, RepositoryId, RepositoryIdentity, TaskId};
+use loopflow_storage::sqlite::SqliteStore;
 
 pub fn identity(
     bind: Option<&RepositoryId>,
@@ -31,7 +32,7 @@ pub fn repository_identity(
     bind: Option<&RepositoryId>,
     relocate: Option<&RepositoryId>,
 ) -> Result<(crate::repository::CanonicalRepo, RepositoryIdentity)> {
-    let repo = crate::repository::CanonicalRepo::containing(directory)?
+    let repo = crate::repository::containing(directory)?
         .ok_or_else(|| anyhow!("run `lf repo` in a repository"))?;
     let runtime = tokio::runtime::Runtime::new()?;
     let identity = runtime.block_on(async {
@@ -96,7 +97,7 @@ pub fn resolve_repository_selection(cli: &mut Cli) -> Result<()> {
     }
     let repo = if explicit_repository {
         Some(
-            crate::repository::CanonicalRepo::current()?
+            crate::repository::current()?
                 .ok_or_else(|| anyhow!("selected repository is unavailable"))?
                 .to_string(),
         )
@@ -265,7 +266,7 @@ pub fn forward(cli: &Cli, args: &[String], directory: &Path) -> Result<Option<Fo
     let Some(route) = resolve_task(&store, cli, selector, directory)? else {
         return Ok(None);
     };
-    if route.machine_id == store.local_machine()?.id {
+    if route.machine_id == crate::store::machines::local_machine(&store)?.id {
         return Ok(None);
     }
     let ownership = matches!(
@@ -348,8 +349,8 @@ fn remote_task_in(store: &SqliteStore, selector: &str) -> Result<Option<TaskExec
     let Some(task) = resolve_task_id(store, selector, None)? else {
         return Ok(None);
     };
-    let route = store.task_execution_route(&task)?;
-    Ok((route.machine_id != store.local_machine()?.id).then_some(route))
+    let route = crate::store::ownership::task_execution_route(store, &task)?;
+    Ok((route.machine_id != crate::store::machines::local_machine(store)?.id).then_some(route))
 }
 
 /// The other Machine that writes the Task's ownership: where it runs, unless
@@ -368,7 +369,7 @@ pub(crate) fn remote_ownership_writer(selector: &str) -> Result<Option<TaskExecu
     };
     let sent = matches!(
         moving.stage,
-        crate::store::sqlite::task_moves::MoveStage::Sent { .. }
+        loopflow_storage::sqlite::task_moves::MoveStage::Sent { .. }
     );
     let arrived = sent && super::session_move::arrived_on(&route.task_id, &moving.to_machine_id)?;
     Ok(arrived.then_some(route))
@@ -449,11 +450,11 @@ fn moved_session(cli: &Cli, args: &[String]) -> Result<Option<Forward>> {
     let Some(store) = read_registry()? else {
         return Ok(None);
     };
-    let id = crate::id::canonical_session(id);
+    let id = loopflow_model::id::canonical_session(id);
     let machine = match conversation_task(&store, &id)? {
         Some(task) => {
-            let runs_on = store.task_execution_route(&task)?.machine_id;
-            (runs_on != store.local_machine()?.id).then_some(runs_on)
+            let runs_on = crate::store::ownership::task_execution_route(&store, &task)?.machine_id;
+            (runs_on != crate::store::machines::local_machine(&store)?.id).then_some(runs_on)
         }
         None => store.session_moved_to(&id)?,
     };
@@ -511,8 +512,7 @@ fn primary_session(cli: &Cli, args: &[String], directory: &Path) -> Result<Optio
     };
     let registry: crate::store::SharedStore = std::sync::Arc::new(registry);
     let store = &registry.sqlite;
-    let repo =
-        crate::repository::CanonicalRepo::containing(directory)?.map(|repo| repo.to_string());
+    let repo = crate::repository::containing(directory)?.map(|repo| repo.to_string());
     let repository = match (&cli.repository, repo.as_deref()) {
         (Some(repository), _) => Some(repository.clone()),
         (None, Some(repo)) => store.repository_id(repo)?,
@@ -534,9 +534,12 @@ fn primary_session(cli: &Cli, args: &[String], directory: &Path) -> Result<Optio
                 return Ok(None);
             };
             (
-                store
-                    .wave_owning_machine(&wave_id, crate::durable::MachineSetting::Session)?
-                    .0,
+                crate::store::placement::wave_owning_machine(
+                    store,
+                    &wave_id,
+                    loopflow_model::durable::MachineSetting::Session,
+                )?
+                .0,
                 format!("Wave {wave}"),
             )
         }
@@ -545,14 +548,17 @@ fn primary_session(cli: &Cli, args: &[String], directory: &Path) -> Result<Optio
                 return Ok(None);
             };
             (
-                store
-                    .repository_owning_machine(repository, crate::durable::MachineSetting::Session)?
-                    .0,
+                crate::store::placement::repository_owning_machine(
+                    store,
+                    repository,
+                    loopflow_model::durable::MachineSetting::Session,
+                )?
+                .0,
                 "this repository".to_string(),
             )
         }
     };
-    if machine == store.local_machine()?.id {
+    if machine == crate::store::machines::local_machine(store)?.id {
         return Ok(None);
     }
     // The destination finds its own checkout by identity, never by this path.
@@ -613,6 +619,7 @@ fn context_scope(
                     .map(|wave| ContextScope::Wave(wave.name().to_string())),
                 Ok(PrimaryScope::Repository(_)) => Some(ContextScope::Repository),
                 Ok(PrimaryScope::Task(_)) | Err(_) => None,
+                Ok(_) => None,
             },
         )
     })
@@ -643,7 +650,7 @@ fn resolve_task(
             })?)
         } else if cli.repo.is_some() {
             Some(
-                crate::repository::CanonicalRepo::containing(directory)?
+                crate::repository::containing(directory)?
                     .ok_or_else(|| anyhow!("selected repository is unavailable"))?
                     .to_string(),
             )
@@ -651,7 +658,7 @@ fn resolve_task(
             None
         };
     resolve_task_id(store, selector, repo.as_deref())?
-        .map(|task| store.task_execution_route(&task).map_err(Into::into))
+        .map(|task| crate::store::ownership::task_execution_route(store, &task).map_err(Into::into))
         .transpose()
 }
 
@@ -669,7 +676,7 @@ pub fn location(
     let (repository, repo) = if let Some(repository) = &cli.repository {
         (repository.clone(), store.repository_path(repository)?)
     } else {
-        let repo = crate::repository::CanonicalRepo::current()?
+        let repo = crate::repository::current()?
             .ok_or_else(|| anyhow!("select a repository before reading execution location"))?
             .to_string();
         let repository = store
@@ -716,10 +723,10 @@ fn resolve_task_id(
     selector: &str,
     repo: Option<&str>,
 ) -> Result<Option<TaskId>> {
-    let task = store.resolve_task_id(selector, repo)?;
+    let task = crate::store::children::resolve_task_id(store, selector, repo)?;
     if let Some(repo) = repo.filter(|_| task.is_none()) {
         anyhow::ensure!(
-            store.resolve_task_id(selector, None)?.is_none(),
+            crate::store::children::resolve_task_id(store, selector, None)?.is_none(),
             "Task {selector} does not belong to selected repository {repo}"
         );
     }
@@ -731,16 +738,16 @@ mod tests {
     use std::path::Path;
 
     use super::{launch_task, repository_path, resolve, resolve_task, without_placement};
-    use crate::durable::{RepositoryId, TaskId};
     use crate::lf::Cli;
-    use crate::store::sqlite::SqliteStore;
-    use crate::work::task::NewTask;
+
     use clap::Parser;
+    use loopflow_model::durable::{RepositoryId, TaskId};
+    use loopflow_storage::work::task::NewTask;
 
     #[test]
     fn routing_resolves_task_prefixes_within_historical_repository_locators() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
         let first = TaskId::parse("task_abcd1234400080000000000000000001").unwrap();
         let second = TaskId::parse("task_abcd1235400080000000000000000002").unwrap();
         let selected_path = home.path().join("selected");
@@ -754,10 +761,12 @@ mod tests {
             (selected_repo, &first),
             (other_path.to_str().unwrap(), &second),
         ] {
-            let project = store.ensure_wave_project(repo, "inbox").unwrap();
+            let project =
+                crate::work::wave::bootstrap::ensure_wave_project(&store, repo, "inbox").unwrap();
             store
                 .create_task(&NewTask {
-                    repository_id: store.ensure_repository(repo).unwrap(),
+                    repository_id: crate::repository::location::ensure_repository(&store, repo)
+                        .unwrap(),
                     due_date: None,
                     id: id.clone(),
                     project_id: Some(project.id),
@@ -768,11 +777,11 @@ mod tests {
         }
         let prior = store.repository_id(selected_repo).unwrap().unwrap();
         let selected = RepositoryId::new();
-        store.bind_repository(selected_repo, &selected).unwrap();
+        crate::repository::location::bind_repository(&store, selected_repo, &selected).unwrap();
         let cli = Cli::try_parse_from(["lf", "--repo-id", prior.as_str()]).unwrap();
         assert_eq!(
             resolve_task(&store, &cli, "abcd", Path::new("/")).unwrap(),
-            Some(store.task_execution_route(&first).unwrap())
+            Some(crate::store::ownership::task_execution_route(&store, &first).unwrap())
         );
         assert_eq!(
             resolve_task(&store, &cli, first.as_str(), Path::new("/"))
@@ -821,8 +830,10 @@ mod tests {
         let _restore = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
         let home = tempfile::tempdir().unwrap();
         std::env::set_var("LF_HOME", home.path());
-        let store = SqliteStore::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
-        let id = store.ensure_repository("/selected/repository").unwrap();
+        let store =
+            crate::store::opening::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
+        let id =
+            crate::repository::location::ensure_repository(&store, "/selected/repository").unwrap();
         assert_eq!(
             repository_path(&id).unwrap(),
             std::path::Path::new("/selected/repository")

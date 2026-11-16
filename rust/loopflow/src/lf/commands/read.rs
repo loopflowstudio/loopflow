@@ -22,10 +22,10 @@ use super::machine::{local_machine, machines};
 use super::subscribe::{Subscription, Transport};
 use super::usage;
 use super::waves::list as list_waves;
-use crate::durable::RepositoryId;
 use crate::lf::SessionListArgs;
 use crate::ops::task::{task_changes, task_diff, task_file};
 use crate::session::SessionFilter;
+use loopflow_model::durable::RepositoryId;
 
 fn words(words: &[&str]) -> Vec<String> {
     words.iter().map(|word| word.to_string()).collect()
@@ -85,7 +85,7 @@ pub enum Read {
     ProcessHistory { id: String },
     /// Look up a creation without starting or retrying it. Null confirms absence.
     #[serde(rename = "creation.get")]
-    #[schemars(extend("x-result" = generator.subschema_for::<Option<crate::store::sqlite::creation::CreationReceipt>>()))]
+    #[schemars(extend("x-result" = generator.subschema_for::<Option<loopflow_storage::sqlite::creation::CreationReceipt>>()))]
     CreationGet { request_id: String },
     /// `lf process list`: live Loopflow call trees.
     #[serde(rename = "process.list")]
@@ -93,12 +93,12 @@ pub enum Read {
     ProcessList,
     /// `lf --cwd <directory> desktop view list`: the plans a repository window shows.
     #[serde(rename = "desktop.view.list")]
-    #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::work::selection::ViewPlan>>()))]
+    #[schemars(extend("x-result" = generator.subschema_for::<Vec<loopflow_storage::work::selection::ViewPlan>>()))]
     DesktopViewList { directory: PathBuf },
     /// `lf desktop view list --all [--expression <expression>]`: one selection
     /// across the portfolio repositories, as the phone lists open Tasks.
     #[serde(rename = "view.select")]
-    #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::work::selection::ViewPlan>>()))]
+    #[schemars(extend("x-result" = generator.subschema_for::<Vec<loopflow_storage::work::selection::ViewPlan>>()))]
     ViewSelect { expression: Option<String> },
     /// `lf --cwd <directory> session list`, with `--headless`
     /// when `headless` Sessions are shown too: every row, or with a `limit`
@@ -164,7 +164,7 @@ pub enum Read {
     WaveList,
     /// `lf machine id`: this Machine's identity.
     #[serde(rename = "machine.self")]
-    #[schemars(extend("x-result" = generator.subschema_for::<crate::durable::Machine>()))]
+    #[schemars(extend("x-result" = generator.subschema_for::<loopflow_model::durable::Machine>()))]
     MachineSelf,
     /// `lf desktop portfolio`: the repositories this Machine's windows show.
     #[serde(rename = "desktop.portfolio")]
@@ -215,7 +215,7 @@ pub enum Read {
     /// `lf --cwd <directory> desktop view show [expression]`: what a view
     /// shows; no expression is the repository's own.
     #[serde(rename = "desktop.view.get")]
-    #[schemars(extend("x-result" = generator.subschema_for::<crate::work::selection::ViewPlan>()))]
+    #[schemars(extend("x-result" = generator.subschema_for::<loopflow_storage::work::selection::ViewPlan>()))]
     DesktopViewGet {
         directory: PathBuf,
         expression: Option<String>,
@@ -848,13 +848,12 @@ impl Read {
             // The command prints the path alone.
             Self::RepoPath { id } => {
                 let checkout = super::work_route::repository_path(id)?;
-                let repo =
-                    crate::repository::CanonicalRepo::containing(&checkout)?.ok_or_else(|| {
-                        not_found(
-                            format!("repository plan {id} has no local checkout"),
-                            serde_json::json!({ "repo_id": id }),
-                        )
-                    })?;
+                let repo = crate::repository::containing(&checkout)?.ok_or_else(|| {
+                    not_found(
+                        format!("repository plan {id} has no local checkout"),
+                        serde_json::json!({ "repo_id": id }),
+                    )
+                })?;
                 Ok(repo.to_string().into())
             }
             Self::WaveGraph { directory, wave } => {
@@ -1108,9 +1107,7 @@ mod tests {
     #[test]
     fn session_subscription_keeps_conversations_beyond_the_first_hundred() {
         let home = tempfile::tempdir().unwrap();
-        let store =
-            crate::store::sqlite::SqliteStore::open_ephemeral(&home.path().join("store.db"))
-                .unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         for index in 0..101 {
             store.test_session(
                 &format!("session-{index:03}"),
@@ -1125,7 +1122,8 @@ mod tests {
             task: None,
         };
         let filter = read.session_filter(home.path()).unwrap();
-        let sessions = store.session_summaries(&filter, 0).unwrap();
+        let sessions =
+            crate::store::session_projection::session_summaries(&store, &filter, 0).unwrap();
         assert_eq!(sessions.len(), 101);
         assert!(sessions.iter().any(|session| session.id == "session-100"));
     }
@@ -1133,9 +1131,7 @@ mod tests {
     #[test]
     fn served_session_lists_include_headless_but_never_completed() {
         let home = tempfile::tempdir().unwrap();
-        let store =
-            crate::store::sqlite::SqliteStore::open_ephemeral(&home.path().join("store.db"))
-                .unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         for id in ["interactive", "headless", "closed", "closed-headless"] {
             store.test_session(id, &crate::session_record::new_artifact_key());
         }
@@ -1153,7 +1149,9 @@ mod tests {
                     task: None,
                 };
                 let filter = read.session_filter(home.path()).unwrap();
-                let sessions = store.session_summaries(&filter, 0).unwrap();
+                let sessions =
+                    crate::store::session_projection::session_summaries(&store, &filter, 0)
+                        .unwrap();
                 let mut ids = sessions
                     .iter()
                     .map(|row| row.id.as_str())

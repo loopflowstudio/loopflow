@@ -509,17 +509,18 @@ fn terminal_context_refreshes_without_replacing_instructions_or_losing_failed_se
         env!("CARGO_BIN_EXE_lf"),
         &home.path().join("machine"),
     );
-    let store = loopflow::store::sqlite::SqliteStore::new(&home.path().join("machine/loopflow.db"))
-        .unwrap();
-    store
-        .create_wave(&loopflow::work::wave::Wave::new(
+    let store = loopflow::store::open_sqlite(&home.path().join("machine/loopflow.db")).unwrap();
+    loopflow::work::wave::bootstrap::upsert_wave(
+        &store,
+        &loopflow::work::wave::Wave::new(
             loopflow::id::WaveId::new(),
             "fixture".into(),
-            loopflow::repository::CanonicalRepo::discover(repo.path())
+            loopflow::repository::discover(repo.path())
                 .unwrap()
                 .to_string(),
-        ))
-        .unwrap();
+        ),
+    )
+    .unwrap();
     let bin = home.path().join("bin");
     fs::create_dir(&bin).unwrap();
     let provider = bin.join(harness);

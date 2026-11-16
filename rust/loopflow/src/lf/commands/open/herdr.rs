@@ -6,7 +6,7 @@ use std::path::Path;
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 
-use crate::work::selection::SplitAxis;
+use loopflow_storage::work::selection::SplitAxis;
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub(super) struct HerdrLocation {
@@ -181,7 +181,7 @@ pub(super) fn split(axis: SplitAxis, ratio: f64, before: Value, after: Value) ->
 #[cfg(test)]
 mod tests {
     use super::{split, terminal};
-    use crate::work::selection::SplitAxis;
+    use loopflow_storage::work::selection::SplitAxis;
     use std::path::Path;
 
     #[test]

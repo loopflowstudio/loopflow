@@ -83,7 +83,7 @@ fn prepare_pr(
         if matches!(finalize, Finalize::AutoMerge) && matches!(integration, Integration::Required) {
             if let Some((number, head)) = crate::ops::task::matching_task_pr_merge_request(
                 &repo_root,
-                crate::work::task::PrMergeMode::Auto,
+                loopflow_storage::work::task::PrMergeMode::Auto,
             )? {
                 if let Some(pr) = crate::ops::pr::current_pr(&repo_root)? {
                     if pr.number == u64::from(number)
@@ -211,8 +211,8 @@ fn prepare_pr(
     crate::ops::task::request_task_pr_merge(
         &repo_root,
         match finalize {
-            Finalize::AutoMerge => crate::work::task::PrMergeMode::Auto,
-            Finalize::UserMerge => crate::work::task::PrMergeMode::User,
+            Finalize::AutoMerge => loopflow_storage::work::task::PrMergeMode::Auto,
+            Finalize::UserMerge => loopflow_storage::work::task::PrMergeMode::User,
         },
         pr.as_ref().and_then(|pr| pr.head_sha.as_deref()),
         inherit_pr,

@@ -1,4 +1,5 @@
 use crate::support;
+use loopflow::process::attachment;
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -326,8 +327,7 @@ fn same_named_repositories_need_a_qualifier_and_change_nothing() {
     let home = tempfile::tempdir().unwrap();
     let elsewhere = tempfile::tempdir().unwrap();
     let parents = [tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap()];
-    let store =
-        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     let mut ids = Vec::new();
     for parent in &parents {
         let path = parent.path().join("same");
@@ -355,8 +355,7 @@ fn same_named_repositories_need_a_qualifier_and_change_nothing() {
         }
         ids.push((
             path.clone(),
-            store
-                .ensure_repository(&path.display().to_string())
+            loopflow::repository::location::ensure_repository(&store, &path.display().to_string())
                 .unwrap(),
         ));
     }
@@ -686,40 +685,40 @@ fn live_conversation(
     open_tools: i64,
     yielded: i64,
 ) -> String {
-    let store = loopflow::store::sqlite::SqliteStore::new(&home.join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&home.join("loopflow.db")).unwrap();
     let input = format!("run_{}", uuid::Uuid::new_v4().simple());
     let id = format!("session_{input}");
-    store
-        .create_session(
-            loopflow::session::LfSession {
-                captured: None,
-                id: id.clone().into(),
-                artifact_key: Some(input),
-                caller_artifact_key: None,
-                input_published: false,
-                cwd: cwd.into(),
-                skill: None,
-                provider: Some("codex".into()),
-                model: None,
-                node: None,
-                iterations: None,
-                task_id: None,
-                wave_id: None,
-                graph_lf_process_id: None,
-                work_source: None,
-                bound_at: None,
-                interactive: true,
-                repo: Some(cwd.display().to_string()),
-                title: title.into(),
-                title_source: loopflow::session::TitleSource::Generated,
-                request: None,
-                ready_summary: None,
-                completed_at: None,
-                created_at: 1,
-            },
-            None,
-        )
-        .unwrap();
+    loopflow::store::sessions::create_session(
+        &store,
+        loopflow::session::LfSession {
+            captured: None,
+            id: id.clone().into(),
+            artifact_key: Some(input),
+            caller_artifact_key: None,
+            input_published: false,
+            cwd: cwd.into(),
+            skill: None,
+            provider: Some("codex".into()),
+            model: None,
+            node: None,
+            iterations: None,
+            task_id: None,
+            wave_id: None,
+            graph_lf_process_id: None,
+            work_source: None,
+            bound_at: None,
+            interactive: true,
+            repo: Some(cwd.display().to_string()),
+            title: title.into(),
+            title_source: loopflow::session::TitleSource::Generated,
+            request: None,
+            ready_summary: None,
+            completed_at: None,
+            created_at: 1,
+        },
+        None,
+    )
+    .unwrap();
     let db = rusqlite::Connection::open(home.join("loopflow.db")).unwrap();
     let parent = loopflow::id::LfProcessId::new();
     db.execute(
@@ -727,9 +726,8 @@ fn live_conversation(
         [&parent],
     )
     .unwrap();
-    let attachment = store
-        .claim_session_attachment(&id, None, &parent, true)
-        .unwrap();
+    let attachment =
+        attachment::claim_session_attachment(&store, &id, None, &parent, true).unwrap();
     db.execute(
         "UPDATE processes SET pid=?2,os_started_at=?3 WHERE id=?1",
         rusqlite::params![attachment.agent_process_id, provider.id(), started],
@@ -1379,20 +1377,17 @@ fn rex_reply(bin: &Path, method: &str, reply: Value) {
 #[test]
 fn rex_follower_places_remote_arrivals_in_one_container_per_machine() {
     use loopflow::durable::MachineId;
-    use loopflow::store::sqlite::SqliteStore;
 
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     let bin = tempfile::tempdir().unwrap();
     let _env = EnvGuard::with_lf_home(&[], home.path());
     let registered = register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
-    let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     let peer = MachineId::new();
-    store
-        .add_machine(&peer, "remote.invalid", "Remote")
-        .unwrap();
-    store.claim_task(&registered.task.id).unwrap();
-    store.move_claim(&registered.task.id, &peer).unwrap();
+    loopflow::store::machines::add_machine(&store, &peer, "remote.invalid", "Remote").unwrap();
+    loopflow::store::ownership::claim_task(&store, &registered.task.id).unwrap();
+    loopflow::store::ownership::move_claim(&store, &registered.task.id, &peer).unwrap();
     // Remote checkout state is not copied here; the peer decides eligibility.
     rusqlite::Connection::open(home.path().join("loopflow.db"))
         .unwrap()
@@ -2423,11 +2418,8 @@ fn failed_attachment_returns_failure_and_the_same_command_can_retry() {
         [&owner],
     )
     .unwrap();
-    let store =
-        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
-    store
-        .claim_session_attachment(&session, None, &owner, true)
-        .unwrap();
+    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
+    attachment::claim_session_attachment(&store, &session, None, &owner, true).unwrap();
     let focus = lf(
         home.path(),
         repo.path(),

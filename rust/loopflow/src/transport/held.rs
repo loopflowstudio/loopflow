@@ -10,10 +10,10 @@ use std::os::unix::process::ExitStatusExt;
 use std::process::ExitStatus;
 use std::time::{Duration, Instant};
 
-use crate::id::TerminalId;
 use crate::server::holder::client::Client;
 use crate::server::holder::wire::{self, Decoder, Exit, Frame, Request};
 use crate::server::holder::Place;
+use loopflow_model::id::TerminalId;
 
 use super::hosted::Chunk;
 use super::input::{Paste, PendingInput};

@@ -10,9 +10,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::planning_exchange::PlanningSnapshot;
 use crate::planning_git::{PlanningGit, PlanningPublication, PlanningRevision};
 use crate::store::{open_store, sqlite::SqliteStore, StorageConfig, Store};
+use loopflow_storage::planning_exchange::PlanningSnapshot;
 
 use super::{OpsError, OpsResult};
 
@@ -26,11 +26,9 @@ pub(crate) async fn find_task(
     store: &Store,
     repo: &str,
     selector: &str,
-) -> OpsResult<Option<crate::work::task::Task>> {
+) -> OpsResult<Option<loopflow_storage::work::task::Task>> {
     let read = || {
-        store
-            .sqlite
-            .resolve_task_id(selector, Some(repo))?
+        crate::store::children::resolve_task_id(&store.sqlite, selector, Some(repo))?
             .map(|id| store.sqlite.task(&id))
             .transpose()
             .map(Option::flatten)
@@ -119,7 +117,7 @@ pub(crate) async fn configured_destination(store: &Store, repo: &str) -> OpsResu
         .reference(key.as_deref())
         .expect("a personal plan has a provisioned user key");
     let destination =
-        crate::planning_git::PlanningDestination::resolve(Path::new(repo), &remote, &reference)
+        crate::planning_git::resolve_destination(Path::new(repo), &remote, &reference)
             .map_err(message)?;
     let id = store
         .bind_peer_planning(repo, &destination)
@@ -221,13 +219,9 @@ async fn active_destination(store: &Store, repo: &str) -> OpsResult<Option<Optio
     {
         reference
             .map(|reference| {
-                crate::planning_git::PlanningDestination::resolve(
-                    Path::new(repo),
-                    &remote,
-                    &reference,
-                )
-                .map(|destination| destination.id())
-                .map_err(message)
+                crate::planning_git::resolve_destination(Path::new(repo), &remote, &reference)
+                    .map(|destination| destination.id())
+                    .map_err(message)
             })
             .transpose()?
     } else {
@@ -347,9 +341,14 @@ fn acquire_destination(
         .map_err(message)?;
     let imported = if let Some(document) = remote {
         let snapshot = PlanningSnapshot::from_bytes(&document.bytes).map_err(message)?;
-        store
-            .import_peer_planning(repo, destination, document.revision.as_str(), &snapshot)
-            .map_err(message)?;
+        crate::store::planning_peers::import_peer_planning(
+            store,
+            repo,
+            destination,
+            document.revision.as_str(),
+            &snapshot,
+        )
+        .map_err(message)?;
         Some((document.revision, snapshot))
     } else {
         None
@@ -434,7 +433,7 @@ pub(crate) fn refresh_directory(directory: &Path) -> OpsResult<()> {
 }
 
 fn sync_directory(directory: &Path, refresh: bool) -> OpsResult<()> {
-    let repo = crate::repository::CanonicalRepo::discover(directory)
+    let repo = crate::repository::discover(directory)
         .map_err(message)?
         .to_string();
     if !super::planning_client::connected(&repo) {
@@ -467,7 +466,7 @@ impl PlanningSync {
     /// One thread owns initialization and exchange. Callers may already be inside
     /// an async runtime; startup errors still return before the provider launches.
     pub(crate) fn start_for_directory(directory: &Path) -> OpsResult<Self> {
-        let repo = crate::repository::CanonicalRepo::discover(directory)
+        let repo = crate::repository::discover(directory)
             .map_err(message)?
             .to_string();
         if super::planning_client::connected(&repo) {

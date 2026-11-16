@@ -27,7 +27,7 @@ pub struct BindReport {
 
 #[derive(Debug, Serialize)]
 pub struct BoundSession {
-    pub session_id: crate::id::LfSessionId,
+    pub session_id: loopflow_model::id::LfSessionId,
     pub task: String,
     pub wave: Option<String>,
     #[serde(with = "time::serde::rfc3339")]
@@ -77,7 +77,7 @@ impl Usage {
 /// One captured input reduced to what the comparison measures.
 #[derive(Debug)]
 struct Step {
-    session_id: crate::id::LfSessionId,
+    session_id: loopflow_model::id::LfSessionId,
     task: Option<String>,
     wave: Option<String>,
     ended_at: Option<i64>,
@@ -101,12 +101,15 @@ fn read() -> Result<(Vec<Step>, Vec<SessionBind>)> {
     if !database.exists() {
         return Ok((Vec::new(), Vec::new()));
     }
-    let store = crate::store::sqlite::SqliteStore::open_processes_read_only(&database)?;
-    let steps = store
-        .conversation_history(None, None, None, None, 0, false)?
-        .iter()
-        .map(step)
-        .collect();
+    let store = loopflow_storage::sqlite::SqliteStore::open_processes_read_only(
+        &database,
+        crate::store::token_key::encryption_key,
+    )?;
+    let steps =
+        crate::store::sessions::conversation_history(&store, None, None, None, None, 0, false)?
+            .iter()
+            .map(step)
+            .collect();
     Ok((steps, store.bound_sessions()?))
 }
 

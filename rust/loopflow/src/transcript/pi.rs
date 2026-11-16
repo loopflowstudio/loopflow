@@ -118,7 +118,7 @@ fn branch(rows: &[Value]) -> Vec<&Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chat::types::{ConversationItem, Lifecycle};
+    use loopflow_model::chat::types::{ConversationItem, Lifecycle};
 
     #[test]
     fn a_pi_session_reads_only_the_branch_it_resumes_with_its_turn_end_and_cost() {

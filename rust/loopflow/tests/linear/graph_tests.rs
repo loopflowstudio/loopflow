@@ -8,7 +8,6 @@ use std::process::Command;
 use loopflow::graph::compile_graph;
 use loopflow::graph::load_graph;
 use loopflow::graph::{ConcreteStep, Step};
-use loopflow::store::sqlite::SqliteStore;
 use support::{codex_app_server_script, register_codex_account};
 use tempfile::TempDir;
 
@@ -76,7 +75,7 @@ fn step_fields(graph: &serde_json::Value, field: &str) -> Vec<serde_json::Value>
 }
 
 fn kill_recorded_graph(home: &Path, id: &str) {
-    let store = SqliteStore::new(&home.join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&home.join("loopflow.db")).unwrap();
     let pid = store
         .lf_process(&id.parse().unwrap())
         .unwrap()
@@ -1123,9 +1122,7 @@ fn observing_and_preparing_a_task_are_not_execution() {
     let runtime = tokio::runtime::Runtime::new().unwrap();
     // Allocating the checkout claimed the Task; nothing after it adds an entry.
     let entries = || {
-        task.store
-            .sqlite
-            .task_ownership(&task.task.id)
+        loopflow::store::ownership::task_ownership(&task.store.sqlite, &task.task.id)
             .unwrap()
             .log
             .len()
@@ -1179,11 +1176,15 @@ fn task_run_history_reads_only_that_tasks_runs_without_starting_it() {
 
     // A Task without Runs: an empty list, and asking prepares and claims nothing.
     let before = events();
-    let claims = task.store.sqlite.task_ownership(&task.task.id).unwrap().log;
+    let claims = loopflow::store::ownership::task_ownership(&task.store.sqlite, &task.task.id)
+        .unwrap()
+        .log;
     assert!(read("INF-123").is_empty());
     assert_eq!(events(), before, "reading Run history writes no Task event");
     assert_eq!(
-        task.store.sqlite.task_ownership(&task.task.id).unwrap().log,
+        loopflow::store::ownership::task_ownership(&task.store.sqlite, &task.task.id)
+            .unwrap()
+            .log,
         claims
     );
 

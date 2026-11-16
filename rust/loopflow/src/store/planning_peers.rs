@@ -1,45 +1,8 @@
-use std::collections::{BTreeMap, BTreeSet};
-
-use crate::planning_exchange::PlanningMutation;
-
 use crate::planning_git::PlanningDestination;
 
 use super::{run_sqlite, Store, StoreResult};
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
-pub struct PeerProjectionConflict {
-    pub target: String,
-    pub reason: String,
-}
-
-/// Local routing and import evidence. Endpoints are deliberately not displayed:
-/// Git URLs can contain credentials. A checkpoint is not publication evidence.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
-pub struct PeerPlanningStatus {
-    pub id: String,
-    pub reference: String,
-    pub active: bool,
-    pub selected_records: u64,
-    pub imported_revision: Option<String>,
-    pub fetched_revision: Option<String>,
-    pub acquisition_error: Option<String>,
-    pub publication_revision: Option<String>,
-    pub publication_state: Option<String>,
-    pub publication_error: Option<String>,
-    pub pending_local: bool,
-    pub conflicts: Vec<PeerProjectionConflict>,
-}
-
-/// `lf planning journal`: one destination's retained journal. It grows with
-/// every edit, so it is a one-shot read, not part of the status.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct PlanningJournal {
-    pub destination: String,
-    /// Retained journal entries, including losing values and rejected projections.
-    pub changes: BTreeMap<String, PlanningMutation>,
-    /// Ranked mutations, not evidence of successful projection or publication.
-    pub candidates: BTreeSet<String>,
-}
+pub use super::peer_records::{PeerPlanningStatus, PeerProjectionConflict, PlanningJournal};
 
 impl Store {
     pub async fn peer_planning_journal(
@@ -91,5 +54,132 @@ impl Store {
             sqlite.bind_peer_planning(&repo, &destination)
         })
         .await
+    }
+}
+
+/// Observe peer configuration and repository identity before the SQL import.
+pub fn import_peer_planning(
+    store: &super::sqlite::SqliteStore,
+    repo: &str,
+    destination: &str,
+    revision: &str,
+    incoming: &loopflow_storage::planning_exchange::PlanningSnapshot,
+) -> StoreResult<()> {
+    if store.peer_import_current(repo, destination, revision)? {
+        return Ok(());
+    }
+    let incoming = incoming
+        .canonicalized()
+        .map_err(|error| super::StoreError::InvalidData(error.to_string()))?;
+    incoming
+        .validate()
+        .map_err(|error| super::StoreError::InvalidData(error.to_string()))?;
+    loop {
+        if store.repository_id(repo)?.is_none() {
+            crate::repository::location::ensure_repository(store, repo)?;
+        }
+        let inputs = store.repository_registration(repo)?;
+        let config = crate::config::placement::global_settings_at(&store.home_dir()?)
+            .map_err(|error| super::StoreError::InvalidData(error.to_string()))?;
+        let machine_names = config
+            .machines
+            .into_iter()
+            .map(|(name, declaration)| (declaration.id, name))
+            .collect();
+        let connected = crate::ops::planning_client::connected(repo);
+        let import = super::sqlite::PeerImport {
+            repo,
+            destination,
+            revision,
+            incoming: &incoming,
+            inputs: &inputs,
+            planning_connected: connected,
+            machine_names,
+        };
+        if store.import_prepared_peer_planning(&import)? {
+            return Ok(());
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::import_peer_planning;
+    use crate::planning_git::PlanningDestination;
+    use crate::repository::location::{
+        bind_repository, ensure_repository, locator_directory, read_locator,
+    };
+    use loopflow_model::durable::RepositoryId;
+    use loopflow_storage::planning_exchange::PlanningSnapshot;
+    use loopflow_storage::sqlite::PeerImport;
+    use loopflow_test_support::TestRepo;
+
+    #[test]
+    fn first_repository_import_retries_with_the_locator_left_by_a_failed_registration() {
+        let home = tempfile::tempdir().unwrap();
+        let repo = TestRepo::new();
+        let path = repo.path().canonicalize().unwrap();
+        let path = path.to_str().unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let destination =
+            PlanningDestination::new("/unused/fixture", "refs/loopflow/planning/shared/retry")
+                .unwrap();
+        let route = store.bind_peer_planning(path, &destination).unwrap();
+        let incoming = PlanningSnapshot::default();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute_batch(
+                "CREATE TEMP TRIGGER fail_registration BEFORE INSERT ON repository_plans
+             BEGIN SELECT RAISE(ABORT,'registration failed'); END;",
+            )
+            .unwrap();
+        assert!(import_peer_planning(&store, path, &route, "one", &incoming).is_err());
+        assert!(store.repository_id(path).unwrap().is_none());
+        let directory = locator_directory(
+            &crate::git::worktrees::git_common_dir(repo.path()).unwrap(),
+            &store.repository_registration(path).unwrap().machine,
+        );
+        let original = read_locator(&directory).unwrap().unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute_batch("DROP TRIGGER fail_registration")
+            .unwrap();
+        import_peer_planning(&store, path, &route, "one", &incoming).unwrap();
+        assert_eq!(store.repository_id(path).unwrap(), Some(original));
+        assert!(store.peer_import_current(path, &route, "one").unwrap());
+        assert!(store.peer_planning_status(path, Some(&route)).unwrap()[0].active);
+    }
+
+    #[test]
+    fn changed_repository_scope_reacquires_before_an_import_is_recorded() {
+        let home = tempfile::tempdir().unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
+        ensure_repository(&store, "/repo").unwrap();
+        let destination =
+            PlanningDestination::new("/unused/fixture", "refs/loopflow/planning/shared/scope")
+                .unwrap();
+        let route = store.bind_peer_planning("/repo", &destination).unwrap();
+        let inputs = store.repository_registration("/repo").unwrap();
+        let incoming = PlanningSnapshot::default();
+        let prepared = PeerImport {
+            inputs: &inputs,
+            repo: "/repo",
+            destination: &route,
+            revision: "one",
+            incoming: &incoming,
+            planning_connected: false,
+            machine_names: Default::default(),
+        };
+        let later = RepositoryId::new();
+        bind_repository(&store, "/repo", &later).unwrap();
+        assert!(!store.import_prepared_peer_planning(&prepared).unwrap());
+        assert!(!store.peer_import_current("/repo", &route, "one").unwrap());
+        import_peer_planning(&store, "/repo", &route, "one", &incoming).unwrap();
+        assert_eq!(store.repository_id("/repo").unwrap(), Some(later));
+        assert!(store.peer_import_current("/repo", &route, "one").unwrap());
     }
 }

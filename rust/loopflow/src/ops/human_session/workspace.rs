@@ -4,10 +4,10 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-use crate::durable::{MachineId, WorkRef};
-use crate::store::sqlite::TaskCheckout;
 use crate::store::SharedStore;
-use crate::work::task::TaskId;
+use loopflow_model::durable::{MachineId, WorkRef};
+use loopflow_storage::sqlite::TaskCheckout;
+use loopflow_storage::work::task::TaskId;
 
 use super::SessionRecord;
 
@@ -144,9 +144,9 @@ pub(super) async fn associate(
 #[cfg(test)]
 mod tests {
     use super::WorkspaceResolver;
-    use crate::durable::{MachineId, WorkRef};
-    use crate::store::sqlite::TaskCheckout;
-    use crate::work::task::TaskId;
+    use loopflow_model::durable::{MachineId, WorkRef};
+    use loopflow_storage::sqlite::TaskCheckout;
+    use loopflow_storage::work::task::TaskId;
 
     #[tokio::test]
     async fn unavailable_checkout_snapshot_is_not_an_empty_inventory() {

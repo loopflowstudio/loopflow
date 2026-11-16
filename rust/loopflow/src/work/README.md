@@ -44,10 +44,10 @@ let selection = Selection {
     id: SelectionId::new(),
     expression: SelectionExpression::Repository,
 };
-let resolution = store.resolve_selection(&repository_id, &selection)?;
+let resolution = resolve_selection(&store, &repository_id, &selection)?;
 let arrangement = Arrangement::automatic(&resolution.members);
-let saved = store.save_dashboard(
-    &repository_id, &DashboardId::new(), None, &selection, &arrangement.to_edit(),
+let saved = save_dashboard(
+    &store, &repository_id, &DashboardId::new(), None, &selection, &arrangement.to_edit(),
 )?;
 ```
 
@@ -59,7 +59,9 @@ includes descendant Waves. Idle Tasks remain. Explicit references also
 reach backlog and finished Tasks. Preserve authored node IDs across edits: occurrences use those source
 paths and canonical Work keys, so sibling insertion does not change identity.
 
-`resolve_selection` reads Work and query definitions in one SQLite savepoint.
+`store::selections::resolve_selection` observes Session identity and time outside
+SQL, then reads Work and query definitions in one SQLite savepoint after
+checking that the saved projection inputs still match.
 Task state, publication and ownership come from a fixed set of statements for the
 whole repository, not a query per Task. Missing references are explicit
 unavailable evidence; database failures return errors. Neither is confirmed

@@ -4,9 +4,9 @@
 //! Tailscale devices. Each carrier delimits messages its own way: the Unix
 //! socket carries one JSON object per line, the WebSocket one per text frame.
 use crate::engine::{Error, ErrorCode};
-use crate::id::LfProcessId;
 use crate::lf::commands::{read::Read, subscribe::SubscriptionFrame, write::Write};
 use crate::server::schema::Untyped;
+use loopflow_model::id::LfProcessId;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -107,9 +107,9 @@ pub enum ServerOperation {
     #[serde(rename = "session.attach")]
     #[schemars(extend("x-result" = generator.subschema_for::<SessionAttached>()))]
     SessionAttach {
-        session: crate::id::LfSessionId,
+        session: loopflow_model::id::LfSessionId,
         /// Attach only to this held terminal.
-        terminal_id: Option<crate::id::TerminalId>,
+        terminal_id: Option<loopflow_model::id::TerminalId>,
     },
     /// Start the Session's agent in this build's holder and answer
     /// `{terminal_id}`. `env` is the caller's whole environment; the server's
@@ -118,7 +118,7 @@ pub enum ServerOperation {
     #[serde(rename = "session.start")]
     #[schemars(extend("x-result" = generator.subschema_for::<SessionStarted>()))]
     SessionStart {
-        session: Option<crate::id::LfSessionId>,
+        session: Option<loopflow_model::id::LfSessionId>,
         request: String,
         argv: Vec<String>,
         cwd: std::path::PathBuf,
@@ -138,7 +138,7 @@ pub enum ServerOperation {
     #[serde(rename = "session.continue")]
     #[schemars(extend("x-result" = generator.subschema_for::<SessionStarted>()))]
     SessionContinue {
-        session: crate::id::LfSessionId,
+        session: loopflow_model::id::LfSessionId,
         request: String,
         rows: u16,
         cols: u16,
@@ -242,7 +242,7 @@ pub struct SessionBoundaryAnswer {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SessionStarted {
-    pub terminal_id: crate::id::TerminalId,
+    pub terminal_id: loopflow_model::id::TerminalId,
 }
 
 /// What `session.attach` answers: a ticket that opens one bridge.
@@ -252,7 +252,7 @@ pub struct SessionAttached {
     /// Opaque random ticket; single use.
     pub ticket: String,
     /// The held terminal the bridge reaches.
-    pub terminal_id: crate::id::TerminalId,
+    pub terminal_id: loopflow_model::id::TerminalId,
     /// How long the ticket opens a bridge, from when it was issued.
     pub expires_in_ms: u64,
 }
@@ -264,22 +264,22 @@ pub struct SessionAttached {
 pub enum SubscriptionEvent {
     #[serde(rename = "task.shipped")]
     TaskShipped {
-        task_id: crate::work::task::TaskId,
-        pr_id: crate::work::task::TaskPrId,
+        task_id: loopflow_storage::work::task::TaskId,
+        pr_id: loopflow_storage::work::task::TaskPrId,
         number: u32,
         url: String,
         merge_commit: String,
     },
     #[serde(rename = "task.steer")]
     TaskSteer {
-        task_id: crate::work::task::TaskId,
+        task_id: loopflow_storage::work::task::TaskId,
         steer: crate::steer::Steer,
         /// The thread entry when this direction came from a retained comment.
-        comment: Option<crate::work::task::comment::TaskComment>,
+        comment: Option<loopflow_model::comment::TaskComment>,
     },
     #[serde(rename = "graph.step_finished")]
     GraphStepFinished {
-        task_id: crate::work::task::TaskId,
+        task_id: loopflow_storage::work::task::TaskId,
         graph_process_id: LfProcessId,
         step: crate::durable::GraphStepProcess,
     },
@@ -300,13 +300,13 @@ pub enum ServerMessage {
     /// diagnostics for it.
     Response {
         id: String,
-        trace_id: crate::id::TraceId,
+        trace_id: loopflow_model::id::TraceId,
         result: serde_json::Value,
     },
     /// The answer to `attach`: the connection now speaks the viewer protocol
     /// with this held terminal, and nothing more arrives from the server.
     Bridged {
-        terminal_id: crate::id::TerminalId,
+        terminal_id: loopflow_model::id::TerminalId,
     },
     /// One subscription line; its `body` has the shape of the read's `x-result`.
     Reading {
@@ -360,7 +360,7 @@ pub struct Welcome {
     pub build: String,
     pub executable_sha256: String,
     /// Null while the Machine registry is unavailable or uninitialized.
-    #[schemars(with = "Option<crate::durable::Machine>")]
+    #[schemars(with = "Option<loopflow_model::durable::Machine>")]
     pub machine: Option<serde_json::Value>,
     pub limits: Limits,
 }

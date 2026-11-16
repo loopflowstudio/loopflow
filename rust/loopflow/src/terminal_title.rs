@@ -6,6 +6,7 @@
 //! and follows only the Task title, unless someone renamed it by hand; tabs and
 //! tmux windows follow the Session.
 
+use crate::store::session_projection;
 use std::collections::BTreeMap;
 use std::io::{IsTerminal, Write};
 use std::process::{Command, Stdio};
@@ -56,17 +57,16 @@ pub(crate) fn workspace_name(identifier: &str, title: &str) -> String {
 /// `Available · Design`. Both come from their shared readers; nothing new is judged.
 fn standing(
     store: &SqliteStore,
-    task: &crate::durable::TaskId,
+    task: &loopflow_model::durable::TaskId,
     conversation: Option<&str>,
 ) -> StoreResult<Option<String>> {
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
     let available = match conversation {
-        Some(id) => store
-            .session_summary(id, now)?
+        Some(id) => session_projection::session_summary(store, id, now)?
             .is_some_and(|summary| summary.available),
         None => false,
     };
-    let graph = store.task_graph(task)?;
+    let graph = crate::store::task_work::task_graph(store, task)?;
     let node = graph
         .as_ref()
         .and_then(|graph| graph.waiting_step())
@@ -277,10 +277,12 @@ impl TerminalTitle {
         title.host.is_some().then_some(title)
     }
 
-    fn viewing(held: &crate::id::TerminalId) -> Option<Self> {
+    fn viewing(held: &loopflow_model::id::TerminalId) -> Option<Self> {
         let load = || -> anyhow::Result<Option<Self>> {
-            let store =
-                SqliteStore::open_processes_read_only(&crate::store::database_path_from_env()?)?;
+            let store = SqliteStore::open_processes_read_only(
+                &crate::store::database_path_from_env()?,
+                crate::store::token_key::encryption_key,
+            )?;
             let Some(id) = store.terminal_session(held)? else {
                 return Ok(None);
             };
@@ -298,8 +300,10 @@ impl TerminalTitle {
     }
 
     fn load(input: &str) -> anyhow::Result<Option<Self>> {
-        let store =
-            SqliteStore::open_processes_read_only(&crate::store::database_path_from_env()?)?;
+        let store = SqliteStore::open_processes_read_only(
+            &crate::store::database_path_from_env()?,
+            crate::store::token_key::encryption_key,
+        )?;
         let Some(session) = store.session_for_artifact(input)? else {
             return Ok(None);
         };
@@ -389,7 +393,7 @@ impl Drop for TerminalTitle {
 /// link its Session after the viewer attaches, so the viewer keeps looking.
 #[derive(Debug)]
 pub(crate) struct ViewerTitle {
-    held: crate::id::TerminalId,
+    held: loopflow_model::id::TerminalId,
     title: Option<TerminalTitle>,
     /// Until when to look; executions without a Session never get one.
     looking: Option<Instant>,
@@ -406,7 +410,7 @@ pub(crate) struct TitleReader {
 
 #[derive(Debug)]
 struct TitleRequest {
-    held: crate::id::TerminalId,
+    held: loopflow_model::id::TerminalId,
     answer: mpsc::SyncSender<String>,
 }
 
@@ -423,7 +427,10 @@ impl TitleReader {
             while let Ok(request) = requested.recv() {
                 let mut read = || -> anyhow::Result<Option<String>> {
                     if store.is_none() {
-                        store = Some(SqliteStore::open_processes_read_only(&path)?);
+                        store = Some(SqliteStore::open_processes_read_only(
+                            &path,
+                            crate::store::token_key::encryption_key,
+                        )?);
                     }
                     output_title(store.as_ref().expect("opened above"), &request.held)
                 };
@@ -442,7 +449,7 @@ impl TitleReader {
 /// Host-specific names remain with each viewer, including remote viewers.
 #[derive(Debug)]
 pub(crate) struct OutputTitle {
-    held: crate::id::TerminalId,
+    held: loopflow_model::id::TerminalId,
     reader: TitleReader,
     answer: mpsc::SyncSender<String>,
     names: mpsc::Receiver<String>,
@@ -450,7 +457,7 @@ pub(crate) struct OutputTitle {
 }
 
 impl OutputTitle {
-    pub(crate) fn new(held: &crate::id::TerminalId, reader: &TitleReader) -> Self {
+    pub(crate) fn new(held: &loopflow_model::id::TerminalId, reader: &TitleReader) -> Self {
         let (answer, names) = mpsc::sync_channel(1);
         Self {
             held: held.clone(),
@@ -482,7 +489,7 @@ impl OutputTitle {
 
 fn output_title(
     store: &SqliteStore,
-    held: &crate::id::TerminalId,
+    held: &loopflow_model::id::TerminalId,
 ) -> anyhow::Result<Option<String>> {
     let Some(id) = store.terminal_session(held)? else {
         return Ok(None);
@@ -501,7 +508,7 @@ fn output_title(
 }
 
 impl ViewerTitle {
-    pub(crate) fn new(held: &crate::id::TerminalId) -> Self {
+    pub(crate) fn new(held: &loopflow_model::id::TerminalId) -> Self {
         Self {
             held: held.clone(),
             title: None,
@@ -607,6 +614,8 @@ fn host_command(program: &str, args: &[&str]) -> std::io::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use crate::process::attachment;
+
     use super::{
         display_title, renames_due, workspace_name, HostRename, Names, TerminalTitle, WorkspaceName,
     };
@@ -615,10 +624,10 @@ mod tests {
     fn replaced_attachment_stops_observing_session_names() {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("store.db");
-        let store = crate::store::sqlite::SqliteStore::open_ephemeral(&path).unwrap();
+        let store = crate::store::opening::open_ephemeral(&path).unwrap();
         let session =
             store.test_session("conversation", &crate::session_record::new_artifact_key());
-        let process = crate::id::LfProcessId::new();
+        let process = loopflow_model::id::LfProcessId::new();
         rusqlite::Connection::open(&path)
             .unwrap()
             .execute(
@@ -626,10 +635,10 @@ mod tests {
                 [process.as_str()],
             )
             .unwrap();
-        let attachment = store
-            .claim_session_attachment(&session.id, None, &process, true)
-            .unwrap();
-        let terminal = crate::id::TerminalId::new();
+        let attachment =
+            attachment::claim_session_attachment(&store, &session.id, None, &process, true)
+                .unwrap();
+        let terminal = loopflow_model::id::TerminalId::new();
         store.create_terminal(&terminal, "build").unwrap();
         rusqlite::Connection::open(&path)
             .unwrap()
@@ -650,14 +659,13 @@ mod tests {
             host: None,
             checked: std::time::Instant::now(),
         };
-        title
-            .store
-            .rename_session(
-                &title.session,
-                "Release notes",
-                crate::session::TitleSource::Human,
-            )
-            .unwrap();
+        crate::store::sessions::rename_session(
+            &title.store,
+            &title.session,
+            "Release notes",
+            crate::session::TitleSource::Human,
+        )
+        .unwrap();
         assert_eq!(
             title.read_names().unwrap().map(|names| names.terminal),
             Some("Release notes".to_string())
@@ -666,10 +674,14 @@ mod tests {
             super::output_title(&title.store, &terminal).unwrap(),
             Some("Release notes".into())
         );
-        title
-            .store
-            .claim_session_attachment(&title.session, Some(&attachment), &process, false)
-            .unwrap();
+        attachment::claim_session_attachment(
+            &title.store,
+            &title.session,
+            Some(&attachment),
+            &process,
+            false,
+        )
+        .unwrap();
         assert_eq!(title.read_names().unwrap(), None);
     }
 

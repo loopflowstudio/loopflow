@@ -276,16 +276,16 @@ async fn read_context(
                     .as_deref()
                     .expect("selected Wave has a repository"),
             );
-            if !crate::repository::CanonicalRepo::discover(repo)
-                .is_ok_and(|repo| repo.contains(&directory))
-            {
+            if !crate::repository::discover(repo).is_ok_and(|repo| {
+                crate::repository::discover(&directory).is_ok_and(|other| other == repo)
+            }) {
                 directory = repo.to_path_buf();
                 source = "wave_repository";
             }
         }
         selected_repo
     } else {
-        crate::repository::CanonicalRepo::discover(&directory)
+        crate::repository::discover(&directory)
             .ok()
             .map(|repo| repo.to_string())
     };

@@ -1,3 +1,4 @@
+use crate::process::attachment;
 fn listed_session(store: &crate::store::SharedStore, id: &str) -> super::SessionRecord {
     let capacity = crate::provider_account::LaunchCapacity::read(&store.sqlite).unwrap();
     super::listed(store, id, &capacity).unwrap().unwrap()
@@ -37,12 +38,12 @@ fn resume_refuses_a_run_and_leaves_its_provider_running() {
                 .sqlite
                 .session_for_artifact(&capture.artifact_key())?
                 .unwrap();
-            let launcher = crate::id::LfProcessId::new();
+            let launcher = loopflow_model::id::LfProcessId::new();
             rusqlite::Connection::open(home.join("loopflow.db"))?.execute(
                 "INSERT INTO processes(id,trace_id,started_at) SELECT ?1,trace_id,started_at FROM processes WHERE id=?2",
                 rusqlite::params![launcher, crate::journal::current_lf_process_id().unwrap()],
             )?;
-            let first = store.sqlite.claim_session_attachment(&session.id, None, &launcher, true)?;
+            let first = attachment::claim_session_attachment(&store.sqlite, &session.id, None, &launcher, true)?;
             let mut command = tokio::process::Command::new("/bin/sleep");
             command.env_clear().arg("60");
             let mut provider = crate::harness::agent_process::spawn(
@@ -139,7 +140,7 @@ fn session_metadata_wire_preserves_unknown_observation_and_occurrence() {
 #[test]
 fn session_metadata_keeps_unknown_position_visible() {
     let task = TaskId::new();
-    let wave = crate::id::WaveId::new();
+    let wave = loopflow_model::id::WaveId::new();
     let mut summary = crate::session::SessionSummary {
         transition: None,
         preview: None,
@@ -188,7 +189,7 @@ fn session_metadata_keeps_unknown_position_visible() {
     };
     let row = super::summary_surface(&summary, &LaunchCapacity::default());
     assert_eq!(row.id, summary.id);
-    assert_eq!(row.work, Some(crate::durable::WorkRef::Task(task)));
+    assert_eq!(row.work, Some(loopflow_model::durable::WorkRef::Task(task)));
     assert_eq!(row.wave_id, Some(wave));
     assert_eq!(row.work_path.as_deref(), Some("Infrastructure / INF-123"));
     assert_eq!(row.state, super::SessionState::Unknown);
@@ -271,7 +272,7 @@ use super::human_session_argv;
 use crate::lf::commands::write::SessionOpenIntent;
 use crate::session::LfSession;
 use crate::store::{open_ephemeral_store, SharedStore, StorageConfig};
-use crate::work::task::TaskId;
+use loopflow_storage::work::task::TaskId;
 
 pub(crate) struct SessionHome {
     home: tempfile::TempDir,
@@ -516,12 +517,12 @@ async fn session_work_labels_follow_stable_ancestry_without_a_roadmap() {
         .unwrap(),
     );
     let wave = crate::work::wave::Wave::new(
-        crate::id::WaveId::new(),
+        loopflow_model::id::WaveId::new(),
         "product".to_string(),
         directory.path().display().to_string(),
     );
     store.create_wave(&wave).await.unwrap();
-    let session = |task_id: Option<crate::work::task::TaskId>| LfSession {
+    let session = |task_id: Option<loopflow_storage::work::task::TaskId>| LfSession {
         captured: None,
         caller_artifact_key: None,
         id: "conversation".into(),
@@ -562,7 +563,7 @@ async fn session_work_labels_follow_stable_ancestry_without_a_roadmap() {
         super::session_work_path(&store, &unbound).await.unwrap(),
         None
     );
-    let missing = crate::work::task::TaskId::new();
+    let missing = loopflow_storage::work::task::TaskId::new();
     assert_eq!(
         super::session_work_path(&store, &session(Some(missing.clone())))
             .await
@@ -645,15 +646,15 @@ fn membership_wire_ids_are_derived_from_their_captures() {
     let expected = std::collections::BTreeMap::from([
         (
             "00000000-0000-0000-0000-00000000f10w".to_string(),
-            CompiledGraph::new("task-design", &opening()),
+            crate::graph::compiled::compile("task-design", &opening()),
         ),
         (
             "00000000-0000-0000-0000-0000000000f1".to_string(),
-            CompiledGraph::new("feature", &past),
+            crate::graph::compiled::compile("feature", &past),
         ),
         (
             "00000000-0000-0000-0000-0000000000f2".to_string(),
-            CompiledGraph::new("feature", &current),
+            crate::graph::compiled::compile("feature", &current),
         ),
     ]);
     let graphs: std::collections::BTreeMap<String, CompiledGraph> = serde_json::from_str(
@@ -774,7 +775,8 @@ impl Logins {
             Some(crate::profile::EmailAddress::parse(&format!("{name}@example.com")).unwrap()),
         );
         account.cooldown_until = cooldown_until;
-        self.store.sqlite.upsert_provider_account(&account).unwrap();
+        crate::provider_account::catalog::upsert_provider_account(&self.store.sqlite, &account)
+            .unwrap();
         id
     }
 
@@ -805,7 +807,7 @@ impl Logins {
             .sqlite
             .pin_provider_session_route(
                 crate::provider_auth::Provider::Codex,
-                &crate::id::AgentSessionId::from(thread.as_str()),
+                &loopflow_model::id::AgentSessionId::from(thread.as_str()),
                 account,
             )
             .unwrap();
@@ -813,7 +815,7 @@ impl Logins {
     }
 
     fn run(&self, session: &LfSession) -> RunningAgent {
-        let parent = crate::id::LfProcessId::new();
+        let parent = loopflow_model::id::LfProcessId::new();
         rusqlite::Connection::open(&self.database)
             .unwrap()
             .execute(
@@ -821,11 +823,14 @@ impl Logins {
                 [&parent],
             )
             .unwrap();
-        let attachment = self
-            .store
-            .sqlite
-            .claim_session_attachment(&session.id, None, &parent, true)
-            .unwrap();
+        let attachment = attachment::claim_session_attachment(
+            &self.store.sqlite,
+            &session.id,
+            None,
+            &parent,
+            true,
+        )
+        .unwrap();
         let mut command = std::process::Command::new("/bin/sleep");
         command.env_clear().arg("60");
         RunningAgent(
@@ -990,13 +995,13 @@ async fn task_detail_reads_capacity_once_for_all_sessions() {
     let task = logins
         .store
         .sqlite
-        .create_task(&crate::work::task::NewTask {
-            repository_id: logins
-                .store
-                .sqlite
-                .ensure_repository(repo.path().to_str().unwrap())
-                .unwrap(),
-            id: crate::durable::TaskId::new(),
+        .create_task(&loopflow_storage::work::task::NewTask {
+            repository_id: crate::repository::location::ensure_repository(
+                &logins.store.sqlite,
+                repo.path().to_str().unwrap(),
+            )
+            .unwrap(),
+            id: loopflow_model::durable::TaskId::new(),
             project_id: None,
             title: "Many Sessions".into(),
             description: String::new(),
@@ -1005,7 +1010,7 @@ async fn task_detail_reads_capacity_once_for_all_sessions() {
         .unwrap();
     // `lf task status`, Desktop and screens read this on the write store.
     let mut status =
-        crate::store::query_plans::assert_no_empty_writes(&logins.store.sqlite, || {
+        loopflow_storage::query_plans::assert_no_empty_writes(&logins.store.sqlite, || {
             tokio::task::block_in_place(|| {
                 tokio::runtime::Handle::current()
                     .block_on(crate::ops::task::registered_task_status(
@@ -1307,10 +1312,9 @@ fn recovery_refresh_follows_current_holder_and_history() {
                 [&launcher],
             )
             .unwrap();
-        let holder = store
-            .sqlite
-            .claim_session_attachment(&record.id, None, &launcher, true)
-            .unwrap();
+        let holder =
+            attachment::claim_session_attachment(&store.sqlite, &record.id, None, &launcher, true)
+                .unwrap();
         store
             .sqlite
             .record_agent_process_launch(
@@ -1534,9 +1538,9 @@ fn opening_any_primary_without_a_request_only_reads() {
         "a person's stored request is the first turn"
     );
     for skill in [
-        include_str!("../../builtins/task/skill/task_session.md"),
-        include_str!("../../builtins/ops/skill/repo_session.md"),
-        include_str!("../../builtins/wave/skill/wave_session.md"),
+        loopflow_definitions::builtins::get_builtin_skill("task-session").unwrap(),
+        loopflow_definitions::builtins::get_builtin_skill("repo-session").unwrap(),
+        loopflow_definitions::builtins::get_builtin_skill("wave-session").unwrap(),
     ] {
         let skill = skill.split_whitespace().collect::<Vec<_>>().join(" ");
         assert!(skill.contains("request is a reading pass"));
@@ -1575,7 +1579,7 @@ fn creation_retry_reconciles_publication_but_never_repeats_a_stop_or_append() {
             .unwrap();
         assert_eq!(
             stopped.disposition,
-            crate::store::sqlite::creation::RecoveryDisposition::Inspect
+            loopflow_storage::sqlite::creation::RecoveryDisposition::Inspect
         );
         assert_eq!(stopped.explanation, "Conversation change unconfirmed");
         // A crash while stopping is uncertain, even if no provider is live now.
@@ -1614,7 +1618,7 @@ fn creation_retry_reconciles_publication_but_never_repeats_a_stop_or_append() {
                 .unwrap()
                 .unwrap()
                 .disposition,
-            crate::store::sqlite::creation::RecoveryDisposition::Continue
+            loopflow_storage::sqlite::creation::RecoveryDisposition::Continue
         );
         // Simulate app/server death after the atomic append, before publication.
         let recovered = super::new_thread(&store, &record.id, None, false, false, "interrupted")
@@ -1637,7 +1641,7 @@ fn creation_retry_reconciles_publication_but_never_repeats_a_stop_or_append() {
                 .unwrap()
                 .unwrap()
                 .disposition,
-            crate::store::sqlite::creation::RecoveryDisposition::Complete
+            loopflow_storage::sqlite::creation::RecoveryDisposition::Complete
         );
         let mut newer = recovered.clone();
         newer.request = Some("A later independent input".into());
@@ -1686,7 +1690,7 @@ fn creation_retry_reconciles_publication_but_never_repeats_a_stop_or_append() {
                 .unwrap()
                 .unwrap()
                 .disposition,
-            crate::store::sqlite::creation::RecoveryDisposition::Continue
+            loopflow_storage::sqlite::creation::RecoveryDisposition::Continue
         );
         let newest = super::append_input(&store, pending).await.unwrap();
         let refused = super::new_thread(&store, &record.id, None, false, false, "superseded")
@@ -1703,7 +1707,7 @@ fn creation_retry_reconciles_publication_but_never_repeats_a_stop_or_append() {
             .unwrap();
         assert_eq!(
             receipt.disposition,
-            crate::store::sqlite::creation::RecoveryDisposition::Inspect
+            loopflow_storage::sqlite::creation::RecoveryDisposition::Inspect
         );
         assert_eq!(
             receipt.explanation,
@@ -1752,7 +1756,7 @@ fn creation_retry_reconciles_publication_but_never_repeats_a_stop_or_append() {
                 .unwrap()
                 .unwrap()
                 .disposition,
-            crate::store::sqlite::creation::RecoveryDisposition::Complete
+            loopflow_storage::sqlite::creation::RecoveryDisposition::Complete
         );
     });
 }
@@ -1797,8 +1801,12 @@ async fn a_held_task_conversation_without_a_view_offers_attach() {
     let created = logins
         .store
         .sqlite
-        .create_task(&crate::work::task::NewTask {
-            repository_id: logins.store.sqlite.ensure_repository("/fixture").unwrap(),
+        .create_task(&loopflow_storage::work::task::NewTask {
+            repository_id: crate::repository::location::ensure_repository(
+                &logins.store.sqlite,
+                "/fixture",
+            )
+            .unwrap(),
             id: task.clone(),
             project_id: None,
             title: "Held".into(),
@@ -1806,7 +1814,7 @@ async fn a_held_task_conversation_without_a_view_offers_attach() {
             due_date: None,
         })
         .unwrap();
-    let terminal = crate::id::TerminalId::new();
+    let terminal = loopflow_model::id::TerminalId::new();
     rusqlite::Connection::open(&logins.database)
         .unwrap()
         .execute_batch(&format!(
@@ -1852,7 +1860,7 @@ async fn a_held_task_conversation_without_a_view_offers_attach() {
 struct ListFilters {
     home: SessionHome,
     store: SharedStore,
-    wave: crate::id::WaveId,
+    wave: loopflow_model::id::WaveId,
     repo: loopflow_test_support::TestRepo,
 }
 
@@ -1861,9 +1869,9 @@ impl ListFilters {
         let home = SessionHome::new();
         let store = home.store().await;
         let repo = loopflow_test_support::TestRepo::new();
-        let wave = crate::id::WaveId::new();
-        let project = crate::work::project::ProjectId::new();
-        let task = crate::durable::TaskId::new();
+        let wave = loopflow_model::id::WaveId::new();
+        let project = loopflow_storage::work::project::ProjectId::new();
+        let task = loopflow_model::durable::TaskId::new();
         let db = rusqlite::Connection::open(home.home.path().join("loopflow.db")).unwrap();
         db.execute(
             "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'craft',?2,1)",

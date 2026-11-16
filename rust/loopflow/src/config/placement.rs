@@ -1,7 +1,6 @@
 //! File locations for domain operations that name a retained repository or Wave.
-use crate::durable::DefaultScope;
 use anyhow::{Context, Result};
-use rusqlite::Connection;
+use loopflow_model::durable::DefaultScope;
 use serde::{Deserialize, Serialize};
 use serde_yaml_ng::Value;
 use std::path::{Path, PathBuf};
@@ -100,50 +99,30 @@ impl std::ops::Deref for AccountOrder {
 #[derive(schemars::JsonSchema, Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MachineDeclaration {
-    pub id: crate::durable::MachineId,
+    pub id: loopflow_model::durable::MachineId,
 }
 
-pub(crate) fn home(conn: &Connection) -> Result<PathBuf> {
-    Ok(Path::new(
-        conn.path()
-            .context("file preferences require a file-backed registry")?,
-    )
-    .parent()
-    .context("registry has a parent")?
-    .to_owned())
-}
-
-pub(crate) fn location(
-    conn: &Connection,
-    scope: Option<&DefaultScope>,
+pub(crate) fn location_at(
+    home: &Path,
+    scope: Option<&loopflow_storage::sqlite::scope_defaults::ScopeAddress>,
 ) -> Result<(PathBuf, Vec<String>)> {
     let Some(scope) = scope else {
-        return Ok((home(conn)?.join("config.yaml"), vec![]));
-    };
-    let (repo, wave): (String, Option<String>) = match scope {
-        DefaultScope::Repository(id) => (
-            conn.query_row(
-                "SELECT repo FROM repository_plans WHERE id=?1",
-                [id.as_str()],
-                |row| row.get(0),
-            )?,
-            None,
-        ),
-        DefaultScope::Wave(id) => conn.query_row(
-            "SELECT repo,id FROM wave_addresses WHERE id=?1",
-            [id.as_str()],
-            |row| Ok((row.get(0)?, Some(row.get(1)?))),
-        )?,
+        return Ok((home.join("config.yaml"), vec![]));
     };
     Ok((
-        super::files::private_path(Path::new(&repo))?,
-        wave.map(|name| vec!["waves".into(), name])
-            .unwrap_or_default(),
+        super::files::private_path(Path::new(&scope.repo))?,
+        match &scope.scope {
+            DefaultScope::Repository(_) => vec![],
+            DefaultScope::Wave(id) => vec!["waves".into(), id.to_string()],
+        },
     ))
 }
 
-pub(crate) fn read(conn: &Connection, scope: Option<&DefaultScope>) -> Result<Value> {
-    let (path, prefix) = location(conn, scope)?;
+pub(crate) fn read_at(
+    home: &Path,
+    scope: Option<&loopflow_storage::sqlite::scope_defaults::ScopeAddress>,
+) -> Result<Value> {
+    let (path, prefix) = location_at(home, scope)?;
     let mut value = super::files::read(&path)?;
     super::remote::apply_document(&path, &mut value)?;
     for part in prefix {
@@ -152,29 +131,18 @@ pub(crate) fn read(conn: &Connection, scope: Option<&DefaultScope>) -> Result<Va
     Ok(value)
 }
 
-pub(crate) fn write(
-    conn: &Connection,
-    scope: Option<&DefaultScope>,
-    key: &[&str],
-    value: Option<Value>,
-) -> Result<bool> {
-    let (path, prefix) = location(conn, scope)?;
-    let path_parts: Vec<_> = prefix
-        .iter()
-        .map(String::as_str)
-        .chain(key.iter().copied())
-        .collect();
-    super::files::edit(&path, &path_parts, value, super::keys::Root::General)
-}
-
 pub(crate) fn route_location(
-    conn: &Connection,
+    store: &loopflow_storage::sqlite::SqliteStore,
     scope: &crate::profile::RouteScope,
 ) -> Result<(PathBuf, Vec<String>)> {
     match scope {
-        crate::profile::RouteScope::Default => location(conn, None),
+        crate::profile::RouteScope::Default => Ok((store.home_dir()?.join("config.yaml"), vec![])),
         crate::profile::RouteScope::Wave(id) => {
-            location(conn, Some(&DefaultScope::Wave(id.clone())))
+            let wave = store.get_wave(id)?.context("Wave not found")?;
+            Ok((
+                super::files::private_path(Path::new(wave.repo()))?,
+                vec!["waves".into(), id.to_string()],
+            ))
         }
         crate::profile::RouteScope::Repo(repo) => {
             Ok((super::files::private_path(repo.as_path())?, vec![]))
@@ -182,46 +150,26 @@ pub(crate) fn route_location(
     }
 }
 
-pub(crate) fn global_settings(conn: &Connection) -> Result<super::Config> {
-    let (path, _) = location(conn, None)?;
+pub(crate) fn write_global(home: &Path, key: &[&str], value: Option<Value>) -> Result<bool> {
+    super::files::edit(
+        &home.join("config.yaml"),
+        key,
+        value,
+        super::keys::Root::General,
+    )
+}
+
+pub(crate) fn global_settings_at(home: &Path) -> Result<super::Config> {
+    let path = home.join("config.yaml");
+    let mut value = super::files::read(&path)?;
+    super::remote::apply_document(&path, &mut value)?;
     let declarations = [super::ConfigDeclarations {
         source: super::ConfigSource::Personal,
         scope: super::settings::SettingScope::Global,
         path,
-        value: read(conn, None)?,
+        value,
     }];
     Ok(super::settings::resolve_layers(&declarations, None)?.config)
-}
-
-pub(crate) fn machine_declarations(
-    conn: &Connection,
-) -> Result<std::collections::BTreeMap<String, MachineDeclaration>> {
-    Ok(global_settings(conn)?.machines)
-}
-
-pub(crate) fn scopes(conn: &Connection) -> Result<Vec<(DefaultScope, String)>> {
-    let mut out = Vec::new();
-    let mut query = conn.prepare("SELECT id,repo FROM repository_plans WHERE selected=1")?;
-    for row in query.query_map([], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-    })? {
-        let (id, repo) = row?;
-        out.push((
-            DefaultScope::Repository(crate::durable::RepositoryId::from_raw(id)),
-            repo,
-        ));
-    }
-    let mut query = conn.prepare("SELECT id,slug FROM wave_addresses WHERE retired_at IS NULL")?;
-    for row in query.query_map([], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-    })? {
-        let (id, slug) = row?;
-        out.push((
-            DefaultScope::Wave(crate::id::WaveId::parse(&id).map_err(anyhow::Error::msg)?),
-            slug,
-        ));
-    }
-    Ok(out)
 }
 
 #[derive(schemars::JsonSchema, Debug, Clone, Default, Serialize, Deserialize)]
@@ -262,7 +210,7 @@ pub(crate) fn parse_date(value: &str) -> Result<time::Date> {
 }
 
 pub(crate) fn write_account_preferences(
-    conn: &Connection,
+    home: &Path,
     account: &crate::store::ProviderAccount,
 ) -> Result<()> {
     let declaration = AccountDeclaration {
@@ -271,7 +219,7 @@ pub(crate) fn write_account_preferences(
         plan: account.plan.clone(),
         paid_through: account.paid_through.map(|date| date.to_string()),
     };
-    let (path, _) = location(conn, None)?;
+    let path = home.join("config.yaml");
     super::files::update(&path, |document| {
         if let Some(accounts) = document
             .get("accounts")
@@ -313,18 +261,18 @@ pub struct PoolDeclaration {
 #[derive(schemars::JsonSchema, Debug, Clone, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct OnDemandDeclaration {
-    pub provider: crate::rental::Provider,
-    pub hardware: crate::rental::Hardware,
+    pub provider: loopflow_storage::rental::Provider,
+    pub hardware: loopflow_storage::rental::Hardware,
     pub max_machines: u32,
-    pub max_usd_per_hour: crate::rental::Usd,
+    pub max_usd_per_hour: loopflow_storage::rental::Usd,
     pub hours: f64,
 }
 
 impl Default for OnDemandDeclaration {
     fn default() -> Self {
         Self {
-            provider: crate::rental::Provider::Daytona,
-            hardware: crate::rental::Hardware {
+            provider: loopflow_storage::rental::Provider::Daytona,
+            hardware: loopflow_storage::rental::Hardware {
                 vcpus: 2,
                 memory_gb: 4,
                 disk_gb: 20,
@@ -332,8 +280,8 @@ impl Default for OnDemandDeclaration {
                 spot: false,
             },
             max_machines: 0,
-            max_usd_per_hour: crate::rental::Usd::ZERO,
-            hours: crate::rental::DEFAULT_HOURS,
+            max_usd_per_hour: loopflow_storage::rental::Usd::ZERO,
+            hours: loopflow_storage::rental::DEFAULT_HOURS,
         }
     }
 }

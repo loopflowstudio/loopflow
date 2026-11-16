@@ -1,4 +1,3 @@
-use crate::durable::WorkRef;
 use crate::graph::compile_graph;
 use crate::graph::output::GraphOutput;
 use crate::graph::return_target;
@@ -13,18 +12,19 @@ use crate::graph::ConcreteSkill;
 use crate::graph::ConcreteStep;
 use crate::graph::ConcreteXor;
 use crate::graph::GraphDefinition;
-use crate::id::LfProcessId;
 use crate::journal::{self, LfEventFields, LfEventType, LfNode};
 use crate::lf::output::Colors;
 use crate::lf::{Cli, Commands, PrCommand};
 use crate::ops::graph_process;
 use crate::ops::WorkBinding;
-use crate::store::sqlite::SqliteStore;
 use crate::store::SharedStore;
-use crate::work::task::Task;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use clap::Parser;
+use loopflow_model::durable::WorkRef;
+use loopflow_model::id::LfProcessId;
+use loopflow_storage::sqlite::SqliteStore;
+use loopflow_storage::work::task::Task;
 use std::path::Path;
 use std::sync::Mutex;
 
@@ -72,7 +72,7 @@ pub fn run_task_graph(cli: &Cli, repo: &Path, binding: Option<&WorkBinding>) -> 
     };
     let store = block_on(open_graph_store())?;
     store.sqlite.require_task_launch(task)?;
-    let row = store.sqlite.task_graph_row(task)?;
+    let row = crate::store::task_work::task_graph_row(&store.sqlite, task)?;
     let Some((graph, (start, carrier))) = row.and_then(|row| row.run.map(|run| (row.graph, run)))
     else {
         anyhow::bail!("the Task is not on a run; `lf task run` starts one");
@@ -261,7 +261,7 @@ pub fn run_task_graph_for(
                 // The recovery sweep restarts a wait at its reset, not now.
                 if let Some(retry_at) = recovery
                     .retry_at
-                    .filter(|at| *at > crate::store::rows::now_unix())
+                    .filter(|at| *at > loopflow_storage::rows::now_unix())
                 {
                     eprintln!(
                         "The run of {run} is waiting on a limit until {}; it starts again at {step} then.",
@@ -294,8 +294,7 @@ pub fn run_task_graph_for(
             return Err(exit_of(status).into());
         }
         // The failed Graph checkpointed after each step it finished.
-        let again = store
-            .task_graph_row(&task.id)?
+        let again = crate::store::task_work::task_graph_row(store, &task.id)?
             .and_then(|row| row.graph.step_name_of(&row.run?.0))
             .map_or_else(String::new, |step| format!(" at {step}"));
         eprintln!(
@@ -553,17 +552,18 @@ fn execute(
             interrupt,
         };
         // A chapter rotation moving this checkout's Task excludes new work in it.
-        let admission = running
-            .store
-            .sqlite
-            .lock_task_checkouts(&[running.cwd], running.task.as_ref())?;
+        let admission = crate::store::admission::lock_task_checkouts(
+            &running.store.sqlite,
+            &[running.cwd],
+            running.task.as_ref(),
+        )?;
         // The Graph process's one record of its Graph, written before any step runs.
         running
             .store
             .sqlite
             .record_graph_process(
                 &running.process,
-                &crate::graph::compiled::CompiledGraph::new(graph_name, items),
+                &crate::graph::compiled::compile(graph_name, items),
                 running.task.as_ref(),
             )
             .context("could not record the Graph; no steps launched")?;
@@ -607,7 +607,10 @@ fn execute(
 
 /// The interrupt cursor of the Task run this Graph belongs to, or its own when
 /// it was started directly.
-async fn interrupt_cursor(store: &SharedStore, task: &crate::durable::TaskId) -> Result<i64> {
+async fn interrupt_cursor(
+    store: &SharedStore,
+    task: &loopflow_model::durable::TaskId,
+) -> Result<i64> {
     if let Some(cursor) = std::env::var(graph_process::TASK_INTERRUPT_CURSOR_ENV)
         .ok()
         .and_then(|value| value.parse().ok())
@@ -802,7 +805,7 @@ impl Drop for EnvVarGuard {
 /// Process that child registered.
 struct RunningGraph<'a> {
     store: SharedStore,
-    process: crate::id::LfProcessId,
+    process: loopflow_model::id::LfProcessId,
     graph: &'a str,
     steps: &'a [ConcreteStep],
     message: Option<&'a str>,
@@ -810,7 +813,7 @@ struct RunningGraph<'a> {
     launcher: &'a Cli,
     /// Where the runner stands, as of its last checkpoint.
     position: Mutex<ExecutionCursor>,
-    task: Option<crate::durable::TaskId>,
+    task: Option<loopflow_model::durable::TaskId>,
     /// The `lf task run` this Graph carries its Task for: a stop keeps it from
     /// merging, and each checkpoint is where that run's next attempt sets out.
     task_run: Option<LfProcessId>,
@@ -852,7 +855,7 @@ impl RunningGraph<'_> {
     }
 
     /// Record the Process this Graph process's newest child registered, once it has.
-    fn record_step(&self, mark: i64) -> Result<Option<crate::id::LfProcessId>> {
+    fn record_step(&self, mark: i64) -> Result<Option<loopflow_model::id::LfProcessId>> {
         let Some(step) = self.store.sqlite.child_process_after(&self.process, mark)? else {
             return Ok(None);
         };
@@ -911,7 +914,7 @@ impl RunningGraph<'_> {
         label: &str,
         kind: StepKind,
         args: &[String],
-    ) -> Result<(StepExit, Option<crate::id::LfProcessId>)> {
+    ) -> Result<(StepExit, Option<loopflow_model::id::LfProcessId>)> {
         if self.interrupted() {
             eprintln!("Graph {} interrupted before {label}.", self.graph);
             return Ok((StepExit::Interrupted, None));
@@ -927,10 +930,11 @@ impl RunningGraph<'_> {
         }
         command.args(args);
         let mark = self.store.sqlite.process_mark(&self.process)?;
-        let admission = self
-            .store
-            .sqlite
-            .lock_task_checkouts(&[self.cwd], self.task.as_ref())?;
+        let admission = crate::store::admission::lock_task_checkouts(
+            &self.store.sqlite,
+            &[self.cwd],
+            self.task.as_ref(),
+        )?;
         crate::transport::configure_child(command.as_std_mut());
         let output = crate::terminal_output::TerminalOutput::for_child(command.as_std_mut())?;
         let mut child = command.spawn().context("could not execute Graph step")?;
@@ -965,7 +969,7 @@ impl RunningGraph<'_> {
         // through an older schema.
         self.store
             .sqlite
-            .validate_current_schema()
+            .validate_current_schema(&crate::store::migrations::build())
             .with_context(|| {
                 format!(
                     "this Graph process cannot read the result of {label}; inspect its Process and effects with a compatible lf before launching further work"
@@ -1006,7 +1010,10 @@ impl RunningGraph<'_> {
     }
 
     /// The conversation and input a step's Process captured; none for an operation.
-    fn captured(&self, step: Option<&crate::id::LfProcessId>) -> Result<Option<(String, String)>> {
+    fn captured(
+        &self,
+        step: Option<&loopflow_model::id::LfProcessId>,
+    ) -> Result<Option<(String, String)>> {
         let Some(step) = step else { return Ok(None) };
         Ok(self
             .store
@@ -1015,7 +1022,10 @@ impl RunningGraph<'_> {
             .map(|(session, input, _)| (session, input)))
     }
 
-    fn turn_events(&self, step: Option<&crate::id::LfProcessId>) -> Result<Vec<serde_json::Value>> {
+    fn turn_events(
+        &self,
+        step: Option<&loopflow_model::id::LfProcessId>,
+    ) -> Result<Vec<serde_json::Value>> {
         Ok(match self.captured(step)? {
             Some((_, input)) => self.store.sqlite.input_events(&input)?,
             None => Vec::new(),
@@ -1026,7 +1036,7 @@ impl RunningGraph<'_> {
     fn answer(
         &self,
         label: &str,
-        step: Option<&crate::id::LfProcessId>,
+        step: Option<&loopflow_model::id::LfProcessId>,
     ) -> Result<(String, Option<String>)> {
         let step = step.with_context(|| format!("{label} registered no step Process"))?;
         let (session, input) = self.captured(Some(step))?.with_context(|| {
@@ -1074,11 +1084,12 @@ impl SkillExecutor for &RunningGraph<'_> {
         // A Task run that fails starts again here, not where it began. A stale
         // cursor reruns finished steps; that beats failing a finished step.
         if let (Some(task), Some(carrier)) = (&self.task, &self.task_run) {
-            if let Err(error) = self
-                .store
-                .sqlite
-                .advance_task_graph_run(task, carrier, cursor)
-            {
+            if let Err(error) = crate::store::task_work::advance_task_graph_run(
+                &self.store.sqlite,
+                task,
+                carrier,
+                cursor,
+            ) {
                 tracing::warn!(%task, %error, "could not record where the Task run goes on");
             }
         }
@@ -1241,9 +1252,9 @@ impl SkillExecutor for &RunningGraph<'_> {
 }
 
 fn print_step_progress(progress: Option<StepProgress>, name: &str) {
-    crate::transport::report(crate::program_status::State::Clear, true, None);
+    crate::transport::report(loopflow_model::program_status::State::Clear, true, None);
     crate::transport::report(
-        crate::program_status::State::Working,
+        loopflow_model::program_status::State::Working,
         true,
         progress.map(|p| (p.index * 100 / p.total.max(1)) as u8),
     );
@@ -1311,7 +1322,7 @@ mod tests {
             ];
             let running = super::RunningGraph {
                 store: fixture.store.clone(),
-                process: crate::id::LfProcessId::new(),
+                process: loopflow_model::id::LfProcessId::new(),
                 graph: "probe",
                 steps: &steps,
                 message: None,
@@ -1390,10 +1401,10 @@ mod tests {
                 sources: Vec::new(),
             });
             let steps = [skill.clone(), skill];
-            let work = crate::durable::WorkRef::Task(task.id.clone());
+            let work = loopflow_model::durable::WorkRef::Task(task.id.clone());
             let running = super::RunningGraph {
                 store: fixture.store.clone(),
-                process: crate::id::LfProcessId::new(),
+                process: loopflow_model::id::LfProcessId::new(),
                 graph: "probe",
                 steps: &steps,
                 message: None,

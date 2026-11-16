@@ -16,11 +16,11 @@ use anyhow::{Context, Result};
 use serde::Serialize;
 use time::OffsetDateTime;
 
-use crate::id::LfProcessId;
 use crate::journal::{
     lf_process_evidence, recorded_process_receipt, OsProcess, ProcessIdentityEvidence,
 };
-use crate::store::sqlite::SqliteStore;
+use loopflow_model::id::LfProcessId;
+use loopflow_storage::sqlite::SqliteStore;
 
 const VERSION_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -111,7 +111,13 @@ pub fn inventory() -> Result<BinaryInventory> {
         .inspect_err(|error| tracing::warn!(%error, "the lf a launch runs now is unknown"))
         .ok();
     let processes = if database.exists() {
-        live_lf_processes(&SqliteStore::open_processes_read_only(&database)?, now)?
+        live_lf_processes(
+            &SqliteStore::open_processes_read_only(
+                &database,
+                crate::store::token_key::encryption_key,
+            )?,
+            now,
+        )?
     } else {
         Vec::new()
     };
@@ -364,8 +370,8 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use super::{group, parse_version, superseded_summary, BinaryInventory, RunningLfProcess};
-    use crate::id::LfProcessId;
-    use crate::store::sqlite::SqliteStore;
+    use loopflow_model::id::LfProcessId;
+    use loopflow_storage::sqlite::SqliteStore;
 
     fn process(pid: u32) -> RunningLfProcess {
         RunningLfProcess {
@@ -414,7 +420,7 @@ mod tests {
     #[test]
     fn a_launcher_running_its_provider_is_no_lf_binary() {
         let directory = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&directory.path().join("lf.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&directory.path().join("lf.db")).unwrap();
         let me = crate::journal::OsProcess::read(std::process::id())
             .unwrap()
             .unwrap();
@@ -446,7 +452,7 @@ mod tests {
                 "INSERT INTO processes(id,kind,trace_id,parent_lf_process_id,started_at,pid,os_started_at,
                      agent_provider,agent_interactive,attached_lf_process_id)
                  VALUES(?1,'agent',?2,?2,?3,?4,?3,'claude',1,?2)",
-                rusqlite::params![crate::id::AgentProcessId::new(), launcher, me.started_at, me.pid],
+                rusqlite::params![loopflow_model::id::AgentProcessId::new(), launcher, me.started_at, me.pid],
             )
             .unwrap();
         assert!(listed(&store).is_empty());

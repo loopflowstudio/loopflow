@@ -22,7 +22,7 @@ pub fn private_path(repo: &Path) -> Result<PathBuf> {
 }
 
 pub(crate) fn wave_key(repo: &Path, name: &str) -> Result<Option<String>> {
-    if let Ok(id) = crate::id::WaveId::parse(name) {
+    if let Ok(id) = loopflow_model::id::WaveId::parse(name) {
         return Ok(Some(id.to_string()));
     }
     let config = crate::work::wave::config::try_read_wave_config(repo, name)?;
@@ -119,7 +119,7 @@ impl Destination {
         if source == ConfigSource::Repository {
             if let Some(wave) = wave
                 .as_deref()
-                .filter(|wave| crate::id::WaveId::parse(wave).is_ok())
+                .filter(|wave| loopflow_model::id::WaveId::parse(wave).is_ok())
             {
                 anyhow::bail!(
                     "Wave {wave} has no authored shared destination in {}",
@@ -174,7 +174,7 @@ pub(crate) fn wave_name(repo: &Path, selector: &str) -> Result<String> {
                 .any(|part| part == ".." || part.is_empty()),
         "invalid Wave name"
     );
-    let Ok(id) = crate::id::WaveId::parse(selector) else {
+    let Ok(id) = loopflow_model::id::WaveId::parse(selector) else {
         return Ok(selector.into());
     };
     let root = repo.join(".lf/wave");
@@ -387,17 +387,7 @@ pub fn update<T>(path: &Path, change: impl FnOnce(&mut Value) -> Result<T>) -> R
     if path.file_name().is_some_and(|name| name == PRIVATE_FILE) {
         protect_private_file(path)?;
     }
-    update_text(path, |original| {
-        let before = parse_document(original, path)?;
-        let mut after = before.clone();
-        let result = change(&mut after)?;
-        let text = if after == before {
-            original.to_owned()
-        } else {
-            edited_text(original, &after)?
-        };
-        Ok((text, result))
-    })
+    LockedFile::open(path)?.update(change)
 }
 
 /// The same serialized, hand-edit-aware writer also edits definition frontmatter.
@@ -405,19 +395,52 @@ pub(crate) fn update_text<T>(
     path: &Path,
     change: impl FnOnce(&str) -> Result<(String, T)>,
 ) -> Result<T> {
-    let _lock = lock(path)?;
-    let original = read_text(path)?;
-    let (text, result) = change(&original)?;
-    if text == original {
-        return Ok(result);
+    LockedFile::open(path)?.update_text(change)
+}
+
+/// Hold a preference writer's fence across configuration acquisition and its command.
+#[derive(Debug)]
+pub(crate) struct LockedFile {
+    path: PathBuf,
+    _lock: File,
+}
+
+impl LockedFile {
+    pub(crate) fn open(path: &Path) -> Result<Self> {
+        Ok(Self {
+            path: path.to_owned(),
+            _lock: lock(path)?,
+        })
     }
-    ensure!(
-        read_text(path)? == original,
-        "{} changed during this edit; retry with the current file",
-        path.display()
-    );
-    atomic_write(path, &text)?;
-    Ok(result)
+
+    pub(crate) fn update<T>(&self, change: impl FnOnce(&mut Value) -> Result<T>) -> Result<T> {
+        self.update_text(|original| {
+            let mut after = parse_document(original, &self.path)?;
+            let before = after.clone();
+            let result = change(&mut after)?;
+            let text = if after == before {
+                original.to_owned()
+            } else {
+                edited_text(original, &after)?
+            };
+            Ok((text, result))
+        })
+    }
+
+    fn update_text<T>(&self, change: impl FnOnce(&str) -> Result<(String, T)>) -> Result<T> {
+        let original = read_text(&self.path)?;
+        let (text, result) = change(&original)?;
+        if text == original {
+            return Ok(result);
+        }
+        ensure!(
+            read_text(&self.path)? == original,
+            "{} changed during this edit; retry with the current file",
+            self.path.display()
+        );
+        atomic_write(&self.path, &text)?;
+        Ok(result)
+    }
 }
 
 pub(crate) fn edited_text(original: &str, after: &Value) -> Result<String> {
@@ -597,7 +620,7 @@ pub fn import(
 pub(crate) fn copy_wave(
     source: &Path,
     target: &Path,
-    id: &crate::id::WaveId,
+    id: &loopflow_model::id::WaveId,
 ) -> Result<Option<Value>> {
     let source = private_path(source)?;
     let target = private_path(target)?;
@@ -634,7 +657,7 @@ pub(crate) fn copy_wave(
 
 pub(crate) fn finish_wave_move(
     source: &Path,
-    id: &crate::id::WaveId,
+    id: &loopflow_model::id::WaveId,
     copied: &Value,
 ) -> Result<()> {
     let path = private_path(source)?;
@@ -1028,7 +1051,7 @@ mod tests {
         let _home =
             crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
         let repo = loopflow_test_support::TestRepo::new();
-        let first = crate::id::WaveId::new();
+        let first = loopflow_model::id::WaveId::new();
         repo.create_file(".lf/wave/old/config.yaml", &format!("id: {first}\n"));
         set(
             repo.path(),
@@ -1046,7 +1069,7 @@ mod tests {
         .unwrap();
         repo.create_file(
             ".lf/wave/old/config.yaml",
-            &format!("id: {}\n", crate::id::WaveId::new()),
+            &format!("id: {}\n", loopflow_model::id::WaveId::new()),
         );
         let selected = |name| {
             crate::config::load_wave_config(Some(repo.path()), Some(name))
@@ -1063,7 +1086,7 @@ mod tests {
         let _env = loopflow_test_support::env_lock().lock().unwrap();
         let source = loopflow_test_support::TestRepo::new();
         let target = loopflow_test_support::TestRepo::new();
-        let id = crate::id::WaveId::new();
+        let id = loopflow_model::id::WaveId::new();
         let key = format!("waves.{id}.agent");
         let source_path = private_path(source.path()).unwrap();
         let target_path = private_path(target.path()).unwrap();

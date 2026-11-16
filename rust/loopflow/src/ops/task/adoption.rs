@@ -3,13 +3,13 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::durable::TaskId;
 use crate::git::worktrees::{PlacementPlan, PlacementStrategy};
 use crate::ops::human_session::{checkout_scope, SessionTarget};
 use crate::ops::OpsResult;
 use crate::session::{LfSession, PrimaryScope};
 use crate::store::{PlanningLocks, SharedStore};
-use crate::work::task::{NewTask, Task};
+use loopflow_model::durable::TaskId;
+use loopflow_storage::work::task::{NewTask, Task};
 
 use super::{task_error, TaskPlacement};
 
@@ -57,9 +57,9 @@ async fn resolve_checkout(
         // Plain creation never adopts the caller's checkout or conversation.
         return Ok(Source::default());
     };
-    let main = crate::repository::CanonicalRepo::discover(repo).map_err(task_error)?;
+    let main = crate::repository::discover(repo).map_err(task_error)?;
     let root = crate::git::worktree_root(cwd).map_err(task_error)?;
-    if crate::repository::CanonicalRepo::discover(&root).map_err(task_error)? != main {
+    if crate::repository::discover(&root).map_err(task_error)? != main {
         return Err(task_error(
             "The selected work belongs to another repository; run promotion there",
         ));
@@ -105,6 +105,11 @@ async fn resolve_checkout(
             }
             (None, None)
         }
+        Some(scope) => {
+            return Err(task_error(format!(
+                "Unsupported conversation scope: {scope:?}"
+            )))
+        }
     };
     let session_task = selected
         .as_ref()
@@ -142,7 +147,7 @@ pub(super) async fn save(
     source: Source,
     acquisition: Option<Arc<PlanningLocks>>,
     continue_in_task: bool,
-    receipt: Option<crate::store::sqlite::creation::CreationIdentity>,
+    receipt: Option<loopflow_storage::sqlite::creation::CreationIdentity>,
 ) -> OpsResult<Task> {
     if let Some(task) = source.task.as_ref().filter(|task| task.id != id) {
         return Err(task_error(format!(

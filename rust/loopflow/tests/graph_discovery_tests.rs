@@ -54,7 +54,7 @@ async fn public_graph_discovery_reads_saved_detail_without_selecting_work() {
     open_ephemeral_store(&StorageConfig::sqlite(dir.path().join("loopflow.db")))
         .await
         .unwrap();
-    let expected_repo = loopflow::repository::CanonicalRepo::discover(dir.path())
+    let expected_repo = loopflow::repository::discover(dir.path())
         .unwrap()
         .to_string();
     // A Graph whose definition no longer exists: only its Processes describe it.
@@ -235,14 +235,13 @@ fn graph_catalog_and_wave_selection_read_the_same_graphs() {
     );
     let customized = run(&["graph", "customize", "feature"]);
     assert!(customized.status.success());
-    let store =
-        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
-    store
-        .ensure_wave_project(
-            repo.path().canonicalize().unwrap().to_str().unwrap(),
-            "proof",
-        )
-        .unwrap();
+    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
+    loopflow::work::wave::bootstrap::ensure_wave_project(
+        &store,
+        repo.path().canonicalize().unwrap().to_str().unwrap(),
+        "proof",
+    )
+    .unwrap();
     // A Wave selects a graph by name; its definition is the committed graph.
     let definition = repo.path().join(".lf/graphs/feature.yaml");
     let selected = run(&["--wave", "proof", "set", "graph", "feature"]);

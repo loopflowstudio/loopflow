@@ -107,7 +107,7 @@ fn wait_for(mut condition: impl FnMut() -> bool) {
 // Execution fixtures seed SQL directly. Save through the ordinary writer before
 // exercising Git exchange, which publishes only the journal of accepted edits.
 fn save_fixture_task(home: &Path, task: &loopflow::work::task::Task) {
-    let store = loopflow::store::sqlite::SqliteStore::new(&home.join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&home.join("loopflow.db")).unwrap();
     let current = store.task(&task.id).unwrap().unwrap();
     store
         .edit_task(
@@ -186,19 +186,24 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
     fs::write(right.path().join("config.yaml"), "user:\n  name: Lee\n").unwrap();
     let fixture = support::register_task_with_pr(left.path(), &source, "main", &repo.head_sha());
     save_fixture_task(left.path(), &fixture.task);
-    loopflow::store::sqlite::SqliteStore::new(&left.path().join("loopflow.db"))
-        .unwrap()
-        .ensure_wave_project(source.to_str().unwrap(), "task-pr-tests")
-        .unwrap();
+    loopflow::work::wave::bootstrap::ensure_wave_project(
+        &loopflow::store::open_sqlite(&left.path().join("loopflow.db")).unwrap(),
+        source.to_str().unwrap(),
+        "task-pr-tests",
+    )
+    .unwrap();
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let worker = runtime
         .block_on(open_ephemeral_store(&StorageConfig::sqlite(
             right.path().join("loopflow.db"),
         )))
         .unwrap();
-    let binding =
-        PlanningDestination::resolve(&source, "origin", "refs/loopflow/planning/shared/fixture")
-            .unwrap();
+    let binding = loopflow::planning_git::resolve_destination(
+        &source,
+        "origin",
+        "refs/loopflow/planning/shared/fixture",
+    )
+    .unwrap();
     configure(&source, &binding);
     configure(&target, &binding);
     runtime.block_on(async {
@@ -497,7 +502,7 @@ fn fetched_invalid_document_does_not_claim_import_or_publication() {
         .unwrap();
     let repo_path = repo.path().canonicalize().unwrap();
     let repo_key = repo_path.to_str().unwrap();
-    let binding = PlanningDestination::resolve(
+    let binding = loopflow::planning_git::resolve_destination(
         repo.path(),
         "origin",
         "refs/loopflow/planning/shared/invalid",
@@ -618,7 +623,7 @@ fn taskless_terminal_and_headless_sessions_keep_planning_live() {
             right.path().join("loopflow.db"),
         )))
         .unwrap();
-    let binding = PlanningDestination::resolve(
+    let binding = loopflow::planning_git::resolve_destination(
         &source_path,
         "origin",
         "refs/loopflow/planning/shared/taskless",
@@ -699,18 +704,21 @@ fn public_wave_reads_imported_planning_without_placing_or_changing_execution() {
     let target = other.path().canonicalize().unwrap();
     let fixture = support::register_task_with_pr(left.path(), &source, "main", &repo.head_sha());
     save_fixture_task(left.path(), &fixture.task);
-    loopflow::store::sqlite::SqliteStore::new(&left.path().join("loopflow.db"))
-        .unwrap()
-        .ensure_wave_project(source.to_str().unwrap(), "task-pr-tests")
-        .unwrap();
-    let source_store =
-        loopflow::store::sqlite::SqliteStore::new(&left.path().join("loopflow.db")).unwrap();
+    loopflow::work::wave::bootstrap::ensure_wave_project(
+        &loopflow::store::open_sqlite(&left.path().join("loopflow.db")).unwrap(),
+        source.to_str().unwrap(),
+        "task-pr-tests",
+    )
+    .unwrap();
+    let source_store = loopflow::store::open_sqlite(&left.path().join("loopflow.db")).unwrap();
     let retained = create(&target, right.path(), "");
-    let worker =
-        loopflow::store::sqlite::SqliteStore::new(&right.path().join("loopflow.db")).unwrap();
-    let binding =
-        PlanningDestination::resolve(&source, "origin", "refs/loopflow/planning/shared/fixture")
-            .unwrap();
+    let worker = loopflow::store::open_sqlite(&right.path().join("loopflow.db")).unwrap();
+    let binding = loopflow::planning_git::resolve_destination(
+        &source,
+        "origin",
+        "refs/loopflow/planning/shared/fixture",
+    )
+    .unwrap();
     configure(&source, &binding);
     configure(&target, &binding);
     let source_key = source.to_str().unwrap();
@@ -722,9 +730,14 @@ fn public_wave_reads_imported_planning_without_placing_or_changing_execution() {
     let snapshot = source_store
         .export_peer_planning(source_key, &binding.id())
         .unwrap();
-    worker
-        .import_peer_planning(target_key, &binding.id(), "fixture", &snapshot)
-        .unwrap();
+    loopflow::store::planning_peers::import_peer_planning(
+        &worker,
+        target_key,
+        &binding.id(),
+        "fixture",
+        &snapshot,
+    )
+    .unwrap();
     assert!(worker.peer_planning_status(target_key, None).unwrap()[0]
         .conflicts
         .is_empty());
@@ -836,8 +849,7 @@ fn planning_journal_reads_retained_changes_without_inventing_recovery_records() 
         .iter()
         .find(|journal| journal.destination == active.id)
         .unwrap();
-    let store =
-        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     let journal = store
         .export_peer_planning(source.to_str().unwrap(), &active.id)
         .unwrap();
@@ -879,9 +891,12 @@ fn planning_journal_reads_retained_changes_without_inventing_recovery_records() 
     let config = config_path
         .exists()
         .then(|| fs::read(&config_path).unwrap());
-    let other =
-        PlanningDestination::resolve(&source, "origin", "refs/loopflow/planning/shared/other")
-            .unwrap();
+    let other = loopflow::planning_git::resolve_destination(
+        &source,
+        "origin",
+        "refs/loopflow/planning/shared/other",
+    )
+    .unwrap();
     configure(&source, &other);
     let switched: serde_json::Value = serde_json::from_str(&run(
         &source,
@@ -1026,8 +1041,7 @@ fn personal_plan_moves_to_shared_default_with_identity() {
             .any(|body| body.starts_with("Start with the CPU path")),
         "{theirs:?}"
     );
-    let open =
-        |home: &Path| loopflow::store::sqlite::SqliteStore::new(&home.join("loopflow.db")).unwrap();
+    let open = |home: &Path| loopflow::store::open_sqlite(&home.join("loopflow.db")).unwrap();
     let id: loopflow::work::task::TaskId = task.parse().unwrap();
     let (mine, theirs) = (open(left.path()), open(right.path()));
     let (left_task, right_task) = (
@@ -1037,8 +1051,7 @@ fn personal_plan_moves_to_shared_default_with_identity() {
     assert_eq!(right_task.identifier, left_task.identifier);
     assert_eq!(right_task.title, left_task.title);
     let people = |store: &loopflow::store::sqlite::SqliteStore| {
-        store
-            .task_ownership(&id)
+        loopflow::store::ownership::task_ownership(store, &id)
             .unwrap()
             .log
             .into_iter()

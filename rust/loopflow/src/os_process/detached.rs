@@ -20,7 +20,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 
 use super::{execution_context, shell_escape, DISCORD_TOKEN_ENV};
-use crate::id::LfProcessId;
+use loopflow_model::id::LfProcessId;
 
 const LAUNCHER_ENV: &str = "LF_LAUNCHER_FD";
 const RELEASED: &str = "released";
@@ -291,7 +291,7 @@ pub(crate) fn start_lf(
 
 fn launch_environment(
     env: &[(&str, &str)],
-    context: &crate::child::ChildExecutionContext,
+    context: &loopflow_storage::child::ChildExecutionContext,
 ) -> Vec<(String, String)> {
     let inherited_context = [
         crate::config::AGENT_OVERRIDE_ENV,

@@ -8,7 +8,7 @@ use serde_yaml_ng::Value;
 use super::{Config, ConfigDeclarations, ConfigSource};
 use crate::error::LoadError;
 use crate::graph::Skill;
-use crate::work::selection::{WorkWorkspaceKey, WorkWorkspaceKind};
+use loopflow_storage::work::selection::{WorkWorkspaceKey, WorkWorkspaceKind};
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, schemars::JsonSchema,
@@ -278,7 +278,7 @@ pub(crate) fn validate_value(path: &[&str], value: &Value) -> Result<(), LoadErr
         }
         if !template.hours.is_finite()
             || template.hours <= 0.0
-            || template.hours > crate::rental::MAX_HOURS
+            || template.hours > loopflow_storage::rental::MAX_HOURS
         {
             return Err(invalid("rental hours must be positive and at most 24"));
         }
@@ -737,7 +737,7 @@ pub fn resolve_layers(
             value: Value::Null,
         };
         if let Some(skill) = skill {
-            let portable = crate::definition::name::portable_name(&skill.name);
+            let portable = loopflow_definitions::name::portable_name(&skill.name);
             if let Some(value) = layer
                 .value
                 .get("skills")
@@ -1093,7 +1093,7 @@ fn environment() -> Result<Value, LoadError> {
     }
     match std::env::var(super::USER_NAME_ENV) {
         Ok(name) => {
-            if let Some(name) = super::normalize_user_name(&name) {
+            if let Some(name) = loopflow_model::person::normalize_name(&name) {
                 insert(&mut values, &["user", "name"], name.into());
             }
         }

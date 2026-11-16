@@ -5,13 +5,13 @@ use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::durable::WorkRef;
 use crate::lf::commands::util::parse_since;
 use crate::lf::commands::work_catalog::{WorkCatalog, WorkOwner};
 use crate::lf::commands::WorkFilter;
 use crate::session_record::SessionHistory;
-use crate::store::rows::unix_to_datetime;
-use crate::store::sqlite::SqliteStore;
+use loopflow_model::durable::WorkRef;
+use loopflow_storage::rows::unix_to_datetime;
+use loopflow_storage::sqlite::SqliteStore;
 
 const MAX_LIMIT: usize = 200;
 
@@ -39,19 +39,19 @@ pub struct WorkActivityEntry {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum WorkActivityFact {
     InputCaptured {
-        session_id: crate::id::LfSessionId,
+        session_id: loopflow_model::id::LfSessionId,
         captured: i64,
     },
     InputCompletionRecorded {
-        session_id: crate::id::LfSessionId,
+        session_id: loopflow_model::id::LfSessionId,
         captured: i64,
         status: String,
     },
     ProviderHistoryRecorded {
-        session_id: crate::id::LfSessionId,
+        session_id: loopflow_model::id::LfSessionId,
         captured: Option<i64>,
         reference: crate::session_record::ProviderHistoryReference,
-        lf_process_id: Option<crate::id::LfProcessId>,
+        lf_process_id: Option<loopflow_model::id::LfProcessId>,
         status: Option<String>,
     },
 }
@@ -131,7 +131,10 @@ pub fn run(options: &super::history::HistoryFeed) -> Result<()> {
 /// What `lf history --json` prints for `window`.
 pub(crate) fn snapshot(window: &HistoryWindow) -> Result<WorkActivitySnapshot> {
     let path = crate::store::database_path_from_env()?;
-    let store = path.exists().then(|| SqliteStore::new(&path)).transpose()?;
+    let store = path
+        .exists()
+        .then(|| crate::store::open_sqlite(&path))
+        .transpose()?;
     read(store.as_ref(), window)
 }
 
@@ -184,7 +187,7 @@ pub(crate) fn build_snapshot(
         if settled(&entries, limit, input.latest) {
             break;
         }
-        let snapshot = store.decode_history(&pending, input)?;
+        let snapshot = crate::store::sessions::project_history_input(store, &pending, input)?;
         let mut found = Vec::new();
         let work = snapshot
             .task_id
@@ -367,7 +370,7 @@ fn print_snapshot(snapshot: &WorkActivitySnapshot) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::work::task::TaskId;
+    use loopflow_storage::work::task::TaskId;
 
     #[test]
     fn work_activity_fixture_round_trips() {
@@ -474,6 +477,55 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["b", "a"]
         );
+    }
+
+    #[test]
+    fn settled_activity_does_not_read_invalid_metadata_below_its_bound() {
+        let home = tempfile::tempdir().unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
+        std::fs::create_dir(home.path().join(".git")).unwrap();
+        let repository =
+            crate::repository::location::ensure_repository(&store, home.path().to_str().unwrap())
+                .unwrap();
+        let task = store
+            .create_task(&crate::work::task::NewTask {
+                repository_id: repository,
+                id: loopflow_model::durable::TaskId::new(),
+                project_id: None,
+                title: "History".into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap();
+        for at in [10, 20, 30] {
+            let input = crate::session_record::new_artifact_key();
+            let template = store.test_session(
+                &format!("seed-{at}"),
+                &crate::session_record::new_artifact_key(),
+            );
+            crate::store::sessions::create_session(
+                &store,
+                crate::session::LfSession {
+                    id: format!("input-{at}").into(),
+                    captured: None,
+                    artifact_key: Some(input),
+                    task_id: Some(task.id.clone()),
+                    created_at: at,
+                    ..template
+                },
+                None,
+            )
+            .unwrap();
+        }
+        // Selection carries this value without decoding it; only an evidence read fails.
+        store.conn.lock().unwrap().execute_batch(
+            "PRAGMA ignore_check_constraints=ON; UPDATE agent_sessions SET work_source='invalid-source' WHERE id='input-10'; PRAGMA ignore_check_constraints=OFF"
+        ).unwrap();
+        let snapshot = super::build_snapshot(&store, 0, 1, WorkFilter::default()).unwrap();
+        assert!(snapshot.truncated);
+        assert_eq!(snapshot.items.len(), 1);
+        assert!(snapshot.items[0].id.contains("input-30"));
+        assert!(crate::store::sessions::input_history(&store, "input-10").is_err());
     }
 
     #[test]

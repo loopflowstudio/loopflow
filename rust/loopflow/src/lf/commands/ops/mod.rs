@@ -352,7 +352,7 @@ pub(crate) fn run_sync_in(
             continue_sync_after_authorization(repo_root, true, || {
                 crate::ops::task::record_task_pr_repair(
                     repo_root,
-                    crate::work::task::TaskPrRepairKind::ManualGitRepair,
+                    loopflow_storage::work::task::TaskPrRepairKind::ManualGitRepair,
                 )
                 .map(|_| ())
             })?;
@@ -368,7 +368,7 @@ pub(crate) fn run_sync_in(
             abort_sync_after_authorization(repo_root, true, || {
                 crate::ops::task::record_task_pr_repair(
                     repo_root,
-                    crate::work::task::TaskPrRepairKind::ManualGitRepair,
+                    loopflow_storage::work::task::TaskPrRepairKind::ManualGitRepair,
                 )
                 .map(|_| ())
             })?;
@@ -563,7 +563,7 @@ fn resolve_sync_conflict(
     if avoidable {
         crate::ops::task::record_task_pr_repair(
             repo_root,
-            crate::work::task::TaskPrRepairKind::AvoidableRebaseAgent,
+            loopflow_storage::work::task::TaskPrRepairKind::AvoidableRebaseAgent,
         )?;
     }
     progress.status("Launching sync agent to resolve conflicts...");
@@ -1766,17 +1766,22 @@ fn task_ownership() -> Result<WorktreeOwnership> {
             let tasks = runtime
                 .block_on(store.list_tasks(None))
                 .map_err(|error| anyhow!("cannot verify Task ownership before pruning: {error}"))?;
-            let local = store.sqlite.local_machine()?.id;
+            let local = crate::store::machines::local_machine(&store.sqlite)?.id;
             for task in tasks {
                 let work = runtime
-                    .block_on(store.work_for_child(&crate::child::ChildRef::Task(task.id.clone())))
+                    .block_on(
+                        store.work_for_child(&loopflow_storage::child::ChildRef::Task(
+                            task.id.clone(),
+                        )),
+                    )
                     .map_err(|error| anyhow!("cannot resolve Task Work: {error}"))?;
                 let status = runtime
                     .block_on(store.work_status(&work))
                     .map_err(|error| anyhow!("cannot read Task Work status: {error}"))?;
                 let open = !matches!(
                     status,
-                    crate::durable::WorkStatus::Done | crate::durable::WorkStatus::Abandoned
+                    loopflow_model::durable::WorkStatus::Done
+                        | loopflow_model::durable::WorkStatus::Abandoned
                 );
                 let prs = runtime
                     .block_on(store.task_prs(&task.id))
@@ -1785,7 +1790,7 @@ fn task_ownership() -> Result<WorktreeOwnership> {
                 named.extend(prs.into_iter().map(|pr| (pr.branch, open)));
                 // A move pushed the branch before handing the Task off.
                 let elsewhere = if open {
-                    let owned = store.sqlite.task_ownership(&task.id)?;
+                    let owned = crate::store::ownership::task_ownership(&store.sqlite, &task.id)?;
                     owned.owner_elsewhere(&local).map(|machine| machine.name())
                 } else {
                     None

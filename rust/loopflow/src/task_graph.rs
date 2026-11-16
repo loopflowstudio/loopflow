@@ -12,10 +12,9 @@ use serde::{Deserialize, Serialize};
 use crate::error::LoadError;
 use crate::graph::runner::{ExecutionCursor, NestedCursor};
 use crate::graph::{compile_graph, load_authored_graph, ConcreteSkill, ConcreteStep};
-use crate::skills::first_prose_line;
+use loopflow_definitions::text::first_prose_line;
 
-pub const START: &str = "start";
-pub const END: &str = "end";
+pub use loopflow_storage::sqlite::task_work::{END, START};
 
 /// The graph a Task took up, compiled as it was then.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

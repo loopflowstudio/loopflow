@@ -20,9 +20,9 @@ use super::fact_writer::FactWriter;
 use super::pi_decode::Turn;
 use super::{Harness, HarnessError, SendCurrentOutcome};
 use crate::agent::AgentConfig;
-use crate::chat::types::{ConversationEvent, Lifecycle};
-use crate::id::AgentSessionId;
 use crate::steer::NativeBoundary;
+use loopflow_model::chat::types::{ConversationEvent, Lifecycle};
+use loopflow_model::id::AgentSessionId;
 
 #[derive(Debug)]
 struct Response {
@@ -548,7 +548,7 @@ fn display(decoded: &[Decoded]) -> Vec<ConversationEvent> {
 /// Record one event the native extension reported over its `session.boundary`
 /// connection: Pi's identity, activity and usage.
 pub(crate) fn observe_native(
-    store: &crate::store::sqlite::SqliteStore,
+    store: &loopflow_storage::sqlite::SqliteStore,
     adapter: &crate::steer::SteerAdapter,
     value: &Value,
 ) -> anyhow::Result<()> {

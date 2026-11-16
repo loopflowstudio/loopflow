@@ -2,7 +2,7 @@
 //! does. A conversation Loopflow started recorded that id; one the provider
 //! started alone is found in its home and admitted when first connected.
 
-use crate::id::AgentSessionId;
+use loopflow_model::id::AgentSessionId;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -187,7 +187,7 @@ pub(crate) async fn admit(
             request: None,
             ready_summary: None,
             completed_at: None,
-            created_at: crate::store::rows::now_unix(),
+            created_at: loopflow_storage::rows::now_unix(),
         })
         .await?;
     let session = select(

@@ -1,5 +1,7 @@
 //! Isolated server for scripts/benchmarks/subscription_baseline.py. Run only
 //! through that driver; the control socket is fixture-only, never a wire API.
+
+use crate::process::attachment;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixListener as ControlListener;
 use std::path::Path;
@@ -14,13 +16,13 @@ use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
 use super::{connection, Clients, Tickets};
-use crate::durable::TaskId;
-use crate::id::LfProcessId;
 use crate::performance::subscription_measurement as meter;
 use crate::process::SessionAttachment;
 use crate::server::subscriptions::Subscriptions;
 use crate::server::wire::MAX_CONNECTIONS;
-use crate::store::sqlite::SqliteStore;
+use loopflow_model::durable::TaskId;
+use loopflow_model::id::LfProcessId;
+use loopflow_storage::sqlite::SqliteStore;
 
 struct ChildGuard(Child);
 impl Drop for ChildGuard {
@@ -41,9 +43,8 @@ fn attach(store: &SqliteStore, session: &str, pid: u32) -> SessionAttachment {
             [owner.as_str()],
         )
         .unwrap();
-    let attachment = store
-        .claim_session_attachment(session, None, &owner, true)
-        .unwrap();
+    let attachment =
+        attachment::claim_session_attachment(store, session, None, &owner, true).unwrap();
     let born = crate::journal::process_started_at(pid).unwrap().unwrap();
     store
         .conn
@@ -67,11 +68,12 @@ fn seed(home: &Path, pid: u32) {
         .unwrap()
         .success());
     let repo = repo.canonicalize().unwrap();
-    let store = SqliteStore::open_ephemeral(&home.join("loopflow.db")).unwrap();
-    let repository_id = store.ensure_repository(repo.to_str().unwrap()).unwrap();
+    let store = crate::store::opening::open_ephemeral(&home.join("loopflow.db")).unwrap();
+    let repository_id =
+        crate::repository::location::ensure_repository(&store, repo.to_str().unwrap()).unwrap();
     for i in 0..64 {
         store
-            .create_task(&crate::work::task::NewTask {
+            .create_task(&loopflow_storage::work::task::NewTask {
                 repository_id: repository_id.clone(),
                 id: TaskId::new(),
                 project_id: None,
@@ -134,7 +136,7 @@ fn subscription_writer() {
     let home = std::env::var("SUBSCRIPTION_HOME").unwrap();
     std::env::set_var("LF_HOME", &home);
     let home = Path::new(&home);
-    let store = SqliteStore::open_ephemeral(&home.join("loopflow.db")).unwrap();
+    let store = crate::store::opening::open_ephemeral(&home.join("loopflow.db")).unwrap();
     let attachments: Vec<SessionAttachment> =
         serde_json::from_slice(&std::fs::read(home.join("attachments.json")).unwrap()).unwrap();
     let session = store.session("session-127").unwrap().unwrap();
@@ -147,13 +149,13 @@ fn subscription_writer() {
             break;
         }
         if command == "title" {
-            store
-                .rename_session(
-                    "session-001",
-                    "Changed by fixture",
-                    crate::session::TitleSource::Human,
-                )
-                .unwrap();
+            crate::store::sessions::rename_session(
+                &store,
+                "session-001",
+                "Changed by fixture",
+                crate::session::TitleSource::Human,
+            )
+            .unwrap();
             println!("WRITER {}", json!({"title":true}));
             continue;
         }

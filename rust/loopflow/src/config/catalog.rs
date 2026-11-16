@@ -268,13 +268,13 @@ definitions! {
     ondemands: BTreeMap<String, placement::OnDemandDeclaration> = "{}", Personal, Replace, HostLocal, NextLaunch, Machines, "Local rental templates and admission limits; active rentals keep their admitted budget";
     machine: placement::Placement = "{}", PersonalScoped, Merge, Portable, NextLaunch, Machines, "Preferred durable Machine IDs or local capacity; existing Task assignments survive";
     machines: BTreeMap<String, placement::MachineDeclaration> = "{}", Personal, Merge, Portable, NextRead, Machines, "Aliases for durable Machine identities";
-    connections: HashMap<crate::durable::MachineId, String> = "{}", Personal, Merge, HostLocal, NextRead, Machines, "This host's connection address for each durable Machine ID";
+    connections: HashMap<loopflow_model::durable::MachineId, String> = "{}", Personal, Merge, HostLocal, NextRead, Machines, "This host's connection address for each durable Machine ID";
     auth_browsers: BTreeMap<String, placement::AuthBrowsers> = "{}", Personal, Merge, HostLocal, DomainAction, Accounts, "Ordered local browser profiles for authentication; discovered browser identities stay local";
     account: BTreeMap<String, placement::AccountOrder> = "{}", PersonalScoped, Merge, Portable, NextLaunch, Accounts, "Allowed account references in order; each provider list replaces atomically";
     accounts: BTreeMap<String, BTreeMap<String, placement::AccountDeclaration>> = "{}", Personal, Merge, Portable, NextRead, Accounts, "Declared account identity, routing eligibility and subscription dates; credentials and observations stay local";
     repo_root: Option<PathBuf> = "null", Personal, Replace, HostLocal, NextRead, Desktop, "Local repository discovery directory";
     theme: Option<String> = "null", Personal, Replace, ReferencedAssets, NextRead, Desktop, "Appearance theme or light:name,dark:name pair";
-    task_layout: Option<crate::work::selection::TaskLayoutTemplate> = "null", General, Replace, Portable, NextLaunch, Desktop, "Tools and splits for Task workspaces without a saved Desktop layout; the winning scope replaces the whole layout";
+    task_layout: Option<loopflow_storage::work::selection::TaskLayoutTemplate> = "null", General, Replace, Portable, NextLaunch, Desktop, "Tools and splits for Task workspaces without a saved Desktop layout; the winning scope replaces the whole layout";
     portfolio: Option<crate::portfolio::Selection> = "null", Personal, Replace, HostLocal, NextRead, Desktop, "Repository navigation selection";
     planning: Option<PlanningConfig> = "null", Repository, Replace, Portable, DomainAction, Planning, "Tagged planning transport configuration";
     release: ReleaseConfig = "{targets: {}}", Repository, Merge, ReferencedAssets, DomainAction, Release, "Repository release targets";

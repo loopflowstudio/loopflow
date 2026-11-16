@@ -174,9 +174,9 @@ impl Surface {
     /// where a real dependency should route.
     pub fn instructions(self) -> &'static str {
         match self {
-            Self::Headless => crate::builtins::SURFACE_HEADLESS,
-            Self::Chat => crate::builtins::SURFACE_CHAT,
-            _ => crate::builtins::SURFACE_HUMAN_PRESENT,
+            Self::Headless => loopflow_definitions::builtins::SURFACE_HEADLESS,
+            Self::Chat => loopflow_definitions::builtins::SURFACE_CHAT,
+            _ => loopflow_definitions::builtins::SURFACE_HUMAN_PRESENT,
         }
     }
 }
@@ -1464,7 +1464,7 @@ pub fn drop_duplicate_docs(
                      "provider-native discovery owns this instruction file or its symlink target")
                 } else if components.operate
                     && name == "LOOPFLOW.md"
-                    && doc.content.trim() == crate::builtins::LOOPFLOW_DOC.trim()
+                    && doc.content.trim() == loopflow_definitions::builtins::LOOPFLOW_DOC.trim()
                 {
                     (
                         Kind::OperatingInstructions,
@@ -1577,20 +1577,22 @@ pub fn format_system_sections(components: &PromptComponents) -> Vec<String> {
 pub fn loopflow_section() -> String {
     format!(
         "<lf:loopflow>\n{}\n</lf:loopflow>",
-        crate::builtins::LOOPFLOW_DOC
+        loopflow_definitions::builtins::LOOPFLOW_DOC
     )
 }
 
 /// The work API contract is also available as the `work` skill.
 pub fn work_section() -> String {
-    let source = crate::builtins::get_builtin_skill("work").expect("bundled work skill");
-    let body = crate::graph::split_frontmatter(source).map_or(source, |(_, body)| body);
+    let source =
+        loopflow_definitions::builtins::get_builtin_skill("work").expect("bundled work skill");
+    let body =
+        loopflow_definitions::text::split_frontmatter(source).map_or(source, |(_, body)| body);
     format!("<lf:work-guidance>\n{body}\n</lf:work-guidance>")
 }
 
 /// Name context is display data, not authorship for historical or external requests.
 pub fn render_user_context(name: Option<&str>) -> String {
-    let Some(name) = name.and_then(crate::config::normalize_user_name) else {
+    let Some(name) = name.and_then(loopflow_model::person::normalize_name) else {
         return String::new();
     };
     let name = serde_json::to_string(&name)
@@ -1956,7 +1958,7 @@ mod tests {
 
         let prompt = render_full_prompt(components);
         assert!(prompt.contains("<lf:loopflow>"));
-        assert!(prompt.contains(crate::builtins::LOOPFLOW_DOC.trim()));
+        assert!(prompt.contains(loopflow_definitions::builtins::LOOPFLOW_DOC.trim()));
         assert!(prompt.contains("</lf:loopflow>"));
     }
 
@@ -1969,7 +1971,7 @@ mod tests {
 
         let prompt = render_full_prompt(components);
         assert!(!prompt.contains("<lf:loopflow>"));
-        assert!(!prompt.contains(crate::builtins::LOOPFLOW_DOC.trim()));
+        assert!(!prompt.contains(loopflow_definitions::builtins::LOOPFLOW_DOC.trim()));
         assert!(!prompt.contains("lf chat"));
     }
 
@@ -2005,7 +2007,8 @@ mod tests {
             let orchestrates = scope.is_some();
             // LOOPFLOW.md hands a person's change off as a Task in every prompt;
             // advancing existing Tasks is the orchestrating skills' procedure.
-            let procedures = prompt.replace(crate::builtins::LOOPFLOW_DOC.trim(), "");
+            let procedures =
+                prompt.replace(loopflow_definitions::builtins::LOOPFLOW_DOC.trim(), "");
             let advances_tasks =
                 procedures.contains("lf task run") || procedures.contains("lf task-operate");
             assert_eq!(advances_tasks, orchestrates, "{name}");
@@ -2024,14 +2027,16 @@ mod tests {
     #[test]
     fn each_session_carries_its_operate_procedure_once() {
         for scope in ["repo", "wave", "task"] {
-            let operate = crate::builtins::get_builtin_skill(&format!("{scope}/operate"))
-                .expect("operate skill");
+            let operate =
+                loopflow_definitions::builtins::get_builtin_skill(&format!("{scope}/operate"))
+                    .expect("operate skill");
             let procedure = operate
                 .splitn(3, "---\n")
                 .nth(2)
                 .expect("operate skill has a body");
-            let session = crate::builtins::get_builtin_skill(&format!("{scope}/session"))
-                .expect("session skill");
+            let session =
+                loopflow_definitions::builtins::get_builtin_skill(&format!("{scope}/session"))
+                    .expect("session skill");
             assert_eq!(session.matches(procedure).count(), 1, "{scope}");
             let between_turns = match scope {
                 "task" => {
@@ -2738,8 +2743,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let _home =
             crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
-        crate::store::sqlite::SqliteStore::open_ephemeral(&home.path().join("loopflow.db"))
-            .unwrap();
+        crate::store::opening::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
         let temp = loopflow_test_support::TestRepo::new();
         let repo = temp.path();
 

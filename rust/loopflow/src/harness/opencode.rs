@@ -13,7 +13,6 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use crate::agent::AgentConfig;
-use crate::chat::types::{ConversationEvent, FailureEvidence};
 use crate::config::parse_agent;
 use crate::harness::agent_process::AttachmentOwner;
 use crate::harness::common::TurnInProgressGuard;
@@ -21,7 +20,8 @@ use crate::harness::fact::Decoded;
 use crate::harness::fact_writer::FactWriter;
 use crate::harness::opencode_decode::{OpenCodeDecoder, ReaderState, Snapshot};
 use crate::harness::{ApprovalPolicy, Harness, HarnessError, SendCurrentOutcome};
-use crate::id::AgentSessionId;
+use loopflow_model::chat::types::{ConversationEvent, FailureEvidence};
+use loopflow_model::id::AgentSessionId;
 
 pub(crate) const OPENCODE_DISCONNECTED_CODE: &str = "opencode_disconnected";
 
@@ -902,6 +902,8 @@ fn parse_data_frame(frame: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use crate::process::attachment;
+
     use super::{
         build_turn_content, mpsc, open_agent_session, sanitize_error_message, AgentConfig,
         ApprovalPolicy, Command, ConversationEvent, Duration, Harness, OpenCodeHarness, Ordering,
@@ -925,9 +927,9 @@ mod tests {
     async fn stop_clears_the_child_and_its_group() {
         let home = tempfile::tempdir().unwrap();
         let database = home.path().join("store.db");
-        let store = crate::store::sqlite::SqliteStore::open_ephemeral(&database).unwrap();
+        let store = crate::store::opening::open_ephemeral(&database).unwrap();
         store.test_session("stop", &crate::session_record::new_artifact_key());
-        let process = crate::id::LfProcessId::new();
+        let process = loopflow_model::id::LfProcessId::new();
         let conn = rusqlite::Connection::open(&database).unwrap();
         conn.execute(
             "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?1,1)",
@@ -939,9 +941,8 @@ mod tests {
             [],
         )
         .unwrap();
-        let first = store
-            .claim_session_attachment("stop", None, &process, true)
-            .unwrap();
+        let first =
+            attachment::claim_session_attachment(&store, "stop", None, &process, true).unwrap();
         let owner = (store.clone(), "stop".to_string(), first.clone());
         let mut command = Command::new("/bin/sleep");
         command.env_clear().arg("60");
@@ -959,9 +960,9 @@ mod tests {
         harness.child = Some(child);
         harness.owner = Some(owner);
         assert_eq!(harness.process_group_id(), Some(pid));
-        let current = store
-            .claim_session_attachment("stop", Some(&first), &process, false)
-            .unwrap();
+        let current =
+            attachment::claim_session_attachment(&store, "stop", Some(&first), &process, false)
+                .unwrap();
         assert!(harness.stop().await.is_err());
         assert!(!crate::journal::OsProcess::group(pid).unwrap().is_empty());
         harness.owner = Some((store, "stop".into(), current));
@@ -1051,7 +1052,7 @@ mod tests {
 
     // -- Fake-SSE disconnect matrix --
 
-    use crate::chat::types::{ConversationItem, Lifecycle};
+    use loopflow_model::chat::types::{ConversationItem, Lifecycle};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 

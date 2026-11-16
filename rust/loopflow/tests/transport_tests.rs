@@ -6,9 +6,7 @@
 mod support;
 
 // Decode a terminal's persisted screen with the same pinned Ghostty library.
-#[allow(dead_code)]
-#[path = "../src/ghostty_vt.rs"]
-mod ghostty_vt;
+use loopflow_terminal::ghostty_vt;
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd};
@@ -18,7 +16,6 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
-use loopflow::program_status;
 use loopflow_test_support::{MachineServer, TestRepo};
 use rusqlite::OptionalExtension;
 use serde_json::{json, Value};
@@ -1712,13 +1709,13 @@ impl Fixture {
     fn shell_task(&self, task: &str) -> loopflow::durable::MachineId {
         let output = self.command(&["machine", "id"]).output().unwrap();
         assert!(output.status.success(), "{output:?}");
-        let store =
-            loopflow::store::sqlite::SqliteStore::new(&self.home.path().join("loopflow.db"))
-                .unwrap();
-        let repo = store
-            .ensure_repository(self.repo.path().to_str().unwrap())
-            .unwrap();
-        let machine = store.local_machine().unwrap().id;
+        let store = loopflow::store::open_sqlite(&self.home.path().join("loopflow.db")).unwrap();
+        let repo = loopflow::repository::location::ensure_repository(
+            &store,
+            self.repo.path().to_str().unwrap(),
+        )
+        .unwrap();
+        let machine = loopflow::store::machines::local_machine(&store).unwrap().id;
         self.sql()
             .execute(
                 "INSERT INTO tasks(id,repository_id,issue_identifier,created_at)

@@ -13,7 +13,7 @@ pub(crate) mod registry;
 pub(crate) use output::local_directory_report;
 mod snapshot;
 mod stream;
-mod terminal;
+use loopflow_terminal::repaint as terminal;
 #[cfg(test)]
 mod viewer_tests;
 pub(crate) mod wire;
@@ -35,9 +35,9 @@ use anyhow::{bail, Context, Result};
 use sha2::{Digest, Sha256};
 
 use crate::harness::native_exit::{NativeExit, Settled};
-use crate::id::{LfSessionId, TerminalId};
-use crate::store::sqlite::ViewerHold;
 use input::{Paste, PendingInput};
+use loopflow_model::id::{LfSessionId, TerminalId};
+use loopflow_storage::sqlite::ViewerHold;
 use wire::{
     Close, CloseReason, Decoder, Event, Incoming, Outgoing, Own, Reply, Request, Scanner, Tag,
 };
@@ -2293,7 +2293,7 @@ fn record_relay_terminal(held: &TerminalId) -> Result<()> {
         return Ok(());
     };
     std::env::remove_var("LF_RELAY_SESSION");
-    let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
+    let store = crate::store::open_sqlite(&crate::store::database_path_from_env()?)?;
     let session = session.to_string_lossy();
     if store.session_terminal(&session)?.as_ref() != Some(held) {
         return Ok(());
@@ -2560,7 +2560,11 @@ pub(crate) fn carry_across_exec(command: &mut Command) {
 }
 
 /// Status travels beside output to the sole writer, never through capture pipes.
-pub(crate) fn report(state: crate::program_status::State, step: bool, progress: Option<u8>) {
+pub(crate) fn report(
+    state: loopflow_model::program_status::State,
+    step: bool,
+    progress: Option<u8>,
+) {
     if !io::stdout().is_terminal() || std::env::args().any(|arg| arg == "--json") {
         return;
     }
@@ -2593,14 +2597,14 @@ pub(crate) fn report(state: crate::program_status::State, step: bool, progress: 
 
 /// Report the execution's actual return, never a viewer's disappearance.
 pub fn report_exit(code: u8) {
-    report(crate::program_status::State::Clear, true, None);
+    report(loopflow_model::program_status::State::Clear, true, None);
     report(
         if code == 0 {
-            crate::program_status::State::Done
+            loopflow_model::program_status::State::Done
         } else if code == 130 {
-            crate::program_status::State::Idle
+            loopflow_model::program_status::State::Idle
         } else {
-            crate::program_status::State::Error
+            loopflow_model::program_status::State::Error
         },
         false,
         None,
@@ -2618,7 +2622,7 @@ mod tests {
         carry_across_exec, output, place_events, wire, CatchingUp, Event, Handoff, Own, Ownership,
         RelayOutput, Viewer, CONTROL_ENV, HELD_ENV, LIMIT, PARENT_ENV,
     };
-    use crate::id::TerminalId;
+    use loopflow_model::id::TerminalId;
 
     #[test]
     fn a_catching_up_views_terminal_answers_never_reach_the_agent() {

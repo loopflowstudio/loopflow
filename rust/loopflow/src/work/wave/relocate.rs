@@ -3,10 +3,9 @@ use std::path::Path;
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::id::WaveId;
-use crate::repository::CanonicalRepo;
 use crate::store::{Store, WaveLocatorUpdate};
 use crate::work::wave::{Wave, WaveLocator};
+use loopflow_model::id::WaveId;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WaveRelocationReceipt {
@@ -39,11 +38,11 @@ pub async fn relocate_wave(
     if wave.is_retired() {
         return Err(anyhow!("Wave {wave_id} is retired"));
     }
-    let invoking = CanonicalRepo::discover(invoking_repo)?;
+    let invoking = crate::repository::discover(invoking_repo)?;
     let target_repo =
-        CanonicalRepo::discover(target_repo.unwrap_or_else(|| Path::new(wave.repo())))?;
+        crate::repository::discover(target_repo.unwrap_or_else(|| Path::new(wave.repo())))?;
     let target = WaveLocator::new(target_repo, target_name.unwrap_or(wave.slug()))?;
-    if let Ok(source) = CanonicalRepo::discover(Path::new(wave.repo())) {
+    if let Ok(source) = crate::repository::discover(Path::new(wave.repo())) {
         if source != invoking {
             return Err(anyhow!("invoke relocation from {}", wave.repo()));
         }
@@ -78,9 +77,11 @@ pub async fn relocate_wave(
         waves_moved: moves.len(),
     };
     if let Some((parent, _)) = root.target.slug().rsplit_once('/') {
-        store
-            .sqlite
-            .ensure_wave(&root.target.repo().to_string(), parent)?;
+        crate::work::wave::bootstrap::ensure_wave(
+            &store.sqlite,
+            &root.target.repo().to_string(),
+            parent,
+        )?;
     }
     let mut copied = Vec::new();
     for planned in &moves {
@@ -116,7 +117,7 @@ pub async fn relocate_wave(
 }
 
 fn ensure_repository_team_compatible(wave: &Wave, target: &WaveLocator) -> Result<()> {
-    let Ok(source) = CanonicalRepo::discover(Path::new(wave.repo())) else {
+    let Ok(source) = crate::repository::discover(Path::new(wave.repo())) else {
         return Ok(());
     };
     if &source == target.repo() {

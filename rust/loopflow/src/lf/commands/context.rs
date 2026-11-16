@@ -55,7 +55,7 @@ pub fn run(json: bool, wave: Option<&str>, task: Option<&str>) -> Result<()> {
         })
         .or_else(crate::work::wave::context::resolve_ambient_wave_name);
     let task = binding.as_ref().and_then(|binding| match &binding.work {
-        crate::durable::WorkRef::Task(id) => Some(id.to_string()),
+        loopflow_model::durable::WorkRef::Task(id) => Some(id.to_string()),
         _ => None,
     });
     let budgets = ContextBudgets::load(&repo, wave.as_deref())?;
@@ -294,7 +294,7 @@ pub fn emit_block(
             adapter.is_some() && matches!(moment, ContextMoment::Tool | ContextMoment::Steer)
         });
     if let Some(seen) = &seen {
-        crate::steer::touch(seen)?;
+        loopflow_storage::steer_markers::touch(seen)?;
     }
     // A conversation lf did not start (a Codex app-server thread) has no
     // provider context; only its turn end reports, to refresh planning.
@@ -355,7 +355,7 @@ pub fn emit_block(
 #[derive(Default)]
 struct News {
     steers: Option<(
-        crate::store::sqlite::SqliteStore,
+        loopflow_storage::sqlite::SqliteStore,
         crate::steer::ClaimedSteers,
     )>,
     /// Whether the next tool boundary should read again.
@@ -375,7 +375,7 @@ fn read_news(
     use crate::steer::NativeBoundary;
     let path = crate::store::default_db_path();
     anyhow::ensure!(path.exists(), "Machine registry is absent");
-    let store = crate::store::sqlite::SqliteStore::new(&path)?;
+    let store = crate::store::open_sqlite(&path)?;
     let event = input["hook_event_name"].as_str().unwrap_or("SessionStart");
     let boundary = match event {
         "SessionStart" => NativeBoundary::Select {

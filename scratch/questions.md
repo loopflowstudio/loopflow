@@ -1,14 +1,14 @@
 # Remaining verification
 
-Jack Heart: “Finish 916 with the two journeys it lacks. It does not measure Start → typing or Complete → row gone. Add server spans around the creation steps and put stall counts in the report.”
+Live Loopflow New Task Start → typing and visible-button Complete → row gone both
+completed and are in the HTML report. Only one sample each; Manabot/Kata have no
+Start/Complete samples. Existing Task Start is implemented but not live-validated.
 
-Both Start paths (New Task and an unstarted Task) capture input before async work
-and follow the prepared Session to focused, input-capable terminal frames.
-Completion requires an accepted command and a view-observed row removal, in either
-order. Creation stages carry timed spans joined by interaction ID. Submission
-receipts carry attributed work; report stalls separate retained totals from
-workflow overlaps.
+Native context-menu actions can lack an AppKit input timestamp and stay unmeasured.
+The running older Machine server supplies neither the new creation stage spans nor
+SQL receipts. Branch-side focused tests pass. Phone ReplayKit still needs a real
+capture session. Keep the standalone script; no dashboard server, new in-app surface,
+quiet-host gate or merge approval.
 
-Verify focused native checks and the installed Dev app. Keep the standalone
-reporting script; no dashboard server or new in-app surface. No merge approval.
-Phone ReplayKit still needs its separate real capture session.
+The probe Task debug view exposed a Session capture token in tool output; its
+invalidation is flagged but unconfirmed. No token value belongs in notes or output.

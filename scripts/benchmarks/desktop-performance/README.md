@@ -43,7 +43,7 @@ uv run python scripts/benchmarks/desktop-performance/timings.py --html /tmp/loop
 ```
 
 The HTML starts with one bar chart per workflow and one bar per repository, showing
-median input-to-usable time on a shared scale. Build and capture sources remain
+median input-to-usable time on a labeled scale per workflow, shared across repositories and builds. Build and capture sources remain
 separate. Expand the details below the charts for acknowledgment/usable medians,
 P95, individual attempts, outcomes and unmeasured workflows. P95 needs twenty completed samples. Failures,
 superseded, cancelled, unmeasured and unfinished attempts remain counts. Unknown
@@ -63,7 +63,9 @@ existing Task), follows creation/preparation to the correct Session, and waits f
 the focused terminal to accept input and acquire a frame. Complete → row gone
 requires both a successful completion command and an observed removal of that
 Task's row, in either arrival order. Neither server return nor a filter change by
-itself finishes the journey. Failed commands remain failed attempts.
+itself finishes the journey. Failed commands remain failed attempts. Native context
+menu actions can arrive without an AppKit event; these stay unmeasured. Use the
+visible Complete button in Task & workflow for a timestamped completion trial.
 
 The report shows stall counts at 50/100/250 ms and the longest busy turn across
 the retained journal window. Each workflow also counts stalls overlapping its

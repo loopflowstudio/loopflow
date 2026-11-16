@@ -321,3 +321,36 @@ publish report/PR. The shared submission transport now also requests work receip
 - `swift test --package-path swift --jobs 2 --filter InteractionTests|LaunchJournalTests|WorkModelTests/taskConfirmationDeadline|ServerClientTests/interactionReceivesItsReadResultAndSQLReceiptTogether|ServerProtocolTests` — 42 tests passed; Desktop app built.
 - `uv run pytest python/tests/test_desktop_timings.py -q` — 12 passed; Ruff passed.
 - `cargo clippy --all-targets --jobs 2 -- -D warnings` and `cargo fmt --check` — passed; focused creation receipt/recovery integration test passed.
+
+
+## Live Start and Complete probe, 2026-11-16
+
+Dev build `bd14b90dbe660b9d8de40a34891f029b8c5d2eb2`, live `~/.lf`, Loopflow
+repository. Disposable LOO-929 used `feature` at its first interactive `explore`
+step; no implementation Graph ran. Its conversation acknowledged the probe and
+accepted the visible unsent text `loo916-unsent-input-probe`; that text was cleared.
+The Task is completed and its Working sidebar row is absent.
+
+- New Task Start → typing: 23,781.5 ms usable, 95.8 ms acknowledged, n=1;
+  12 overlapping main-thread stalls. Observation `ABC37922-C495-493A-8DA1-C2662C4AFBB2`.
+- Complete button → row gone: 6,929.7 ms usable, 56.8 ms acknowledged, n=1;
+  27 overlapping stalls. Observation `4E06EE82-A14A-49E7-A942-D5C17CD4CFE7`.
+- The native context-menu Complete attempt has no AppKit input timestamp and
+  remains unmeasured (`76A67EF0-E8A2-4F5A-94BC-15795EF32BF6`). The disposable Task
+  was reopened outside measurement for the visible-button trial. No inferred input.
+- Before load: 49.23/60.80/85.58; after: 36.89/54.15/74.10. Capture-inclusive
+  upper bounds, no P95 or comparison claim. Manabot/Kata Start/Complete unmeasured.
+- The running Machine server is `470da475a`, not the branch build. SQL receipts
+  remain unavailable; new creation spans are compiled/tested but not live-validated.
+  One existing server warning said `attempt to write a readonly database` while
+  recording creation launch. The request returned success; no store/auth repair.
+- Raw journal snapshot, conditions, summary and HTML:
+  `~/.lf/performance/live/20261116-start-complete/`. The stable app-journal report
+  also includes these samples. Each workflow has its own axis scale, shared across
+  its repositories/builds. Missing repository samples are visible as unmeasured.
+- The Task debug AX view exposed a probe Session capture token in tool output.
+  Invalidation is flagged; exit from the visible terminal was followed by automatic
+  reconnection, so invalidation is not confirmed. Do not reproduce the token.
+
+Latest Python report checks: 12 passed; Ruff and diff check passed. No additional
+Swift source changed after the successful final Desktop build.

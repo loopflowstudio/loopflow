@@ -513,14 +513,23 @@ def render_html(report: dict) -> str:
                 group["measurement"],
             )
             workflows.setdefault(key, []).append(group)
-    largest = max(
-        (g["usable"]["median_ms"] for groups in workflows.values() for g in groups), default=1
-    )
-    magnitude = 10 ** math.floor(math.log10(max(largest, 1)))
-    ceiling = next(step * magnitude for step in (1, 2, 5, 10) if step * magnitude >= largest)
+    # Keep repositories and builds comparable within a workflow without making
+    # subsecond navigation disappear beside multi-second Task creation.
+    largest = {}
+    for (name, scenario, *_), groups in workflows.items():
+        key = (name, scenario)
+        largest[key] = max(largest.get(key, 1), *(g["usable"]["median_ms"] for g in groups))
+    ceilings = {}
+    for key, value in largest.items():
+        magnitude = 10 ** math.floor(math.log10(max(value, 1)))
+        ceilings[key] = next(
+            step * magnitude for step in (1, 2, 5, 10) if step * magnitude >= value
+        )
+    repositories = sorted({g["repository"] for g in journal["groups"] if g["repository"]})
     charts = []
     experience_labels = {name: label for name, label, *_ in definitions}
     for (name, scenario, _, measurement), groups in sorted(workflows.items()):
+        ceiling = ceilings[(name, scenario)]
         title = (
             "Board: "
             + scenario.removeprefix("board_").replace("_to_", " → ").replace("_", " ").title()
@@ -533,9 +542,18 @@ def render_html(report: dict) -> str:
             "complete_to_row_gone": "Complete → row gone",
         }.get(scenario, title)
         bars = []
-        for group in sorted(groups, key=lambda g: g["repository"] or ""):
-            repo = Path((group["repository"] or "").rstrip("/")).name or "Repository not recorded"
+        by_repository = {g["repository"]: g for g in groups}
+        for repository in sorted(set(repositories) | set(by_repository), key=lambda r: r or ""):
+            group = by_repository.get(repository)
+            repo = Path((repository or "").rstrip("/")).name or "Repository not recorded"
             label = {"loopflow": "Loopflow", "manabot": "Manabot", "kata": "Kata"}.get(repo, repo)
+            if group is None:
+                bars.append(
+                    f'<div class="bar-row"><div class="repo">{escape(label)}</div>'
+                    '<div class="track"></div><div class="bar-value">'
+                    "<small>Unmeasured</small></div></div>"
+                )
+                continue
             value = group["usable"]["median_ms"]
             stall_count = group["stall_count"]
             stall_label = f" · {stall_count} stalls" if stall_count is not None else ""
@@ -674,7 +692,8 @@ summary {{cursor:pointer; font-weight:600}} [hidden] {{display:none}}
 <p class="intro">How long until the result is usable?<br>
 Median time from your click · milliseconds · shorter bars are faster.</p>
 <div class="charts">{"".join(charts)}</div>
-<p>Same scale across workflows. Capture cost is included. P95 needs 20 samples per case.</p>
+<p>Each workflow has its own labeled scale, shared across repositories and builds.
+Capture cost is included. P95 needs 20 samples per case.</p>
 <aside class="stalls" aria-label="Main-thread stalls">
 <h2>Main-thread stalls</h2>
 <p>Recorded busy turns across the retained journal window.</p>

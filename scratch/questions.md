@@ -30,8 +30,8 @@
   word.
 - **GOAL.md name/summary no longer reach the Initiative.** The only writer was
   `refresh_async`'s apply branch, reachable only from a test; it and
-  `LinearSyncOptions.plan` are gone. Wave `field` effects (slice 3) restore it
-  with a receipt.
+  `LinearSyncOptions.plan` are gone. Restoring it as Wave `field` effects is
+  new behavior for a follow-up Task, not this one.
 
 - **Losing value after a conflict shows in `lf task show`** (`sync.conflict`),
   the surface the Demo reads; Desktop follows from the DTO. Alternatives were

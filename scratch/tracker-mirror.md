@@ -124,10 +124,10 @@ only on NULL ↔ value.
 `WriteOrigin::Local` inserts the effect row in the same transaction for every
 `WorkValue` a bridge carries; creation (`planning_write::create`) inserts the
 `create` row. Provider calls for planning facts happen only in the drain.
-GOAL.md's name and summary reach the Initiative as Wave `field` effects
-(today `refresh_async`'s apply branch, `ops/linear.rs:1749`, sends
-`update_wave` with no receipt, and only a test reaches it). Initiative rename
-and archive keep their `wave_lifecycle_operations` receipts.
+Initiative rename and archive keep their `wave_lifecycle_operations`
+receipts. GOAL.md name/summary → Initiative is not in this Task: no released
+path sends it (the old apply branch was test-only and is deleted), so it is new
+behavior, a follow-up Task (Wave `field` effects) filed with the PR.
 
 **Bridges translate at the edge.** `ops/tracker.rs`:
 `enum Tracker { Linear(LinearClient), Asana(AsanaClient) }` replaces
@@ -422,12 +422,24 @@ Deepest deletions first, then the queue, then the bridges. Commit at each.
    queue", `reference.md`, `reference-code.md`, `ops/README.md`. Filed:
    contract migration (771562), wire names (9fbce4).
 7. **Remaining.**
-   - GOAL.md name/summary as Wave `field` effects: not built
-     (`EffectKind::of` queues nothing for Wave values).
+   - File with the PR: GOAL.md name/summary as Wave `field` effects
+     (`EffectKind::of` queues nothing for Wave values; never sent by a
+     released lf, so no regression).
    - `uncreated()`'s Project half scans `project_transitions` per unbound
      Project (small table); `task_creation_intents` and `project_transitions`
      stay live as creation record and plan transitions, only their export
      columns are dead (contract Task).
+
+### Concept review (2026-11-16, after 7e6a2ce054): nothing left to build
+
+Read against 79d9554d33..7e6a2ce054. Greps empty: `Tracker::Asana` outside
+`ops/tracker.rs`, `sync_retained_relations`, `PlanningClient`,
+`link_pr_with_client`, `Linear*` in `asana/`, `teamId|stateId|assigneeId` in
+storage src. The only Linear names in `ops/tracker{,/drain}.rs` are the
+`Tracker::Linear` arm, `From<LinearError>` and `linear::delta_fresh_secs`
+(inbound acquisition, excluded). GOAL.md → Initiative moves out of scope (see
+Target architecture). Open choices in `questions.md` keep today's behavior and
+do not block publishing.
 
 ## Checks run
 

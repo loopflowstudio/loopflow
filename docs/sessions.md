@@ -521,8 +521,8 @@ lf -a codex resume <session-id>
 ```
 
 Launch and resume use the native client's authentication on the execution
-Machine. The Session retains its native thread and recorded history; historical
-account labels do not select credentials. See [Native authentication](subscriptions.md).
+Machine. The Session retains its native thread and recorded history. See
+[Native authentication](subscriptions.md).
 
 Interactive Sessions keep provider refusals visible and send no automatic
 follow-up input. Retry explicitly after resolving authentication or capacity,
@@ -530,7 +530,7 @@ or select another model or harness with `-a` on resume. Task membership does
 not change this policy. Headless runs follow configured model/harness fallbacks.
 
 `lf session list --on claude` filters by harness; `--on claude:opus` also filters
-by model. Login selectors and catalog-derived `--blocked` filtering are removed.
+by model.
 
 ## Reference
 

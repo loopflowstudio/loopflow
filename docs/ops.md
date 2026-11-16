@@ -361,8 +361,9 @@ lf --wave infrastructure set machine.capacity code            # the Wave's new T
 lf machine end code-1                                # give a rented machine back now
 ```
 
-Claude/Codex authentication must be provisioned on the destination independently
-before unattended work; rentals receive no subscription credentials from lf.
+Claude and Codex use the destination's native authentication. For unattended
+rentals, explicitly configure the documented credentials or home files with
+[named forwarding](subscriptions.md#remote-machines-and-rentals).
 
 Rental providers read their keys from the environment (`doppler run -- lf …`):
 Daytona `DAYTONA_API_KEY`; Modal `MODAL_TOKEN_ID`/`MODAL_TOKEN_SECRET` or

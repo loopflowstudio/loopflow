@@ -297,9 +297,9 @@ lf --setting context.diff=false design
 
 ## Choose where work runs
 
-Claude and Codex use native authentication on the execution Machine. Sign in
-with the native client there before unattended work. Saved subscription account
-preferences do not participate in launch selection.
+Claude and Codex use native authentication on the execution Machine. Use the
+native client's sign-in flow there, or explicitly configure supported credentials
+with [named forwarding](#remote-work) for unattended work.
 
 Once a remote machine is registered, select its durable ID for new Tasks:
 
@@ -423,8 +423,7 @@ Then the list is the whole order, and `--explain` marks `default_agent` unused.
 
 Lists and compound settings follow their declared merge rules. `context.docs`,
 `context.exclude`, `summaries` and `supported_harnesses` add in precedence order; `[]`
-clears earlier contributions. Keyed maps merge by key. Account lists and `agents`
-preserve order and replace as a unit. `planning` replaces its complete tagged provider
+clears earlier contributions. Keyed maps merge by key. `agents` preserves order and replaces as a unit. `planning` replaces its complete tagged provider
 configuration. `false` is a value; omission and `unset` reveal lower declarations.
 
 ## Source, scope and target
@@ -441,8 +440,7 @@ A personal Wave preference is **personal source, Wave scope**. The same Wave's
 committed preference is **repository source, Wave scope**. A file path records
 where the declaration was written; it does not create another authority tier.
 
-A setting supports only meaningful combinations. Account order has global,
-repository and Wave scopes but no skill target. Appearance has no Graph-step
+A setting supports only meaningful combinations. Appearance has no Graph-step
 target. Native provider settings remain owned by the provider. The settings
 catalogue supplies the same applicability and validation to files, CLI and Desktop;
 unsupported combinations report an explanation rather than being silently ignored.
@@ -1045,8 +1043,8 @@ summaries:
 
 Sign in through `claude` or `codex login` on the execution Machine. Loopflow
 honors `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and native API-key configuration.
-Saved subscription account preferences are inert; account-selection flags are
-removed. See [Native authentication](subscriptions.md) for resume and recovery.
+See [Native authentication](subscriptions.md) for resume, recovery and supported
+remote setup.
 
 Service authentication still uses commands such as
 `lf account connect linear --chrome-profile Work`. See

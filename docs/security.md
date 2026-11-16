@@ -91,10 +91,12 @@ ssh mini                         # sign in with the native Claude/Codex client
 lf --machine mini -a codex implement
 ```
 
-Claude and Codex use destination-native authentication. Loopflow does not transfer
-those credentials, change native logins or provision subscription access on owned
-Machines or rentals. Set up the destination before unattended work; a missing
-login produces the native client's authentication error.
+Claude and Codex use destination-native authentication. A Machine can keep its
+own login; unattended work can receive explicitly named environment variables
+or home files through [named forwarding](subscriptions.md#remote-machines-and-rentals).
+Loopflow does not choose a login, interpret those files or refresh them. Existing
+destination files are retained. Missing authentication produces the native
+client's error.
 
 Service credential transfer remains explicit. OpenSSH checks the known host key
 and Loopflow checks the saved Machine identity before transfer. Linear receives a
@@ -110,9 +112,11 @@ encrypted credentials. Unlock that Keychain once to retain its key. Subsequent
 SSH use reads the private file. A fresh credential-free machine can create its
 own file key without an unlocked Keychain.
 
-SSH agent forwarding remains opt-in with `lf --machine <machine> --forward-agent`. Arbitrary
-Doppler secret exports and automatic ambient-token forwarding are removed. Set up
-other services on the target explicitly. No Doppler master credential is sent.
+SSH agent forwarding remains opt-in with `lf --machine <machine> --forward-agent`.
+Automatic ambient-token forwarding is disabled. Only variables and home files
+named in personal `forward` settings are sent; resolve variable values from the
+initiator's environment or Doppler. Names, rather than values, belong in settings.
+Do not name a broad Doppler credential when a scoped service token is sufficient.
 
 ## Keep client access separate from Machine logins
 

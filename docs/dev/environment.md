@@ -46,10 +46,12 @@ drops it too, so sessions a person opens by hand inherit none of it.
 | `LOOPFLOW_DIRECTIVE_FILE` | Shell integration, agent launch with a relay | `lf` commands that ask the parent shell to act | Removed for agents unless a scoped relay is supplied. |
 | `LOOPFLOW_GRAPH_NAME` | Graph process | Skill prose | Names the running Graph for the agent. |
 
-## Account selection and credentials
+## Native authentication and forwarded credentials
 
-Account selection names resident logins; SSH transfers credential bytes on stdin,
-never in environment variables. Detached Session shells scrub transient credentials.
+Native clients own login selection. Explicit `forward.env` and `forward.files`
+settings send named values and home files through SSH stdin, never in command
+arguments. Forwarded variables enter the destination launch environment; detached
+Session shells scrub transient credentials.
 
 | Variable | Policy |
 |---|---|

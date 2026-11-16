@@ -84,7 +84,7 @@ discuss what's being built while work continues.
 
 **3. Organize Tasks into Waves.** A Wave is an area of work with its own goal,
 memory and plan, and its own setup for every Task in it: the Graph, the agent,
-the machine and the login that pays. Your repository is the Wave for Tasks
+and the machine where it runs. Your repository is the Wave for Tasks
 without one.
 
 ```yaml

@@ -22,8 +22,7 @@ owning Wave. `task run` places a Task's worktree and then runs like
 `-a` selects an explicit harness/model. Headless launches can follow configured
 `agents` fallbacks when no explicit choice pins them; interactive launches
 require an explicit retry or move. Claude and Codex use native authentication on
-the execution Machine. Saved subscription accounts and old account preferences
-do not select credentials.
+the execution Machine.
 
 JSON readers emit one document; a watched read such as
 `lf process list --watch --json` emits NDJSON until stdin closes. Diagnostics go to stderr. Exit 0 means the requested

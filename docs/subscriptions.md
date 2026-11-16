@@ -24,8 +24,8 @@ harnesses.
 ## Homes and existing conversations
 
 Claude uses its native home (`~/.claude`, or `CLAUDE_CONFIG_DIR`); Codex uses
-`~/.codex`, or `CODEX_HOME`. Loopflow honors those environment settings and does
-not replace the login with a saved subscription credential. Changing a native
+`~/.codex`, or `CODEX_HOME`. Loopflow honors those environment settings and
+uses the native client's configured authentication. Changing a native
 login affects subsequent launches; an already running client follows its own
 authentication behavior.
 
@@ -33,18 +33,14 @@ authentication behavior.
 lf resume <session-id>
 ```
 
-Resume retains the native conversation ID. Older conversations stored under
-Loopflow-managed account homes are adopted into the native home as transcript
-history only. Existing native history takes precedence; newer transcript data
+Resume retains the native conversation ID. Older conversations stored outside
+the native home are adopted as transcript history only. Existing native history takes precedence; newer transcript data
 is retained. Credentials are never copied as part of resume. Missing history
 is reported instead of silently starting an empty conversation.
 
-Existing saved accounts, credentials and historical account labels remain stored.
-They do not select a login or establish its current capacity. New usage records
-retain provider-reported tokens and costs; subscription identity stays unknown
-unless the native provider reports it. Loopflow does not poll subscription
-quotas, switch logins or redeem resets. Old `account` preferences have no effect
-on launches; `--account` and `--only-account` are removed.
+Usage records retain provider-reported tokens and costs. Native clients own
+subscription limits and authentication; Loopflow does not poll quotas or change
+logins.
 
 ## When a provider refuses work
 

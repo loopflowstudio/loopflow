@@ -77,7 +77,7 @@ Graphs may invoke the named internal operations that own their exact boundary.
 | `lf process list`, `process top`, `process prune`, `machine doctor` | local OS and command-journal observation |
 | `lf machine`, `lf --machine` | Machine identity and execution-destination routing |
 | `lf server` | Client API serving and observational readiness |
-| `lf account` | provider credential and account authority |
+| `lf account` | service authentication and browser consent |
 | `lf install`, `release` | Artifact selection, server registration/update and release workflow |
 
 Argument-level behavior belongs in the [`lf` reference](../lf-reference.md). Wire DTOs

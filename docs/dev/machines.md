@@ -54,8 +54,8 @@ initialization, repair or local fallback.
 
 `lf machine connect mini <provider>` installs supported service credentials
 through SSH stdin. Claude and Codex instead use native authentication established
-on the destination. Launch does not select, install or refresh subscription
-credentials. See [native authentication](../subscriptions.md#remote-machines-and-rentals).
+on the destination. Personal `forward` settings can send named variables and home
+files; native clients interpret them. Launch does not select or refresh logins. See [native authentication](../subscriptions.md#remote-machines-and-rentals).
 
 Remove forgets the connection without contacting the remote. Historical machine
 identity and routes remain in SQLite, and ownership entries keep naming the Machine. Previously observed routes

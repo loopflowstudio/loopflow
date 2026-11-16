@@ -179,7 +179,8 @@ Machine's unclaim, the owner claims again.
 
 The target uses its own store, repository, provider homes, OS locks and payload
 directory. Reads remain Machine-local. Claude and Codex use destination-native authentication for foreground and detached
-launches; SSH does not forward subscription credentials.
+launches. Explicitly named variables and home files can be forwarded through SSH
+stdin; native clients interpret the resulting authentication.
 
 Wave selection always resolves `(canonical repository, slug)` to one UUID.
 Bare-slug diagnostics fail when more than one repository owns the slug; no

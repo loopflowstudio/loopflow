@@ -176,7 +176,7 @@ covered by the complete profile and follows the same deletion/conflict rules.
 
 ## Migration and code parity
 
-A migration preserves authored declarations, account order and identity bindings.
+A migration preserves authored declarations and identity bindings.
 Exporting effective values destroys fallback and provenance. Before retiring DB
 values, inventory collisions with files and the behavior of a former DB-global
 override against a more specific file value. Coordinate database and file cutover
@@ -188,7 +188,7 @@ not every clone with the same remote. Jack Heart accepted this scope change on
 November 3. A canonical remote identifies the project but does not select a private
 file from an arbitrary checkout registry. Runtime reads use the addressed checkout.
 
-For migration, preserve the old origin-wide account policy as a recoverable export,
+For migration, preserve retired origin-wide preferences as a recoverable export,
 then materialize its declarations into explicitly identified existing clones after
 checking file collisions. Copies become independent clone policies at cutover. A
 route with no available checkout remains recoverable, not an active fallback.

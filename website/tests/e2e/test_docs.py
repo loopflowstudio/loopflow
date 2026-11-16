@@ -60,10 +60,10 @@ def test_docs_security_page_states_resident_login_guarantees(page: Page, base_ur
     text = " ".join(content.inner_text().split())
     assert "Only the first is general containment" in text
     assert "workspace-write" in text
-    assert "Only explicitly added machines receive credentials" in text
+    assert "Loopflow checks the saved Machine identity before transfer" in text
     assert "Credential bytes travel through SSH stdin" in text
-    assert "Existing matching logins are retained and unrelated accounts remain" in text
-    assert "No Doppler master credential is sent" in text
+    assert "Existing destination files are retained" in text
+    assert "Only variables and home files named in personal" in text
     assert "SSH agent forwarding remains opt-in" in text
     assert "--forward-agent" in text
 
@@ -76,8 +76,8 @@ def test_docs_subscriptions_page_owns_native_auth_and_retry_policy(page: Page, b
     assert "Each launch uses the native client's authentication" in text
     assert "Headless, with or without a Task" in text
     assert "Interactive, with or without a Task" in text
-    assert "Loopflow never waits for a subscription reset" in text
-    assert "does not transfer Claude/Codex credentials" in text
+    assert "Wait 5, 15, 30, then 60 minutes" in text
+    assert "already has a named file keeps its own" in text
 
 
 def test_docs_nonexistent_redirects(page: Page, base_url: str):

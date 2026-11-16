@@ -253,6 +253,13 @@ Each one goes in a named PR below.
   `transport::delegate_current` sends the operation, not `std::env::args()`.
 - Snapshot-test the Clap → `Invocation` table, one line per command, in the
   manner of Jujutsu's CLI snapshot tests.
+- Route once, in `Write::run`: `remote()` → `Remote::call::<$output>` →
+  `WriteResult`, else `run_here`. The six `match remote { Some … None … }`
+  arms in `writes!` become local-only, and the CLI's hand-routed copies
+  (`mutation.rs` hold and claim/unassign, `write::run_task`) become calls to
+  the dispatcher. session.resume's `move_session` before and
+  `prepared_remotely` after move into that one routed path. `ContinueRun`
+  stays while execution cannot name `Write`; every caller passes `run_task`.
 
 ### PR 3: Swift
 

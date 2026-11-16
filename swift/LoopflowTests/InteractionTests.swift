@@ -12,6 +12,21 @@ private final class InteractionRecords: @unchecked Sendable {
 @Suite("Interaction journeys")
 struct InteractionTests {
     @Test @MainActor
+    func processClockOnlyQualifiesTheLaunchExperience() async {
+        for name in ["open_app", "open_task"] {
+            let records = InteractionRecords()
+            let interaction = Interaction(name: name, scenario: "process_start_to_typing",
+                input: InteractionInput(uptime: 100, source: .processStart),
+                context: Interaction.Context(thermalState: 0, liveSessions: nil), sink: records.append)
+            interaction.identifyLaunch(repository: "/repo", liveSessions: 2)
+            interaction.observe(.acknowledged) { 101 }
+            interaction.observe(.usable) { 102 }
+            await interaction.waitForObservation()
+            #expect(records.values.last?.outcome == (name == "open_app" ? .completed : .unmeasured))
+        }
+    }
+
+    @Test @MainActor
     func screenFrameRequiresFreshFiniteHostTime() {
         #expect(ScreenFrames.observedTime(presented: 11, acquired: 12, after: 10) == 11)
         #expect(ScreenFrames.observedTime(presented: 9, acquired: 12, after: 10) == nil)

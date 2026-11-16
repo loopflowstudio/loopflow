@@ -58,6 +58,30 @@ Images are discarded immediately and never written to the journal. A Task metada
 pane or a read-only Session is not conversation input readiness. Superseding an
 interaction prevents its pending capture from completing the replacement.
 
+App launch records process creation → restored conversation input. The initial
+journal row survives a launch that never shows a window; the first visible
+restored window supplies acknowledgment and repository identity, and only its
+focused input-capable terminal supplies usability. This excludes OS time before
+process creation and is labeled **App process start → typing**, not launch-request
+latency. Sidebar rows alone cannot finish it.
+
+Task selection and Session return follow the exact prepared Session, including
+already-focused retained terminals. New independent conversations follow their
+new shell tab to its recorded, available Session. Refresh measures the original
+Refresh click through reattachment to focused usable input. File selection ends
+only when the selected text snapshot is mounted in its editable, focused buffer;
+previews and read-only patches do not qualify as editor input.
+
+Send → response observed is currently instrumented for native Codex. A bounded
+provider preview is published once after the first response word, then the visible
+terminal text is checked at most ten times per second. A new provider turn and
+response text absent before submission are required before acquiring a frame.
+This is an observed-response upper bound, including receipt delivery, polling and
+capture; it is not the precise first compositor frame or bare model TTFT. Prompt
+echoes, old-turn previews, tool output and spinners cannot qualify. Preview and
+screen text stay in memory and are never added to performance records. Other
+providers remain unmeasured until they supply the same response observation.
+
 Start → typing begins at the Start button's original event (both New Task and an
 existing Task), follows creation/preparation to the correct Session, and waits for
 the focused terminal to accept input and acquire a frame. Complete → row gone

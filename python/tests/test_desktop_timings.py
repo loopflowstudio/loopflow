@@ -342,3 +342,32 @@ def test_workflow_stalls_include_queued_time_and_exclude_other_launches(tmp_path
     assert "Main-thread stalls" in headline
     assert "Complete → row gone" in headline
     assert "Unmeasured · no completed observations yet" in headline
+
+
+def test_process_start_qualifies_launch_but_not_a_task_click(tmp_path: Path) -> None:
+    journal = tmp_path / "interactions"
+    journal.mkdir()
+    records = []
+    for name in ("open_app", "open_task"):
+        journey = _journey(name, name, "candidate")
+        journey[0]["evidence"] = "process_start"
+        journey[0]["inputSource"] = "processStart"
+        records.extend(journey)
+    _write(journal / "2026-11-16.ndjson", records)
+    groups = timings.summarize(tmp_path)["experiences"]["groups"]
+    assert next(g for g in groups if g["name"] == "open_app")["samples"] == 1
+    assert next(g for g in groups if g["name"] == "open_task")["samples"] == 0
+
+
+def test_repository_trailing_separator_does_not_duplicate_bars(tmp_path: Path) -> None:
+    journal = tmp_path / "interactions"
+    journal.mkdir()
+    records = []
+    for identity, repository in (("one", "/src/loopflow"), ("two", "/src/loopflow/")):
+        for row in _journey("open_task", identity, "candidate"):
+            row["context"] = {**row["context"], "repository": repository}
+            records.append(row)
+    _write(journal / "2026-11-16.ndjson", records)
+    report = timings.summarize(tmp_path)
+    assert len(report["experiences"]["groups"]) == 1
+    assert report["experiences"]["groups"][0]["samples"] == 2

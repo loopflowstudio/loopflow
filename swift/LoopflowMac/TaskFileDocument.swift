@@ -32,6 +32,7 @@ final class TaskFileDocument: NSObject, NSTextViewDelegate, @preconcurrency NSTe
     }
 
     func reconcile(_ next: TaskFileSnapshot) async {
+        defer { editor.recordInputReadiness() }
         incomingGeneration += 1
         let generation = incomingGeneration
         updateAccess(next)
@@ -240,7 +241,19 @@ final class TaskFileDocument: NSObject, NSTextViewDelegate, @preconcurrency NSTe
 
 @MainActor
 final class TaskFileTextView: NSTextView {
+    var inputReady: (() -> Void)?
     var compositionEnded: (() -> Void)?
+
+    func recordInputReadiness() {
+        guard let window, window.firstResponder === self, isEditable, acceptsFirstResponder else { return }
+        inputReady?()
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        if accepted { recordInputReadiness() }
+        return accepted
+    }
 
     override func unmarkText() {
         super.unmarkText()
@@ -295,6 +308,24 @@ final class TaskFilesStore {
 
     func dismissNavigator() {
         if navigator == .dropdown { navigator = .closed }
+    }
+
+    let performanceOwner = UUID()
+
+    func selectFileFromInput(_ path: String, mode: Mode) {
+        Perf.userAction(.openFile, scenario: "file_to_editor", id: path,
+                        repository: measurementRepository, liveSessions: nil, owner: performanceOwner) {
+            let document = document(path)
+            document.editor.inputReady = { [weak self, weak document] in
+                guard let self, let document, self.selection == path,
+                      document.snapshot?.state == .text, document.snapshot?.path == path,
+                      document.editor.string == document.text else { return }
+                Perf.stateObserved(.openFile, id: path, owner: self.performanceOwner)
+            }
+            selectFile(path, mode: mode)
+            Perf.acknowledged(.openFile, id: path, owner: performanceOwner)
+            document.editor.recordInputReadiness()
+        }
     }
 
     func selectFile(_ path: String, mode: Mode) {
@@ -390,6 +421,7 @@ final class TaskFilesStore {
         mode == .read && selection.map(Self.isRenderable) == true
     }
 
+    var measurementRepository: String?
     let issue: String
     let cwd: String
     let query: RegistryQuery

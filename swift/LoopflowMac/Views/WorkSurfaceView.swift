@@ -125,10 +125,18 @@ struct WorkSurfaceView: View {
                                 let navigation = model.navigation
                                 guard navigation.startingTaskSessions.insert(task.id).inserted else { return }
                                 navigation.taskSessionErrors[task.id] = nil
-                                Task {
-                                    defer { navigation.startingTaskSessions.remove(task.id) }
-                                    do { try await onNewSession(task.id) }
-                                    catch { navigation.taskSessionErrors[task.id] = error.localizedDescription }
+                                Perf.userAction(.newConversation, scenario: "new_session_to_typing", id: task.id,
+                                                repository: model.repoPath, liveSessions: model.liveSessionCount,
+                                                owner: navigation.performanceOwner) {
+                                    Perf.acknowledged(.newConversation, id: task.id, owner: navigation.performanceOwner)
+                                    Task {
+                                        defer { navigation.startingTaskSessions.remove(task.id) }
+                                        do { try await onNewSession(task.id) }
+                                        catch {
+                                            Perf.finish(.newConversation, id: task.id, owner: navigation.performanceOwner, outcome: .failed)
+                                            navigation.taskSessionErrors[task.id] = error.localizedDescription
+                                        }
+                                    }
                                 }
                             } label: {
                                 Label("New session", systemImage: "plus.bubble")

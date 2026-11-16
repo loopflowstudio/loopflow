@@ -1,6 +1,6 @@
 # LOO-936: record only what the product reads, history apart from state
 
-Status: 2026-11-16, slice 1 committed (`0cdba4ed89`), slice 2 and `opened_at` committed; Process placement revised (see the last section), code for slices 2–4 paused for its review.
+Status: 2026-11-16, slice 1 committed (`0cdba4ed89`), slice 2 and `opened_at` committed; Process placement revised and settled (see the last sections); slice 3 next.
 Old `provider_session_observed`/`provider_account_selected` rows still sit in
 live stores (tests seed them); slice 5's move pass deletes them. The inventory below is the review a person reads before
 code changes (brief: "Start with an inventory a person reviews before code
@@ -143,8 +143,8 @@ with its own write lock, WAL and revision row.
 - **Read finished Processes from both files with a UNION view.** Avoided by
   the move rule: each Process is in one file, and `lf history` reads
   `process_history` plus the main rows a record pins through one query in
-  `processes.rs`, not a view every caller sees. (Open: whether `lf history`
-  should list pinned rows at all; today it does.)
+  `processes.rs`, not a view every caller sees. (Moot under the revised
+  direction: every Process row is in one table.)
 
 ### Wild success / failure
 
@@ -267,10 +267,10 @@ their own row (Graph step and ship outcome, end time, error), so
 `failure_cause` and old Graphs never depend on a Process row retention
 removed. No transaction spans both files: Process row first, pointer second; a
 Process row nothing points to is harmless and the liveness check reaps it.
-Task-list wake-ups on Process start and exit come from the history file's
-revision. Slice 1, retention 30/90 days, the server-scheduled prune and
-`output` read from transcripts stand. Code for slices 2–4 stops until this
-section is reviewed (slice 2's `history.rs` and `opened_at` are committed:
+Task lists never read the history file: Task state reads the pointing
+records' own `ended_at` (see "Settled in concept review"). Slice 1, retention 30/90 days, the server-scheduled prune and
+`output` read from transcripts stand. Code for slices 2–4 resumes under
+"Settled in concept review" below (slice 2's `history.rs` and `opened_at` are committed:
 `be56185174`, the `opened_at` commit after it).
 
 ### Counts (production code, branch at `be56185174`)
@@ -357,10 +357,51 @@ keep the fence whole, for review:
   where the Session points at a Process whose token has not changed yet.
 
 The first is smaller and matches the prior art (a pod's binding lives on the
-pod, the node lease apart). Questions for review: does the attachment move to
-`agent_sessions`; does Task moving/shipping (`durable.rs:407`) read Process
-liveness from the history file's revision, or does each Graph and ship record
-carry `ended_at` itself so state reads never join the history file.
+pod, the node lease apart).
+
+### Settled in concept review (2026-11-16, headless)
+
+Both questions follow from the Task outcome ("writing it does not take the
+product's write lock or wake a Task list") and the "(C)" direction (records
+keep the results their readers need on their own row); neither needed a
+person.
+
+- **The attachment moves to `agent_sessions`.** `attachment_token` and
+  `attached_lf_process_id` join `agent_process_id` there. Which Process holds
+  a Session now is Session state; every fence, the 8 transactions and the 20
+  fence joins stay in `loopflow.db`. Cross-file fences were rejected: a
+  handoff window where the Session points at a Process whose token has not
+  changed is the stray-row risk in `questions.md`, widened from history rows
+  to authority.
+- **Task state never joins the history file.** `graph_processes`,
+  `graph_process_steps`, `task_graphs` and the ship log entry carry
+  `ended_at` (and the result their readers show) on their own row.
+  `task_state_sql`'s two `processes` arms (`durable.rs:407`, and
+  `task_open_process_ids`, which only selects Graph processes and their
+  direct children) become reads of those columns. Task-list wake-ups come
+  from main's own revisions when those rows change; `task_update_processes_*`
+  are deleted, not replaced by a history revision. The history revision
+  wakes only reads that name `history.*`.
+- **Exit and crash.** Exit writes the history Process row, then the pointing
+  record's `ended_at` (two commits, history first). A Process that dies
+  without exiting is found the way it is today, from the main records still
+  open (`ended_at IS NULL`, a few dozen rows): the liveness pass checks its
+  pid through the read-only attachment and closes both. A crash between the
+  commits leaves a record open on a finished Process; the same pass closes
+  it.
+- **Names.** The history file's table is `processes` (it holds live rows;
+  readers say `history.processes`), not `process_history`. It gains the
+  columns live readers use (pid, `agent_session_id`, `held_terminal_id`,
+  `spawn_state`) under `user_version` 2.
+- **Relocation** stops rewriting Process rows: history keeps the path a
+  Process ran in. `relocated_task_processes` keeps ids with no foreign key.
+
+Counterexample to keep testing: `idle_conversation_candidates`
+(`steers.rs:233`) and `lf top` need agent liveness now. They read
+`history.processes` through the attachment; a read takes no write lock, and
+neither is a subscription, so no wake-up is lost. If a subscription turns out
+to need live agent state, it reads `agent_sessions` (attachment), not the
+history revision.
 
 ### Revised slices (replaces 2–4)
 
@@ -369,7 +410,8 @@ carry `ended_at` itself so state reads never join the history file.
 3. Session history kinds and the state columns, as planned (`opened_at`
    done), `output` dropped.
 4. Every Process row in the history file: attachment state onto
-   `agent_sessions` (if accepted), result columns on the pointing records,
+   `agent_sessions`, result columns on the pointing records,
    the 15 foreign keys dropped with the cascade tables cleaned up explicitly,
-   `task_update_processes_*` replaced by the history revision, the 43 reads
+   `task_update_processes_*` deleted (Task state reads the records'
+   `ended_at`), the 43 reads
    repointed, `FORGETTABLE` replaced by retention by age.

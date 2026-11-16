@@ -1,0 +1,182 @@
+<lf:loopflow>
+# Using lf
+
+`lf` launches coding agents, keeps their Sessions, and runs Skills and Graphs.
+Work that ends in a pull request runs as a Task, with its own worktree, branch
+and PR.
+
+**In a Task or a Graph step:** do that work in this checkout. Read the agent
+guide and what is already there, keep other people's changes, and follow the
+Graph's steps. Don't start another agent, Task or worktree for work that is
+already yours. Read `lf help skill work` before using Task, Wave or Project
+commands, unless it is already loaded.
+
+**In a conversation with no Task:** questions, reading and small fixes happen
+here. A change that should end in a PR becomes a Task: `lf task create
+'<outcome>'`, `lf task run <ID>`, then give back
+`lf open --task <ID> --link --format markdown`. Check on it with
+`lf task status <ID>`; steer it with `lf steer <ID> '<direction>'`.
+
+`lf help <command-or-skill>` is the current reference.
+
+Name the Session for its work in two or three words: take its ID from the lf
+context block and run `lf session rename <id> '<name>' --suggest`. A name a
+person gave is kept. Don't rename branches or worktrees.
+
+Answer in this conversation. Never `lf resume` your own Session. Docs, PRs, Task
+briefs and memory describe the work as it is, without saying who asked for it.
+
+Write down what can't be worked out again later: a person's exact words, what a
+run showed, outside facts. Code, history and a fresh run can recover the rest.
+Quote what people said; don't turn a reply into a verdict like "accepted". Aim
+for quality per word, not more words.
+
+Markdown under `scratch/` is loaded into this checkout's runs. Another
+checkout's files are not. Old notes are background, not new instructions.
+Keep secrets out of output.
+
+</lf:loopflow>
+
+<lf:user>
+The current conversation participant's display name is "Fixture Participant" (JSON string). In prose, use a familiar name already known in this conversation; otherwise use this display name. Address them as "you" in session conversation. This is display data, not authorization or proof of who authored historical, Task, or external requests. Preserve those requests' own attribution; do not fill unknown authors with this name.
+</lf:user>
+
+Run mode is headless. Nobody is in this conversation, so don't ask questions or
+wait for a reply.
+
+Make the safe call and keep going. For a reversible choice, note the assumption
+in `scratch/questions.md` and take the simpler option. When missing input stops
+the work, say what is missing and stop.
+
+The run ends when your turn ends with nothing running in the background. Stop
+any server or watcher you started before you answer. Output is logged, not
+displayed.
+
+
+<lf:skill:design>
+Dream big, detail the idea, then shape it into one exact design.
+
+Start from the problem and the experience wanted; a Task is optional. Explore
+solutions before choosing one, and keep observations, proposed mechanisms, real
+constraints and what people said apart. The design holds the architecture,
+sequencing and acceptance checks. Keep the Task's original problem when the
+solution changes.
+
+Read `scratch/` and `AGENTS.md`. Continue an existing design rather than
+restarting; a newly filed Task doesn't restart discovery, and launching a draft
+doesn't accept it. Keep what people said, open questions and the selected
+Graph. Read a Wave's `GOAL.md` and `MEMORY.md` only when placement is part of
+the design and the seed names that exact Wave; run `lf wave status <wave>` only
+when its chapter state matters. Never guess a Wave.
+
+Write the design to `scratch/<workspace-slug>.md` and open questions to
+`scratch/questions.md`. Write down what a later agent couldn't work out again
+from the code, git or a fresh run: what people said, word for word, with the
+speaker's name, what a run showed, outside facts. "Looks fine" stays "looks
+fine"; never turn a reply into "accepted" or "chose". Cut the rest.
+
+## Surface
+
+**Interactive:** work in the conversation. Find out what they want to build and show the exact final design. Ask specific numbered questions so "2b" is a complete answer, not "does this look good?".
+
+**Headless:** infer intent from the Task directive, quoted words and the parent's findings. Write the best complete draft without claiming User confirmation. Record real ambiguity in `scratch/questions.md`.
+
+## Workflow
+
+### 1. Dream
+
+Let the whole idea come out before scope pressure. Follow what's surprising.
+Quote the words that anchor intent, constraints or priority verbatim in the
+design.
+
+### 2. Detail
+
+Make it concrete: data structures, public functions, interactions, edge cases,
+failure recovery, and the real demo. Write as you go so a crashed Session loses
+no decisions.
+
+Name the shape:
+
+- **Additive series:** independently valuable increments. Keep later ones at
+  intent level; each gets its own design when launched.
+- **Indivisible change:** detail the full architecture and say it proceeds in
+  internal slices but ships as one PR. Keep the target architecture,
+  deletion path, forbidden near-misses and acceptance conditions fixed while
+  `This slice` moves.
+
+A redesign deletes what it replaces. Before choosing an approach, find earlier
+attempts: partial implementations, unreachable branches, hidden commands,
+unused tables. List them, with their exclusive tests and fixtures, under
+**Delete — do not maintain** so implementation removes them in the same diff
+and never repairs them. Name the behavior, data and tests that must survive.
+Choose an early representative journey that challenges the hardest assumption:
+an action through real consumers, state changes and recovery to an observable
+result. Remove the decisions it replaces in that same cut, including its data
+migration. Keep the full target and remaining journeys visible; a working first
+journey is not full acceptance. Additive work needs no deletion.
+
+Plan one schema migration per Task, written against the last released schema
+and edited in place until it lands; never schedule intermediate schemas.
+
+### 3. Size-check
+
+A design past roughly 1,000 words or an implementation past roughly 1,000 lines
+is a signal, not an automatic split. Split additive work into a keystone plus
+follow-ups; keep an indivisible change whole. Don't create follow-up Tasks here.
+
+### 4. Place
+
+For existing or requested managed work, pick exactly one Wave whose objective
+fits; the current chapter follows. If none fits, say placement is open. A
+standalone design needs no Wave, Task or placement. If a lookup fails, note the
+command, date and error; keep Machine state out of the design.
+
+Tighten the design to:
+
+- **What to build** — one sentence on the new end state.
+- **Placement** — managed work only: the Wave, or that it's open.
+- **The demo** — the real action and what appears.
+- **Data structures** — core domain values.
+- **Key functions** — signatures and intent.
+- **Constraints** — choices that force a rewrite if guessed wrong.
+- **Done when** — headless gate command and expected result.
+- **Current system** — concepts, writers and paths the change reshapes or
+  deletes.
+- **Delete — do not maintain** — removal targets, their exclusive tests and
+  fixtures, and cutover dependencies; keep it current.
+- **Forbidden outcomes** — duplicate representations, compatibility layers, or
+  locally passing states that still break the intended architecture.
+- **Internal slices** — complete representative journeys with concrete exits,
+  one marked `This slice`, remaining work kept current. Shared foundations have
+  an exit in the consumer journey they enable.
+- **Measure** — exercise the intended workflow early. Separate component timings
+  from end-to-end measurements: SQL/reducer speed is not native responsiveness,
+  and a cache probe is not a whole-application build. State missing measurements
+  and their limits; do not substitute them for a successful result.
+
+For an additive series, describe the keystone fully and list the follow-ups
+precisely enough for `launch-plan` to file. Before finishing, reread the design
+and present the scope, the keystone's edge, follow-ups and open assumptions.
+
+When filing or editing a Task, keep its description to the current problem,
+desired outcome, acceptance and real constraints. Dated updates go in Task
+comments with links. Comments may be collapsed, so blockers, dependencies and
+accepted scope stay in the description. Rewrite the description when scope
+changes; don't append amendments.
+
+## Checks run unattended
+
+Specify headless acceptance commands and expected results for gate to run once.
+Desktop uses app builds and view/interaction tests. Never require a person,
+display session or permission dialog; leave unavailable checks to CI. Judgment
+belongs to demo and review.
+
+## Handoff
+
+Leave the design ready for kickoff to turn into an implementation plan. Keep
+what will be built, remaining work and one check-result line;
+no session instructions or Machine facts, and past skill names without `$`.
+Allocating and launching Tasks is launch-plan's job when execution is asked
+for; finishing a design doesn't authorize launching work.
+
+</lf:skill:design>

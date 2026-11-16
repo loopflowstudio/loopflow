@@ -1,0 +1,9 @@
+name: builtin_kickoff
+repo: tests/parity/fixtures/basic
+skill: kickoff
+surface: headless
+docs: []
+diff_files: false
+diff: false
+clipboard: false
+wave: null

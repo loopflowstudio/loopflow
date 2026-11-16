@@ -144,6 +144,49 @@ work. Name your own decider with `step:`:
         description: "No actionable defect in the supplied change"
 ```
 
+## Take a large rewrite through a complete journey
+
+```bash
+lf design "Replace the task list's client state model on desktop and mobile"
+```
+
+The design keeps the whole replacement in view and chooses an early journey
+that tests its hardest assumption. For this example: complete a task, see it
+leave both lists with the next item selected, then check stale replies, restart
+and a refused completion. That journey reaches the screens and saved state;
+other actions can remain pending.
+
+`kickoff` turns the design into working journeys with concrete exit checks.
+For a substantial migration, the plan in `scratch/` keeps one table of
+responsibilities, production callers and surfaces, test consumers, what gets
+replaced or deleted, exit checks and remaining status. Production and test
+consumers are compiled early, or exercised in a bounded migration spike, so
+hidden dependencies surface before the replacement grows. Small edits do not
+need a migration table.
+
+`implement` finishes the selected journey before generalizing its machinery,
+removing replaced consumer decisions in the same cut. Shared foundations serve
+that journey's exit check. An indivisible migration can stay in one PR without
+adding adapters, duplicate stores or flags just to split it up. Completing the
+first journey leaves the rest of the intended change in the plan.
+
+`concept-review` checks changed contracts and concrete regressions against the
+design. Its first review establishes that reference; later reviews can finish
+briefly when it still holds. Changed experience, ownership, persistence or
+recovery decisions, or a counterexample to the design, warrant a wider review.
+An unresolved product choice returns through the loop's blocked question.
+
+Progress names completed behavior, remaining migration, repairs, newly found
+scope and the next bounded outcome. `realign` keeps that account in the existing
+plan. Repeating an inventory without closing behavior, learning something new
+or changing approach does not justify another identical iteration. A successful
+step exit alone does not establish completion.
+
+Check the intended workflow early. A reducer test can check state changes;
+native responsiveness needs native interaction measurements. Report unavailable
+checks as missing and leave them for a capable gate or CI environment while
+unrelated headless work continues. The full target still defines completion.
+
 ## Move one number
 
 ```bash

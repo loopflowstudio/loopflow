@@ -86,20 +86,21 @@ Graph calls for it.
    survive) and keep it current. Add predecessors you discover.
 
 2. **Implement.**
-   - Make the deepest planned deletions first, then build on what remains.
-     Remove what this change replaces in the same diff; leave no parallel path.
-   - Never repair, refactor or extend a deletion target or its tests. When one
-     fails, delete it as planned and keep coverage of the required behavior on
-     the surviving path.
-   - Move real consumers end to end and include any data migration in the
-     deletion cut. Breakage mid-cut is no reason to fix the old path; finish the
-     cut, then check. New capabilities need no deletion.
+   - Finish the selected journey through actual consumers, persistence or
+     reconciliation, recovery and observable result before generalizing its
+     machinery. Shared foundations must lead to that journey's exit check.
+   - Remove replaced consumer decisions and any required data migration in the
+     same cut. Never repair or extend a deletion target or its exclusive tests;
+     keep required behavior covered on the surviving path. New capabilities
+     need no invented predecessor.
+   - Compile production and test consumers early, or use a bounded migration
+     spike to expose missed callers. Mid-cut breakage calls for finishing the
+     consumer cut, not restoring the predecessor or expanding unrelated layers.
    - Keep one unreleased schema migration per Task and edit it in place. When
      the schema changes again, rewrite it to the final shape; never stack a
      second that alters or drops what the first created. Test the upgrade from
      the last released schema to the finished migration.
-   - Functions one at a time, following the signatures. Reshape the existing
-     code instead of adding a parallel representation.
+   - Reshape the existing owner instead of adding a parallel representation.
    - An indivisible change proceeds in internal slices but ships as one PR.
      Update remaining work as you learn. No flags, v2s, or setup nothing uses
      yet.
@@ -122,7 +123,9 @@ Graph calls for it.
      to gate/CI. Ask for a judgment when someone is in the conversation;
      headless, leave it for demo or review. A real build or test failure still
      needs a fix.
-   - Update remaining work in place, with one command/result line.
+   - Update the existing plan: completed behavior, remaining migration rows,
+     repairs, newly discovered scope and the next bounded outcome. Keep one
+     command/result line; a completed journey does not erase full acceptance.
 
 ## Rules
 

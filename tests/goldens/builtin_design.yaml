@@ -1,0 +1,9 @@
+name: builtin_design
+repo: tests/parity/fixtures/basic
+skill: design
+surface: headless
+docs: []
+diff_files: false
+diff: false
+clipboard: false
+wave: null

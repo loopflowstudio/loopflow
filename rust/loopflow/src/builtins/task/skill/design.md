@@ -58,9 +58,11 @@ attempts: partial implementations, unreachable branches, hidden commands,
 unused tables. List them, with their exclusive tests and fixtures, under
 **Delete — do not maintain** so implementation removes them in the same diff
 and never repairs them. Name the behavior, data and tests that must survive.
-Sequence the deepest cuts first; if removal needs a consumer cutover or
-migration, put the minimum of it in the same cut instead of first modernizing
-the old path. Additive work needs no deletion.
+Choose an early representative journey that challenges the hardest assumption:
+an action through real consumers, state changes and recovery to an observable
+result. Remove the decisions it replaces in that same cut, including its data
+migration. Keep the full target and remaining journeys visible; a working first
+journey is not full acceptance. Additive work needs no deletion.
 
 Plan one schema migration per Task, written against the last released schema
 and edited in place until it lands; never schedule intermediate schemas.
@@ -93,9 +95,13 @@ Tighten the design to:
   fixtures, and cutover dependencies; keep it current.
 - **Forbidden outcomes** — duplicate representations, compatibility layers, or
   locally passing states that still break the intended architecture.
-- **Internal slices** — deepest deletions first, one coherent cut marked
-  `This slice`, remaining work kept current.
-- **Measure** — only when a real before/after number exists.
+- **Internal slices** — complete representative journeys with concrete exits,
+  one marked `This slice`, remaining work kept current. Shared foundations have
+  an exit in the consumer journey they enable.
+- **Measure** — exercise the intended workflow early. Separate component timings
+  from end-to-end measurements: SQL/reducer speed is not native responsiveness,
+  and a cache probe is not a whole-application build. State missing measurements
+  and their limits; do not substitute them for a successful result.
 
 For an additive series, describe the keystone fully and list the follow-ups
 precisely enough for `launch-plan` to file. Before finishing, reread the design

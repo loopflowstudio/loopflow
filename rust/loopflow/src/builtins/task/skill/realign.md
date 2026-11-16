@@ -75,9 +75,12 @@ its next reader. Keep transcripts separate and historical skill names
 unprefixed. If no plan exists, update the working context, or write the
 smallest plan continued work needs.
 
-Finish briefly: what changed, what remains, any decision needed, and one
-command/result line. Update the existing plan rather than adding reports. If
-everything already agrees, say so. Give loop-or-next the facts to judge; don't
+Finish briefly: completed behavior, remaining migration, repairs versus newly
+discovered scope, the next bounded outcome, any decision needed, and one
+command/result line. For a migration, update the existing coverage rows with
+what closed and why new consumers were added; keep full acceptance intact.
+Update the existing plan rather than adding reports. If everything already
+agrees, say so. Give loop-or-next the facts to judge; don't
 preselect Advance, Iterate or Blocked. Publishing and moving the Task on belong
 to the caller.
 

@@ -6,6 +6,18 @@ action_style: exploratory
 Step back and decide what the product's concepts and interactions should be,
 then follow that answer through the data model, APIs and infrastructure.
 
+## Bound the review
+
+Start with the working design and what changed: contracts, concrete regressions
+and unresolved choices. The first review establishes that reference design.
+On later reviews, inspect the affected interaction and recovery; if the design
+still holds and no choice remains, say so briefly and finish without another
+page or redesign. Implementation details alone do not reopen product choices.
+
+Widen the review when experience, ownership, persistence or recovery decisions
+change, or a counterexample invalidates the design. Follow those changes through
+the system using the review below; do not trade away accepted behavior.
+
 ## With a person
 
 Start from the experience they want and the constraints they've stated. The
@@ -68,7 +80,8 @@ rewrite code or restart execution unless asked.
 
 ## In a Graph without a person
 
-Run the same review against the working design and the implemented change.
+Use the same changed-contract review against the working design and implemented
+change, widening it only for the reasons above.
 Settle what the design already implies (clearer names, merged concepts,
 machinery a clearer design makes unnecessary) and write it into the working
 design as the next implement direction. Don't change code here.
@@ -79,7 +92,8 @@ why it matters. Don't write an answer into the design as settled unless someone
 said so; quote what they said.
 
 Then report one outcome for loop-or-next:
-- nothing to change and no open choice: say so; it advances.
+- nothing to change and no open choice: say so; remaining implementation still
+  belongs to loop-or-next's assessment.
 - the design changed: name the change; it iterates to implement.
 - an open product choice: state the question; it returns Blocked with it.
 

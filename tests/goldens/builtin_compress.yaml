@@ -1,0 +1,9 @@
+name: builtin_compress
+repo: tests/parity/fixtures/basic
+skill: compress
+surface: headless
+docs: []
+diff_files: false
+diff: false
+clipboard: false
+wave: null

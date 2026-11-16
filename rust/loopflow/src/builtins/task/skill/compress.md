@@ -11,14 +11,15 @@ and change, without losing required behavior. The output is a diff.
    just modified lines. Take every worthwhile simplification there; don't stop
    after one small win or wander into unrelated cleanup.
 
-2. Make the deepest cuts first. Read or update the plan's **Delete — do not
-   maintain** list of files and symbols and their exclusive tests and fixtures.
+2. Simplify in complete consumer cuts. Read or update the plan's **Delete — do
+   not maintain** list of files and symbols and their exclusive tests and fixtures.
    Remove obsolete concepts and paths before polishing what survives. Never
    repair, refactor or extend code the plan removes. Keep required behavior,
    data and tests on the surviving path, with any consumer cutover or migration
    in the same cut. If the cut breaks something, finish the cut; don't repair
    the predecessor. Keep the remaining deletion targets current. Additive work
-   needs no deletion.
+   needs no deletion. Keep the selected journey working through its consumers,
+   state and recovery; an unfinished internal layer is not its replacement.
 
 3. Then look at every scale in what remains: names, control flow, function
    boundaries, a more direct algorithm or data structure, repeated work, extra

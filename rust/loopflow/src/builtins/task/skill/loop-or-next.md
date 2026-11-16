@@ -31,10 +31,14 @@ need work. Never claim a deferred check passed or skip an authored review.
   direction. If results are missing, say so; missing results don't prove there
   was no progress.
 
-Before deciding, answer separately: which obligations are met, what changed or
-was learned, and what useful action or missing input remains. Look at actual
-results, not a confidence score. There is no pass limit: decide from the work,
-not the iteration count. The runner owns edge targets.
+Before deciding, name completed behavior, remaining migration, repairs versus
+new scope, and the next bounded outcome or missing input. Check the existing
+coverage rows against actual consumers and results. Repeated inventories with
+no closed behavior, new finding or changed approach do not justify an identical
+iteration. A useful internal layer alone cannot satisfy a journey exit check;
+a complete first journey cannot satisfy unfinished full-target acceptance.
+Look at actual results, not a confidence score. There is no pass limit: decide
+from the work, not the iteration count. The runner owns edge targets.
 
 Answer through the supplied decision protocol for this exact decision. Advance
 and Iterate move the Graph; Blocked stops it here. Existing output and logs are

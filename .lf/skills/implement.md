@@ -63,21 +63,21 @@ plan in the conversation; do not require a document template or a prior skill.
    preserving required behavior and data on the surviving path.
 
 2. **Implement**
-   - Make the deepest planned deletions first: remove obsolete concepts,
-     authorities, and paths, then build data structures on what remains.
-   - Never repair, refactor, or extend a deletion target or its exclusive
-     tests/fixtures. When one fails, carry out the planned removal instead.
-     Preserve coverage of required behavior on the surviving path.
-   - Move real consumers end to end and include any required data migration in
-     the deletion cut. Temporary compile/test breakage within the cut is no
-     reason to repair the predecessor; finish the cut before checking the result.
-     New capabilities need no invented predecessor or deletion quota.
+   - Finish the selected journey through actual consumers, persistence or
+     reconciliation, recovery and observable result before generalizing its
+     machinery. Shared foundations must lead to that journey's exit check.
+   - Remove replaced consumer decisions and any required data migration in the
+     same cut. Never repair or extend a deletion target or its exclusive tests;
+     keep required behavior covered on the surviving path. New capabilities
+     need no invented predecessor.
+   - Compile production and test consumers early, or use a bounded migration
+     spike to expose missed callers. Mid-cut breakage calls for finishing the
+     consumer cut, not restoring the predecessor or expanding unrelated layers.
    - Keep one unreleased schema migration per Task and edit it in place. When
      the schema changes again, rewrite that migration to the final shape; never
      stack a second one that alters or drops what the first created. Test the
      upgrade from the last released schema to the finished migration, not the
      steps between.
-   - Functions one at a time, following the signatures
    - Match existing patterns in the codebase
    - Reshape the existing owner instead of adding a parallel representation
    - Follow the design's delivery boundary. An indivisible architectural change
@@ -107,8 +107,10 @@ plan in the conversation; do not require a document template or a prior skill.
      judgment you need when one is in the conversation; headless, leave it for
      demo/review instead of blocking the Graph. An actual build or test failure
      still needs a fix.
-   - Update remaining work in place. Keep one command/result line with any
-     deferred owner; no pass ledger or repeated caveats.
+   - Update the existing plan: completed behavior, remaining migration rows,
+     repairs, newly discovered scope and the next bounded outcome. Keep one
+     command/result line with deferred owners; no separate progress ledger.
+     A completed journey does not erase full acceptance.
 
 ## Rules
 

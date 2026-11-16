@@ -80,6 +80,9 @@ overage.
    interaction that now works. If you can't describe it, the slice probably
    stops one step short; carry it to where it shows itself. Only work
    commissioned as infrastructure-only skips the demo, and the plan says so.
+   Exercise the real workflow early. A component benchmark cannot establish
+   native interaction latency or whole-application build cost. Name missing
+   measurements separately from useful partial results.
 
 8. **Write the plan.** Update `scratch/<slug>.md`. Treat every other scratch file
    as input to reconcile; an older, worse design doesn't win by being there
@@ -113,11 +116,17 @@ Cover these where they matter; skip the rest:
   adapters, fallbacks, dual writes, or a locally passing state that still
   breaks the intended architecture. Any of these blocks unless the plan
   justifies it and names when it is deleted.
-- **Internal slices** — for an indivisible change, keep the full end state.
-  Deepest deletions first, then build on what remains, with the minimum
-  cutover inside the deletion cut. Mark one `This slice` with a focused test
-  and update the plan in place as slices finish. Additive work needs no
-  deletion.
+- **Internal slices** — keep the full end state and sequence complete journeys,
+  starting with the one that tests the hardest assumption. Mark `This slice`
+  with its actual consumers, state changes, recovery and observable exit check.
+  Include replaced decisions and data migration in that cut. Shared foundations
+  serve its exit; do not grow machinery before trying the journey.
+- **Migration coverage** — for substantial migrations, keep one finite table in
+  the plan: responsibility, production callers/surfaces, test consumers,
+  replacement/deletion, exit check and remaining status. Compile production and
+  test consumers early or run a bounded migration spike. New discoveries update
+  named rows with a reason; another “final dependency” inventory is not closure.
+  Small edits need no table.
 
 "Done when" names behavior people see, not a list of files.
 

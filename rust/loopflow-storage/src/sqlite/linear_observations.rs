@@ -31,7 +31,7 @@ impl SqliteStore {
                 rows.collect::<Result<Vec<_>, _>>()?
             };
             for id in ids {
-                planning_write::local(
+                planning_write::tracker(
                     &tx,
                     &crate::work::edit::WorkEdit::for_target(
                         &id,

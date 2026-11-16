@@ -1,15 +1,21 @@
-//! The planning write boundary shared by local operations and imports.
-//! Callers own their transaction and local delivery evidence; this writer changes
-//! only planning columns and captures local mutations in that same transaction.
+//! The planning write boundary shared by local operations, tracker
+//! observations and Git imports. Callers own their transaction; this writer
+//! changes planning columns, journals local and tracker writes for Git peers,
+//! and queues a tracker effect for each value a local write changed.
 use crate::planning_exchange::PlanningMutation;
 use crate::work::edit::{CommentContent, Disposition, WorkEdit, WorkValue};
 use crate::{StoreError, StoreResult};
 use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::{BTreeMap, BTreeSet};
 
-#[derive(Debug, Clone, Copy)]
+/// Who a planning write comes from, which decides what else it records.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WriteOrigin {
+    /// A person or agent here: journaled, and queued for the tracker.
     Local,
+    /// A fact the tracker reported: journaled, never echoed back to it.
+    Tracker,
+    /// A Git peer's change: already in the journal it came from.
     Import,
 }
 
@@ -226,6 +232,7 @@ fn write_record(
 ) -> StoreResult<bool> {
     let before = read(conn, table, id)?;
     let mut columns = BTreeMap::new();
+    let mut changes = Vec::new();
     for edit in edits {
         let edit = &edit.change;
         if matches!(
@@ -250,6 +257,7 @@ fn write_record(
         if before.contains(edit) {
             continue;
         }
+        changes.push(edit);
         let value = edit.value()?;
         match edit {
             WorkValue::Disposition(_) | WorkValue::CommentContent(_) => {
@@ -289,7 +297,12 @@ fn write_record(
             previous_identifier.as_deref(),
         )?;
     }
-    if matches!(origin, WriteOrigin::Local) {
+    if origin == WriteOrigin::Local {
+        for change in changes {
+            super::tracker_effects::enqueue_local(conn, table, id, change)?;
+        }
+    }
+    if matches!(origin, WriteOrigin::Local | WriteOrigin::Tracker) {
         // Initial rows and every subsequent write use this same typed snapshot.
         capture(conn, table, id)?;
     }
@@ -532,13 +545,24 @@ pub(crate) fn write(
     Ok(changed)
 }
 
-/// Save local Work in the caller's transaction, including its causal identity.
+/// Save local Work in the caller's transaction, including its causal identity
+/// and the tracker effects it asks for.
 pub(crate) fn local(conn: &Connection, edits: &[WorkEdit]) -> StoreResult<bool> {
     write(conn, edits, WriteOrigin::Local)
 }
 
+/// Save what the tracker holds, which it needs no effect to learn.
+pub(crate) fn tracker(conn: &Connection, edits: &[WorkEdit]) -> StoreResult<bool> {
+    write(conn, edits, WriteOrigin::Tracker)
+}
+
 /// Create shared records before attaching any machine-local execution data.
-pub(crate) fn create(conn: &Connection, repo: &str, edits: &[WorkEdit]) -> StoreResult<()> {
+pub(crate) fn create(
+    conn: &Connection,
+    repo: &str,
+    edits: &[WorkEdit],
+    origin: WriteOrigin,
+) -> StoreResult<()> {
     let edits = edits
         .iter()
         .map(WorkEdit::canonicalized)
@@ -548,12 +572,19 @@ pub(crate) fn create(conn: &Connection, repo: &str, edits: &[WorkEdit]) -> Store
     // arrive in a different order. Capturing fields still uses the common writer.
     for table in WORK_TABLES {
         for (&(record_table, id), values) in &records {
-            if record_table == table {
-                ensure_record(conn, repo, table, id, values)?;
+            if record_table == table
+                && ensure_record(conn, repo, table, id, values)?
+                && origin == WriteOrigin::Local
+            {
+                // A new record's values are all changes, though the insert
+                // already holds them.
+                for value in values {
+                    super::tracker_effects::enqueue_local(conn, table, id, &value.change)?;
+                }
             }
         }
     }
-    write(conn, &edits, WriteOrigin::Local)?;
+    write(conn, &edits, origin)?;
     Ok(())
 }
 
@@ -589,6 +620,7 @@ mod tests {
                         Edit::ProjectName(Some("Plan".into())),
                     ],
                 ),
+                super::WriteOrigin::Local,
             )
             .unwrap();
             local(
@@ -977,7 +1009,7 @@ mod tests {
                 "session_events",
                 "session_activity",
                 "task_graphs",
-                "task_state_deliveries",
+                "tracker_effects",
             ]
             .into_iter()
             .map(|table| {
@@ -1023,7 +1055,7 @@ mod tests {
         {
             let mut conn = a.conn.lock().unwrap();
             let tx = conn.transaction().unwrap();
-            super::super::task_state_delivery::queue_in(&tx, &task, "completed").unwrap();
+            super::super::task_state::decide_in(&tx, &task, "completed").unwrap();
             tx.commit().unwrap();
         }
         let snapshot = a.export_peer_planning("/repo", &route.id()).unwrap();
@@ -1075,11 +1107,13 @@ mod tests {
                 }
             )
         );
+        // A Git peer's decision reaches this store through the journal, never
+        // as a tracker effect of its own.
         assert_eq!(
-            conn.query_row("SELECT count(*) FROM task_state_deliveries", [], |r| r
+            conn.query_row("SELECT count(*) FROM tracker_effects", [], |r| r
                 .get::<_, i64>(0))
                 .unwrap(),
-            1
+            0
         );
         drop(conn);
         let before = a.export_peer_planning("/repo", &route.id()).unwrap();

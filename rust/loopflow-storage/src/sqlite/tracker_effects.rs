@@ -39,8 +39,9 @@ impl EffectKind {
         }
     }
 
-    fn parse(value: &str) -> StoreResult<Self> {
-        Ok(match value {
+    /// `None` for a kind a later lf writes.
+    fn parse(value: &str) -> Option<Self> {
+        Some(match value {
             "create" => Self::Create,
             "field" => Self::Field,
             "order" => Self::Order,
@@ -48,12 +49,30 @@ impl EffectKind {
             "comment" => Self::Comment,
             "delete" => Self::Delete,
             "link" => Self::Link,
-            other => {
-                return Err(StoreError::InvalidData(format!(
-                    "unknown tracker effect kind {other}"
-                )))
-            }
+            _ => return None,
         })
+    }
+
+    /// The effect a local change to `value` makes; `None` for values no bridge
+    /// carries (bindings, ranks, execution facts). Order and creation are
+    /// enqueued by their writers: neither is one field's value.
+    pub fn of(value: &WorkValue) -> Option<Self> {
+        match value {
+            WorkValue::TaskTitle(_)
+            | WorkValue::TaskDescription(_)
+            | WorkValue::TaskAssignee(_)
+            | WorkValue::TaskProject(_)
+            | WorkValue::ProjectName(_)
+            | WorkValue::ProjectSummary(_)
+            | WorkValue::ProjectDescription(_)
+            | WorkValue::ProjectStatus(_)
+            | WorkValue::Krs(_)
+            | WorkValue::MetricTargets(_) => Some(Self::Field),
+            WorkValue::Disposition(_) => Some(Self::State),
+            WorkValue::CommentContent(_) => Some(Self::Comment),
+            WorkValue::TaskDeletedAt(Some(_)) => Some(Self::Delete),
+            _ => None,
+        }
     }
 
     /// Only the newest unsent value of these is worth sending.
@@ -149,9 +168,10 @@ pub enum Settlement {
         revision: Option<String>,
         remote_id: Option<String>,
     },
-    /// The provider's value won; the local value it replaced is kept.
+    /// The provider's value won: `remote` is `{revision, value}` as it held
+    /// it; the effect keeps the local value that lost.
     Adopt {
-        losing: Value,
+        remote: Value,
     },
     Retire {
         reason: String,
@@ -167,7 +187,8 @@ const IN_REPO: &str = "(e.task_id IN (SELECT t.id FROM tasks t JOIN repository_p
     OR e.project_id IN (SELECT p.id FROM projects p JOIN waves w ON w.id=p.wave_id WHERE w.repo=?1)
     OR e.wave_id IN (SELECT id FROM waves WHERE repo=?1))";
 
-fn read_effect(row: &Row<'_>) -> StoreResult<TrackerEffect> {
+/// A row and its owner; the effect is `Err` for a kind a later lf wrote.
+fn read_effect(row: &Row<'_>) -> StoreResult<Result<TrackerEffect, EffectOwner>> {
     let wave: Option<String> = row.get(2)?;
     let project: Option<String> = row.get(3)?;
     let task: Option<String> = row.get(4)?;
@@ -184,15 +205,20 @@ fn read_effect(row: &Row<'_>) -> StoreResult<TrackerEffect> {
             ))
         }
     };
+    let kind: String = row.get(6)?;
+    let Some(kind) = EffectKind::parse(&kind) else {
+        tracing::debug!(%kind, ?owner, "tracker effect of an unknown kind holds its owner");
+        return Ok(Err(owner));
+    };
     let base: Option<String> = row.get(8)?;
     let conflict: Option<String> = row.get(9)?;
     let provider: String = row.get(11)?;
-    Ok(TrackerEffect {
+    Ok(Ok(TrackerEffect {
         seq: row.get(0)?,
         id: row.get(1)?,
         owner,
         subject: row.get(5)?,
-        kind: EffectKind::parse(&row.get::<_, String>(6)?)?,
+        kind,
         value: serde_json::from_str(&row.get::<_, String>(7)?)?,
         base: base.map(|base| serde_json::from_str(&base)).transpose()?,
         conflict: conflict
@@ -207,13 +233,11 @@ fn read_effect(row: &Row<'_>) -> StoreResult<TrackerEffect> {
         error: row.get(14)?,
         attempted_at: row.get(15)?,
         looked_at: row.get(16)?,
-    })
+    }))
 }
 
 /// The bridge an owner's effects go to: its binding's, else its pending
 /// creation's. An owner with neither enqueues nothing.
-// Planning writers call this once their receipts move onto the queue (LOO-925).
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn owner_tracker(
     conn: &Connection,
     owner: &EffectOwner,
@@ -266,20 +290,187 @@ pub(crate) fn owner_tracker(
 /// Add one effect for a bound or creating owner, retiring older unsent values
 /// of the same subject. Returns the effect id, or `None` when no bridge carries
 /// this owner.
-// Planning writers call this once their receipts move onto the queue (LOO-925).
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn enqueue(
     conn: &Connection,
     owner: &EffectOwner,
     kind: EffectKind,
     subject: Option<&str>,
     value: &Value,
-    base: Option<&PlanningBaseline>,
+    base: Option<&Value>,
 ) -> StoreResult<Option<String>> {
     let Some(provider) = owner_tracker(conn, owner)? else {
         return Ok(None);
     };
     insert(conn, owner, kind, subject, value, base, provider).map(Some)
+}
+
+/// Queue what a local save of `value` on `table`/`id` asks a bridge to do.
+/// The planning writer calls this for every value a `Local` write changed.
+pub(crate) fn enqueue_local(
+    conn: &Connection,
+    table: &str,
+    id: &str,
+    value: &WorkValue,
+) -> StoreResult<()> {
+    let Some(kind) = EffectKind::of(value) else {
+        return Ok(());
+    };
+    let (owner, subject) = match table {
+        "tasks" => (EffectOwner::Task(TaskId::from_raw(id)), None),
+        "projects" => (EffectOwner::Project(ProjectId::from_raw(id)), None),
+        // A comment goes out on its Task, behind the Task's creation.
+        "task_comments" => {
+            let task: String = conn.query_row(
+                "SELECT task_id FROM task_comments WHERE id=?1",
+                [id],
+                |row| row.get(0),
+            )?;
+            (EffectOwner::Task(TaskId::from_raw(task)), Some(id))
+        }
+        _ => return Ok(()),
+    };
+    let subject = match kind {
+        EffectKind::Field => Some(value.field()),
+        _ => subject,
+    };
+    let base = match kind {
+        EffectKind::Field => field_baseline(conn, &owner, value)?,
+        EffectKind::State => state_baseline(conn, &owner)?,
+        EffectKind::Delete => observed_revision(conn, &owner)?.map(|revision| PlanningBaseline {
+            revision,
+            value: Some(WorkValue::TaskDeletedAt(None)),
+        }),
+        _ => None,
+    };
+    enqueue(
+        conn,
+        &owner,
+        kind,
+        subject,
+        &serde_json::to_value(value)?,
+        base.map(serde_json::to_value).transpose()?.as_ref(),
+    )?;
+    Ok(())
+}
+
+/// The owner's provider observation, joined from its binding.
+fn observation_source(owner: &EffectOwner) -> Option<&'static str> {
+    match owner {
+        EffectOwner::Task(_) => Some(
+            "tasks t JOIN repository_plans w ON w.id=t.repository_id
+             JOIN pm_items o ON o.repo=w.repo AND o.provider IN ('linear','asana') AND o.id=t.external_issue_id
+             WHERE t.id=?1",
+        ),
+        EffectOwner::Project(_) => Some(
+            "projects p JOIN waves w ON w.id=p.wave_id
+             JOIN pm_projects o ON o.repo=w.repo AND o.provider IN ('linear','asana') AND o.id=p.external_project_id
+             WHERE p.id=?1",
+        ),
+        EffectOwner::Wave(_) => None,
+    }
+}
+
+/// `Some(revision)` when the owner has an observation at all.
+fn observed_revision(
+    conn: &Connection,
+    owner: &EffectOwner,
+) -> StoreResult<Option<Option<String>>> {
+    let Some(source) = observation_source(owner) else {
+        return Ok(None);
+    };
+    Ok(conn
+        .query_row(
+            &format!("SELECT o.revision FROM {source}"),
+            [owner.id()],
+            |row| row.get(0),
+        )
+        .optional()?)
+}
+
+fn state_baseline(conn: &Connection, owner: &EffectOwner) -> StoreResult<Option<PlanningBaseline>> {
+    let EffectOwner::Task(id) = owner else {
+        return Ok(None);
+    };
+    Ok(conn
+        .query_row(
+            &format!(
+                "SELECT o.revision,o.state,o.completed,o.completed_at FROM {}",
+                observation_source(owner).expect("a Task has an observation source")
+            ),
+            [id.as_str()],
+            |row| {
+                Ok(PlanningBaseline {
+                    revision: row.get(0)?,
+                    value: Some(WorkValue::Disposition(crate::work::edit::Disposition {
+                        planning_state: row.get(1)?,
+                        planning_completed: i64::from(row.get::<_, bool>(2)?),
+                        planning_completed_at: row.get(3)?,
+                    })),
+                })
+            },
+        )
+        .optional()?)
+}
+
+// Read only the edited field's observation. Prose keeps its own revision;
+// an explicitly null membership is distinct from an omitted observation.
+fn field_baseline(
+    conn: &Connection,
+    owner: &EffectOwner,
+    edit: &WorkValue,
+) -> StoreResult<Option<PlanningBaseline>> {
+    let Some(source) = observation_source(owner) else {
+        return Ok(None);
+    };
+    let (column, presence) = match edit {
+        WorkValue::TaskTitle(_) | WorkValue::ProjectName(_) => ("o.name", "o.name IS NOT NULL"),
+        WorkValue::TaskDescription(_) => ("o.description", "o.description IS NOT NULL"),
+        WorkValue::ProjectDescription(_) => ("o.description", "o.description_observed_at IS NOT NULL"),
+        WorkValue::ProjectSummary(_) => ("o.summary", "o.summary IS NOT NULL"),
+        WorkValue::ProjectStatus(_) => ("o.status", "o.status IS NOT NULL"),
+        WorkValue::Krs(_) => ("o.krs", "o.krs IS NOT NULL"),
+        WorkValue::MetricTargets(_) => ("o.metric_targets", "o.metric_targets IS NOT NULL"),
+        WorkValue::TaskAssignee(_) => ("o.assignee", "o.assignee_observed"),
+        WorkValue::TaskProject(_) => ("COALESCE((SELECT id FROM projects WHERE id=o.claimed_project_id OR external_project_id=o.claimed_project_id),o.claimed_project_id)", "o.project_id_observed"),
+        _ => return Ok(None),
+    };
+    let revision = if matches!(edit, WorkValue::ProjectDescription(_)) {
+        "o.description_revision"
+    } else {
+        "o.revision"
+    };
+    let mut query = conn.prepare(&format!(
+        "SELECT {revision},{column} FROM {source} AND {presence}"
+    ))?;
+    let baseline = query
+        .query_and_then([owner.id()], |row| -> StoreResult<PlanningBaseline> {
+            let value = match edit {
+                WorkValue::TaskTitle(_) => WorkValue::TaskTitle(row.get(1)?),
+                WorkValue::ProjectName(_) => WorkValue::ProjectName(row.get(1)?),
+                WorkValue::TaskDescription(_) => WorkValue::TaskDescription(row.get(1)?),
+                WorkValue::ProjectDescription(_) => WorkValue::ProjectDescription(row.get(1)?),
+                WorkValue::ProjectSummary(_) => WorkValue::ProjectSummary(row.get(1)?),
+                WorkValue::ProjectStatus(_) => {
+                    WorkValue::ProjectStatus(serde_json::from_value(Value::String(row.get(1)?))?)
+                }
+                WorkValue::Krs(_) => {
+                    WorkValue::Krs(serde_json::from_str(&row.get::<_, String>(1)?)?)
+                }
+                WorkValue::MetricTargets(_) => {
+                    WorkValue::MetricTargets(serde_json::from_str(&row.get::<_, String>(1)?)?)
+                }
+                WorkValue::TaskAssignee(_) => WorkValue::TaskAssignee(row.get(1)?),
+                WorkValue::TaskProject(_) => WorkValue::TaskProject(row.get(1)?),
+                _ => unreachable!("baseline field was selected above"),
+            };
+            Ok(PlanningBaseline {
+                revision: row.get(0)?,
+                value: Some(value),
+            })
+        })?
+        .next()
+        .transpose();
+    baseline
 }
 
 fn insert(
@@ -288,7 +479,7 @@ fn insert(
     kind: EffectKind,
     subject: Option<&str>,
     value: &Value,
-    base: Option<&PlanningBaseline>,
+    base: Option<&Value>,
     provider: Provider,
 ) -> StoreResult<String> {
     let column = owner.column();
@@ -313,7 +504,7 @@ fn insert(
             subject,
             kind.as_str(),
             value.to_string(),
-            base.map(serde_json::to_string).transpose()?,
+            base.map(Value::to_string),
             provider.as_str()
         ],
     )?;
@@ -351,38 +542,307 @@ fn creation_baseline(conn: &Connection, owner: &EffectOwner) -> StoreResult<Vec<
     })
 }
 
+/// Settle an unsettled effect; false when it settled already.
+pub(crate) fn settle_in(conn: &Connection, id: &str, settlement: &Settlement) -> StoreResult<bool> {
+    let changed = match settlement {
+        Settlement::Acknowledged {
+            revision,
+            remote_id,
+        } => conn.execute(
+            "UPDATE tracker_effects SET phase='acknowledged',acknowledged_revision=?2,
+             remote_id=COALESCE(?3,remote_id),error=NULL
+             WHERE id=?1 AND phase IN ('pending','attempted')",
+            params![id, revision, remote_id],
+        )?,
+        Settlement::Adopt { remote } => conn.execute(
+            "UPDATE tracker_effects SET phase='acknowledged',conflict_json=?2,error=NULL
+             WHERE id=?1 AND phase IN ('pending','attempted')",
+            params![id, remote.to_string()],
+        )?,
+        Settlement::Retire { reason } => conn.execute(
+            "UPDATE tracker_effects SET phase='retired',error=?2
+             WHERE id=?1 AND phase IN ('pending','attempted')",
+            params![id, reason],
+        )?,
+    };
+    Ok(changed == 1)
+}
+
+/// An owner's unsettled effects in send order, inside the caller's transaction.
+pub(crate) fn unsettled_for_in(
+    conn: &Connection,
+    owner: &EffectOwner,
+) -> StoreResult<Vec<TrackerEffect>> {
+    let mut query = conn.prepare(&format!(
+        "SELECT {COLUMNS} FROM tracker_effects e WHERE e.{}=?1
+         AND e.phase IN ('pending','attempted') ORDER BY e.seq",
+        owner.column()
+    ))?;
+    let rows = query.query_and_then([owner.id()], read_effect)?;
+    rows.filter_map(|row| row.map(Result::ok).transpose())
+        .collect()
+}
+
+/// The newest unsettled value of each field an owner has queued.
+pub(crate) fn pending_changes_in(
+    conn: &Connection,
+    owner: &EffectOwner,
+) -> StoreResult<Vec<crate::planning_sync::PlanningChange>> {
+    let mut changes: Vec<crate::planning_sync::PlanningChange> = Vec::new();
+    for effect in unsettled_for_in(conn, owner)? {
+        if effect.kind != EffectKind::Field {
+            continue;
+        }
+        let change = crate::planning_sync::PlanningChange {
+            id: effect.id,
+            value: serde_json::from_value(effect.value)?,
+            base: effect.base.map(serde_json::from_value).transpose()?,
+        };
+        changes.retain(|older| older.value.field() != change.value.field());
+        changes.push(change);
+    }
+    Ok(changes)
+}
+
+/// Acceptance of the provider's copy of `owner` at `revision`, before it is
+/// written: attempted effects the copy answers settle (the rule the drain
+/// uses), unsent values rebase onto it, and every unsettled value replaces the
+/// observed one in `edits`, so the write keeps local intent until it settles.
+/// Returns the settlements made, so the caller can tell what was adopted.
+pub(crate) fn reconcile_in(
+    conn: &Connection,
+    owner: &EffectOwner,
+    revision: Option<&str>,
+    edits: &mut [WorkValue],
+) -> StoreResult<Vec<(TrackerEffect, Settlement)>> {
+    let effects: Vec<TrackerEffect> = unsettled_for_in(conn, owner)?
+        .into_iter()
+        .filter(|effect| {
+            matches!(
+                effect.kind,
+                EffectKind::Field | EffectKind::State | EffectKind::Delete
+            )
+        })
+        .collect();
+    let observed = crate::planning::rules::Observed {
+        revision: revision.map(str::to_owned),
+        values: edits.to_vec(),
+        ..Default::default()
+    };
+    let seen = crate::planning::revision_nanos(revision)?;
+    let mut settled = Vec::new();
+    for effect in &effects {
+        if effect.phase != EffectPhase::Attempted {
+            continue;
+        }
+        // An older copy than the one the effect was based on says nothing.
+        let base = effect
+            .base
+            .as_ref()
+            .and_then(|base| base["revision"].as_str());
+        if seen < crate::planning::revision_nanos(base)? {
+            continue;
+        }
+        if let crate::planning::rules::Decision::Settle(settlement) =
+            crate::planning::rules::decide(effect, Some(&observed), false)
+        {
+            if settle_in(conn, &effect.id, &settlement)? {
+                settled.push((effect.clone(), settlement));
+            }
+        }
+    }
+    // The newest unsettled value of each field is the one local intent holds.
+    let mut overlaid = std::collections::HashSet::new();
+    for effect in effects.iter().rev() {
+        if settled.iter().any(|(done, _)| done.id == effect.id) || effect.kind == EffectKind::Delete
+        {
+            continue;
+        }
+        let Ok(value) = serde_json::from_value::<WorkValue>(effect.value.clone()) else {
+            continue;
+        };
+        if !overlaid.insert(value.field()) {
+            continue;
+        }
+        let Some(edit) = edits.iter_mut().find(|edit| edit.field() == value.field()) else {
+            continue;
+        };
+        if *edit == value {
+            continue;
+        }
+        let base = effect
+            .base
+            .as_ref()
+            .and_then(|base| serde_json::from_value::<WorkValue>(base["value"].clone()).ok());
+        if effect.phase == EffectPhase::Pending && base.as_ref() != Some(edit) {
+            // The unsent value now replaces what the provider holds.
+            conn.execute(
+                "UPDATE tracker_effects SET base_json=?2 WHERE id=?1",
+                params![
+                    effect.id,
+                    serde_json::to_string(&PlanningBaseline {
+                        revision: revision.map(str::to_owned),
+                        value: Some(edit.clone()),
+                    })?
+                ],
+            )?;
+        }
+        *edit = value;
+    }
+    Ok(settled)
+}
+
+/// Called by every ingestion path before it can allocate a new local identity.
+/// An observation of an id this store created claims the owner whose `create`
+/// was sent with it (both bridges carry the owner's uuid): the creation
+/// settles, effects queued behind it take its values as their base, and the
+/// owner binds. Ordinary title matches do nothing.
+pub(crate) fn attach_in(
+    conn: &Connection,
+    repo: &str,
+    project: bool,
+    external: &str,
+    revision: Option<&str>,
+    observed: &[WorkValue],
+) -> StoreResult<()> {
+    let Ok(uuid) = uuid::Uuid::parse_str(external) else {
+        return Ok(());
+    };
+    let sql = if project {
+        "SELECT o.id,e.id,e.value_json FROM projects o JOIN waves w ON w.id=o.wave_id
+         JOIN tracker_effects e ON e.project_id=o.id AND e.kind='create' AND e.phase='attempted'
+         WHERE w.repo=?1 AND o.external_project_id IS NULL AND substr(o.id,6)=?2
+         ORDER BY e.seq DESC LIMIT 1"
+    } else {
+        "SELECT o.id,e.id,e.value_json FROM tasks o JOIN repository_plans w ON w.id=o.repository_id
+         JOIN tracker_effects e ON e.task_id=o.id AND e.kind='create' AND e.phase='attempted'
+         WHERE w.repo=?1 AND o.external_issue_id IS NULL AND substr(o.id,6)=?2
+         ORDER BY e.seq DESC LIMIT 1"
+    };
+    let created: Option<(String, String, String)> = conn
+        .query_row(sql, params![repo, uuid.simple().to_string()], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })
+        .optional()?;
+    let Some((id, effect, baseline)) = created else {
+        return Ok(());
+    };
+    let owner = if project {
+        EffectOwner::Project(ProjectId::from_raw(id.clone()))
+    } else {
+        EffectOwner::Task(TaskId::from_raw(id.clone()))
+    };
+    settle_in(
+        conn,
+        &effect,
+        &Settlement::Acknowledged {
+            revision: revision.map(str::to_owned),
+            remote_id: Some(external.to_owned()),
+        },
+    )?;
+    let column = owner.column();
+    let mut bases: Vec<(EffectKind, Option<&str>, WorkValue)> = Vec::new();
+    let baseline: Vec<WorkValue> = serde_json::from_str(&baseline)?;
+    for value in &baseline {
+        bases.push((EffectKind::Field, Some(value.field()), value.clone()));
+    }
+    if let Some(state) = observed
+        .iter()
+        .find(|value| matches!(value, WorkValue::Disposition(_)))
+    {
+        bases.push((EffectKind::State, None, state.clone()));
+    }
+    if !project {
+        bases.push((EffectKind::Delete, None, WorkValue::TaskDeletedAt(None)));
+    }
+    for (kind, subject, value) in bases {
+        let base = PlanningBaseline {
+            revision: revision.map(str::to_owned),
+            value: Some(value),
+        };
+        conn.execute(
+            &format!(
+                "UPDATE tracker_effects SET base_json=?4 WHERE {column}=?1 AND kind=?2 AND subject IS ?3
+                 AND base_json IS NULL AND phase IN ('pending','attempted')"
+            ),
+            params![id, kind.as_str(), subject, serde_json::to_string(&base)?],
+        )?;
+    }
+    let bind = if project {
+        WorkValue::ProjectLinearId(Some(external.to_owned()))
+    } else {
+        WorkValue::TaskLinearId(Some(external.to_owned()))
+    };
+    super::planning_write::tracker(conn, &crate::work::edit::WorkEdit::for_target(&id, &[bind]))?;
+    Ok(())
+}
+
+/// A historical filing recorded its creation intent but no attempt boundary:
+/// it may have reached Linear, so its `create` is attempted with the reply
+/// unknown and its values are the intent's, never today's Task.
+pub(crate) fn retain_filing_create_in(
+    conn: &Connection,
+    task: &TaskId,
+    baseline: &[WorkValue],
+) -> StoreResult<()> {
+    let id = insert(
+        conn,
+        &EffectOwner::Task(task.clone()),
+        EffectKind::Create,
+        None,
+        &serde_json::to_value(baseline)?,
+        None,
+        Provider::Linear,
+    )?;
+    conn.execute(
+        "UPDATE tracker_effects SET phase='attempted',attempted_at=?2,
+         error='Historical creation outcome is unknown; awaiting exact provider readback'
+         WHERE id=?1",
+        params![id, now_unix()],
+    )?;
+    Ok(())
+}
+
+/// Unbound local Projects, then Tasks, in `repo` with no live `create`.
+fn uncreated(conn: &Connection, repo: &str) -> StoreResult<Vec<EffectOwner>> {
+    let mut query = conn.prepare_cached(
+        "SELECT 'project',p.id FROM projects p JOIN waves w ON w.id=p.wave_id
+         WHERE w.repo=?1 AND p.external_project_id IS NULL
+         AND EXISTS(SELECT 1 FROM project_transitions c WHERE c.successor_id=p.id AND c.local_plan_json IS NOT NULL)
+         AND NOT EXISTS(SELECT 1 FROM tracker_effects e WHERE e.project_id=p.id AND e.kind='create' AND e.phase!='retired')
+         UNION ALL
+         SELECT 'task',t.id FROM tasks t JOIN repository_plans r ON r.id=t.repository_id
+         WHERE r.repo=?1 AND t.external_issue_id IS NULL AND t.planning_deleted_at IS NULL
+         AND EXISTS(SELECT 1 FROM task_creation_intents c WHERE c.task_id=t.id)
+         AND NOT EXISTS(SELECT 1 FROM tracker_effects e WHERE e.task_id=t.id AND e.kind='create' AND e.phase!='retired')",
+    )?;
+    let rows = query.query_map([repo], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    rows.map(|row| {
+        let (kind, id) = row?;
+        Ok(if kind == "project" {
+            EffectOwner::Project(ProjectId::from_raw(id))
+        } else {
+            EffectOwner::Task(TaskId::from_raw(id))
+        })
+    })
+    .collect()
+}
+
 impl SqliteStore {
     /// Give every unbound local Project and Task in `repo` a `create` for
     /// `provider`, including those made before the tracker was connected, then
     /// queue their comments behind it. Sends nothing.
     pub fn enqueue_tracker_creations(&self, repo: &str, provider: Provider) -> StoreResult<usize> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let mut owners = Vec::new();
-        {
-            let mut query = tx.prepare(
-                "SELECT 'project',p.id FROM projects p JOIN waves w ON w.id=p.wave_id
-                 WHERE w.repo=?1 AND p.external_project_id IS NULL
-                 AND EXISTS(SELECT 1 FROM project_transitions c WHERE c.successor_id=p.id AND c.local_plan_json IS NOT NULL)
-                 AND NOT EXISTS(SELECT 1 FROM tracker_effects e WHERE e.project_id=p.id AND e.kind='create' AND e.phase!='retired')
-                 UNION ALL
-                 SELECT 'task',t.id FROM tasks t JOIN repository_plans r ON r.id=t.repository_id
-                 WHERE r.repo=?1 AND t.external_issue_id IS NULL AND t.planning_deleted_at IS NULL
-                 AND EXISTS(SELECT 1 FROM task_creation_intents c WHERE c.task_id=t.id)
-                 AND NOT EXISTS(SELECT 1 FROM tracker_effects e WHERE e.task_id=t.id AND e.kind='create' AND e.phase!='retired')",
-            )?;
-            let rows = query.query_map([repo], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })?;
-            for row in rows {
-                let (kind, id) = row?;
-                owners.push(if kind == "project" {
-                    EffectOwner::Project(ProjectId::from_raw(id))
-                } else {
-                    EffectOwner::Task(TaskId::from_raw(id))
-                });
-            }
+        // Every pass asks; almost every pass finds nothing, so it reads first
+        // and takes the shared write lock only when there is something to queue.
+        if uncreated(&conn, repo)?.is_empty() {
+            return Ok(0);
         }
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let owners = uncreated(&tx, repo)?;
         for owner in &owners {
             let baseline = serde_json::to_value(creation_baseline(&tx, owner)?)?;
             insert(
@@ -432,8 +892,20 @@ impl SqliteStore {
             "SELECT {COLUMNS} FROM tracker_effects e
              WHERE e.phase IN ('pending','attempted') AND {IN_REPO} ORDER BY e.seq"
         ))?;
-        let effects = query.query_and_then([repo], read_effect)?;
-        effects.collect()
+        // An owner with a row this lf cannot read waits from that row on, for
+        // the lf that wrote it; other owners drain.
+        let mut held = std::collections::HashSet::new();
+        let mut effects = Vec::new();
+        for row in query.query_and_then([repo], read_effect)? {
+            match row? {
+                Ok(effect) if !held.contains(&effect.owner) => effects.push(effect),
+                Ok(_) => {}
+                Err(owner) => {
+                    held.insert(owner);
+                }
+            }
+        }
+        Ok(effects)
     }
 
     /// Every effect for one owner, oldest first, settled ones included.
@@ -444,7 +916,9 @@ impl SqliteStore {
             owner.column()
         ))?;
         let effects = query.query_and_then([owner.id()], read_effect)?;
-        effects.collect()
+        effects
+            .filter_map(|row| row.map(Result::ok).transpose())
+            .collect()
     }
 
     /// Mark an unsettled effect sent before its request leaves. Returns false
@@ -491,28 +965,7 @@ impl SqliteStore {
 
     pub fn settle_tracker_effect(&self, id: &str, settlement: &Settlement) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let changed = match settlement {
-            Settlement::Acknowledged {
-                revision,
-                remote_id,
-            } => conn.execute(
-                "UPDATE tracker_effects SET phase='acknowledged',acknowledged_revision=?2,
-                 remote_id=COALESCE(?3,remote_id),error=NULL
-                 WHERE id=?1 AND phase IN ('pending','attempted')",
-                params![id, revision, remote_id],
-            )?,
-            Settlement::Adopt { losing } => conn.execute(
-                "UPDATE tracker_effects SET phase='acknowledged',conflict_json=?2,error=NULL
-                 WHERE id=?1 AND phase IN ('pending','attempted')",
-                params![id, losing.to_string()],
-            )?,
-            Settlement::Retire { reason } => conn.execute(
-                "UPDATE tracker_effects SET phase='retired',error=?2
-                 WHERE id=?1 AND phase IN ('pending','attempted')",
-                params![id, reason],
-            )?,
-        };
-        Ok(changed == 1)
+        settle_in(&conn, id, settlement)
     }
 }
 
@@ -521,6 +974,7 @@ mod tests {
     use super::{EffectKind, EffectOwner, EffectPhase, Settlement};
     use crate::provider::Provider;
     use crate::sqlite::SqliteStore;
+    use crate::work::edit::WorkValue;
     use loopflow_model::durable::TaskId;
     use serde_json::json;
 
@@ -572,6 +1026,46 @@ mod tests {
             None,
         )
         .unwrap()
+    }
+
+    #[test]
+    fn a_local_save_queues_what_a_bridge_carries_and_a_tracker_fact_queues_nothing() {
+        let (_dir, store) = store();
+        let task = task(&store, true);
+        let save = |origin, values: &[WorkValue]| {
+            let conn = store.conn.lock().unwrap();
+            crate::sqlite::planning_write::write(
+                &conn,
+                &crate::work::edit::WorkEdit::for_target(task.as_str(), values),
+                origin,
+            )
+            .unwrap();
+        };
+        save(
+            crate::sqlite::planning_write::WriteOrigin::Local,
+            &[
+                WorkValue::TaskTitle(Some("Renamed".into())),
+                WorkValue::TaskRank(4),
+                WorkValue::TaskDeletedAt(Some(1)),
+            ],
+        );
+        save(
+            crate::sqlite::planning_write::WriteOrigin::Tracker,
+            &[WorkValue::TaskDescription(Some("Theirs".into()))],
+        );
+        let effects: Vec<_> = store
+            .tracker_effects_for(&EffectOwner::Task(task))
+            .unwrap()
+            .into_iter()
+            .map(|effect| (effect.kind, effect.subject))
+            .collect();
+        assert_eq!(
+            effects,
+            [
+                (EffectKind::Field, Some("task_title".into())),
+                (EffectKind::Delete, None)
+            ]
+        );
     }
 
     #[test]
@@ -654,7 +1148,7 @@ mod tests {
             .settle_tracker_effect(
                 &id,
                 &Settlement::Adopt {
-                    losing: json!("mine")
+                    remote: json!("theirs")
                 }
             )
             .unwrap());
@@ -669,7 +1163,7 @@ mod tests {
         assert!(store.unsettled_tracker_effects("/repo").unwrap().is_empty());
         let effect = &store.tracker_effects_for(&EffectOwner::Task(task)).unwrap()[0];
         assert_eq!(effect.phase, EffectPhase::Acknowledged);
-        assert_eq!(effect.conflict, Some(json!("mine")));
+        assert_eq!(effect.conflict, Some(json!("theirs")));
     }
 }
 

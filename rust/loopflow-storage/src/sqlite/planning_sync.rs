@@ -1,4 +1,5 @@
-//! Project and Task delivery presentation comes from the existing receipts.
+//! What a Project or Task has waiting for its tracker, and what the tracker
+//! won, read from the effect queue.
 use std::collections::HashMap;
 
 use rusqlite::{Connection, Row};
@@ -33,12 +34,7 @@ impl SqliteStore {
             |row| row.get(0),
         )?;
         let ids = ids_json([project.as_str()]);
-        let mut changes = fields(&tx, "project", &ids, false)?;
-        append(&tx, &mut changes,
-            "SELECT c.successor_id,'creation',COALESCE(json_extract(c.export_json,'$.input'),c.local_plan_json),c.export_attempted OR c.export_link_attempted,c.export_error,NULL,p.id
-             FROM project_transitions c JOIN projects p ON p.id=c.successor_id
-             WHERE p.id IN (SELECT value FROM json_each(?1)) AND p.external_project_id IS NULL AND c.local_plan_json IS NOT NULL",
-            &ids)?;
+        let changes = effects(&tx, "project_id", &ids, false)?;
         tx.commit()?;
         Ok(PlanningSyncReceipts {
             repo,
@@ -72,27 +68,8 @@ pub(super) fn task_planning_receipts_in(
             .iter()
             .filter_map(|(_, _, project)| project.as_deref()),
     );
-    let mut task_fields = by_owner(fields(conn, "task", &task_ids, false)?);
-    let project_fields = by_owner(fields(conn, "project", &project_ids, true)?);
-    let mut receipts = Vec::new();
-    append(conn, &mut receipts,
-            "SELECT d.id,'state',json_quote(d.target),d.attempted,d.error,
-                CASE WHEN d.conflict_json IS NOT NULL THEN json_quote(json_extract(d.conflict_json,'$.state')) END,d.task_id
-             FROM task_state_deliveries d WHERE d.task_id IN (SELECT value FROM json_each(?1)) AND
-             (d.conflict_json IS NOT NULL OR (d.settled=0 AND
-                (d.attempted=1 OR d.seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=d.task_id)))) ORDER BY d.seq",
-            &task_ids)?;
-    append(conn, &mut receipts,
-            "SELECT d.comment_id,'comment',d.comment_json,0,d.error,d.conflicting_comment_json,c.task_id
-             FROM task_comments c JOIN task_comment_deliveries d ON d.comment_id=c.id
-             WHERE c.task_id IN (SELECT value FROM json_each(?1)) AND (d.conflicting_comment_json IS NOT NULL OR (d.acknowledged=0))
-             ORDER BY c.created_at,c.id", &task_ids)?;
-    append(conn, &mut receipts,
-            "SELECT c.task_id,'creation',COALESCE(json_extract(c.export_json,'$.input'),json_object('title',c.title,'description',c.description)),
-                c.export_attempted,c.export_error,NULL,c.task_id FROM task_creation_intents c
-             JOIN tasks t ON t.id=c.task_id WHERE c.task_id IN (SELECT value FROM json_each(?1)) AND t.external_issue_id IS NULL
-             AND (t.planning_deleted_at IS NULL OR c.export_attempted=1)", &task_ids)?;
-    let mut receipts = by_owner(receipts);
+    let mut task_fields = by_owner(effects(conn, "task_id", &task_ids, false)?);
+    let project_fields = by_owner(effects(conn, "project_id", &project_ids, true)?);
     let mut statuses = HashMap::new();
     for (task, repo, project) in owners {
         let mut changes = task_fields.remove(&task).unwrap_or_default();
@@ -102,7 +79,6 @@ pub(super) fn task_planning_receipts_in(
         {
             changes.extend(changes_in_project.iter().cloned());
         }
-        changes.extend(receipts.remove(&task).unwrap_or_default());
         statuses.insert(
             TaskId::from_raw(task),
             PlanningSyncReceipts { repo, changes },
@@ -121,28 +97,36 @@ fn by_owner(
     owners
 }
 
-/// Field changes of every owner in `ids` (a JSON array), each with its owner.
-fn fields(
+/// Unsettled effects of every owner in `ids` (a JSON array), and each
+/// subject's latest conflict until a later save of it settles, with owners.
+fn effects(
     conn: &Connection,
     owner: &str,
     ids: &str,
     order_only: bool,
 ) -> StoreResult<Vec<(String, PlanningSyncChange)>> {
     let mut changes = Vec::new();
-    let filter = if order_only {
-        "AND c.field='task_order'"
-    } else {
-        ""
-    };
+    let filter = if order_only { "AND e.kind='order'" } else { "" };
     append(conn, &mut changes, &format!(
-        "SELECT c.id,c.field,
-            CASE WHEN c.field IN ('deleted','task_order') THEN c.value_json ELSE json_quote(json_extract(c.value_json,'$.value')) END,c.attempted,c.error,
-            CASE WHEN c.conflict_json IS NOT NULL THEN CASE WHEN c.field IN ('deleted','task_order') THEN json_quote(json_extract(c.conflict_json,'$.value')) ELSE json_quote(json_extract(c.conflict_json,'$.value.value')) END END,
-            c.{owner}_id
-         FROM {owner}_changes c WHERE c.{owner}_id IN (SELECT value FROM json_each(?1)) {filter} AND
-         (c.conflict_json IS NOT NULL OR (c.acknowledged=0 AND
-            (c.attempted=1 OR c.seq=(SELECT max(seq) FROM {owner}_changes WHERE {owner}_id=c.{owner}_id AND field=c.field))))
-         ORDER BY c.seq"), ids)?;
+        "SELECT e.id,
+            CASE e.kind WHEN 'field' THEN e.subject WHEN 'create' THEN 'creation' WHEN 'delete' THEN 'deleted'
+                WHEN 'order' THEN 'task_order' ELSE e.kind END,
+            CASE e.kind WHEN 'field' THEN json_quote(json_extract(e.value_json,'$.value'))
+                WHEN 'state' THEN json_quote(json_extract(e.value_json,'$.value.planning_state'))
+                WHEN 'comment' THEN json_extract(e.value_json,'$.value')
+                WHEN 'delete' THEN 'true' ELSE e.value_json END,
+            e.phase='attempted',e.error,
+            CASE WHEN e.conflict_json IS NOT NULL THEN CASE e.kind
+                WHEN 'field' THEN json_quote(json_extract(e.conflict_json,'$.value.value'))
+                WHEN 'state' THEN json_quote(json_extract(e.conflict_json,'$.value.value.planning_state'))
+                WHEN 'comment' THEN json_extract(e.conflict_json,'$.value')
+                ELSE json_quote(json_extract(e.conflict_json,'$.value')) END END,
+            e.{owner}
+         FROM tracker_effects e WHERE e.{owner} IN (SELECT value FROM json_each(?1)) {filter} AND
+         (e.phase IN ('pending','attempted') OR (e.conflict_json IS NOT NULL AND NOT EXISTS(
+             SELECT 1 FROM tracker_effects later WHERE later.{owner}=e.{owner} AND later.kind=e.kind
+             AND later.subject IS e.subject AND later.seq>e.seq AND later.phase='acknowledged')))
+         ORDER BY e.seq"), ids)?;
     Ok(changes)
 }
 

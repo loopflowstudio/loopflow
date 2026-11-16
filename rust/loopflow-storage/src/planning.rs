@@ -251,6 +251,7 @@ pub fn render_krs(krs: &[ProjectKR]) -> String {
 }
 
 pub mod project_document;
+pub mod rules;
 
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]

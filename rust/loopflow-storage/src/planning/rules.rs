@@ -2,11 +2,11 @@
 //! single lost-reply rule every kind shares. Pure: the drain supplies what the
 //! provider holds; nothing here performs I/O.
 
-use loopflow_storage::sqlite::tracker_effects::{
-    EffectKind, EffectPhase, Settlement, TrackerEffect,
-};
-use loopflow_storage::work::edit::WorkValue;
 use serde_json::Value;
+
+use crate::planning::StateHistory;
+use crate::sqlite::tracker_effects::{EffectKind, EffectPhase, Settlement, TrackerEffect};
+use crate::work::edit::WorkValue;
 
 /// The provider's current copy of an effect's owner, in store words.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -21,6 +21,9 @@ pub struct Observed {
     pub comments: Vec<String>,
     pub initiatives: Vec<String>,
     pub deleted: bool,
+    /// Whether the state moved since a state effect's base, when the provider
+    /// keeps that history. `None`: compare values only.
+    pub state_history: Option<StateHistory>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -63,12 +66,12 @@ pub fn decide(
     match effect.kind {
         EffectKind::Create => create(observed, parent_pending),
         EffectKind::Field if parent_pending => Decision::Hold,
-        EffectKind::Field | EffectKind::State => field(effect, observed),
+        EffectKind::Field => field(effect, observed),
+        EffectKind::State => state(effect, observed),
         EffectKind::Order => order(effect, observed),
         EffectKind::Comment => comment(effect, observed),
         EffectKind::Delete => delete(effect, observed),
         EffectKind::Link => link(effect, observed),
-        _ => Decision::Hold,
     }
 }
 
@@ -129,10 +132,45 @@ fn field(effect: &TrackerEffect, observed: Option<&Observed>) -> Decision {
         .as_ref()
         .and_then(|base| work_value(&base["value"]))
     {
-        Some(base) if !same(&base, remote) => Decision::Settle(Settlement::Adopt {
-            losing: effect.value.clone(),
-        }),
+        Some(base) if !same(&base, remote) => adopt(observed, remote),
         _ => Decision::Send,
+    }
+}
+
+fn adopt(observed: &Observed, remote: &WorkValue) -> Decision {
+    Decision::Settle(Settlement::Adopt {
+        remote: serde_json::json!({"revision": observed.revision, "value": remote}),
+    })
+}
+
+/// State is a field, except that a provider keeping state history can say
+/// whether a lost write landed while the state now reads as its base: no
+/// history holds, an unchanged history re-sends, a changed one adopts.
+fn state(effect: &TrackerEffect, observed: Option<&Observed>) -> Decision {
+    let history = observed.and_then(|observed| observed.state_history);
+    let (Some(observed), Some(history), EffectPhase::Attempted) = (observed, history, effect.phase)
+    else {
+        return field(effect, observed);
+    };
+    let Some(remote) = observed
+        .values
+        .iter()
+        .find(|v| matches!(v, WorkValue::Disposition(_)))
+    else {
+        return field(effect, Some(observed));
+    };
+    let at_base = effect
+        .base
+        .as_ref()
+        .and_then(|base| work_value(&base["value"]))
+        .is_some_and(|base| same(&base, remote));
+    if !at_base {
+        return field(effect, Some(observed));
+    }
+    match history {
+        StateHistory::Unknown => Decision::Hold,
+        StateHistory::Unchanged => Decision::Send,
+        StateHistory::Changed => adopt(observed, remote),
     }
 }
 
@@ -145,7 +183,7 @@ fn order(effect: &TrackerEffect, observed: Option<&Observed>) -> Decision {
         return Decision::Hold;
     };
     let desired: Vec<String> = serde_json::from_value(effect.value.clone()).unwrap_or_default();
-    if *order == desired {
+    if desired.iter().all(|id| order.contains(id)) && same_order(&desired, order) {
         return acknowledged(observed);
     }
     if effect.phase == EffectPhase::Pending {
@@ -156,11 +194,19 @@ fn order(effect: &TrackerEffect, observed: Option<&Observed>) -> Decision {
         .as_ref()
         .and_then(|base| serde_json::from_value(base["value"].clone()).ok());
     match base {
-        Some(base) if base != *order => Decision::Settle(Settlement::Adopt {
-            losing: effect.value.clone(),
+        Some(base) if !same_order(&base, order) => Decision::Settle(Settlement::Adopt {
+            remote: serde_json::json!({"revision": observed.revision, "value": order}),
         }),
         _ => Decision::Send,
     }
+}
+
+/// Relative order among shared members. A new member does not conflict with
+/// a saved move; a missing one is incomplete evidence, not a move.
+pub fn same_order(left: &[String], right: &[String]) -> bool {
+    left.iter()
+        .filter(|id| right.contains(id))
+        .eq(right.iter().filter(|id| left.contains(id)))
 }
 
 fn comment(effect: &TrackerEffect, observed: Option<&Observed>) -> Decision {
@@ -190,11 +236,7 @@ fn delete(effect: &TrackerEffect, observed: Option<&Observed>) -> Decision {
     if observed.deleted {
         return acknowledged(observed);
     }
-    let nanos = |revision: Option<&str>| {
-        loopflow_storage::planning::revision_nanos(revision)
-            .ok()
-            .flatten()
-    };
+    let nanos = |revision: Option<&str>| crate::planning::revision_nanos(revision).ok().flatten();
     let base = effect
         .base
         .as_ref()
@@ -226,12 +268,13 @@ fn link(effect: &TrackerEffect, observed: Option<&Observed>) -> Decision {
 #[cfg(test)]
 mod tests {
     use super::{decide, lost_reply, Decision, LostReply, Observed};
-    use loopflow_model::durable::TaskId;
-    use loopflow_storage::provider::Provider;
-    use loopflow_storage::sqlite::tracker_effects::{
+    use crate::planning::StateHistory;
+    use crate::provider::Provider;
+    use crate::sqlite::tracker_effects::{
         EffectKind, EffectOwner, EffectPhase, Settlement, TrackerEffect,
     };
-    use loopflow_storage::work::edit::WorkValue;
+    use crate::work::edit::{Disposition, WorkValue};
+    use loopflow_model::durable::TaskId;
     use serde_json::json;
 
     fn effect(kind: EffectKind, phase: EffectPhase, value: serde_json::Value) -> TrackerEffect {
@@ -296,9 +339,9 @@ mod tests {
         assert_eq!(
             decide(&sent, Some(&holding(vec![title("Theirs")], "r3")), false),
             Decision::Settle(Settlement::Adopt {
-                losing: serde_json::to_value(title("Mine")).unwrap()
+                remote: json!({"revision":"r3","value":title("Theirs")})
             }),
-            "a coworker's newer value wins and ours is kept"
+            "a coworker's newer value wins and the effect keeps ours"
         );
         sent.phase = EffectPhase::Pending;
         assert_eq!(
@@ -383,6 +426,49 @@ mod tests {
         assert_eq!(
             decide(&note, Some(&Observed::default()), false),
             Decision::Send
+        );
+    }
+
+    fn disposition(state: &str) -> WorkValue {
+        WorkValue::Disposition(Disposition {
+            planning_state: Some(state.into()),
+            planning_completed: i64::from(state == "completed"),
+            planning_completed_at: None,
+        })
+    }
+
+    #[test]
+    fn a_lost_state_reply_at_its_base_follows_the_provider_history() {
+        let mut sent = effect(
+            EffectKind::State,
+            EffectPhase::Attempted,
+            serde_json::to_value(disposition("completed")).unwrap(),
+        );
+        sent.base = Some(json!({"revision":"r1","value":disposition("unstarted")}));
+        let at_base = |history| Observed {
+            state_history: Some(history),
+            ..holding(vec![disposition("unstarted")], "r2")
+        };
+        assert_eq!(
+            decide(&sent, Some(&at_base(StateHistory::Unknown)), false),
+            Decision::Hold
+        );
+        assert_eq!(
+            decide(&sent, Some(&at_base(StateHistory::Unchanged)), false),
+            Decision::Send
+        );
+        assert!(matches!(
+            decide(&sent, Some(&at_base(StateHistory::Changed)), false),
+            Decision::Settle(Settlement::Adopt { .. })
+        ));
+        assert_eq!(
+            decide(
+                &sent,
+                Some(&holding(vec![disposition("unstarted")], "r2")),
+                false
+            ),
+            Decision::Send,
+            "a provider without history compares values"
         );
     }
 }

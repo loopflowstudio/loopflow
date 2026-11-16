@@ -1,10 +1,8 @@
 //! Accept supplied Linear facts and canonical Work in one SQL transaction.
 
-use super::{
-    self as sqlite, planning_changes, planning_export, planning_write, task_state_delivery,
-    SqliteStore,
-};
-use crate::planning::{revision_nanos, StateHistory, TrackerItem, TrackerProject};
+use super::tracker_effects::{self, EffectKind, Settlement, TrackerEffect};
+use super::{self as sqlite, planning_write, SqliteStore};
+use crate::planning::{revision_nanos, TrackerItem, TrackerProject};
 use crate::work::edit::{Disposition, WorkValue as Edit};
 use crate::{StoreError, StoreResult};
 use loopflow_model::durable::ProjectId;
@@ -446,53 +444,6 @@ fn put_item(
     Ok(true)
 }
 
-/// Reconcile a delivery's read; true means its saved intention remains pending.
-pub fn observe_task_state(
-    store: &SqliteStore,
-    delivery: &sqlite::task_state_delivery::TaskStateDelivery,
-    observed: &TrackerItem,
-    history: StateHistory,
-) -> StoreResult<bool> {
-    let mut conn = store.conn.lock().expect("store mutex poisoned");
-    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-    // Retain the provider baseline for the next local save. A response for an
-    // older delivery cannot ingest over the current decision.
-    let repo: Option<String> = tx
-        .query_row(
-            "SELECT w.repo FROM task_state_deliveries d JOIN tasks t ON t.id=d.task_id
-         JOIN repository_plans w ON w.id=t.repository_id
-         WHERE d.id=?1 AND d.task_id=?2 AND d.settled=0 AND t.external_issue_id=?3
-         AND d.seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=t.id)",
-            params![delivery.id, delivery.task_id.as_str(), observed.id],
-            |row| row.get(0),
-        )
-        .optional()?;
-    let Some(repo) = repo else { return Ok(false) };
-    if !put_item(&tx, &repo, crate::rows::now_unix(), observed)? {
-        return Ok(false);
-    }
-    let pending = sqlite::task_state_delivery::reconcile_in(
-        &tx,
-        &delivery.task_id,
-        observed.revision.as_deref(),
-        &crate::work::edit::Disposition {
-            planning_state: observed.state.clone(),
-            planning_completed: i64::from(observed.completed),
-            planning_completed_at: observed.completed_at.clone(),
-        },
-        &serde_json::json!({
-            "revision": observed.revision,
-            "state": observed.state,
-            "completed": observed.completed,
-            "completed_at": observed.completed_at,
-        })
-        .to_string(),
-        history,
-    )?;
-    tx.commit()?;
-    Ok(pending)
-}
-
 fn observe_order(
     conn: &Connection,
     repo: &str,
@@ -600,7 +551,7 @@ fn project_accepted_planning(
         .collect::<StoreResult<Vec<_>>>()?;
     drop(query);
     for (external, observed_at, wave_id, revision, mut edits) in observations {
-        planning_export::attach_in(tx, repo, true, &external, revision.as_deref(), &edits)?;
+        tracker_effects::attach_in(tx, repo, true, &external, revision.as_deref(), &edits)?;
         let existing: Option<(String, WaveId)> = tx
             .query_row(
                 "SELECT id,wave_id FROM projects WHERE external_project_id=?1",
@@ -629,8 +580,9 @@ fn project_accepted_planning(
         if let Some(rank) = rank {
             edits.push(Edit::ProjectRank(rank));
         }
-        planning_changes::PlanningChanges::Project(&id).reconcile_edits(
+        tracker_effects::reconcile_in(
             tx,
+            &tracker_effects::EffectOwner::Project(id.clone()),
             revision.as_deref(),
             &mut edits,
         )?;
@@ -638,6 +590,7 @@ fn project_accepted_planning(
             tx,
             repo,
             &crate::work::edit::WorkEdit::for_target(id.as_str(), &edits),
+            crate::sqlite::planning_write::WriteOrigin::Tracker,
         )?;
         tx.execute("UPDATE projects SET pm_snapshot_synced_at=?2,planning_provider_revision=?3 WHERE id=?1",params![id.as_str(),observed_at,revision])?;
     }
@@ -670,13 +623,13 @@ fn project_accepted_planning(
         .collect::<Result<Vec<_>, _>>()?;
     drop(query);
     for (id, revision, edits) in observed {
-        planning_export::attach_in(tx, repo, false, &id, revision.as_deref(), &edits)?;
+        tracker_effects::attach_in(tx, repo, false, &id, revision.as_deref(), &edits)?;
     }
     // Admission and refresh share one accepted observation. Existing Tasks retain
     // their IDs, local order and pending disposition; new Tasks receive only Work.
     let mut query = tx.prepare(&format!(
         "WITH accepted AS ({ACCEPTED_WAVE_PROJECTS})
-         SELECT target.id,json_object('revision',i.revision,'state',i.state,'completed',json(CASE i.completed WHEN 1 THEN 'true' ELSE 'false' END),'completed_at',i.completed_at),i.observed_at,p.id,i.id,
+         SELECT target.id,NULL,i.observed_at,p.id,i.id,
              i.revision,i.identifier,
              i.name,i.description,
              i.rank,i.url,
@@ -710,7 +663,6 @@ fn project_accepted_planning(
             |row| {
                 Ok((
                     row.get::<_, Option<String>>(0)?,
-                    row.get::<_, String>(1)?,
                     row.get::<_, i64>(2)?,
                     row.get::<_, String>(4)?,
                     row.get::<_, Option<String>>(5)?,
@@ -737,46 +689,77 @@ fn project_accepted_planning(
         )?
         .collect::<Result<Vec<_>, _>>()?;
     drop(query);
-    for (existing, body, observed_at, external, revision, mut edits, disposition) in observations {
+    for (existing, observed_at, external, revision, mut edits, disposition) in observations {
         let id = existing.as_ref().map_or_else(
             || loopflow_model::durable::TaskId::from_issue(&external),
             loopflow_model::durable::TaskId::from_raw,
         );
         edits.push(Edit::Disposition(disposition.clone()));
         if existing.is_some() {
-            task_state_delivery::reconcile_in(
+            let settled = tracker_effects::reconcile_in(
                 tx,
-                &id,
-                revision.as_deref(),
-                &disposition,
-                &body,
-                StateHistory::Unknown,
-            )?;
-            let pending: bool = tx.query_row(
-                "SELECT EXISTS(SELECT 1 FROM task_state_deliveries WHERE task_id=?1 AND settled=0
-                 AND seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=?1))",
-                [id.as_str()],
-                |row| row.get(0),
-            )?;
-            planning_changes::PlanningChanges::Task(&id).reconcile_edits(
-                tx,
+                &tracker_effects::EffectOwner::Task(id.clone()),
                 revision.as_deref(),
                 &mut edits,
             )?;
-            edits.retain(|edit| {
-                !matches!(edit, Edit::TaskRank(_))
-                    && (!pending || !matches!(edit, Edit::Disposition(_)))
-            });
+            record_adoptions(tx, &id, &settled)?;
+            edits.retain(|edit| !matches!(edit, Edit::TaskRank(_)));
         }
         planning_write::create(
             tx,
             repo,
             &crate::work::edit::WorkEdit::for_target(id.as_str(), &edits),
+            crate::sqlite::planning_write::WriteOrigin::Tracker,
         )?;
         tx.execute(
             "UPDATE tasks SET planning_provider_revision=?2,pm_snapshot_synced_at=?3 WHERE id=?1",
             params![id.as_str(), revision, observed_at],
         )?;
+    }
+    Ok(())
+}
+
+/// What acceptance settled against local intent and the Task shows for it: an
+/// adopted state is a Task event; a removal the tracker undid restores the Task.
+fn record_adoptions(
+    tx: &Transaction<'_>,
+    task: &loopflow_model::durable::TaskId,
+    settled: &[(TrackerEffect, Settlement)],
+) -> StoreResult<()> {
+    for (effect, settlement) in settled {
+        match (effect.kind, settlement) {
+            (EffectKind::State, Settlement::Adopt { remote }) => {
+                let state = |value: &serde_json::Value| {
+                    value["value"]["planning_state"]
+                        .as_str()
+                        .unwrap_or("unknown")
+                        .to_owned()
+                };
+                sqlite::children::insert_task_event_in(
+                    tx,
+                    task,
+                    &crate::work::task::TaskEventKind::Progress {
+                        summary: format!(
+                            "Adopted {} state {}; local intention {} remains in effect {}. Local Workflow unchanged.",
+                            effect.provider.display_name(),
+                            state(&remote["value"]),
+                            state(&effect.value),
+                            effect.id
+                        ),
+                    },
+                )?;
+            }
+            (EffectKind::Delete, Settlement::Retire { .. }) => {
+                planning_write::tracker(
+                    tx,
+                    &crate::work::edit::WorkEdit::for_target(
+                        task.as_str(),
+                        &[Edit::TaskDeletedAt(None)],
+                    ),
+                )?;
+            }
+            _ => {}
+        }
     }
     Ok(())
 }

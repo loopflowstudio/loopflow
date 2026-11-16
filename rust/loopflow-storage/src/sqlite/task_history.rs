@@ -151,7 +151,7 @@ impl SqliteStore {
              JOIN repository_plans w ON w.id=source.repository_id
              JOIN tasks target ON target.id=json_extract(e.kind_json, '$.intent.issue_id')
                 OR target.external_issue_id=json_extract(e.kind_json, '$.intent.issue_id')
-                OR target.id=(SELECT task_id FROM task_creation_intents WHERE json_extract(export_json,'$.id')=json_extract(e.kind_json,'$.intent.issue_id'))
+                OR target.id='task_'||replace(lower(json_extract(e.kind_json,'$.intent.issue_id')),'-','')
              WHERE w.repo=?1 AND json_extract(e.kind_json, '$.kind')='follow_through_intent'
                 AND source.external_issue_id IS NOT NULL AND target.external_issue_id IS NOT NULL
                 AND source.planning_deleted_at IS NULL AND target.planning_deleted_at IS NULL
@@ -192,11 +192,14 @@ impl SqliteStore {
 }
 
 fn recover_filing_in(conn: &Connection, intent: &RetainedFiling) -> StoreResult<String> {
-    let existing: Option<String> = conn.query_row(
-        "SELECT id FROM tasks WHERE id=?1 OR external_issue_id=?1
-         OR id=(SELECT task_id FROM task_creation_intents WHERE json_extract(export_json,'$.id')=?1)",
-        [&intent.issue_id], |row| row.get(0),
-    ).optional()?;
+    let existing: Option<String> = conn
+        .query_row(
+            "SELECT id FROM tasks WHERE id=?1 OR external_issue_id=?1
+         OR id='task_'||replace(lower(?1),'-','')",
+            [&intent.issue_id],
+            |row| row.get(0),
+        )
+        .optional()?;
     if let Some(id) = existing {
         return super::children::short_task_id(conn, &TaskId::from_raw(id))?
             .ok_or(StoreError::NotFound);
@@ -238,7 +241,25 @@ fn recover_filing_in(conn: &Connection, intent: &RetainedFiling) -> StoreResult<
         },
     )?;
     if !local {
-        super::planning_export::retain_filing_export_in(conn, &task.id, intent)?;
+        let project = conn
+            .query_row(
+                "SELECT id FROM projects WHERE id=?1 OR external_project_id=?1",
+                [&intent.project_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        super::tracker_effects::retain_filing_create_in(
+            conn,
+            &task.id,
+            &[
+                crate::work::edit::WorkValue::TaskTitle(Some(intent.title.clone())),
+                crate::work::edit::WorkValue::TaskDescription(Some(intent.notes.clone())),
+                crate::work::edit::WorkValue::TaskDueDate(intent.due.clone()),
+                crate::work::edit::WorkValue::TaskProject(Some(
+                    project.unwrap_or_else(|| intent.project_id.clone()),
+                )),
+            ],
+        )?;
     }
     Ok(task.identifier)
 }
@@ -246,7 +267,6 @@ fn recover_filing_in(conn: &Connection, intent: &RetainedFiling) -> StoreResult<
 #[cfg(test)]
 mod tests {
     use super::{RetainedFiling, SqliteStore};
-    use crate::sqlite::planning_changes::PlanningChanges;
     use crate::work::task::TaskEventKind;
     use crate::work::wave::Wave;
     use loopflow_model::durable::{ProjectId, TaskId};
@@ -350,36 +370,24 @@ mod tests {
             .into_iter()
             .find(|task| task.id != source)
             .unwrap();
-        let export = store
-            .prepare_planning_export(
-                PlanningChanges::Task(&child.id),
-                "changed-team",
-                Some("changed-initiative"),
-            )
+        // The creation may have reached Linear: it waits for a look, with the
+        // intent's values, never today's Task.
+        let effects = store
+            .tracker_effects_for(&crate::sqlite::tracker_effects::EffectOwner::Task(
+                child.id.clone(),
+            ))
             .unwrap();
-        assert_eq!(export.id, intent.issue_id);
+        assert_eq!(effects.len(), 1);
         assert_eq!(
-            export.input,
-            json!({"id":intent.issue_id,"teamId":"original-team","projectId":"original-project",
-            "stateId":"original-state","title":intent.title,"description":intent.notes,"dueDate":intent.due})
+            effects[0].kind,
+            crate::sqlite::tracker_effects::EffectKind::Create
         );
-        assert!(
-            store
-                .planning_export_attempts(PlanningChanges::Task(&child.id))
-                .unwrap()
-                .creation
+        assert_eq!(
+            effects[0].phase,
+            crate::sqlite::tracker_effects::EffectPhase::Attempted
         );
-        let error: String = store
-            .conn
-            .lock()
-            .unwrap()
-            .query_row(
-                "SELECT export_error FROM task_creation_intents WHERE task_id=?1",
-                [child.id.as_str()],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert!(error.contains("unknown"));
+        assert_eq!(effects[0].value[0]["value"], json!(intent.title));
+        assert!(effects[0].error.as_deref().unwrap().contains("unknown"));
         assert!(store
             .pending_retained_relations("/repo")
             .unwrap()

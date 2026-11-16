@@ -334,7 +334,8 @@ mod tests {
         )
         .unwrap();
         conn.execute(
-            "INSERT INTO task_state_deliveries(id,task_id,target,attempted,error) VALUES(?1,?2,'started',1,'rate limited')",
+            "INSERT INTO tracker_effects(id,task_id,kind,value_json,phase,provider,error)
+             VALUES(?1,?2,'state','{}','attempted','linear','rate limited')",
             params![delivery, task.as_str()],
         )
         .unwrap();
@@ -377,7 +378,7 @@ mod tests {
         assert_eq!(
             planning_moved(
                 &conn,
-                "UPDATE task_state_deliveries SET error='rate limited' WHERE id=?1",
+                "UPDATE tracker_effects SET error='rate limited' WHERE id=?1",
                 &delivery
             ),
             0,
@@ -386,7 +387,7 @@ mod tests {
         assert_eq!(
             planning_moved(
                 &conn,
-                "UPDATE task_state_deliveries SET error='denied' WHERE id=?1",
+                "UPDATE tracker_effects SET error='denied' WHERE id=?1",
                 &delivery
             ),
             1,

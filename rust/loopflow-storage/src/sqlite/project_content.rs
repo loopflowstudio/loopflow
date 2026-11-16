@@ -9,13 +9,15 @@ use crate::work::project::ProjectKR;
 use crate::{StoreError, StoreResult};
 use loopflow_model::durable::ProjectId;
 
-use super::planning_changes::PlanningChanges;
 use super::SqliteStore;
 
 impl SqliteStore {
     pub fn pending_project_changes(&self, project: &ProjectId) -> StoreResult<Vec<PlanningChange>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        PlanningChanges::Project(project).pending(&conn)
+        super::tracker_effects::pending_changes_in(
+            &conn,
+            &super::tracker_effects::EffectOwner::Project(project.clone()),
+        )
     }
 
     pub fn edit_project(
@@ -41,7 +43,11 @@ impl SqliteStore {
                     .map(|description| Edit::ProjectDescription(Some(description.trim().into()))),
             )
             .collect();
-        PlanningChanges::Project(project).save(&tx, &edits)?;
+        super::planning_write::local(
+            &tx,
+            &crate::work::edit::WorkEdit::for_target(project.as_str(), &edits),
+        )
+        .map(|_| ())?;
         tx.commit()?;
         Ok(())
     }
@@ -54,13 +60,17 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        PlanningChanges::Project(project).save(
+        super::planning_write::local(
             &tx,
-            &[
-                Edit::Krs(krs.to_vec()),
-                Edit::MetricTargets(metric_targets.to_vec()),
-            ],
-        )?;
+            &crate::work::edit::WorkEdit::for_target(
+                project.as_str(),
+                &[
+                    Edit::Krs(krs.to_vec()),
+                    Edit::MetricTargets(metric_targets.to_vec()),
+                ],
+            ),
+        )
+        .map(|_| ())?;
         tx.commit()?;
         Ok(())
     }
@@ -111,14 +121,7 @@ mod tests {
             serde_json::to_value(&change.base).unwrap(),
             serde_json::json!({"revision":"2026-10-10T12:00:00Z", "value":{"field":"project_name","value":"Product"}})
         );
-        assert!(store
-            .attempt_planning_field(
-                super::super::planning_changes::PlanningChanges::Project(&project.id),
-                &change,
-                Some("2026-10-10T12:00:00Z"),
-                false,
-            )
-            .unwrap());
+        assert!(store.attempt_tracker_effect(&change.id).unwrap());
         assert_eq!(store.project(&project.id).unwrap().unwrap().name, "Renamed");
         let retained: (String, i64) = store
             .conn
@@ -178,7 +181,7 @@ mod tests {
         let conn = store.conn.lock().unwrap();
         let (conflict, base): (Option<String>, String) = conn
             .query_row(
-                "SELECT conflict_json,base_json FROM project_changes WHERE id=?1",
+                "SELECT conflict_json,base_json FROM tracker_effects WHERE id=?1",
                 [&change.id],
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )

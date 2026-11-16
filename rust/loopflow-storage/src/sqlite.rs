@@ -71,8 +71,6 @@ mod task_started;
 mod linear_team_checks;
 mod machine_records;
 mod metrics;
-pub mod planning_changes;
-pub mod planning_export;
 pub mod planning_order;
 mod planning_peers;
 pub use planning_peers::PeerImport;
@@ -106,7 +104,7 @@ mod task_retirement;
 mod transport;
 pub use task_retirement::{TaskRetirement, ViewerHold, WORKSPACE_GRACE};
 pub mod task_history;
-pub mod task_state_delivery;
+mod task_state;
 pub mod task_work;
 pub mod tracker_effects;
 pub mod wave_definitions;
@@ -885,6 +883,7 @@ impl SqliteStore {
             &tx,
             wave.repo(),
             &crate::work::edit::WorkEdit::for_target(wave.id().as_str(), &edits),
+            crate::sqlite::planning_write::WriteOrigin::Local,
         )?;
         if !saved {
             tx.execute("UPDATE waves SET created_at=?2,retired_at=?3,superseded_by_wave_id=?4,retirement_reason=?5 WHERE id=?1",params![wave.id(),created_at,wave.retired_at().map(|at|at.unix_timestamp()),wave.superseded_by_wave_id(),wave.retirement_reason()])?;

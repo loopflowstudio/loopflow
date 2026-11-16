@@ -1,4 +1,4 @@
-//! One saved Task thread and its delivery evidence, with or without Linear.
+//! One saved Task thread and its tracker effects, with or without a tracker.
 
 use super::planning_write;
 use crate::work::edit::WorkValue as Edit;
@@ -18,7 +18,7 @@ pub(super) fn ingest_task_comment(
     machine_names: &std::collections::HashMap<loopflow_model::durable::MachineId, String>,
 ) -> StoreResult<bool> {
     // A historical filing keeps its original local UUID. Only its Linear
-    // representation changes version bits; an existing delivery proves the link.
+    // representation changes version bits; the local comment proves the link.
     let mut comment = comment.clone();
     if let Ok(uuid) = uuid::Uuid::parse_str(&comment.id) {
         if uuid.get_version_num() == 4 {
@@ -26,7 +26,7 @@ pub(super) fn ingest_task_comment(
             bytes[6] = (bytes[6] & 0x0f) | 0x50;
             let local = uuid::Uuid::from_bytes(bytes).to_string();
             let retained: bool = conn.query_row(
-                "SELECT EXISTS(SELECT 1 FROM task_comment_deliveries WHERE comment_id=?1)",
+                "SELECT EXISTS(SELECT 1 FROM task_comments WHERE id=?1)",
                 [&local],
                 |row| row.get(0),
             )?;
@@ -66,29 +66,36 @@ pub(super) fn ingest_task_comment(
             return Ok(false);
         }
     }
-    let delivery: Option<(String, bool)> = conn
+    let unsettled: Option<(String, String)> = conn
         .query_row(
-            "SELECT json_extract(comment_json,'$.body'),acknowledged FROM task_comment_deliveries
-             WHERE comment_id=?1 AND conflicting_comment_json IS NULL",
-            [&comment.id],
+            "SELECT id,json_extract(value_json,'$.value.body') FROM tracker_effects
+             WHERE task_id=?1 AND kind='comment' AND subject=?2 AND phase IN ('pending','attempted')
+             ORDER BY seq DESC LIMIT 1",
+            params![task.as_str(), comment.id],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()?;
-    if let Some((body, acknowledged)) = delivery {
-        if body == comment.body {
-            conn.execute(
-                "UPDATE task_comment_deliveries SET acknowledged=1,error=NULL WHERE comment_id=?1",
-                [&comment.id],
-            )?;
-        } else if !acknowledged {
-            // Adopt Linear and retain the complete losing comment and observation.
-            conn.execute(
-                "UPDATE task_comment_deliveries SET conflicting_comment_json=?2,error=NULL WHERE comment_id=?1",
-                params![comment.id, serde_json::to_string(comment)?],
-            )?;
-        }
+    if let Some((effect, body)) = unsettled {
+        // The tracker holds this comment: ours arrived, or someone edited it
+        // there first, and then theirs wins and the effect keeps ours.
+        let settlement = if body == comment.body {
+            super::tracker_effects::Settlement::Acknowledged {
+                revision: comment.revision.clone(),
+                remote_id: Some(comment.id.clone()),
+            }
+        } else {
+            super::tracker_effects::Settlement::Adopt {
+                remote: serde_json::json!({"revision": comment.revision, "value": comment}),
+            }
+        };
+        super::tracker_effects::settle_in(conn, &effect, &settlement)?;
     }
-    write_comment(conn, task, &TaskComment::from(comment))?;
+    write_comment(
+        conn,
+        task,
+        &TaskComment::from(comment),
+        planning_write::WriteOrigin::Tracker,
+    )?;
     conn.execute(
         "UPDATE task_comments SET provider_revision=?2 WHERE id=?1",
         params![comment.id, comment.revision],
@@ -110,7 +117,12 @@ pub(super) fn read_comment(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskComm
     })
 }
 
-fn write_comment(conn: &Connection, task: &TaskId, comment: &TaskComment) -> StoreResult<()> {
+fn write_comment(
+    conn: &Connection,
+    task: &TaskId,
+    comment: &TaskComment,
+    origin: planning_write::WriteOrigin,
+) -> StoreResult<()> {
     planning_write::create(
         conn,
         "",
@@ -125,27 +137,18 @@ fn write_comment(conn: &Connection, task: &TaskId, comment: &TaskComment) -> Sto
                 }),
             ],
         ),
+        origin,
     )
 }
 
-// Local and acquired comments share the field writer; only local saves enqueue delivery.
+// Local and acquired comments share the field writer; only a local save
+// queues the comment for the tracker.
 pub(super) fn insert_authored_comment(
     conn: &Connection,
     task: &TaskId,
     comment: &TaskComment,
 ) -> StoreResult<()> {
-    write_comment(conn, task, comment)?;
-    conn.execute(
-        "INSERT INTO task_comment_deliveries(comment_id,comment_json) VALUES(?1,?2)",
-        params![
-            comment.id,
-            serde_json::to_string(&TaskComment {
-                author: comment.author.stored(),
-                ..comment.clone()
-            })?
-        ],
-    )?;
-    Ok(())
+    write_comment(conn, task, comment, planning_write::WriteOrigin::Local)
 }
 
 /// The saved thread and its repository, read together before provider presentation.
@@ -193,11 +196,12 @@ impl SqliteStore {
         {
             let mut query = tx.prepare(
                 "SELECT c.id,c.body,c.author,c.created_at,
-                    d.acknowledged=0 AND d.conflicting_comment_json IS NULL,
-                    CASE WHEN d.conflicting_comment_json IS NOT NULL THEN json_extract(d.comment_json,'$.body') END
-                 FROM task_comments c LEFT JOIN task_comment_deliveries d
-                     ON d.comment_id=c.id
-                 WHERE c.task_id=?1 ORDER BY c.created_at,c.id",
+                    EXISTS(SELECT 1 FROM tracker_effects e WHERE e.task_id=c.task_id AND e.kind='comment'
+                        AND e.subject=c.id AND e.phase IN ('pending','attempted')),
+                    (SELECT json_extract(e.value_json,'$.value.body') FROM tracker_effects e
+                        WHERE e.task_id=c.task_id AND e.kind='comment' AND e.subject=c.id
+                        AND e.conflict_json IS NOT NULL ORDER BY e.seq DESC LIMIT 1)
+                 FROM task_comments c WHERE c.task_id=?1 ORDER BY c.created_at,c.id",
             )?;
             let mut rows = query.query([task.id.as_str()])?;
             while let Some(row) = rows.next()? {
@@ -261,24 +265,12 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(
             "SELECT c.id,c.body,c.author,c.created_at FROM task_comments c
-             JOIN task_comment_deliveries d ON d.comment_id=c.id
-             WHERE c.task_id=?1 AND d.acknowledged=0
-                 AND d.conflicting_comment_json IS NULL
+             WHERE c.task_id=?1 AND EXISTS(SELECT 1 FROM tracker_effects e WHERE e.task_id=c.task_id
+                 AND e.kind='comment' AND e.subject=c.id AND e.phase IN ('pending','attempted'))
              ORDER BY c.created_at,c.id",
         )?;
         let rows = query.query_map([task.as_str()], read_comment)?;
         rows.collect::<Result<_, _>>().map_err(StoreError::from)
-    }
-
-    pub fn record_comment_delivery(&self, id: &str, error: Option<&str>) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        // A late failed attempt cannot undo an acknowledgement from another reader.
-        conn.execute(
-            "UPDATE task_comment_deliveries SET acknowledged=?2,error=?3
-             WHERE comment_id=?1 AND acknowledged=0 AND conflicting_comment_json IS NULL",
-            params![id, error.is_none(), error],
-        )?;
-        Ok(())
     }
 }
 
@@ -358,13 +350,13 @@ mod tests {
             .conn
             .lock()
             .unwrap()
-            .prepare("SELECT author FROM task_comments UNION ALL SELECT json_extract(comment_json,'$.author') FROM task_comment_deliveries")
+            .prepare("SELECT author FROM task_comments")
             .unwrap()
             .query_map([], |row| row.get(0))
             .unwrap()
             .collect::<Result<_, _>>()
             .unwrap();
-        assert_eq!(stored, vec![r#"{"kind":"person","name":"Jack Heart"}"#; 2]);
+        assert_eq!(stored, vec![r#"{"kind":"person","name":"Jack Heart"}"#]);
         assert_eq!(
             store.task_comment_thread(&task).unwrap().thread.comments,
             vec![comment.clone()]
@@ -432,10 +424,6 @@ mod tests {
         .unwrap();
         drop(store);
         let store = crate::test_fixture::open(&database).unwrap();
-        store.record_comment_delivery(&original.id, None).unwrap();
-        store
-            .record_comment_delivery(&original.id, Some("late failure"))
-            .unwrap();
         let thread = store.task_comment_thread(&task).unwrap().thread;
         assert_eq!(thread.comments.len(), 1);
         assert_eq!(thread.comments[0].body, observed.body);
@@ -448,19 +436,20 @@ mod tests {
         assert_eq!(thread.conflicts[&original.id], original.body);
         assert!(thread.pending_sync.is_empty());
         assert!(store.pending_task_comments(&task).unwrap().is_empty());
-        let receipt: (String, String, bool) = store.conn.lock().unwrap().query_row(
-            "SELECT comment_json,conflicting_comment_json,acknowledged FROM task_comment_deliveries WHERE comment_id=?1",
-            [&original.id], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
-        ).unwrap();
+        let effect = store
+            .tracker_effects_for(&crate::sqlite::tracker_effects::EffectOwner::Task(
+                task.clone(),
+            ))
+            .unwrap()
+            .remove(0);
+        assert_eq!(effect.value["value"]["body"], original.body);
         assert_eq!(
-            serde_json::from_str::<TaskComment>(&receipt.0).unwrap(),
-            original
-        );
-        assert_eq!(
-            serde_json::from_str::<crate::planning::TrackerComment>(&receipt.1).unwrap(),
+            serde_json::from_value::<crate::planning::TrackerComment>(
+                effect.conflict.unwrap()["value"].clone()
+            )
+            .unwrap(),
             observed
         );
-        assert!(!receipt.2);
         let stale = crate::planning::TrackerComment {
             body: original.body.clone(),
             revision: Some("2026-10-08T01:00:00Z".into()),

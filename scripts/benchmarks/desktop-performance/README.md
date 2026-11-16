@@ -54,6 +54,12 @@ a **visual-observation upper bound**, including native acquisition cost; phone
 uses the frame's host-clock timestamp. Neither claims the first compositor
 presentation timestamp. The table keeps these observations separate from
 presentation-callback observations.
+Endpoint validation receipts may live in `<Home>/desktop-cache/timings/interaction-validations.ndjson`:
+`{"observation":"UUID","verdict":"rejected","reason":"why the endpoint is invalid"}`.
+Rejected attempts retain their original outcome and reason in the report and stay
+outside latency statistics. Acceptance never promotes an unavailable frame, dirty
+build or unfinished attempt. Slow observations are not rejected for being slow.
+
 Images are discarded immediately and never written to the journal. A Task metadata
 pane or a read-only Session is not conversation input readiness. Superseding an
 interaction prevents its pending capture from completing the replacement.

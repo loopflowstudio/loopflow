@@ -144,6 +144,19 @@ def _journal(directory: Path) -> dict:
     attempts = {}
     errors = []
     stalls = []
+    validations = {}
+    validation_path = directory / "interaction-validations.ndjson"
+    if validation_path.exists():
+        for number, line in enumerate(validation_path.read_text().splitlines(), 1):
+            try:
+                row = json.loads(line)
+                if row["verdict"] not in ("accepted", "rejected") or not row["reason"]:
+                    raise ValueError("Validation needs a verdict and reason")
+                validations[row["observation"]] = {**row, "receipt": str(validation_path)}
+            except (KeyError, TypeError, ValueError) as error:
+                errors.append(
+                    {"receipt": str(validation_path), "line": number, "reason": str(error)}
+                )
     for path in sorted((directory / "interactions").glob("*.ndjson")):
         for number, line in enumerate(path.read_text().splitlines(), 1):
             try:
@@ -241,7 +254,11 @@ def _journal(directory: Path) -> dict:
         )
         events = attempt["events"]
         outcomes = [e for e in events if e["phase"] == "outcome"]
-        outcome = outcomes[-1].get("outcome") if outcomes else "unfinished"
+        original_outcome = outcomes[-1].get("outcome") if outcomes else "unfinished"
+        validation = validations.get(observation)
+        outcome = (
+            "rejected" if validation and validation["verdict"] == "rejected" else original_outcome
+        )
         phases = {}
         for phase in ("acknowledged", "usable"):
             values = [
@@ -293,6 +310,8 @@ def _journal(directory: Path) -> dict:
             {
                 "observation": observation,
                 "outcome": outcome,
+                "journal_outcome": original_outcome,
+                "validation": validation,
                 "measured": complete,
                 "phases": phases,
                 "work": (outcomes[-1] if outcomes else events[-1])["work"],
@@ -707,7 +726,7 @@ summary {{cursor:pointer; font-weight:600}} [hidden] {{display:none}}
 <main>
 <h1>Live app performance</h1>
 <p class="intro">How long until the result is usable?<br>
-Median time from your click · milliseconds · shorter bars are faster.</p>
+Median journey time · milliseconds · shorter bars are faster.</p>
 <div class="charts">{"".join(charts)}</div>
 <p>Each workflow has its own labeled scale, shared across repositories and builds.
 Capture cost is included. P95 needs 20 samples per case.</p>

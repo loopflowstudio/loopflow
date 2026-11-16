@@ -31,3 +31,5 @@ Live probe LOO-929 was reopened for these trials, without a Graph run. The
 owned checkout contains `scratch/performance-probe.txt` as a plain text editor
 fixture. Restore completion after collection. New Start/Complete timings from
 its earlier run remain separate by build. No native figures from the new hooks yet.
+
+Live validation rejected three launch observations from build 0814633052: EF72F4E2-8C75-40EC-9D95-62828222AD4F, FABF453D-C86B-4FB9-AC1A-386467035ADA, E05C76AC-9DDA-4E0B-A48F-0C599204BBA0. The observer depended on system key-window activation under background app control; menus/focus could end the interval late. Raw journal records remain intact; interaction-validations.ndjson records the endpoint rejection. This is unrelated to the valid earlier 23.8 s Start sample. Launch now follows the actual input-focused terminal window.

@@ -371,3 +371,24 @@ def test_repository_trailing_separator_does_not_duplicate_bars(tmp_path: Path) -
     report = timings.summarize(tmp_path)
     assert len(report["experiences"]["groups"]) == 1
     assert report["experiences"]["groups"][0]["samples"] == 2
+
+
+def test_rejected_endpoint_stays_visible_without_becoming_a_latency(tmp_path: Path) -> None:
+    journal = tmp_path / "interactions"
+    journal.mkdir()
+    _write(journal / "2026-11-16.ndjson", _journey("open_app", "invalid-focus", "candidate"))
+    _write(
+        tmp_path / "interaction-validations.ndjson",
+        [
+            {
+                "observation": "invalid-focus",
+                "verdict": "rejected",
+                "reason": "Menu activation ended a background launch",
+            }
+        ],
+    )
+    group = timings.summarize(tmp_path)["experiences"]["groups"][0]
+    assert group["samples"] == 0
+    assert group["outcomes"] == {"rejected": 1}
+    assert group["attempts"][0]["journal_outcome"] == "completed"
+    assert "Menu activation" in group["attempts"][0]["validation"]["reason"]

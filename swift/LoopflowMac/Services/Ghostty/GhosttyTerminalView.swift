@@ -878,9 +878,6 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
               !isHiddenOrHasHiddenAncestor,
               window?.occlusionState.contains(.visible) != false
         else { return }
-        if Perf.isPending(.coldStart), window?.isKeyWindow == true {
-            Perf.launchVisible(repository: measurementRepository, liveSessions: nil, window: window)
-        }
         if Perf.awaitsTerminal { recordInputReadiness() }
         if let keyToDraw {
             // Ghostty owns its render thread and display link. Forcing a draw
@@ -1111,6 +1108,9 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         case .shell(let id, _):
             guard let session = programStatus.sessionId, measuredSession?.availability == .available else { return }
             ids = [id, session]
+        }
+        if Perf.isPending(.coldStart) {
+            Perf.launchVisible(repository: measurementRepository, liveSessions: nil, window: window)
         }
         for id in ids {
             Perf.terminalReady(session: id, window: window) { [weak self] in

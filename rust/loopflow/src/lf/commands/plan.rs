@@ -308,6 +308,12 @@ async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
                 };
                 println!("  {:width$}  {:9} {state}", effect.owner, effect.change);
             }
+            let mut errors: Vec<&str> = effects.iter().filter_map(|e| e.error.as_deref()).collect();
+            errors.sort_unstable();
+            errors.dedup();
+            for error in errors {
+                println!("Last attempt: {error}");
+            }
             return Ok(());
         }
         Status::Git(destinations) => destinations,

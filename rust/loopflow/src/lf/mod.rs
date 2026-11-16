@@ -2214,7 +2214,7 @@ pub enum TaskCommand {
     /// Synchronize a Task with its tracker; the change sent last wins
     Sync {
         issue: String,
-        /// Retry uncertain saved field/state updates after observing current Linear values
+        /// Retry uncertain saved field/state updates after observing the tracker's current values
         #[arg(long)]
         retry_updates: bool,
     },
@@ -2346,7 +2346,7 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
         #[arg(long)]
         json: bool,
     },
-    /// Unassign the Task: nobody owns it and Linear shows no assignee; nothing
+    /// Unassign the Task: nobody owns it and its tracker shows no assignee; nothing
     /// moves it until someone claims or runs it. History stays intact
     Unassign {
         issue: String,
@@ -2469,7 +2469,7 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
         #[arg(long)]
         json: bool,
     },
-    /// Cancel the Task in Linear and locally, close its PRs and delete its branches
+    /// Cancel the Task in its tracker and locally, close its PRs and delete its branches
     Abandon {
         /// Issue ID or branch; defaults to the Task in this checkout
         issue: Option<String>,
@@ -2478,7 +2478,7 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
         #[arg(long)]
         json: bool,
     },
-    /// Cancel unfinished placed work, clean up delivery, then trash the Linear issue
+    /// Cancel unfinished placed work, clean up delivery, then trash the tracker item
     Delete { issue: String },
     /// Update a Task's title or notes, before or after placement
     Update {

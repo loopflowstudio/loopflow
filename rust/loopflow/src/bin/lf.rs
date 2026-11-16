@@ -1294,11 +1294,12 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             unreachable!("shared mutation dispatch precedes this command")
         }
         TaskCommand::Delete { issue } => {
-            let identifier = loopflow_execution::ops::task::task_delete(repo, issue)?;
+            let (identifier, pending) = loopflow_execution::ops::task::task_delete(repo, issue)?;
             println!("{identifier}: removed locally; execution history retained");
             if let Some(provider) = loopflow_execution::config::load_config_or_default(Some(repo))
                 .planning_transport()
                 .remote_name()
+                .filter(|_| pending)
             {
                 println!("Pending {provider} sync");
             }

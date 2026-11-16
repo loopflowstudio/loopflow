@@ -3,10 +3,7 @@
 ## Taken headless (reversible at review)
 
 - **Any tracker, not Linear-only.** Linear and Asana stay as bridges; Notion is
-  deleted. Basis in `tracker-mirror.md` ("Decision"): the 2026-11-02 parity
-  decision recorded on `loo-691-combined`, Asana's rebuild in #1607, and the
-  queue being required either way. If Linear-only is wanted, slice 4 deletes
-  `asana/` instead of porting it and everything else stands.
+  deleted. Jack Heart, 2026-11-16: "lets keep asana but dropping notion is fine".
 - **Table name `tracker_effects`.** Alternatives: `planning_outbox`,
   `tracker_queue`.
 - **Drain bound: 20 provider requests or 5 s per pass, concurrency 4.** The

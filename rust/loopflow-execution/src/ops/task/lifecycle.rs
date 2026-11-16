@@ -146,8 +146,10 @@ async fn save_abandon(store: &SharedStore, task: &Task) -> OpsResult<()> {
     Ok(())
 }
 
-/// Remove planning immediately, retaining execution and pending provider delivery.
-pub fn task_delete(repo: &Path, issue: &str) -> OpsResult<String> {
+/// Remove planning immediately, retaining execution and pending provider
+/// delivery. Returns the identifier and whether the tracker still has
+/// something to hear about this Task.
+pub fn task_delete(repo: &Path, issue: &str) -> OpsResult<(String, bool)> {
     let repo = task_repository(repo, Some(issue))?;
     block_on_task(async {
         let store = task_store().await?;
@@ -166,7 +168,21 @@ pub fn task_delete(repo: &Path, issue: &str) -> OpsResult<String> {
             &loopflow_storage::sqlite::tracker_effects::EffectOwner::Task(task.id.clone()),
         )
         .await;
-        Ok(task.identifier)
+        let pending = store
+            .sqlite
+            .tracker_effects_for(
+                &loopflow_storage::sqlite::tracker_effects::EffectOwner::Task(task.id.clone()),
+            )
+            .map_err(task_error)?
+            .iter()
+            .any(|effect| {
+                matches!(
+                    effect.phase,
+                    loopflow_storage::sqlite::tracker_effects::EffectPhase::Pending
+                        | loopflow_storage::sqlite::tracker_effects::EffectPhase::Attempted
+                )
+            });
+        Ok((task.identifier, pending))
     })
 }
 

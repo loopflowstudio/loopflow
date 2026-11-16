@@ -364,6 +364,9 @@ pub(crate) fn enqueue_local(
         }
         _ => return Ok(()),
     };
+    if kind == EffectKind::Delete && withdraw_unsent(conn, &owner)? {
+        return Ok(());
+    }
     let subject = match kind {
         EffectKind::Field => Some(value.field()),
         _ => subject,
@@ -386,6 +389,41 @@ pub(crate) fn enqueue_local(
         base.map(serde_json::to_value).transpose()?.as_ref(),
     )?;
     Ok(())
+}
+
+/// Deleting an owner whose creation never left: the tracker has nothing to
+/// trash, so its unsent effects retire instead of creating it to delete it.
+/// A creation already attempted may exist there, so its deletion still goes.
+fn withdraw_unsent(conn: &Connection, owner: &EffectOwner) -> StoreResult<bool> {
+    let unbound = match owner {
+        EffectOwner::Task(_) => {
+            "NOT EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND external_issue_id IS NOT NULL)"
+        }
+        EffectOwner::Project(_) => {
+            "NOT EXISTS(SELECT 1 FROM projects WHERE id=?1 AND external_project_id IS NOT NULL)"
+        }
+        EffectOwner::Wave(_) => return Ok(false),
+    };
+    let column = owner.column();
+    let unsent: bool = conn.query_row(
+        &format!(
+            "SELECT {unbound}
+                AND EXISTS(SELECT 1 FROM tracker_effects WHERE {column}=?1 AND kind='create' AND phase='pending')
+                AND NOT EXISTS(SELECT 1 FROM tracker_effects WHERE {column}=?1 AND kind='create' AND phase<>'pending' AND phase<>'retired')"
+        ),
+        [owner.id()],
+        |row| row.get(0),
+    )?;
+    if unsent {
+        conn.execute(
+            &format!(
+                "UPDATE tracker_effects SET phase='retired',error='deleted before it was sent'
+                 WHERE {column}=?1 AND phase='pending'"
+            ),
+            [owner.id()],
+        )?;
+    }
+    Ok(unsent)
 }
 
 /// The owner's provider observation, joined from its binding.
@@ -913,6 +951,31 @@ impl SqliteStore {
                 provider,
             )?;
             if let EffectOwner::Task(task) = owner {
+                // A creation opens the item; a Task already started or done
+                // before the tracker was connected says so next.
+                let moved = super::planning_write::read(&tx, "tasks", task.as_str())?
+                    .into_iter()
+                    .find(|value| match value {
+                        WorkValue::Disposition(disposition) => {
+                            disposition.planning_completed != 0
+                                || disposition
+                                    .planning_state
+                                    .as_deref()
+                                    .is_some_and(|state| state != "unstarted")
+                        }
+                        _ => false,
+                    });
+                if let Some(disposition) = moved {
+                    insert(
+                        &tx,
+                        owner,
+                        EffectKind::State,
+                        None,
+                        &serde_json::to_value(disposition)?,
+                        None,
+                        provider,
+                    )?;
+                }
                 let mut comments = tx.prepare(
                     "SELECT id FROM task_comments WHERE task_id=?1 ORDER BY created_at,id",
                 )?;
@@ -1250,6 +1313,61 @@ mod tests {
             .tracker_effects_for(&EffectOwner::Task(bound))
             .unwrap()
             .is_empty());
+    }
+
+    #[test]
+    fn a_task_done_before_the_tracker_was_connected_arrives_done() {
+        let (_dir, store) = store();
+        let done = task(&store, false);
+        let open = task(&store, false);
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE tasks SET planning_state='completed',planning_completed=1 WHERE id=?1",
+                [done.as_str()],
+            )
+            .unwrap();
+        store
+            .enqueue_tracker_creations("/repo", Provider::Linear)
+            .unwrap();
+        let kinds = |task: &TaskId| -> Vec<EffectKind> {
+            store
+                .tracker_effects_for(&EffectOwner::Task(task.clone()))
+                .unwrap()
+                .into_iter()
+                .map(|effect| effect.kind)
+                .collect()
+        };
+        assert_eq!(kinds(&done), [EffectKind::Create, EffectKind::State]);
+        assert_eq!(kinds(&open), [EffectKind::Create]);
+    }
+
+    #[test]
+    fn deleting_a_task_before_its_creation_is_sent_sends_nothing() {
+        let (_dir, store) = store();
+        let task = task(&store, false);
+        store
+            .enqueue_tracker_creations("/repo", Provider::Linear)
+            .unwrap();
+        {
+            let conn = store.conn.lock().unwrap();
+            super::enqueue_local(
+                &conn,
+                "tasks",
+                task.as_str(),
+                &WorkValue::TaskDeletedAt(Some(1_794_800_000)),
+            )
+            .unwrap();
+        }
+        let phases: Vec<_> = store
+            .tracker_effects_for(&EffectOwner::Task(task))
+            .unwrap()
+            .into_iter()
+            .map(|effect| (effect.kind, effect.phase))
+            .collect();
+        assert_eq!(phases, [(EffectKind::Create, EffectPhase::Retired)]);
     }
 
     #[test]

@@ -2356,22 +2356,23 @@ pub fn task_sync(issue: &str, retry_updates: bool) -> OpsResult<String> {
             )
             .await?;
         }
-        let task = store
-            .get_task(&task.id)
-            .await
-            .map_err(task_error)?
-            .ok_or_else(|| task_error("Task is missing"))?;
-        if task.linear_id.is_none() {
-            return Err(task_error(format!(
-                "Task publication to {provider} remains pending"
-            )));
-        }
         let saved = store
             .get_task(&task.id)
             .await
             .map_err(task_error)?
             .ok_or_else(|| task_error("Task is missing"))?;
         let sync = store.task_planning_sync(&saved.id).map_err(task_error)?;
+        if saved.linear_id.is_none() {
+            let reason = sync
+                .changes
+                .iter()
+                .find_map(|change| change.error.as_deref())
+                .map(|error| format!(": {error}"))
+                .unwrap_or_default();
+            return Err(task_error(format!(
+                "Task publication to {provider} remains pending{reason}"
+            )));
+        }
         let pending = sync.lines();
         if !pending.is_empty() {
             return Ok(format!("{}: {}", saved.identifier, pending.join("\n")));

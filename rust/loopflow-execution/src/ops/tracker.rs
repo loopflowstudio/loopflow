@@ -150,15 +150,6 @@ impl Tracker {
         }
     }
 
-    pub fn provider(&self) -> Provider {
-        match self {
-            Self::Linear(_) => Provider::Linear,
-            Self::Asana(_) => Provider::Asana,
-            #[cfg(test)]
-            Self::Fake(fake) => fake.provider,
-        }
-    }
-
     /// A send carrying our own id cannot duplicate, so a lost reply repeats
     /// it: Linear comments take the id we give them, and every link reads
     /// what the provider holds before it adds anything.
@@ -475,7 +466,6 @@ pub(crate) mod fake {
     use std::sync::Mutex;
 
     use loopflow_storage::planning::rules::Observed;
-    use loopflow_storage::provider::Provider;
     use loopflow_storage::sqlite::tracker_effects::{EffectKind, TrackerEffect};
 
     use super::Sent;
@@ -483,16 +473,14 @@ pub(crate) mod fake {
     /// A provider that acknowledges every send and answers looks from `held`.
     #[derive(Debug)]
     pub struct Fake {
-        pub provider: Provider,
         pub idempotent: Vec<EffectKind>,
         pub held: Mutex<Option<Observed>>,
         pub requests: AtomicUsize,
     }
 
     impl Fake {
-        pub fn new(provider: Provider) -> Self {
+        pub fn new() -> Self {
             Self {
-                provider,
                 idempotent: Vec::new(),
                 held: Mutex::new(None),
                 requests: AtomicUsize::new(0),

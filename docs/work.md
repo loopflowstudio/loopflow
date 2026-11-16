@@ -272,6 +272,9 @@ Planning: Linear. 3 changes waiting to send.
   LOO-398  complete  sent, waiting for Linear to confirm
 ```
 
+When a send failed, a `Last attempt:` line after the list says why: offline,
+signed out, or the tracker's own error.
+
 A change marked as waiting to confirm was sent, but its answer never arrived.
 Loopflow reads the tracker before sending anything else for that Task, at most
 once every ten minutes, so the change lands once. `lf task sync LOO-398` looks

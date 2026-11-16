@@ -111,17 +111,33 @@ pub(crate) async fn drain_repository(
     drain(store, repo, &tracker, effects, scope, bound).await
 }
 
-/// The repository's unsettled effects, after queueing a creation for each
-/// owner made before the tracker was connected.
+/// The repository's unsettled effects for `provider`, after queueing a
+/// creation for each owner made before the tracker was connected. An effect
+/// queued for another tracker retires here, before any bridge is built, so a
+/// switched repository that is offline or signed out does not keep it.
 fn queued(store: &Store, repo: &str, provider: Provider) -> OpsResult<Vec<TrackerEffect>> {
     store
         .sqlite
         .enqueue_tracker_creations(repo, provider)
         .map_err(message)?;
-    store
+    let (effects, elsewhere): (Vec<_>, Vec<_>) = store
         .sqlite
         .unsettled_tracker_effects(repo)
-        .map_err(message)
+        .map_err(message)?
+        .into_iter()
+        .partition(|effect| effect.provider == provider);
+    for effect in elsewhere {
+        let reason = format!(
+            "queued for {}, but this repository uses {}",
+            effect.provider.display_name(),
+            provider.display_name()
+        );
+        store
+            .sqlite
+            .settle_tracker_effect(&effect.id, &Settlement::Retire { reason })
+            .map_err(message)?;
+    }
+    Ok(effects)
 }
 
 /// Drain `effects` to `tracker` within `bound`.
@@ -372,16 +388,6 @@ impl Drain<'_> {
     }
 
     async fn effect(&self, effect: TrackerEffect) -> OpsResult<Step> {
-        let provider = self.tracker.provider();
-        if effect.provider != provider {
-            let reason = format!(
-                "queued for {}, but this repository uses {}",
-                effect.provider.display_name(),
-                provider.display_name()
-            );
-            self.settle(&effect, &Settlement::Retire { reason })?;
-            return Ok(Step::Done);
-        }
         // An owner bound some other way (adopted, linked by hand) already has its
         // tracker object; sending the creation would make a second one.
         if effect.kind == EffectKind::Create {
@@ -545,7 +551,7 @@ mod tests {
         let store = Store {
             sqlite: crate::store::opening::open_ephemeral(&path).unwrap(),
         };
-        let fake = Arc::new(Fake::new(Provider::Linear));
+        let fake = Arc::new(Fake::new());
         Fixture {
             _home: home,
             path,

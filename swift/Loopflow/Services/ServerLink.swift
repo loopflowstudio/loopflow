@@ -57,6 +57,15 @@ public actor ServerLink {
     public static let unanswered = "Loopflow server did not answer in time; check `lf server status`"
     static let handshakeExpired = "Loopflow server did not answer within 10s; check `lf server status`"
 
+    /// Whether `error` lost the connection before an answer arrived, so a
+    /// change sent again under its request ID still runs once.
+    public static func lostLink(_ error: any Error) -> Bool {
+        if let error = error as? RegistryQueryError {
+            return [disconnected, handshakeExpired, unanswered].contains(error.message)
+        }
+        return (error as NSError).domain == NSPOSIXErrorDomain
+    }
+
     public static func open(_ endpoint: ServerEndpoint) async throws -> ServerLink {
         let carrier = try await endpoint.control()
         do {
@@ -420,6 +429,8 @@ extension RegistryQuery {
             try await link().request(.read(read), deadline: deadline).printed
         }, write: { change in
             String(decoding: try await link().request(.command(change), deadline: deadline).bytes, as: UTF8.self)
+        }, change: { change, requestID in
+            try await link().write(change, requestID: requestID).revisions
         }) { args, _ in
             throw RegistryQueryError("`lf \(args.joined(separator: " "))` runs only on the Machine")
         }

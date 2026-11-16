@@ -56,8 +56,14 @@ public final class PendingChanges {
 
     /// The Machine answered: keep the change until a reading covers `revisions`.
     /// A partly done change (an error that advanced revisions) is answered too.
+    /// An answer that advanced nothing (or a transport that cannot say) has no
+    /// reading to wait for: the rows show the readings as they are.
     public func answered(_ requestID: String, revisions: Revisions) {
         guard let index = changes.firstIndex(where: { $0.requestID == requestID }) else { return }
+        guard !revisions.domains.isEmpty else {
+            changes.remove(at: index)
+            return
+        }
         changes[index].answer = revisions
         prune()
     }
@@ -101,12 +107,14 @@ public final class PendingChanges {
     }
 
     /// `plan` as it looks with this Machine's changes made. `wave` is the
-    /// Wave the list is filtered to; nil lists every Wave.
-    public func apply(to plan: WorkViewPlan, readAt: Revisions?, wave: String? = nil) -> WorkViewPlan {
+    /// Wave the list is filtered to; nil lists every Wave. `identifier` names a
+    /// row's Task as commands do, for rows the reading left unnamed.
+    public func apply(to plan: WorkViewPlan, readAt: Revisions?, wave: String? = nil,
+                      identifier: (WorkViewPlan.Content) -> String? = \.identifier) -> WorkViewPlan {
         var plan = plan
         for change in shown(at: readAt) {
             guard let task = change.command.task else { continue }
-            let matches = plan.contents.filter { $0.work.kind == .task && ($0.work.id == task || $0.identifier == task) }.map(\.work)
+            let matches = plan.contents.filter { $0.work.kind == .task && ($0.work.id == task || identifier($0) == task) }.map(\.work)
             guard !matches.isEmpty else { continue }
             switch change.command {
             case .complete, .abandon:

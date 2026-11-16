@@ -166,6 +166,9 @@ public struct WorkFrame: Sendable {
     public let answers: Int?
     public let unavailable: String?
     public let content: Content
+    /// The revisions the Machine read this frame at; nil without a store, and
+    /// for frames the window made itself.
+    public let readAt: Revisions?
     /// Wire text of the parts a saved workspace keeps, exactly as a one-shot
     /// read would have printed them.
     public let wire: Wire?
@@ -178,17 +181,18 @@ public struct WorkFrame: Sendable {
         public let sessionPage: String?
     }
 
-    public init(sequence: Int, answers: Int?, unavailable: String?, content: Content, wire: Wire?) {
+    public init(sequence: Int, answers: Int?, unavailable: String?, content: Content, wire: Wire?, readAt: Revisions? = nil) {
         self.sequence = sequence
         self.answers = answers
         self.unavailable = unavailable
         self.content = content
         self.wire = wire
+        self.readAt = readAt
     }
 
     /// The same reading answering a later request.
     func answering(_ answers: Int, sequence: Int) -> WorkFrame {
-        WorkFrame(sequence: sequence, answers: answers, unavailable: unavailable, content: content, wire: wire)
+        WorkFrame(sequence: sequence, answers: answers, unavailable: unavailable, content: content, wire: wire, readAt: readAt)
     }
 
     /// Every field is required; an absent one is a parse error, not a nil.
@@ -196,14 +200,16 @@ public struct WorkFrame: Sendable {
         let answers: Int?
         let unavailable: String?
         let body: Body?
+        let readAt: Revisions?
 
-        enum CodingKeys: String, CodingKey { case answers, unavailable, body }
+        enum CodingKeys: String, CodingKey { case answers, unavailable, body, readAt = "read_at" }
 
         init(from decoder: any Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             answers = try container.decode(Int?.self, forKey: .answers)
             unavailable = try container.decode(String?.self, forKey: .unavailable)
             body = try container.decode(Body?.self, forKey: .body)
+            readAt = try container.decode(Revisions?.self, forKey: .readAt)
         }
     }
 
@@ -232,7 +238,7 @@ public struct WorkFrame: Sendable {
         func frame<Body>(_ envelope: Envelope<Body>, _ content: Content, unavailable: String? = nil,
                          wire: Wire? = nil) -> WorkFrame {
             WorkFrame(sequence: sequence, answers: envelope.answers, unavailable: envelope.unavailable ?? unavailable,
-                      content: content, wire: wire)
+                      content: content, wire: wire, readAt: envelope.readAt)
         }
         func text(_ value: Any?) -> String? {
             guard let value, let data = try? JSONSerialization.data(withJSONObject: value) else { return nil }

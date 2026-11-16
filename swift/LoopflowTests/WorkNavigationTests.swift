@@ -286,11 +286,13 @@ struct WorkNavigationTests {
         #expect(model.sidebarAutonomousTaskIDs.isEmpty)
     }
 
-    @Test("Abandoning the open Task drops its row and opens the next one before the command returns; a refusal puts it back")
-    func abandonLeavesTheSidebarAtOnce() async throws {
+    @Test("Abandon and Complete drop the open Task's row and open the next one in the click; a refusal puts it back with one Notice",
+          arguments: ["abandon", "complete"])
+    func changesLeaveTheSidebarInTheClick(command: String) async throws {
+        let release = AsyncStream<Void>.makeStream()
         let model = WorkModel(query: RegistryQuery { args, _ in
-            if args.contains("abandon") {
-                try await Task.sleep(for: .milliseconds(50))
+            if args.contains(command) {
+                for await _ in release.stream { break }
                 throw RegistryQueryError("Task has unpushed commits")
             }
             throw RegistryQueryError("unused")
@@ -303,14 +305,18 @@ struct WorkNavigationTests {
                                                    members: [task("issue-review"), task("issue-now")])], reason: "")
         model.applyStartedFixture(working: ["issue-review", "issue-now"])
         model.select(.task(id: "issue-review"))
-        let abandoned = try #require(model.task(id: "issue-review")?.task)
-        let abandon = Task { await model.abandonTask(abandoned) }
-        for _ in 0..<20 where !model.abandoningTaskIDs.contains("issue-review") { await Task.yield() }
+        let changed = try #require(model.task(id: "issue-review")?.task)
+        if command == "abandon" { await model.abandonTask(changed) } else { model.completeTask(changed) }
+        // The write is still held: the row is gone and the next Task is open.
         #expect(model.sidebarTaskIDs == ["issue-now"])
         #expect(model.selection == .task(id: "issue-now"))
-        await abandon.value
+        #expect(!model.visibleTasks.contains { $0.id == "issue-review" })
+        release.continuation.finish()
+        for _ in 0..<200 where !model.pendingChanges.changes.isEmpty { try await Task.sleep(for: .milliseconds(5)) }
         #expect(model.sidebarTaskIDs == ["issue-review", "issue-now"])
-        #expect(model.dashboardError == "Task has unpushed commits")
+        let verb = command == "abandon" ? "abandoned" : "completed"
+        #expect(model.navigation.notices.current?.text
+            == "\(changed.task.identifier) couldn't be \(verb): Task has unpushed commits")
     }
 
     @Test("A row dragged over another lands there on release and leaves no drag behind")
@@ -373,7 +379,7 @@ struct WorkNavigationTests {
         let start = try offer.inspect().find(viewWithAccessibilityIdentifier: "task-start-issue-review").button()
         #expect(!start.isDisabled())
         #expect(throws: Never.self) { try offer.inspect().find(text: task.task.description) }
-        #expect(model.navigation.taskRunDrafts[task.id] == nil)
+        #expect(model.navigation.notices.current == nil)
     }
 
     @Test("Selecting Work closes Find Work and preserves the sidebar preference", arguments: [false, true])

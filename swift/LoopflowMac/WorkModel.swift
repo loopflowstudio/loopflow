@@ -114,8 +114,10 @@ final class WorkModel {
 
     private var viewOpening: UUID?
     private var selectionOpening: DesktopOpening?
-    /// Tasks whose abandonment was requested; they leave the sidebar at once.
-    private(set) var abandoningTaskIDs: Set<String> = []
+    /// This Machine's changes shown before the readings that show them.
+    let pendingChanges = PendingChanges()
+    /// The revisions each Task-showing part was last read at.
+    private var readAt: [String: Revisions] = [:]
     var dashboardError: String?
     private(set) var dashboardSaving = false
 
@@ -147,7 +149,10 @@ final class WorkModel {
         return entry.reading
     }
 
-    private var taskList: WorkViewPlan? { taskListReading.value }
+    private var taskList: WorkViewPlan? {
+        let wave: String? = if case .wave(let id) = navigation.sidebarScope { id } else { nil }
+        return taskListReading.value.map { shown($0, part: .taskList, wave: wave) }
+    }
 
     func applySelectionPlans(_ plans: [WorkViewPlan]?, reason: String) {
         guard let plans else {
@@ -1071,7 +1076,7 @@ final class WorkModel {
 
     /// The Tasks a Wave view's board buckets: the Wave's, or every Task in the repository.
     func standupTasks(_ view: WorkNavigation.Board) -> WorkEvidence<RoadmapTask>? {
-        if case .wave(let id) = view { return wave(id: id)?.tasks }
+        if case .wave(let id) = view { return wave(id: id).map { shown($0.tasks) } }
         guard view == .repository, let tasks = roadmap.value?.tasks else { return nil }
         guard case .available(_, let truncated) = tasks else { return tasks }
         return .available(items: visibleTasks, truncated: truncated)
@@ -1787,6 +1792,10 @@ final class WorkModel {
         case .checkpoint:
             break
         }
+        if Self.showsTasks.contains(part) {
+            if let readAt = frame.readAt { self.readAt[part] = readAt }
+            pendingChanges.read(part, at: frame.readAt)
+        }
         appliedSequence[part] = frame.sequence
         // A changed plan may come with changed Workflow definitions.
         if part == WorkPart.planning.rawValue { await observeDefinitions() }
@@ -2135,7 +2144,7 @@ final class WorkModel {
         var seen = Set<String>()
         return plan.resolution.members.filter { $0.work.kind == .task }.compactMap { member in
             let id = task(id: member.work.id)?.task.id ?? member.work.id
-            guard seen.insert(id).inserted, !abandoningTaskIDs.contains(id) else { return nil }
+            guard seen.insert(id).inserted else { return nil }
             return (id, states[member.work] ?? [])
         }
     }
@@ -2145,7 +2154,6 @@ final class WorkModel {
         if let taskList { return taskRows(taskList) }
         return visibleTasks.compactMap { task in
             if case .wave(let wave) = navigation.sidebarScope, task.task.waveId != wave { return nil }
-            guard !abandoningTaskIDs.contains(task.id) else { return nil }
             switch task.section {
             case .working: return (task.id, [.working])
             case .autonomous: return (task.id, [.autonomous])
@@ -2509,10 +2517,8 @@ final class WorkModel {
 
     @discardableResult
     func startTask(_ graph: String?, from: String? = nil, task: RoadmapTask) async -> Bool {
-        await performTaskAction(task.id) {
-            try await query.runTask(issue: task.task.identifier, graph: graph, from: from,
-                                    cwd: WaveOrigin.resolve(task.task.repo))
-        }
+        await request(task, "Start", .taskRun(directory: directory(task), issue: task.task.identifier, graph: graph,
+                                             from: from, agent: nil, approve: false))
     }
 
     /// The graph a new Task in each scope would take up, keyed by repository and
@@ -2559,26 +2565,17 @@ final class WorkModel {
         }
     }
 
-    /// Ship the Task, then confirm its subscription update; it moves to Shipping
-    /// and the window's ship toast offers Undo.
+    /// Ship the Task: the Notice says Auto-Ship was requested and its Undo
+    /// stops it. The Task moves when the Machine's reading says so.
     func shipTask(_ task: RoadmapTask) async {
-        await performTaskAction(task.id) {
-            try await query.shipTask(issue: task.task.identifier, cwd: WaveOrigin.resolve(task.task.repo))
-        }
-        noteShipping(task, shipped: true)
+        await request(task, "Auto-Ship", .taskShip(directory: directory(task), issue: task.task.identifier),
+                      undo: Notice.Action("Undo", help: "Stop Auto-Ship") { [weak self] in
+                          Task { await self?.stopShipping(task) }
+                      })
     }
 
-    /// Stop Auto-Ship for the Task; it returns to Working and the toast says so.
     func stopShipping(_ task: RoadmapTask) async {
-        await performTaskAction(task.id) {
-            try await query.stopShipping(issue: task.task.identifier, cwd: WaveOrigin.resolve(task.task.repo))
-        }
-        noteShipping(task, shipped: false)
-    }
-
-    private func noteShipping(_ task: RoadmapTask, shipped: Bool) {
-        guard navigation.taskRunDrafts[task.id]?.error == nil else { return }
-        navigation.shipNotice = ShipNotice(task: task, shipped: shipped)
+        await request(task, "Stop Auto-Ship", .taskHold(directory: directory(task), issue: task.task.identifier))
     }
 
     /// The Work the Machine control describes: the current started Task, else the
@@ -2624,16 +2621,18 @@ final class WorkModel {
     }
 
     func assignTask(_ task: RoadmapTask, claimed: Bool) async {
-        await performTaskAction(task.id) {
-            try await query.assignTask(issue: task.task.identifier, claimed: claimed, cwd: WaveOrigin.resolve(task.task.repo))
+        let issue = task.task.identifier
+        if claimed {
+            change(task, .claim(task: issue), .taskClaim(directory: directory(task), issue: issue), "claimed")
+        } else {
+            change(task, .unassign(task: issue), .taskUnassign(directory: directory(task), issue: issue), "unassigned")
         }
     }
 
     func moveTask(_ task: RoadmapTask, toWave wave: String?) async {
-        await performTaskAction(task.id) {
-            try await query.moveTask(issue: task.task.identifier, wave: wave,
-                                    cwd: WaveOrigin.resolve(task.task.repo))
-        }
+        let issue = task.task.identifier
+        change(task, .move(task: issue, wave: wave ?? ""),
+               .taskMove(directory: directory(task), issue: issue, wave: wave, machine: nil), "moved")
     }
 
     func completeTaskFromInput(_ task: RoadmapTask) {
@@ -2641,72 +2640,135 @@ final class WorkModel {
         Perf.userAction(.completeTask, scenario: "complete_to_row_gone", id: task.id,
                         repository: repoPath, liveSessions: liveSessionCount, owner: owner) {
             Perf.acknowledged(.completeTask, id: task.id, owner: owner)
-            Task {
-                let accepted = await completeTask(task)
-                if !accepted {
-                    Perf.finish(.completeTask, id: task.id, owner: owner, outcome: .failed)
-                }
-            }
+            completeTask(task)
         }
     }
 
-    @discardableResult
-    func completeTask(_ task: RoadmapTask) async -> Bool {
+    /// The row is gone and the next Task selected in the click; a refusal
+    /// brings the row back and the Notice says why.
+    func completeTask(_ task: RoadmapTask) {
         let owner = navigation.performanceOwner
-        return await performTaskAction(task.id) {
-            try await query.completeTask(issue: task.task.identifier, cwd: WaveOrigin.resolve(task.task.repo))
+        let issue = task.task.identifier
+        moveSelection(past: task)
+        change(task, .complete(task: issue), .taskComplete(directory: directory(task), issue: issue), "completed") {
             Perf.completionAccepted(id: task.id, owner: owner)
         }
     }
 
     func reopenTask(_ task: RoadmapTask) async {
-        abandoningTaskIDs.remove(task.id)
-        await performTaskAction(task.id) {
-            try await query.reopenTask(issue: task.task.identifier, cwd: WaveOrigin.resolve(task.task.repo))
-        }
+        let issue = task.task.identifier
+        change(task, .reopen(task: issue), .taskReopen(directory: directory(task), issue: issue), "reopened")
     }
 
-    /// The row leaves the sidebar and the selection moves on before the slow
-    /// cleanup (PRs, branches, checkout) returns; a failure puts the row back.
+    /// The row leaves every list and the selection moves on in the click; PR,
+    /// branch and checkout cleanup finish after. A refusal puts the row back.
     func abandonTask(_ task: RoadmapTask) async {
-        let rows = sidebarTaskIDs + sidebarAutonomousTaskIDs
-        abandoningTaskIDs.insert(task.id)
-        if isSelected(.task(id: task.id)) {
-            let index = rows.firstIndex(of: task.id) ?? rows.count
-            let next = rows.dropFirst(index + 1).first ?? rows.prefix(index).last
-            select(next.map { .task(id: $0) } ?? sidebarWave.map { .wave(id: $0.wave.id) })
-        }
-        let accepted = await performTaskAction(task.id) {
-            try await query.abandonTask(issue: task.task.identifier, cwd: WaveOrigin.resolve(task.task.repo))
-        }
-        if !accepted {
-            abandoningTaskIDs.remove(task.id)
-            dashboardError = navigation.taskRunDrafts[task.id]?.error
+        let issue = task.task.identifier
+        moveSelection(past: task)
+        change(task, .abandon(task: issue), .taskAbandon(directory: directory(task), issue: issue), "abandoned")
+    }
+
+    // MARK: Changes in the click
+
+    /// The parts whose rows a pending change patches; each holds a change until it reads past it.
+    private static let showsTasks: Set<String> = [WorkPart.planning.rawValue, WorkPart.taskList.rawValue,
+                                                   WorkPart.selections.rawValue]
+
+    /// `plan` as read from `part`, with this Machine's pending changes made.
+    private func shown(_ plan: WorkViewPlan, part: WorkPart, wave: String? = nil) -> WorkViewPlan {
+        guard !pendingChanges.changes.isEmpty else { return plan }
+        return pendingChanges.apply(to: plan, readAt: readAt[part.rawValue], wave: wave) { [self] content in
+            content.identifier ?? task(id: content.work.id)?.task.task.identifier
         }
     }
 
-    /// Feedback belongs to the navigation and Task that began the command.
-    /// Returns whether the command was accepted, refreshed or not.
+    /// Planning rows a pending Complete or Abandon has removed.
+    private func shown(_ tasks: [RoadmapTask]) -> [RoadmapTask] {
+        guard !pendingChanges.changes.isEmpty else { return tasks }
+        let readAt = readAt[WorkPart.planning.rawValue]
+        return tasks.filter { !pendingChanges.removes(task: $0.task.identifier, at: readAt) }
+    }
+
+    private func shown(_ tasks: WorkEvidence<RoadmapTask>) -> WorkEvidence<RoadmapTask> {
+        guard case .available(let items, let truncated) = tasks else { return tasks }
+        return .available(items: shown(items), truncated: truncated)
+    }
+
+    private func directory(_ task: RoadmapTask) -> String { WaveOrigin.resolve(task.task.repo) ?? "/" }
+
+    /// Complete and Abandon select the next row below, else the one above, else nothing.
+    private func moveSelection(past task: RoadmapTask) {
+        guard isSelected(.task(id: task.id)) else { return }
+        let rows = sidebarTaskIDs + sidebarAutonomousTaskIDs
+        let index = rows.firstIndex(of: task.id) ?? rows.count
+        let next = rows.dropFirst(index + 1).first ?? rows.prefix(index).last
+        select(next.map { .task(id: $0) })
+    }
+
+    /// Show `command` on every list now and send `write` under its request ID.
+    /// The change stays until a reading covers what the answer advanced; a
+    /// refusal removes it and the Notice says "LOO-4 couldn't be completed: …".
+    private func change(_ task: RoadmapTask, _ command: PendingCommand, _ write: ServedWrite, _ verb: String,
+                        accepted: (() -> Void)? = nil) {
+        let requestID = pendingChanges.add(command)
+        let notices = navigation.notices
+        let issue = task.task.identifier
+        Task {
+            switch await send(write, requestID: requestID) {
+            case .answered(let revisions):
+                pendingChanges.answered(requestID, revisions: revisions)
+                accepted?()
+                try? await confirmWorkUpdate()
+            case .partlyDone(let revisions, let reason):
+                pendingChanges.answered(requestID, revisions: revisions)
+                notices.post(Notice("\(issue) was \(verb), but \(reason)", key: requestID))
+                try? await confirmWorkUpdate()
+            case .refused(let reason):
+                pendingChanges.refused(requestID)
+                notices.post(Notice("\(issue) couldn't be \(verb): \(reason)", key: requestID))
+            }
+        }
+    }
+
+    /// Start, Auto-Ship and Stop Auto-Ship change nothing on screen: the Notice
+    /// says the change was requested and the Machine's readings show the rest.
     @discardableResult
-    private func performTaskAction(_ taskId: String, _ action: () async throws -> Void) async -> Bool {
-        let owner = navigation
-        let home = workDataDirectory
-        guard owner.taskRunDrafts[taskId]?.acting != true else { return false }
-        owner.taskRunDrafts[taskId, default: TaskRunDraft()].phase = .runningCommand
-        owner.taskRunDrafts[taskId]?.error = nil
-        do {
-            try await action()
-            owner.taskRunDrafts[taskId]?.phase = .awaitingObservation
-            try await confirmWorkUpdate(after: home)
-            owner.taskRunDrafts[taskId] = nil
+    private func request(_ task: RoadmapTask, _ name: String, _ write: ServedWrite, undo: Notice.Action? = nil) async -> Bool {
+        let notices = navigation.notices
+        let issue = task.task.identifier
+        switch await send(write, requestID: UUID().uuidString) {
+        case .answered, .partlyDone:
+            notices.post(Notice("\(issue) \(name) requested", action: undo))
+            try? await confirmWorkUpdate()
             return true
-        } catch {
-            let accepted = owner.taskRunDrafts[taskId]?.phase == .awaitingObservation
-            owner.taskRunDrafts[taskId]?.phase = nil
-            owner.taskRunDrafts[taskId]?.error = accepted
-                ? "Task update accepted; refresh not confirmed. \(error.localizedDescription)"
-                : error.localizedDescription
-            return accepted
+        case .refused(let reason):
+            notices.post(Notice("\(issue) \(name) couldn't be requested: \(reason)"))
+            return false
+        }
+    }
+
+    private enum Sent {
+        case answered(Revisions)
+        case partlyDone(Revisions, String)
+        case refused(String)
+    }
+
+    /// Send `write` until the Machine answers it. A lost connection sends it
+    /// again under the same request ID, so the Machine runs it once.
+    private func send(_ write: ServedWrite, requestID: String) async -> Sent {
+        var delay = Duration.milliseconds(250)
+        while true {
+            do {
+                return .answered(try await query.change(write, requestID: requestID) ?? Revisions([:]))
+            } catch let error as ServerError {
+                if let revisions = error.revisions { return .partlyDone(revisions, error.message) }
+                return .refused(error.message)
+            } catch where ServerLink.lostLink(error) && !Task.isCancelled {
+                try? await Task.sleep(for: delay)
+                delay = min(delay * 2, .seconds(4))
+            } catch {
+                return .refused(error.localizedDescription)
+            }
         }
     }
 
@@ -2851,7 +2913,7 @@ final class WorkModel {
     }
 
     /// Current repository inventory only; retained navigation evidence is display-only.
-    var visibleTasks: [RoadmapTask] { taskIndex.tasks }
+    var visibleTasks: [RoadmapTask] { shown(taskIndex.tasks) }
 
     /// The repository's Tasks with lookups by ID and identifier. Every
     /// sidebar row looks Tasks up on each update; a filtered scan per lookup made

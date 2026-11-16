@@ -279,12 +279,12 @@ struct WorkCLISubscriptionTests {
         _ = try await fixture.run(["wave", "create", "product", "--json"])
         let before = try #require(model.task(id: id)?.task)
         await model.moveTask(before, toWave: "product")
-        #expect(model.navigation.taskRunDrafts[id]?.error == nil,
+        #expect(model.navigation.notices.current == nil,
                 "\(model.peerPlanning.errorMessage ?? "") · \(model.workActivity.errorMessage ?? "")")
         try await eventually { model.task(id: id)?.task.task.waveId != nil }
         #expect(model.visibleWork.standaloneTasks.isEmpty)
         await model.moveTask(try #require(model.task(id: id)?.task), toWave: nil)
-        #expect(model.navigation.taskRunDrafts[id]?.error == nil,
+        #expect(model.navigation.notices.current == nil,
                 "\(model.peerPlanning.errorMessage ?? "") · \(model.workActivity.errorMessage ?? "")")
         try await eventually { model.visibleWork.standaloneTasks.count == 1 }
         #expect(model.selection == .task(id: id))

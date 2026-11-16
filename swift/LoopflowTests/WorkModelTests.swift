@@ -760,14 +760,14 @@ struct WorkModelStreamTests {
         #expect(model.workflowCatalog.errorMessage == nil)
     }
 
-    @Test("A mutation waits for its checkpoint without asking for broad refresh")
-    func mutationConfirmation() async throws {
+    @Test("A change shows in the click, then asks its parts for a reading once answered")
+    func changeCheckpointsAfterItsAnswer() async throws {
         let fixture = try WorkTestFixture.load()
         let feed = WorkFeed()
+        let answered = AsyncStream<Void>.makeStream()
         let query = RegistryQuery(subscribeWork: { await feed.open() }) { args, _ in
-            guard args.starts(with: ["task", "unassign"]) else {
-                throw RegistryQueryError("unexpected read: \(args)")
-            }
+            guard args.starts(with: ["task", "unassign"]) else { throw RegistryQueryError("unexpected read: \(args)") }
+            for await _ in answered.stream { break }
             return ""
         }
         let model = WorkModel(query: query, repoPath: "/src/loopflow")
@@ -777,58 +777,15 @@ struct WorkModelStreamTests {
         await feed.send(try fixture.planningFrame(sequence: 1, answers: nil))
         try await eventually { model.roadmap.value != nil }
         let found = try #require(model.task(id: "issue-now"))
-        let owner = model.navigation
-        let action = Task { await model.assignTask(found.task, claimed: false) }
+        await model.assignTask(found.task, claimed: false)
+        // Held: the change is shown and nothing asked for a reading yet.
+        #expect(model.pendingChanges.changes.map(\.command) == [.unassign(task: found.task.task.identifier)])
+        answered.continuation.finish()
         let request = try await feed.request(2)
         #expect(request == .checkpoint(id: request.id, replay: []))
-        await feed.send(try fixture.planningFrame(sequence: 2, answers: request.id, renaming: "Committed"))
-        try await eventually { model.task(id: "issue-now")?.task.task.name == "Committed" }
-        #expect(owner.taskRunDrafts[found.task.id]?.phase == .awaitingObservation)
-        model.setRepoPath("/src/context")
-        model.navigation.taskRunDrafts[found.task.id] = TaskRunDraft(error: "New draft")
-        await feed.send(try fixture.frame("checkpoint", sequence: 3, answers: request.id, body: "null"))
-        await action.value
-        #expect(owner.taskRunDrafts[found.task.id] == nil)
-        #expect(model.navigation.taskRunDrafts[found.task.id]?.error == "New draft")
-    }
-
-    @Test("A successful Task update stops waiting despite unrelated frames, and a late checkpoint is harmless")
-    func taskConfirmationDeadline() async throws {
-        let fixture = try WorkTestFixture.load()
-        let feed = WorkFeed()
-        let query = RegistryQuery(subscribeWork: { await feed.open() }) { args, _ in
-            guard args.starts(with: ["task", "complete"]) else { throw RegistryQueryError("unexpected command") }
-            try await Task.sleep(for: .milliseconds(100))
-            return ""
-        }
-        let model = WorkModel(query: query, repoPath: "/src/loopflow")
-        let keeping = Task { await model.keepWorkCurrent() }
-        defer { keeping.cancel() }
-        try await feed.opened(1)
-        await feed.send(try fixture.planningFrame(sequence: 1, answers: nil))
-        try await eventually { model.roadmap.value != nil }
-        let found = try #require(model.task(id: "issue-now"))
-        let action = Task { await model.completeTask(found.task) }
-        try await eventually { model.navigation.taskRunDrafts[found.task.id]?.phase == .runningCommand }
-        let request = try await feed.request(2)
-        #expect(model.navigation.taskRunDrafts[found.task.id]?.phase == .awaitingObservation)
-        let heartbeats = Task {
-            for sequence in 2...14 {
-                await feed.send(try fixture.activityFrame(sequence: sequence))
-                try await Task.sleep(for: .seconds(1))
-            }
-        }
-        defer { heartbeats.cancel() }
-        #expect(await action.value)
-        let draft = try #require(model.navigation.taskRunDrafts[found.task.id])
-        #expect(!draft.acting)
-        #expect(draft.error?.hasPrefix("Task update accepted; refresh not confirmed.") == true)
-        #expect(model.task(id: "issue-now") != nil)
-        await feed.send(try fixture.frame("checkpoint", sequence: 16, answers: request.id, body: "null"))
-        let confirming = Task { try await model.confirmWorkUpdate() }
-        let next = try await feed.request(3)
-        await feed.send(try fixture.frame("checkpoint", sequence: 17, answers: next.id, body: "null"))
-        try await confirming.value
+        // The CLI answers without revisions, so there is no reading to wait for.
+        #expect(model.pendingChanges.changes.isEmpty)
+        await feed.send(try fixture.frame("checkpoint", sequence: 2, answers: request.id, body: "null"))
     }
 
     @Test("Only the requested checkpoint confirms a write, including an unchanged result")
@@ -1111,7 +1068,7 @@ private struct WorkTestFixture {
             return WorkFrame(sequence: sequence, answers: answers, unavailable: nil, content: .checkpoint, wire: nil)
         }
         let answers = answers.map(String.init) ?? "null"
-        let line = #"{"answers":\#(answers),"unavailable":null,"body":\#(body)}"#
+        let line = #"{"answers":\#(answers),"unavailable":null,"body":\#(body),"read_at":null}"#
         return try WorkFrame.decode(part: try #require(WorkPart(rawValue: part)), scope: scope,
                                     sequence: sequence, line: Data(line.utf8))
     }

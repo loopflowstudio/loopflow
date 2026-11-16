@@ -149,7 +149,7 @@ struct DesktopHeadlessTests {
                 return WorkFrame(sequence: sequence, answers: answers, unavailable: nil, content: .checkpoint, wire: nil)
             }
             let line: [String: Any] = [
-                "answers": answers, "unavailable": NSNull(), "body": body,
+                "answers": answers, "unavailable": NSNull(), "body": body, "read_at": NSNull(),
             ]
             return try WorkFrame.decode(part: try #require(WorkPart(rawValue: part)),
                                         scope: WorkScope(repo: nil, headless: false, task: task, activity: nil, taskListWave: nil),
@@ -258,7 +258,6 @@ struct DesktopHeadlessTests {
         // A frame read before the write cannot stand for it.
         feed.send(try frame("task", sequence: 4, answers: 2, task: task.task.identifier, body: moved))
         try await eventually { model.taskWork[task.id].value?.graphProcesses.count == 2 }
-        #expect(model.navigation.taskRunDrafts[task.id]?.acting == true)
         feed.send(try frame("task", sequence: 5, answers: 3, task: task.task.identifier, body: moved))
         feed.send(try frame("planning", sequence: 6, answers: 3, body: planning))
         feed.send(try frame("checkpoint", sequence: 7, answers: 3, body: [:]))
@@ -417,7 +416,8 @@ struct DesktopHeadlessTests {
         #expect(try await tapped(4) == ["task", "run", task.task.identifier, "--from", "review-design", "--json"])
 
         // Completion has its own operation and does not move the Workflow.
-        await model.completeTask(task)
+        model.completeTask(task)
+        for _ in 0..<200 where await started.calls.last?.contains("complete") != true { try await Task.sleep(for: .milliseconds(5)) }
         #expect(await started.calls.last == ["task", "complete", task.task.identifier, "--json"])
 
         // A shipping Task offers Stop Auto-Ship in place of Auto-Ship.
@@ -430,58 +430,15 @@ struct DesktopHeadlessTests {
         for _ in 0..<200 where await started.calls.last?.contains("hold") != true { try await Task.sleep(for: .milliseconds(5)) }
         #expect(await started.calls.last == ["task", "hold", shipping.task.identifier, "--json"])
 
-        // The toast after Auto-Ship offers Undo; after Stop Auto-Ship it only reports.
-        var undone = false
-        let toast = ShipNoticeToast(notice: ShipNotice(task: task, shipped: true)) { undone = true }
-        #expect(try toast.inspect().find(viewWithAccessibilityIdentifier: "task-ship-notice").text().string()
-            == "\(task.task.identifier) is shipping")
-        try toast.inspect().find(viewWithAccessibilityIdentifier: "task-ship-undo").button().tap()
-        #expect(undone)
-        let back = ShipNoticeToast(notice: ShipNotice(task: task, shipped: false)) {}
-        #expect(throws: (any Error).self) {
-            try back.inspect().find(viewWithAccessibilityIdentifier: "task-ship-undo")
-        }
-    }
-
-    @Test("The Workflow bar shows the interactive steps, what runs now and Auto-Ship, and opens to its step cells")
-    func taskWorkflowBar() throws {
-        let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self,
-            from: Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")))
-        let wave = try #require(roadmap.waves.first)
-        let task = try #require(wave.tasks.items.first { $0.runControl.unavailable == nil && $0.shipping == nil })
-        let work = try JSONDecoder().decode(TaskOverview.self,
-            from: Data(contentsOf: fixtures.appendingPathComponent("task_work.json")))
-        let workflow = try #require(work.graph)
-        let model = WorkModel(query: RegistryQuery { _, _ in "{}" })
-
-        // The fixture's run carries the Task from review-design to demo.
-        let bar = TaskWorkflowBar(model: model, task: task, work: .available(work))
-        #expect(bar.live == "review-design → demo")
-        #expect(try bar.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-bar-name").text().string() == "feature")
-        _ = try bar.inspect().find(viewWithAccessibilityIdentifier: "task-ship")
-        let stages = TaskWorkflowBar.stages(workflow, shipping: false)
-        #expect(stages.map(\.name) == ["review-design", "demo", "end"])
-        #expect(stages.map(\.place) == [.passed, .going, .ahead])
-        #expect(stages.map(\.who) == ["you", "you", nil])
-        // Shipping hands the stages ahead to stand-ins, and the reason is the live line.
-        #expect(TaskWorkflowBar.stages(workflow, shipping: true).map(\.who) == ["you", "stand-in", nil])
-        // Waiting at demo, or stopped short of it, the Task stands there.
-        let waiting = TaskGraph(name: workflow.name, interactiveSteps: workflow.interactiveSteps, position: .at(step: "demo"))
-        #expect(TaskWorkflowBar.stages(waiting, shipping: false).map(\.place) == [.passed, .here, .ahead])
-        let stopped = TaskGraph(name: workflow.name, interactiveSteps: workflow.interactiveSteps,
-                                position: .run(step: "review-design", at: "implement", lfProcessId: "p", running: false))
-        #expect(TaskWorkflowBar.stages(stopped, shipping: false).map(\.place) == [.passed, .here, .ahead])
-        #expect(TaskWorkflowBar(model: model, task: task, work: .available(TaskOverview(
-            sessions: [], graphProcesses: [], graph: stopped))).live == "Stopped at implement before demo")
-        let shipping = try #require(wave.tasks.items.first { $0.shipping != nil })
-        let shipped = TaskWorkflowBar(model: model, task: shipping, work: .available(work))
-        #expect(shipped.live == shipping.shipping?.reason)
-        _ = try shipped.inspect().find(viewWithAccessibilityIdentifier: "task-ship-stop")
-
-        // Stage cells stay closed until the dots are clicked.
-        #expect(throws: (any Error).self) {
-            try bar.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-bar-stage-demo")
-        }
+        // Auto-Ship says it was requested, never that it shipped; its Undo stops Auto-Ship.
+        await model.shipTask(task)
+        let notice = try #require(model.navigation.notices.current)
+        #expect(notice.text == "\(task.task.identifier) Auto-Ship requested")
+        let view = NoticeView(center: model.navigation.notices)
+        let sent = await started.calls.count
+        try view.inspect().find(viewWithAccessibilityIdentifier: "notice-action").button().tap()
+        for _ in 0..<200 where await started.calls.count == sent { try await Task.sleep(for: .milliseconds(5)) }
+        #expect(await started.calls.last == ["task", "hold", task.task.identifier, "--json"])
     }
 
     @Test("Task lifecycle controls remain available without a Workflow", arguments: ["unstarted", "completed", "canceled"])

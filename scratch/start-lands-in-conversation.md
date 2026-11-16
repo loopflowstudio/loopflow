@@ -218,11 +218,10 @@ Differences from the approach above:
 
 Concept review of dde1d32a15: the model holds (one transaction; a crash after
 commit and before `hold_conversation` repeats as Complete and the conversation
-sets up when opened). One cleanup before slice 2: `file_task_in` builds the
-same `TaskCreationRecord` twice (adopted and new branches, `ops/task.rs` ~1988
-and ~2051) from a `Receipt`/`Admit` pair that mirrors
-`TaskCreationRecord`/`TaskAdmission`. Build it in one helper taking
-`(existing, id, title, wave)`; keep one pair of types.
+sets up when opened). Its one cleanup is done: `ops/task.rs::creation_record`
+builds the `TaskCreationRecord` for both the adopted and new branches of
+`file_task_in`. `Receipt`/`Admit` stay as the caller's input (graph name,
+request); `TaskCreationRecord`/`TaskAdmission` are the resolved rows.
 
 Remaining, in order:
 1. Slice 2 (Desktop, phone): consume `TaskCreated.session`/`.overview`; Swift

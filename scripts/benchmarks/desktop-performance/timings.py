@@ -24,7 +24,7 @@ LAUNCH_METRICS = ["pre_main", "restored", "first_frame", "usable_saved", "usable
 EXPERIENCES = [
     ("start_task", "Start → typing", "Start pressed", "Conversation input accepts typing"),
     ("complete_task", "Complete → row gone", "Complete pressed", "Completed Task row absent"),
-    ("open_app", "Open the app", "Launch requested", "Workspace visible and input usable"),
+    ("open_app", "Open the app", "App process starts", "Workspace visible and input usable"),
     ("open_task", "Open a Task’s conversation", "Task clicked", "Conversation responds to typing"),
     (
         "return_session",
@@ -38,7 +38,7 @@ EXPERIENCES = [
         "New conversation requested",
         "Composer accepts typing",
     ),
-    ("first_word", "Get an answer", "Send pressed", "First response word visible"),
+    ("first_word", "Get an answer", "Send pressed", "New response text visibly observed"),
     (
         "find_work",
         "Find work",
@@ -144,6 +144,19 @@ def _journal(directory: Path) -> dict:
     attempts = {}
     errors = []
     stalls = []
+    validations = {}
+    validation_path = directory / "interaction-validations.ndjson"
+    if validation_path.exists():
+        for number, line in enumerate(validation_path.read_text().splitlines(), 1):
+            try:
+                row = json.loads(line)
+                if row["verdict"] not in ("accepted", "rejected") or not row["reason"]:
+                    raise ValueError("Validation needs a verdict and reason")
+                validations[row["observation"]] = {**row, "receipt": str(validation_path)}
+            except (KeyError, TypeError, ValueError) as error:
+                errors.append(
+                    {"receipt": str(validation_path), "line": number, "reason": str(error)}
+                )
     for path in sorted((directory / "interactions").glob("*.ndjson")):
         for number, line in enumerate(path.read_text().splitlines(), 1):
             try:
@@ -178,6 +191,9 @@ def _journal(directory: Path) -> dict:
                     isinstance(row.get(key), str) for key in ("observation", "name", "scenario")
                 ):
                     raise ValueError("Invalid interaction identity")
+                repository = row["context"].get("repository")
+                if isinstance(repository, str):
+                    row["context"]["repository"] = repository.rstrip("/") or "/"
                 attempt = attempts.setdefault(
                     row["observation"],
                     {
@@ -192,6 +208,8 @@ def _journal(directory: Path) -> dict:
                 if any(attempt[key] != row[key] for key in ("name", "scenario", "build")):
                     raise ValueError("Interaction identity changed")
                 attempt["events"].append(row)
+                if attempt["name"] == "open_app" and row["context"].get("repository"):
+                    attempt["context"] = row["context"]
             except (KeyError, TypeError, ValueError) as error:
                 errors.append({"receipt": str(path), "line": number, "reason": str(error)})
     groups = {}
@@ -236,7 +254,11 @@ def _journal(directory: Path) -> dict:
         )
         events = attempt["events"]
         outcomes = [e for e in events if e["phase"] == "outcome"]
-        outcome = outcomes[-1].get("outcome") if outcomes else "unfinished"
+        original_outcome = outcomes[-1].get("outcome") if outcomes else "unfinished"
+        validation = validations.get(observation)
+        outcome = (
+            "rejected" if validation and validation["verdict"] == "rejected" else original_outcome
+        )
         phases = {}
         for phase in ("acknowledged", "usable"):
             values = [
@@ -260,7 +282,14 @@ def _journal(directory: Path) -> dict:
             and len(outcomes) == 1
             and ordered
             and known_revision
-            and any(e["phase"] == "input" and e["evidence"] == "input_event" for e in events)
+            and any(
+                e["phase"] == "input"
+                and (
+                    e["evidence"] == "input_event"
+                    or (attempt["name"] == "open_app" and e["evidence"] == "process_start")
+                )
+                for e in events
+            )
         )
         # The terminal elapsed time includes the original input's queueing.
         terminal = outcomes[-1] if outcomes else None
@@ -281,6 +310,8 @@ def _journal(directory: Path) -> dict:
             {
                 "observation": observation,
                 "outcome": outcome,
+                "journal_outcome": original_outcome,
+                "validation": validation,
                 "measured": complete,
                 "phases": phases,
                 "work": (outcomes[-1] if outcomes else events[-1])["work"],
@@ -540,6 +571,11 @@ def render_html(report: dict) -> str:
             "start_to_typing": "Start → typing",
             "new_task_to_typing": "New Task: Start → typing",
             "complete_to_row_gone": "Complete → row gone",
+            "process_start_to_typing": "App process start → typing",
+            "new_session_to_typing": "New conversation → typing",
+            "refresh_to_typing": "Refresh → typing",
+            "file_to_editor": "Open file → editor ready",
+            "send_to_response_observed": "Send → response observed",
         }.get(scenario, title)
         bars = []
         by_repository = {g["repository"]: g for g in groups}
@@ -581,7 +617,7 @@ def render_html(report: dict) -> str:
             + f'<p class="chart-source">{escape(source)}</p></section>'
         )
     measured_names = {key[0] for key in workflows}
-    for name, label, start, end in EXPERIENCES[:2]:
+    for name, label, start, end in EXPERIENCES:
         if name not in measured_names:
             charts.append(
                 f'<section class="workflow"><h2>{escape(label)}</h2>'
@@ -690,7 +726,7 @@ summary {{cursor:pointer; font-weight:600}} [hidden] {{display:none}}
 <main>
 <h1>Live app performance</h1>
 <p class="intro">How long until the result is usable?<br>
-Median time from your click · milliseconds · shorter bars are faster.</p>
+Median journey time · milliseconds · shorter bars are faster.</p>
 <div class="charts">{"".join(charts)}</div>
 <p>Each workflow has its own labeled scale, shared across repositories and builds.
 Capture cost is included. P95 needs 20 samples per case.</p>

@@ -572,7 +572,20 @@ struct DesktopAction {
             guard let id = pane.sessionId else {
                 throw DesktopTargetError("Address a Session pane to refresh its conversation; nothing changed.")
             }
-            Task { @MainActor in await context.workspaces.refreshSession(id, in: workspace) }
+            Perf.userAction(.reconnect, scenario: "refresh_to_typing", id: id,
+                            repository: context.model.repoPath, liveSessions: context.model.liveSessionCount,
+                            owner: workspace.performanceOwner) {
+                Perf.acknowledged(.reconnect, id: id, owner: workspace.performanceOwner)
+                Perf.userAction(.reconnect, scenario: "refresh_to_typing", id: id,
+                            repository: context.model.repoPath, liveSessions: context.model.liveSessionCount,
+                            owner: workspace.performanceOwner) {
+                Perf.acknowledged(.reconnect, id: id, owner: workspace.performanceOwner)
+                Task { @MainActor in
+                    await context.workspaces.refreshSession(id, in: workspace)
+                    Perf.reconnected(id: id, owner: workspace.performanceOwner)
+                }
+            }
+            }
             return DesktopActionOutcome(pane: pane.id, tab: nil)
         },
         DesktopAction("take-back-session", "Take Back Session", scope: .pane) { context in

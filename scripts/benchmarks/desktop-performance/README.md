@@ -54,9 +54,39 @@ a **visual-observation upper bound**, including native acquisition cost; phone
 uses the frame's host-clock timestamp. Neither claims the first compositor
 presentation timestamp. The table keeps these observations separate from
 presentation-callback observations.
+Endpoint validation receipts may live in `<Home>/desktop-cache/timings/interaction-validations.ndjson`:
+`{"observation":"UUID","verdict":"rejected","reason":"why the endpoint is invalid"}`.
+Rejected attempts retain their original outcome and reason in the report and stay
+outside latency statistics. Acceptance never promotes an unavailable frame, dirty
+build or unfinished attempt. Slow observations are not rejected for being slow.
+
 Images are discarded immediately and never written to the journal. A Task metadata
 pane or a read-only Session is not conversation input readiness. Superseding an
 interaction prevents its pending capture from completing the replacement.
+
+App launch records process creation → restored conversation input. The initial
+journal row survives a launch that never shows a window; the first visible
+restored window supplies acknowledgment and repository identity, and only its
+focused input-capable terminal supplies usability. This excludes OS time before
+process creation and is labeled **App process start → typing**, not launch-request
+latency. Sidebar rows alone cannot finish it.
+
+Task selection and Session return follow the exact prepared Session, including
+already-focused retained terminals. New independent conversations follow their
+new shell tab to its recorded, available Session. Refresh measures the original
+Refresh click through reattachment to focused usable input. File selection ends
+only when the selected text snapshot is mounted in its editable, focused buffer;
+previews and read-only patches do not qualify as editor input.
+
+Send → response observed is currently instrumented for native Codex. A bounded
+provider preview is published once after the first response word, then the visible
+terminal text is checked at most ten times per second. A new provider turn and
+response text absent before submission are required before acquiring a frame.
+This is an observed-response upper bound, including receipt delivery, polling and
+capture; it is not the precise first compositor frame or bare model TTFT. Prompt
+echoes, old-turn previews, tool output and spinners cannot qualify. Preview and
+screen text stay in memory and are never added to performance records. Other
+providers remain unmeasured until they supply the same response observation.
 
 Start → typing begins at the Start button's original event (both New Task and an
 existing Task), follows creation/preparation to the correct Session, and waits for

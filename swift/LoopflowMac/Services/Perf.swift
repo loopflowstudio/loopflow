@@ -17,7 +17,7 @@ enum Perf {
 
     enum Interval: Hashable {
         case coldStart, workspaceCurrent, hierarchyInteraction, taskWorkspaceReady
-        case workflowReady, workFrameApply, retainedWorkspaceAction, startTask, completeTask
+        case workflowReady, workFrameApply, retainedWorkspaceAction, startTask, completeTask, newConversation, reconnect, openFile, firstWord
 
         var signpost: StaticString {
             switch self {
@@ -30,11 +30,15 @@ enum Perf {
             case .retainedWorkspaceAction: "retained_workspace_action"
             case .startTask: "start_task"
             case .completeTask: "complete_task"
+            case .newConversation: "new_conversation"
+            case .reconnect: "reconnect"
+            case .openFile: "open_file"
+            case .firstWord: "first_word"
             }
         }
         var recordsInteraction: Bool {
             switch self {
-            case .coldStart, .hierarchyInteraction, .taskWorkspaceReady, .retainedWorkspaceAction, .startTask, .completeTask: true
+            case .coldStart, .hierarchyInteraction, .taskWorkspaceReady, .retainedWorkspaceAction, .startTask, .completeTask, .newConversation, .reconnect, .openFile, .firstWord: true
             case .workspaceCurrent, .workflowReady, .workFrameApply: false
             }
         }
@@ -46,6 +50,10 @@ enum Perf {
             case .retainedWorkspaceAction: "workspace_layout"
             case .startTask: "start_task"
             case .completeTask: "complete_task"
+            case .newConversation: "new_conversation"
+            case .reconnect: "reconnect"
+            case .openFile: "open_file"
+            case .firstWord: "first_word"
             default: "diagnostic"
             }
         }
@@ -80,6 +88,7 @@ enum Perf {
         let interaction: Interaction?
         weak var window: NSWindow?
         var stateObserved = false
+        var acknowledgmentObserved = false
         var commandAccepted = false
         var rowRemoved = false
     }
@@ -102,6 +111,45 @@ enum Perf {
 
     @MainActor
     static func stalled(milliseconds: Double) { journal?.stalled(milliseconds: milliseconds) }
+
+    @MainActor private static var launchObserved = false
+
+    /// The first restored window acknowledges launch; a focused input surface
+    /// supplies usability. The clock starts at process creation, not this call.
+    @MainActor
+    static func launchVisible(repository: String?, liveSessions: Int?, window: NSWindow?) {
+        guard !launchObserved, let window, window.isVisible else { return }
+        launchObserved = true
+        pending[Key(interval: .coldStart, owner: nil)]?.interaction?.identifyLaunch(repository: repository, liveSessions: liveSessions)
+        pending[Key(interval: .coldStart, owner: nil)]?.window = window
+        acknowledged(.coldStart, id: "launch")
+    }
+
+    @MainActor
+    static var awaitsTerminal: Bool {
+        pending.contains { [.coldStart, .taskWorkspaceReady, .startTask, .newConversation, .reconnect].contains($0.key.interval) && !$0.value.stateObserved }
+    }
+
+    @MainActor
+    static func terminalReady(session: String, window: NSWindow, prepareFrame: @escaping @MainActor () -> Void) {
+        let matches = pending.filter {
+            [.taskWorkspaceReady, .startTask, .newConversation, .reconnect].contains($0.key.interval)
+                && $0.value.id == session && $0.value.window === window
+                && ($0.key.interval != .reconnect || $0.value.commandAccepted)
+        }
+        for (key, _) in matches { end(key.interval, id: session, owner: key.owner, prepareFrame: prepareFrame) }
+        let launch = Key(interval: .coldStart, owner: nil)
+        if pending[launch]?.window === window {
+            stateObserved(.coldStart, id: "launch", prepareFrame: prepareFrame)
+        }
+    }
+
+    @MainActor
+    static func reconnected(id: String, owner: UUID) {
+        let key = Key(interval: .reconnect, owner: owner)
+        guard pending[key]?.id == id else { return }
+        pending[key]?.commandAccepted = true
+    }
 
     /// Capture before launching Tasks so their model work retains the initiating event.
     @MainActor
@@ -148,7 +196,9 @@ enum Perf {
 
     @MainActor
     static func acknowledged(_ interval: Interval, id: String, owner: UUID? = nil) {
-        guard let current = pending[Key(interval: interval, owner: owner)], current.id == id else { return }
+        let key = Key(interval: interval, owner: owner)
+        guard let current = pending[key], current.id == id, !current.acknowledgmentObserved else { return }
+        pending[key]?.acknowledgmentObserved = true
         current.interaction?.acknowledged(at: ProcessInfo.processInfo.systemUptime, evidence: .appState)
         current.interaction?.observe(.acknowledged) { [weak window = current.window] in
             await InteractionFrame.capture(window: window)

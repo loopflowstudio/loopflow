@@ -223,7 +223,6 @@ Concept review (2026-11-16), next implement direction:
   `take_up_graph`/`claim`/`record_conversation`/`admit_receipt` steps,
   `primary::admit_task` and the admits' `filed`+run → Continue branch go
   away; a receipt for a conversation-admitting create is never `filed`.
-  Supersedes the last item in `questions.md`.
 - **The planning continuation runs on `journal::request::spawn_blocking`**,
   as the approach says, not a bare `std::thread` carrying the span: served
   creation keeps request attribution for `sync_planning` and the assignee

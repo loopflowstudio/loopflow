@@ -253,11 +253,10 @@ All in one PR; deepest first. Status after the second implement pass
    disable while away. Outside-the-plan is a condition Notice per open Wave
    with Copy recovery. `CreationRecoveryView` is gone: `CreationRecovery`
    posts condition Notices and opens its inspector from the action
-   (`CreationNotices`). Left: Claim's owner (Desktop has no local person
-   identity; the section moves, the owner waits for the reading); the refusal
-   Notice's "· Show" action; the planning-rows bridge in `sidebarTaskRows` and
-   saving `task_list` through `SavedReadings`; the ~50 inline load-failure
-   sites; suppressing per-part failure Notices while away (only the phone does).
+   (`CreationNotices`). Left: the four items under "Next implement
+   direction" below. `WorkModel.change`/`request` (`WorkModel.swift:2743,
+   2753`) are the two-line bindings to `PendingChanges.make`/`request`;
+   `sidebarTaskRows` (`WorkModel.swift:2167`) still falls back to `visibleTasks`.
 4. **Phone — built except tests.** `TaskFeed` holds `Reading<[RepositoryTasks]>`
    from `SavedReadings` and changes through `PendingChanges` (so it resends);
    controls disable while away. Left: `TaskFeedTests`, which needs a

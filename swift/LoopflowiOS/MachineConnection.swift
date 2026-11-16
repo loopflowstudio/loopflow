@@ -161,7 +161,7 @@ extension MachineSocket {
             try await socket.send(try JSONEncoder().encode(ServerClientMessage.attach(ticket: ticket)))
             switch try ServerMessage(line: try await socket.receiveText()) {
             case .bridged: return socket
-            case .error(_, let code, let message, let data): throw ServerError(code: code, message: message, data: data)
+            case .error(_, let code, let message, let data, _): throw ServerError(code: code, message: message, data: data)
             default: throw RegistryQueryError("The Machine did not attach the Session")
             }
         } catch { socket.close(); throw error }

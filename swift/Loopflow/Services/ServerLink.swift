@@ -38,7 +38,7 @@ public actor ServerLink {
     private nonisolated let endpoint: ServerEndpoint
     private let carrier: any ServerCarrier
     private var order = ServerMessageOrder()
-    private var pending: [String: CheckedContinuation<RawJSON, any Error>] = [:]
+    private var pending: [String: CheckedContinuation<ServerAnswer, any Error>] = [:]
     private var subscriptions: [String: ServerSubscription] = [:]
     private var failure: (any Error)?
     private var unansweredReads = 0
@@ -68,7 +68,7 @@ public actor ServerLink {
                 }
                 switch try ServerMessage(line: first) {
                 case .welcome(let welcome): return welcome
-                case .error(_, let code, let message, let data): throw ServerError(code: code, message: message, data: data)
+                case .error(_, let code, let message, let data, _): throw ServerError(code: code, message: message, data: data)
                 default: throw RegistryQueryError("Server did not welcome the connection")
                 }
             }
@@ -101,6 +101,18 @@ public actor ServerLink {
     /// stalled server shows as unavailable rather than current. Without one the
     /// request waits, because its outcome would otherwise become unknown.
     public func request(_ operation: ServerOperation, deadline: Duration? = nil) async throws -> RawJSON {
+        try await request(operation, requestID: nil, deadline: deadline).result
+    }
+
+    /// A write under `requestID`, answered with the revisions it advanced. A
+    /// repeat under the same ID, on this or a later connection, gets the same
+    /// answer and runs nothing. A failed write throws a `ServerError` whose
+    /// `revisions` says whether it advanced anything.
+    public func write(_ change: ServedWrite, requestID: String) async throws -> ServerAnswer {
+        try await request(.command(change), requestID: requestID, deadline: nil)
+    }
+
+    private func request(_ operation: ServerOperation, requestID: String?, deadline: Duration?) async throws -> ServerAnswer {
         let measured: ServerOperation? = switch operation {
         case .read(let query): .measuredRead(query)
         case .command(let change): .measuredWrite(change)
@@ -112,11 +124,13 @@ public actor ServerLink {
             defer { work.requestFinished() }
             if welcome.revision < 6 {
                 work.sqlUnavailable()
-                return try await InteractionTrace.$current.withValue(nil) { try await self.request(operation, deadline: deadline) }
+                return try await InteractionTrace.$current.withValue(nil) {
+                    try await self.request(operation, requestID: requestID, deadline: deadline)
+                }
             }
             do {
-                let response = try await request(measured, deadline: deadline)
-                let fields = try response.fields()
+                let response = try await request(measured, requestID: requestID, deadline: deadline)
+                let fields = try response.result.fields()
                 struct Receipt: Decodable { let id: String; let statements: UInt64; let rows: UInt64 }
                 guard let result = fields["result"] else {
                     throw RegistryQueryError("Measured read is missing its result")
@@ -124,17 +138,17 @@ public actor ServerLink {
                 if let counts = try? fields["work"]?.decode(Receipt.self) {
                     work.sql(statements: counts.statements, rows: counts.rows, receipt: counts.id)
                 } else { work.sqlUnavailable() }
-                return result
+                return ServerAnswer(result: result, revisions: response.revisions)
             } catch {
                 work.sqlUnavailable()
                 throw error
             }
         }
-        guard let deadline else { return try await admitted(operation) }
+        guard let deadline else { return try await admitted(operation, requestID: requestID) }
         struct Expired: Error {}
         do {
-            let value = try await withThrowingTaskGroup(of: RawJSON.self) { group in
-                group.addTask { try await self.admitted(operation) }
+            let value = try await withThrowingTaskGroup(of: ServerAnswer.self) { group in
+                group.addTask { try await self.admitted(operation, requestID: requestID) }
                 group.addTask {
                     try await Task.sleep(for: deadline)
                     throw Expired()
@@ -153,11 +167,11 @@ public actor ServerLink {
 
     /// Admission refusals ran nothing. Give ordinary concurrent loading time to
     /// drain without replaying a dispatched or disconnected command.
-    private func admitted(_ operation: ServerOperation) async throws -> RawJSON {
+    private func admitted(_ operation: ServerOperation, requestID: String?) async throws -> ServerAnswer {
         let deadline = ContinuousClock.now + Self.busyWait
         var delay = Duration.milliseconds(100)
         while true {
-            do { return try await requestOnce(operation) }
+            do { return try await requestOnce(operation, requestID: requestID) }
             catch let error as ServerError {
                 guard ContinuousClock.now < deadline, error.code == .busy,
                       case .integer = error.data["max"],
@@ -171,15 +185,15 @@ public actor ServerLink {
 
     private struct Ticket: Decodable { let ticket: String }
 
-    private func requestOnce(_ operation: ServerOperation) async throws -> RawJSON {
+    private func requestOnce(_ operation: ServerOperation, requestID: String?) async throws -> ServerAnswer {
         let id = UUID().uuidString
-        let message = try Self.line(.request(id: id, operation: operation, select: nil))
+        let message = try Self.line(.request(id: id, operation: operation, select: nil, requestID: requestID))
         if message.count <= ServerProtocol.maxMessage {
             return try await answer(id) { try await self.send(message) }
         }
         // An upload ticket admits a second connection carrying this one request;
         // its answer arrives here under the request's own id.
-        let ticket = try await requestOnce(.requestUpload(bytes: message.count)).decode(Ticket.self).ticket
+        let ticket = try await requestOnce(.requestUpload(bytes: message.count), requestID: nil).result.decode(Ticket.self).ticket
         return try await answer(id) {
             try await self.ticketed(ticket) { try await $0.send(message) }
         }
@@ -187,7 +201,7 @@ public actor ServerLink {
 
     /// Cancelling sends `cancel` and releases the wait; a command already
     /// dispatched may still complete.
-    private func answer(_ id: String, deliver: @escaping @Sendable () async throws -> Void) async throws -> RawJSON {
+    private func answer(_ id: String, deliver: @escaping @Sendable () async throws -> Void) async throws -> ServerAnswer {
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 if let failure { continuation.resume(throwing: failure); return }
@@ -289,8 +303,8 @@ public actor ServerLink {
 
     private func deliver(_ message: ServerMessage) throws {
         switch message {
-        case .response(let id, _, let result):
-            pending.removeValue(forKey: id)?.resume(returning: result)
+        case .response(let id, _, let result, let revisions):
+            pending.removeValue(forKey: id)?.resume(returning: ServerAnswer(result: result, revisions: revisions))
             // A null result confirms a registered subscription; anything else is
             // a late answer to a forgotten request.
         case .reading(let id, let checkpoint, let frame):
@@ -312,9 +326,9 @@ public actor ServerLink {
             subscriptions[id]?.receive(event)
         case .ended(let id):
             subscriptions.removeValue(forKey: id)?.end()
-        case .error(let id?, let code, let message, let data):
-            settle(id, throwing: ServerError(code: code, message: message, data: data))
-        case .error(nil, let code, let message, let data):
+        case .error(let id?, let code, let message, let data, let revisions):
+            settle(id, throwing: ServerError(code: code, message: message, data: data, revisions: revisions))
+        case .error(nil, let code, let message, let data, _):
             throw ServerError(code: code, message: message, data: data)
         case .welcome, .status, .bridged, .admitted:
             throw RegistryQueryError("Server repeated its greeting; update the client")
@@ -341,7 +355,7 @@ public actor ServerLink {
                 }
                 switch try ServerMessage(line: first) {
                 case .admitted: break
-                case .error(_, let code, let message, let data): throw ServerError(code: code, message: message, data: data)
+                case .error(_, let code, let message, let data, _): throw ServerError(code: code, message: message, data: data)
                 default: throw RegistryQueryError("Server did not admit the ticket; update the client")
                 }
             }

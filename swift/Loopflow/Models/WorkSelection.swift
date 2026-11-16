@@ -104,7 +104,7 @@ public struct WorkArrangementProjection: Codable, Equatable, Sendable {
         public let member: WorkMemberRef
         public let winner: WorkMemberRef
     }
-    public let visible: [WorkMemberRef]
+    public var visible: [WorkMemberRef]
     public let suppressed: [Suppressed]
 }
 
@@ -170,7 +170,7 @@ public struct WorkViewPlan: Codable, Equatable, Sendable {
         public let face: WorkPaneIntent?
         public let work: WorkWorkspaceKey
         public let title: String
-        public let states: [WorkSelectionState]
+        public var states: [WorkSelectionState]
         /// A Task's short name, as people say it: `LOO-809`.
         public let identifier: String?
         public let primarySession: String?
@@ -190,10 +190,10 @@ public struct WorkViewPlan: Codable, Equatable, Sendable {
     public let savedRevision: Int64?
     public var resolution: WorkSelectionResolution
     public let arrangement: WorkArrangement
-    public let projection: WorkArrangementProjection
+    public var projection: WorkArrangementProjection
     /// The page geometry visible members fill, in projection order.
     public let slots: DashboardSlotLayout
-    public let contents: [Content]
+    public var contents: [Content]
     enum CodingKeys: String, CodingKey {
         case repository = "repo", selection, resolution, arrangement, projection, slots, contents, name, pinned
         case dashboardID = "dashboard_id", savedRevision = "saved_revision", repositoryPath = "repo_path"

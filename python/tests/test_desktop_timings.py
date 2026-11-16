@@ -127,3 +127,84 @@ def test_html_shows_real_values_missing_tails_and_escapes_labels(tmp_path: Path)
     assert "&lt;script&gt;&quot;" in document
     assert 'value="<script>' not in document
     assert "Host load was not recorded" in document
+    headline = document.split('<details id="diagnostics">')[0]
+    assert "123.4" not in headline
+    assert "Open the app" in headline
+    assert "Get an answer" in headline
+    assert "Unmeasured" in headline
+    headline = document.split('<details id="diagnostics">')[0]
+    assert "123.4" not in headline
+    assert "Get an answer" in headline
+    assert "no complete journey observations" in timings.render(timings.summarize(tmp_path))
+
+
+def _trial(
+    path: Path,
+    elapsed: float | None,
+    *,
+    case: str = "cached",
+    revision: str = "abc123",
+    status: str = "observed; native captures require review",
+) -> Path:
+    path.write_text(
+        json.dumps(
+            {
+                "metadata": {
+                    "provider": "codex",
+                    "provider_version": "pinned",
+                    "case": case,
+                    "conditions": "live store, busy host",
+                    "app_revision": revision,
+                    "helper_revision": "def456",
+                    "machine": "local",
+                    "data": "live",
+                    "variant": "before",
+                },
+                "status": status,
+                "click_to_observed_response_ms": elapsed,
+            }
+        )
+    )
+    return path
+
+
+def test_all_in_trials_keep_complete_cases_separate_and_retain_failed_attempts(
+    tmp_path: Path,
+) -> None:
+    trials = [_trial(tmp_path / f"{i}.json", 100 + i) for i in range(20)]
+    trials += [
+        _trial(tmp_path / "failed.json", 9000, status="failed"),
+        _trial(tmp_path / "interrupted.json", None, status="unproved"),
+        _trial(tmp_path / "resume.json", 500, case="resume"),
+        _trial(tmp_path / "after.json", 50, revision="changed"),
+    ]
+    alias = tmp_path / "alias.json"
+    alias.symlink_to(trials[0])
+    report = timings.summarize(tmp_path, trials + [trials[0], alias])
+    groups = report["experiences"]["groups"]
+    assert len(groups) == 3
+    assert groups[0]["samples"] == 20
+    assert len(groups[0]["attempts"]) == 22
+    assert groups[0]["unmeasured"] == 2
+    assert groups[0]["median_ms"] == 109.5
+    assert groups[0]["p95_ms"] == 118
+    assert groups[1]["samples"] == 1
+    assert groups[1]["p95_ms"] is None
+    document = timings.render_html(report)
+    assert "captures require review" in document
+    assert "20 / 22 attempts" in document
+    assert "2 unmeasured" in document
+    assert "changed" in document
+    assert trials[0].as_uri() in document
+
+
+def test_invalid_trial_receipts_are_named_without_manufacturing_latency(tmp_path: Path) -> None:
+    malformed = tmp_path / "malformed.json"
+    malformed.write_text('{"metadata":')
+    invalid = _trial(tmp_path / "invalid.json", float("nan"))
+    missing = tmp_path / "missing.json"
+    report = timings.summarize(tmp_path, [malformed, invalid, missing])
+    assert report["experiences"]["groups"] == []
+    assert len(report["experiences"]["errors"]) == 3
+    assert str(missing) in timings.render(report)
+    assert "nonnegative elapsed time" in timings.render_html(report)

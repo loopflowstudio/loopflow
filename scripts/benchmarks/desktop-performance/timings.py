@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Report the timings Desktop recorded for its real launches and `lf` reads.
+"""Report complete experience observations, with app internals as diagnostics.
 
 uv run python scripts/benchmarks/desktop-performance/timings.py
 uv run python scripts/benchmarks/desktop-performance/timings.py --json
 uv run python scripts/benchmarks/desktop-performance/timings.py --home /path/to/home
+uv run python scripts/benchmarks/desktop-performance/timings.py --input-trial /tmp/trial/report.json
 
 Reads `<Machine>/desktop-cache/timings/{launches,reads}.ndjson`, which the app
 appends to while it runs. Launch milliseconds count from kernel process start.
@@ -22,6 +23,36 @@ from pathlib import Path
 
 BUDGETS_MS = {"first_frame": 400, "usable_saved": 1000, "usable_fresh": 1000}
 LAUNCH_METRICS = ["pre_main", "restored", "first_frame", "usable_saved", "usable_fresh", "fresh"]
+EXPERIENCES = [
+    ("open_app", "Open the app", "Launch requested", "Workspace visible and input usable"),
+    ("open_task", "Open a Task’s conversation", "Task clicked", "Conversation responds to typing"),
+    (
+        "return_session",
+        "Return to a conversation",
+        "Session clicked",
+        "Conversation responds to typing",
+    ),
+    (
+        "new_conversation",
+        "Start a conversation",
+        "New conversation requested",
+        "Composer accepts typing",
+    ),
+    ("first_word", "Get an answer", "Send pressed", "First response word visible"),
+    (
+        "find_work",
+        "Find work",
+        "Search or filter changed",
+        "Matching results visible and selectable",
+    ),
+    ("open_file", "Open a file", "File clicked", "Contents visible and editor accepts input"),
+    (
+        "reconnect",
+        "Recover a connection",
+        "Reconnect begins",
+        "Conversation restored and input usable",
+    ),
+]
 
 
 def _lines(path: Path) -> list[dict]:
@@ -111,7 +142,68 @@ def _interactions(records: list[dict]) -> dict:
     }
 
 
-def summarize(directory: Path) -> dict:
+def _experience_trials(paths: list[Path]) -> dict:
+    groups = {}
+    errors = []
+    # Aliases of a receipt are one observation, never extra samples.
+    for path in dict.fromkeys(p.expanduser().resolve() for p in paths):
+        try:
+            report = json.loads(path.read_text())
+            metadata = report["metadata"]
+            dimensions = (
+                "provider",
+                "provider_version",
+                "case",
+                "conditions",
+                "app_revision",
+                "helper_revision",
+                "machine",
+                "data",
+                "variant",
+            )
+            context = {key: metadata[key] for key in dimensions}
+            if any(not isinstance(value, str) or not value for value in context.values()):
+                raise ValueError(
+                    "Trial conditions and build/provider identities must be nonempty text"
+                )
+            if context["provider"] not in ("codex", "claude") or context["case"] not in (
+                "cached",
+                "resume",
+                "fresh",
+            ):
+                raise ValueError("Unknown provider or cached/resume/fresh case")
+            key = json.dumps(context, sort_keys=True)
+            group = groups.setdefault(key, {"context": context, "attempts": []})
+            value = report["click_to_observed_response_ms"]
+            observed = report["status"] == "observed; native captures require review"
+            if observed and (
+                type(value) not in (int, float) or not math.isfinite(value) or value < 0
+            ):
+                raise ValueError("Observed trial has no finite, nonnegative elapsed time")
+            group["attempts"].append(
+                {
+                    "receipt": str(path),
+                    "status": report["status"],
+                    "ms": value if observed else None,
+                }
+            )
+        except (OSError, ValueError, TypeError, KeyError) as error:
+            errors.append({"receipt": str(path), "reason": str(error)})
+    return {
+        "groups": [
+            {
+                **group,
+                **_stats([a["ms"] for a in group["attempts"] if a["ms"] is not None]),
+                "unmeasured": sum(a["ms"] is None for a in group["attempts"]),
+            }
+            for group in groups.values()
+            if group["attempts"]
+        ],
+        "errors": errors,
+    }
+
+
+def summarize(directory: Path, input_trials: list[Path] | None = None) -> dict:
     launches = _lines(directory / "launches.ndjson")
     reads = _lines(directory / "reads.ndjson")
     interactions = _lines(directory / "interactions.ndjson")
@@ -128,6 +220,7 @@ def summarize(directory: Path) -> dict:
         }
     return {
         "source": str(directory),
+        "experiences": _experience_trials(input_trials or []),
         "endpoints": {
             "first_frame": "first window content committed to the render server; "
             "not on-glass presentation",
@@ -153,10 +246,28 @@ def _cell(stats: dict) -> str:
     )
 
 
+def _experience_text(report: dict) -> list[str]:
+    lines = ["Everyday experiences — all-in time", ""]
+    trials = report["experiences"]
+    for identifier, label, start, end in EXPERIENCES:
+        lines.append(f"{label}: {start} → {end}")
+        if identifier == "open_task" and trials["groups"]:
+            for group in trials["groups"]:
+                lines.append(
+                    f"  {json.dumps(group['context'], sort_keys=True)}: {_cell(group)}; "
+                    f"unmeasured attempts {group['unmeasured']}; captures require review"
+                )
+        else:
+            lines.append("  Unmeasured — no complete journey observations")
+    lines.extend(f"Unavailable receipt: {e['receipt']}: {e['reason']}" for e in trials["errors"])
+    lines += ["", "Internal timings below are diagnostics, not complete experience times."]
+    return lines
+
+
 def render(report: dict) -> str:
-    lines = [f"Desktop timings from {report['source']}"]
+    lines = _experience_text(report) + ["", f"Desktop timings from {report['source']}"]
     if not report["versions"]:
-        return lines[0] + "\nNo launches recorded yet. Open Desktop, then run this again."
+        return "\n".join(lines) + "\nNo launches recorded yet. Open Desktop, then run this again."
     header = f"{'':24} {'samples':>7} {'median ms':>9} {'p95 ms':>9} {'max ms':>9}"
     for app, version in report["versions"].items():
         cache = (
@@ -212,6 +323,46 @@ def render_html(report: dict) -> str:
     def escape(value: object) -> str:
         return html.escape(str(value), quote=True)
 
+    experiences = []
+    trials = report["experiences"]
+    maximum = max((g["median_ms"] or 0 for g in trials["groups"]), default=0) or 1
+    for identifier, label, start, end in EXPERIENCES:
+        heading = f"<strong>{escape(label)}</strong><p>{escape(start)} → {escape(end)}</p>"
+        groups = trials["groups"] if identifier == "open_task" else []
+        if not groups:
+            experiences.append(
+                f'<tr><td>{heading}</td><td colspan="6" class="missing">'
+                "Unmeasured · no complete journey observations</td></tr>"
+            )
+        for group in groups:
+            context = group["context"]
+            case = escape(f"{context['provider']} · {context['case']} · {context['variant']}")
+            numbers = "".join(
+                f'<td class="num">{group[k]:,.1f}</td>'
+                if group[k] is not None
+                else '<td class="num">Unmeasured</td>'
+                for k in ("median_ms", "p95_ms", "max_ms")
+            )
+            receipts = "".join(
+                f'<li><a href="{escape(Path(a["receipt"]).as_uri())}">'
+                f"{escape(a['status'])}</a></li>"
+                for a in group["attempts"]
+            )
+            width = 100 * (group["median_ms"] or 0) / maximum
+            experiences.append(
+                f"<tr><td>{heading}</td><td>{case}<br>"
+                f"Build {escape(context['app_revision'])}<br>"
+                "Observed input response; captures require review"
+                f"<details><summary>Conditions and receipts</summary>"
+                f"<pre>{escape(json.dumps(context, indent=2))}</pre>"
+                f"<ul>{receipts}</ul></details></td>"
+                f"<td>{group['samples']} / {len(group['attempts'])} attempts<br>"
+                f"{group['unmeasured']} unmeasured</td>{numbers}"
+                f'<td><span style="width:{width:.2f}%"></span></td></tr>'
+            )
+    unavailable = "".join(
+        f"<li>{escape(e['receipt'])}: {escape(e['reason'])}</li>" for e in trials["errors"]
+    )
     rows = []
     options = []
     versions = report["versions"]
@@ -226,7 +377,7 @@ def render_html(report: dict) -> str:
             "frame_applies",
         ):
             measurements = version[section]
-            scale = max((s["max_ms"] or 0 for s in measurements.values()), default=0) or 1
+            scale = max((s["median_ms"] or 0 for s in measurements.values()), default=0) or 1
             for name, stats in measurements.items():
                 values = [
                     f"{stats[k]:,.1f}" if stats[k] is not None else "Unmeasured"
@@ -266,15 +417,28 @@ th {{background:#e2ebe1; text-align:left; padding:15px 12px; white-space:nowrap}
 td {{padding:12px; border-top:1px solid #e6ece4}}
 .num {{text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap}}
 td:last-child {{min-width:110px}} span {{display:block; height:9px; background:#378267}}
+.missing {{color:#6c766c}} td p {{margin:8px 0 0; color:#647469; line-height:1.5}}
 pre {{white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.6; font-size:12px}}
 details {{background:white; margin:20px 0; padding:20px; border-radius:12px}}
 summary {{cursor:pointer; font-weight:600}} [hidden] {{display:none}}
 </style>
 <main><div class="label">Loopflow · live observations</div>
 <h1>The waits in everyday use</h1>
-<p>Real app journals · local Machine · milliseconds, lower is faster</p>
+<p>From your action to a usable result · milliseconds, lower is faster</p>
+<p class="note">Only complete journey observations belong in this table.
+The retained launch/read/navigation journals do not establish these all-in times.
+P95 needs 20 observed samples with matching conditions. Missing values stay unmeasured.</p>
+<div class="table"><table><thead><tr><th>Experience · start → finish</th><th>Case</th>
+<th>Observed / attempts</th><th>Median ms</th><th>P95 ms</th><th>Max ms</th><th>Median</th>
+</tr></thead><tbody>{"".join(experiences)}</tbody></table></div>
+<ul>{unavailable}</ul>
+<p>Task-to-conversation observations include capture and observer delay, and hook/trust waits.
+They time an unsent probe response, not model response latency. Captures need review;
+they are not an automatic pass. Cases, builds, providers and host/data conditions stay separate.</p>
+<details id="diagnostics"><summary>Diagnostics · what happened inside the app</summary>
+<p>Real app journals · local Machine. These are internal phase timings, not all-in UX results.</p>
 <p class="note">These are ordinary-use observations, including busy-host samples.
-Host load was not recorded. P95 needs 20 completed samples; missing values stay unmeasured.
+Host load was not recorded. P95 needs 20 completed samples.
 Unfinished interactions may still be pending. Older versions have no interaction journal.
 Builds sharing a version are pooled; this is not a controlled before/after comparison.</p>
 <p class="note">Frame wait/apply rows contain only readings whose combined wait and apply
@@ -289,6 +453,7 @@ Exact tail values remain in the table.</p>
 <details><summary>Endpoints and measurement limits</summary><pre>{endpoints}</pre></details>
 <details><summary>All versions, launch failures and raw summary</summary>
 <pre>{details}</pre></details>
+</details>
 <p>Source: {escape(report["source"])}. Journals rotate; this is the retained window.</p></main>
 <script>
 const selector = document.getElementById('version');
@@ -311,8 +476,16 @@ def main() -> int:
     )
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--html", type=Path, help="Write a standalone chart and table")
+    parser.add_argument(
+        "--input-trial",
+        type=Path,
+        action="append",
+        default=[],
+        help="Include an agent_input.py report.json as a Task-to-conversation observation; "
+        "repeat per trial",
+    )
     args = parser.parse_args()
-    report = summarize(args.home.expanduser() / "desktop-cache" / "timings")
+    report = summarize(args.home.expanduser() / "desktop-cache" / "timings", args.input_trial)
     if args.html:
         args.html.write_text(render_html(report), encoding="utf-8")
         print(args.html)

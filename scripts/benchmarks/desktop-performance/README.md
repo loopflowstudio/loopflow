@@ -39,7 +39,28 @@ distinguished. These endpoints retain the signposts' meanings: observed view sta
 or a queued main-thread callback, not verified provider input or displayed pixels.
 Terminal key-to-draw and Markdown spans remain in signposts, outside this journal.
 
-The HTML report reads the live Machine's retained journals, with app-version
+The headline report is organized by complete experiences: open the app, open a
+Task's conversation, return to a Session, start a conversation, get the first
+answer word, find work, open a file and recover a connection. Each names the
+initiating action and usable endpoint. **Existing internal timings do not supply
+these all-in numbers.** Without a full journey observation the row is unmeasured.
+
+The Task-to-conversation recorder in [agent-input.md](agent-input.md) measures from
+the Task click through an unsent probe's observed native response. After recording
+and summarizing owned live-app trials, include their receipts:
+
+```sh
+uv run python scripts/benchmarks/desktop-performance/timings.py --input-trial /tmp/codex-resume-before/report.json --html /tmp/loopflow-performance.html
+```
+
+Repeat `--input-trial` for additional reports. Cases, providers/versions, app/helper
+builds, Machine, fixture/data identity, conditions and before/after variants stay
+separate. Observed captures require review; they are not automatic passes. Capture,
+observer and hook/trust delays remain in the full interval. Failed/unproved trials
+remain counted outside observed latency statistics. Invalid or missing reports are
+named without manufacturing measurements. Other full-journey drivers remain missing.
+
+The diagnostics section reads the live Machine's retained journals, with app-version
 selection, median bars, P95/max and failure counts. Missing metrics stay unmeasured.
 Versions can contain several build revisions. Slow frame wait/apply samples are
 selected at 100 ms combined latency; their distribution excludes fast readings.

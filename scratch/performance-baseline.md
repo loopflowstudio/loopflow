@@ -26,6 +26,49 @@ collect agent-driven live usage. Synthetic worlds and isolated-host CI follow.
 Keep loaded-host samples; host context must not add synchronous interaction work
 or turn real latency into an adjusted estimate. No merge approval.
 
+Jack Heart: “i thinknthese might heba little low level i want metrics with clear
+user experiences associated that are \"all in\" times like the ade benchmark”.
+
+The headline report must measure complete experiences from the initiating action
+to the usable result. CLI, SQL, refresh and publication timings are diagnostic
+breakdowns, never substitutes for the whole journey. Existing queued-callback
+navigation spans do not yet meet this contract. Candidate journeys:
+
+| Experience | Start | Finish |
+|---|---|---|
+| Open the app | Launch requested | Restored workspace visible and intended input accepts typing |
+| Open a Task | Task selected | Correct workspace visible and usable, with its retained state |
+| Return to a Session | Session selected | Correct conversation visible and its input accepts typing |
+| Start a conversation | New-conversation action | Correct destination visible and composer accepts typing |
+| Get an answer | Submit input | First response word visible |
+| Find work | Filter/search changed | Matching list visible and selectable |
+| Open a file | File selected | Correct contents visible and editor accepts input |
+| Recover a connection | Return/reconnect begins | Correct conversation restored and input usable |
+
+Measure first/cached/fresh and idle/streaming variants separately. Count unfinished,
+failed and superseded journeys. Continuous ordinary-use recording needs a truthful
+usable endpoint; rendered-state callbacks alone do not prove pixel or input readiness.
+Agent-driven initial trials can validate visible/input endpoints with capture and
+owned probes. The live report just published is a diagnostic view, not completed
+all-in experience coverage.
+
+### UX report update (2026-11-16)
+
+Headline text/HTML now lists complete experiences and their action → usable-result
+contracts; internal phase timings move under collapsed diagnostics. No old callback,
+CLI or launch milestone is promoted to a full-journey observation. Existing
+`agent_input.py` reports can populate Task-click → observed unsent draft response
+through repeated `--input-trial` paths. Provider/case/build/Machine/data/conditions
+stay separate; captured observations still need review. Other drivers and continuous
+all-in app collection remain to implement. No complete input-response trial was found
+in the bounded `/tmp` report locations inspected; no new native trial was started.
+
+- `uv run pytest python/tests/test_desktop_timings.py python/tests/test_agent_input_profile.py::test_experience_report_consumes_the_full_trial_without_promoting_missing_input -q` — 7 passed.
+- Ruff check/format on the three changed Python files; `git diff --check` — passed.
+- Regenerated `/tmp/loo916-live-performance.html` from live journals. Browser preview
+  rejected the local file URL: “The requested URL protocol is not allowed. Allowed
+  protocols: \"http:\", \"https:\".” No alternate browser route was attempted.
+
 ## Controlled comparisons
 
 Use the existing native workspace/hierarchy/Session-return and committed-write

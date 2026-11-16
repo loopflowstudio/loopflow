@@ -68,7 +68,7 @@ fn insert_process(store: &SqliteStore, _id: &str, ts: i64) {
 #[test]
 fn doctor_json_reports_the_build_revision_and_freshness_check() {
     let home = TestRepo::new();
-    SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     let fetch_head = home.path().join(".git/FETCH_HEAD");
     let before = fs::read(&fetch_head).ok();
     let output = run_lf(home.path(), &["self", "doctor", "--json"]);
@@ -94,7 +94,7 @@ fn doctor_json_reports_the_build_revision_and_freshness_check() {
 #[test]
 fn copied_production_history_does_not_block_the_telemetry_cron() {
     let home = TestRepo::new();
-    let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     insert_process(
         &store,
         "august-03",
@@ -150,7 +150,7 @@ fn copied_production_history_does_not_block_the_telemetry_cron() {
 #[test]
 fn doctor_accepts_machine_commands_without_a_repository() {
     let home = TestRepo::new();
-    let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     insert_process(
         &store,
         "machine-command",
@@ -211,7 +211,7 @@ fn doctor_does_not_initialize_a_missing_database() {
 fn reads_answer_from_a_store_a_newer_build_migrated() {
     let home = TestRepo::new();
     let path = home.path().join("loopflow.db");
-    let store = SqliteStore::new(&path).unwrap();
+    let store = loopflow::store::open_sqlite(&path).unwrap();
     insert_process(&store, "recent", OffsetDateTime::now_utc().unix_timestamp());
     let connection = rusqlite::Connection::open(&path).unwrap();
     connection.execute("INSERT INTO schema_migrations (version, applied_at) VALUES ('9.0.001_future', unixepoch() + 1)", []).unwrap();

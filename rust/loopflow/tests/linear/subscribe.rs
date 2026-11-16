@@ -71,13 +71,13 @@ impl Machine {
     fn at(dir: tempfile::TempDir) -> Self {
         let repo = dir.path().join("repo");
         std::fs::create_dir_all(&repo).unwrap();
-        let store = SqliteStore::new(&dir.path().join("loopflow.db")).unwrap();
+        let store = loopflow::store::open_sqlite(&dir.path().join("loopflow.db")).unwrap();
         let wave = Wave::new(
             WaveId::new(),
             "product".into(),
             repo.canonicalize().unwrap().display().to_string(),
         );
-        store.create_wave(&wave).unwrap();
+        loopflow::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
         Self { dir, store, wave }
     }
 
@@ -152,14 +152,14 @@ impl Machine {
             created_at: now,
             updated_at: now,
         };
-        self.store
-            .place_task(
-                &task.id,
-                task.worktree.as_ref().unwrap(),
-                &task.workspace_slug,
-                &pr,
-            )
-            .unwrap();
+        loopflow::store::ownership::place_task(
+            &self.store,
+            &task.id,
+            task.worktree.as_ref().unwrap(),
+            &task.workspace_slug,
+            &pr,
+        )
+        .unwrap();
         self.store
             .append_task_event(
                 &task.id,
@@ -190,7 +190,7 @@ impl Machine {
         let id = self.store.repository_id(self.wave.repo()).unwrap().unwrap();
         loopflow::repository::location::reconcile(
             &self.store,
-            &loopflow::repository::CanonicalRepo::discover(self.repo()).unwrap(),
+            &loopflow::repository::discover(self.repo()).unwrap(),
             Some(&id),
             None,
         )
@@ -611,21 +611,25 @@ fn task_view_keeps_workflow_checkout_and_conversations_after_live_updates() {
     home.plan(1);
     let checkout = home.start(1);
     let task = home.store.task_by_issue("FIX-1").unwrap().unwrap();
-    home.store
-        .take_up_task_graph(
-            &task.id,
-            &crate::task_graph::CapturedGraph {
-                name: "feature".into(),
-                steps: vec![],
-            },
-        )
-        .unwrap();
+    crate::store::task_work::take_up_task_graph(
+        &home.store,
+        &task.id,
+        &crate::task_graph::CapturedGraph {
+            name: "feature".into(),
+            steps: vec![],
+        },
+    )
+    .unwrap();
     let session = home
         .store
         .test_session("task-view", &crate::session_record::new_artifact_key());
-    home.store
-        .bind_session(session.id.as_str(), session.captured, &task.id)
-        .unwrap();
+    crate::store::sessions::bind_session(
+        &home.store,
+        session.id.as_str(),
+        session.captured,
+        &task.id,
+    )
+    .unwrap();
     home.store.test_graph(
         "debug",
         checkout.to_str().unwrap(),
@@ -686,13 +690,13 @@ fn task_view_keeps_workflow_checkout_and_conversations_after_live_updates() {
         assert!(!screen.contains("No workflow taken up"), "{screen}");
     };
     check(&screens.recv_timeout(Duration::from_secs(30)).unwrap());
-    home.store
-        .rename_session(
-            session.id.as_str(),
-            "Updated conversation",
-            crate::session::TitleSource::Human,
-        )
-        .unwrap();
+    crate::store::sessions::rename_session(
+        &home.store,
+        session.id.as_str(),
+        "Updated conversation",
+        crate::session::TitleSource::Human,
+    )
+    .unwrap();
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         let screen = screens
@@ -826,13 +830,13 @@ fn planning_runs_git_per_repository_not_per_wave() {
             format!("gone-{index}"),
             gone.display().to_string(),
         );
-        home.store.create_wave(&wave).unwrap();
+        loopflow::work::wave::bootstrap::upsert_wave(&home.store, &wave).unwrap();
         let sibling = Wave::new(
             WaveId::new(),
             format!("sibling-{index}"),
             home.wave.repo().into(),
         );
-        home.store.create_wave(&sibling).unwrap();
+        loopflow::work::wave::bootstrap::upsert_wave(&home.store, &sibling).unwrap();
     }
     let grown = planning_git_commands(home.path());
 

@@ -1,6 +1,7 @@
 //! Command observation is durable even when no agent work starts.
 #![cfg(unix)]
 
+use loopflow::process::attachment;
 #[allow(dead_code)] // Linked for its inherited provider-home scrub.
 mod support;
 
@@ -39,7 +40,7 @@ async fn agent_settlement_on_read_reports_failed_observation_and_recovers_withou
     let _store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
         .await
         .unwrap();
-    let store = SqliteStore::new(&database).unwrap();
+    let store = loopflow::store::open_sqlite(&database).unwrap();
     reserve_session(&store, "orphan", repo.path());
     let sql = rusqlite::Connection::open(&database).unwrap();
     sql.execute(
@@ -48,9 +49,8 @@ async fn agent_settlement_on_read_reports_failed_observation_and_recovers_withou
     )
     .unwrap();
     let parent = recorded_lf_process(&database);
-    let attachment = store
-        .claim_session_attachment("orphan", None, &parent, true)
-        .unwrap();
+    let attachment =
+        attachment::claim_session_attachment(&store, "orphan", None, &parent, true).unwrap();
     // Only this throwaway group can be signaled. The shell supplies the server
     // argv shape, not a configured provider, account or conversation.
     let started = time::OffsetDateTime::now_utc().unix_timestamp();
@@ -205,11 +205,16 @@ fn task_checkout_blockers_are_rows_in_the_activity_list() {
     let worktree = Path::new(placed["worktree"].as_str().unwrap());
 
     let database = home.path().join("loopflow.db");
-    let store = SqliteStore::new(&database).unwrap();
+    let store = loopflow::store::open_sqlite(&database).unwrap();
     reserve_session(&store, "held", worktree);
-    let attachment = store
-        .claim_session_attachment("held", None, &recorded_lf_process(&database), true)
-        .unwrap();
+    let attachment = attachment::claim_session_attachment(
+        &store,
+        "held",
+        None,
+        &recorded_lf_process(&database),
+        true,
+    )
+    .unwrap();
     let agent = attachment.agent_process_id.as_str();
 
     let output = lf(repo.path(), &["monitor", "ps", "--json"]);
@@ -480,7 +485,7 @@ async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
     let paths = repos
         .iter()
         .map(|repo| {
-            loopflow::repository::CanonicalRepo::discover(repo.path())
+            loopflow::repository::discover(repo.path())
                 .unwrap()
                 .to_string()
         })
@@ -754,7 +759,7 @@ fn empty_release_check_returns_through_process_completion() {
     std::fs::write(&gh, "#!/bin/sh\ncase \"$1 $2\" in '--version ') exit 0;; 'pr list') echo '[]'; exit 0;; esac\nexit 1\n").unwrap();
     std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).unwrap();
     let database = home.path().join("loopflow.db");
-    drop(SqliteStore::new(&database).unwrap());
+    drop(loopflow::store::open_sqlite(&database).unwrap());
     let parent = RunningParent::insert(&database);
     let output = child(home.path(), repo.path(), &["release", "check"], &parent)
         .env(
@@ -870,37 +875,37 @@ fn recorded_lf_process(database: &Path) -> LfProcessId {
 
 fn reserve_session(store: &SqliteStore, session_id: &str, repo: &Path) {
     let run_id = uuid::Uuid::new_v4().simple().to_string();
-    store
-        .create_session(
-            LfSession {
-                captured: None,
-                task_id: None,
-                wave_id: None,
-                graph_lf_process_id: None,
-                work_source: None,
-                bound_at: None,
-                id: session_id.into(),
-                artifact_key: Some(run_id),
-                caller_artifact_key: None,
-                input_published: false,
-                cwd: repo.into(),
-                skill: None,
-                provider: Some("codex".into()),
-                model: None,
-                node: None,
-                iterations: None,
-                interactive: true,
-                repo: None,
-                title: "AgentProcess ownership".into(),
-                title_source: TitleSource::Generated,
-                request: None,
-                ready_summary: None,
-                completed_at: None,
-                created_at: 1,
-            },
-            None,
-        )
-        .unwrap();
+    loopflow::store::sessions::create_session(
+        store,
+        LfSession {
+            captured: None,
+            task_id: None,
+            wave_id: None,
+            graph_lf_process_id: None,
+            work_source: None,
+            bound_at: None,
+            id: session_id.into(),
+            artifact_key: Some(run_id),
+            caller_artifact_key: None,
+            input_published: false,
+            cwd: repo.into(),
+            skill: None,
+            provider: Some("codex".into()),
+            model: None,
+            node: None,
+            iterations: None,
+            interactive: true,
+            repo: None,
+            title: "AgentProcess ownership".into(),
+            title_source: TitleSource::Generated,
+            request: None,
+            ready_summary: None,
+            completed_at: None,
+            created_at: 1,
+        },
+        None,
+    )
+    .unwrap();
 }
 
 #[tokio::test]
@@ -989,13 +994,18 @@ async fn historical_feedback_is_not_live_availability() {
     let _store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
         .await
         .unwrap();
-    let store = SqliteStore::new(&database).unwrap();
+    let store = loopflow::store::open_sqlite(&database).unwrap();
     for id in ["waiting", "finished", "legacy_finished", "unobserved"] {
         reserve_session(&store, id, home.path());
     }
-    let finished = store
-        .claim_session_attachment("finished", None, &recorded_lf_process(&database), true)
-        .unwrap();
+    let finished = attachment::claim_session_attachment(
+        &store,
+        "finished",
+        None,
+        &recorded_lf_process(&database),
+        true,
+    )
+    .unwrap();
     let connection = rusqlite::Connection::open(&database).unwrap();
     connection
         .execute(

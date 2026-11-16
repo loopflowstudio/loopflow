@@ -35,9 +35,9 @@ use anyhow::{bail, Context, Result};
 use sha2::{Digest, Sha256};
 
 use crate::harness::native_exit::{NativeExit, Settled};
-use crate::store::sqlite::ViewerHold;
 use input::{Paste, PendingInput};
 use loopflow_model::id::{LfSessionId, TerminalId};
+use loopflow_storage::sqlite::ViewerHold;
 use wire::{
     Close, CloseReason, Decoder, Event, Incoming, Outgoing, Own, Reply, Request, Scanner, Tag,
 };
@@ -2293,7 +2293,7 @@ fn record_relay_terminal(held: &TerminalId) -> Result<()> {
         return Ok(());
     };
     std::env::remove_var("LF_RELAY_SESSION");
-    let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
+    let store = crate::store::open_sqlite(&crate::store::database_path_from_env()?)?;
     let session = session.to_string_lossy();
     if store.session_terminal(&session)?.as_ref() != Some(held) {
         return Ok(());

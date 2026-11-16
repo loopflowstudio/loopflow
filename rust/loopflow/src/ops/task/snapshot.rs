@@ -11,12 +11,12 @@ use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
-use crate::child::ChildRef;
 use crate::config::parse_agent;
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::task_actions::{derive_task_actions, TaskActionEvidence, TaskActionModel};
 use crate::store::SharedStore;
-use crate::work::task::{PrPhase, Task, TaskPr};
+use loopflow_storage::child::ChildRef;
+use loopflow_storage::work::task::{PrPhase, Task, TaskPr};
 use sha2::{Digest, Sha256};
 
 pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
@@ -58,7 +58,8 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
     let execution = crate::ops::task_execution::task_execution(store, &task)
         .await
         .map_err(task_error)?;
-    let work_set = store.sqlite.task_work(&task.id).map_err(task_error)?;
+    let work_set =
+        crate::store::task_work::task_work(&store.sqlite, &task.id).map_err(task_error)?;
     let status = store.task_state(&task.id).await.map_err(task_error)?;
     let actions = if store.sqlite.task_deleted(&task).map_err(task_error)? {
         TaskActionModel {

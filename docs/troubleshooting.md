@@ -340,7 +340,7 @@ Tasks' build output and merged branches through `lf wt prune`, and ignored
 build output (`target`, `node_modules`, `.venv`, `.build`, `DerivedData`) that no process
 holds and nothing wrote for 4 hours. It removes nothing under `~/.lf`: the
 database, its pre-migration clones (lf's own, see
-`rust/loopflow/src/store/MIGRATIONS.md`), captures, logs and account homes stay.
+`rust/loopflow-storage/src/MIGRATIONS.md`), captures, logs and account homes stay.
 Anything a process holds open is never removed; when `lsof` fails, neither is
 anything else that check protects.
 

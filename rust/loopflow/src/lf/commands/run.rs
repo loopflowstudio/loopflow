@@ -109,7 +109,7 @@ pub fn resume(id: &str, message: &str, cli: &Cli, named_work: bool) -> Result<()
     if crate::transport::delegate_current(true, named_work)? {
         return Ok(());
     }
-    let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
+    let store = crate::store::open_sqlite(&crate::store::database_path_from_env()?)?;
     let session = store
         .session(id)?
         .ok_or_else(|| anyhow!("session {id:?} was not found"))?;
@@ -361,19 +361,14 @@ fn operator_scope(
     }
     let skill = resolve_skill(skill, cli, cwd)?;
     let scope = match (skill.as_ref().map(|skill| skill.name.as_str()), binding) {
-        (Some("repo-operate"), None) => {
-            PrimaryScope::Repository(crate::repository::CanonicalRepo::discover(cwd)?)
-        }
+        (Some("repo-operate"), None) => PrimaryScope::Repository(crate::repository::discover(cwd)?),
         (Some("wave-operate"), Some(binding)) => match &binding.work {
             WorkRef::Wave(id) => PrimaryScope::Wave(id.clone()),
             _ => return Ok(None),
         },
         _ => return Ok(None),
     };
-    Ok(
-        (crate::repository::CanonicalRepo::discover(cwd)?.as_path() == cwd.canonicalize()?)
-            .then_some(scope),
-    )
+    Ok((crate::repository::discover(cwd)?.as_path() == cwd.canonicalize()?).then_some(scope))
 }
 
 /// Captured identity and body take precedence, including during scope selection.
@@ -1783,10 +1778,8 @@ for line in sys.stdin:
         repo.commit("committed basis");
         repo.create_file("scratch/z-untracked.md", "untracked evidence bytes");
         let store =
-            crate::store::sqlite::SqliteStore::open_ephemeral(&home.path().join("loopflow.db"))
-                .unwrap();
-        store
-            .ensure_wave(repo.path().to_str().unwrap(), "ship")
+            crate::store::opening::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
+        crate::work::wave::bootstrap::ensure_wave(&store, repo.path().to_str().unwrap(), "ship")
             .unwrap();
 
         let cli = Cli {
@@ -2005,14 +1998,13 @@ for line in sys.stdin:
             "## Objective\nShip a reliable release.\n\n## Bounds\nKeep rollback available.\n";
         repo.create_file(".lf/wave/release/GOAL.md", goal);
         let store =
-            crate::store::sqlite::SqliteStore::open_ephemeral(&home.path().join(".lf/loopflow.db"))
-                .unwrap();
-        store
-            .ensure_wave(
-                repo.path().canonicalize().unwrap().to_str().unwrap(),
-                "release",
-            )
-            .unwrap();
+            crate::store::opening::open_ephemeral(&home.path().join(".lf/loopflow.db")).unwrap();
+        crate::work::wave::bootstrap::ensure_wave(
+            &store,
+            repo.path().canonicalize().unwrap().to_str().unwrap(),
+            "release",
+        )
+        .unwrap();
         let cli = Cli::parse_from(["lf", "-i", "--wave", "release", "design"]);
         let built = build_prompt_at(
             Some("design"),

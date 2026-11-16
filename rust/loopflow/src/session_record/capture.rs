@@ -284,7 +284,8 @@ impl SessionRecorder {
             task.as_ref().map(|task| task.title.as_str()),
             &manifest.cwd,
         );
-        let session = store.create_session(
+        let session = crate::store::sessions::create_session(
+            &store,
             crate::session::LfSession {
                 captured: None,
                 caller_artifact_key: manifest.caller_artifact_key.clone(),

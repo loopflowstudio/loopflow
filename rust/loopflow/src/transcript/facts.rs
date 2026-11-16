@@ -17,9 +17,9 @@ use serde_json::{json, Value};
 use super::live::TurnState;
 use super::{seconds, Source, Turn};
 use crate::harness::HarnessKind;
-use crate::store::sqlite::SqliteStore;
 use crate::store::StoreResult;
 use loopflow_model::id::AgentSessionId;
+use loopflow_storage::sqlite::SqliteStore;
 
 /// How long after a turn's last transcript row its live completion may have
 /// been recorded.
@@ -183,7 +183,7 @@ mod tests {
 
     fn store() -> (tempfile::TempDir, SqliteStore) {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("conversation", &crate::session_record::new_artifact_key());
         (home, store)
     }

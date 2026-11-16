@@ -10,12 +10,12 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::durable::GraphStepProcess;
-use crate::store::sqlite::SqliteStore;
 use crate::store::{StoreError, StoreResult};
 use crate::task_graph::TaskGraphPosition;
-use crate::work::task::comment::TaskCommentAuthor;
+use loopflow_model::comment::TaskCommentAuthor;
 use loopflow_model::durable::TaskId;
 use loopflow_model::id::LfProcessId;
+use loopflow_storage::sqlite::SqliteStore;
 
 /// Run and position changes share one steer; its complete source is on disk.
 const UPDATE_BYTES: usize = 4_000;
@@ -28,9 +28,7 @@ type QuietKey = (String, TaskId);
 static QUIET_AT: Mutex<Option<HashMap<QuietKey, i64>>> = Mutex::new(None);
 
 fn quiet_key(store: &SqliteStore, task: &TaskId) -> Option<QuietKey> {
-    let conn = store.conn.lock().expect("store mutex poisoned");
-    let path = conn.path().filter(|path| !path.is_empty())?.to_string();
-    Some((path, task.clone()))
+    Some((store.path()?.to_string_lossy().into_owned(), task.clone()))
 }
 
 fn quiet_at(key: Option<&QuietKey>) -> Option<i64> {
@@ -122,7 +120,7 @@ pub(crate) fn write(store: &SqliteStore, session_id: &str) -> StoreResult<()> {
 fn write_task(store: &SqliteStore, task: &TaskId) -> StoreResult<()> {
     let stored = store.task_update_reading(task)?;
     let old: Option<TaskObservation> = stored.as_deref().map(serde_json::from_str).transpose()?;
-    let (graph, graphs) = store.task_progress(task)?;
+    let (graph, graphs) = crate::store::task_work::task_progress(store, task)?;
     let mut observation = TaskObservation {
         position: graph.map(|graph| graph.position),
         runs: HashMap::new(),
@@ -226,10 +224,10 @@ fn position_text(position: Option<&TaskGraphPosition>) -> String {
 #[cfg(test)]
 mod tests {
     use super::write;
-    use crate::store::sqlite::SqliteStore;
-    use crate::work::task::comment::{TaskComment, TaskCommentAuthor};
+    use loopflow_model::comment::{TaskComment, TaskCommentAuthor};
     use loopflow_model::durable::TaskId;
     use loopflow_model::id::LfProcessId;
+    use loopflow_storage::sqlite::SqliteStore;
 
     /// The updates `session` has not read, after a reading.
     fn pending(store: &SqliteStore, session: &str) -> Vec<String> {
@@ -320,15 +318,15 @@ mod tests {
     #[test]
     fn review_positions_are_reported_without_repeating_history() {
         let (_home, store, task) = task_session();
-        store
-            .take_up_task_graph(
-                &task,
-                &crate::task_graph::CapturedGraph {
-                    name: "feature".into(),
-                    steps: Vec::new(),
-                },
-            )
-            .unwrap();
+        crate::store::task_work::take_up_task_graph(
+            &store,
+            &task,
+            &crate::task_graph::CapturedGraph {
+                name: "feature".into(),
+                steps: Vec::new(),
+            },
+        )
+        .unwrap();
         let run = store.test_graph("feature", "/task-updates", &[("gate", None)], None);
         assert!(quiet(&store));
         finish_run(&store, &run, "succeeded");
@@ -380,12 +378,16 @@ mod tests {
 
     fn task_session() -> (tempfile::TempDir, SqliteStore, TaskId) {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
         let session = store.test_session("reader", &crate::session_record::new_artifact_key());
         let task = TaskId::new();
         store
-            .create_task(&crate::work::task::NewTask {
-                repository_id: store.ensure_repository("/task-updates").unwrap(),
+            .create_task(&loopflow_storage::work::task::NewTask {
+                repository_id: crate::repository::location::ensure_repository(
+                    &store,
+                    "/task-updates",
+                )
+                .unwrap(),
                 id: task.clone(),
                 project_id: None,
                 title: "Updates".into(),
@@ -403,9 +405,7 @@ mod tests {
                 [],
             )
             .unwrap();
-        store
-            .bind_session("reader", session.captured, &task)
-            .unwrap();
+        crate::store::sessions::bind_session(&store, "reader", session.captured, &task).unwrap();
         (home, store, task)
     }
 
@@ -505,9 +505,7 @@ mod tests {
     fn worker_runs_neither_write_nor_read_updates() {
         let (_home, store, task) = task_session();
         let worker = store.test_session("worker", &crate::session_record::new_artifact_key());
-        store
-            .bind_session("worker", worker.captured, &task)
-            .unwrap();
+        crate::store::sessions::bind_session(&store, "worker", worker.captured, &task).unwrap();
         store
             .conn
             .lock()

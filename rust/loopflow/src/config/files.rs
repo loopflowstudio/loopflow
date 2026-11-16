@@ -387,17 +387,7 @@ pub fn update<T>(path: &Path, change: impl FnOnce(&mut Value) -> Result<T>) -> R
     if path.file_name().is_some_and(|name| name == PRIVATE_FILE) {
         protect_private_file(path)?;
     }
-    update_text(path, |original| {
-        let before = parse_document(original, path)?;
-        let mut after = before.clone();
-        let result = change(&mut after)?;
-        let text = if after == before {
-            original.to_owned()
-        } else {
-            edited_text(original, &after)?
-        };
-        Ok((text, result))
-    })
+    LockedFile::open(path)?.update(change)
 }
 
 /// The same serialized, hand-edit-aware writer also edits definition frontmatter.
@@ -405,19 +395,52 @@ pub(crate) fn update_text<T>(
     path: &Path,
     change: impl FnOnce(&str) -> Result<(String, T)>,
 ) -> Result<T> {
-    let _lock = lock(path)?;
-    let original = read_text(path)?;
-    let (text, result) = change(&original)?;
-    if text == original {
-        return Ok(result);
+    LockedFile::open(path)?.update_text(change)
+}
+
+/// Hold a preference writer's fence across configuration acquisition and its command.
+#[derive(Debug)]
+pub(crate) struct LockedFile {
+    path: PathBuf,
+    _lock: File,
+}
+
+impl LockedFile {
+    pub(crate) fn open(path: &Path) -> Result<Self> {
+        Ok(Self {
+            path: path.to_owned(),
+            _lock: lock(path)?,
+        })
     }
-    ensure!(
-        read_text(path)? == original,
-        "{} changed during this edit; retry with the current file",
-        path.display()
-    );
-    atomic_write(path, &text)?;
-    Ok(result)
+
+    pub(crate) fn update<T>(&self, change: impl FnOnce(&mut Value) -> Result<T>) -> Result<T> {
+        self.update_text(|original| {
+            let mut after = parse_document(original, &self.path)?;
+            let before = after.clone();
+            let result = change(&mut after)?;
+            let text = if after == before {
+                original.to_owned()
+            } else {
+                edited_text(original, &after)?
+            };
+            Ok((text, result))
+        })
+    }
+
+    fn update_text<T>(&self, change: impl FnOnce(&str) -> Result<(String, T)>) -> Result<T> {
+        let original = read_text(&self.path)?;
+        let (text, result) = change(&original)?;
+        if text == original {
+            return Ok(result);
+        }
+        ensure!(
+            read_text(&self.path)? == original,
+            "{} changed during this edit; retry with the current file",
+            self.path.display()
+        );
+        atomic_write(&self.path, &text)?;
+        Ok(result)
+    }
 }
 
 pub(crate) fn edited_text(original: &str, after: &Value) -> Result<String> {

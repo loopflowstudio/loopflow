@@ -116,7 +116,7 @@ impl Error {
     /// A write that failed for another reason may have taken partial effect.
     pub fn written(error: &anyhow::Error) -> Self {
         use crate::store::StoreError;
-        use crate::work::selection::SelectionError;
+        use loopflow_storage::work::selection::SelectionError;
         if let Some(named) = error.chain().find_map(|cause| cause.downcast_ref::<Self>()) {
             return named.clone();
         }

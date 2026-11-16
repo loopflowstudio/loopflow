@@ -8,15 +8,15 @@ pub(crate) mod recovery;
 
 use std::path::{Path, PathBuf};
 
-use recovery::{Identity, Operation, ProviderChange};
+use crate::work::wave::lifecycle::{Identity, Operation, ProviderChange};
 
 use serde::{Deserialize, Serialize};
 
 use crate::ops::{OpsError, OpsResult};
 use crate::store::Store;
-use crate::work::project::Project;
-use crate::work::wave::{Wave, WaveLocator};
+use crate::work::wave::Wave;
 use loopflow_model::id::WaveId;
+use loopflow_storage::work::project::Project;
 
 fn lifecycle_error(message: impl ToString) -> OpsError {
     OpsError::Message(message.to_string())
@@ -48,17 +48,15 @@ pub struct WaveAdded {
 /// Register a Wave, seed its authored files on the main checkout, ensure its
 /// first Project and commit the files. Re-adding a live Wave changes nothing.
 pub async fn add(repo: &Path, name: &str, objective: Option<&str>) -> OpsResult<WaveAdded> {
-    let main = crate::repository::CanonicalRepo::discover(repo)
+    let main = crate::repository::discover(repo)
         .map_err(lifecycle_error)?
         .as_path()
         .to_path_buf();
     let _lifecycle = recovery::lock(&main)?;
-    let locator = WaveLocator::discover(&main, name).map_err(lifecycle_error)?;
+    let locator = crate::work::wave::discover(&main, name).map_err(lifecycle_error)?;
     let store = super::planning_sync::planning_store().await?;
     // A clone's authored Waves join the store with the first explicit write here.
-    store
-        .sqlite
-        .register_authored_waves(&main.to_string_lossy())
+    crate::work::wave::bootstrap::register_authored_waves(&store.sqlite, &main.to_string_lossy())
         .map_err(lifecycle_error)?;
     let created = store
         .get_wave_at(&locator)
@@ -146,11 +144,9 @@ async fn ensure_first_project(store: &Store, wave: &crate::work::wave::Wave) -> 
 /// this runs when a repository joins the portfolio and before `lf wave connect
 /// --all`; a directory of a removed Wave stays removed.
 pub async fn register_authored(repo: &Path) -> OpsResult<()> {
-    let main = crate::repository::CanonicalRepo::discover(repo).map_err(lifecycle_error)?;
+    let main = crate::repository::discover(repo).map_err(lifecycle_error)?;
     let store = super::planning_sync::planning_store().await?;
-    store
-        .sqlite
-        .register_authored_waves(&main.to_string())
+    crate::work::wave::bootstrap::register_authored_waves(&store.sqlite, &main.to_string())
         .map_err(lifecycle_error)
 }
 
@@ -160,7 +156,7 @@ fn resolve_wave(store: &Store, main: &Path, name: &str) -> OpsResult<Option<Wave
     match WaveId::parse(name) {
         Ok(id) => store.sqlite.get_wave(&id).map_err(lifecycle_error),
         Err(_) => {
-            let locator = WaveLocator::discover(main, name).map_err(lifecycle_error)?;
+            let locator = crate::work::wave::discover(main, name).map_err(lifecycle_error)?;
             store.sqlite.get_wave_at(&locator).map_err(lifecycle_error)
         }
     }
@@ -293,7 +289,7 @@ pub fn remove(
     delete_backlog: bool,
 ) -> OpsResult<WaveRemoval> {
     let runtime = tokio::runtime::Runtime::new().map_err(lifecycle_error)?;
-    let main = crate::repository::CanonicalRepo::discover(repo).map_err(lifecycle_error)?;
+    let main = crate::repository::discover(repo).map_err(lifecycle_error)?;
     let repo_key = main.to_string();
     let main = main.as_path().to_path_buf();
     let store = runtime.block_on(super::planning_sync::planning_store())?;
@@ -317,7 +313,7 @@ pub fn remove(
     let wave = match wave {
         Some(wave) => wave,
         None => {
-            let locator = WaveLocator::discover(&main, name).map_err(lifecycle_error)?;
+            let locator = crate::work::wave::discover(&main, name).map_err(lifecycle_error)?;
             store
                 .sqlite
                 .retired_wave_at(&locator)
@@ -505,7 +501,7 @@ pub fn remove(
             applied: false,
             files_done: false,
         };
-        operation.save(&store)?;
+        recovery::save(&operation, &store)?;
         operation
     };
 
@@ -531,7 +527,7 @@ pub fn remove(
     }
 
     operation.planning_done = true;
-    operation.save(&store)?;
+    recovery::save(&operation, &store)?;
 
     for (index, archive) in receipt.initiatives.iter_mut().enumerate() {
         if operation.providers[index].done {
@@ -543,7 +539,7 @@ pub fn remove(
         )) {
             Ok(()) => {
                 operation.providers[index].done = true;
-                operation.save(&store)?;
+                recovery::save(&operation, &store)?;
             }
             Err(error) => archive.error = Some(error.to_string()),
         }
@@ -554,7 +550,7 @@ pub fn remove(
                 reason: "kept until the Linear Initiative is archived".into(),
             }
         } else {
-            operation.finish_files(&store, &main)
+            recovery::finish_files(&mut operation, &store, &main)
         },
     );
     receipt.summary = removal_summary(&receipt);
@@ -918,19 +914,19 @@ pub async fn rename(
     title: Option<&str>,
 ) -> OpsResult<WaveRenamed> {
     let store = super::planning_sync::planning_store().await?;
-    let main = crate::repository::CanonicalRepo::discover(repo)
+    let main = crate::repository::discover(repo)
         .map_err(lifecycle_error)?
         .as_path()
         .to_path_buf();
     let target = new_name
         .map(|name| {
-            crate::ops::normalize_wave_name(name)
+            loopflow_storage::work::wave::normalize_wave_name(name)
                 .ok_or_else(|| lifecycle_error(format!("invalid Wave name {name:?}")))
         })
         .transpose()?;
     let _lifecycle = recovery::lock(&main)?;
     let repo_key = main.to_string_lossy().to_string();
-    let target_checkout = crate::repository::CanonicalRepo::discover(target_repo.unwrap_or(&main))
+    let target_checkout = crate::repository::discover(target_repo.unwrap_or(&main))
         .map_err(lifecycle_error)?
         .to_string();
     let operations = store
@@ -1042,7 +1038,7 @@ pub async fn rename(
             applied: false,
             files_done: !moves,
         };
-        operation.save(&store)?;
+        recovery::save(&operation, &store)?;
         operation
     };
     let renamed_now = !operation.planning_done
@@ -1070,9 +1066,9 @@ pub async fn rename(
             .map_err(lifecycle_error)?;
         }
         operation.planning_done = true;
-        operation.save(&store)?;
+        recovery::save(&operation, &store)?;
     }
-    let files = operation.finish_files(&store, &main);
+    let files = recovery::finish_files(&mut operation, &store, &main);
     let initiative = if let Some(provider) = operation.providers.first() {
         let mut result = InitiativeRename {
             initiative: provider.initiative.clone(),
@@ -1089,7 +1085,7 @@ pub async fn rename(
             {
                 Ok(()) => {
                     operation.providers[0].done = true;
-                    operation.save(&store)?;
+                    recovery::save(&operation, &store)?;
                 }
                 Err(error) => result.error = Some(error.to_string()),
             }

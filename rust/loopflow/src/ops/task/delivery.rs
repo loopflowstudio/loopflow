@@ -14,12 +14,12 @@ use crate::durable::TaskState;
 use crate::git::{current_branch, get_default_branch, is_clean, rev_parse};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::store::{default_db_path, open_existing_store, SharedStore};
-use crate::work::task::{
+use fs2::FileExt;
+use loopflow_storage::work::task::{
     CiCheck, CiObservation, CiState, GithubObservation, GithubObservationResult, GithubPr,
     Observation, PrMergeMode, PrMergeRequest, PrPhase, PrPresentation, PrPublication, Task,
     TaskEventKind, TaskPr, TaskPrId,
 };
-use fs2::FileExt;
 use time::format_description::well_known::Rfc3339;
 
 /// A managed Task worktree, or an explicit decision
@@ -96,7 +96,7 @@ pub(super) async fn resolve_managed_task(repo: &Path) -> OpsResult<ManagedTask> 
 
 pub(crate) fn record_task_pr_repair(
     repo: &Path,
-    kind: crate::work::task::TaskPrRepairKind,
+    kind: loopflow_storage::work::task::TaskPrRepairKind,
 ) -> OpsResult<bool> {
     block_on_task(async move {
         let ManagedTask::Managed { store, task } = resolve_managed_task(repo).await? else {
@@ -1006,7 +1006,7 @@ pub(crate) fn reconcile_checkout_pr(repo: &Path) -> OpsResult<Option<(Task, Task
 /// infer it from process liveness.
 pub(crate) async fn settle_task_landing(
     store: &SharedStore,
-    landing: &crate::pr_landing::PrLanding,
+    landing: &loopflow_storage::pr_landing::PrLanding,
 ) -> OpsResult<()> {
     let task_id = landing
         .task_id
@@ -1040,7 +1040,7 @@ pub(super) async fn apply_merged_task_landing(
     store: &SharedStore,
     task: &mut Task,
     pr: &TaskPr,
-    landing: &crate::pr_landing::PrLanding,
+    landing: &loopflow_storage::pr_landing::PrLanding,
 ) -> OpsResult<()> {
     if pr.phase() != PrPhase::Merged
         || pr.github().map(|github| github.number) != Some(landing.pr_number)

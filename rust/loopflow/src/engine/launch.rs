@@ -245,7 +245,7 @@ mod tests {
     use super::{process_evidence, wait, write, UNKNOWN_GRACE};
     use crate::engine::{Error, ErrorCode};
     use crate::journal::{ProcessIdentityEvidence, TestLedgerGuard};
-    use crate::store::sqlite::SqliteStore;
+
     use loopflow_model::id::LfProcessId;
 
     #[test]
@@ -387,7 +387,7 @@ mod tests {
                     if unreadable {
                         std::fs::remove_file(&database).unwrap();
                     }
-                    let _store = SqliteStore::open_ephemeral(&database).unwrap();
+                    let _store = crate::store::opening::open_ephemeral(&database).unwrap();
                     let connection = rusqlite::Connection::open(&database).unwrap();
                     connection.execute(
                         "INSERT INTO processes(id,trace_id,started_at,completed_at) VALUES(?1,?1,1,2)",

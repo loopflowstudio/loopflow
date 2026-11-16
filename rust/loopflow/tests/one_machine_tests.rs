@@ -58,7 +58,7 @@ fn custom_home_initializes_once_and_refuses_schema_repair() {
             |row| row.get(0),
         )
         .unwrap();
-    let error = loopflow::store::sqlite::SqliteStore::new(&database)
+    let error = loopflow::store::open_sqlite(&database)
         .unwrap_err()
         .to_string();
     assert!(error.contains("disposable"), "{error}");

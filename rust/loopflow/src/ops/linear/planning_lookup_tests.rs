@@ -196,7 +196,7 @@ async fn acquisition_returns_saved_task_fields_without_replacing_pending_edits()
                 .edit_task(
                     &task.id,
                     task.revision,
-                    &crate::work::task::TaskUpdate {
+                    &loopflow_storage::work::task::TaskUpdate {
                         title: Some("Saved during disconnection".into()),
                         assignee: Some(Some("pending-assignee".into())),
                         ..Default::default()
@@ -1132,11 +1132,12 @@ async fn cold_detail_resolves_configured_wave_before_projecting() {
                 ))
                 .await
                 .unwrap();
-            fixture
-                .store
-                .sqlite
-                .ensure_wave(repo.to_str().unwrap(), "other")
-                .unwrap();
+            crate::work::wave::bootstrap::ensure_wave(
+                &fixture.store.sqlite,
+                repo.to_str().unwrap(),
+                "other",
+            )
+            .unwrap();
         }
         let (url, _) = spawn(vec![
             team_response(),
@@ -1533,11 +1534,12 @@ async fn inventory_refresh_retains_unmapped_local_projects() {
     let _restore = PlanningEnvironment::isolate();
     let fixture = Fixture::new().await;
     let (repo, wave) = fixture.planning_repo().await;
-    let local = fixture
-        .store
-        .sqlite
-        .ensure_wave_project(repo.to_str().unwrap(), "product")
-        .unwrap();
+    let local = crate::work::wave::bootstrap::ensure_wave_project(
+        &fixture.store.sqlite,
+        repo.to_str().unwrap(),
+        "product",
+    )
+    .unwrap();
     assert!(local.linear_id.is_none());
     let (url, _) = spawn(vec![json_response(
         StatusCode::OK,

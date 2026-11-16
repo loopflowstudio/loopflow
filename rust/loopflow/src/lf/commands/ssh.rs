@@ -23,7 +23,7 @@ pub fn runs_here(target: &str, lf_args: &[String]) -> anyhow::Result<bool> {
     };
     let store = &store.sqlite;
     let target = crate::ops::task_ownership::resolve_machine(store, target)?;
-    if target == store.local_machine()?.id {
+    if target == crate::store::machines::local_machine(store)?.id {
         return Ok(true);
     }
     let Ok(cli) = parse_remote_command(lf_args) else {
@@ -540,7 +540,7 @@ pub(super) async fn resolve_target(
         .await?
         .ok_or_else(|| anyhow!("machine commands need an initialized local store"))?;
     let machine = super::machine::find_machine(&store, target).await?;
-    if machine.id == store.sqlite.local_machine()?.id {
+    if machine.id == crate::store::machines::local_machine(&store.sqlite)?.id {
         return Ok(machine);
     }
     let probe = super::machine::probe(&machine.route, forward_agent).await?;
@@ -575,7 +575,7 @@ fn build_preamble(cmd: &[String], extra_env: &[(&str, &str)]) -> String {
 fn current_repository(
     directory: &std::path::Path,
 ) -> anyhow::Result<Option<loopflow_model::durable::RepositoryId>> {
-    let Some(repo) = crate::repository::CanonicalRepo::containing(directory)? else {
+    let Some(repo) = crate::repository::containing(directory)? else {
         return Ok(None);
     };
     let Some(store) = crate::store::read_existing_registry()? else {

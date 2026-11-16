@@ -17,14 +17,14 @@ use crate::lf::output::Colors;
 use crate::lf::{Cli, Commands, PrCommand};
 use crate::ops::graph_process;
 use crate::ops::WorkBinding;
-use crate::store::sqlite::SqliteStore;
 use crate::store::SharedStore;
-use crate::work::task::Task;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use clap::Parser;
 use loopflow_model::durable::WorkRef;
 use loopflow_model::id::LfProcessId;
+use loopflow_storage::sqlite::SqliteStore;
+use loopflow_storage::work::task::Task;
 use std::path::Path;
 use std::sync::Mutex;
 
@@ -72,7 +72,7 @@ pub fn run_task_graph(cli: &Cli, repo: &Path, binding: Option<&WorkBinding>) -> 
     };
     let store = block_on(open_graph_store())?;
     store.sqlite.require_task_launch(task)?;
-    let row = store.sqlite.task_graph_row(task)?;
+    let row = crate::store::task_work::task_graph_row(&store.sqlite, task)?;
     let Some((graph, (start, carrier))) = row.and_then(|row| row.run.map(|run| (row.graph, run)))
     else {
         anyhow::bail!("the Task is not on a run; `lf task run` starts one");
@@ -261,7 +261,7 @@ pub fn run_task_graph_for(
                 // The recovery sweep restarts a wait at its reset, not now.
                 if let Some(retry_at) = recovery
                     .retry_at
-                    .filter(|at| *at > crate::store::rows::now_unix())
+                    .filter(|at| *at > loopflow_storage::rows::now_unix())
                 {
                     eprintln!(
                         "The run of {run} is waiting on a limit until {}; it starts again at {step} then.",
@@ -294,8 +294,7 @@ pub fn run_task_graph_for(
             return Err(exit_of(status).into());
         }
         // The failed Graph checkpointed after each step it finished.
-        let again = store
-            .task_graph_row(&task.id)?
+        let again = crate::store::task_work::task_graph_row(store, &task.id)?
             .and_then(|row| row.graph.step_name_of(&row.run?.0))
             .map_or_else(String::new, |step| format!(" at {step}"));
         eprintln!(
@@ -553,17 +552,18 @@ fn execute(
             interrupt,
         };
         // A chapter rotation moving this checkout's Task excludes new work in it.
-        let admission = running
-            .store
-            .sqlite
-            .lock_task_checkouts(&[running.cwd], running.task.as_ref())?;
+        let admission = crate::store::admission::lock_task_checkouts(
+            &running.store.sqlite,
+            &[running.cwd],
+            running.task.as_ref(),
+        )?;
         // The Graph process's one record of its Graph, written before any step runs.
         running
             .store
             .sqlite
             .record_graph_process(
                 &running.process,
-                &crate::graph::compiled::CompiledGraph::new(graph_name, items),
+                &crate::graph::compiled::compile(graph_name, items),
                 running.task.as_ref(),
             )
             .context("could not record the Graph; no steps launched")?;
@@ -930,10 +930,11 @@ impl RunningGraph<'_> {
         }
         command.args(args);
         let mark = self.store.sqlite.process_mark(&self.process)?;
-        let admission = self
-            .store
-            .sqlite
-            .lock_task_checkouts(&[self.cwd], self.task.as_ref())?;
+        let admission = crate::store::admission::lock_task_checkouts(
+            &self.store.sqlite,
+            &[self.cwd],
+            self.task.as_ref(),
+        )?;
         crate::transport::configure_child(command.as_std_mut());
         let output = crate::terminal_output::TerminalOutput::for_child(command.as_std_mut())?;
         let mut child = command.spawn().context("could not execute Graph step")?;
@@ -968,7 +969,7 @@ impl RunningGraph<'_> {
         // through an older schema.
         self.store
             .sqlite
-            .validate_current_schema()
+            .validate_current_schema(&crate::store::migrations::build())
             .with_context(|| {
                 format!(
                     "this Graph process cannot read the result of {label}; inspect its Process and effects with a compatible lf before launching further work"
@@ -1083,11 +1084,12 @@ impl SkillExecutor for &RunningGraph<'_> {
         // A Task run that fails starts again here, not where it began. A stale
         // cursor reruns finished steps; that beats failing a finished step.
         if let (Some(task), Some(carrier)) = (&self.task, &self.task_run) {
-            if let Err(error) = self
-                .store
-                .sqlite
-                .advance_task_graph_run(task, carrier, cursor)
-            {
+            if let Err(error) = crate::store::task_work::advance_task_graph_run(
+                &self.store.sqlite,
+                task,
+                carrier,
+                cursor,
+            ) {
                 tracing::warn!(%task, %error, "could not record where the Task run goes on");
             }
         }

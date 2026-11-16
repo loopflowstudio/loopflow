@@ -1,3 +1,4 @@
+use crate::process::attachment;
 use std::fs;
 use std::path::Path;
 
@@ -373,12 +374,11 @@ fn opencode_display(
 // transcript reader (`transcript::opencode`), so the stream writes none.
 #[test]
 fn opencode_native_history_preserves_output_and_tools_and_leaves_usage_to_the_transcript() {
-    use crate::store::sqlite::SqliteStore;
     use loopflow_model::id::LfProcessId;
 
     let home = tempfile::tempdir().unwrap();
     let path = home.path().join("store.db");
-    let store = SqliteStore::open_ephemeral(&path).unwrap();
+    let store = crate::store::opening::open_ephemeral(&path).unwrap();
     let sql = rusqlite::Connection::open(&path).unwrap();
     let process = LfProcessId::new();
     sql.execute(
@@ -389,9 +389,8 @@ fn opencode_native_history_preserves_output_and_tools_and_leaves_usage_to_the_tr
     let input = crate::session_record::new_artifact_key();
     let session = "session".to_owned();
     store.test_session(&session, &input);
-    let attachment = store
-        .claim_session_attachment(&session, None, &process, false)
-        .unwrap();
+    let attachment =
+        attachment::claim_session_attachment(&store, &session, None, &process, false).unwrap();
     let mut writer = FactWriter::new(
         store.clone(),
         session.clone(),
@@ -445,7 +444,9 @@ fn opencode_native_history_preserves_output_and_tools_and_leaves_usage_to_the_tr
         .unwrap()
         .iter()
         .all(|row| row.kind != crate::session::SessionEventKind::Usage));
-    let usage = store.input_history(input.as_str()).unwrap().usage;
+    let usage = crate::store::sessions::input_history(&store, input.as_str())
+        .unwrap()
+        .usage;
     assert_eq!(usage.input_tokens, None);
 }
 

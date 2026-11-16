@@ -548,7 +548,7 @@ fn display(decoded: &[Decoded]) -> Vec<ConversationEvent> {
 /// Record one event the native extension reported over its `session.boundary`
 /// connection: Pi's identity, activity and usage.
 pub(crate) fn observe_native(
-    store: &crate::store::sqlite::SqliteStore,
+    store: &loopflow_storage::sqlite::SqliteStore,
     adapter: &crate::steer::SteerAdapter,
     value: &Value,
 ) -> anyhow::Result<()> {

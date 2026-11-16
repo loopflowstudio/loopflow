@@ -1,8 +1,7 @@
 //! Desktop shell execution: create once, reattach, close, and retain history.
 //! The Machine server's holder keeps the PTY; Session viewers alone hold Task
 //! checkouts. This runtime needs no GUI on either execution Machine.
-mod store;
-pub(crate) use store::{hosts, jobs_settled};
+pub(crate) use loopflow_storage::sqlite::desktop_shells::{hosts, jobs_settled};
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -47,8 +46,7 @@ pub fn run(args: &ShellArgs) -> Result<()> {
     // remain attachable/closable after retirement, and only the insert winner
     // launches execution, including when concurrent creation loses its reply.
     if *create && store.desktop_shell(id)?.is_none() {
-        let task = store
-            .resolve_task_id(issue, None)?
+        let task = crate::store::children::resolve_task_id(&store, issue, None)?
             .ok_or_else(|| anyhow!("Task is unknown"))?;
         let checkout = store
             .task_checkout(&task)?

@@ -5,9 +5,9 @@ use anyhow::Result;
 use serde_json::Value;
 
 use crate::server::wire::SubscriptionEvent;
-use crate::store::sqlite::SqliteStore;
-use crate::work::task::{TaskEventKind, TaskId};
 use loopflow_model::id::LfProcessId;
+use loopflow_storage::sqlite::SqliteStore;
+use loopflow_storage::work::task::{TaskEventKind, TaskId};
 
 const MAX_EVENTS: usize = 256;
 
@@ -150,15 +150,15 @@ fn task_ids(value: &Value, tasks: &mut HashSet<TaskId>) -> Result<bool> {
 mod tests {
     use super::Observer;
     use crate::server::wire::SubscriptionEvent;
-    use crate::store::sqlite::SqliteStore;
-    use crate::work::task::{TaskEventKind, TaskId, TaskPrId};
     use loopflow_model::durable::{Author, WorkRef};
+    use loopflow_storage::sqlite::SqliteStore;
+    use loopflow_storage::work::task::{TaskEventKind, TaskId, TaskPrId};
     use serde_json::json;
 
     fn fixture() -> (tempfile::TempDir, SqliteStore, TaskId) {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("db");
-        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let store = crate::store::opening::open_ephemeral(&path).unwrap();
         let conn = rusqlite::Connection::open(path).unwrap();
         conn.execute_batch(include_str!(
             "../../tests/fixtures/saved_selection_work.sql"
@@ -206,7 +206,7 @@ mod tests {
 
     #[test]
     fn a_comment_steer_carries_the_exact_thread_entry() {
-        use crate::work::task::comment::{TaskComment, TaskCommentAuthor};
+        use loopflow_model::comment::{TaskComment, TaskCommentAuthor};
         let (_dir, store, task) = fixture();
         let body = json!({"task":{"id":task}});
         let mut observer = Observer::default();

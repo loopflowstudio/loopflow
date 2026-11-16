@@ -108,10 +108,12 @@ impl Fixture {
             repo.to_string_lossy().into_owned(),
         );
         self.store.create_wave(&wave).await.unwrap();
-        self.store
-            .sqlite
-            .ensure_wave(repo.to_str().unwrap(), "product")
-            .unwrap();
+        crate::work::wave::bootstrap::ensure_wave(
+            &self.store.sqlite,
+            repo.to_str().unwrap(),
+            "product",
+        )
+        .unwrap();
         (repo, wave)
     }
 }
@@ -188,7 +190,7 @@ pub(crate) async fn refresh_task_input(
     }
     let store = super::planning_store().await?;
     let database = store.sqlite.home_dir().unwrap().join("loopflow.db");
-    let scope = crate::repository::CanonicalRepo::discover(repo).unwrap();
+    let scope = crate::repository::discover(repo).unwrap();
     Ok(loopflow_test_support::retained_task_input(
         &database,
         &scope.to_string(),

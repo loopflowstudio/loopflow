@@ -250,7 +250,7 @@ pub(crate) fn resolve_session_config(
     cli: &crate::lf::Cli,
 ) -> Result<AgentConfig> {
     let _selection = crate::config::settings::select_invocation(cli.setting_values()?);
-    let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
+    let store = crate::store::open_sqlite(&crate::store::database_path_from_env()?)?;
     let wave = session
         .wave_id
         .as_ref()

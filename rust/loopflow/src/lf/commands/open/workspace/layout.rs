@@ -10,7 +10,7 @@ use serde_json::Value;
 use super::{
     lf_argv, tool_cwd, tools, with_machine_home, Native, Presentation, SqliteStore, ViewContent,
 };
-use crate::work::selection::{
+use loopflow_storage::work::selection::{
     BrowserTab, ChangeComparison, PaneIntent, PaneTree, SplitAxis, TaskLayoutTemplate,
 };
 
@@ -44,7 +44,7 @@ pub(super) fn layout(
         return Ok((tools.task_view()?, 0, None));
     };
     anyhow::ensure!(
-        location.machine_id == store.local_machine()?.id.as_str(),
+        location.machine_id == crate::store::machines::local_machine(store)?.id.as_str(),
         "Task runs on Machine {}; no local tool was created",
         location.machine_id
     );
@@ -273,7 +273,7 @@ impl Tools<'_> {
 mod tests {
     use super::{Native, Tools};
     use crate::lf::commands::open::rex::Rex;
-    use crate::work::selection::{ViewContent, ViewLocation, WorkPaneLayout};
+    use loopflow_storage::work::selection::{ViewContent, ViewLocation, WorkPaneLayout};
 
     #[test]
     fn selected_tools_and_hidden_splits_shape_the_task_layout() {

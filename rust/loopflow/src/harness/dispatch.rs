@@ -89,10 +89,12 @@ pub(super) fn off_reactor<T>(work: impl FnOnce() -> T) -> T {
 
 #[cfg(test)]
 mod tests {
+    use crate::process::attachment;
+
     use super::{off_reactor, within};
     use crate::process::SessionAttachment;
-    use crate::store::sqlite::SqliteStore;
     use loopflow_model::id::LfProcessId;
+    use loopflow_storage::sqlite::SqliteStore;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{mpsc, Arc};
     use std::time::Duration;
@@ -101,7 +103,7 @@ mod tests {
 
     fn fenced_session(home: &tempfile::TempDir) -> (SqliteStore, SessionAttachment) {
         let path = home.path().join("dispatch.db");
-        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let store = crate::store::opening::open_ephemeral(&path).unwrap();
         store.test_session("conversation", "run_00000000000000000000000000000001");
         let process = LfProcessId::new();
         rusqlite::Connection::open(&path)
@@ -111,9 +113,9 @@ mod tests {
                 [process.as_str()],
             )
             .unwrap();
-        let attachment = store
-            .claim_session_attachment("conversation", None, &process, false)
-            .unwrap();
+        let attachment =
+            attachment::claim_session_attachment(&store, "conversation", None, &process, false)
+                .unwrap();
         (store, attachment)
     }
 
@@ -179,9 +181,14 @@ mod tests {
         let former = attachment.clone();
         let (transferred, transfer) = mpsc::channel();
         let takeover = std::thread::spawn(move || {
-            let next = transfer_store
-                .claim_session_attachment("conversation", Some(&former), &LfProcessId::new(), false)
-                .unwrap();
+            let next = attachment::claim_session_attachment(
+                &transfer_store,
+                "conversation",
+                Some(&former),
+                &LfProcessId::new(),
+                false,
+            )
+            .unwrap();
             transferred.send(next).unwrap();
         });
         assert!(transfer.recv_timeout(Duration::from_millis(50)).is_err());

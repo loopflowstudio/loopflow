@@ -662,6 +662,8 @@ mod activity_tests {
 
 #[cfg(test)]
 mod tests {
+    use crate::process::attachment;
+
     use std::os::unix::fs::PermissionsExt;
 
     use super::*;
@@ -676,7 +678,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let database = home.path().join("loopflow.db");
         std::env::set_var("LF_HOME", home.path());
-        let store = crate::store::sqlite::SqliteStore::open_ephemeral(&database).unwrap();
+        let store = crate::store::opening::open_ephemeral(&database).unwrap();
         let conn = rusqlite::Connection::open(&database).unwrap();
         let process = loopflow_model::id::LfProcessId::new();
         conn.execute(
@@ -701,9 +703,8 @@ mod tests {
                 [id],
             )
             .unwrap();
-            let attachment = store
-                .claim_session_attachment(id, None, &process, true)
-                .unwrap();
+            let attachment =
+                attachment::claim_session_attachment(&store, id, None, &process, true).unwrap();
             let (tx, _rx) = mpsc::unbounded_channel();
             let mut harness = ClaudeHarness::new(tx);
             let mut config = live_config();
@@ -721,9 +722,9 @@ mod tests {
             harnesses.push(harness);
         }
         let original = harnesses[0].owner().unwrap().2;
-        let replacement = store
-            .claim_session_attachment("first", Some(&original), &process, false)
-            .unwrap();
+        let replacement =
+            attachment::claim_session_attachment(&store, "first", Some(&original), &process, false)
+                .unwrap();
         assert!(harnesses[0].stop().await.is_err());
         assert_eq!(
             crate::journal::process_identity_evidence(recorded[0].0, recorded[0].1),
@@ -804,7 +805,7 @@ mod tests {
             .map(crate::process::LfProcessRuntime::new)?;
             capture.claim_session_attachment()?;
             let (session, first) = capture.session_attachment().unwrap();
-            let store = crate::store::sqlite::SqliteStore::new(&home.join("loopflow.db"))?;
+            let store = crate::store::open_sqlite(&home.join("loopflow.db"))?;
             runtime.block_on(async {
                 let (tx, _rx) = mpsc::unbounded_channel();
                 let mut harness = ClaudeHarness::new(tx);
@@ -826,10 +827,9 @@ mod tests {
                 observed_input(home, "first request").await;
                 let first_pid = harness.pid().unwrap();
                 let other_home = tempfile::tempdir().unwrap();
-                let other_store = crate::store::sqlite::SqliteStore::open_ephemeral(
-                    &other_home.path().join("loopflow.db"),
-                )
-                .unwrap();
+                let other_store =
+                    crate::store::opening::open_ephemeral(&other_home.path().join("loopflow.db"))
+                        .unwrap();
                 let selection = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
                 std::env::set_var("LF_HOME", other_home.path());
                 assert!(matches!(
@@ -971,7 +971,7 @@ mod tests {
     /// headless sessions it attaches to.
     struct StandInClaude {
         home: tempfile::TempDir,
-        store: crate::store::sqlite::SqliteStore,
+        store: loopflow_storage::sqlite::SqliteStore,
         database: std::path::PathBuf,
         process: loopflow_model::id::LfProcessId,
         _environment: crate::test_ambient::EnvGuard,
@@ -1001,7 +1001,7 @@ mod tests {
             std::fs::write(&claude, script).unwrap();
             std::fs::set_permissions(&claude, std::fs::Permissions::from_mode(0o755)).unwrap();
             let database = home.path().join("loopflow.db");
-            let store = crate::store::sqlite::SqliteStore::open_ephemeral(&database).unwrap();
+            let store = crate::store::opening::open_ephemeral(&database).unwrap();
             let process = loopflow_model::id::LfProcessId::new();
             rusqlite::Connection::open(&database)
                 .unwrap()
@@ -1032,10 +1032,9 @@ mod tests {
                     [id],
                 )
                 .unwrap();
-            let attachment = self
-                .store
-                .claim_session_attachment(id, None, &self.process, true)
-                .unwrap();
+            let attachment =
+                attachment::claim_session_attachment(&self.store, id, None, &self.process, true)
+                    .unwrap();
             let mut config = live_config();
             config.cwd = Some(self.home.path().to_path_buf());
             config.session_attachment = Some((id.into(), attachment));

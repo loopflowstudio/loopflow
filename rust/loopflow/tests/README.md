@@ -41,7 +41,7 @@ one to three seconds:
 cargo nextest run -p loopflow --lib -E 'test(adoption::tests::)'            # promotion and binding
 cargo nextest run -p loopflow --lib -E 'test(run::launch_policy_tests::)'   # launch and resume settings
 cargo nextest run -p loopflow --lib -E 'test(ops::task::explain::tests::)'  # Task run and checkout previews
-cargo nextest run -p loopflow --lib -E 'test(ssh::dispatch_tests::) | test(task_ownership::tests::)'  # Machine dispatch and ownership
+cargo nextest run -p loopflow --lib -E 'test(ssh::dispatch_tests::) | test(task_ownership::tests::) | test(store::ownership_lifecycle_tests::)'  # Machine dispatch and ownership
 cargo nextest run -p loopflow --test session_lifecycle_tests -E 'test(promotion_)'
 ```
 
@@ -295,7 +295,11 @@ build the current CLI and take its path from Cargo’s artifact output:
 ```sh
 cargo test -p loopflow --lib local_planning
 cargo test -p loopflow --lib linear::acceptance
+cargo test -p loopflow --lib sqlite::linear_acceptance
 ```
+
+Application lifecycle checks stay in `linear::acceptance`; supplied-fact SQL
+checks live in `store::sqlite::linear_acceptance`.
 
 CI and the disposable installation runner supply their prepared candidate through
 `LOOPFLOW_TEST_LF`, avoiding Cargo calls in each test process. Only set this to

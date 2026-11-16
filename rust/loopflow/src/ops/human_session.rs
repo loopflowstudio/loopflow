@@ -1,3 +1,4 @@
+use crate::store::session_projection;
 pub(crate) use primary::admit_workspace;
 mod resume_explanation;
 pub(crate) use resume_explanation::explain_resume;
@@ -21,10 +22,10 @@ use crate::lf::commands::write::SessionOpenIntent;
 use crate::provider_account::LaunchCapacity;
 use crate::session::{LfSession, WorkSource};
 use crate::session_record::SessionTitleSource;
-use crate::store::sqlite::SqliteStore;
 use crate::store::SharedStore;
-use crate::work::task::Task;
 use loopflow_model::durable::WorkRef;
+use loopflow_storage::sqlite::SqliteStore;
+use loopflow_storage::work::task::Task;
 
 pub(crate) mod conversation_log;
 pub(crate) mod moves;
@@ -86,10 +87,12 @@ pub(super) async fn resolve_target<'a>(
     if store.session(id).await?.is_some() {
         return Ok(target);
     }
-    Ok(match store.sqlite.resolve_task_id(id, None)? {
-        Some(_) => SessionTarget::Task(id),
-        None => target,
-    })
+    Ok(
+        match crate::store::children::resolve_task_id(&store.sqlite, id, None)? {
+            Some(_) => SessionTarget::Task(id),
+            None => target,
+        },
+    )
 }
 
 /// Resolve physical checkout ownership without admitting a conversation.
@@ -118,7 +121,7 @@ pub(super) async fn checkout_conversation(
 }
 
 pub(super) fn unassociated_checkout(cwd: &Path) -> Result<anyhow::Error> {
-    let path = crate::repository::CanonicalRepo::discover(cwd)?.to_string();
+    let path = crate::repository::discover(cwd)?.to_string();
     let command = shlex::try_join(["lf", "--repo", path.as_str(), "resume"])?;
     Ok(anyhow!("This worktree has no associated work conversation.\n  lf                         Start a new conversation in this worktree\n  {command}  Open the repository's ongoing conversation\n  lf resume SESSION          Continue a particular conversation"))
 }
@@ -156,7 +159,7 @@ pub(crate) async fn checkout_scope(
             ),
         }));
     }
-    let repo = crate::repository::CanonicalRepo::discover(cwd)?;
+    let repo = crate::repository::discover(cwd)?;
     if matches!(target, SessionTarget::Repository) {
         return Ok(Some(PrimaryScope::Repository(repo)));
     }
@@ -215,7 +218,10 @@ pub(crate) async fn select_connection(
     if intent == SessionOpenIntent::Reveal {
         let session = match &scope {
             PrimaryScope::Task(task) => primary::task_conversation(store, task).await?,
-            _ => store.sqlite.primary_session(&scope)?,
+            PrimaryScope::Repository(_) | PrimaryScope::Wave(_) => {
+                store.sqlite.primary_session(&scope)?
+            }
+            _ => anyhow::bail!("Unsupported conversation scope: {scope:?}"),
         }
         .context("No existing conversation; start one explicitly")?;
         return Ok(existing(session.id.into()));
@@ -224,6 +230,7 @@ pub(crate) async fn select_connection(
         PrimaryScope::Repository(repo) => primary::ensure(store, repo.as_path(), None).await?,
         PrimaryScope::Wave(wave) => primary::ensure(store, cwd, Some(wave.as_str())).await?,
         PrimaryScope::Task(task) => primary::ensure_task(store, cwd, task.as_str(), None).await?,
+        _ => anyhow::bail!("Unsupported conversation scope: {scope:?}"),
     };
     Ok(Selected {
         id: session.id.into(),
@@ -418,7 +425,7 @@ pub struct SessionPage<T = SessionRecord> {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SessionRecord {
-    pub transition: Option<crate::store::sqlite::provider_transitions::ProviderTransition>,
+    pub transition: Option<loopflow_storage::sqlite::provider_transitions::ProviderTransition>,
     pub preview: Option<crate::session::SessionPreview>,
     pub primary_scope: Option<String>,
     /// Available for a person, judged from current stream or terminal reports; absent when it is
@@ -528,7 +535,7 @@ pub enum SessionGraphOccurrence {
 }
 
 pub(crate) fn publish_prepared_input(
-    store: &crate::store::sqlite::SqliteStore,
+    store: &loopflow_storage::sqlite::SqliteStore,
     session: &LfSession,
     graph: crate::session_record::SessionGraphMembership,
 ) -> Result<LfSession> {
@@ -592,7 +599,7 @@ pub(crate) async fn list(
     let mut workspaces = workspace::associate(store, &mut sessions).await?;
     turns::read(&store.sqlite, &mut sessions)?;
     let task = match &filter.task {
-        Some(selector) => store.sqlite.resolve_task_id(selector, None)?,
+        Some(selector) => crate::store::children::resolve_task_id(&store.sqlite, selector, None)?,
         None => None,
     };
     let in_task = |session: &SessionRecord| {
@@ -678,9 +685,7 @@ pub(crate) fn listed(
     capacity: &LaunchCapacity,
 ) -> Result<Option<SessionRecord>> {
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    let Some(mut session) = store
-        .sqlite
-        .session_summary(id, now)?
+    let Some(mut session) = session_projection::session_summary(&store.sqlite, id, now)?
         .map(|session| summary_surface(&session, capacity))
     else {
         return Ok(turns::raw(&store.sqlite, None)?
@@ -1385,7 +1390,7 @@ async fn fork(
             request: Some(request),
             ready_summary: None,
             completed_at: None,
-            created_at: crate::store::rows::now_unix(),
+            created_at: loopflow_storage::rows::now_unix(),
             ..source.clone()
         })
         .await?;
@@ -1398,9 +1403,10 @@ async fn fork(
         "Forked {} into {}; the original keeps running.",
         source.id, next.id
     ));
-    store
-        .sqlite
-        .record_provider_lineage(&next, &store.sqlite.provider_lineage(source)?)?;
+    store.sqlite.record_provider_lineage(
+        &next,
+        &session_projection::provider_lineage(&store.sqlite, source)?,
+    )?;
     let record = surface(store, &next).await?;
     if launch {
         open_prepared(store, &next.id, json).await?;
@@ -1424,9 +1430,12 @@ pub(crate) fn run_refusal(store: &SqliteStore, session: &LfSession) -> Result<Op
     if session.interactive {
         return Ok(None);
     }
-    let summary = store
-        .session_summary(&session.id, crate::store::rows::now_unix())?
-        .ok_or_else(|| session_not_found(&session.id))?;
+    let summary = session_projection::session_summary(
+        store,
+        &session.id,
+        loopflow_storage::rows::now_unix(),
+    )?
+    .ok_or_else(|| session_not_found(&session.id))?;
     let running = summary.completed_at.is_none()
         && summary.agent_process_evidence == crate::journal::ProcessIdentityEvidence::Live;
     let mut what: Vec<&str> = Vec::new();
@@ -1574,14 +1583,15 @@ pub(crate) async fn new_thread(
     let launch_lock =
         crate::journal::request::spawn_blocking(move || lock_session_process(&lock_id)).await??;
     if let Some(receipt) = store.sqlite.creation_receipt(request_id)? {
-        if receipt.disposition == crate::store::sqlite::creation::RecoveryDisposition::Inspect {
+        if receipt.disposition == loopflow_storage::sqlite::creation::RecoveryDisposition::Inspect {
             return Err(crate::engine::creation::unknown(&receipt).into());
         }
         let next = store
             .session(id)
             .await?
             .ok_or_else(|| session_not_found(id))?;
-        if receipt.disposition == crate::store::sqlite::creation::RecoveryDisposition::Continue {
+        if receipt.disposition == loopflow_storage::sqlite::creation::RecoveryDisposition::Continue
+        {
             // The input and receipt committed together, before filesystem publication.
             // Only that exact input may finish publishing; never replace a newer one.
             if next.artifact_key != receipt.artifact_key {
@@ -1611,7 +1621,7 @@ pub(crate) async fn new_thread(
         session.request.clone()
     };
     let lineage = threaded
-        .then(|| store.sqlite.provider_lineage(&session))
+        .then(|| session_projection::provider_lineage(&store.sqlite, &session))
         .transpose()?;
     let artifact = crate::session_record::new_artifact_key();
     store
@@ -1781,7 +1791,7 @@ pub(crate) fn viewed_summary(
     id: &str,
 ) -> Result<Option<crate::session::SessionSummary>> {
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    let Some(mut summary) = store.session_summary(id, now)? else {
+    let Some(mut summary) = session_projection::session_summary(store, id, now)? else {
         return Ok(None);
     };
     let released = !summary.unviewed
@@ -2130,13 +2140,12 @@ pub(crate) async fn record_program_status(
         return Ok(());
     }
     if sequence == 1 {
-        let current = store
-            .sqlite
-            .session_summary(
-                &session.id,
-                time::OffsetDateTime::now_utc().unix_timestamp(),
-            )?
-            .context("Session disappeared")?;
+        let current = session_projection::session_summary(
+            &store.sqlite,
+            &session.id,
+            time::OffsetDateTime::now_utc().unix_timestamp(),
+        )?
+        .context("Session disappeared")?;
         anyhow::ensure!(
             current.agent_process_id.as_ref() == agent_process,
             "Session provider changed"

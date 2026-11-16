@@ -19,7 +19,6 @@ use std::path::{Path, PathBuf};
 #[cfg(target_os = "macos")]
 use std::process::Command as ProcessCommand;
 use std::process::Stdio;
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -30,7 +29,7 @@ use regex::Regex;
 use reqwest::Url;
 use secrecy::ExposeSecret;
 use secrecy::SecretString;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use time::format_description::well_known::Rfc3339;
@@ -107,153 +106,9 @@ static GH_LOGIN_RE: Lazy<Regex> = Lazy::new(|| {
 static ANSI_ESCAPE_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\x1B\[[0-9;]*[A-Za-z]").expect("ansi escape regex"));
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "lowercase")]
-#[non_exhaustive]
-pub enum Provider {
-    GitHub,
-    Claude,
-    Codex,
-    OpenCodeZen,
-    Linear,
-    Asana,
-    Notion,
-    Doppler,
-}
+pub use loopflow_storage::provider::{ParseProviderError, Provider};
 
-impl Provider {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::GitHub => "github",
-            Self::Claude => "claude",
-            Self::Codex => "codex",
-            Self::OpenCodeZen => "opencodezen",
-            Self::Linear => "linear",
-            Self::Asana => "asana",
-            Self::Notion => "notion",
-            Self::Doppler => "doppler",
-        }
-    }
-
-    pub fn all() -> [Self; 8] {
-        [
-            Self::GitHub,
-            Self::Claude,
-            Self::Codex,
-            Self::OpenCodeZen,
-            Self::Linear,
-            Self::Asana,
-            Self::Notion,
-            Self::Doppler,
-        ]
-    }
-
-    pub fn display_name(self) -> &'static str {
-        match self {
-            Self::GitHub => "GitHub",
-            Self::Claude => "Claude",
-            Self::Codex => "Codex",
-            Self::OpenCodeZen => "OpenCode Zen",
-            Self::Linear => "Linear",
-            Self::Asana => "Asana",
-            Self::Notion => "Notion",
-            Self::Doppler => "Doppler",
-        }
-    }
-
-    pub fn api_key_env_name(self) -> Option<&'static str> {
-        match self {
-            Self::Claude => Some("ANTHROPIC_API_KEY"),
-            Self::Codex => Some("OPENAI_API_KEY"),
-            Self::OpenCodeZen => Some("OPENCODE_API_KEY"),
-            Self::GitHub | Self::Linear | Self::Asana | Self::Notion | Self::Doppler => None,
-        }
-    }
-
-    pub fn api_key_bills_per_token(self) -> bool {
-        matches!(self, Self::Claude | Self::Codex | Self::OpenCodeZen)
-    }
-
-    pub fn api_key_configure_error(self) -> Option<&'static str> {
-        match self {
-            Self::Linear => {
-                Some("Linear requires OAuth. Run 'lf account connect linear' to connect.")
-            }
-            Self::Asana => Some("Asana requires OAuth. Run 'lf account connect asana' to connect."),
-            Self::Notion => {
-                Some("Notion requires OAuth. Run 'lf account connect notion' to connect.")
-            }
-            _ => None,
-        }
-    }
-
-    /// Whether this provider can refresh without user interaction.
-    pub fn supports_automatic_refresh(self) -> bool {
-        matches!(
-            self,
-            Self::GitHub | Self::Codex | Self::Linear | Self::Asana | Self::Notion
-        )
-    }
-}
-
-impl std::fmt::Display for Provider {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl FromStr for Provider {
-    type Err = ParseProviderError;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        let normalized = value.trim().to_ascii_lowercase();
-        match normalized.as_str() {
-            "github" | "gh" => Ok(Self::GitHub),
-            "claude" => Ok(Self::Claude),
-            "codex" => Ok(Self::Codex),
-            "opencodezen" | "opencode" | "zen" | "oc" => Ok(Self::OpenCodeZen),
-            "linear" | "lin" => Ok(Self::Linear),
-            "asana" => Ok(Self::Asana),
-            "notion" => Ok(Self::Notion),
-            "doppler" => Ok(Self::Doppler),
-            _ => Err(ParseProviderError {
-                input: value.trim().to_string(),
-            }),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
-#[error("unsupported provider: {input}")]
-pub struct ParseProviderError {
-    input: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AuthStatus {
-    Active { login: Option<String> },
-    Pending,
-    None,
-    Expired,
-}
-
-impl AuthStatus {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Active { .. } => "active",
-            Self::Pending => "pending",
-            Self::None => "none",
-            Self::Expired => "expired",
-        }
-    }
-
-    pub fn login(&self) -> Option<String> {
-        match self {
-            Self::Active { login } => login.clone(),
-            _ => None,
-        }
-    }
-}
+pub use loopflow_storage::provider::{AuthStatus, ProviderAuthSnapshot};
 
 /// How the provider completes authorization after the browser opens.
 #[derive(Clone, PartialEq, Eq)]
@@ -289,15 +144,6 @@ impl std::fmt::Debug for AuthFlowResponse {
             .field("expires_in", &self.expires_in)
             .finish_non_exhaustive()
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProviderAuthSnapshot {
-    pub provider: Provider,
-    pub status: AuthStatus,
-    pub expires_at: Option<i64>,
-    pub next_refresh_at: Option<i64>,
-    pub credential_type: Option<CredentialType>,
 }
 
 pub struct AuthFlowHandle {
@@ -1864,7 +1710,7 @@ async fn extract_doppler_token() -> Option<ProviderToken> {
         oauth_client_id: None,
         expires_at: None,
         login: None,
-        updated_at: crate::store::rows::now_unix(),
+        updated_at: loopflow_storage::rows::now_unix(),
         credential_type: CredentialType::OAuth,
     })
 }
@@ -3322,9 +3168,7 @@ async fn refresh_provider_token_with_runner(
                 provider: Provider::OpenCodeZen,
             })
         }
-        Provider::Linear | Provider::Asana | Provider::Notion | Provider::Doppler => {
-            Err(TokenRefreshError::MissingToken { provider })
-        }
+        _ => Err(TokenRefreshError::MissingToken { provider }),
     }
 }
 

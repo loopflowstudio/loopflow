@@ -11,163 +11,58 @@ use std::path::{Component, Path, PathBuf};
 
 use anyhow::{anyhow, bail, Context};
 use base64::Engine as _;
-use serde::{Deserialize, Serialize};
 
-use crate::store::sqlite::SqliteStore;
 use loopflow_model::durable::MachineId;
+use loopflow_storage::sqlite::SqliteStore;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RecordKind {
-    Process,
-    Session,
-    SessionEvent,
-    GraphProcess,
-    GraphProcessStep,
+pub use loopflow_storage::machine_records::*;
+
+/// Where an event's copied capture lives here, when it was copied.
+fn capture_dir(history: &CopiedHistory, lf_home: &Path, event: &CopiedEvent) -> Option<PathBuf> {
+    let key = event.artifact_key.as_deref()?;
+    crate::session_record::record_dir(&copies_home(lf_home, &history.session.origin), key)
+        .filter(|dir| dir.is_dir())
 }
 
-impl RecordKind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Process => "process",
-            Self::Session => "session",
-            Self::SessionEvent => "session_event",
-            Self::GraphProcess => "graph_process",
-            Self::GraphProcessStep => "graph_process_step",
-        }
-    }
-}
-
-/// One copied row: its table's kind, its key there, and its columns as written.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Record {
-    pub kind: RecordKind,
-    pub key: String,
-    pub row: serde_json::Value,
-}
-
-/// One line of `lf history export`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "line", rename_all = "snake_case")]
-pub enum ExportLine {
-    /// Always first: which Machine wrote these, so a reused address cannot
-    /// file another Machine's records under this one.
-    Origin {
-        machine_id: MachineId,
-    },
-    Row(Record),
-    /// One file of a Session capture, base64.
-    Capture {
-        artifact_key: String,
-        path: String,
-        content: String,
-    },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub struct CopyCounts {
-    pub sessions: usize,
-    pub processes: usize,
-}
-
-impl std::fmt::Display for CopyCounts {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{} Session(s), {} Process(es)",
-            self.sessions, self.processes
-        )
-    }
-}
-
-/// A Session as its origin Machine recorded it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CopiedSession {
-    pub origin: MachineId,
-    /// The origin's label while it is still added here.
-    pub origin_label: Option<String>,
-    pub id: String,
-    pub title: String,
-    pub completed_at: Option<i64>,
-}
-
-impl CopiedSession {
-    pub fn origin_name(&self) -> &str {
-        self.origin_label.as_deref().unwrap_or(self.origin.as_str())
-    }
-}
-
-/// A copied Session with what its origin recorded about it.
-#[derive(Debug, Clone, PartialEq)]
-pub struct CopiedHistory {
-    pub session: CopiedSession,
-    pub task_id: Option<String>,
-    /// A path on the origin, which may no longer exist anywhere.
-    pub cwd: Option<String>,
-    pub created_at: Option<i64>,
-    /// When this Machine last copied it.
-    pub copied_at: i64,
-    pub events: Vec<CopiedEvent>,
-}
-
-/// One session event as its origin wrote it.
-#[derive(Debug, Clone, PartialEq)]
-pub struct CopiedEvent {
-    pub kind: String,
-    pub observed_at: Option<i64>,
-    /// The capture a `captured` event names.
-    pub artifact_key: Option<String>,
-    pub row: serde_json::Value,
-}
-
-impl CopiedHistory {
-    /// Where an event's copied capture lives here, when it was copied.
-    fn capture_dir(&self, lf_home: &Path, event: &CopiedEvent) -> Option<PathBuf> {
-        let key = event.artifact_key.as_deref()?;
-        crate::session_record::record_dir(&copies_home(lf_home, &self.session.origin), key)
-            .filter(|dir| dir.is_dir())
-    }
-
-    /// The text `lf history show` prints for a copied Session.
-    pub fn render(&self, lf_home: &Path) -> String {
-        let session = &self.session;
-        let mut lines = vec![
-            format!(
-                "Session {} · from {} (copied {})",
-                session.id,
-                session.origin_name(),
-                when(Some(self.copied_at))
-            ),
-            format!("Title: {}", session.title),
-        ];
-        if let Some(task) = &self.task_id {
-            lines.push(format!("Task: {task}"));
-        }
-        lines.push(format!(
-            "Working directory on {}: {}",
+/// The text `lf history show` prints for a copied Session.
+pub fn render(history: &CopiedHistory, lf_home: &Path) -> String {
+    let session = &history.session;
+    let mut lines = vec![
+        format!(
+            "Session {} · from {} (copied {})",
+            session.id,
             session.origin_name(),
-            self.cwd.as_deref().unwrap_or("unknown")
-        ));
-        lines.push(format!("Created: {}", when(self.created_at)));
-        lines.push(match session.completed_at {
-            Some(at) => format!("Completed: {}", when(Some(at))),
-            None => "Completed: not recorded before the copy".to_string(),
-        });
-        lines.push(format!("Events: {}", self.events.len()));
-        for event in &self.events {
-            let capture = match (&event.artifact_key, self.capture_dir(lf_home, event)) {
-                (_, Some(dir)) => format!(" {}", dir.display()),
-                (Some(key), None) => format!(" {key} (capture not copied)"),
-                (None, None) => String::new(),
-            };
-            lines.push(format!(
-                "  {} {}{capture}",
-                when(event.observed_at),
-                event.kind
-            ));
-        }
-        lines.join("\n")
+            when(Some(history.copied_at))
+        ),
+        format!("Title: {}", session.title),
+    ];
+    if let Some(task) = &history.task_id {
+        lines.push(format!("Task: {task}"));
     }
+    lines.push(format!(
+        "Working directory on {}: {}",
+        session.origin_name(),
+        history.cwd.as_deref().unwrap_or("unknown")
+    ));
+    lines.push(format!("Created: {}", when(history.created_at)));
+    lines.push(match session.completed_at {
+        Some(at) => format!("Completed: {}", when(Some(at))),
+        None => "Completed: not recorded before the copy".to_string(),
+    });
+    lines.push(format!("Events: {}", history.events.len()));
+    for event in &history.events {
+        let capture = match (&event.artifact_key, capture_dir(history, lf_home, event)) {
+            (_, Some(dir)) => format!(" {}", dir.display()),
+            (Some(key), None) => format!(" {key} (capture not copied)"),
+            (None, None) => String::new(),
+        };
+        lines.push(format!(
+            "  {} {}{capture}",
+            when(event.observed_at),
+            event.kind
+        ));
+    }
+    lines.join("\n")
 }
 
 /// Local date and time, as people read history.
@@ -192,7 +87,7 @@ pub fn export(
     out: &mut impl Write,
 ) -> anyhow::Result<()> {
     let origin = ExportLine::Origin {
-        machine_id: sqlite.local_machine()?.id,
+        machine_id: crate::store::machines::local_machine(sqlite)?.id,
     };
     writeln!(out, "{}", serde_json::to_string(&origin)?)?;
     let (records, artifact_keys) = sqlite.export_records(since)?;

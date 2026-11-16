@@ -6,6 +6,7 @@
 //! and follows only the Task title, unless someone renamed it by hand; tabs and
 //! tmux windows follow the Session.
 
+use crate::store::session_projection;
 use std::collections::BTreeMap;
 use std::io::{IsTerminal, Write};
 use std::process::{Command, Stdio};
@@ -61,12 +62,11 @@ fn standing(
 ) -> StoreResult<Option<String>> {
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
     let available = match conversation {
-        Some(id) => store
-            .session_summary(id, now)?
+        Some(id) => session_projection::session_summary(store, id, now)?
             .is_some_and(|summary| summary.available),
         None => false,
     };
-    let graph = store.task_graph(task)?;
+    let graph = crate::store::task_work::task_graph(store, task)?;
     let node = graph
         .as_ref()
         .and_then(|graph| graph.waiting_step())
@@ -279,8 +279,10 @@ impl TerminalTitle {
 
     fn viewing(held: &loopflow_model::id::TerminalId) -> Option<Self> {
         let load = || -> anyhow::Result<Option<Self>> {
-            let store =
-                SqliteStore::open_processes_read_only(&crate::store::database_path_from_env()?)?;
+            let store = SqliteStore::open_processes_read_only(
+                &crate::store::database_path_from_env()?,
+                crate::store::token_key::encryption_key,
+            )?;
             let Some(id) = store.terminal_session(held)? else {
                 return Ok(None);
             };
@@ -298,8 +300,10 @@ impl TerminalTitle {
     }
 
     fn load(input: &str) -> anyhow::Result<Option<Self>> {
-        let store =
-            SqliteStore::open_processes_read_only(&crate::store::database_path_from_env()?)?;
+        let store = SqliteStore::open_processes_read_only(
+            &crate::store::database_path_from_env()?,
+            crate::store::token_key::encryption_key,
+        )?;
         let Some(session) = store.session_for_artifact(input)? else {
             return Ok(None);
         };
@@ -423,7 +427,10 @@ impl TitleReader {
             while let Ok(request) = requested.recv() {
                 let mut read = || -> anyhow::Result<Option<String>> {
                     if store.is_none() {
-                        store = Some(SqliteStore::open_processes_read_only(&path)?);
+                        store = Some(SqliteStore::open_processes_read_only(
+                            &path,
+                            crate::store::token_key::encryption_key,
+                        )?);
                     }
                     output_title(store.as_ref().expect("opened above"), &request.held)
                 };
@@ -607,6 +614,8 @@ fn host_command(program: &str, args: &[&str]) -> std::io::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use crate::process::attachment;
+
     use super::{
         display_title, renames_due, workspace_name, HostRename, Names, TerminalTitle, WorkspaceName,
     };
@@ -615,7 +624,7 @@ mod tests {
     fn replaced_attachment_stops_observing_session_names() {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("store.db");
-        let store = crate::store::sqlite::SqliteStore::open_ephemeral(&path).unwrap();
+        let store = crate::store::opening::open_ephemeral(&path).unwrap();
         let session =
             store.test_session("conversation", &crate::session_record::new_artifact_key());
         let process = loopflow_model::id::LfProcessId::new();
@@ -626,9 +635,9 @@ mod tests {
                 [process.as_str()],
             )
             .unwrap();
-        let attachment = store
-            .claim_session_attachment(&session.id, None, &process, true)
-            .unwrap();
+        let attachment =
+            attachment::claim_session_attachment(&store, &session.id, None, &process, true)
+                .unwrap();
         let terminal = loopflow_model::id::TerminalId::new();
         store.create_terminal(&terminal, "build").unwrap();
         rusqlite::Connection::open(&path)
@@ -650,14 +659,13 @@ mod tests {
             host: None,
             checked: std::time::Instant::now(),
         };
-        title
-            .store
-            .rename_session(
-                &title.session,
-                "Release notes",
-                crate::session::TitleSource::Human,
-            )
-            .unwrap();
+        crate::store::sessions::rename_session(
+            &title.store,
+            &title.session,
+            "Release notes",
+            crate::session::TitleSource::Human,
+        )
+        .unwrap();
         assert_eq!(
             title.read_names().unwrap().map(|names| names.terminal),
             Some("Release notes".to_string())
@@ -666,10 +674,14 @@ mod tests {
             super::output_title(&title.store, &terminal).unwrap(),
             Some("Release notes".into())
         );
-        title
-            .store
-            .claim_session_attachment(&title.session, Some(&attachment), &process, false)
-            .unwrap();
+        attachment::claim_session_attachment(
+            &title.store,
+            &title.session,
+            Some(&attachment),
+            &process,
+            false,
+        )
+        .unwrap();
         assert_eq!(title.read_names().unwrap(), None);
     }
 

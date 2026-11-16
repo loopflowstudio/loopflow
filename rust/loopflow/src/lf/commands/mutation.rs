@@ -325,8 +325,8 @@ pub fn task_edit_update(
     notes: &Option<String>,
     rank: Option<u32>,
     assignee: &Option<String>,
-) -> crate::work::task::TaskUpdate {
-    crate::work::task::TaskUpdate {
+) -> loopflow_storage::work::task::TaskUpdate {
+    loopflow_storage::work::task::TaskUpdate {
         title: title.clone(),
         description: notes.clone(),
         rank,
@@ -342,8 +342,7 @@ pub fn selected_task_repository(
     let repo = crate::ops::task::task_repository(directory, selector)?;
     if cli.repo.is_some() {
         anyhow::ensure!(
-            crate::repository::CanonicalRepo::discover(directory)?
-                == crate::repository::CanonicalRepo::discover(&repo)?,
+            crate::repository::discover(directory)? == crate::repository::discover(&repo)?,
             "Task {} does not belong to selected repository {}",
             selector.unwrap_or("in this checkout"),
             directory.display()

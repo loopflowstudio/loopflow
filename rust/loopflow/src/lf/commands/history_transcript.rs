@@ -8,7 +8,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::harness::HarnessKind;
 use crate::lf::commands::WorkFilter;
-use crate::store::sqlite::SqliteStore;
 use crate::store::ProviderAccountId;
 use crate::transcript::summary::{summarize, RetentionSummary};
 use crate::transcript::{
@@ -16,6 +15,7 @@ use crate::transcript::{
     Turn, TurnItem,
 };
 use loopflow_model::chat::types::{ConversationItem, Lifecycle};
+use loopflow_storage::sqlite::SqliteStore;
 
 const SNIPPET_CHARS: usize = 80;
 const ANSWER_CHARS: usize = 160;
@@ -29,7 +29,10 @@ fn read_only_store() -> Result<Option<SqliteStore>> {
     if !database.exists() {
         return Ok(None);
     }
-    Ok(Some(SqliteStore::open_processes_read_only(&database)?))
+    Ok(Some(SqliteStore::open_processes_read_only(
+        &database,
+        crate::store::token_key::encryption_key,
+    )?))
 }
 
 /// A Unix time as `YYYY-MM-DD HH:MM UTC`.

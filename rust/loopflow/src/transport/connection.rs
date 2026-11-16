@@ -34,7 +34,7 @@ struct Reading {
     input: bool,
     native_ready: bool,
     message: Option<String>,
-    transition: Option<crate::store::sqlite::provider_transitions::ProviderTransition>,
+    transition: Option<loopflow_storage::sqlite::provider_transitions::ProviderTransition>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -317,7 +317,7 @@ impl Status {
                                     old.to_agent_process == next.to_agent_process
                                         && old.to_provider_session == next.to_provider_session
                                 }) {
-                                    next.kind = crate::store::sqlite::provider_transitions::TransitionKind::Retained;
+                                    next.kind = loopflow_storage::sqlite::provider_transitions::TransitionKind::Retained;
                                 }
                             }
                             self.reading.transition = transition;

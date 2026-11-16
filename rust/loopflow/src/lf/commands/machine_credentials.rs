@@ -23,9 +23,9 @@ use crate::provider_account::{
     ensure_account_home, match_account, new_account, open_account_store, AccountMatch,
 };
 use crate::provider_auth::Provider;
-use crate::store::rows::now_unix;
 use crate::store::{CredentialState, CredentialType, ProviderAccount, ProviderToken, SharedStore};
 use loopflow_model::durable::{Machine, MachineId};
+use loopflow_storage::rows::now_unix;
 
 // Deliberately no Debug: native credential JSON and tokens must never be logged.
 #[derive(Serialize, Deserialize)]
@@ -74,7 +74,7 @@ enum Credential {
 /// rental refreshed at prepare must not outlive it, or Linear stops working
 /// there; raising `rental::MAX_HOURS` past it needs another way to renew.
 const LINEAR_ACCESS_HOURS: f64 = 24.0;
-const _: () = assert!(crate::rental::MAX_HOURS <= LINEAR_ACCESS_HOURS);
+const _: () = assert!(loopflow_storage::rental::MAX_HOURS <= LINEAR_ACCESS_HOURS);
 
 /// A rental's Claude access token counts as current until this close to its
 /// expiry; then a connect, by hand or before a launch, sends the next one. A
@@ -408,7 +408,7 @@ fn renew_rental(
     login: &str,
     credential: &Credential,
 ) -> Result<Option<String>> {
-    let Some(machine) = store.sqlite.machine_by_id(machine_id)? else {
+    let Some(machine) = crate::store::machines::machine_by_id(&store.sqlite, machine_id)? else {
         return Ok(None);
     };
     if remote_holds_full_login(&machine, login)? {
@@ -604,7 +604,8 @@ async fn renew_rentals(store: &SharedStore) -> Result<()> {
         .filter(|rental| rental.state.is_live())
         .filter_map(|rental| rental.machine_id)
     {
-        let Some(machine) = store.sqlite.machine_by_id(&machine_id)? else {
+        let Some(machine) = crate::store::machines::machine_by_id(&store.sqlite, &machine_id)?
+        else {
             continue;
         };
         if let Err(error) = connect_claude_accounts(&machine, true).await {
@@ -1817,11 +1818,11 @@ esac
 
     /// A Machine at `route` under a live rental.
     fn live_rental(store: &SharedStore, route: &str) -> loopflow_model::durable::Machine {
-        use crate::rental::{Hardware, OnDemand, Provider, Usd};
+        use loopflow_storage::rental::{Hardware, OnDemand, Provider, Usd};
         let usd = |text| Usd::parse(text).unwrap();
-        store
-            .sqlite
-            .add_ondemand(&OnDemand {
+        crate::store::rentals::add_ondemand(
+            &store.sqlite,
+            &OnDemand {
                 name: route.into(),
                 provider: Provider::Daytona,
                 hardware: Hardware {
@@ -1835,17 +1836,21 @@ esac
                 max_usd_per_hour: usd("0.40"),
                 hours: 4.0,
                 created_at: time::OffsetDateTime::UNIX_EPOCH,
-            })
-            .unwrap();
-        let rental = store.sqlite.admit_rental(route, None, None, false).unwrap();
+            },
+        )
+        .unwrap();
+        let rental =
+            crate::store::rentals::admit_rental(&store.sqlite, route, None, None, false).unwrap();
         store
             .sqlite
             .confirm_rental(&rental.id, route, usd("0.25"))
             .unwrap();
         let id = loopflow_model::durable::MachineId::new();
-        store.sqlite.add_machine(&id, route, route).unwrap();
+        crate::store::machines::add_machine(&store.sqlite, &id, route, route).unwrap();
         store.sqlite.attach_rental(&rental.id, &id).unwrap();
-        store.sqlite.machine_by_id(&id).unwrap().unwrap()
+        crate::store::machines::machine_by_id(&store.sqlite, &id)
+            .unwrap()
+            .unwrap()
     }
 
     /// An `ssh` that logs each remote command and reports `owned-rental` as the

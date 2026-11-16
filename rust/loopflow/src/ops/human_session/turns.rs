@@ -2,6 +2,7 @@
 //! transcript. Raw conversations, provider processes open here that Loopflow
 //! is not holding, list beside the Sessions with what their transcript shows.
 
+use crate::store::session_projection;
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -10,9 +11,9 @@ use anyhow::Result;
 use super::{SessionAvailability, SessionGraphMembership, SessionRecord, SessionState};
 use crate::harness::HarnessKind;
 use crate::session_record::SessionTitleSource;
-use crate::store::sqlite::SqliteStore;
 use crate::transcript::live::SessionTurn;
 use loopflow_model::durable::TaskId;
+use loopflow_storage::sqlite::SqliteStore;
 
 /// Read the current turn of each live Session among `sessions`. A Session
 /// whose agent reports no status is available once its turn hands back.
@@ -81,7 +82,7 @@ pub(super) fn raw(store: &SqliteStore, repo: Option<&str>) -> Result<Vec<Session
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
     let mut summaries = HashMap::new();
     for (thread, session) in &recorded {
-        if let Some(summary) = store.session_summary(session, now)? {
+        if let Some(summary) = session_projection::session_summary(store, session, now)? {
             summaries.insert(thread.as_str(), summary);
         }
     }
@@ -116,7 +117,7 @@ pub(super) fn raw(store: &SqliteStore, repo: Option<&str>) -> Result<Vec<Session
             }
         }
         if let Some(repo) = repo {
-            let here = crate::repository::CanonicalRepo::containing(&conversation.cwd)
+            let here = crate::repository::containing(&conversation.cwd)
                 .ok()
                 .flatten();
             if here.is_none_or(|here| here.to_string() != repo) {
@@ -231,7 +232,7 @@ mod tests {
     #[test]
     fn a_recorded_end_closes_only_the_open_turn_with_its_id() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("conversation", &crate::session_record::new_artifact_key());
         let thread = loopflow_model::id::AgentSessionId::from("thread");
         let detail = serde_json::json!({"status":"interrupted"});

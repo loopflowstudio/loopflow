@@ -289,8 +289,10 @@ pub(crate) async fn resolve_login(
 
 fn resolve_repo_id(raw_repo: Option<&str>) -> Result<Option<CanonicalRepo>> {
     match raw_repo {
-        Some(repo) => Ok(Some(CanonicalRepo::discover(std::path::Path::new(repo))?)),
-        None => CanonicalRepo::current(),
+        Some(repo) => Ok(Some(crate::repository::discover(std::path::Path::new(
+            repo,
+        ))?)),
+        None => crate::repository::current(),
     }
 }
 

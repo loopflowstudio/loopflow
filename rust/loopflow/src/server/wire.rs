@@ -264,22 +264,22 @@ pub struct SessionAttached {
 pub enum SubscriptionEvent {
     #[serde(rename = "task.shipped")]
     TaskShipped {
-        task_id: crate::work::task::TaskId,
-        pr_id: crate::work::task::TaskPrId,
+        task_id: loopflow_storage::work::task::TaskId,
+        pr_id: loopflow_storage::work::task::TaskPrId,
         number: u32,
         url: String,
         merge_commit: String,
     },
     #[serde(rename = "task.steer")]
     TaskSteer {
-        task_id: crate::work::task::TaskId,
+        task_id: loopflow_storage::work::task::TaskId,
         steer: crate::steer::Steer,
         /// The thread entry when this direction came from a retained comment.
-        comment: Option<crate::work::task::comment::TaskComment>,
+        comment: Option<loopflow_model::comment::TaskComment>,
     },
     #[serde(rename = "graph.step_finished")]
     GraphStepFinished {
-        task_id: crate::work::task::TaskId,
+        task_id: loopflow_storage::work::task::TaskId,
         graph_process_id: LfProcessId,
         step: crate::durable::GraphStepProcess,
     },

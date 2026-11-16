@@ -11,7 +11,6 @@ use std::path::Path;
 use std::process::Command;
 
 use loopflow::id::WaveId;
-use loopflow::store::sqlite::SqliteStore;
 use loopflow::store::StorageConfig;
 use loopflow::work::wave::context::{resolve_managed_wave, WaveResolveError};
 use loopflow::work::wave::Wave;
@@ -154,13 +153,13 @@ async fn resolver_matrix_agrees_across_every_environment() {
 fn seed(home: &Path, repo: &Path, wave_name: &str) -> Wave {
     std::fs::create_dir_all(home).expect("home");
     std::fs::create_dir_all(repo).expect("repo");
-    let store = SqliteStore::new(&home.join("loopflow.db")).expect("open store");
+    let store = loopflow::store::open_sqlite(&home.join("loopflow.db")).expect("open store");
     let wave = Wave::new(
         WaveId::new(),
         wave_name.to_string(),
         repo.display().to_string(),
     );
-    store.create_wave(&wave).expect("register wave");
+    loopflow::work::wave::bootstrap::upsert_wave(&store, &wave).expect("register wave");
     store
         .seed_inventory(&InventoryFixture {
             wave_id: wave.id().clone(),

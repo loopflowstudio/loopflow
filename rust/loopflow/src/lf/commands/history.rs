@@ -8,7 +8,6 @@ use crate::lf::output::print_process;
 use crate::process::{
     ProcessCursor, ProcessEntry, ProcessFilter, ProcessOutcomeFilter, ProcessWorkFilter,
 };
-use crate::repository::CanonicalRepo;
 use crate::store::{open_store, storage_config_from_env};
 
 #[derive(Debug, clap::Args)]
@@ -306,13 +305,11 @@ pub fn run(command: &HistoryCommand) -> anyhow::Result<()> {
             let repo = if *all {
                 None
             } else {
-                CanonicalRepo::current()?.map(|repo| repo.to_string())
+                crate::repository::current()?.map(|repo| repo.to_string())
             };
             let performed_work = match (task, wave) {
                 (Some(task), _) => Some(ProcessWorkFilter::Task(
-                    store
-                        .sqlite
-                        .resolve_task_id(task, repo.as_deref())?
+                    crate::store::children::resolve_task_id(&store.sqlite, task, repo.as_deref())?
                         .context("Task was not found")?,
                 )),
                 (_, Some(wave)) => Some(ProcessWorkFilter::Wave(
@@ -397,14 +394,14 @@ pub(crate) fn render(
         );
         if process.is_none() && session.is_none() {
             // A Session copied from a given-back Machine, when nothing here is it.
-            let copied = store.sqlite.copied_history(id)?;
+            let copied = crate::store::machines::copied_history(&store.sqlite, id)?;
             let copied =
                 copied.with_context(|| format!("Process or Session {id} was not found"))?;
             return Ok(Shown::Copied(copied));
         }
         if let Some(input) = input {
             anyhow::ensure!(session.is_some(), "--input requires a Session identity");
-            let captured = store.sqlite.input_history(input)?;
+            let captured = crate::store::sessions::input_history(&store.sqlite, input)?;
             anyhow::ensure!(
                 captured.session_id == id,
                 "Input does not belong to Session {id}"
@@ -420,7 +417,10 @@ pub(crate) fn render(
                 "Session {id} is a copy from {}; it reads as text",
                 copied.session.origin_name()
             );
-            return Ok(format!("{}\n", copied.render(&crate::store::lf_home_dir())));
+            return Ok(format!(
+                "{}\n",
+                crate::machine_records::render(&copied, &crate::store::lf_home_dir())
+            ));
         }
     };
     match process {

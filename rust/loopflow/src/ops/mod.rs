@@ -74,4 +74,3 @@ pub use sync::{
     SyncOptions, SyncPlan, SyncRecovery, SyncStrategy, SyncVerification,
 };
 pub use trace::{hash_prompt, trace_enabled, MockResponses, OpTrace, Tracer};
-pub use util::normalize_wave_name;

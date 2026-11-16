@@ -9,38 +9,10 @@ use serde::{Deserialize, Serialize};
 
 use super::{locate, read, ExpiryPolicy, Gap, Located, Source, Turn};
 use crate::harness::HarnessKind;
-use crate::store::sqlite::SqliteStore;
 use crate::store::ProviderAccountId;
-use loopflow_model::id::AgentSessionId;
+use loopflow_storage::sqlite::SqliteStore;
 
-/// What the store kept of one provider conversation.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ThreadFacts {
-    pub thread: AgentSessionId,
-    pub harness: Option<String>,
-    pub account: Option<ProviderAccountId>,
-    pub turns: Vec<TurnFacts>,
-}
-
-/// One native turn's receipts.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct TurnFacts {
-    pub turn: String,
-    pub started_at: Option<i64>,
-    pub settled_at: Option<i64>,
-    pub status: Option<String>,
-    pub final_answer: Option<String>,
-}
-
-impl ThreadFacts {
-    fn last_at(&self) -> Option<i64> {
-        self.turns
-            .iter()
-            .flat_map(|turn| [turn.started_at, turn.settled_at])
-            .flatten()
-            .max()
-    }
-}
+pub use loopflow_storage::transcript::{ThreadFacts, TurnFacts};
 
 /// `lf history show SESSION --transcript --json`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

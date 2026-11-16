@@ -1493,17 +1493,25 @@ impl SharedPlan {
     ) -> Self {
         use loopflow::durable::RepositoryId;
         use loopflow::planning_git::PlanningDestination;
-        use loopflow::store::sqlite::SqliteStore;
-        let local = SqliteStore::new(&fixture.root.path().join("local/loopflow.db")).unwrap();
+
+        let local =
+            loopflow::store::open_sqlite(&fixture.root.path().join("local/loopflow.db")).unwrap();
         let remote =
-            SqliteStore::new(&fixture.root.path().join("remote/store/loopflow.db")).unwrap();
+            loopflow::store::open_sqlite(&fixture.root.path().join("remote/store/loopflow.db"))
+                .unwrap();
         let repository = RepositoryId::new();
-        local
-            .bind_repository(local_path.to_str().unwrap(), &repository)
-            .unwrap();
-        remote
-            .bind_repository(remote_path.to_str().unwrap(), &repository)
-            .unwrap();
+        loopflow::repository::location::bind_repository(
+            &local,
+            local_path.to_str().unwrap(),
+            &repository,
+        )
+        .unwrap();
+        loopflow::repository::location::bind_repository(
+            &remote,
+            remote_path.to_str().unwrap(),
+            &repository,
+        )
+        .unwrap();
         let destination =
             PlanningDestination::new("/unused/fixture", "refs/loopflow/planning/shared/owners")
                 .unwrap();
@@ -1528,14 +1536,14 @@ impl SharedPlan {
             .remote
             .export_peer_planning(self.remote_path.to_str().unwrap(), &self.destination.id())
             .unwrap();
-        self.local
-            .import_peer_planning(
-                self.local_path.to_str().unwrap(),
-                &self.destination.id(),
-                &uuid::Uuid::new_v4().to_string(),
-                &journal,
-            )
-            .unwrap();
+        loopflow::store::planning_peers::import_peer_planning(
+            &self.local,
+            self.local_path.to_str().unwrap(),
+            &self.destination.id(),
+            &uuid::Uuid::new_v4().to_string(),
+            &journal,
+        )
+        .unwrap();
     }
 
     fn to_remote(&self) {
@@ -1543,14 +1551,14 @@ impl SharedPlan {
             .local
             .export_peer_planning(self.local_path.to_str().unwrap(), &self.destination.id())
             .unwrap();
-        self.remote
-            .import_peer_planning(
-                self.remote_path.to_str().unwrap(),
-                &self.destination.id(),
-                &uuid::Uuid::new_v4().to_string(),
-                &journal,
-            )
-            .unwrap();
+        loopflow::store::planning_peers::import_peer_planning(
+            &self.remote,
+            self.remote_path.to_str().unwrap(),
+            &self.destination.id(),
+            &uuid::Uuid::new_v4().to_string(),
+            &journal,
+        )
+        .unwrap();
     }
 
     fn task(&self) -> loopflow::durable::TaskId {
@@ -1566,12 +1574,19 @@ impl SharedPlan {
         store: &loopflow::store::sqlite::SqliteStore,
         path: &Path,
     ) -> loopflow::durable::TaskId {
-        let project = store
-            .ensure_wave_project(path.to_str().unwrap(), "owners")
-            .unwrap();
+        let project = loopflow::work::wave::bootstrap::ensure_wave_project(
+            store,
+            path.to_str().unwrap(),
+            "owners",
+        )
+        .unwrap();
         store
             .create_task(&loopflow::work::task::NewTask {
-                repository_id: store.ensure_repository(path.to_str().unwrap()).unwrap(),
+                repository_id: loopflow::repository::location::ensure_repository(
+                    store,
+                    path.to_str().unwrap(),
+                )
+                .unwrap(),
                 id: loopflow::durable::TaskId::new(),
                 project_id: Some(project.id),
                 title: "Ownership demo".into(),
@@ -1589,17 +1604,23 @@ fn task_ownership_follows_claim_handoff_and_unassign_through_the_writer() {
     let fixture = preview_machines();
     let plan = SharedPlan::new(&fixture);
     let task = plan.task();
-    let mini = plan.remote.local_machine().unwrap().id;
-    let laptop = plan.local.local_machine().unwrap().id;
-    plan.remote.claim_task(&task).unwrap().unwrap();
+    let mini = loopflow::store::machines::local_machine(&plan.remote)
+        .unwrap()
+        .id;
+    let laptop = loopflow::store::machines::local_machine(&plan.local)
+        .unwrap()
+        .id;
+    loopflow::store::ownership::claim_task(&plan.remote, &task)
+        .unwrap()
+        .unwrap();
     plan.to_local();
     // The laptop follows the claim; it routes to the owner, never allocating here.
-    let route = plan.local.task_execution_route(&task).unwrap();
+    let route = loopflow::store::ownership::task_execution_route(&plan.local, &task).unwrap();
     assert_eq!(
         (route.machine_id.clone(), route.source),
         (mini.clone(), TaskExecutionSource::Owner)
     );
-    assert!(plan.local.claim_task(&task).is_err());
+    assert!(loopflow::store::ownership::claim_task(&plan.local, &task).is_err());
 
     // Moving it to the laptop sends it from mini, the writer, over SSH.
     let handed = fixture.json(&[
@@ -1614,8 +1635,7 @@ fn task_ownership_follows_claim_handoff_and_unassign_through_the_writer() {
     ]);
     assert_eq!(handed["owner"]["machine"]["id"], laptop.as_str());
     let kinds = |store: &loopflow::store::sqlite::SqliteStore| {
-        store
-            .task_ownership(&task)
+        loopflow::store::ownership::task_ownership(store, &task)
             .unwrap()
             .log
             .iter()
@@ -1628,7 +1648,9 @@ fn task_ownership_follows_claim_handoff_and_unassign_through_the_writer() {
     );
     plan.to_local();
     assert_eq!(
-        plan.local.task_execution_route(&task).unwrap().machine_id,
+        loopflow::store::ownership::task_execution_route(&plan.local, &task)
+            .unwrap()
+            .machine_id,
         laptop
     );
 
@@ -1644,7 +1666,7 @@ fn task_ownership_follows_claim_handoff_and_unassign_through_the_writer() {
     assert!(unassigned["owner"].is_null());
     plan.to_remote();
     for store in [&plan.local, &plan.remote] {
-        let ownership = store.task_ownership(&task).unwrap();
+        let ownership = loopflow::store::ownership::task_ownership(store, &task).unwrap();
         assert!(ownership.owner.is_none());
         assert_eq!(
             kinds(store),
@@ -1665,13 +1687,19 @@ fn set_machine_changes_local_preferences_without_copying_or_moving_work() {
     let plan = SharedPlan::new(&fixture);
     let task = plan.task();
     plan.to_local();
-    let mini = plan.remote.local_machine().unwrap().id;
-    let laptop = plan.local.local_machine().unwrap().id;
-    let wave = plan
-        .local
-        .ensure_wave_project(plan.local_path.to_str().unwrap(), "owners")
+    let mini = loopflow::store::machines::local_machine(&plan.remote)
         .unwrap()
-        .wave_id;
+        .id;
+    let laptop = loopflow::store::machines::local_machine(&plan.local)
+        .unwrap()
+        .id;
+    let wave = loopflow::work::wave::bootstrap::ensure_wave_project(
+        &plan.local,
+        plan.local_path.to_str().unwrap(),
+        "owners",
+    )
+    .unwrap()
+    .wave_id;
     let output = fixture.run(&[
         "--repo-id",
         plan.repository.as_str(),
@@ -1683,32 +1711,41 @@ fn set_machine_changes_local_preferences_without_copying_or_moving_work() {
     ]);
     assert_success(&output);
     assert_eq!(
-        plan.local
-            .wave_owning_machine(&wave, MachineSetting::Tasks)
+        loopflow::store::placement::wave_owning_machine(&plan.local, &wave, MachineSetting::Tasks)
             .unwrap()
             .0,
         mini
     );
     assert_eq!(
-        plan.local
-            .wave_owning_machine(&wave, MachineSetting::Session)
-            .unwrap()
-            .0,
+        loopflow::store::placement::wave_owning_machine(
+            &plan.local,
+            &wave,
+            MachineSetting::Session
+        )
+        .unwrap()
+        .0,
         laptop
     );
     assert!(!plan.remote_path.join("lf.config.local.yaml").exists());
     assert_eq!(
-        plan.local.task_execution_route(&task).unwrap().machine_id,
+        loopflow::store::ownership::task_execution_route(&plan.local, &task)
+            .unwrap()
+            .machine_id,
         mini
     );
-    assert!(plan.local.task_ownership(&task).unwrap().log.is_empty());
+    assert!(
+        loopflow::store::ownership::task_ownership(&plan.local, &task)
+            .unwrap()
+            .log
+            .is_empty()
+    );
 }
 
 #[test]
 fn remote_file_observer_keeps_the_recorded_owner_and_streams_changes() {
     use loopflow::durable::RepositoryId;
     use loopflow::ops::task::TaskFilesFrame;
-    use loopflow::store::sqlite::SqliteStore;
+
     use std::io::{BufRead, BufReader};
     use std::sync::mpsc;
     use std::time::Duration;
@@ -1719,12 +1756,11 @@ fn remote_file_observer_keeps_the_recorded_owner_and_streams_changes() {
     let remote_home = fixture.root.path().join("remote/store");
     let registered =
         support::register_task_with_pr(&remote_home, &path, "companions", &repo.head_sha());
-    let store = SqliteStore::new(&remote_home.join("loopflow.db")).unwrap();
+    let store = loopflow::store::open_sqlite(&remote_home.join("loopflow.db")).unwrap();
     let repository = RepositoryId::new();
-    store
-        .bind_repository(path.to_str().unwrap(), &repository)
+    loopflow::repository::location::bind_repository(&store, path.to_str().unwrap(), &repository)
         .unwrap();
-    let owner = store.local_machine().unwrap().id;
+    let owner = loopflow::store::machines::local_machine(&store).unwrap().id;
     fs::write(path.join(".gitignore"), "target/\n").unwrap();
     fs::create_dir(path.join("target")).unwrap();
     let rejected = fixture.run(&[
@@ -1823,7 +1859,6 @@ fn git(dir: &Path, args: &[&str]) -> String {
 
 #[test]
 fn resume_moves_a_session_to_another_machine() {
-    use loopflow::store::sqlite::SqliteStore;
     let fixture = preview_machines();
     let mini = fixture.json(&["machine", "list", "--json"])[0]["id"]
         .as_str()
@@ -1848,17 +1883,23 @@ fn resume_moves_a_session_to_another_machine() {
     git(&remote_checkout, &["config", "user.name", "Jack"]);
     let remote_checkout = remote_checkout.canonicalize().unwrap();
     let repository = loopflow::durable::RepositoryId::new();
-    let local = SqliteStore::new(&fixture.root.path().join("local/loopflow.db")).unwrap();
-    let remote = SqliteStore::new(&fixture.root.path().join("remote/store/loopflow.db")).unwrap();
-    local
-        .bind_repository(
-            repo.path().canonicalize().unwrap().to_str().unwrap(),
-            &repository,
-        )
-        .unwrap();
-    remote
-        .bind_repository(remote_checkout.to_str().unwrap(), &repository)
-        .unwrap();
+    let local =
+        loopflow::store::open_sqlite(&fixture.root.path().join("local/loopflow.db")).unwrap();
+    let remote =
+        loopflow::store::open_sqlite(&fixture.root.path().join("remote/store/loopflow.db"))
+            .unwrap();
+    loopflow::repository::location::bind_repository(
+        &local,
+        repo.path().canonicalize().unwrap().to_str().unwrap(),
+        &repository,
+    )
+    .unwrap();
+    loopflow::repository::location::bind_repository(
+        &remote,
+        remote_checkout.to_str().unwrap(),
+        &repository,
+    )
+    .unwrap();
 
     // A Claude conversation in the worktree, admitted the way connecting admits it.
     let conversation = "0199a213-81c0-7800-8aa1-bbab2a035a53";
@@ -1995,8 +2036,7 @@ fn a_mid_merge_worktree_refuses_to_move() {
     assert!(stderr.contains("mid-merge"), "{stderr}");
     assert_eq!(git(&worktree, &["rev-parse", "HEAD"]), head);
     let local =
-        loopflow::store::sqlite::SqliteStore::new(&fixture.root.path().join("local/loopflow.db"))
-            .unwrap();
+        loopflow::store::open_sqlite(&fixture.root.path().join("local/loopflow.db")).unwrap();
     assert!(local.session_moved_to(&session).unwrap().is_none());
 }
 
@@ -2033,34 +2073,34 @@ fn place(plan: &SharedPlan, task: &loopflow::durable::TaskId, branch: &str) -> s
     );
     let worktree = worktree.canonicalize().unwrap();
     let now = time::OffsetDateTime::now_utc();
-    plan.local
-        .place_task(
-            task,
-            &worktree,
-            branch,
-            &TaskPr {
-                id: TaskPrId::new(),
-                task_id: task.clone(),
-                sequence: 1,
-                slug: branch.into(),
-                branch: branch.into(),
-                base_commit: git(&worktree, &["rev-parse", "HEAD"]),
-                parent_pr_id: None,
-                publication: None,
-                merge_commit: None,
-                abandoned_at: None,
-                ci_observation: None,
-                github_observation: None,
-                linear_attachment_id: None,
-                linear_comment_id: None,
-                linear_link_error: None,
-                created_at: now,
-                updated_at: now,
-            },
-        )
-        .unwrap();
+    loopflow::store::ownership::place_task(
+        &plan.local,
+        task,
+        &worktree,
+        branch,
+        &TaskPr {
+            id: TaskPrId::new(),
+            task_id: task.clone(),
+            sequence: 1,
+            slug: branch.into(),
+            branch: branch.into(),
+            base_commit: git(&worktree, &["rev-parse", "HEAD"]),
+            parent_pr_id: None,
+            publication: None,
+            merge_commit: None,
+            abandoned_at: None,
+            ci_observation: None,
+            github_observation: None,
+            linear_attachment_id: None,
+            linear_comment_id: None,
+            linear_link_error: None,
+            created_at: now,
+            updated_at: now,
+        },
+    )
+    .unwrap();
     if !plan.local.task_owned(task).unwrap() {
-        plan.local.claim_task(task).unwrap();
+        loopflow::store::ownership::claim_task(&plan.local, task).unwrap();
     }
     worktree
 }
@@ -2108,7 +2148,9 @@ fn at_explore(db: &Path, task: &loopflow::durable::TaskId) {
 fn task_move_carries_ownership_graph_and_session() {
     let fixture = preview_machines();
     let plan = SharedPlan::cloned(&fixture);
-    let mini = plan.remote.local_machine().unwrap().id;
+    let mini = loopflow::store::machines::local_machine(&plan.remote)
+        .unwrap()
+        .id;
     let (task, worktree) = placed_task(&plan, "move-task");
     at_explore(&fixture.root.path().join("local/loopflow.db"), &task);
     let session = claude_conversation(&fixture, &worktree, "0199a213-81c0-7800-8aa1-bbab2a035a55");
@@ -2129,7 +2171,10 @@ fn task_move_carries_ownership_graph_and_session() {
         "uncommitted"
     );
     // Mini owns the Task, checked out on its branch, at the same step.
-    let owner = plan.remote.task_ownership(&task).unwrap().owner.unwrap();
+    let owner = loopflow::store::ownership::task_ownership(&plan.remote, &task)
+        .unwrap()
+        .owner
+        .unwrap();
     assert_eq!(owner.machine.id, Some(mini.clone()));
     let arrived = plan.remote.task(&task).unwrap().unwrap();
     let checkout = arrived.worktree.clone().unwrap();
@@ -2158,7 +2203,9 @@ fn task_move_carries_ownership_graph_and_session() {
     );
     // The laptop routes the Task and its conversation to mini.
     assert_eq!(
-        plan.local.task_execution_route(&task).unwrap().machine_id,
+        loopflow::store::ownership::task_execution_route(&plan.local, &task)
+            .unwrap()
+            .machine_id,
         mini
     );
     let resumed = fixture
@@ -2176,7 +2223,9 @@ fn task_move_carries_ownership_graph_and_session() {
 fn a_move_that_did_not_arrive_shows_in_status_and_the_same_command_delivers_it() {
     let fixture = preview_machines();
     let plan = SharedPlan::cloned(&fixture);
-    let mini = plan.remote.local_machine().unwrap().id;
+    let mini = loopflow::store::machines::local_machine(&plan.remote)
+        .unwrap()
+        .id;
     let (task, worktree) = placed_task(&plan, "retry-move");
     at_explore(&fixture.root.path().join("local/loopflow.db"), &task);
     let session = claude_conversation(&fixture, &worktree, "0199a213-81c0-7800-8aa1-bbab2a035a58");
@@ -2253,7 +2302,10 @@ fn a_move_that_did_not_arrive_shows_in_status_and_the_same_command_delivers_it()
         ),
         "sent once"
     );
-    let owner = plan.remote.task_ownership(&task).unwrap().owner.unwrap();
+    let owner = loopflow::store::ownership::task_ownership(&plan.remote, &task)
+        .unwrap()
+        .owner
+        .unwrap();
     assert_eq!(owner.machine.id, Some(mini));
     assert!(plan.local.task_move_in_flight(&task).unwrap().is_none());
     // The conversation that left with the first send arrived with the retry.
@@ -2273,7 +2325,9 @@ fn a_move_that_did_not_arrive_shows_in_status_and_the_same_command_delivers_it()
 fn a_failed_conversation_import_keeps_the_move_available_for_retry() {
     let fixture = preview_machines();
     let plan = SharedPlan::cloned(&fixture);
-    let mini = plan.remote.local_machine().unwrap().id;
+    let mini = loopflow::store::machines::local_machine(&plan.remote)
+        .unwrap()
+        .id;
     let (task, worktree) = placed_task(&plan, "retry-conversation");
     let conversation = "0199a213-81c0-7800-8aa1-bbab2a035a60";
     let session = claude_conversation(&fixture, &worktree, conversation);
@@ -2313,7 +2367,9 @@ fn a_failed_conversation_import_keeps_the_move_available_for_retry() {
 fn claiming_a_task_back_ends_a_move_that_never_arrived() {
     let fixture = preview_machines();
     let plan = SharedPlan::cloned(&fixture);
-    let mini = plan.remote.local_machine().unwrap().id;
+    let mini = loopflow::store::machines::local_machine(&plan.remote)
+        .unwrap()
+        .id;
     let (task, worktree) = placed_task(&plan, "claimed-back");
     fs::write(worktree.join("notes.txt"), "sent once\n").unwrap();
     let remote_lf = fixture.root.path().join("remote/.local/bin/lf");
@@ -2363,7 +2419,10 @@ fn claiming_a_task_back_ends_a_move_that_never_arrived() {
         ),
         "edited after claiming"
     );
-    let owner = plan.remote.task_ownership(&task).unwrap().owner.unwrap();
+    let owner = loopflow::store::ownership::task_ownership(&plan.remote, &task)
+        .unwrap()
+        .owner
+        .unwrap();
     assert_eq!(owner.machine.id, Some(mini));
     assert!(plan.local.task_move_in_flight(&task).unwrap().is_none());
 }
@@ -2376,7 +2435,9 @@ fn claiming_a_task_back_ends_a_move_that_never_arrived() {
 fn claiming_back_a_task_whose_arrival_answer_was_lost_leaves_it_on_its_target() {
     let fixture = preview_machines();
     let plan = SharedPlan::cloned(&fixture);
-    let mini = plan.remote.local_machine().unwrap().id;
+    let mini = loopflow::store::machines::local_machine(&plan.remote)
+        .unwrap()
+        .id;
     let (task, _worktree) = placed_task(&plan, "answer-lost");
     let remote_lf = fixture.root.path().join("remote/.local/bin/lf");
     let working = fs::read_to_string(&remote_lf).unwrap();
@@ -2404,9 +2465,15 @@ fn claiming_back_a_task_whose_arrival_answer_was_lost_leaves_it_on_its_target() 
         .output()
         .unwrap();
     assert_success(&claimed);
-    let owner = plan.remote.task_ownership(&task).unwrap().owner.unwrap();
+    let owner = loopflow::store::ownership::task_ownership(&plan.remote, &task)
+        .unwrap()
+        .owner
+        .unwrap();
     assert_eq!(owner.machine.id, Some(mini.clone()));
-    let local = plan.local.task_ownership(&task).unwrap().owner.unwrap();
+    let local = loopflow::store::ownership::task_ownership(&plan.local, &task)
+        .unwrap()
+        .owner
+        .unwrap();
     assert_eq!(local.machine.id, Some(mini));
     assert!(plan.local.task_move_in_flight(&task).unwrap().is_none());
     let status = fixture
@@ -2427,7 +2494,9 @@ fn claiming_back_a_task_whose_arrival_answer_was_lost_leaves_it_on_its_target() 
 fn a_sent_move_forwarded_to_its_target_delivers_what_was_sent() {
     let fixture = preview_machines();
     let plan = SharedPlan::cloned(&fixture);
-    let mini = plan.remote.local_machine().unwrap().id;
+    let mini = loopflow::store::machines::local_machine(&plan.remote)
+        .unwrap()
+        .id;
     let (task, worktree) = placed_task(&plan, "forwarded-retry");
     at_explore(&fixture.root.path().join("local/loopflow.db"), &task);
     fs::write(worktree.join("notes.txt"), "sent once\n").unwrap();
@@ -2474,7 +2543,10 @@ fn a_sent_move_forwarded_to_its_target_delivers_what_was_sent() {
         ),
         "sent once"
     );
-    let owner = plan.remote.task_ownership(&task).unwrap().owner.unwrap();
+    let owner = loopflow::store::ownership::task_ownership(&plan.remote, &task)
+        .unwrap()
+        .owner
+        .unwrap();
     assert_eq!(owner.machine.id, Some(mini));
     assert!(plan.local.task_move_in_flight(&task).unwrap().is_none());
 }
@@ -2486,9 +2558,11 @@ fn a_sent_move_forwarded_to_its_target_delivers_what_was_sent() {
 fn a_leaving_move_forwarded_to_its_target_carries_on() {
     let fixture = preview_machines();
     let plan = SharedPlan::cloned(&fixture);
-    let mini = plan.remote.local_machine().unwrap().id;
+    let mini = loopflow::store::machines::local_machine(&plan.remote)
+        .unwrap()
+        .id;
     let (task, worktree) = placed_task(&plan, "forwarded-leaving");
-    plan.local.begin_task_move(&task, &mini).unwrap();
+    loopflow::store::ownership::begin_task_move(&plan.local, &task, &mini).unwrap();
     fs::write(worktree.join("notes.txt"), "halfway\n").unwrap();
 
     let retried = fixture
@@ -2514,7 +2588,10 @@ fn a_leaving_move_forwarded_to_its_target_carries_on() {
         ),
         "halfway"
     );
-    let owner = plan.remote.task_ownership(&task).unwrap().owner.unwrap();
+    let owner = loopflow::store::ownership::task_ownership(&plan.remote, &task)
+        .unwrap()
+        .owner
+        .unwrap();
     assert_eq!(owner.machine.id, Some(mini));
     assert!(plan.local.task_move_in_flight(&task).unwrap().is_none());
 }
@@ -2535,7 +2612,9 @@ fn a_move_checked_on_its_target_stays_a_past_check_after_source_claim_back() {
 fn checked_move_on_target(claim_back: bool) {
     let fixture = preview_machines();
     let plan = SharedPlan::cloned(&fixture);
-    let mini = plan.remote.local_machine().unwrap().id;
+    let mini = loopflow::store::machines::local_machine(&plan.remote)
+        .unwrap()
+        .id;
     let (task, worktree) = placed_task(&plan, "retry-on-mini");
     // Mini reaches the laptop over its own SSH.
     let local = fixture.root.path().join("local");
@@ -2597,7 +2676,9 @@ fn checked_move_on_target(claim_back: bool) {
     let check = plan.remote.task_move_check(&task).unwrap().unwrap();
     assert_eq!(
         check.from_machine_id,
-        plan.local.local_machine().unwrap().id
+        loopflow::store::machines::local_machine(&plan.local)
+            .unwrap()
+            .id
     );
     let status = on_mini(&["task", "status", task.as_str()]);
     assert_success(&status);
@@ -2630,14 +2711,17 @@ fn checked_move_on_target(claim_back: bool) {
             .unwrap();
         assert_success(&claimed);
         assert_eq!(
-            plan.local
-                .task_ownership(&task)
+            loopflow::store::ownership::task_ownership(&plan.local, &task)
                 .unwrap()
                 .owner
                 .unwrap()
                 .machine
                 .id,
-            Some(plan.local.local_machine().unwrap().id)
+            Some(
+                loopflow::store::machines::local_machine(&plan.local)
+                    .unwrap()
+                    .id
+            )
         );
         let after = on_mini(&["task", "status", task.as_str()]);
         assert_success(&after);
@@ -2647,7 +2731,12 @@ fn checked_move_on_target(claim_back: bool) {
         assert!(after.contains("Unowned"), "{after}");
         assert!(after.contains("Not checked out on "), "{after}");
         assert!(!after.contains("Moving to"), "{after}");
-        assert!(plan.remote.task_ownership(&task).unwrap().owner.is_none());
+        assert!(
+            loopflow::store::ownership::task_ownership(&plan.remote, &task)
+                .unwrap()
+                .owner
+                .is_none()
+        );
         return;
     }
     // The laptop's retry line names mini by the laptop's label; on mini the
@@ -2661,7 +2750,10 @@ fn checked_move_on_target(claim_back: bool) {
     assert_success(&retried);
     let stderr = String::from_utf8_lossy(&retried.stderr);
     assert!(stderr.contains("move to"), "{stderr}");
-    let owner = plan.remote.task_ownership(&task).unwrap().owner.unwrap();
+    let owner = loopflow::store::ownership::task_ownership(&plan.remote, &task)
+        .unwrap()
+        .owner
+        .unwrap();
     assert_eq!(owner.machine.id, Some(mini));
     assert_eq!(plan.remote.task_move_check(&task).unwrap(), None);
     let arrived_status = on_mini(&["task", "status", task.as_str()]);
@@ -2685,7 +2777,9 @@ fn checked_move_on_target(claim_back: bool) {
 fn a_task_sent_without_its_reply_delivers_its_conversation_when_repeated() {
     let fixture = preview_machines();
     let plan = SharedPlan::cloned(&fixture);
-    let laptop_id = plan.local.local_machine().unwrap().id;
+    let laptop_id = loopflow::store::machines::local_machine(&plan.local)
+        .unwrap()
+        .id;
     let (task, worktree) = placed_task(&plan, "lost-reply");
     at_explore(&fixture.root.path().join("local/loopflow.db"), &task);
     let session = claude_conversation(&fixture, &worktree, "0199a213-81c0-7800-8aa1-bbab2a035a59");
@@ -2746,7 +2840,9 @@ fn a_task_sent_without_its_reply_delivers_its_conversation_when_repeated() {
         .completed_at
         .is_none());
     assert_eq!(
-        plan.local.task_execution_route(&task).unwrap().machine_id,
+        loopflow::store::ownership::task_execution_route(&plan.local, &task)
+            .unwrap()
+            .machine_id,
         laptop_id
     );
     // Mini heard it arrived: nothing is in flight there any more.
@@ -2850,7 +2946,9 @@ fn the_laptop_says_where_a_moved_task_runs_and_prunes_its_checkout() {
 fn resume_task_on_another_machine_moves_the_task_there() {
     let fixture = preview_machines();
     let plan = SharedPlan::cloned(&fixture);
-    let mini = plan.remote.local_machine().unwrap().id;
+    let mini = loopflow::store::machines::local_machine(&plan.remote)
+        .unwrap()
+        .id;
     let (task, worktree) = placed_task(&plan, "resume-task");
     at_explore(&fixture.root.path().join("local/loopflow.db"), &task);
     let session = claude_conversation(&fixture, &worktree, "0199a213-81c0-7800-8aa1-bbab2a035a56");
@@ -2874,7 +2972,10 @@ fn resume_task_on_another_machine_moves_the_task_there() {
     assert_eq!(resumed["workspace"]["machine_id"], mini.as_str());
 
     // The same state `lf task move` reaches: ownership, graph and Session on mini.
-    let owner = plan.remote.task_ownership(&task).unwrap().owner.unwrap();
+    let owner = loopflow::store::ownership::task_ownership(&plan.remote, &task)
+        .unwrap()
+        .owner
+        .unwrap();
     assert_eq!(owner.machine.id, Some(mini.clone()));
     let step: String =
         rusqlite::Connection::open(fixture.root.path().join("remote/store/loopflow.db"))
@@ -2889,7 +2990,9 @@ fn resume_task_on_another_machine_moves_the_task_there() {
     let moved = plan.remote.session(&session).unwrap().unwrap();
     assert_eq!(moved.task_id.as_ref(), Some(&task));
     assert_eq!(
-        plan.local.task_execution_route(&task).unwrap().machine_id,
+        loopflow::store::ownership::task_execution_route(&plan.local, &task)
+            .unwrap()
+            .machine_id,
         mini
     );
 }
@@ -2901,7 +3004,10 @@ fn task_move_refuses_a_mid_merge_worktree() {
     let (task, worktree) = placed_task(&plan, "merging-task");
     let head = git(&worktree, &["rev-parse", "HEAD"]);
     fs::write(git_dir(&worktree).join("MERGE_HEAD"), format!("{head}\n")).unwrap();
-    let before = plan.local.task_ownership(&task).unwrap().log.len();
+    let before = loopflow::store::ownership::task_ownership(&plan.local, &task)
+        .unwrap()
+        .log
+        .len();
 
     let refused = fixture
         .command(&["task", "move", task.as_str(), "--machine", "mini"])
@@ -2912,7 +3018,13 @@ fn task_move_refuses_a_mid_merge_worktree() {
     let stderr = String::from_utf8_lossy(&refused.stderr);
     assert!(stderr.contains("mid-merge"), "{stderr}");
     assert_eq!(git(&worktree, &["rev-parse", "HEAD"]), head);
-    assert_eq!(plan.local.task_ownership(&task).unwrap().log.len(), before);
+    assert_eq!(
+        loopflow::store::ownership::task_ownership(&plan.local, &task)
+            .unwrap()
+            .log
+            .len(),
+        before
+    );
 }
 
 #[test]
@@ -2922,14 +3034,23 @@ fn task_move_hands_nothing_off_when_mini_cannot_receive_it() {
     let task = plan.local_task();
     let worktree = place(&plan, &task, "stay-task");
     fs::write(worktree.join("notes.txt"), "uncommitted\n").unwrap();
-    let before = plan.local.task_ownership(&task).unwrap().log.len();
+    let before = loopflow::store::ownership::task_ownership(&plan.local, &task)
+        .unwrap()
+        .log
+        .len();
     let unchanged = || {
         assert_eq!(
             git(&worktree, &["status", "--porcelain"]),
             "?? notes.txt",
             "the worktree stays uncommitted"
         );
-        assert_eq!(plan.local.task_ownership(&task).unwrap().log.len(), before);
+        assert_eq!(
+            loopflow::store::ownership::task_ownership(&plan.local, &task)
+                .unwrap()
+                .log
+                .len(),
+            before
+        );
         assert!(plan.local.task_owned(&task).unwrap());
     };
     let refused = |expected: &str| {
@@ -2980,8 +3101,10 @@ fn task_move_hands_the_task_back_when_its_checkpoint_cannot_be_pushed() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("push refused"), "{stderr}");
 
-    let local = plan.local.local_machine().unwrap().id;
-    let ownership = plan.local.task_ownership(&task).unwrap();
+    let local = loopflow::store::machines::local_machine(&plan.local)
+        .unwrap()
+        .id;
+    let ownership = loopflow::store::ownership::task_ownership(&plan.local, &task).unwrap();
     assert_eq!(ownership.owner.unwrap().machine.id, Some(local.clone()));
     let kinds: Vec<_> = ownership
         .log
@@ -2992,7 +3115,14 @@ fn task_move_hands_the_task_back_when_its_checkpoint_cannot_be_pushed() {
         .collect();
     assert_eq!(
         kinds,
-        [Some(local), Some(plan.remote.local_machine().unwrap().id)],
+        [
+            Some(local),
+            Some(
+                loopflow::store::machines::local_machine(&plan.remote)
+                    .unwrap()
+                    .id
+            )
+        ],
         "the log reads: handed to mini, handed back"
     );
     assert!(plan
@@ -3074,23 +3204,25 @@ fn task_move_to_a_mini_without_the_repository_takes_it_in_from_planning() {
     );
     assert!(stderr.contains("Arrived on mini"), "{stderr}");
 
-    let remote =
-        loopflow::store::sqlite::SqliteStore::new(&remote_home.join("loopflow.db")).unwrap();
+    let remote = loopflow::store::open_sqlite(&remote_home.join("loopflow.db")).unwrap();
     assert!(
         remote.task(&task).unwrap().is_some(),
         "mini never took the Task in"
     );
     assert_eq!(
-        remote
-            .task_ownership(&task)
+        loopflow::store::ownership::task_ownership(&remote, &task)
             .unwrap()
             .owner
             .unwrap()
             .machine
             .id,
-        Some(remote.local_machine().unwrap().id)
+        Some(
+            loopflow::store::machines::local_machine(&remote)
+                .unwrap()
+                .id
+        )
     );
-    let local = loopflow::store::sqlite::SqliteStore::new(&local_home.join("loopflow.db")).unwrap();
+    let local = loopflow::store::open_sqlite(&local_home.join("loopflow.db")).unwrap();
     assert_eq!(
         remote.planning_user_key().unwrap(),
         local.planning_user_key().unwrap(),
@@ -3292,11 +3424,13 @@ fn a_move_killed_while_leaving_shows_in_status_and_the_same_command_carries_it_o
     let _laptop = loopflow_test_support::MachineServer::start(lf, &local_home);
     let _mini = loopflow_test_support::MachineServer::start(lf, &remote_home);
     let _ended = EndRecorded(vec![local_home.clone(), remote_home.clone()]);
-    let mini = plan.remote.local_machine().unwrap().id;
+    let mini = loopflow::store::machines::local_machine(&plan.remote)
+        .unwrap()
+        .id;
     let (task, worktree) = placed_task(&plan, "leaving-task");
     let mut run = start_hold_run(&fixture, &task, &worktree);
     let step = format!("task wait {task} --timeout 120s");
-    plan.local.begin_task_move(&task, &mini).unwrap();
+    loopflow::store::ownership::begin_task_move(&plan.local, &task, &mini).unwrap();
     loopflow_test_support::end_recorded_processes(&local_home, Path::new(lf));
     assert!(
         exits_within_ten_seconds(&mut run),
@@ -3342,7 +3476,10 @@ fn a_move_killed_while_leaving_shows_in_status_and_the_same_command_carries_it_o
         "halfway"
     );
     assert_eq!(plan.local.task_move_in_flight(&task).unwrap(), None);
-    let owner = plan.remote.task_ownership(&task).unwrap().owner.unwrap();
+    let owner = loopflow::store::ownership::task_ownership(&plan.remote, &task)
+        .unwrap()
+        .owner
+        .unwrap();
     assert_eq!(owner.machine.id, Some(mini));
     let mini_status = fixture
         .command(&[
@@ -3429,7 +3566,9 @@ fn a_moved_task_comes_back_with_the_same_command() {
     );
     // Mini says where the Task went. Forwarded from the laptop, the request
     // reads the laptop's preferences, which never name the laptop itself.
-    let laptop_id = plan.local.local_machine().unwrap().id;
+    let laptop_id = loopflow::store::machines::local_machine(&plan.local)
+        .unwrap()
+        .id;
     let forwarded = fixture
         .command(&["--machine", "mini", "task", "status", task.as_str()])
         .current_dir(&plan.local_path)
@@ -3562,8 +3701,12 @@ fn wait_step_live(db: &Path) -> bool {
 fn resuming_a_task_conversation_on_mini_moves_its_task() {
     let fixture = preview_machines();
     let plan = SharedPlan::cloned(&fixture);
-    let mini = plan.remote.local_machine().unwrap().id;
-    let laptop = plan.local.local_machine().unwrap().id;
+    let mini = loopflow::store::machines::local_machine(&plan.remote)
+        .unwrap()
+        .id;
+    let laptop = loopflow::store::machines::local_machine(&plan.local)
+        .unwrap()
+        .id;
     let (task, worktree) = placed_task(&plan, "conversation-task");
     let session = claude_conversation(&fixture, &worktree, "0199a213-81c0-7800-8aa1-bbab2a035a56");
 
@@ -3582,11 +3725,15 @@ fn resuming_a_task_conversation_on_mini_moves_its_task() {
     assert_success(&moved);
     // The conversation took its Task along: both Machines say it runs on mini.
     assert_eq!(
-        plan.local.task_execution_route(&task).unwrap().machine_id,
+        loopflow::store::ownership::task_execution_route(&plan.local, &task)
+            .unwrap()
+            .machine_id,
         mini
     );
     assert_eq!(
-        plan.remote.task_execution_route(&task).unwrap().machine_id,
+        loopflow::store::ownership::task_execution_route(&plan.remote, &task)
+            .unwrap()
+            .machine_id,
         mini
     );
     let status = fixture
@@ -3639,8 +3786,12 @@ fn resuming_a_task_conversation_on_mini_moves_its_task() {
 fn a_handed_back_tasks_conversation_resumes_here() {
     let fixture = preview_machines();
     let plan = SharedPlan::cloned(&fixture);
-    let mini = plan.remote.local_machine().unwrap().id;
-    let laptop = plan.local.local_machine().unwrap().id;
+    let mini = loopflow::store::machines::local_machine(&plan.remote)
+        .unwrap()
+        .id;
+    let laptop = loopflow::store::machines::local_machine(&plan.local)
+        .unwrap()
+        .id;
     let (task, worktree) = placed_task(&plan, "handed-back");
     let session = claude_conversation(&fixture, &worktree, "0199a213-81c0-7800-8aa1-bbab2a035a5c");
     let moved = fixture
@@ -3670,13 +3821,17 @@ fn a_handed_back_tasks_conversation_resumes_here() {
             [rental.as_str(), mini.as_str()],
         )
         .unwrap();
-    let (_, returned) = plan
-        .local
-        .set_rental_state(&rental, loopflow::rental::RentalState::Ended)
-        .unwrap();
+    let (_, returned) = loopflow::store::ownership::set_rental_state(
+        &plan.local,
+        &rental,
+        loopflow::rental::RentalState::Ended,
+    )
+    .unwrap();
     assert_eq!(returned, std::slice::from_ref(&task));
     assert_eq!(
-        plan.local.task_execution_route(&task).unwrap().machine_id,
+        loopflow::store::ownership::task_execution_route(&plan.local, &task)
+            .unwrap()
+            .machine_id,
         laptop
     );
 
@@ -3697,7 +3852,9 @@ fn a_handed_back_tasks_conversation_resumes_here() {
 fn resuming_a_tasks_other_conversation_on_mini_carries_that_one() {
     let fixture = preview_machines();
     let plan = SharedPlan::cloned(&fixture);
-    let mini = plan.remote.local_machine().unwrap().id;
+    let mini = loopflow::store::machines::local_machine(&plan.remote)
+        .unwrap()
+        .id;
     let (task, worktree) = placed_task(&plan, "two-conversations");
     let first = claude_conversation(&fixture, &worktree, "0199a213-81c0-7800-8aa1-bbab2a035a5a");
     let other = claude_conversation(&fixture, &worktree, "0199a213-81c0-7800-8aa1-bbab2a035a5b");
@@ -3712,7 +3869,9 @@ fn resuming_a_tasks_other_conversation_on_mini_carries_that_one() {
     let resumed: Value = serde_json::from_slice(&resumed.stdout).unwrap();
     assert_eq!(resumed["id"], other.as_str());
     assert_eq!(
-        plan.remote.task_execution_route(&task).unwrap().machine_id,
+        loopflow::store::ownership::task_execution_route(&plan.remote, &task)
+            .unwrap()
+            .machine_id,
         mini
     );
     let there = plan.remote.session(&other).unwrap().unwrap();
@@ -3729,14 +3888,13 @@ fn a_moved_session_clones_its_repository_where_none_is_checked_out() {
         .canonicalize()
         .unwrap();
     let local =
-        loopflow::store::sqlite::SqliteStore::new(&fixture.root.path().join("local/loopflow.db"))
-            .unwrap();
-    local
-        .bind_repository(
-            repo.path().canonicalize().unwrap().to_str().unwrap(),
-            &loopflow::durable::RepositoryId::new(),
-        )
-        .unwrap();
+        loopflow::store::open_sqlite(&fixture.root.path().join("local/loopflow.db")).unwrap();
+    loopflow::repository::location::bind_repository(
+        &local,
+        repo.path().canonicalize().unwrap().to_str().unwrap(),
+        &loopflow::durable::RepositoryId::new(),
+    )
+    .unwrap();
     let session = claude_conversation(&fixture, &worktree, "0199a213-81c0-7800-8aa1-bbab2a035a57");
 
     let moved = fixture
@@ -3752,10 +3910,9 @@ fn a_moved_session_clones_its_repository_where_none_is_checked_out() {
         .output()
         .unwrap();
     assert_success(&moved);
-    let remote = loopflow::store::sqlite::SqliteStore::new(
-        &fixture.root.path().join("remote/store/loopflow.db"),
-    )
-    .unwrap();
+    let remote =
+        loopflow::store::open_sqlite(&fixture.root.path().join("remote/store/loopflow.db"))
+            .unwrap();
     let arrived = remote.session(&session).unwrap().unwrap();
     let src = fixture
         .root
@@ -3792,7 +3949,9 @@ fn served_ownership_routes_to_its_writer_and_never_falls_back_locally() {
     let fixture = preview_machines();
     let plan = SharedPlan::new(&fixture);
     let task = plan.task();
-    plan.remote.claim_task(&task).unwrap().unwrap();
+    loopflow::store::ownership::claim_task(&plan.remote, &task)
+        .unwrap()
+        .unwrap();
     plan.to_local();
     let server = Server(fixture.command(&["server", "run"]).spawn().unwrap());
     let deadline = Instant::now() + Duration::from_secs(20);
@@ -3825,13 +3984,19 @@ fn served_ownership_routes_to_its_writer_and_never_falls_back_locally() {
             }
         }))
     };
-    let local = plan.local.task_ownership(&task).unwrap();
+    let local = loopflow::store::ownership::task_ownership(&plan.local, &task).unwrap();
     let ownership = send(true).unwrap().result;
     assert_eq!(
         ownership["owner"]["machine"]["id"],
-        plan.remote.local_machine().unwrap().id.as_str()
+        loopflow::store::machines::local_machine(&plan.remote)
+            .unwrap()
+            .id
+            .as_str()
     );
-    assert_eq!(plan.local.task_ownership(&task).unwrap(), local);
+    assert_eq!(
+        loopflow::store::ownership::task_ownership(&plan.local, &task).unwrap(),
+        local
+    );
     // A CLI mutation that takes no body must finish with stdin still open,
     // as it is at a terminal. Sharing request I/O must not wait for EOF.
     let mut cli = Server(
@@ -3876,8 +4041,16 @@ fn served_ownership_routes_to_its_writer_and_never_falls_back_locally() {
         refused.message.contains("peer unavailable") || refused.message.contains("unavailable"),
         "{refused:?}"
     );
-    assert_eq!(plan.local.task_ownership(&task).unwrap(), local);
-    assert!(plan.remote.task_ownership(&task).unwrap().owner.is_some());
+    assert_eq!(
+        loopflow::store::ownership::task_ownership(&plan.local, &task).unwrap(),
+        local
+    );
+    assert!(
+        loopflow::store::ownership::task_ownership(&plan.remote, &task)
+            .unwrap()
+            .owner
+            .is_some()
+    );
     drop(server);
 }
 

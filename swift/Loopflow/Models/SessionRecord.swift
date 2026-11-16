@@ -235,7 +235,7 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     /// Provider harness recorded on the Session's capture manifest; nil when the
     /// capture is on another Machine or its manifest is unreadable.
     public let provider: String?
-    /// The login its conversation is pinned to; nil for a shared or unrouted one.
+    /// Historical attribution: the saved login its conversation last recorded; never the current native login.
     public let account: String?
     /// The model its current input launched with, when one was named.
     public let model: String?

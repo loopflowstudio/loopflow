@@ -684,7 +684,7 @@ async fn list(
                 },
                 place,
                 match &session.account {
-                    Some(account) => format!("{}  on {account}", session.title),
+                    Some(account) => format!("{}  historical account: {account}", session.title),
                     None => session.title.clone(),
                 }
             );

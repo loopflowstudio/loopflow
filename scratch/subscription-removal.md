@@ -190,20 +190,13 @@ Task membership does not grant permission to resend interactive input. The norma
 launch, refusal/recovery matrix and transcript-only adoption fit that model; no
 new product choice is needed.
 
-Next implement direction: make historical account attribution read as history in
-Session displays. `lf session list` currently renders retained `session.account`
-as “on {account}”. After resuming an old thread with a different native login,
-that wording incorrectly presents the old account as current launch identity.
-Use “historical account: {account}” (or an equally clear historical label), and
-document the retained field as historical attribution wherever it is exposed.
-Keep the stored value and wire key; do not clear history, infer the current
-login, poll authentication or add a replacement identity selector. Check the
-rendered list for an old attributed Session after native resume and a new
-Session with no account attribution.
-
-The review page is `scratch/concept-review.html`. It marks this display change
-as proposed; launch and retry behavior are already implemented. Loop-or-next
-should iterate to implement for the attribution wording, then return to gate.
+Historical attribution now reads as history: `lf session list` renders
+retained `session.account` as “historical account: {account}”, and the Rust
+`SessionSummary::account` and Swift `SessionRecord.account` doc comments call it
+historical attribution, never the current native login. Stored value and wire
+key are unchanged. No test asserts the rendered label yet; gate or qa checks it
+on an old attributed Session after native resume and on a new Session with no
+attribution. The concept review page is `scratch/concept-review.html`.
 
 One architectural cut ships as one PR; these are implementation order, not
 separate Tasks or compatibility stages.
@@ -214,8 +207,8 @@ raw fixture insertion is test-only. Native stderr failures now remain visible
 when a provider exits before emitting its first structured event. Detached
 launches inherit native provider homes and API-key environment.
 
-The native-auth implementation and its focused acceptance are complete. The
-historical-attribution display correction above remains for implement. Gate owns
+The native-auth implementation, its focused acceptance and the attribution
+wording are complete. Gate owns
 the full changed-path suites and final review; publication follows in the caller's
 delivery step. No merge or landing belongs to this implementation step.
 

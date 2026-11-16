@@ -184,19 +184,6 @@ pub(crate) fn departure_notice(
         Departure::Terminal { to: None } => {
             "This conversation moved to another terminal on this Machine.".into()
         }
-        Departure::Account { account } => {
-            let label = store
-                .session(session)?
-                .and_then(|session| session.provider)
-                .map(|provider| {
-                    crate::store::account_labels::get_provider_account(store, &provider, &account)
-                })
-                .transpose()?
-                .flatten()
-                .and_then(|account| account.login_email.map(|email| email.to_string()))
-                .unwrap_or_else(|| account.to_string());
-            format!("This conversation moved to account {label}: lf resume {session}")
-        }
         Departure::Machine { machine, task } => {
             let label = crate::store::machines::machine_by_id(store, &machine)?
                 .map_or_else(|| machine.to_string(), |machine| machine.name());
@@ -583,7 +570,7 @@ fn run_native_session(
         // Hand the wait to the execution owner and become the provider, or its
         // client: no launcher sits beside the agent holding the heap that built it.
         if let Some(capture) = capture {
-            capture.observe_provider(agent_session.cloned(), None);
+            capture.observe_provider(agent_session.cloned());
         }
         let exit = crate::harness::native_exit::NativeExit {
             session: attachment.1.clone(),

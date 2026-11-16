@@ -271,13 +271,16 @@ Headless runs retry transient capacity, rate-limit, availability and transport
 failures four times, continuing the same provider conversation so partial work
 survives; the backoff tops out at 30 seconds.
 
-A classified usage-limit or model-unavailable refusal moves a headless run
-through its configured model/harness order. It never selects another login or
+A classified usage-limit or model-unavailable refusal moves a Graph step
+through its configured model/harness order; other headless work stops with
+the provider error. It never selects another login or
 reads reset times. An explicit agent pins the harness; bare Claude can still
 try its other models. When the whole order, or an explicit model pin, is
-refused on a usage limit, the run waits 5, 15, 30, then 60 minutes, trying again
-from the first entry after each; then it stops with the provider error and a
-next step. Other refusals stop at once. Interactive Sessions retain the
+refused on a usage limit, the step waits 5, 15, 30, then 60 minutes, trying
+again from the first entry after each; then it stops with the provider error
+and a next step. A revoked login skips its provider's other models and, with no
+other provider left, stops with how to sign in again. Other refusals stop at
+once. Interactive Sessions retain the
 refusal and require an explicit retry or move, even when attached to a Task.
 
 ```bash

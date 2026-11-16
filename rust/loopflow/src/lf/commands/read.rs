@@ -330,13 +330,10 @@ pub enum Read {
         wave: Option<String>,
         repo: Option<String>,
     },
-    /// `lf account [<provider>] [--cached] --json`: saved service authentication.
+    /// `lf account [<provider>] --json`: saved service authentication.
     #[serde(rename = "account.list")]
     #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::provider_auth::operations::account_status::AccountReport>()))]
-    AccountList {
-        target: Option<String>,
-        cached: bool,
-    },
+    AccountList { target: Option<String> },
     /// `lf --cwd <directory> list [<path>…] --json`: the commands, skills,
     /// graphs and Waves under `path`.
     #[serde(rename = "skill.list")]
@@ -572,12 +569,9 @@ impl Read {
                 argv.push("--json".into());
                 argv
             }
-            Self::AccountList { target, cached } => {
+            Self::AccountList { target } => {
                 let mut argv = words(&["account"]);
                 argv.extend(target.iter().cloned());
-                if *cached {
-                    argv.push("--cached".into());
-                }
                 argv.push("--json".into());
                 argv
             }
@@ -853,9 +847,9 @@ impl Read {
                 wave.as_deref(),
                 repo.as_deref(),
             )?),
-            Self::AccountList { target, cached } => value(
-                &loopflow_execution::engine::account::list(target.as_deref(), *cached)?,
-            ),
+            Self::AccountList { target } => value(&loopflow_execution::engine::account::list(
+                target.as_deref(),
+            )?),
             Self::SkillList { directory, path } => {
                 let repo = loopflow_execution::repo::discover_repo_root(directory)
                     .map_err(|error| Error::refused(&error, ErrorCode::Invalid))?

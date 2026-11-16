@@ -247,7 +247,7 @@ pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
             max_usd,
             json,
         } => {
-            loopflow_execution::machine::forward::read(&std::env::current_dir()?)?;
+            loopflow_execution::machine::forward::read_for_rental(&std::env::current_dir()?)?;
             let (rental, machine) = rent(&runtime, sqlite, name, *hours, *max_usd, true)?;
             if *json {
                 println!("{}", serde_json::to_string(&rental)?);
@@ -262,7 +262,7 @@ pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
                 );
                 if !batch {
                     println!(
-                        "Next: `lf machine connect {label} github` and `lf machine connect {label} claude`; \
+                        "Next: `lf machine connect {label} github`; launches carry `forward`; \
                          `lf machine end {label}` gives it back"
                     );
                 }
@@ -621,7 +621,7 @@ pub fn place(
         repo, None, issue,
     ))?;
     // A rental that could not authenticate its launch is money for nothing.
-    loopflow_execution::machine::forward::read(repo)?;
+    loopflow_execution::machine::forward::read_for_rental(repo)?;
     let (rental, machine) = rent(&runtime, sqlite, name, None, None, false)?;
     let label = machine.name();
     if let Err(error) = prepare(&runtime, &label, repo, &task.repository_id, batch) {

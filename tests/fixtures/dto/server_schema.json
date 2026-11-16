@@ -8180,18 +8180,14 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf account [<provider>] [--cached] --json`: saved service authentication.",
+          "description": "`lf account [<provider>] --json`: saved service authentication.",
           "examples": [
             {
-              "cached": true,
               "kind": "account.list",
               "target": "linear"
             }
           ],
           "properties": {
-            "cached": {
-              "type": "boolean"
-            },
             "kind": {
               "const": "account.list",
               "type": "string"
@@ -8205,8 +8201,7 @@
           },
           "required": [
             "kind",
-            "target",
-            "cached"
+            "target"
           ],
           "type": "object",
           "x-result": {

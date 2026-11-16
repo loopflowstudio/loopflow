@@ -2,36 +2,57 @@
 #![cfg(unix)]
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
+use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
 use loopflow_test_support::{MachineServer, TestRepo};
 use serde_json::Value;
 
-#[test]
-fn pinned_headless_refusal_shows_provider_message_and_waits_before_trying_again() {
+/// A Claude stand-in that counts its dispatches and reports a `rejected`
+/// rate limit before each result; `refused` also fails the turn.
+fn rate_limited_fixture(refused: bool) -> Fixture {
     let fixture = Fixture::new("claude:opus");
     let provider = fixture.home.path().join("bin/claude");
-    let source = fs::read_to_string(&provider).unwrap().replace(
-        "'subtype':'success','result':'done'",
-        "'subtype':'error_during_execution','is_error':True,'result':\"You've hit your limit.\\nResets 3pm (America/Los_Angeles).\"",
-    ).replace(
+    let mut source = fs::read_to_string(&provider).unwrap().replace(
         "    message = json.loads(sys.stdin.readline())",
         "    with open(os.environ['HOME']+'/dispatches', 'a') as out:\n        out.write('dispatch\\n')\n    message = json.loads(sys.stdin.readline())",
     ).replace(
         "    print(json.dumps({'type':'result'",
         "    print(json.dumps({'type':'rate_limit_event','rate_limit_info':{'status':'rejected','rate_limit_type':'five_hour'}}), flush=True)\n    print(json.dumps({'type':'result'",
     );
+    if refused {
+        source = source.replace(
+            "'subtype':'success','result':'done'",
+            "'subtype':'error_during_execution','is_error':True,'result':\"You've hit your limit.\\nResets 3pm (America/Los_Angeles).\"",
+        );
+    }
     fs::write(provider, source).unwrap();
+    fixture
+}
 
+impl Fixture {
+    fn dispatches(&self) -> String {
+        fs::read_to_string(self.home.path().join("dispatches")).unwrap()
+    }
+}
+
+#[test]
+fn a_graph_step_refused_on_its_pinned_agent_shows_the_message_and_waits() {
+    let fixture = rate_limited_fixture(true);
+    fixture.repo.create_file(".lf/skills/probe.md", "probe");
+    fixture
+        .repo
+        .create_file(".lf/graphs/refusal-probe.yaml", "- probe\n");
     // The real waits are minutes long: read until the wait is announced, then
     // stop the run. Its schedule and final stop are unit-tested.
     let mut child = fixture
         .command()
-        .args(["-b", "-a", "claude:opus", ":", "say done"])
+        .args(["-b", "-a", "claude:opus", "graph", "refusal-probe"])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
+        .process_group(0)
         .spawn()
         .unwrap();
     let stderr = std::io::BufReader::new(child.stderr.take().unwrap());
@@ -52,7 +73,12 @@ fn pinned_headless_refusal_shows_provider_message_and_waits_before_trying_again(
         stderr.push_str(&line);
         stderr.push('\n');
     }
-    child.kill().unwrap();
+    // The Graph and its step share the process group started above.
+    let group = i32::try_from(child.id()).unwrap();
+    Command::new("/bin/kill")
+        .args(["-TERM", "--", &format!("-{group}")])
+        .status()
+        .unwrap();
     child.wait().unwrap();
 
     assert!(stderr.contains("You've hit your limit."), "{stderr}");
@@ -60,13 +86,38 @@ fn pinned_headless_refusal_shows_provider_message_and_waits_before_trying_again(
         stderr.contains("Resets 3pm (America/Los_Angeles)."),
         "{stderr}"
     );
-    assert!(stderr.contains("claude: "), "{stderr}");
     assert!(stderr.contains("Waiting until "), "{stderr}");
     // It waits before a second dispatch, never instead of the first.
-    assert_eq!(
-        fs::read_to_string(fixture.home.path().join("dispatches")).unwrap(),
-        "dispatch\n"
-    );
+    assert_eq!(fixture.dispatches(), "dispatch\n");
+}
+
+#[test]
+fn headless_work_outside_a_graph_stops_at_a_usage_limit_with_the_provider_message() {
+    let fixture = rate_limited_fixture(true);
+    let output = fixture
+        .command()
+        .args(["-b", "-a", "claude:opus", ":", "say done"])
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "{stderr}");
+    assert!(stderr.contains("You've hit your limit."), "{stderr}");
+    assert!(!stderr.contains("Waiting until "), "{stderr}");
+    assert_eq!(fixture.dispatches(), "dispatch\n");
+}
+
+#[test]
+fn a_turn_the_provider_finishes_succeeds_despite_a_rejected_rate_limit_event() {
+    let fixture = rate_limited_fixture(false);
+    let output = fixture
+        .command()
+        .args(["-b", "-a", "claude:opus", ":", "say done"])
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    success(&output);
+    assert_eq!(fixture.dispatches(), "dispatch\n");
 }
 
 struct Fixture {
@@ -733,6 +784,16 @@ fn setup_token_and_codex_auth_json_reach_a_remote_launch_only_by_name() {
             .unwrap()
     };
 
+    // An environment file a failed launch never read is swept by the next delivery.
+    let stale = remote.home.path().join(".lf/forward/unread");
+    fs::create_dir_all(stale.parent().unwrap()).unwrap();
+    fs::write(&stale, "export CLAUDE_CODE_OAUTH_TOKEN=old\n").unwrap();
+    fs::File::options()
+        .write(true)
+        .open(&stale)
+        .unwrap()
+        .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(3600))
+        .unwrap();
     let output = launch(Some(TOKEN));
     success(&output);
     assert_eq!(remote.received()["forwarded"], TOKEN);
@@ -783,6 +844,15 @@ fn setup_token_and_codex_auth_json_reach_a_remote_launch_only_by_name() {
         );
     }
 
+    // A destination already holding the same file says nothing about it.
+    let output = launch(Some(TOKEN));
+    success(&output);
+    assert!(
+        !String::from_utf8_lossy(&output.stderr).contains("keeps its own"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
     // A destination with its own login keeps it.
     fs::write(&copied, "destination login").unwrap();
     let output = launch(Some(TOKEN));
@@ -801,6 +871,16 @@ fn setup_token_and_codex_auth_json_reach_a_remote_launch_only_by_name() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(!argv_log.exists());
+
+    // A command that launches no agent carries nothing, so it needs no value.
+    let output = local
+        .command()
+        .args(["--machine", "fixture", "machine", "self", "--json"])
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stderr.contains("forward.env"), "{stderr}");
+    assert!(argv_log.exists(), "{stderr}");
 }
 
 #[path = "support/mod.rs"]
@@ -1886,7 +1966,8 @@ if '--version' not in args:
     except FileNotFoundError:
         sys.stdin.readline()
         print('native login required', file=sys.stderr); sys.exit(34)
-    assert os.environ['ANTHROPIC_API_KEY'] == 'fixture-native-api-key'
+    # An exported API key never reaches Claude: it bills the native login.
+    assert 'ANTHROPIC_API_KEY' not in os.environ
     with open(os.environ['HOME']+'/auth-seen.json','w') as out: json.dump(auth,out)
 "#,
                 )
@@ -1897,7 +1978,7 @@ if '--version' not in args:
 [ "$CODEX_HOME" = "$HOME/.codex" ] || exit 35
 [ -z "$LF_PROVIDER_ACCOUNT_ID" ] || exit 36
 [ -f "$CODEX_HOME/auth.json" ] || { echo 'native login required' >&2; exit 34; }
-[ "$OPENAI_API_KEY" = fixture-native-api-key ] || exit 37
+[ -z "${OPENAI_API_KEY+set}" ] || exit 37
 cp "$CODEX_HOME/auth.json" "$HOME/auth-seen.json"
 "#,
                 )

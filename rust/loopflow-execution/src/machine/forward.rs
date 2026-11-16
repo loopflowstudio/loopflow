@@ -69,24 +69,74 @@ pub fn read(directory: &Path) -> Result<Forwarded> {
     Ok(Forwarded { env, files })
 }
 
+/// What Claude and Codex sign in with: a setup or access token in the
+/// environment, or the login file under the home.
+const AGENT_LOGIN_ENV: [&str; 2] = ["CLAUDE_CODE_OAUTH_TOKEN", "CODEX_ACCESS_TOKEN"];
+const AGENT_LOGIN_FILES: [&str; 2] = [".claude/.credentials.json", ".codex/auth.json"];
+
+impl Forwarded {
+    fn carries_agent_login(&self) -> bool {
+        self.env
+            .iter()
+            .any(|(name, _)| AGENT_LOGIN_ENV.contains(&name.as_str()))
+            || self
+                .files
+                .iter()
+                .any(|(path, _)| AGENT_LOGIN_FILES.iter().any(|file| path == Path::new(file)))
+    }
+}
+
+/// `read` for an on-demand rental, which starts with no login of its own: a
+/// `forward` that carries no Claude or Codex login stops it before anything
+/// is rented.
+pub fn read_for_rental(directory: &Path) -> Result<Forwarded> {
+    let forwarded = read(directory)?;
+    if !forwarded.carries_agent_login() {
+        bail!(
+            "an on-demand rental has no Claude or Codex login, and `forward` names none to carry; \
+             after `claude setup-token`, `doppler secrets set CLAUDE_CODE_OAUTH_TOKEN` and \
+             `lf set --global forward.env '[CLAUDE_CODE_OAUTH_TOKEN]'`, \
+             or `lf set --global forward.files '[~/.codex/auth.json]'`"
+        );
+    }
+    Ok(forwarded)
+}
+
+/// Forwarded environment files older than this were never read by their
+/// launch (its SSH failed); the next delivery removes them.
+const UNREAD_MINUTES: u32 = 10;
+
 /// Put the named files and environment on `machine` over one SSH exchange whose
 /// script carries only names and lengths; the values travel on its stdin. A
-/// destination that already has a named file keeps its own. Returns `preamble`
-/// preceded by reading the forwarded environment and removing its file.
-pub fn deliver(machine: &Machine, forwarded: &Forwarded, preamble: &str) -> Result<String> {
+/// destination that already has a named file keeps its own; when its copy
+/// differs, `notices` says so. Returns `preamble` preceded by reading the
+/// forwarded environment and removing its file.
+pub fn deliver(
+    machine: &Machine,
+    forwarded: &Forwarded,
+    preamble: &str,
+    notices: &mut dyn Write,
+) -> Result<String> {
     if forwarded.env.is_empty() && forwarded.files.is_empty() {
         return Ok(preamble.to_owned());
     }
-    let mut script = vec!["set -e".to_owned(), "umask 077".to_owned()];
+    let mut script = vec![
+        "set -e".to_owned(),
+        "umask 077".to_owned(),
+        format!(
+            "[ ! -d \"$HOME/.lf/forward\" ] || find \"$HOME/.lf/forward\" -type f -mmin +{UNREAD_MINUTES} -exec rm -f {{}} +"
+        ),
+    ];
     let mut input = Vec::new();
     for (relative, bytes) in &forwarded.files {
         let path = remote_path(&relative.to_string_lossy());
         let shown = sh_quote(&format!("~/{}", relative.display()));
         let count = bytes.len();
         script.push(format!(
-            "p={path}; d=$(dirname \"$p\"); [ -d \"$d\" ] || mkdir -p \"$d\"; \
-             if [ -e \"$p\" ]; then dd bs=1 count={count} of=/dev/null 2>/dev/null; echo kept {shown}; \
-             else dd bs=1 count={count} of=\"$p.lf-forward\" 2>/dev/null; chmod 600 \"$p.lf-forward\"; mv \"$p.lf-forward\" \"$p\"; fi"
+            "p={path}; t=\"$p.lf-forward\"; d=$(dirname \"$p\"); [ -d \"$d\" ] || mkdir -p \"$d\"; \
+             dd bs=1 count={count} of=\"$t\" 2>/dev/null; \
+             if [ -e \"$p\" ]; then cmp -s \"$t\" \"$p\" || echo kept {shown}; rm -f \"$t\"; \
+             else chmod 600 \"$t\"; mv \"$t\" \"$p\"; fi"
         ));
         input.extend_from_slice(bytes);
     }
@@ -137,7 +187,7 @@ pub fn deliver(machine: &Machine, forwarded: &Forwarded, preamble: &str) -> Resu
     }
     for line in String::from_utf8_lossy(&output.stdout).lines() {
         if let Some(path) = line.strip_prefix("kept ") {
-            eprintln!("{name} keeps its own {path}");
+            writeln!(notices, "{name} keeps its own {path}")?;
         }
     }
     Ok(match env_file {
@@ -194,7 +244,30 @@ fn doppler_value(name: &str, directory: &Path) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{home_relative, sourced, valid_name};
+    use super::{home_relative, sourced, valid_name, Forwarded};
+    use secrecy::SecretString;
+    use std::path::PathBuf;
+
+    #[test]
+    fn a_rental_needs_a_forwarded_claude_or_codex_login() {
+        let forwarded = |env: &[&str], files: &[&str]| Forwarded {
+            env: env
+                .iter()
+                .map(|name| (name.to_string(), SecretString::new("value".into())))
+                .collect(),
+            files: files
+                .iter()
+                .map(|path| (PathBuf::from(path), Vec::new()))
+                .collect(),
+        };
+        assert!(!forwarded(&[], &[]).carries_agent_login());
+        assert!(
+            !forwarded(&["GH_TOKEN", "ANTHROPIC_API_KEY"], &[".ssh/config"]).carries_agent_login()
+        );
+        assert!(forwarded(&["CLAUDE_CODE_OAUTH_TOKEN"], &[]).carries_agent_login());
+        assert!(forwarded(&[], &[".codex/auth.json"]).carries_agent_login());
+        assert!(forwarded(&[], &[".claude/.credentials.json"]).carries_agent_login());
+    }
 
     #[test]
     fn names_and_paths_are_checked_before_anything_moves() {

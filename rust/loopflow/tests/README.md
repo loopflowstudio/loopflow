@@ -764,9 +764,10 @@ Never use the installed store to prove an unmerged migration.
 checks native launch/resume with unusable saved accounts, transcript-only adoption,
 sandboxed Tasks and remote preparation. Credential markers stay private to the
 fixture. `agent::tests::native_retry_policy_matrix` checks bare/Task ×
-interactive/headless refusal handling: only headless runs follow configured
-model/harness fallbacks, explicit pins stop, and quota snapshots or successful
-answers mentioning limits do not trigger fallback. Fixtures use isolated homes,
+interactive/headless refusal handling: only headless Graph steps follow
+configured model/harness fallbacks and wait out a usage limit, explicit pins
+stop, a revoked login skips its provider's models, and quota snapshots or
+successful answers mentioning limits do not trigger fallback. Fixtures use isolated homes,
 provider stand-ins and no live inference or credential refresh.
 
 ## Boundary-specific checks

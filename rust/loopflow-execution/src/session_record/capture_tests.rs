@@ -1276,7 +1276,7 @@ fn agent_session_identity_is_durable_before_the_provider_starts() {
     let capture = crate::session_record::SessionRecorder::begin_at(home.path(), spec(home.path()))
         .map(crate::process::LfProcessRuntime::new)
         .unwrap();
-    capture.observe_provider(Some("provider-session".into()), None);
+    capture.observe_provider(Some("provider-session".into()));
 
     assert_eq!(
         read_provider_session(&capture.artifact_dir())
@@ -1309,13 +1309,13 @@ fn provider_session_preserves_the_selected_account() {
 }
 
 #[test]
-fn recording_failure_cannot_forget_the_thread_or_account_used_by_retry() {
+fn recording_failure_cannot_forget_the_thread_used_by_retry() {
     let ledger = crate::journal::TestLedgerGuard::new();
     let _ambient = crate::test_ambient::EnvGuard::new();
     let home = ledger.home();
     crate::journal::with_runtime(home, &["lf".into(), "skill".into()], || {
-        // Exercise failure both before and after the account fact is saved,
-        // including a stale persisted thread after a provider-side switch.
+        // Exercise failure in the event log and in the saved thread, including
+        // a stale persisted thread after a provider-side switch.
         for (source, failover) in ["events.jsonl:%", "provider-session:%"]
             .into_iter()
             .flat_map(|source| [false, true].map(|failover| (source, failover)))
@@ -1323,8 +1323,6 @@ fn recording_failure_cannot_forget_the_thread_or_account_used_by_retry() {
             let capture = crate::session_record::SessionRecorder::begin_at(home, spec(home))
                 .map(crate::process::LfProcessRuntime::new)?;
             capture.claim_session_attachment()?;
-            let primary = crate::store::ProviderAccountId::parse("primary").unwrap();
-            let fallback = crate::store::ProviderAccountId::parse("fallback").unwrap();
             let thread = loopflow_model::id::AgentSessionId::from("observed-thread");
             let sql = rusqlite::Connection::open(crate::session_record::row_database(
                 &capture.artifact_dir(),
@@ -1339,13 +1337,12 @@ fn recording_failure_cannot_forget_the_thread_or_account_used_by_retry() {
                  WHEN NEW.kind='observed' AND json_extract(NEW.payload,'$.source') LIKE '{source}'
                  BEGIN SELECT RAISE(FAIL, 'observation unavailable'); END;"
             ))?;
-            capture.observe_provider(Some(thread.clone()), Some(primary.clone()));
+            capture.observe_provider(Some(thread.clone()));
             sql.execute_batch("DROP TRIGGER reject_observation")?;
             let store = crate::session_record::row_store(&capture.artifact_dir())?;
             store.record_agent_process_exit(&session, &original, false)?;
 
-            let forgotten =
-                capture.retry_agent_process("proof".into(), None, Some(primary.clone()), None);
+            let forgotten = capture.retry_agent_process("proof".into(), None, None);
             assert_eq!(
                 forgotten.unwrap_err().to_string(),
                 "AgentProcess retry must retain its thread",
@@ -1355,10 +1352,11 @@ fn recording_failure_cannot_forget_the_thread_or_account_used_by_retry() {
                 capture.session_attachment(),
                 Some((session.clone(), original))
             );
+            // Another provider starts fresh; the same one keeps its thread.
             if failover {
-                capture.retry_agent_process("proof".into(), None, Some(fallback), None)?;
+                capture.retry_agent_process("other".into(), None, None)?;
             } else {
-                capture.retry_agent_process("proof".into(), None, Some(primary), Some(&thread))?;
+                capture.retry_agent_process("proof".into(), None, Some(&thread))?;
             }
             capture.finish("completed")?;
         }
@@ -1382,20 +1380,18 @@ fn provider_observation_recovers_then_stops_repeating() {
          BEGIN SELECT RAISE(FAIL, 'observation unavailable'); END;",
     )
     .unwrap();
-    let account = crate::store::ProviderAccountId::parse("primary").unwrap();
-    capture.observe_provider(Some("thread".into()), Some(account.clone()));
+    capture.observe_provider(Some("thread".into()));
     assert!(read_provider_session(&dir).unwrap().is_none());
     sql.execute_batch("DROP TRIGGER reject_observation")
         .unwrap();
 
-    // A later account-only observation must also recover the lost thread.
-    capture.observe_provider(None, Some(account.clone()));
+    // A later observation without a thread must also recover the lost one.
+    capture.observe_provider(None);
     let recorded = read_provider_session(&dir).unwrap().unwrap();
     assert_eq!(recorded.agent_session, "thread".into());
-    assert_eq!(recorded.account_id, Some(account.clone()));
     let store = crate::session_record::row_store(&dir).unwrap();
     let events = store.input_events(&capture.artifact_key()).unwrap();
-    capture.observe_provider(Some("thread".into()), Some(account));
+    capture.observe_provider(Some("thread".into()));
     assert_eq!(store.input_events(&capture.artifact_key()).unwrap(), events);
 }
 

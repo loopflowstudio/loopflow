@@ -326,16 +326,8 @@ impl Cli {
             return Err(clap::Error::raw(clap::error::ErrorKind::ArgumentConflict,
                 "root --json requires --context or --explain; use the command's own --json when available\n"));
         }
-        if let Some(Commands::Account {
-            cmd,
-            target,
-            cached,
-            json,
-        }) = &self.command
-        {
-            if let Some(misuse) =
-                AccountCommand::misuse(cmd.as_ref(), target.as_deref(), *cached || *json)
-            {
+        if let Some(Commands::Account { cmd, target, json }) = &self.command {
+            if let Some(misuse) = AccountCommand::misuse(cmd.as_ref(), target.as_deref(), *json) {
                 return Err(clap::Error::raw(
                     clap::error::ErrorKind::ArgumentConflict,
                     format!("{misuse}\n"),
@@ -577,7 +569,7 @@ pub enum Commands {
     },
     /// Service authentication; native Claude and Codex logins belong to their clients
     #[command(
-        after_help = "lf account linear --cached --json\nlf account connect linear --chrome-profile Work"
+        after_help = "lf account linear --json\nlf account connect linear --chrome-profile Work"
     )]
     Account {
         #[command(subcommand)]
@@ -585,9 +577,6 @@ pub enum Commands {
         /// A service provider
         #[arg(value_parser = parse_service_provider)]
         target: Option<String>,
-        /// Read cached evidence without contacting providers
-        #[arg(long)]
-        cached: bool,
         /// Emit the accounts as one JSON document
         #[arg(long)]
         json: bool,
@@ -1148,7 +1137,7 @@ impl Commands {
             Self::Pr { cmd } => pr_changes_work(cmd.as_ref()),
             Self::Wt { cmd } => cmd.changes_work(),
             Self::Machine { cmd } => cmd.changes_work(),
-            Self::Account { cmd, cached, .. } => account_changes_work(cmd.as_ref(), *cached),
+            Self::Account { cmd, .. } => cmd.is_some(),
             Self::Server { .. } | Self::Holder { .. } => false,
             Self::Commit { .. } | Self::Sync(_) | Self::Steer { .. } => true,
             Self::Repo { cmd, .. } => cmd.as_ref().is_some_and(|cmd| cmd.changes_work()),
@@ -1353,11 +1342,6 @@ fn pr_changes_work(cmd: Option<&PrCommand>) -> bool {
             | PrCommand::Abandon { .. },
         ) => true,
     }
-}
-
-/// Bare `lf account` refreshes stale readings unless it reads the cache.
-fn account_changes_work(cmd: Option<&AccountCommand>, _cached: bool) -> bool {
-    cmd.is_some()
 }
 
 impl ReleaseCommand {

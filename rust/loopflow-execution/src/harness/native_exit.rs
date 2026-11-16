@@ -249,7 +249,7 @@ mod tests {
                 provider: "codex".into(),
                 client: false,
                 cwd: home.into(),
-                capture: Some(capture.hand_off(None, false, None)),
+                capture: Some(capture.hand_off()),
 
                 diagnostics: (home.join("absent.log"), 0),
             };
@@ -321,7 +321,7 @@ mod tests {
                     provider: "claude".into(),
                     client: false,
                     cwd: home.into(),
-                    capture: Some(capture.hand_off(None, false, None)),
+                    capture: Some(capture.hand_off()),
 
                     diagnostics: (home.join("absent.log"), 0),
                 };
@@ -385,7 +385,7 @@ mod tests {
                 provider: "claude".into(),
                 client: false,
                 cwd: home.into(),
-                capture: Some(capture.hand_off(None, false, None)),
+                capture: Some(capture.hand_off()),
 
                 diagnostics: (home.join("absent.log"), 0),
             };

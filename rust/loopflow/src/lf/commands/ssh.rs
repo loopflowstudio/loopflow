@@ -115,8 +115,11 @@ pub(super) fn run_with_io(
             cmd: crate::lf::WaveCommand::Show { .. }
         })
     );
-    // A named value this Machine cannot supply stops the launch before any SSH.
-    let forwarded = (!preview && !resident_operation)
+    // Only a command that may start an agent carries `forward`; a named value
+    // this Machine cannot supply stops it before any SSH. Session viewers are
+    // started by the destination's server, which carries nothing.
+    let launching = cli.may_launch_agent() && !resident_operation;
+    let forwarded = (!preview && launching)
         .then(|| loopflow_execution::machine::forward::read(directory))
         .transpose()?;
     let runtime = tokio::runtime::Runtime::new()?;
@@ -320,7 +323,13 @@ pub(super) fn run_with_io(
     }
     let mut preamble = build_preamble(&cmd, &extra_env);
     if let Some(forwarded) = &forwarded {
-        preamble = loopflow_execution::machine::forward::deliver(&target, forwarded, &preamble)?;
+        let mut stderr = std::io::stderr();
+        let notices: &mut dyn std::io::Write = match io.as_mut() {
+            Some(io) => &mut *io.error,
+            None => &mut stderr,
+        };
+        preamble =
+            loopflow_execution::machine::forward::deliver(&target, forwarded, &preamble, notices)?;
     }
     match io {
         Some(io) => {

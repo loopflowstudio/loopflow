@@ -49,7 +49,7 @@ lf set --global agents claude,codex
 lf -b implement
 ```
 
-A classified usage-limit or model-unavailable refusal lets a headless run try
+A classified usage-limit or model-unavailable refusal lets a Graph step try
 its configured next model or harness. Switching harnesses seeds the new
 conversation with earlier history and retains earlier outcomes. See
 [agent order](config.md#keep-going-when-a-provider-runs-out) for defaults,
@@ -57,12 +57,14 @@ model fallthrough and explicit pins.
 
 | Launch | After a classified refusal |
 | --- | --- |
-| Headless, with or without a Task | Follow configured model/harness fallbacks |
+| Graph step, with or without a Task | Follow configured model/harness fallbacks |
+| Other headless work (`lf -b`, commit and PR text) | Stop with the provider error; someone is waiting on it |
 | Interactive, with or without a Task | Keep the provider, thread and refusal visible; wait for an explicit retry or move |
 | Explicit agent | Keep the harness; bare Claude retains model fallthrough |
 | Explicit model pin | Wait on that choice, then stop |
-| Headless order exhausted on a usage limit | Wait 5, 15, 30, then 60 minutes, trying the order again after each; then stop with the provider error and a next step |
-| Headless order exhausted otherwise | Stop with the provider error and a next step |
+| Graph step's order exhausted on a usage limit | Wait 5, 15, 30, then 60 minutes, trying the order again after each; then stop with the provider error and a next step |
+| Revoked login | Skip that provider's other models; with no other provider left, stop and say how to sign in again |
+| Order exhausted otherwise | Stop with the provider error and a next step |
 
 ```
 claude: You've hit your limit. Resets 3pm (America/Los_Angeles).
@@ -103,15 +105,20 @@ lf set --global forward.files '[~/.codex/auth.json]'
 
 Values and file contents travel on the SSH connection's input, never in
 arguments, logs, the store or Session records. The forwarded environment is
-read and its file removed before the remote command starts. A destination that
-already has a named file keeps its own, and the launch says so. A named
-variable with no value, or a named file missing here, stops the launch, and an
-on-demand rental, before anything is rented or sent. Loopflow does not read,
+read and its file removed before the remote command starts; one a failed launch
+never read is removed by the next delivery. Only commands that may start an
+agent carry anything. A destination that already has a named file keeps its
+own, and the launch says so when its copy differs. A named variable with no
+value, or a named file missing here, stops the launch, and an on-demand rental,
+before anything is rented or sent. A rental also needs `forward` to carry a
+Claude or Codex login (`CLAUDE_CODE_OAUTH_TOKEN`, `CODEX_ACCESS_TOKEN`,
+`~/.claude/.credentials.json` or `~/.codex/auth.json`). Loopflow does not read,
 choose among or refresh what it forwards.
 
 Claude: `claude setup-token` creates a long-lived token for scripts; forward it
-as `CLAUDE_CODE_OAUTH_TOKEN`. An `ANTHROPIC_API_KEY` forwards the same way and
-bills at API rates.
+as `CLAUDE_CODE_OAUTH_TOKEN`. Claude and Codex launches never see an exported
+`ANTHROPIC_API_KEY`, `OPENAI_API_KEY` or `CODEX_API_KEY`, so a key in your shell
+cannot move them onto API billing.
 
 Codex on a Plus or Pro plan: forward `~/.codex/auth.json`, the login file the
 [Codex authentication docs](https://learn.chatgpt.com/docs/auth) describe

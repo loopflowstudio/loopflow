@@ -91,7 +91,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     /// `since` (`7d`, `24h` or an RFC 3339 instant).
     case repoCi(since: String, wave: String?, repo: String?)
     /// Every login's state on this Machine; `cached` skips the providers.
-    case accountList(target: String?, cached: Bool)
+    case accountList(target: String?)
     /// The commands, skills, graphs and Waves under `path`, as `lf list` shows them.
     case skillList(directory: String, path: [String])
     /// The branch's check report as the provider prints it, with its state.
@@ -194,9 +194,8 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             return ["machine", "doctor", "--json"]
         case .repoCi(let since, let wave, let repo):
             return ["repo", "ci", "--since", since] + argument("--wave", wave) + argument("--repo", repo) + ["--json"]
-        case .accountList(let target, let cached):
-            return ["account"] + argument(nil, target) + (cached ? ["--cached"] : [])
-                + ["--json"]
+        case .accountList(let target):
+            return ["account"] + argument(nil, target) + ["--json"]
         case .skillList(_, let path):
             return ["list"] + path + ["--json"]
         case .prChecks(_, let required):
@@ -285,8 +284,8 @@ public enum ServedRead: Equatable, Sendable, Encodable {
         case .machineDoctor: TaggedFields("machine.doctor")
         case .repoCi(let since, let wave, let repo):
             TaggedFields("repo.ci", ["since": since, "wave": wave, "repo": repo])
-        case .accountList(let target, let cached):
-            TaggedFields("account.list", ["target": target, "cached": cached])
+        case .accountList(let target):
+            TaggedFields("account.list", ["target": target])
         case .skillList(let directory, let path): TaggedFields("skill.list", ["directory": directory, "path": path])
         case .prChecks(let directory, let required):
             TaggedFields("pr.checks", ["directory": directory, "required": required])

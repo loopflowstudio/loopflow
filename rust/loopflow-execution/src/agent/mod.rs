@@ -358,6 +358,24 @@ fn _record_limit_stop(
     advice
 }
 
+/// The provider revoked the login: no model of it can go on until someone
+/// signs in again, so the step stops with how.
+fn _record_sign_in_stop(provider: &str, reason: &str) -> String {
+    let sign_in = match provider {
+        "claude" => "run `claude`, then /login",
+        "codex" => "run `codex login`",
+        _ => "sign in with its own client",
+    };
+    let advice =
+        format!("The {provider} login was revoked; sign in again on this Machine: {sign_in}");
+    _record_limit_recovery(
+        provider,
+        &format!("{reason}{}{advice}", crate::ops::task_execution::STOPPED),
+        None,
+    );
+    advice
+}
+
 /// `rungs` is the whole order the step could walk; it stops after the last.
 fn _limit_stop_advice(provider: &str, launch: &AgentConfig, rungs: &[String]) -> String {
     if !launch.fallback_agents.is_empty() {
@@ -427,6 +445,10 @@ pub struct ProcessConfig {
     pub timeout: Option<Duration>,
     /// Live resources for this lf invocation, retained across provider retries.
     pub runtime: Option<LfProcessRuntime>,
+    /// A Graph step goes on after a limit: it moves through its agents and
+    /// waits for capacity. Everything else headless (commit messages, PR text)
+    /// has someone waiting on it and fails now.
+    pub wait_for_capacity: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -1068,18 +1090,37 @@ fn _run_with_retries(
         }
         // Without a native thread, retry the same input.
         let delay = match failure {
-            AgentFailure::UsageLimit
-            | AgentFailure::CredentialInvalidated
-            | AgentFailure::ModelUnavailable => {
+            AgentFailure::CredentialInvalidated => {
+                // Every model of a provider shares its dead login; only
+                // another provider in the order can go on.
+                let reason = _failure_reason(&result, failure);
+                let other = rungs
+                    .iter()
+                    .enumerate()
+                    .skip(rung + 1)
+                    .find(|(_, next)| parse_agent(next).0 != provider);
+                let Some((index, next)) = other else {
+                    let advice = _record_sign_in_stop(&provider, &reason);
+                    result.stderr = format!("{reason}\n{advice}");
+                    return Ok(result);
+                };
+                rung = index;
+                _record_agent_move(attempt.agent()?, failure, &reason, next);
+                attempt = _climb(&attempt, next, process, launch);
+                Duration::ZERO
+            }
+            AgentFailure::UsageLimit | AgentFailure::ModelUnavailable => {
                 let reason = _failure_reason(&result, failure);
                 if let Some(next) = rungs.get(rung + 1) {
                     rung += 1;
                     _record_agent_move(attempt.agent()?, failure, &reason, next);
                     attempt = _climb(&attempt, next, process, launch);
                     Duration::ZERO
-                } else if let (AgentFailure::UsageLimit, Some(&delay)) =
-                    (failure, USAGE_LIMIT_WAITS.get(usage_waits))
-                {
+                } else if let (AgentFailure::UsageLimit, true, Some(&delay)) = (
+                    failure,
+                    process.wait_for_capacity,
+                    USAGE_LIMIT_WAITS.get(usage_waits),
+                ) {
                     // Each try after the wait starts the order again and reads
                     // the native login afresh.
                     usage_waits += 1;
@@ -1127,17 +1168,17 @@ fn _with_original_task(prompt: &str, launch: &AgentConfig) -> String {
     format!("{prompt}\n\nOriginal task:\n\n{}", launch.task_prompt)
 }
 
-/// The agents a headless launch tries after a usage limit or unavailable model.
+/// The agents a Graph step tries after a usage limit or unavailable model.
 /// With an order to move through (`default_agent`, then `agents`) it is that order
 /// as written, a bare harness on its configured model. With none, a bare
 /// harness tries its other models and an explicit `harness:model` stays put.
-/// Interactive launches never move automatically.
+/// Only a Graph step moves automatically.
 fn _fallthrough_rungs(
     launch: &AgentConfig,
     process: &ProcessConfig,
 ) -> Result<Vec<String>, CoreError> {
     let first = launch.agent()?.to_owned();
-    if !process.auto {
+    if !process.wait_for_capacity {
         return Ok(vec![first]);
     }
     let configured = |agent: &str| match (agent, &launch.claude_model) {
@@ -1407,7 +1448,7 @@ fn _run_harness_once(
     if retry {
         if let Some(runtime) = runtime {
             runtime
-                .retry_agent_process(provider.clone(), model, None, launch.resume_token.as_ref())
+                .retry_agent_process(provider.clone(), model, launch.resume_token.as_ref())
                 .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
         }
     }
@@ -1445,7 +1486,7 @@ fn _run_harness_once(
             .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
         let agent_session = harness.agent_session();
         if let Some(runtime) = runtime {
-            runtime.observe_provider(agent_session.clone(), None);
+            runtime.observe_provider(agent_session.clone());
         }
 
         let drive = async {
@@ -1478,7 +1519,7 @@ fn _run_harness_once(
                             continue;
                         };
                         if let Some(runtime) = runtime {
-                            runtime.observe_provider(harness.agent_session(), None);
+                            runtime.observe_provider(harness.agent_session());
                             runtime.record_conversation(event.clone());
                         }
                         match event {
@@ -1519,12 +1560,15 @@ fn _run_harness_once(
             if process.stream && !stdout.ends_with('\n') {
                 println!();
             }
+            let exit_code = exit_code.expect("event loop stops with an exit code");
             Ok(AgentProcessResult {
-                exit_code: exit_code.expect("event loop stops with an exit code"),
+                exit_code,
                 stdout,
                 stderr,
                 agent_session: harness.agent_session(),
-                failure: limited.then_some(AgentFailure::UsageLimit),
+                // A turn the provider finished was served, whatever a rate
+                // limit event said along the way.
+                failure: (limited && exit_code != 0).then_some(AgentFailure::UsageLimit),
             })
         };
         let result = match process.timeout {
@@ -1641,18 +1685,13 @@ fn _run_agent_once(
     if retry {
         if let Some(runtime) = runtime {
             runtime
-                .retry_agent_process(
-                    harness.clone(),
-                    model.clone(),
-                    None,
-                    launch.resume_token.as_ref(),
-                )
+                .retry_agent_process(harness.clone(), model.clone(), launch.resume_token.as_ref())
                 .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
         }
     }
 
     if let Some(runtime) = runtime {
-        runtime.observe_provider(None, None);
+        runtime.observe_provider(None);
     }
 
     let admitted_runtime = runtime.ok_or_else(|| {
@@ -1836,9 +1875,11 @@ mod tests {
         .args
     }
 
+    /// A Graph step: it moves through its agents and waits for capacity.
     fn auto_process() -> ProcessConfig {
         ProcessConfig {
             auto: true,
+            wait_for_capacity: true,
             ..Default::default()
         }
     }
@@ -2637,6 +2678,92 @@ trust_level = "trusted"
     }
 
     #[test]
+    fn headless_work_outside_a_graph_stops_at_a_usage_limit_without_moving_or_waiting() {
+        // `lf commit` and `lf pr submit` message generation: someone is waiting.
+        let launch = AgentConfig {
+            agent: Some("claude".into()),
+            fallback_agents: vec!["codex".into()],
+            ..Default::default()
+        };
+        let process = ProcessConfig {
+            auto: true,
+            ..Default::default()
+        };
+        let mut attempts = 0;
+        let mut waits = Vec::new();
+        let result = _run_with_retries(
+            &launch,
+            &process,
+            &[],
+            |_, _| {
+                attempts += 1;
+                Ok(limited_result())
+            },
+            |delay| waits.push(delay),
+        )
+        .unwrap();
+        assert_eq!(attempts, 1);
+        assert!(waits.is_empty());
+        assert_eq!(result.failure, Some(AgentFailure::UsageLimit));
+    }
+
+    #[test]
+    fn a_revoked_login_skips_its_providers_models_and_says_to_sign_in() {
+        let revoked = || AgentProcessResult {
+            failure: Some(AgentFailure::CredentialInvalidated),
+            ..failed_result("claude: Your session has ended. Please log in again.")
+        };
+        let pinned = AgentConfig {
+            agent: Some("claude".into()),
+            ..Default::default()
+        };
+        let mut attempts = 0;
+        let mut waits = Vec::new();
+        let result = _run_with_retries(
+            &pinned,
+            &auto_process(),
+            &[],
+            |_, _| {
+                attempts += 1;
+                Ok(revoked())
+            },
+            |delay| waits.push(delay),
+        )
+        .unwrap();
+        // Claude's other models share the dead login: one try, no wait.
+        assert_eq!(attempts, 1);
+        assert!(waits.is_empty());
+        assert!(
+            result
+                .stderr
+                .ends_with("The claude login was revoked; sign in again on this Machine: run `claude`, then /login"),
+            "{}",
+            result.stderr
+        );
+
+        // Another provider in the order goes on.
+        let ordered = AgentConfig {
+            fallback_agents: vec!["claude:fable".into(), "codex".into()],
+            ..pinned
+        };
+        let mut scripted = vec![revoked(), done()].into_iter();
+        let mut agents = Vec::new();
+        let result = _run_with_retries(
+            &ordered,
+            &auto_process(),
+            &[],
+            |config, _| {
+                agents.push(config.agent.clone().unwrap());
+                Ok(scripted.next().expect("scripted attempt"))
+            },
+            |_| {},
+        )
+        .unwrap();
+        assert_eq!(result.exit_code, 0);
+        assert_eq!(agents, ["claude", "codex"]);
+    }
+
+    #[test]
     fn native_retry_policy_matrix() {
         let directory = tempfile::tempdir().unwrap();
         let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -2688,8 +2815,11 @@ trust_level = "trusted"
                         resume_token: Some("native-thread".into()),
                         ..Default::default()
                     };
+                    // Headless here is a Graph step; other headless work
+                    // stops at once (its own test).
                     let process = ProcessConfig {
                         auto,
+                        wait_for_capacity: auto,
                         task_input: task_bound.then(|| {
                             crate::ops::task_input::TaskInput::new(
                                 store.clone(),
@@ -2738,7 +2868,12 @@ trust_level = "trusted"
                                 vec![]
                             }
                         );
-                        let order = if auto && !pinned { 3 } else { 1 };
+                        // A revoked login skips its provider's other models.
+                        let order = match (auto && !pinned, failure) {
+                            (false, _) => 1,
+                            (true, AgentFailure::CredentialInvalidated) => 2,
+                            (true, _) => 3,
+                        };
                         let tries = if backoff {
                             1 + USAGE_LIMIT_WAITS.len()
                         } else {
@@ -2769,6 +2904,9 @@ trust_level = "trusted"
                             assert_eq!(attempts[2].agent.as_deref(), Some("codex"));
                             assert!(attempts[2].resume_token.is_none());
                             assert!(attempts[2].task_prompt.contains("finish the operation"));
+                        }
+                        if order == 2 {
+                            assert_eq!(attempts[1].agent.as_deref(), Some("codex"));
                         }
                     }
                     let mut dispatches = 0;

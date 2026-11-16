@@ -11,8 +11,8 @@ pub struct Account {
     pub provider: Provider,
 }
 
-pub fn list(target: Option<&str>, cached: bool) -> Result<AccountReport> {
-    block_on(handlers::account_status::report(target, cached)).map_err(unavailable)
+pub fn list(target: Option<&str>) -> Result<AccountReport> {
+    block_on(handlers::account_status::report(target)).map_err(unavailable)
 }
 pub fn disconnect(provider: &str) -> Result<Account> {
     let account = account(provider)?;

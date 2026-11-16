@@ -2419,8 +2419,9 @@ pub fn api_key_env_allowed_for_program(program: &str, env_name: &str) -> bool {
     if !is_api_key_env_name(&env_name) {
         return true;
     }
+    // An exported API key would bill Claude and Codex per token instead of
+    // their native login; only harnesses that take one see it.
     match normalize_program_name(program).as_str() {
-        "claude" | "codex" => true,
         "pi" => matches!(
             env_name.as_str(),
             "ANTHROPIC_API_KEY" | "OPENAI_API_KEY" | "GEMINI_API_KEY" | "MOONSHOT_API_KEY"
@@ -2532,6 +2533,32 @@ mod tests {
 
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn api_key_env_filter_is_harness_specific() {
+        assert!(api_key_env_allowed_for_program(
+            "opencode",
+            "OPENCODE_API_KEY"
+        ));
+        assert!(api_key_env_allowed_for_program(
+            "/usr/local/bin/opencode",
+            "MOONSHOT_API_KEY"
+        ));
+        assert!(api_key_env_allowed_for_program("pi", "ANTHROPIC_API_KEY"));
+        assert!(!api_key_env_allowed_for_program(
+            "opencode",
+            "ANTHROPIC_API_KEY"
+        ));
+        // Claude and Codex bill to their native login, never an exported key.
+        for name in API_KEY_ENV_NAMES {
+            assert!(!api_key_env_allowed_for_program("claude", name), "{name}");
+            assert!(
+                !api_key_env_allowed_for_program("/opt/bin/codex", name),
+                "{name}"
+            );
+        }
+        assert!(api_key_env_allowed_for_program("claude", "GH_TOKEN"));
+    }
 
     #[derive(Debug)]
     struct FakeRefreshRunner {

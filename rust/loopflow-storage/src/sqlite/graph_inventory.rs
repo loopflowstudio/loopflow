@@ -218,6 +218,21 @@ fn process_inputs(
 }
 
 impl SqliteStore {
+    /// Whether `process` runs under a Graph, through any process between.
+    pub fn process_under_graph(&self, process: &LfProcessId) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.query_row(
+            "WITH RECURSIVE up(id) AS (
+                 SELECT ?1
+                 UNION
+                 SELECT p.parent_lf_process_id FROM processes p JOIN up ON p.id=up.id
+                 WHERE p.parent_lf_process_id IS NOT NULL)
+             SELECT EXISTS(SELECT 1 FROM up JOIN graph_processes g ON g.lf_process_id=up.id)",
+            [process],
+            |row| row.get(0),
+        )?)
+    }
+
     pub fn agent_limit_recovery(
         &self,
         step: &LfProcessId,

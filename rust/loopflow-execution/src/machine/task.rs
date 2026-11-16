@@ -267,7 +267,11 @@ pub fn run_remote(
         .collect();
     let mut preamble = crate::machine::ssh::build_preamble(&command, &environment);
     if let Some(forwarded) = &forwarded {
-        preamble = crate::machine::forward::deliver(&target, forwarded, &preamble)?;
+        let mut notices = Vec::new();
+        preamble = crate::machine::forward::deliver(&target, forwarded, &preamble, &mut notices)?;
+        for line in String::from_utf8_lossy(&notices).lines() {
+            crate::journal::request::diagnostic(format_args!("{line}"));
+        }
     }
     let (mut output, mut error) = (Vec::new(), Vec::new());
     let ran = crate::machine::ssh::run_ssh_io(

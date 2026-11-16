@@ -144,8 +144,8 @@ health and PIDs. Time alone never means dead. `lf mon prune --dry-run` shows
 cleanup candidates; plain prune removes dead records and orphaned provider
 groups. Never kill an `unclaimed` PID.
 
-Check `lf account --cached` (offline) before proposing an account fix;
-`lf account --json` shows service authentication. Claude and Codex own native
+Check `lf account --json` (saved service authentication, offline) before
+proposing an account fix. Claude and Codex own native
 sign-in. OAuth client credentials come from the environment, then Doppler; in a Doppler repository, give
 `doppler run -- lf account connect <provider>`, otherwise name the missing
 variables. Never print values or run a secret getter bare. Don't change accounts

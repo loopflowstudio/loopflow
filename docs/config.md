@@ -57,8 +57,8 @@ nothing the list lacks is tried. A lone bare `claude` (`agents: claude`) has no
 next entry, so it tries Claude's other models instead: Opus, then Sonnet, then
 Haiku.
 
-When a usage limit or model-unavailable error refuses a headless step, it tries
-the next configured model or harness. It uses each native client's own login.
+When a usage limit or model-unavailable error refuses a Graph step, it tries
+the next configured model or harness; other headless work stops at once. It uses each native client's own login.
 An explicit agent pins the harness; an explicit model pin stays on that model.
 Once every entry has refused on a usage limit, the step waits 5, 15, 30, then
 60 minutes, trying the whole order again after each, and then stops.

@@ -361,14 +361,8 @@ balance that you are on)”. Selected unfinished Codex Task Sessions on
 message sent. Verified all 11 active on the funded account, each with a new process and
 the same native thread; zero unfinished Task Sessions remain on the low account. Initial piped resume lacked a terminal; restored in Rex.
 
-Second inventory correction: the initial `session list` used its default 100-row
-limit. Full `--all --headless --limit 0` inventory contained 717 rows and found
-15 more unfinished Codex Sessions on `manabot-eng`, including nine Manabot
-Sessions and MTG-347. Restarted all 15 with explicit funded login, preserving
-native threads and sending no message. Full inventory then verified all 15
-active on `jack-42d1021d3f2d`, each with a new process and unchanged native
-thread; zero unfinished Codex Sessions remained on `manabot-eng`. MTG-347 is
-Task-associated, not bare.
+A full `--all --headless --limit 0` inventory found 15 more, restarted and
+verified the same way (detail in git history).
 
 ## Authentication concept review — 2026-11-16
 
@@ -387,13 +381,8 @@ do not publish the partial resolution.
 
 Jack Heart: “i just redeemed a reset for claude but it still says jackstah@ is cooling. can you clear that, and make sure that we ahve a clearer way to reset / recheck all usage limits post a manual reset in my subscription setting”.
 
-Installed lf: `lf account set claude=jackstah@gmail.com --clear-cooldown`, then
-`lf account claude=jackstah@gmail.com --json`. Provider poll returned seven_day
-35%, seven_day_fable 0%; no account or window holds, all models eligible. This
-was inspection after an external reset, not spending another reset. Private
-switcher gains `refresh [provider] --login <email> --after-reset` to release
-cached holds and immediately fetch current usage without choosing/installing a
-login. No account-management functionality is added back to removal branch.
+Handled with installed lf, not on this branch; the private switcher gains a
+post-reset refresh. No account management returns to this branch.
 
 ## Usage-limit backoff — 2026-11-16 (built)
 
@@ -412,16 +401,9 @@ storage `capacity.rs`/`account_selection.rs`, Claude/Codex machine credentials,
 Surviving service auth moved to `provider_auth::operations`; historical account
 labels and service browser profiles to `store::account_labels`.
 
-Built in `agent/mod.rs::_run_with_retries`: `USAGE_LIMIT_WAITS` (5, 15, 30, 60
-min) after a headless `UsageLimit` with no rung left; each wait records
-`agent_limit_recoveries.retry_at` (Task status: “waiting … until …”), prints
-“Waiting until <time> before trying again”, then restarts at the first rung.
-`_sleep_wall_clock` naps against `SystemTime`. Interactive, `CredentialInvalidated`
-and `ModelUnavailable` unchanged. The e2e refusal fixture now stops the run once
-the wait is announced; schedule and final stop are unit-tested.
-
-Open, noted for review: whether `CredentialInvalidated` also waits (currently
-stops), and restart-at-first-rung versus retrying only the last rung.
+Built in `agent/mod.rs::_run_with_retries` (`USAGE_LIMIT_WAITS`); review fix 2
+below limits it to Graph steps and fix 3 settles `CredentialInvalidated`. Open:
+restart at the first rung versus retrying only the last.
 
 ## Named secret and file forwarding — 2026-11-16 (built)
 
@@ -464,3 +446,33 @@ Compress: `deliver(machine, forwarded, preamble)` returns the launch preamble; t
 and clippy (`loopflow-execution`, `loopflow`) pass.
 
 Do not publish, merge or land. Auto-Ship is on hold for this run.
+
+## Documentation audit — 2026-11-16
+
+Homepage and retained `design/homepage-next` draft: removed balancing claims,
+account selector example, login quota bars and their exclusive CSS. Corrected
+account-order and routing descriptions in config/developer docs and remote
+authentication guidance for named forwarding. Six focused website/browser,
+README sync and portable architecture checks passed. Historical schema names
+stay in developer storage references because those rows remain retained.
+
+## PR #1953 review fixes — 2026-11-16 (built)
+
+Steer 010268e1 (Jack Heart): fix all ten findings in `scratch/review-1953.md`,
+strip API-key variables from claude/codex launches with its test, push, no merge.
+Review notes carried Jack Heart: "send the fixed to the session to fix" and, on 7,
+"just do all 10".
+All ten held against the code.
+
+1. A finished turn succeeds despite a `rejected` rate-limit event.
+2. `ProcessConfig.wait_for_capacity` and `graph_process::in_graph` restored; only Graph steps move through `agents` or wait; `lf -b`, commit and PR text stop.
+3. `CredentialInvalidated` skips same-provider rungs; with none left it stops with "sign in again" (`_record_sign_in_stop`).
+4. `forward::read_for_rental` refuses a rental whose `forward` carries no Claude/Codex login.
+5. `lf --machine` forwards only for `Cli::may_launch_agent()`, never resident operations.
+6. Each delivery removes `~/.lf/forward` files older than 10 minutes.
+7. `api_key_env_allowed_for_program` strips every API-key variable from claude/codex again.
+8. `lf install schedule` unloads and deletes `com.loopflow.rental-renewal` and the `# loopflow rental renewal` crontab line.
+9. "keeps its own" prints only when the destination's copy differs, through the command's error writer.
+10. Removed the Task-status account branch, `Departure::Account`, `lf account --cached` (CLI, served `account.list`, Swift, skills) and runtime/`CaptureHandoff` account fields.
+
+Also: `cli_discovery::help_for_a_provider…` now uses `linear`.

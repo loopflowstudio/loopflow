@@ -345,7 +345,7 @@ struct ServerProtocolTests {
         #expect(entries.count == 2)
         #expect(ServedWrite.accountDisconnect(provider: "linear").cwd == "/")
         let accounts = ServerClientMessage.request(id: "accounts-1",
-            operation: .read(.accountList(target: "linear", cached: true)), select: nil)
+            operation: .read(.accountList(target: "linear")), select: nil)
         #expect(try encoded(accounts) == value("account_list"))
         guard case .response(_, _, .object(let report)) = try answer("account_report") else {
             Issue.record("Missing service auth result"); return

@@ -639,6 +639,7 @@ fn build_prompt_at(
             .map(|(store, seed)| loopflow_execution::ops::task_input::TaskInput::new(store, seed)),
         auto: !is_interactive,
         stream: !is_interactive,
+        wait_for_capacity: !is_interactive && loopflow_execution::ops::graph_process::in_graph(),
         ..Default::default()
     };
     let mut agent_config = prepared.config;
@@ -773,10 +774,7 @@ fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<String>> {
             loopflow_execution::session_record::read_provider_session(&runtime.artifact_dir())
                 .map_err(|error| anyhow!("failed to read provider session: {error}"))?
         {
-            runtime.observe_provider(
-                Some(provider_session.agent_session),
-                provider_session.account_id,
-            );
+            runtime.observe_provider(Some(provider_session.agent_session));
         }
         runtime.finish(
             result

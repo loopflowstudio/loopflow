@@ -1,1 +1,1 @@
-{"type":"request","id":"accounts-1","operation":{"kind":"account.list","target":"linear","cached":true},"select":null}
+{"type":"request","id":"accounts-1","operation":{"kind":"account.list","target":"linear"},"select":null}

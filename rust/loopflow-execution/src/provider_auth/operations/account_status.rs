@@ -20,7 +20,8 @@ pub struct AccountRow {
     pub expires_at: Option<i64>,
 }
 
-pub async fn report(target: Option<&str>, _cached: bool) -> Result<AccountReport> {
+/// What this Machine last saved for each service; no provider is contacted.
+pub async fn report(target: Option<&str>) -> Result<AccountReport> {
     let filter = target.map(super::parse_provider).transpose()?;
     let service = ProviderAuthService::new(super::local_store().await?);
     let mut accounts = Vec::new();
@@ -45,8 +46,8 @@ pub async fn report(target: Option<&str>, _cached: bool) -> Result<AccountReport
     Ok(AccountReport { accounts })
 }
 
-pub async fn run(target: Option<&str>, cached: bool, json: bool) -> Result<()> {
-    let report = report(target, cached).await?;
+pub async fn run(target: Option<&str>, json: bool) -> Result<()> {
+    let report = report(target).await?;
     if json {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {

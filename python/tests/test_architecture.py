@@ -34,7 +34,7 @@ def repo(tmp_path: Path) -> Path:
             "| Concept | Truth and authority | Data structure | Persistence | "
             "Process owner | Public surface | External edge |\n"
             "| --- | --- | --- | --- | --- | --- | --- |\n"
-            "| **Wave** | Goal | [`Wave`](../../rust/loopflow/src/wave/types.rs) | "
+            "| **Wave** | Goal | [`Wave`](../../rust/loopflow-execution/src/wave/types.rs) | "
             "`schema_migrations`, `waves` | `lf` | `lf wave` | "
             "`provider:linear`, `process:git` |\n"
             """<!-- architecture-map:end -->
@@ -57,7 +57,7 @@ def repo(tmp_path: Path) -> Path:
 """
         ),
     )
-    _write(tmp_path, "rust/loopflow/src/wave/types.rs", "pub struct Wave;\n")
+    _write(tmp_path, "rust/loopflow-execution/src/wave/types.rs", "pub struct Wave;\n")
     _write(
         tmp_path,
         "rust/loopflow/src/lf/mod.rs",
@@ -76,7 +76,7 @@ path = "src/bin/lf.rs"
     )
     _write(
         tmp_path,
-        "rust/loopflow/src/provider_auth/mod.rs",
+        "rust/loopflow-storage/src/provider.rs",
         """pub enum Provider { Linear }
 impl Provider {
     pub fn as_str(self) -> &'static str {
@@ -87,12 +87,12 @@ impl Provider {
     )
     _write(
         tmp_path,
-        "rust/loopflow/src/edge.rs",
+        "rust/loopflow-execution/src/edge.rs",
         'fn git() { let _ = std::process::Command::new("git"); }\n',
     )
     _write(
         tmp_path,
-        "rust/loopflow/src/store/migrations/0.1.001_initial.sql",
+        "rust/loopflow-storage/src/migrations/0.1.001_initial.sql",
         "CREATE TABLE waves (id TEXT PRIMARY KEY);\n",
     )
     return tmp_path
@@ -111,7 +111,7 @@ def test_clean_fixture_has_no_unexplained_architecture(repo: Path) -> None:
 def test_new_durable_table_must_join_the_map(repo: Path) -> None:
     _write(
         repo,
-        "rust/loopflow/src/store/migrations/add_mirror.sql",
+        "rust/loopflow-storage/src/migrations/add_mirror.sql",
         """CREATE TABLE mirrors (id TEXT);
 """,
     )
@@ -159,7 +159,7 @@ path = "src/bin/keeper.rs"
 
 
 def test_new_provider_must_join_an_external_edge(repo: Path) -> None:
-    providers = repo / "rust/loopflow/src/provider_auth/mod.rs"
+    providers = repo / "rust/loopflow-storage/src/provider.rs"
     providers.write_text(
         providers.read_text()
         .replace("Provider { Linear }", "Provider { Linear, Codex }")
@@ -239,10 +239,10 @@ def test_named_historical_sql_scope_accepts_retired_language(repo: Path) -> None
     architecture_doc.write_text(
         architecture_doc.read_text().replace(
             "| `Project Session` | — | Project Work |",
-            "| `Project Session` | `rust/loopflow/src/store/migrations/` | Project Work |",
+            "| `Project Session` | `rust/loopflow-storage/src/migrations/` | Project Work |",
         )
     )
-    migration = repo / "rust/loopflow/src/store/migrations/0.1.001_initial.sql"
+    migration = repo / "rust/loopflow-storage/src/migrations/0.1.001_initial.sql"
     migration.write_text(migration.read_text() + "-- Project Session history\n")
 
     assert architecture.check_repository(repo).ok

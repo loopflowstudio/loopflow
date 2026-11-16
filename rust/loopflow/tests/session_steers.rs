@@ -1,5 +1,7 @@
 //! Public launch proofs for the Session delivery cutover.
 use crate::support;
+use loopflow_execution::process::attachment;
+
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::process::{Command, Stdio};
@@ -152,11 +154,10 @@ fn claude_startup_preserves_large_combined_seed_and_correlated_answer() {
     let home = tempfile::tempdir().unwrap();
     let _task =
         support::register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
-    let store =
-        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow_execution::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     let steer = store
         .save_repository_steer(
-            &loopflow::repository::CanonicalRepo::discover(repo.path()).unwrap(),
+            &loopflow_execution::repository::discover(repo.path()).unwrap(),
             "Fixture author",
             &format!("STARTUP_DIRECTION {}", "界<&>".repeat(20_000)),
         )
@@ -426,8 +427,8 @@ fn a_task_pane_reopened_by_session_id_fails_naming_a_missing_server() {
 
 #[test]
 fn public_context_capability_survives_claim_changes_and_rejects_children_and_replacement() {
-    use loopflow::id::LfProcessId;
-    use loopflow::store::sqlite::SqliteStore;
+    use loopflow_model::id::LfProcessId;
+
     use std::io::Write;
     use std::time::{Duration, Instant};
 
@@ -437,7 +438,7 @@ fn public_context_capability_survives_claim_changes_and_rejects_children_and_rep
     // capability and starts beside the Machine server its hooks call.
     let _task =
         support::register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
-    let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow_execution::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     let mut server = Some(MachineServer::start(env!("CARGO_BIN_EXE_lf"), home.path()));
     let provider = home.path().join("claude");
     fs::write(&provider, r#"#!/usr/bin/python3
@@ -537,17 +538,16 @@ while not (home / 'finish').exists() and time.monotonic() < deadline:
         [&other],
     )
     .unwrap();
-    let second = store
-        .claim_session_attachment(session, Some(&first), &other, false)
-        .unwrap();
-    let third = store
-        .claim_session_attachment(
-            session,
-            Some(&second),
-            first.lf_process_id.as_ref().unwrap(),
-            false,
-        )
-        .unwrap();
+    let second =
+        attachment::claim_session_attachment(&store, session, Some(&first), &other, false).unwrap();
+    let third = attachment::claim_session_attachment(
+        &store,
+        session,
+        Some(&second),
+        first.lf_process_id.as_ref().unwrap(),
+        false,
+    )
+    .unwrap();
     assert_eq!(first.agent_process_id, third.agent_process_id);
     assert_ne!(first.token, third.token);
     // The Machine server records each boundary; the hook claims its own steers.
@@ -638,8 +638,8 @@ while not (home / 'finish').exists() and time.monotonic() < deadline:
     fs::write(&plugin, format!("const spec = {};\nconst delivery = {};\n{}\n{}",
         serde_json::json!({"executable":env!("CARGO_BIN_EXE_lf"),"delivery":delivery,"instructions":"","turns":true,"server":plugin_server}),
         serde_json::to_string(delivery_path).unwrap(),
-        include_str!("../src/harness/server_connection.js"),
-        include_str!("../src/harness/context_opencode.js"))).unwrap();
+        include_str!("../../loopflow-execution/src/harness/server_connection.js"),
+        include_str!("../../loopflow-execution/src/harness/context_opencode.js"))).unwrap();
     let probe = home.path().join("transform-proof.mjs");
     fs::write(
         &probe,
@@ -839,13 +839,13 @@ fn public_commands_save_steers_without_launching_providers() {
     ]);
     // A thread entry can sort after the comment this command saves. Its
     // timestamp must not decide which comment's steer the command returns.
-    loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db"))
+    loopflow_execution::store::open_sqlite(&home.path().join("loopflow.db"))
         .unwrap()
         .append_task_comment(
             &task.task.id,
-            &loopflow::work::task::comment::TaskComment {
+            &loopflow_execution::work::task::comment::TaskComment {
                 id: "later-thread-entry".into(),
-                author: loopflow::work::task::comment::TaskCommentAuthor::Integration,
+                author: loopflow_execution::work::task::comment::TaskCommentAuthor::Integration,
                 body: "Existing thread entry".into(),
                 created_at: Some("9999-12-31T23:59:59Z".into()),
             },
@@ -858,7 +858,7 @@ fn public_commands_save_steers_without_launching_providers() {
         VALUES('idle','Idle fixture','human',1,?1,1,?2)",
         rusqlite::params![
             repo.path().to_str().unwrap(),
-            loopflow::repository::CanonicalRepo::discover(repo.path())
+            loopflow_execution::repository::discover(repo.path())
                 .unwrap()
                 .to_string()
         ],

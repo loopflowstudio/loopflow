@@ -1,6 +1,3 @@
-/// Explicit Work declaration inherited by descendants; checkout inference never writes it.
-pub const WORK_DECLARATION_ENV: &str = "LF_AS";
-
 /// The caller's prompt and provider flags for the Task Graph it launches.
 #[doc(hidden)]
 use std::path::PathBuf;
@@ -8,9 +5,10 @@ use std::path::PathBuf;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 pub mod aliases;
+mod desktop_inputs;
+pub use desktop_inputs::{PortfolioArgs, ShellArgs};
 pub mod commands;
 pub mod navigation;
-pub mod output;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum BrowserMode {
@@ -92,7 +90,7 @@ pub struct Cli {
     #[arg(long, value_name = "JSON", value_parser = |text: &str| serde_json::from_str::<serde_json::Value>(text))]
     pub output_schema: Option<serde_json::Value>,
     #[arg(skip)]
-    pub resolved_invocation: Option<crate::skills::invocation::SkillInvocation>,
+    pub resolved_invocation: Option<loopflow_execution::skills::invocation::SkillInvocation>,
 
     /// Skip permission prompts
     #[arg(long)]
@@ -162,9 +160,9 @@ impl Cli {
             let (key, text) = setting
                 .split_once('=')
                 .ok_or_else(|| anyhow::anyhow!("--setting expects KEY=YAML"))?;
-            let parsed = crate::config::settings::parse_value(key, text)?;
-            let typed = crate::config::keys::typed_key(key);
-            crate::config::settings::insert(
+            let parsed = loopflow_execution::config::settings::parse_value(key, text)?;
+            let typed = loopflow_execution::config::keys::typed_key(key);
+            loopflow_execution::config::settings::insert(
                 &mut value,
                 &typed.split('.').collect::<Vec<_>>(),
                 parsed,
@@ -186,7 +184,7 @@ impl Cli {
             ),
         ] {
             if let Some(enabled) = enabled {
-                crate::config::settings::insert(
+                loopflow_execution::config::settings::insert(
                     &mut value,
                     &key.split('.').collect::<Vec<_>>(),
                     enabled.into(),
@@ -194,10 +192,14 @@ impl Cli {
             }
         }
         if let Some(agent) = &self.agent {
-            crate::config::settings::insert(&mut value, &["agent"], agent.clone().into());
+            loopflow_execution::config::settings::insert(
+                &mut value,
+                &["agent"],
+                agent.clone().into(),
+            );
         }
         if !self.docs.is_empty() {
-            crate::config::settings::insert(
+            loopflow_execution::config::settings::insert(
                 &mut value,
                 &["context", "docs"],
                 serde_yaml_ng::to_value(&self.docs)?,
@@ -656,7 +658,7 @@ pub enum Commands {
         #[arg(long)]
         delivery: Option<std::path::PathBuf>,
         #[arg(long, value_enum, default_value = "stop")]
-        moment: crate::context_block::ContextMoment,
+        moment: loopflow_execution::context_block::ContextMoment,
     },
     /// External: skill/graph name (when no subcommand matches)
     #[command(external_subcommand)]
@@ -725,7 +727,7 @@ pub enum DesktopCommand {
     #[command(hide = true)]
     Shell {
         #[command(flatten)]
-        args: crate::desktop::shells::ShellArgs,
+        args: ShellArgs,
     },
     /// Show a Work selection; `list` and `show` read what views show without opening Desktop
     #[command(args_conflicts_with_subcommands = true)]
@@ -746,7 +748,7 @@ pub enum DesktopCommand {
     /// Select repositories for the Machine-local portfolio
     Portfolio {
         #[command(subcommand)]
-        cmd: Option<crate::portfolio::PortfolioCommand>,
+        cmd: Option<PortfolioArgs>,
         #[arg(long, global = true, id = "portfolio_json")]
         json: bool,
     },
@@ -789,7 +791,7 @@ pub enum DesktopCommand {
     )]
     Wait {
         /// Longest wait, e.g. 30s, 5m (default: no limit)
-        #[arg(long = "for", value_name = "DURATION", value_parser = crate::config::parse_duration)]
+        #[arg(long = "for", value_name = "DURATION", value_parser = loopflow_execution::config::parse_duration)]
         timeout: Option<std::time::Duration>,
         #[command(flatten)]
         target: DesktopTargetArgs,
@@ -1537,10 +1539,10 @@ pub struct WavePlanTarget {
 }
 
 impl WavePlanTarget {
-    pub fn as_plan_target(&self) -> crate::ops::project::PlanTarget<'_> {
+    pub fn as_plan_target(&self) -> loopflow_execution::ops::project::PlanTarget<'_> {
         match self.project.as_deref() {
-            Some(project) => crate::ops::project::PlanTarget::Project(project),
-            None => crate::ops::project::PlanTarget::Wave(self.wave.as_deref()),
+            Some(project) => loopflow_execution::ops::project::PlanTarget::Project(project),
+            None => loopflow_execution::ops::project::PlanTarget::Wave(self.wave.as_deref()),
         }
     }
 }
@@ -1621,8 +1623,8 @@ pub struct SessionConnectionArgs {
 }
 
 impl SessionConnectionArgs {
-    pub fn intent(&self) -> crate::lf::commands::write::SessionOpenIntent {
-        use crate::lf::commands::write::SessionOpenIntent;
+    pub fn intent(&self) -> loopflow_execution::session::SessionOpenIntent {
+        use loopflow_execution::session::SessionOpenIntent;
         if self.reveal_existing {
             SessionOpenIntent::Reveal
         } else if self.start_if_free {
@@ -1646,7 +1648,7 @@ impl SessionConnectionArgs {
         &'a self,
         cli: &'a Cli,
         id: Option<&'a str>,
-    ) -> anyhow::Result<crate::ops::human_session::SessionTarget<'a>> {
+    ) -> anyhow::Result<loopflow_execution::ops::human_session::SessionTarget<'a>> {
         anyhow::ensure!(
             self.task.is_none() || cli.task.is_none(),
             "select a Task only once"
@@ -1655,7 +1657,7 @@ impl SessionConnectionArgs {
             self.wave.is_none() || cli.wave.is_none(),
             "select a Wave only once"
         );
-        use crate::ops::human_session::SessionTarget;
+        use loopflow_execution::ops::human_session::SessionTarget;
         let target = SessionTarget::from_selectors(
             id,
             self.task.as_deref().or(cli.task.as_deref()),
@@ -1706,7 +1708,7 @@ pub struct SessionListArgs {
     pub wave: Option<String>,
     /// Current primary conversations; omit the value to include all three scopes
     #[arg(long, value_enum, num_args = 0..=1, default_missing_value = "all", value_name = "task|wave|repository")]
-    pub primary: Option<crate::session::SessionPrimary>,
+    pub primary: Option<loopflow_execution::session::SessionPrimary>,
     /// Outside the work model: no Task association and no Wave
     #[arg(long, conflicts_with = "task")]
     pub orphan: bool,
@@ -2999,7 +3001,7 @@ pub enum MachineCommand {
     Connect {
         target: String,
         /// github, opencode or linear
-        provider: crate::provider_auth::Provider,
+        provider: loopflow_execution::provider_auth::Provider,
         email: Option<String>,
         #[arg(long)]
         chrome_profile: Option<String>,
@@ -3037,7 +3039,7 @@ pub enum MachineCommand {
         pool: Option<String>,
         /// What it cost you, committed when added
         #[arg(long, value_name = "USD")]
-        cost_usd: Option<crate::rental::Usd>,
+        cost_usd: Option<loopflow_storage::rental::Usd>,
         /// After this RFC 3339 time it takes no new work
         #[arg(long, value_name = "RFC3339")]
         expires_at: Option<String>,
@@ -3102,7 +3104,7 @@ pub enum OndemandCommand {
     Add {
         name: String,
         #[arg(long, value_enum)]
-        provider: crate::rental::Provider,
+        provider: loopflow_storage::rental::Provider,
         #[arg(long)]
         vcpus: u32,
         #[arg(long)]
@@ -3119,14 +3121,14 @@ pub enum OndemandCommand {
         #[arg(long)]
         spot: bool,
         /// Hard deadline for each machine it rents, at most 24
-        #[arg(long, default_value_t = crate::rental::DEFAULT_HOURS)]
+        #[arg(long, default_value_t = loopflow_storage::rental::DEFAULT_HOURS)]
         hours: f64,
         /// Machines rented at once
         #[arg(long)]
         max: u32,
         /// Above this hourly price nothing is rented
         #[arg(long, value_name = "USD")]
-        max_usd_per_hour: crate::rental::Usd,
+        max_usd_per_hour: loopflow_storage::rental::Usd,
     },
     /// Templates, budgets and the machines each has rented
     List {
@@ -3142,7 +3144,7 @@ pub enum OndemandCommand {
         hours: Option<f64>,
         /// Spend at most this much on it
         #[arg(long, value_name = "USD")]
-        max_usd: Option<crate::rental::Usd>,
+        max_usd: Option<loopflow_storage::rental::Usd>,
         #[arg(long)]
         json: bool,
     },
@@ -3154,7 +3156,7 @@ pub enum OndemandCommand {
 pub enum MachineCredentialCommand {
     /// Report whether this account is installed, without logging in.
     Inspect {
-        provider: crate::provider_auth::Provider,
+        provider: loopflow_execution::provider_auth::Provider,
         login: String,
     },
     /// Receive a fresh login as JSON on stdin; preserve existing accounts.
@@ -3180,11 +3182,11 @@ pub enum AccountCommand {
     },
 }
 fn parse_service_provider(raw: &str) -> Result<String, String> {
-    match raw.parse::<crate::provider_auth::Provider>() {
-        Ok(crate::provider_auth::Provider::Claude) => {
+    match raw.parse::<loopflow_execution::provider_auth::Provider>() {
+        Ok(loopflow_execution::provider_auth::Provider::Claude) => {
             Err("Claude signs in natively: run `claude`, then /login".to_owned())
         }
-        Ok(crate::provider_auth::Provider::Codex) => {
+        Ok(loopflow_execution::provider_auth::Provider::Codex) => {
             Err("Codex signs in natively: run `codex login`".to_owned())
         }
         Ok(_) => Ok(raw.to_owned()),
@@ -3504,7 +3506,7 @@ mod tests {
 
     #[test]
     fn session_list_selects_wave_and_optional_primary_without_changing_launch_wave() {
-        use crate::session::SessionPrimary;
+        use loopflow_execution::session::SessionPrimary;
         for (words, expected) in [
             (vec!["--primary"], SessionPrimary::All),
             (vec!["--primary", "task"], SessionPrimary::Task),
@@ -3850,7 +3852,7 @@ mod tests {
             cli.command,
             Some(Commands::ContextBlock {
                 delivery: None,
-                moment: crate::context_block::ContextMoment::Stop,
+                moment: loopflow_execution::context_block::ContextMoment::Stop,
             })
         ));
     }
@@ -4200,7 +4202,7 @@ mod tests {
             };
             assert!(matches!(
                 connection.target(&cli, id.as_deref()).unwrap(),
-                crate::ops::human_session::SessionTarget::Session("session-id")
+                loopflow_execution::ops::human_session::SessionTarget::Session("session-id")
             ));
             assert!(connection.work_flag(&cli).is_some());
         }
@@ -4413,6 +4415,3 @@ pub enum DiscordCommand {
     /// Poll a configured channel and post each Session's final answer
     Serve { wave: String },
 }
-
-/// Pushed code requirements for one remote Task invocation.
-pub const TASK_SOURCE_ENV: &str = "LF_TASK_SOURCE";

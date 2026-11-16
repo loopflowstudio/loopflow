@@ -2,6 +2,7 @@
 //! splits, in a Rex session, Herdr workspace or cmux group. The host owns them
 //! afterwards: LF records no host, container, tab or creation state. Native
 //! handles live only in this command, or in a Rex follower while it runs.
+use loopflow_execution::store::selections;
 mod layout;
 mod tools;
 
@@ -19,13 +20,13 @@ use super::{
     rex::{self, Rex},
     OpenHost, OpenReceipt, OpenReport, OpenStatus, Resolved, WorkspaceArgs,
 };
-use crate::store::sqlite::SqliteStore;
-use crate::work::selection::{
+use loopflow_model::durable::{MachineId, RepositoryId, TaskId};
+use loopflow_model::id::WaveId;
+use loopflow_storage::sqlite::SqliteStore;
+use loopflow_storage::work::selection::{
     Selection, SelectionExpression, SelectionFilter, SelectionId, SelectionState, SplitAxis,
     TaskLayoutTemplate, ViewContent, ViewPlan, WorkWorkspaceKey, WorkWorkspaceKind,
 };
-use loopflow_model::durable::{MachineId, RepositoryId, TaskId};
-use loopflow_model::id::WaveId;
 
 /// Where a Task's tools run: its recorded checkout, else the repository.
 fn tool_cwd<'a>(content: &'a ViewContent, repo: &'a Path) -> &'a Path {
@@ -58,7 +59,7 @@ fn workspace_plan(
             expression => expression.clone(),
         },
     };
-    let mut plan = store.plan_selection(repository, inventory)?;
+    let mut plan = selections::plan_selection(store, repository, inventory)?;
     plan.selection = selected;
     Ok(plan)
 }
@@ -257,8 +258,10 @@ pub(super) fn run(cli: &crate::lf::Cli, args: &WorkspaceArgs, host: OpenHost) ->
         return follow(cli, session, args);
     }
     let (targets, unknown) = super::workspace_targets(cli, args)?;
-    crate::store::read_existing_registry()?.context("Work registry is unavailable")?;
-    let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
+    loopflow_execution::store::read_existing_registry()?.context("Work registry is unavailable")?;
+    let store = loopflow_execution::store::open_sqlite(
+        &loopflow_execution::store::database_path_from_env()?,
+    )?;
     let mut report = OpenReport {
         receipts: Vec::new(),
         unknown,
@@ -324,10 +327,13 @@ fn place_task(
     let unplaced = plan.contents.iter().any(|content| {
         content.location.is_none() && !content.states.contains(&SelectionState::Done)
     });
-    if !unplaced || store.task_execution_route(&task.id)?.machine_id != *local {
+    if !unplaced
+        || loopflow_execution::store::ownership::task_execution_route(store, &task.id)?.machine_id
+            != *local
+    {
         return Ok(false);
     }
-    crate::ops::task::task_checkout(
+    loopflow_execution::ops::task::task_checkout(
         &target.repository_path,
         task.id.as_str(),
         Default::default(),
@@ -353,7 +359,7 @@ fn open_machines(
         .context("Repository has no Work identity")?;
     let repository = RepositoryId::parse(repository)?;
     let selected = scope(store, target)?;
-    let local = store.local_machine()?.id;
+    let local = loopflow_execution::store::machines::local_machine(store)?.id;
     let mut plan = workspace_plan(store, &repository, selected.clone())?;
     if place_task(store, target, &plan, &local)? {
         plan = workspace_plan(store, &repository, selected.clone())?;
@@ -452,7 +458,7 @@ fn route<'a>(
         .filter(|content| explicit || !content.states.contains(&SelectionState::Done))
     {
         let task = TaskId::parse(&content.work.id)?;
-        match store.task_execution_route(&task) {
+        match loopflow_execution::store::ownership::task_execution_route(store, &task) {
             Ok(route) if route.machine_id == *local => {
                 if explicit || started(content) {
                     routed.local.push(content);
@@ -548,15 +554,16 @@ fn settle_remote(
     let Ok(report) = outcome else {
         return (known.unwrap_or(Placement::Uncertain), everything());
     };
-    let task_of = |receipt: &OpenReceipt| match crate::work::link::WorkUrl::parse(&receipt.url)
-        .map(|url| url.target)
-    {
-        Ok(crate::work::link::WorkTarget::Task(identifier)) => candidates
-            .iter()
-            .find(|task| task.identifier == identifier)
-            .map(|task| task.id.clone()),
-        _ => None,
-    };
+    let task_of =
+        |receipt: &OpenReceipt| match loopflow_execution::work::link::WorkUrl::parse(&receipt.url)
+            .map(|url| url.target)
+        {
+            Ok(loopflow_execution::work::link::WorkTarget::Task(identifier)) => candidates
+                .iter()
+                .find(|task| task.identifier == identifier)
+                .map(|task| task.id.clone()),
+            _ => None,
+        };
     let mut opened = Vec::new();
     let mut failed = false;
     let mut launch_failed = false;
@@ -588,8 +595,7 @@ fn remote_open(
     selection: &Selection,
     args: &WorkspaceArgs,
 ) -> Result<OpenReport> {
-    let machine = store
-        .machines()?
+    let machine = loopflow_execution::store::machines::machines(store)?
         .into_iter()
         .find(|entry| entry.id.as_str() == machine)
         .context("Task execution Machine has no configured route")?;
@@ -611,7 +617,7 @@ fn remote_open(
     if let Some(session) = &args.selection.session {
         argv.extend(["--session".into(), session.clone()]);
     }
-    if let Some(agent) = crate::config::agent_override() {
+    if let Some(agent) = loopflow_execution::config::agent_override() {
         argv.extend(["--agent".into(), agent]);
     }
     if args.selection.diff {
@@ -626,8 +632,9 @@ fn remote_open(
     if let Some(into) = &args.into {
         argv.extend(["--into".into(), into.clone()]);
     }
-    let bytes = tokio::runtime::Runtime::new()?
-        .block_on(super::super::ssh::request(&machine, &argv, None))?;
+    let bytes = tokio::runtime::Runtime::new()?.block_on(
+        loopflow_execution::machine::ssh::request(&machine, &argv, None),
+    )?;
     serde_json::from_slice(&bytes)
         .context("Remote workspace receipt is unavailable; creation may have succeeded")
 }
@@ -661,13 +668,13 @@ fn wave_config(
     store: &SqliteStore,
     repo: &Path,
     wave: Option<&WaveId>,
-) -> Result<Option<crate::config::Config>> {
+) -> Result<Option<loopflow_execution::config::Config>> {
     let slug = wave
         .map(|wave| store.get_wave(wave))
         .transpose()?
         .flatten()
         .map(|wave| wave.slug().to_owned());
-    Ok(crate::config::load_wave_config(
+    Ok(loopflow_execution::config::load_wave_config(
         Some(repo),
         slug.as_deref(),
     )?)
@@ -808,9 +815,9 @@ fn launch(
         seen.push(task.id.to_string());
         let mut receipt = target.receipt(Some(host), None, OpenStatus::Opening, None);
         receipt.label = format!("{} · {}", task.identifier, task.title);
-        receipt.url = crate::work::link::WorkUrl::new(
+        receipt.url = loopflow_execution::work::link::WorkUrl::new(
             target.url.repository.clone(),
-            crate::work::link::WorkTarget::Task(task.identifier.clone()),
+            loopflow_execution::work::link::WorkTarget::Task(task.identifier.clone()),
         )
         .to_string();
         let opened = native
@@ -933,8 +940,8 @@ fn start_follower(
 fn lf_argv(cwd: &Path, words: &[&str]) -> Result<Vec<String>> {
     // Tools belong to this opening. Keep an explicit private-Machine runtime, but
     // never hand a dev build's real-Machine panes to the installed release.
-    let binary = if crate::store::custom_home_selected() {
-        crate::os_process::resolve_lf_binary()?
+    let binary = if loopflow_execution::store::custom_home_selected() {
+        loopflow_execution::os_process::resolve_lf_binary()?
     } else {
         std::env::current_exe()?
     };
@@ -948,12 +955,15 @@ fn lf_argv(cwd: &Path, words: &[&str]) -> Result<Vec<String>> {
 }
 
 fn with_machine_home(mut argv: Vec<String>) -> Vec<String> {
-    if crate::store::custom_home_selected() {
+    if loopflow_execution::store::custom_home_selected() {
         argv.splice(
             0..0,
             [
                 "env".into(),
-                format!("LF_HOME={}", crate::store::lf_home_dir().display()),
+                format!(
+                    "LF_HOME={}",
+                    loopflow_execution::store::lf_home_dir().display()
+                ),
             ],
         );
     }
@@ -978,7 +988,9 @@ fn follow(cli: &crate::lf::Cli, session: &str, args: &WorkspaceArgs) -> Result<(
     let target = targets
         .first()
         .context("Follower selection is unavailable")?;
-    let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
+    let store = loopflow_execution::store::open_sqlite(
+        &loopflow_execution::store::database_path_from_env()?,
+    )?;
     let selected = scope(&store, target)?;
     let repository = RepositoryId::parse(
         target
@@ -989,16 +1001,16 @@ fn follow(cli: &crate::lf::Cli, session: &str, args: &WorkspaceArgs) -> Result<(
     let mut remotes = Placement::parse(&args.remote)?;
     println!("Loopflow workspace\nNewly started Tasks appear without taking focus. Close this tab to stop following.");
     let subscribed = repository.clone();
-    let subscribing = super::super::subscribe::start(
+    let subscribing = loopflow_execution::read_stream::start(
         selected.clone(),
         move |store, selected| {
             let repository = subscribed.clone();
             async move {
-                let store = super::super::subscribe::require_store(store)?;
+                let store = loopflow_execution::read_stream::require_store(store)?;
                 workspace_plan(&store.sqlite, &repository, selected)
             }
         },
-        super::super::subscribe::Transport::Pull {
+        loopflow_execution::read_stream::Transport::Pull {
             events: false,
             wake: Box::new(|| {}),
             select: None,
@@ -1013,7 +1025,7 @@ fn follow(cli: &crate::lf::Cli, session: &str, args: &WorkspaceArgs) -> Result<(
     };
     let native = Native::Rex(rex.clone());
     let mut container = Container::existing(session);
-    let local = store.local_machine()?.id;
+    let local = loopflow_execution::store::machines::local_machine(&store)?.id;
     let mut refresh = std::time::Instant::now();
     let mut request_id = 0_u64;
     loop {
@@ -1159,7 +1171,7 @@ fn arrive_remote(
 mod tests {
     use super::{settle_remote, started, Candidate, Placement};
     use crate::lf::commands::open::{OpenHost, OpenReceipt, OpenReport, OpenStatus};
-    use crate::work::selection::{
+    use loopflow_storage::work::selection::{
         SelectionState, ViewContent, WorkWorkspaceKey, WorkWorkspaceKind,
     };
 

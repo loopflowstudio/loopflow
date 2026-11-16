@@ -14,6 +14,8 @@ ROOT = Path(__file__).resolve().parents[2]
 def test_build_target_and_cache_bypass(tmp_path, isolated):
     repo = tmp_path / "source with spaces"
     repo.mkdir()
+    (repo / "scripts").mkdir()
+    (repo / "scripts/build_cache.py").write_text((ROOT / "scripts/build_cache.py").read_text())
     subprocess.run(["git", "init", "-q", str(repo)], check=True)
     commands = tmp_path / "bin"
     commands.mkdir()
@@ -41,7 +43,11 @@ def test_build_target_and_cache_bypass(tmp_path, isolated):
         "RUSTC_WRAPPER": "shared-cache",
         "RUSTC_WORKSPACE_WRAPPER": "workspace-cache",
         "SCCACHE_DISABLE": "0",
+        "XDG_CACHE_HOME": str(tmp_path / "cache"),
+        "XDG_CONFIG_HOME": str(tmp_path / "config"),
+        "HOME": str(tmp_path / "home"),
     }
+    env.pop("SCCACHE_CONF", None)
     args = [str(ROOT / "scripts/dev-lf")]
     if isolated:
         args.append("--isolated-build")
@@ -58,3 +64,9 @@ def test_build_target_and_cache_bypass(tmp_path, isolated):
         "RUSTC_WORKSPACE_WRAPPER": "" if isolated else "workspace-cache",
         "SCCACHE_DISABLE": "1" if isolated else "0",
     }
+
+    config = tmp_path / "cache/loopflow/sccache.json"
+    if isolated:
+        assert not config.exists()
+    else:
+        assert json.loads(config.read_text())["basedirs"] == [str(repo.resolve())]

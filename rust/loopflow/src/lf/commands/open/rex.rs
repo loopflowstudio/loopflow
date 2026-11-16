@@ -1,5 +1,4 @@
 //! Rex CLI adapter: resolve the caller, create native sessions and tabs, and focus them.
-use std::collections::BTreeSet;
 use std::path::Path;
 use std::process::Command;
 
@@ -7,75 +6,10 @@ use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 
 use super::OpenHost;
-use crate::journal::OsProcess;
-use crate::transport::local_directory_report;
-use crate::work::selection::SplitAxis;
+use loopflow_execution::transport::local_directory_report;
+use loopflow_storage::work::selection::SplitAxis;
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub(super) struct RexLocation {
-    pub server: String,
-    pub session: String,
-    pub block: String,
-}
-
-impl RexLocation {
-    pub(super) fn current() -> Result<Self> {
-        let server = match std::env::var("REX_SERVER").ok() {
-            Some(server) => server,
-            None => caller_server()?.context(
-                "Rex caller server is unavailable from its process ancestry; select it with --server",
-            )?,
-        };
-        Self {
-            server,
-            session: std::env::var("REX_SESSION").context("Rex caller session is missing")?,
-            block: std::env::var("REX_BLOCK").context("Rex caller block is missing")?,
-        }
-        .resolve()
-    }
-
-    fn resolve(mut self) -> Result<Self> {
-        self.server = Rex::endpoint(Some(&self.server))?;
-        Ok(self)
-    }
-}
-
-/// Native Rex shells descend from the serving process, even through login and
-/// tool shells. Its explicit listener is destination evidence; a running-app or
-/// socket inventory is not. Current conversation placement is resolved first.
-fn caller_server() -> Result<Option<String>> {
-    let mut pid = std::process::id();
-    let mut seen = BTreeSet::new();
-    while pid > 1 && seen.insert(pid) {
-        let Some(process) = OsProcess::read(pid)? else {
-            break;
-        };
-        if OsProcess::executable(pid)
-            .is_some_and(|path| path.file_name().is_some_and(|name| name == "rex"))
-        {
-            let args = OsProcess::arguments(pid)?
-                .context("Rex caller server arguments are unavailable")?;
-            if args.windows(2).any(|pair| pair == ["server", "run"]) {
-                return Ok(listening_endpoint(&args));
-            }
-        }
-        pid = process.ppid;
-    }
-    Ok(None)
-}
-
-fn listening_endpoint(args: &[String]) -> Option<String> {
-    let mut args = args.iter();
-    while let Some(arg) = args.next() {
-        if arg == "--listen" {
-            return args.next().cloned();
-        }
-        if let Some(endpoint) = arg.strip_prefix("--listen=") {
-            return Some(endpoint.into());
-        }
-    }
-    None
-}
+use loopflow_execution::terminal_host::{rex_endpoint, RexLocation};
 
 #[derive(Debug, Clone)]
 pub(super) struct Rex {
@@ -127,7 +61,7 @@ impl Rex {
                     .resolve()?,
             ),
             Some(_) => None,
-            None if super::in_rex() && crate::journal::agent_caller().is_none() => {
+            None if super::in_rex() && loopflow_execution::journal::agent_caller().is_none() => {
                 Some(RexLocation::current()?)
             }
             None => None,
@@ -136,7 +70,7 @@ impl Rex {
             location.filter(|location| server.is_none_or(|server| server == location.server));
         let endpoint = match &location {
             Some(location) => location.server.clone(),
-            None => Self::endpoint(server)?,
+            None => rex_endpoint(server)?,
         };
         let rex = Self {
             server: endpoint,
@@ -155,26 +89,6 @@ impl Rex {
             );
         }
         Ok(rex)
-    }
-
-    fn endpoint(server: Option<&str>) -> Result<String> {
-        let mut command = Command::new("rex");
-        for name in ["REX_SERVER", "REX_SESSION", "REX_BLOCK"] {
-            command.env_remove(name);
-        }
-        if let Some(server) = server {
-            command.args(["-S", server]);
-        }
-        command.args(["--autostart=false", "--timeout", "2s", "whoami", "--json"]);
-        let output = super::run_host(command, "Rex")?;
-        let who: Value = serde_json::from_str(&output)?;
-        let server = who["endpoint"]
-            .as_str()
-            .context("Rex did not identify its server")?;
-        // Unix peer authentication identifies this Machine's account. A remotely
-        // selected default is never accepted as the local Task execution host.
-        anyhow::ensure!(server.starts_with("unix://") && who["principal"]["transport"] == "unix", "Rex is connected to another Machine; run lf open on the Task's recorded Machine with its local Rex server");
-        Ok(server.into())
     }
 
     pub(super) fn create_session(&self, name: &str) -> Result<String> {
@@ -292,36 +206,8 @@ fn array(mut value: Value, key: &str) -> Result<Vec<Value>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{array, listening_endpoint};
+    use super::array;
     use serde_json::json;
-
-    #[test]
-    fn caller_listener_preserves_argument_boundaries() {
-        for args in [
-            vec![
-                "rex",
-                "server",
-                "run",
-                "--listen",
-                "unix:///Task servers/rex.sock",
-            ],
-            vec![
-                "rex",
-                "server",
-                "run",
-                "--listen=unix:///Task servers/rex.sock",
-            ],
-        ] {
-            assert_eq!(
-                listening_endpoint(&args.into_iter().map(str::to_owned).collect::<Vec<_>>()),
-                Some("unix:///Task servers/rex.sock".into())
-            );
-        }
-        assert_eq!(
-            listening_endpoint(&["--config".into(), "/rex.lua".into()]),
-            None
-        );
-    }
 
     #[test]
     fn missing_inventory_is_not_an_empty_host() {

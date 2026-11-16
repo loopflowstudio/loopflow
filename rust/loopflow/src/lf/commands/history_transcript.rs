@@ -6,16 +6,16 @@ use std::collections::BTreeSet;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-use crate::harness::HarnessKind;
 use crate::lf::commands::WorkFilter;
-use crate::store::sqlite::SqliteStore;
-use crate::store::ProviderAccountId;
-use crate::transcript::summary::{summarize, RetentionSummary};
-use crate::transcript::{
+use loopflow_execution::harness::HarnessKind;
+use loopflow_execution::store::ProviderAccountId;
+use loopflow_execution::transcript::summary::{summarize, RetentionSummary};
+use loopflow_execution::transcript::{
     self, Conversation, Located, Request, RequestSource, RetentionState, SessionTranscript, Source,
     Turn, TurnItem,
 };
 use loopflow_model::chat::types::{ConversationItem, Lifecycle};
+use loopflow_storage::sqlite::SqliteStore;
 
 const SNIPPET_CHARS: usize = 80;
 const ANSWER_CHARS: usize = 160;
@@ -25,11 +25,14 @@ fn now() -> i64 {
 }
 
 fn read_only_store() -> Result<Option<SqliteStore>> {
-    let database = crate::store::database_path_from_env()?;
+    let database = loopflow_execution::store::database_path_from_env()?;
     if !database.exists() {
         return Ok(None);
     }
-    Ok(Some(SqliteStore::open_processes_read_only(&database)?))
+    Ok(Some(SqliteStore::open_processes_read_only(
+        &database,
+        loopflow_execution::store::token_key::encryption_key,
+    )?))
 }
 
 /// A Unix time as `YYYY-MM-DD HH:MM UTC`.
@@ -348,7 +351,8 @@ pub(crate) fn search(
     json: bool,
 ) -> Result<()> {
     anyhow::ensure!(!query.trim().is_empty(), "Search text is empty");
-    let since = super::util::parse_since(since, time::OffsetDateTime::now_utc())?.unix_timestamp();
+    let since = loopflow_execution::output::parse_since(since, time::OffsetDateTime::now_utc())?
+        .unix_timestamp();
     let mut results = SearchResults {
         query: query.to_owned(),
         since,

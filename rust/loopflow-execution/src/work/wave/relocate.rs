@@ -1,0 +1,164 @@
+use std::path::Path;
+
+use anyhow::{anyhow, Result};
+use serde::{Deserialize, Serialize};
+
+use crate::store::{Store, WaveLocatorUpdate};
+use crate::work::wave::{Wave, WaveLocator};
+use loopflow_model::id::WaveId;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WaveRelocationReceipt {
+    pub wave_id: String,
+    pub from_repo: String,
+    pub from_name: String,
+    pub to_repo: String,
+    pub to_name: String,
+    pub waves_moved: usize,
+}
+
+#[derive(Debug, Clone)]
+struct PlannedWaveMove {
+    wave: Wave,
+    target: WaveLocator,
+}
+
+/// Relocation changes planning addresses. Definitions and execution retain their identities.
+pub async fn relocate_wave(
+    store: &Store,
+    wave_id: &WaveId,
+    invoking_repo: &Path,
+    target_repo: Option<&Path>,
+    target_name: Option<&str>,
+) -> Result<WaveRelocationReceipt> {
+    let wave = store
+        .get_wave(wave_id)
+        .await?
+        .ok_or_else(|| anyhow!("Wave {wave_id} is not registered"))?;
+    if wave.is_retired() {
+        return Err(anyhow!("Wave {wave_id} is retired"));
+    }
+    let invoking = crate::repository::discover(invoking_repo)?;
+    let target_repo =
+        crate::repository::discover(target_repo.unwrap_or_else(|| Path::new(wave.repo())))?;
+    let target = WaveLocator::new(target_repo, target_name.unwrap_or(wave.slug()))?;
+    if let Ok(source) = crate::repository::discover(Path::new(wave.repo())) {
+        if source != invoking {
+            return Err(anyhow!("invoke relocation from {}", wave.repo()));
+        }
+    } else if target.repo() != &invoking {
+        return Err(anyhow!(
+            "invoke relocation from its explicit target {}",
+            target.repo()
+        ));
+    }
+    ensure_repository_team_compatible(&wave, &target)?;
+    if wave.repo() != target.repo().to_string() && wave.parent_wave_id().is_some() {
+        return Err(anyhow!("repository relocation must start from a root Wave"));
+    }
+    let moves = plan_moves(store, wave, target).await?;
+    for planned in &moves {
+        if let Some(existing) = store.get_wave_at(&planned.target).await? {
+            if existing.id() != planned.wave.id() {
+                return Err(anyhow!(
+                    "Wave {} already exists; remove or rename it first",
+                    planned.target.slug()
+                ));
+            }
+        }
+    }
+    let root = &moves[0];
+    let receipt = WaveRelocationReceipt {
+        wave_id: root.wave.id().to_string(),
+        from_repo: root.wave.repo().to_string(),
+        from_name: root.wave.slug().to_string(),
+        to_repo: root.target.repo().to_string(),
+        to_name: root.target.slug().to_string(),
+        waves_moved: moves.len(),
+    };
+    if let Some((parent, _)) = root.target.slug().rsplit_once('/') {
+        crate::work::wave::bootstrap::ensure_wave(
+            &store.sqlite,
+            &root.target.repo().to_string(),
+            parent,
+        )?;
+    }
+    let mut copied = Vec::new();
+    for planned in &moves {
+        if let Some(value) = crate::config::files::copy_wave(
+            Path::new(planned.wave.repo()),
+            planned.target.repo().as_path(),
+            planned.wave.id(),
+        )? {
+            copied.push((
+                planned.wave.repo().to_owned(),
+                planned.wave.id().clone(),
+                value,
+            ));
+        }
+    }
+    store
+        .relocate_waves(
+            moves
+                .iter()
+                .map(|planned| WaveLocatorUpdate {
+                    wave_id: planned.wave.id().clone(),
+                    expected_repo: planned.wave.repo().to_string(),
+                    expected_slug: planned.wave.slug().to_string(),
+                    target: planned.target.clone(),
+                })
+                .collect(),
+        )
+        .await?;
+    for (source, id, value) in copied {
+        crate::config::files::finish_wave_move(Path::new(&source), &id, &value)?;
+    }
+    Ok(receipt)
+}
+
+fn ensure_repository_team_compatible(wave: &Wave, target: &WaveLocator) -> Result<()> {
+    let Ok(source) = crate::repository::discover(Path::new(wave.repo())) else {
+        return Ok(());
+    };
+    if &source == target.repo() {
+        return Ok(());
+    }
+    let source_team = crate::ops::linear::selected_linear_team(source.as_path())
+        .map_err(|error| anyhow!(error.to_string()))?;
+    let target_team = crate::ops::linear::selected_linear_team(target.repo().as_path())
+        .map_err(|error| anyhow!(error.to_string()))?;
+    if let (Some(source_team), Some(target_team)) = (source_team, target_team) {
+        if source_team != target_team {
+            return Err(anyhow!(
+                "cannot rehome Wave {} from repository Team {} to {}; run `lf reteam` explicitly before relocating",
+                wave.id(),
+                source_team,
+                target_team
+            ));
+        }
+    }
+    Ok(())
+}
+
+async fn plan_moves(
+    store: &Store,
+    root: Wave,
+    target: WaveLocator,
+) -> Result<Vec<PlannedWaveMove>> {
+    let mut moves = vec![PlannedWaveMove { wave: root, target }];
+    // Parents precede children so the store can resolve each destination parent.
+    let mut next = 0;
+    while next < moves.len() {
+        for child in store.list_child_waves(moves[next].wave.id()).await? {
+            moves.push(PlannedWaveMove {
+                target: WaveLocator::new(
+                    moves[next].target.repo().clone(),
+                    &format!("{}/{}", moves[next].target.slug(), child.name()),
+                )?,
+                wave: child,
+            });
+        }
+        next += 1;
+    }
+    Ok(moves)
+}

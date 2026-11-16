@@ -1,6 +1,6 @@
-use loopflow::durable::TaskState;
 use loopflow::lf::commands::waves::{Evidence, RoadmapSnapshot, WaveDetailSnapshot};
-use loopflow::work::wave::metrics::MetricPortfolioDto;
+use loopflow_execution::durable::TaskState;
+use loopflow_execution::work::wave::metrics::MetricPortfolioDto;
 
 const WAVE_DETAIL: &str = include_str!("../../../tests/fixtures/dto/wave_detail.json");
 const ROADMAP: &str = include_str!("../../../tests/fixtures/dto/roadmap_snapshot.json");
@@ -44,8 +44,8 @@ fn activity_retains_unknown_record_identity_without_a_pid() {
 
 #[test]
 fn task_comments_keep_authorship_and_require_every_field() {
-    use loopflow::work::task::comment::TaskCommentAuthor;
-    use loopflow::work::task::comment::TaskComments;
+    use loopflow_execution::work::task::comment::TaskCommentAuthor;
+    use loopflow_execution::work::task::comment::TaskComments;
     let json = include_str!("../../../tests/fixtures/dto/task_comments.json");
     let thread: TaskComments = serde_json::from_str(json).unwrap();
     assert_eq!(thread.comments[0].author, TaskCommentAuthor::Integration);
@@ -83,13 +83,13 @@ fn wave_detail_preserves_graph_and_machine() {
     );
     assert_eq!(
         snapshot.project_readiness.state,
-        loopflow::store::sqlite::ProjectReadinessState::Ready
+        loopflow_execution::store::sqlite::ProjectReadinessState::Ready
     );
     assert!(snapshot.project_readiness.activation.is_none());
     assert_eq!(snapshot.setup.graph.value.as_deref(), Some("code"));
     assert_eq!(
         snapshot.setup.skill_agents["implement"].source,
-        loopflow::config::ConfigSource::Repository
+        loopflow_execution::config::ConfigSource::Repository
     );
     let Evidence::Ok {
         items: projects, ..
@@ -121,7 +121,7 @@ fn wave_detail_preserves_graph_and_machine() {
     assert!(items[0].current);
     assert_eq!(
         items[0].status,
-        loopflow::work::project::ProjectStatus::Started
+        loopflow_execution::work::project::ProjectStatus::Started
     );
 
     let encoded = serde_json::to_string(&snapshot).unwrap();
@@ -150,7 +150,7 @@ fn status_and_roadmap_require_the_shared_metric_portfolio() {
     assert!(matches!(
         detail.metric_portfolio.metrics.as_slice(),
         [metric] if metric.identity.metric_id == "task-loop-trust"
-            && matches!(metric.evidence, loopflow::work::wave::metrics::MetricEvidenceDto::Met { .. })
+            && matches!(metric.evidence, loopflow_execution::work::wave::metrics::MetricEvidenceDto::Met { .. })
     ));
 
     let roadmap: RoadmapSnapshot = serde_json::from_str(ROADMAP).unwrap();
@@ -229,11 +229,12 @@ fn metric_portfolio_fixture_locks_every_tagged_payload() {
     assert_eq!(portfolio.metrics.len(), 11);
     assert!(matches!(
         &portfolio.metrics[10].evidence,
-        loopflow::work::wave::metrics::MetricEvidenceDto::Unknown {
-            cause: loopflow::work::wave::metrics::MetricUnknownCauseDto::TargetUnavailable {
-                value: 1.0,
-                ..
-            }
+        loopflow_execution::work::wave::metrics::MetricEvidenceDto::Unknown {
+            cause:
+                loopflow_execution::work::wave::metrics::MetricUnknownCauseDto::TargetUnavailable {
+                    value: 1.0,
+                    ..
+                }
         }
     ));
     assert_eq!(portfolio.contract_issues.len(), 5);
@@ -282,10 +283,11 @@ fn metric_portfolio_fixture_locks_every_tagged_payload() {
 #[test]
 fn session_history_retains_receipts_and_unknown_lf_process() {
     let input = include_str!("../../../tests/fixtures/dto/session_history.json");
-    let events: Vec<loopflow::session::SessionEvent> = serde_json::from_str(input).unwrap();
+    let events: Vec<loopflow_execution::session::SessionEvent> =
+        serde_json::from_str(input).unwrap();
     assert_eq!(
         events[1].kind,
-        loopflow::session::SessionEventKind::Completed
+        loopflow_execution::session::SessionEventKind::Completed
     );
     assert_eq!(
         events[0].agent_session.as_ref().unwrap().as_str(),
@@ -295,7 +297,7 @@ fn session_history_retains_receipts_and_unknown_lf_process() {
     assert_eq!(events[0].payload["total"]["inputTokens"], 40);
     assert_eq!(
         events[2].kind,
-        loopflow::session::SessionEventKind::Observed
+        loopflow_execution::session::SessionEventKind::Observed
     );
     assert!(events[2].provider_turn.is_none());
     assert!(events[2].agent_session.is_none());
@@ -309,11 +311,11 @@ fn session_history_retains_receipts_and_unknown_lf_process() {
 fn task_files_share_exact_bases_rename_paths_and_lossless_revisions() {
     #[derive(serde::Serialize, serde::Deserialize)]
     struct Files {
-        directory: loopflow::ops::task::TaskDirectory,
-        changes: loopflow::ops::task::TaskChangesSnapshot,
-        diff: loopflow::ops::task::TaskDiffSnapshot,
-        file: loopflow::ops::task::TaskFileSnapshot,
-        save: loopflow::ops::task::TaskFileSave,
+        directory: loopflow_execution::ops::task::TaskDirectory,
+        changes: loopflow_execution::ops::task::TaskChangesSnapshot,
+        diff: loopflow_execution::ops::task::TaskDiffSnapshot,
+        file: loopflow_execution::ops::task::TaskFileSnapshot,
+        save: loopflow_execution::ops::task::TaskFileSave,
     }
     let json = include_str!("../../../tests/fixtures/dto/task_files.json");
     let files: Files = serde_json::from_str(json).unwrap();
@@ -329,11 +331,11 @@ fn task_files_share_exact_bases_rename_paths_and_lossless_revisions() {
 #[test]
 fn process_page_retains_outcomes_unknowns_and_continuation() {
     let json = include_str!("../../../tests/fixtures/dto/process_page.json");
-    let page: loopflow::process::ProcessPage = serde_json::from_str(json).unwrap();
-    let loopflow::process::ProcessEntry::Lf(lf) = &page.entries[0] else {
+    let page: loopflow_execution::process::ProcessPage = serde_json::from_str(json).unwrap();
+    let loopflow_execution::process::ProcessEntry::Lf(lf) = &page.entries[0] else {
         panic!("first entry is an lf Process")
     };
-    let loopflow::process::ProcessEntry::Agent(agent) = &page.entries[1] else {
+    let loopflow_execution::process::ProcessEntry::Agent(agent) = &page.entries[1] else {
         panic!("second entry is an AgentProcess")
     };
     assert_eq!(lf.exit_code, Some(42));
@@ -349,7 +351,7 @@ fn process_page_retains_outcomes_unknowns_and_continuation() {
         serde_json::to_value(page).unwrap(),
         serde_json::from_str::<serde_json::Value>(json).unwrap()
     );
-    assert!(serde_json::from_str::<loopflow::process::ProcessPage>("{}").is_err());
+    assert!(serde_json::from_str::<loopflow_execution::process::ProcessPage>("{}").is_err());
 }
 
 #[test]
@@ -379,7 +381,10 @@ fn task_detail_says_each_fact_once() {
     use loopflow::lf::commands::task_row::TaskDetail;
     let json = include_str!("../../../tests/fixtures/dto/task_detail.json");
     let detail: TaskDetail = serde_json::from_str(json).unwrap();
-    assert_eq!(detail.task.state, loopflow::durable::TaskState::Active);
+    assert_eq!(
+        detail.task.state,
+        loopflow_execution::durable::TaskState::Active
+    );
     assert_eq!(
         detail.task.graph.as_ref().unwrap().step.as_deref(),
         Some("demo")
@@ -392,7 +397,7 @@ fn task_detail_says_each_fact_once() {
 
 #[test]
 fn task_status_preserves_canonical_work_and_acquisition_evidence() {
-    use loopflow::ops::task::TaskStatus;
+    use loopflow_execution::ops::task::TaskStatus;
     let json = include_str!("../../../tests/fixtures/dto/task_status.json");
     let status: TaskStatus = serde_json::from_str(json).unwrap();
     let task = status.task.as_ref().unwrap();
@@ -404,7 +409,7 @@ fn task_status_preserves_canonical_work_and_acquisition_evidence() {
     assert_eq!(status.observed_at, Some(1790683200));
     assert_eq!(
         status.planning_state,
-        loopflow::store::PlanningState::Available
+        loopflow_execution::store::PlanningState::Available
     );
     assert!(!status.planning_stale);
     assert!(status.planning_error.is_none());
@@ -423,8 +428,8 @@ fn task_status_preserves_canonical_work_and_acquisition_evidence() {
             .map(|entry| entry.kind)
             .collect::<Vec<_>>(),
         [
-            loopflow::durable::OwnershipKind::Claim,
-            loopflow::durable::OwnershipKind::Claim
+            loopflow_execution::durable::OwnershipKind::Claim,
+            loopflow_execution::durable::OwnershipKind::Claim
         ]
     );
     let value: serde_json::Value = serde_json::from_str(json).unwrap();
@@ -441,7 +446,7 @@ fn task_status_preserves_canonical_work_and_acquisition_evidence() {
 
 #[test]
 fn graph_compositions_round_trip_distinct_compositions_and_required_children() {
-    use loopflow::graph::compiled::GraphCatalogEntry;
+    use loopflow_execution::graph::compiled::GraphCatalogEntry;
     let json = include_str!("../../../tests/fixtures/dto/graph_composition.json");
     let entry: GraphCatalogEntry = serde_json::from_str(json).unwrap();
     let value: serde_json::Value = serde_json::from_str(json).unwrap();
@@ -462,7 +467,7 @@ fn graph_compositions_round_trip_distinct_compositions_and_required_children() {
 #[test]
 fn prepared_checkout_retains_owning_home_without_starting_execution() {
     let json = include_str!("../../../tests/fixtures/dto/task_checkout.json");
-    let snapshot: loopflow::ops::task::TaskSnapshot = serde_json::from_str(json).unwrap();
+    let snapshot: loopflow_execution::ops::task::TaskSnapshot = serde_json::from_str(json).unwrap();
     assert_eq!(
         snapshot.machine_id.as_ref().unwrap().as_str(),
         "home_00000000000000000000000000000001"
@@ -476,7 +481,7 @@ fn prepared_checkout_retains_owning_home_without_starting_execution() {
     assert!(!snapshot.branch.as_ref().unwrap().is_empty());
     assert_eq!(
         snapshot.execution.state,
-        loopflow::ops::task_execution::TaskExecutionState::Idle
+        loopflow_execution::ops::task_execution::TaskExecutionState::Idle
     );
     assert_eq!(
         snapshot.started_by.as_ref().unwrap().to_string(),
@@ -492,14 +497,14 @@ fn prepared_checkout_retains_owning_home_without_starting_execution() {
 #[test]
 fn task_work_preserves_all_owners() {
     let input = include_str!("../../../tests/fixtures/dto/task_work.json");
-    let work: loopflow::task_work::TaskWork = serde_json::from_str(input).unwrap();
+    let work: loopflow_execution::task_work::TaskWork = serde_json::from_str(input).unwrap();
     assert_eq!(work.sessions.len(), 2);
     assert_eq!(work.graph_processes.len(), 1);
     assert!(!work.processes.is_empty());
     let graph = work.graph.as_ref().expect("fixture Task has a graph");
     assert_eq!(
         graph.position,
-        loopflow::task_graph::TaskGraphPosition::Run {
+        loopflow_execution::task_graph::TaskGraphPosition::Run {
             step: "review-design".into(),
             at: "implement".into(),
             lf_process_id: work.graph_processes[0].summary.id.to_string(),
@@ -516,7 +521,7 @@ fn task_work_preserves_all_owners() {
 
 #[test]
 fn context_report_keeps_unknown_sources_distinct_from_zero() {
-    use loopflow::context_usage::{ContextReport, ContextSource};
+    use loopflow_execution::context_usage::{ContextReport, ContextSource};
     let input = include_str!("../../../tests/fixtures/dto/context_report.json");
     let report: ContextReport = serde_json::from_str(input).unwrap();
     assert_eq!(
@@ -536,7 +541,8 @@ fn context_report_keeps_unknown_sources_distinct_from_zero() {
 #[test]
 fn graph_detail_keeps_its_launched_graph_and_every_step() {
     let input = include_str!("../../../tests/fixtures/dto/graph_detail.json");
-    let detail: loopflow::durable::GraphProcessDetail = serde_json::from_str(input).unwrap();
+    let detail: loopflow_execution::durable::GraphProcessDetail =
+        serde_json::from_str(input).unwrap();
     assert_eq!(detail.steps.len(), 6);
     // The running step is the second pass of the node the loop returned to.
     let running = detail.steps.last().unwrap();
@@ -551,7 +557,7 @@ fn graph_detail_keeps_its_launched_graph_and_every_step() {
 /// Every state Rust can send, so Swift's decoder is tested against all of them.
 #[test]
 fn selection_states_fixture_lists_every_state() {
-    use loopflow::work::selection::SelectionState;
+    use loopflow_execution::work::selection::SelectionState;
     fn collect(schema: &serde_json::Value, names: &mut Vec<String>) {
         match schema {
             serde_json::Value::Object(fields) => {
@@ -584,7 +590,7 @@ fn selection_states_fixture_lists_every_state() {
 
 #[test]
 fn subscribe_frames_carry_each_reads_json_result() {
-    use loopflow::lf::commands::subscribe::SubscriptionFrame;
+    use loopflow_execution::read_stream::SubscriptionFrame;
     let entries: Vec<serde_json::Value> = serde_json::from_str(include_str!(
         "../../../tests/fixtures/dto/subscribe_frames.json"
     ))
@@ -614,7 +620,7 @@ fn subscribe_frames_carry_each_reads_json_result() {
         }
         match entry["part"].as_str().unwrap() {
             "planning" => read::<RoadmapSnapshot>(&body),
-            "selections" => read::<Vec<loopflow::work::selection::ViewPlan>>(&body),
+            "selections" => read::<Vec<loopflow_execution::work::selection::ViewPlan>>(&body),
             // Desktop's Session rows are pinned by `sessions.json`; the subscription carries them as listed.
             "sessions" => assert!(body
                 .as_array()
@@ -627,7 +633,7 @@ fn subscribe_frames_carry_each_reads_json_result() {
             }
             "activity" => read::<loopflow::lf::commands::top::ActivitySnapshot>(&body),
             "peer_planning" => {
-                read::<Vec<loopflow::store::PeerPlanningStatus>>(&body["destinations"]);
+                read::<Vec<loopflow_execution::store::PeerPlanningStatus>>(&body["destinations"]);
                 assert_eq!(body["transport"], "git");
             }
             other => panic!("unknown subscription {other}"),
@@ -650,7 +656,7 @@ fn task_delivery_preserves_execution_and_due_unstarted_tasks() {
         .contains("lf task complete"));
     assert_eq!(
         rows["completed_running"].runtime.as_ref().unwrap().status,
-        loopflow::durable::TaskState::Done
+        loopflow_execution::durable::TaskState::Done
     );
     assert_eq!(
         rows["completed_running"].execution,
@@ -670,7 +676,7 @@ fn task_delivery_preserves_execution_and_due_unstarted_tasks() {
 #[test]
 fn composed_lifecycle_preserves_completion_before_graph_arrival() {
     use loopflow::lf::commands::waves::RoadmapTask;
-    use loopflow::ops::task::TaskStatus;
+    use loopflow_execution::ops::task::TaskStatus;
     let captures: serde_json::Value = serde_json::from_str(include_str!(
         "../../../tests/fixtures/dto/task_lifecycle.json"
     ))
@@ -685,7 +691,10 @@ fn composed_lifecycle_preserves_completion_before_graph_arrival() {
         assert_eq!(overview.graph, execution.work.graph);
         assert_eq!(row.runtime.as_ref().unwrap().status, execution.status);
         if phase != "merged" {
-            assert_eq!(execution.status, loopflow::durable::TaskState::Done);
+            assert_eq!(
+                execution.status,
+                loopflow_execution::durable::TaskState::Done
+            );
         }
     }
     assert_eq!(
@@ -708,12 +717,12 @@ fn planning_sync_preserves_delivery_and_losing_values() {
         "../../../tests/fixtures/dto/planning_sync.json"
     ))
     .unwrap();
-    let sync: loopflow::store::planning_sync::PlanningSyncStatus =
+    let sync: loopflow_execution::store::planning_sync::PlanningSyncStatus =
         serde_json::from_value(value.clone()).unwrap();
     assert!(sync.connected);
     assert_eq!(
         sync.changes[1].state,
-        loopflow::store::planning_sync::PlanningSyncState::Uncertain
+        loopflow_execution::store::planning_sync::PlanningSyncState::Uncertain
     );
     assert_eq!(sync.changes[2].field, "task_title");
     assert_eq!(sync.changes[3].field, "task_assignee");
@@ -838,7 +847,7 @@ fn desktop_opening_distinguishes_launch_acceptance_from_usable_and_failed() {
 
 #[test]
 fn task_run_explanations_preserve_actions_and_missing_evidence() {
-    use loopflow::ops::task::{TaskRunAction, TaskRunExplanation};
+    use loopflow_execution::ops::task::{TaskRunAction, TaskRunExplanation};
     let json = include_str!("../../../tests/fixtures/dto/task_run_explanations.json");
     let reports: Vec<TaskRunExplanation> = serde_json::from_str(json).unwrap();
     assert!(matches!(
@@ -930,10 +939,10 @@ fn session_resume_explanations_preserve_intent_and_unavailable_evidence() {
 #[test]
 fn work_authors_preserve_names_and_historical_attribution() {
     let fixture = include_str!("../../../tests/fixtures/dto/work_authors.json");
-    let authors: Vec<loopflow::durable::Author> = serde_json::from_str(fixture).unwrap();
+    let authors: Vec<loopflow_execution::durable::Author> = serde_json::from_str(fixture).unwrap();
     assert_eq!(
         authors[1],
-        loopflow::durable::Author::Named("Fixture author".into())
+        loopflow_execution::durable::Author::Named("Fixture author".into())
     );
     assert_eq!(
         serde_json::to_value(authors).unwrap(),
@@ -944,7 +953,7 @@ fn work_authors_preserve_names_and_historical_attribution() {
 #[test]
 fn session_steers_say_when_each_was_read() {
     let fixture = include_str!("../../../tests/fixtures/dto/session_steers.json");
-    let page: loopflow::steer::SessionSteerPage = serde_json::from_str(fixture).unwrap();
+    let page: loopflow_execution::steer::SessionSteerPage = serde_json::from_str(fixture).unwrap();
     assert_eq!(page.items[0].delivered_at, Some(1794000000));
     assert_eq!((page.items[1].delivered_at, page.pending), (None, 1));
     assert_eq!(
@@ -953,7 +962,7 @@ fn session_steers_say_when_each_was_read() {
     );
     // A page missing a nullable key is not a complete page.
     let partial = fixture.replace(r#""delivered_at": null"#, r#""unrelated": null"#);
-    assert!(serde_json::from_str::<loopflow::steer::SessionSteerPage>(&partial).is_err());
+    assert!(serde_json::from_str::<loopflow_execution::steer::SessionSteerPage>(&partial).is_err());
 }
 
 #[test]
@@ -962,7 +971,7 @@ fn peer_planning_status_keeps_independent_receipts() {
         "../../../tests/fixtures/dto/peer_planning_status.json"
     ))
     .unwrap();
-    let statuses: Vec<loopflow::store::PeerPlanningStatus> =
+    let statuses: Vec<loopflow_execution::store::PeerPlanningStatus> =
         serde_json::from_value(value.clone()).unwrap();
     assert!(statuses[0].pending_local);
     assert_eq!(
@@ -975,7 +984,10 @@ fn peer_planning_status_keeps_independent_receipts() {
     for field in ["conflicts", "pending_local"] {
         let mut missing = value[1].clone();
         missing.as_object_mut().unwrap().remove(field);
-        assert!(serde_json::from_value::<loopflow::store::PeerPlanningStatus>(missing).is_err());
+        assert!(
+            serde_json::from_value::<loopflow_execution::store::PeerPlanningStatus>(missing)
+                .is_err()
+        );
     }
 }
 
@@ -985,7 +997,7 @@ fn planning_journal_keeps_losing_values_and_its_winners() {
         "../../../tests/fixtures/dto/planning_journal.json"
     ))
     .unwrap();
-    let journals: Vec<loopflow::store::PlanningJournal> =
+    let journals: Vec<loopflow_execution::store::PlanningJournal> =
         serde_json::from_value(value.clone()).unwrap();
     assert_eq!(
         journals[1].changes["comment-head"]
@@ -1008,7 +1020,7 @@ fn planning_journal_keeps_losing_values_and_its_winners() {
         .parents
         .contains("title-loser"));
     for journal in &journals {
-        let snapshot = loopflow::planning_exchange::PlanningSnapshot {
+        let snapshot = loopflow_execution::planning_exchange::PlanningSnapshot {
             changes: journal.changes.clone(),
         };
         snapshot.validate().unwrap();
@@ -1035,7 +1047,7 @@ fn unplaced_wave_preserves_nullable_machine() {
 
 #[test]
 fn repository_identity_preserves_explicit_local_locators() {
-    use loopflow::durable::RepositoryIdentity;
+    use loopflow_execution::durable::RepositoryIdentity;
     let json = include_str!("../../../tests/fixtures/dto/repository_identity.json");
     let identity: RepositoryIdentity = serde_json::from_str(json).unwrap();
     assert_eq!(identity.locators.len(), 2);
@@ -1051,7 +1063,7 @@ fn repository_identity_preserves_explicit_local_locators() {
 
 #[test]
 fn task_planning_explanations_preserve_intent_and_effects() {
-    use loopflow::ops::task::{TaskPlanningAction, TaskPlanningExplanation};
+    use loopflow_execution::ops::task::{TaskPlanningAction, TaskPlanningExplanation};
     let json = include_str!("../../../tests/fixtures/dto/task_planning_explanations.json");
     let reports: Vec<TaskPlanningExplanation> = serde_json::from_str(json).unwrap();
     assert!(matches!(
@@ -1101,7 +1113,7 @@ fn task_planning_explanations_preserve_intent_and_effects() {
 
 #[test]
 fn task_checkout_explanations_keep_proposals_separate_from_admission() {
-    use loopflow::ops::task::{TaskCheckoutBehavior, TaskCheckoutExplanation};
+    use loopflow_execution::ops::task::{TaskCheckoutBehavior, TaskCheckoutExplanation};
     let json = include_str!("../../../tests/fixtures/dto/task_checkout_explanations.json");
     let reports: Vec<TaskCheckoutExplanation> = serde_json::from_str(json).unwrap();
     for (report, behavior) in reports.iter().zip([
@@ -1121,7 +1133,7 @@ fn task_checkout_explanations_keep_proposals_separate_from_admission() {
 
 #[test]
 fn task_locations_preserve_owner_freshness_and_unavailable_evidence() {
-    use loopflow::durable::{TaskLocation, TaskLocationObservation};
+    use loopflow_execution::durable::{TaskLocation, TaskLocationObservation};
     let wire: serde_json::Value = serde_json::from_str(include_str!(
         "../../../tests/fixtures/dto/task_locations.json"
     ))
@@ -1148,7 +1160,7 @@ fn task_locations_preserve_owner_freshness_and_unavailable_evidence() {
 
 #[test]
 fn task_files_frames_preserve_checkout_identity_and_heartbeat() {
-    use loopflow::ops::task::TaskFilesFrame;
+    use loopflow_execution::ops::task::TaskFilesFrame;
     let wire: serde_json::Value = serde_json::from_str(include_str!(
         "../../../tests/fixtures/dto/task_files_frames.json"
     ))
@@ -1168,7 +1180,8 @@ fn task_files_frames_preserve_checkout_identity_and_heartbeat() {
 #[test]
 fn task_overview_excludes_diagnostic_process_history() {
     let input = include_str!("../../../tests/fixtures/dto/task_overview.json");
-    let overview: loopflow::task_work::TaskOverview = serde_json::from_str(input).unwrap();
+    let overview: loopflow_execution::task_work::TaskOverview =
+        serde_json::from_str(input).unwrap();
     assert!(overview.graph.is_some());
     assert_eq!(
         serde_json::to_value(overview).unwrap(),
@@ -1245,8 +1258,8 @@ fn closed_task_pages_round_trip_plan_rows_and_their_continuation() {
 
 #[test]
 fn retention_summary_keeps_states_expiries_and_policies_exactly() {
-    use loopflow::transcript::summary::{AgeBucket, RetentionSummary};
-    use loopflow::transcript::{ExpiryPolicy, RetentionState};
+    use loopflow_execution::transcript::summary::{AgeBucket, RetentionSummary};
+    use loopflow_execution::transcript::{ExpiryPolicy, RetentionState};
     let json = include_str!("../../../tests/fixtures/dto/retention_summary.json");
     let summary: RetentionSummary = serde_json::from_str(json).unwrap();
     assert_eq!(summary.groups[1].age, AgeBucket::UnderQuarter);
@@ -1268,7 +1281,7 @@ fn retention_summary_keeps_states_expiries_and_policies_exactly() {
 
 #[test]
 fn repo_people_keep_unresolved_github_identity_explicit() {
-    use loopflow::ops::people::RepoPerson;
+    use loopflow_execution::ops::people::RepoPerson;
     let json = include_str!("../../../tests/fixtures/dto/repo_people.json");
     let value: serde_json::Value = serde_json::from_str(json).unwrap();
     let people: Vec<RepoPerson> = serde_json::from_value(value.clone()).unwrap();
@@ -1282,7 +1295,7 @@ fn repo_people_keep_unresolved_github_identity_explicit() {
 
 #[test]
 fn wave_removal_preview_round_trips() {
-    use loopflow::ops::wave_lifecycle::WaveRemoval;
+    use loopflow_execution::ops::wave_lifecycle::WaveRemoval;
     let json = include_str!("../../../tests/fixtures/dto/wave_removal.json");
     let removal: WaveRemoval = serde_json::from_str(json).unwrap();
     assert!(removal.moved[1].started);
@@ -1294,7 +1307,7 @@ fn wave_removal_preview_round_trips() {
 
 #[test]
 fn wave_added_receipt_round_trips_with_its_leftover() {
-    use loopflow::ops::wave_lifecycle::WaveAdded;
+    use loopflow_execution::ops::wave_lifecycle::WaveAdded;
     let json = include_str!("../../../tests/fixtures/dto/wave_added.json");
     let added: WaveAdded = serde_json::from_str(json).unwrap();
     assert!(added.created);
@@ -1308,7 +1321,7 @@ fn wave_added_receipt_round_trips_with_its_leftover() {
 
 #[test]
 fn wave_renamed_receipt_round_trips_with_its_leftovers() {
-    use loopflow::ops::wave_lifecycle::WaveRenamed;
+    use loopflow_execution::ops::wave_lifecycle::WaveRenamed;
     let json = include_str!("../../../tests/fixtures/dto/wave_renamed.json");
     let renamed: WaveRenamed = serde_json::from_str(json).unwrap();
     assert!(renamed.renamed);
@@ -1322,7 +1335,7 @@ fn wave_renamed_receipt_round_trips_with_its_leftovers() {
 #[test]
 fn task_create_receipt_names_the_graph_and_admitted_conversation_or_a_failed_run() {
     let json = include_str!("../../../tests/fixtures/dto/task_create_receipt.json");
-    let receipts: Vec<loopflow::engine::creation::TaskCreateReceipt> =
+    let receipts: Vec<loopflow_execution::engine::creation::TaskCreateReceipt> =
         serde_json::from_str(json).unwrap();
     assert_eq!(receipts[0].graph.as_deref(), Some("code"));
     assert!(receipts[0].session_id.is_some());
@@ -1338,7 +1351,8 @@ fn task_create_receipt_names_the_graph_and_admitted_conversation_or_a_failed_run
 #[test]
 fn wave_graph_reports_its_default_with_or_without_a_wave() {
     let json = include_str!("../../../tests/fixtures/dto/wave_graph.json");
-    let graphs: Vec<loopflow::ops::project::WaveGraph> = serde_json::from_str(json).unwrap();
+    let graphs: Vec<loopflow_execution::ops::project::WaveGraph> =
+        serde_json::from_str(json).unwrap();
     assert_eq!(graphs[0].default.source.as_str(), "repository");
     assert!(graphs[1].wave.is_none());
     assert_eq!(
@@ -1349,7 +1363,7 @@ fn wave_graph_reports_its_default_with_or_without_a_wave() {
 
 #[test]
 fn session_open_intents_distinguish_explicit_resume_from_passive_reveal() {
-    use loopflow::lf::commands::write::SessionOpenIntent;
+    use loopflow_execution::session::SessionOpenIntent;
     let wire: serde_json::Value = serde_json::from_str(include_str!(
         "../../../tests/fixtures/dto/session_open_intents.json"
     ))
@@ -1369,7 +1383,7 @@ fn session_open_intents_distinguish_explicit_resume_from_passive_reveal() {
 #[test]
 fn creation_recovery_dispositions_round_trip() {
     let json = include_str!("../../../tests/fixtures/dto/creation_lookup.json");
-    let receipts: Vec<loopflow::store::sqlite::creation::CreationReceipt> =
+    let receipts: Vec<loopflow_execution::store::sqlite::creation::CreationReceipt> =
         serde_json::from_str(json).unwrap();
     assert_eq!(
         serde_json::to_value(receipts).unwrap(),

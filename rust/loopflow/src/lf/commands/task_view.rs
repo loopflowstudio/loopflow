@@ -6,10 +6,11 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use serde_json::Value;
 
-use super::{subscribe, waves};
+use super::waves;
+use loopflow_execution::read_stream as subscribe;
 
 pub fn run(repo: &Path, issue: Option<&str>, once: bool) -> Result<()> {
-    let status = crate::ops::task::task_status(repo, issue)?;
+    let status = loopflow_execution::ops::task::task_status(repo, issue)?;
     let issue = status
         .task
         .as_ref()
@@ -122,7 +123,8 @@ fn steps(reading: &Value) -> impl Iterator<Item = &Value> {
 fn step_log(reading: &Value, index: usize) -> Result<String> {
     let step = steps(reading).nth(index).context("No step selected")?;
     let id = loopflow_model::id::LfProcessId::parse(word(step, "lf_process_id"))?;
-    let store = crate::store::read_existing_registry()?.context("Work registry is unavailable")?;
+    let store = loopflow_execution::store::read_existing_registry()?
+        .context("Work registry is unavailable")?;
     let process = store
         .sqlite
         .lf_process(&id)?

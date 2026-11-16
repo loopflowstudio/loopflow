@@ -147,7 +147,7 @@ Installation also provisions a separate minute-based cleanup job: `lf task retir
 reads completed Tasks' local retirement queue and exits after one pass. It pins
 the installed executable and Machine home; alternate HOME or LF_HOME skips
 account-wide scheduling. Cleanup does not update LF, and the updater does not
-execute cleanup. See [Task shell cleanup](../rust/loopflow/src/transport/README.md#task-shells-and-completed-workspaces).
+execute cleanup. See [Task shell cleanup](../rust/loopflow-execution/src/transport/README.md#task-shells-and-completed-workspaces).
 
 The installed Loopflow.app updates itself through Sparkle from its stream's
 appcast. `dev` has no appcast and runs no updater: each `lf install --dev`

@@ -1,70 +1,8 @@
-pub mod agent;
-mod agent_input_timing;
-pub mod asana;
 pub mod build_info;
-pub use loopflow_definitions::builtins;
-pub mod chat;
-pub mod child;
-pub mod command;
-pub mod config;
-pub mod context_block;
-pub mod context_usage;
-pub mod definition;
-pub mod desktop;
-pub(crate) mod desktop_exits;
-pub mod diagnostic_log;
-pub mod durable;
-pub mod engine;
-pub mod error;
-pub mod git;
-pub mod graph;
-pub mod harness;
-pub use loopflow_model::id;
 #[cfg(test)]
 mod id_tests;
-pub mod installation;
-pub mod journal;
 pub mod lf;
-pub mod machine_records;
-pub(crate) mod machine_route;
-pub mod naming;
-pub(crate) mod os_process;
-pub mod platform;
-pub mod portfolio;
-pub mod process;
-pub mod prompt;
 pub mod server;
-pub mod skills;
-pub(crate) mod startup;
-pub mod task_graph;
-pub mod task_work;
-pub(crate) mod terminal_output;
-pub(crate) mod terminal_title;
-// Build-time parsing lives here so its golden tests compile against the exact parser.
-pub mod linear;
-#[allow(dead_code)]
-pub mod notion;
-pub(crate) mod observe;
-pub mod ops;
-pub mod performance;
-pub mod planning_exchange;
-pub mod planning_git;
-pub mod pr_landing;
-pub mod profile;
-pub use loopflow_model::program_status;
-pub(crate) mod promotion_lock;
-pub mod provider_auth;
-pub mod rental;
-pub mod repo;
-pub mod repository;
-pub mod security;
-pub mod session;
-pub(crate) mod session_record;
-pub mod steer;
-pub mod store;
-pub mod trace;
-pub mod transcript;
-pub mod work;
 pub mod world;
 
 #[cfg(test)]
@@ -116,5 +54,5 @@ mod wave_resolution_matrix;
 #[path = "../tests/linear/wave_resolution_tests.rs"]
 mod wave_resolution_tests;
 
-#[cfg(unix)]
-pub mod transport;
+#[cfg(test)]
+mod adapter_tests;

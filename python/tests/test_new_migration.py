@@ -8,7 +8,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/new_migration.py"
-MIGRATIONS = Path("rust/loopflow/src/store/migrations")
+MIGRATIONS = Path("rust/loopflow-storage/src/migrations")
 
 
 @pytest.fixture
@@ -79,3 +79,19 @@ def test_a_name_already_in_use_is_refused(repo: Path, name: str) -> None:
 
 def test_a_name_must_be_snake_case(repo: Path) -> None:
     assert run(repo, "Add-Colour").returncode == 2
+
+
+def test_existing_task_migration_is_found_across_a_source_move(repo: Path) -> None:
+    relocated = Path("rust/loopflow/src/store/migrations")
+    (repo / relocated.parent).mkdir(parents=True)
+    git(repo, "mv", str(MIGRATIONS), str(relocated))
+    commit(repo, "move storage")
+    git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    git(repo, "mv", str(relocated), str(MIGRATIONS))
+    (repo / MIGRATIONS / "unfinished.sql").write_text("SELECT 1;\n")
+
+    result = run(repo, "another_one")
+
+    assert result.returncode == 0, result.stderr
+    assert "unfinished.sql" in result.stdout
+    assert not (repo / MIGRATIONS / "another_one.sql").exists()

@@ -6,14 +6,14 @@ use std::process::Command;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use loopflow::ops::{
+use loopflow_execution::ops::{
     bump_version, generate_release, preview_release_notes, release_bump, release_check,
     release_issues, release_notes, release_promote, release_regress, release_run, release_status,
     release_tag, NullProgress, OpsError, Progress, ReleaseNotesDegradation, ReleaseNotesStatus,
     ReleaseRunOutcome,
 };
-use loopflow::repository::RepoId;
-use loopflow::store::{open_store, storage_config_from_env, StorageConfig};
+use loopflow_execution::repository::RepoId;
+use loopflow_execution::store::{open_store, storage_config_from_env, StorageConfig};
 use loopflow_test_support::TestRepo;
 use support::EnvGuard;
 
@@ -2528,7 +2528,7 @@ fn release_run_waits_out_a_repair_disarm_but_stops_on_a_persons() {
         git(&repo, &["push", "origin", "HEAD"]);
         let branch = format!(
             "{}/release-default-v0-9-2",
-            loopflow::naming::git_user(repo.path()).unwrap()
+            loopflow_execution::naming::git_user(repo.path()).unwrap()
         );
         git(
             &repo,
@@ -2739,7 +2739,7 @@ exec '{}' "$@"
     let head = git_output(&repo, &["rev-parse", "HEAD"]);
     let branch = format!(
         "{}/release-default-v0-9-2",
-        loopflow::naming::git_user(repo.path()).unwrap()
+        loopflow_execution::naming::git_user(repo.path()).unwrap()
     );
     git(
         &repo,
@@ -2889,7 +2889,7 @@ while read -r line; do :; done
     let head = git_output(&repo, &["rev-parse", "HEAD"]);
     let branch = format!(
         "{}/release-default-v0-9-2",
-        loopflow::naming::git_user(repo.path()).unwrap()
+        loopflow_execution::naming::git_user(repo.path()).unwrap()
     );
     git(
         &repo,

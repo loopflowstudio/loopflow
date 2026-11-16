@@ -52,7 +52,7 @@ impl Stream {
 /// Install the newest build on `switch`, recording it as this Machine's
 /// stream, or on the recorded stream (`stable` when none is recorded).
 pub fn install(switch: Option<Stream>) -> Result<()> {
-    let home = crate::installation::account_home()?.join(".lf");
+    let home = loopflow_execution::installation::account_home()?.join(".lf");
     let stream = match switch {
         Some(stream) => {
             record_stream(&home, stream)?;
@@ -210,7 +210,7 @@ fn newest_release(json: &str) -> Result<String> {
 /// The stream recorded in `home`'s config.yaml.
 fn recorded_stream(home: &Path) -> Result<Option<Stream>> {
     let config = home.join("config.yaml");
-    let Some(name) = crate::config::files::read(&config)?
+    let Some(name) = loopflow_execution::config::files::read(&config)?
         .get("stream")
         .and_then(|value| value.as_str().map(str::to_string))
     else {
@@ -225,7 +225,7 @@ fn recorded_stream(home: &Path) -> Result<Option<Stream>> {
 }
 
 fn record_stream(home: &Path, stream: Stream) -> Result<()> {
-    crate::config::files::update(&home.join("config.yaml"), |config| {
+    loopflow_execution::config::files::update(&home.join("config.yaml"), |config| {
         config["stream"] = stream.as_str().into();
         Ok(())
     })
@@ -451,7 +451,7 @@ fn install_dir() -> Result<PathBuf> {
         return Ok(std::env::current_dir()?.join(directory));
     }
     let home = dirs::home_dir().context("cannot determine the installation home")?;
-    if let Some(binary) = crate::os_process::which_on_path(Path::new("lf")) {
+    if let Some(binary) = loopflow_execution::os_process::which_on_path(Path::new("lf")) {
         if let Some(parent) = binary.parent() {
             if parent == home.join(".local/bin") || parent == home.join(".lf/bin") {
                 return Ok(parent.to_path_buf());
@@ -584,8 +584,8 @@ pub fn schedule(frequency: Option<InstallFrequency>) -> Result<()> {
     let home = dirs::home_dir().context("cannot determine the installation home")?;
     // launchd and cron schedule for the whole account; a disposable HOME
     // (release smoke tests) must not replace the account's job.
-    if home != crate::installation::account_home()?
-        || crate::store::lf_home_dir() != home.join(".lf")
+    if home != loopflow_execution::installation::account_home()?
+        || loopflow_execution::store::lf_home_dir() != home.join(".lf")
     {
         println!(
             "Not scheduling installation or cleanup for disposable home {}",
@@ -594,7 +594,7 @@ pub fn schedule(frequency: Option<InstallFrequency>) -> Result<()> {
         return Ok(());
     }
     let binary = install_dir()?.join("lf");
-    let logs = crate::store::lf_home_dir().join("logs");
+    let logs = loopflow_execution::store::lf_home_dir().join("logs");
     fs::create_dir_all(&logs)?;
     if cfg!(target_os = "macos") {
         launchd_schedule(&home, &binary, &logs, frequency)?;
@@ -969,7 +969,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn scheduling_preserves_existing_cadence_when_install_location_changes() {
-        let _lock = crate::journal::test_env_lock();
+        let _lock = loopflow_execution::journal::test_env_lock();
         let _restore = crate::test_ambient::EnvGuard::clear(&["PATH"]);
         let temp = tempfile::tempdir().unwrap();
         let bin = temp.path().join("bin");
@@ -1003,7 +1003,7 @@ mod tests {
     fn schedule_is_independent_of_checkout_and_retains_its_cadence() {
         use crate::lf::InstallFrequency;
 
-        let _lock = crate::journal::test_env_lock();
+        let _lock = loopflow_execution::journal::test_env_lock();
         let _restore = crate::test_ambient::EnvGuard::clear(&["PATH"]);
         let temp = tempfile::tempdir().unwrap();
         let bin = temp.path().join("bin");
@@ -1064,7 +1064,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn cli_only_skips_setup_but_keeps_an_existing_app() {
-        let _lock = crate::journal::test_env_lock();
+        let _lock = loopflow_execution::journal::test_env_lock();
         let _restore =
             crate::test_ambient::EnvGuard::clear(&["LF_INSTALL_CLI_ONLY", "LF_APPLICATIONS_DIR"]);
         let temp = tempfile::tempdir().unwrap();
@@ -1095,7 +1095,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn ordinary_and_scheduled_updates_pass_the_custom_destination_to_older_installers() {
-        let _lock = crate::journal::test_env_lock();
+        let _lock = loopflow_execution::journal::test_env_lock();
         let _restore = crate::test_ambient::EnvGuard::clear(&[
             "LF_INSTALL_CLI_ONLY",
             "LF_APPLICATIONS_DIR",
@@ -1177,7 +1177,7 @@ printf updated > "$LF_APPLICATIONS_DIR/Loopflow.app/Contents/MacOS/lf"
     #[cfg(target_os = "macos")]
     #[test]
     fn explicit_destination_wins_without_splitting_an_existing_cli_only_install() {
-        let _lock = crate::journal::test_env_lock();
+        let _lock = loopflow_execution::journal::test_env_lock();
         let _restore =
             crate::test_ambient::EnvGuard::clear(&["LF_INSTALL_CLI_ONLY", "LF_APPLICATIONS_DIR"]);
         let temp = tempfile::tempdir().unwrap();
@@ -1225,7 +1225,7 @@ printf updated > "$LF_APPLICATIONS_DIR/Loopflow.app/Contents/MacOS/lf"
     #[cfg(target_os = "macos")]
     #[test]
     fn launchd_schedule_preserves_frequency_and_reuses_its_job() {
-        use crate::lf::commands::graph::EnvVarGuard;
+        use loopflow_execution::config::environment::EnvVarGuard;
         use std::os::unix::fs::symlink;
 
         let _env = loopflow_test_support::env_lock().lock().unwrap();
@@ -1299,7 +1299,7 @@ printf updated > "$LF_APPLICATIONS_DIR/Loopflow.app/Contents/MacOS/lf"
 
     #[test]
     fn cleanup_schedule_never_provisions_a_disposable_home() {
-        use crate::lf::commands::graph::EnvVarGuard;
+        use loopflow_execution::config::environment::EnvVarGuard;
         let _env = loopflow_test_support::env_lock().lock().unwrap();
         let home = tempfile::tempdir().unwrap();
         let _home = EnvVarGuard::set("HOME", home.path().to_str().unwrap());
@@ -1343,7 +1343,7 @@ printf updated > "$LF_APPLICATIONS_DIR/Loopflow.app/Contents/MacOS/lf"
     #[cfg(target_os = "macos")]
     #[test]
     fn cleanup_schedule_pins_machine_and_reloads_only_when_needed() {
-        use crate::lf::commands::graph::EnvVarGuard;
+        use loopflow_execution::config::environment::EnvVarGuard;
         let _env = loopflow_test_support::env_lock().lock().unwrap();
         let home = tempfile::tempdir().unwrap();
         let bin = home.path().join("bin");

@@ -4,8 +4,8 @@ use std::process::Command;
 
 use clap::Parser;
 
-use loopflow::durable::GraphProcessPage;
-use loopflow::store::{open_ephemeral_store, StorageConfig};
+use loopflow_execution::durable::GraphProcessPage;
+use loopflow_execution::store::{open_ephemeral_store, StorageConfig};
 
 #[test]
 fn graph_inventory_wire_keeps_unknowns_and_requires_metadata() {
@@ -54,7 +54,7 @@ async fn public_graph_discovery_reads_saved_detail_without_selecting_work() {
     open_ephemeral_store(&StorageConfig::sqlite(dir.path().join("loopflow.db")))
         .await
         .unwrap();
-    let expected_repo = loopflow::repository::CanonicalRepo::discover(dir.path())
+    let expected_repo = loopflow_execution::repository::discover(dir.path())
         .unwrap()
         .to_string();
     // A Graph whose definition no longer exists: only its Processes describe it.
@@ -88,7 +88,7 @@ async fn public_graph_discovery_reads_saved_detail_without_selecting_work() {
     assert_eq!(page.entries[0].summary.id, graph);
     assert_eq!(
         page.entries[0].summary.state,
-        loopflow::session::GraphProcessSummaryState::Stopped
+        loopflow_execution::session::GraphProcessSummaryState::Stopped
     );
     assert_eq!(
         page.entries[0].repo.as_deref(),
@@ -117,7 +117,7 @@ async fn public_graph_discovery_reads_saved_detail_without_selecting_work() {
         "{}",
         String::from_utf8_lossy(&detail.stderr)
     );
-    let detail: loopflow::durable::GraphProcessDetail =
+    let detail: loopflow_execution::durable::GraphProcessDetail =
         serde_json::from_slice(&detail.stdout).unwrap();
     assert_eq!(detail.compiled.name, "no-template");
     assert_eq!(detail.compiled.steps[0].label, "saved-skill");
@@ -235,14 +235,13 @@ fn graph_catalog_and_wave_selection_read_the_same_graphs() {
     );
     let customized = run(&["graph", "customize", "feature"]);
     assert!(customized.status.success());
-    let store =
-        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
-    store
-        .ensure_wave_project(
-            repo.path().canonicalize().unwrap().to_str().unwrap(),
-            "proof",
-        )
-        .unwrap();
+    let store = loopflow_execution::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
+    loopflow_execution::work::wave::bootstrap::ensure_wave_project(
+        &store,
+        repo.path().canonicalize().unwrap().to_str().unwrap(),
+        "proof",
+    )
+    .unwrap();
     // A Wave selects a graph by name; its definition is the committed graph.
     let definition = repo.path().join(".lf/graphs/feature.yaml");
     let selected = run(&["--wave", "proof", "set", "graph", "feature"]);

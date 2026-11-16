@@ -10,8 +10,8 @@ use super::{
     OpenHost, OpenReceipt, OpenRoute, OpenStatus, Opening, Resolved,
 };
 use crate::lf::commands::desktop::{self, DesktopOpeningStatus};
-use crate::lf::commands::write::SessionOpenIntent;
-use crate::ops::human_session::{select_connection, SessionTarget};
+use loopflow_execution::ops::human_session::{select_connection, SessionTarget};
+use loopflow_execution::session::SessionOpenIntent;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Mode {
@@ -52,7 +52,7 @@ pub(super) fn here_route() -> OpenRoute {
 
 pub(super) fn presentation(args: &OpenArgs) -> Result<OpenRoute> {
     Ok(
-        match mode(args, crate::journal::agent_caller().is_some())? {
+        match mode(args, loopflow_execution::journal::agent_caller().is_some())? {
             Mode::Here => here_route(),
             Mode::Focus => OpenRoute {
                 host: None,
@@ -79,7 +79,7 @@ pub(super) fn open(mut target: Resolved, args: &OpenArgs, focus_new: bool) -> Op
 }
 
 fn present(target: &mut Resolved, args: &OpenArgs, focus_new: bool) -> Result<OpenReceipt> {
-    let mode = mode(args, crate::journal::agent_caller().is_some())?;
+    let mode = mode(args, loopflow_execution::journal::agent_caller().is_some())?;
     let host = if mode == Mode::Here {
         OpenHost::Terminal
     } else {
@@ -156,7 +156,7 @@ fn present(target: &mut Resolved, args: &OpenArgs, focus_new: bool) -> Result<Op
         return desktop_open(target, focus_new);
     }
 
-    let lf = crate::os_process::resolve_lf_binary()?
+    let lf = loopflow_execution::os_process::resolve_lf_binary()?
         .to_string_lossy()
         .into_owned();
     if mode == Mode::Here {
@@ -166,9 +166,9 @@ fn present(target: &mut Resolved, args: &OpenArgs, focus_new: bool) -> Result<Op
         command
             .args(&argv[1..])
             .env_remove("LF_AGENT_CALLER")
-            .env_remove(crate::config::AGENT_OVERRIDE_ENV)
+            .env_remove(loopflow_execution::config::AGENT_OVERRIDE_ENV)
             .current_dir(target.cwd());
-        crate::transport::configure_child(&mut command);
+        loopflow_execution::transport::configure_child(&mut command);
         let status = command.status()?;
         anyhow::ensure!(status.success(), "Conversation exited with {status}");
         return Ok(target.receipt(Some(host), None, OpenStatus::Usable, None));
@@ -245,14 +245,17 @@ pub(super) fn resolve(target: &mut Resolved, prepare: bool) -> Result<()> {
         // The Session resolver on the execution Machine owns its identity.
         return Ok(());
     }
-    let existing = crate::store::read_existing_registry()?;
+    let existing = loopflow_execution::store::read_existing_registry()?;
     if !prepare && existing.is_none() {
         return Ok(());
     }
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
         let store = std::sync::Arc::new(
-            crate::store::open_store(&crate::store::storage_config_from_env()?).await?,
+            loopflow_execution::store::open_store(
+                &loopflow_execution::store::storage_config_from_env()?,
+            )
+            .await?,
         );
         let selector = match (&target.url.session, &target.task, &target.wave) {
             (Some(id), _, _) => SessionTarget::Session(id),
@@ -293,12 +296,15 @@ pub(super) fn resolve(target: &mut Resolved, prepare: bool) -> Result<()> {
                     .as_ref()
                     .map_or_else(|| provider.clone(), |model| format!("{provider}:{model}")),
             ),
-            None => crate::config::agent_override(),
+            None => loopflow_execution::config::agent_override(),
         };
         if prepare && session.provider.is_none() {
-            crate::config::load_wave_config(Some(&session.cwd), target.wave.as_deref())?
-                .unwrap_or_default()
-                .agent()?;
+            loopflow_execution::config::load_wave_config(
+                Some(&session.cwd),
+                target.wave.as_deref(),
+            )?
+            .unwrap_or_default()
+            .agent()?;
         }
         target.session = Some(selected.id);
         target.session_cwd = Some(session.cwd);
@@ -343,14 +349,17 @@ fi
 exit "$result""#.into(),
             "lf-open".into(), self.path().to_string_lossy().into_owned(),
             "env".into(), "-u".into(), "LF_AGENT_CALLER".into(),
-            "-u".into(), crate::config::AGENT_OVERRIDE_ENV.into(),
+            "-u".into(), loopflow_execution::config::AGENT_OVERRIDE_ENV.into(),
         ];
-        if crate::store::custom_home_selected() {
-            argv.push(format!("LF_HOME={}", crate::store::lf_home_dir().display()));
+        if loopflow_execution::store::custom_home_selected() {
+            argv.push(format!(
+                "LF_HOME={}",
+                loopflow_execution::store::lf_home_dir().display()
+            ));
         }
         argv.push(format!(
             "{}={}",
-            crate::transport::OPEN_RECEIPT_ENV,
+            loopflow_execution::transport::OPEN_RECEIPT_ENV,
             self.path().display()
         ));
         argv.extend(command);

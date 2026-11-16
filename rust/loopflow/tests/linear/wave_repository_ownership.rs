@@ -6,14 +6,16 @@ use support::planning;
 use std::path::Path;
 use std::process::Command;
 
-use loopflow::id::WaveId;
-use loopflow::linear::{LinearIssueId, LinearProjectId};
-use loopflow::store::StorageConfig;
-use loopflow::work::project::{Project, ProjectId};
-use loopflow::work::task::{LinearWritebackState, Observation, Task, TaskId, TaskPr, TaskPrId};
-use loopflow::work::wave::context::{resolve_managed_wave, WaveResolveError};
-use loopflow::work::wave::relocate::relocate_wave;
-use loopflow::work::wave::{Wave, WaveLocator};
+use loopflow_execution::linear::{LinearIssueId, LinearProjectId};
+use loopflow_execution::store::StorageConfig;
+use loopflow_execution::work::project::{Project, ProjectId};
+use loopflow_execution::work::task::{
+    LinearWritebackState, Observation, Task, TaskId, TaskPr, TaskPrId,
+};
+use loopflow_execution::work::wave::context::{resolve_managed_wave, WaveResolveError};
+use loopflow_execution::work::wave::relocate::relocate_wave;
+use loopflow_execution::work::wave::Wave;
+use loopflow_model::id::WaveId;
 use time::OffsetDateTime;
 
 fn repository(path: &Path) {
@@ -52,7 +54,7 @@ fn author_wave(repo: &Path, slug: &str, marker: &str) {
 }
 
 fn registered_wave(repo: &Path, slug: &str) -> Wave {
-    let locator = WaveLocator::discover(repo, slug).unwrap();
+    let locator = loopflow_execution::work::wave::discover(repo, slug).unwrap();
     Wave::new(
         WaveId::new(),
         locator.slug().to_string(),
@@ -66,7 +68,7 @@ fn project(wave: &Wave) -> Project {
         id: ProjectId::new(),
 
         summary: String::new(),
-        status: loopflow::work::project::ProjectStatus::Started,
+        status: loopflow_execution::work::project::ProjectStatus::Started,
         linear_id: Some(LinearProjectId::new("project-alpha").unwrap()),
         slug: "architecture".to_string(),
         name: "Architecture".to_string(),
@@ -82,7 +84,7 @@ fn project(wave: &Wave) -> Project {
 }
 
 fn task(
-    store: &loopflow::store::Store,
+    store: &loopflow_execution::store::Store,
     wave: &Wave,
     project: &Project,
     repo: &Path,
@@ -90,7 +92,11 @@ fn task(
     let now = OffsetDateTime::now_utc();
     let id = TaskId::new();
     let task = Task {
-        repository_id: store.sqlite.ensure_repository(wave.repo()).unwrap(),
+        repository_id: loopflow_execution::repository::location::ensure_repository(
+            &store.sqlite,
+            wave.repo(),
+        )
+        .unwrap(),
         id: id.clone(),
 
         revision: 0,
@@ -183,9 +189,10 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
 
     std::fs::create_dir_all(&home).unwrap();
     let database = home.join("loopflow.db");
-    let store = loopflow::store::open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
-        .await
-        .unwrap();
+    let store =
+        loopflow_execution::store::open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
+            .await
+            .unwrap();
     let alpha = registered_wave(&repo_a, "infrastructure");
     let beta = registered_wave(&repo_b, "infrastructure");
     store.create_wave(&alpha).await.unwrap();
@@ -236,7 +243,7 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         let original_plans = plans();
         assert_eq!(original_plans.len(), 2);
         let resolved = store
-            .get_wave_at(&WaveLocator::discover(&repo_a, "legacy").unwrap())
+            .get_wave_at(&loopflow_execution::work::wave::discover(&repo_a, "legacy").unwrap())
             .await
             .unwrap()
             .unwrap();
@@ -255,7 +262,10 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
             .linear_issue_evidence(resolved.repo(), "LOO-2")
             .await
             .unwrap();
-        assert_eq!(observation.state, loopflow::store::PlanningState::Available);
+        assert_eq!(
+            observation.state,
+            loopflow_execution::store::PlanningState::Available
+        );
         let detail: crate::test_linear_input::IssueFixture =
             loopflow_test_support::retained_task_input(&database, resolved.repo(), "LOO-2");
         assert_eq!(detail.item, snapshot.items[0]);
@@ -490,7 +500,9 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
     );
     assert_eq!(
         store
-            .get_wave_at(&WaveLocator::discover(&repo_b, "infrastructure").unwrap())
+            .get_wave_at(
+                &loopflow_execution::work::wave::discover(&repo_b, "infrastructure").unwrap()
+            )
             .await
             .unwrap()
             .unwrap()
@@ -565,7 +577,9 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
     );
     assert_eq!(
         store
-            .get_wave_at(&WaveLocator::discover(&repo_b, "infrastructure").unwrap())
+            .get_wave_at(
+                &loopflow_execution::work::wave::discover(&repo_b, "infrastructure").unwrap()
+            )
             .await
             .unwrap()
             .unwrap()
@@ -587,9 +601,10 @@ async fn missing_repository_wave_can_be_disabled_and_relocated_from_its_target()
     author_wave(&target, "feedback", "feedback");
     std::fs::create_dir_all(&home).unwrap();
     let database = home.join("loopflow.db");
-    let store = loopflow::store::open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
-        .await
-        .unwrap();
+    let store =
+        loopflow_execution::store::open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
+            .await
+            .unwrap();
     let wave = registered_wave(&source, "feedback");
     store.create_wave(&wave).await.unwrap();
 
@@ -644,7 +659,7 @@ async fn relocation_refuses_a_taken_destination() {
     author_wave(&source, "core", "core");
     let _env = support::EnvGuard::with_lf_home(&[], tmp.path());
     let database = tmp.path().join("loopflow.db");
-    let store = loopflow::store::open_ephemeral_store(&StorageConfig::sqlite(database))
+    let store = loopflow_execution::store::open_ephemeral_store(&StorageConfig::sqlite(database))
         .await
         .unwrap();
     let established = registered_wave(&source, "core");

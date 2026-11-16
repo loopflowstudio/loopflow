@@ -225,24 +225,25 @@ read -r answer < /dev/tty
             ("PATH", "/usr/bin:/bin"),
             ("RUST_LOG", "off"),
         ];
-        let started = loopflow::server::client::Connection::open_at(&self.endpoint("machine"))
-            .unwrap()
-            .request(loopflow::server::wire::Operation::Server(
-                loopflow::server::wire::ServerOperation::SessionStart {
-                    session: None,
-                    request: uuid::Uuid::new_v4().to_string(),
-                    argv: argv.iter().map(|arg| arg.to_string()).collect(),
-                    cwd: self.repo.path().to_path_buf(),
-                    env: env
-                        .iter()
-                        .map(|(name, value)| (name.to_string(), value.to_string()))
-                        .collect(),
-                    rows: 24,
-                    cols: 80,
-                    placement: None,
-                },
-            ))
-            .unwrap();
+        let started =
+            loopflow_execution::machine::client::Connection::open_at(&self.endpoint("machine"))
+                .unwrap()
+                .request(loopflow::server::wire::Operation::Server(
+                    loopflow::server::wire::ServerOperation::SessionStart {
+                        session: None,
+                        request: uuid::Uuid::new_v4().to_string(),
+                        argv: argv.iter().map(|arg| arg.to_string()).collect(),
+                        cwd: self.repo.path().to_path_buf(),
+                        env: env
+                            .iter()
+                            .map(|(name, value)| (name.to_string(), value.to_string()))
+                            .collect(),
+                        rows: 24,
+                        cols: 80,
+                        placement: None,
+                    },
+                ))
+                .unwrap();
         started.result["terminal_id"].as_str().unwrap().to_owned()
     }
     /// A view of a held terminal attached with `request`.
@@ -1157,7 +1158,8 @@ fn headless_run(command: &[&str], resume: bool) {
     let provider = bin.join("opencode");
     std::fs::write(
         &provider,
-        include_str!("support/opencode_server.py").replace("__WAIT__", "False"),
+        include_str!("../../loopflow-execution/tests/support/opencode_server.py")
+            .replace("__WAIT__", "False"),
     )
     .unwrap();
     std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -1352,7 +1354,7 @@ printf '%s\n' "$answer" >> "$HOME/answers"
     let session = session_of(&fixture.sql(), &fixture.launches(1)[0]);
     let terminal = fixture.terminal_of(&session);
     let attach = |control: bool| {
-        let socket = loopflow::server::client::attach(
+        let socket = loopflow_execution::machine::client::attach(
             &fixture.endpoint("machine"),
             &session.as_str().into(),
         )
@@ -1373,7 +1375,7 @@ printf '%s\n' "$answer" >> "$HOME/answers"
     fixture.held_ends(&terminal);
     assert_eq!(fixture.launches(1).len(), 1);
     assert!(!fixture.home.path().join("answers").exists());
-    assert!(loopflow::server::client::attach(
+    assert!(loopflow_execution::machine::client::attach(
         &fixture.endpoint("machine"),
         &session.as_str().into(),
     )
@@ -1391,7 +1393,7 @@ printf '%s\n' "$answer" >> "$HOME/answers"
     fixture.held_ends(&successor);
     assert_eq!(fixture.launches(2).len(), 2);
     assert_eq!(fixture.wait_file("answers"), "once\n");
-    assert!(loopflow::server::client::attach(
+    assert!(loopflow_execution::machine::client::attach(
         &fixture.endpoint("machine"),
         &session.as_str().into(),
     )
@@ -1706,16 +1708,19 @@ fn completed_task_cleanup_ends_its_held_shell_and_settles_jobs() {
 }
 
 impl Fixture {
-    fn shell_task(&self, task: &str) -> loopflow::durable::MachineId {
+    fn shell_task(&self, task: &str) -> loopflow_execution::durable::MachineId {
         let output = self.command(&["machine", "id"]).output().unwrap();
         assert!(output.status.success(), "{output:?}");
         let store =
-            loopflow::store::sqlite::SqliteStore::new(&self.home.path().join("loopflow.db"))
-                .unwrap();
-        let repo = store
-            .ensure_repository(self.repo.path().to_str().unwrap())
-            .unwrap();
-        let machine = store.local_machine().unwrap().id;
+            loopflow_execution::store::open_sqlite(&self.home.path().join("loopflow.db")).unwrap();
+        let repo = loopflow_execution::repository::location::ensure_repository(
+            &store,
+            self.repo.path().to_str().unwrap(),
+        )
+        .unwrap();
+        let machine = loopflow_execution::store::machines::local_machine(&store)
+            .unwrap()
+            .id;
         self.sql()
             .execute(
                 "INSERT INTO tasks(id,repository_id,issue_identifier,created_at)
@@ -2068,8 +2073,10 @@ impl<'a> ServerProof<'a> {
         // The server observes an installed Machine; startup creates no Work.
         tokio::runtime::Runtime::new()
             .unwrap()
-            .block_on(loopflow::store::open_ephemeral_store(
-                &loopflow::store::StorageConfig::sqlite(fixture.home.path().join("loopflow.db")),
+            .block_on(loopflow_execution::store::open_ephemeral_store(
+                &loopflow_execution::store::StorageConfig::sqlite(
+                    fixture.home.path().join("loopflow.db"),
+                ),
             ))
             .unwrap();
         let mut service = Self {
@@ -2162,9 +2169,9 @@ impl<'a> ServerProof<'a> {
     fn ready(&self) -> String {
         let deadline = Instant::now() + Duration::from_secs(20);
         loop {
-            if let Ok(connection) =
-                loopflow::server::client::Connection::open_at(&self.fixture.endpoint("machine"))
-            {
+            if let Ok(connection) = loopflow_execution::machine::client::Connection::open_at(
+                &self.fixture.endpoint("machine"),
+            ) {
                 if self.remote_address.is_none_or(|address| {
                     std::net::TcpStream::connect_timeout(&address, Duration::from_millis(100))
                         .is_ok()
@@ -2211,10 +2218,11 @@ impl<'a> ServerProof<'a> {
         }
     }
 
-    fn connect(&self) -> loopflow::server::client::Connection {
-        let connection =
-            loopflow::server::client::Connection::open_at(&self.fixture.endpoint("machine"))
-                .unwrap();
+    fn connect(&self) -> loopflow_execution::machine::client::Connection {
+        let connection = loopflow_execution::machine::client::Connection::open_at(
+            &self.fixture.endpoint("machine"),
+        )
+        .unwrap();
         connection
             .set_read_timeout(Some(Duration::from_secs(15)))
             .unwrap();
@@ -2223,7 +2231,9 @@ impl<'a> ServerProof<'a> {
 
     fn request(&self, operation: Value) -> Value {
         self.connect()
-            .request(serde_json::from_value(operation).unwrap())
+            .request(
+                serde_json::from_value::<loopflow::server::wire::Operation>(operation).unwrap(),
+            )
             .unwrap()
             .result
     }
@@ -2265,7 +2275,9 @@ fn server_task_watch_replaces_readings_across_repositories() {
     let query = json!({"kind":"view.select","expression":"kind:task state:open"});
     let mut watch = service.connect();
     let tasks = watch
-        .subscribe(serde_json::from_value(query.clone()).unwrap())
+        .subscribe(
+            serde_json::from_value::<loopflow::lf::commands::read::Read>(query.clone()).unwrap(),
+        )
         .unwrap();
     let first = watch.reading(&tasks).unwrap().expect("a reading");
     let contents = |frame: &Value| -> Vec<Value> {
@@ -2570,7 +2582,9 @@ fn server_mobile_changes_preserve_local_connections_and_saved_disable() {
     let roadmap = json!({"kind":"plan.list","directory":"/","wave":null,"task":null,"all":true});
     let mut watch = service.connect();
     let watched = watch
-        .subscribe(serde_json::from_value(roadmap.clone()).unwrap())
+        .subscribe(
+            serde_json::from_value::<loopflow::lf::commands::read::Read>(roadmap.clone()).unwrap(),
+        )
         .unwrap();
     let initial = watch.reading(&watched).unwrap().expect("a reading");
     assert!(initial["unavailable"].is_null(), "{initial}");
@@ -2583,8 +2597,10 @@ fn server_mobile_changes_preserve_local_connections_and_saved_disable() {
     let mut abandoned = service.connect();
     abandoned
         .send(
-            serde_json::from_value(json!({"kind":"mobile.configure","configuration":proposed}))
-                .unwrap(),
+            serde_json::from_value::<loopflow::server::wire::Operation>(
+                json!({"kind":"mobile.configure","configuration":proposed}),
+            )
+            .unwrap(),
         )
         .unwrap();
     assert_eq!(fixture.wait_file("certificate-requested"), "ready");
@@ -3827,13 +3843,13 @@ fn a_held_view_waits_for_a_holder_stopped_at_server_startup() {
 /// before it was presented is refused by name.
 #[test]
 fn session_attach_waits_for_a_holder_stopped_at_server_startup() {
-    use loopflow::engine::{Error, ErrorCode};
     use loopflow::server::wire::{Operation, ServerOperation};
+    use loopflow_execution::engine::{Error, ErrorCode};
 
     let fixture = Fixture::new();
     let mut service = ServerProof::start(&fixture, false);
     let home = fixture.home.path();
-    let session: loopflow::id::LfSessionId = "session_held_attach".into();
+    let session: loopflow_model::id::LfSessionId = "session_held_attach".into();
     let script = format!(
         "echo $$ > {home}/agent.pid; i=0; while [ ! -e {home}/stop ]; do i=$((i+1)); printf 'tick:%d\\n' $i; sleep 0.1; done",
         home = home.display()
@@ -3896,7 +3912,7 @@ fn session_attach_waits_for_a_holder_stopped_at_server_startup() {
     signal(libc::SIGCONT);
     let deadline = Instant::now() + Duration::from_secs(30);
     let mut socket = loop {
-        match loopflow::server::client::attach(&fixture.endpoint("machine"), &session) {
+        match loopflow_execution::machine::client::attach(&fixture.endpoint("machine"), &session) {
             Ok(socket) => break socket,
             Err(failure) => {
                 let waiting = refused(failure);

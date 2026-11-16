@@ -10,11 +10,10 @@ use crate::test_linear_input::{InventoryFixture, SeedLinearSqlite};
 use std::path::Path;
 use std::process::Command;
 
-use loopflow::id::WaveId;
-use loopflow::store::sqlite::SqliteStore;
-use loopflow::store::StorageConfig;
-use loopflow::work::wave::context::{resolve_managed_wave, WaveResolveError};
-use loopflow::work::wave::Wave;
+use loopflow_execution::store::StorageConfig;
+use loopflow_execution::work::wave::context::{resolve_managed_wave, WaveResolveError};
+use loopflow_execution::work::wave::Wave;
+use loopflow_model::id::WaveId;
 
 /// The command matrix at the resolver itself: one durable Wave, driven from
 /// every ambient environment. Each cell resolves the SAME wave name or returns
@@ -22,7 +21,7 @@ use loopflow::work::wave::Wave;
 #[tokio::test]
 async fn resolver_matrix_agrees_across_every_environment() {
     let tmp = tempfile::tempdir().expect("tempdir");
-    let store = loopflow::store::open_ephemeral_store(&StorageConfig::sqlite(
+    let store = loopflow_execution::store::open_ephemeral_store(&StorageConfig::sqlite(
         tmp.path().join("loopflow.db"),
     ))
     .await
@@ -154,13 +153,14 @@ async fn resolver_matrix_agrees_across_every_environment() {
 fn seed(home: &Path, repo: &Path, wave_name: &str) -> Wave {
     std::fs::create_dir_all(home).expect("home");
     std::fs::create_dir_all(repo).expect("repo");
-    let store = SqliteStore::new(&home.join("loopflow.db")).expect("open store");
+    let store =
+        loopflow_execution::store::open_sqlite(&home.join("loopflow.db")).expect("open store");
     let wave = Wave::new(
         WaveId::new(),
         wave_name.to_string(),
         repo.display().to_string(),
     );
-    store.create_wave(&wave).expect("register wave");
+    loopflow_execution::work::wave::bootstrap::upsert_wave(&store, &wave).expect("register wave");
     store
         .seed_inventory(&InventoryFixture {
             wave_id: wave.id().clone(),

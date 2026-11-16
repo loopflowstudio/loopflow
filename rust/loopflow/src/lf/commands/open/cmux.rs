@@ -8,25 +8,12 @@ use std::process::Command;
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 
-use crate::work::selection::SplitAxis;
+use loopflow_storage::work::selection::SplitAxis;
 
 /// The app bundles its CLI without adding it to PATH.
 const BUNDLED: &str = "/Applications/cmux.app/Contents/Resources/bin/cmux";
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
-pub(super) struct CmuxLocation {
-    socket: String,
-    workspace: String,
-}
-
-impl CmuxLocation {
-    pub(super) fn current() -> Option<Self> {
-        Some(Self {
-            socket: std::env::var("CMUX_SOCKET_PATH").ok()?,
-            workspace: std::env::var("CMUX_WORKSPACE_ID").ok()?,
-        })
-    }
-}
+use loopflow_execution::terminal_host::CmuxLocation;
 
 pub(super) struct Cmux {
     cli: PathBuf,
@@ -242,7 +229,7 @@ mod tests {
             r"cd '/repo/it'\''s' && 'lf' 'task' 'a b'"
         );
         let split = split(
-            crate::work::selection::SplitAxis::Vertical,
+            loopflow_storage::work::selection::SplitAxis::Vertical,
             0.6,
             pane.clone(),
             pane,

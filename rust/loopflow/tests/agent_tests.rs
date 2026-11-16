@@ -3,8 +3,8 @@ mod support;
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use loopflow::agent::{run_agent, AgentConfig, AgentFailure, ProcessConfig};
-use loopflow::error::CoreError;
+use loopflow_execution::agent::{run_agent, AgentConfig, AgentFailure, ProcessConfig};
+use loopflow_execution::error::CoreError;
 use support::EnvGuard;
 use tempfile::TempDir;
 
@@ -86,14 +86,14 @@ fn library_launch_records_each_provider_under_its_invocation() {
             .trim()
             .parse()
             .unwrap_or_else(|error| panic!("{error}: fixture output {:?}", result.stdout));
-        let store = loopflow::store::sqlite::SqliteStore::new(
-            &loopflow::store::database_path_from_env().unwrap(),
+        let store = loopflow_execution::store::open_sqlite(
+            &loopflow_execution::store::database_path_from_env().unwrap(),
         )
         .unwrap();
         let rows = store.processes_since(0).unwrap();
         let agent = rows
             .iter()
-            .filter_map(loopflow::process::ProcessEntry::as_agent)
+            .filter_map(loopflow_execution::process::ProcessEntry::as_agent)
             .find(|row| row.pid == Some(pid))
             .unwrap();
         assert!(agent.os_started_at.is_some());
@@ -106,15 +106,15 @@ fn library_launch_records_each_provider_under_its_invocation() {
         assert!(parent.completed_at.is_some());
         assert!(agent.agent_session_id.is_some());
     }
-    let store = loopflow::store::sqlite::SqliteStore::new(
-        &loopflow::store::database_path_from_env().unwrap(),
+    let store = loopflow_execution::store::open_sqlite(
+        &loopflow_execution::store::database_path_from_env().unwrap(),
     )
     .unwrap();
     let rows = store.processes_since(0).unwrap();
     assert_eq!(rows.len(), 4);
     assert_eq!(
         rows.iter()
-            .filter_map(loopflow::process::ProcessEntry::as_agent)
+            .filter_map(loopflow_execution::process::ProcessEntry::as_agent)
             .count(),
         2
     );
@@ -128,23 +128,24 @@ fn library_launch_reuses_the_enclosing_invocation() {
         cwd: Some(directory.path().to_path_buf()),
         ..base_launch()
     };
-    loopflow::journal::with_runtime(directory.path(), &["fixture".into()], || {
+    loopflow_execution::journal::with_runtime(directory.path(), &["fixture".into()], || {
         for _ in 0..2 {
             let result = run_agent(&launch, &base_process())?;
             assert_eq!(result.exit_code, 0);
         }
-        let store =
-            loopflow::store::sqlite::SqliteStore::new(&loopflow::store::database_path_from_env()?)?;
+        let store = loopflow_execution::store::open_sqlite(
+            &loopflow_execution::store::database_path_from_env()?,
+        )?;
         let rows = store.processes_since(0)?;
         let parents = rows
             .iter()
-            .filter_map(loopflow::process::ProcessEntry::as_lf)
+            .filter_map(loopflow_execution::process::ProcessEntry::as_lf)
             .collect::<Vec<_>>();
         assert_eq!(parents.len(), 1);
         assert!(parents[0].completed_at.is_none());
         let agents = rows
             .iter()
-            .filter_map(loopflow::process::ProcessEntry::as_agent)
+            .filter_map(loopflow_execution::process::ProcessEntry::as_agent)
             .collect::<Vec<_>>();
         assert_eq!(agents.len(), 2);
         for agent in agents {

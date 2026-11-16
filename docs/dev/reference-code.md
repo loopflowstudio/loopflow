@@ -12,8 +12,8 @@ are listed separately. The counts are navigation aids, not quality metrics.
 | Territory | Main paths | Approx. LOC | What lives there |
 | --- | --- | ---: | --- |
 | CLI and presentation | `rust/loopflow/src/lf/`, `src/bin/` | 31,700 | Clap grammar, command dispatch, status/read models, terminal output |
-| Operational workflows | `rust/loopflow/src/ops/` | 25,800 | Task control, sessions, PR, Git, release, metrics, planning operations |
-| Prompt assembly, Graph runner and provider processes | `rust/loopflow/src/prompt/`, `agent/`, `graph/`, `skills/`, `src/harness/` | 29,300 | Skill/Graph discovery, prompt assembly, provider subprocesses and streams |
+| Operational workflows | `rust/loopflow-execution/src/ops/` | 25,800 | Task control, sessions, PR, Git, release, metrics, planning operations |
+| Prompt assembly, Graph runner and provider processes | `rust/loopflow-execution/src/prompt/`, `agent/`, `graph/`, `skills/`, `src/harness/` | 29,300 | Skill/Graph discovery, prompt assembly, provider subprocesses and streams |
 | Tracked Work | `work/`, `pm/` | — | Wave/Task facts, Task delivery identity, planning/provider models |
 | Storage and command journal | `store/`, `journal/` | 19,700 | SQLite access, migration runner, durable rows, outer command receipts |
 | Authentication and history | `provider_auth/`, `transcript/` | — | Service authentication, native homes and transcript adoption; native clients own subscription credentials |

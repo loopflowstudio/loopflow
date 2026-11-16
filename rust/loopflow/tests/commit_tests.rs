@@ -4,7 +4,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::Command;
 
-use loopflow::ops::{commit_selected, commit_workflow, CommitOptions, NullProgress};
+use loopflow_execution::ops::{commit_selected, commit_workflow, CommitOptions, NullProgress};
 use loopflow_test_support::TestRepo;
 use support::EnvGuard;
 
@@ -132,7 +132,7 @@ fn empty_git_commit_retains_stdout_diagnostic() {
     let repo = TestRepo::new();
     let before = repo.head_sha();
 
-    let error = loopflow::git::commit(repo.path(), "No changes", &|command| {
+    let error = loopflow_execution::git::commit(repo.path(), "No changes", &|command| {
         command.env("LC_ALL", "C");
     })
     .unwrap_err()
@@ -206,9 +206,9 @@ fn persistent_selection_preserves_scratch_and_unrelated_index() {
     repo.stage_all();
     repo.commit("existing scratch");
     repo.push();
-    let persistent = loopflow::git::worktrees::ensure_agent_worktree(
+    let persistent = loopflow_execution::git::worktrees::ensure_agent_worktree(
         repo.path(),
-        loopflow::git::worktrees::WorktreeSegment::parse("repo").unwrap(),
+        loopflow_execution::git::worktrees::WorktreeSegment::parse("repo").unwrap(),
     )
     .unwrap();
     // Use local HEAD as the fixture base rather than the older remote.
@@ -305,9 +305,9 @@ fn rejected_push_does_not_rewrite_remote_history() {
 fn persistent_workspace_checkpoints_added_scratch_until_explicit_cleanup() {
     let _env = EnvGuard::new(&[]);
     let repo = TestRepo::new();
-    let persistent = loopflow::git::worktrees::ensure_agent_worktree(
+    let persistent = loopflow_execution::git::worktrees::ensure_agent_worktree(
         repo.path(),
-        loopflow::git::worktrees::WorktreeSegment::parse("repo").unwrap(),
+        loopflow_execution::git::worktrees::WorktreeSegment::parse("repo").unwrap(),
     )
     .unwrap();
     std::fs::create_dir_all(persistent.path.join("scratch")).unwrap();
@@ -316,7 +316,7 @@ fn persistent_workspace_checkpoints_added_scratch_until_explicit_cleanup() {
         "repository content",
     )
     .unwrap();
-    loopflow::ops::commit_selected(
+    loopflow_execution::ops::commit_selected(
         &persistent.path,
         &["scratch/design.md".into()],
         Some("Save design"),
@@ -330,6 +330,9 @@ fn persistent_workspace_checkpoints_added_scratch_until_explicit_cleanup() {
         git_output(&persistent.path, &["show", "HEAD:scratch/design.md"]),
         "repository content"
     );
-    assert_eq!(loopflow::ops::scratch::clear(&persistent.path).unwrap(), 1);
+    assert_eq!(
+        loopflow_execution::ops::scratch::clear(&persistent.path).unwrap(),
+        1
+    );
     assert!(!persistent.path.join("scratch/design.md").exists());
 }

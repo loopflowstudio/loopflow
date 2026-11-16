@@ -18,13 +18,15 @@ use serde::{Deserialize, Serialize};
 
 use super::activity::HistoryWindow;
 use super::graph_inventory;
-use super::machine::{local_machine, machines};
-use super::subscribe::{Subscription, Transport};
+use super::machine::machines;
 use super::usage;
 use super::waves::list as list_waves;
 use crate::lf::SessionListArgs;
-use crate::ops::task::{task_changes, task_diff, task_file};
-use crate::session::SessionFilter;
+use loopflow_execution::engine::{Error, ErrorCode};
+use loopflow_execution::machine::connection::local_machine;
+use loopflow_execution::ops::task::{task_changes, task_diff, task_file};
+use loopflow_execution::read_stream::{Subscription, Transport};
+use loopflow_execution::session::SessionFilter;
 use loopflow_model::durable::RepositoryId;
 
 fn words(words: &[&str]) -> Vec<String> {
@@ -41,25 +43,24 @@ fn optional(flag: &str, value: Option<impl ToString>) -> Vec<String> {
 /// `command` as `lf` spells it for `destination`: the flags
 /// `Destination::from_cli` reads back.
 pub(crate) fn destination_argv(
-    destination: &crate::config::files::Destination,
+    destination: &loopflow_execution::config::files::Destination,
     command: &[&str],
 ) -> Vec<String> {
-    use crate::config::files::Destination;
-    let (repository, wave, flag) = match destination {
-        Destination::PersonalGlobal {} => (None, None, Some("--global")),
-        Destination::PersonalRepository { repository } => (Some(repository), None, None),
-        Destination::SharedRepository { repository } => (Some(repository), None, Some("--shared")),
-        Destination::PersonalWave { repository, wave } => (Some(repository), Some(wave), None),
-        Destination::SharedWave { repository, wave } => {
-            (Some(repository), Some(wave), Some("--shared"))
-        }
+    let repository = destination.repository();
+    let wave = destination.wave();
+    let flag = if destination.is_shared() {
+        Some("--shared")
+    } else if repository.is_none() {
+        Some("--global")
+    } else {
+        None
     };
     let mut argv = match repository {
         Some(repository) => at(repository, command),
         None => words(command),
     };
     if let Some(wave) = wave {
-        argv.splice(0..0, ["--wave".to_owned(), wave.clone()]);
+        argv.splice(0..0, ["--wave".to_owned(), wave.to_owned()]);
     }
     argv.extend(flag.map(str::to_owned));
     argv
@@ -85,7 +86,7 @@ pub enum Read {
     ProcessHistory { id: String },
     /// Look up a creation without starting or retrying it. Null confirms absence.
     #[serde(rename = "creation.get")]
-    #[schemars(extend("x-result" = generator.subschema_for::<Option<crate::store::sqlite::creation::CreationReceipt>>()))]
+    #[schemars(extend("x-result" = generator.subschema_for::<Option<loopflow_storage::sqlite::creation::CreationReceipt>>()))]
     CreationGet { request_id: String },
     /// `lf process list`: live Loopflow call trees.
     #[serde(rename = "process.list")]
@@ -93,19 +94,19 @@ pub enum Read {
     ProcessList,
     /// `lf --cwd <directory> desktop view list`: the plans a repository window shows.
     #[serde(rename = "desktop.view.list")]
-    #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::work::selection::ViewPlan>>()))]
+    #[schemars(extend("x-result" = generator.subschema_for::<Vec<loopflow_storage::work::selection::ViewPlan>>()))]
     DesktopViewList { directory: PathBuf },
     /// `lf desktop view list --all [--expression <expression>]`: one selection
     /// across the portfolio repositories, as the phone lists open Tasks.
     #[serde(rename = "view.select")]
-    #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::work::selection::ViewPlan>>()))]
+    #[schemars(extend("x-result" = generator.subschema_for::<Vec<loopflow_storage::work::selection::ViewPlan>>()))]
     ViewSelect { expression: Option<String> },
     /// `lf --cwd <directory> session list`, with `--headless`
     /// when `headless` Sessions are shown too: every row, or with a `limit`
     /// one page (`--page --limit <limit> [--after <after>]`). Only the whole
     /// list has a subscription.
     #[serde(rename = "session.list")]
-    #[schemars(extend("x-result" = (crate::server::schema::either::<Vec<crate::ops::human_session::SessionRecord>, crate::ops::human_session::SessionPage>(generator))))]
+    #[schemars(extend("x-result" = (crate::server::schema::either::<Vec<loopflow_execution::ops::human_session::SessionRecord>, loopflow_execution::ops::human_session::SessionPage>(generator))))]
     SessionList {
         directory: PathBuf,
         headless: bool,
@@ -137,7 +138,7 @@ pub enum Read {
     TaskGet { directory: PathBuf, issue: String },
     /// `lf task changes <issue> --base <base> [--head <head>]`: a Task's changed files.
     #[serde(rename = "task.changes")]
-    #[schemars(extend("x-result" = generator.subschema_for::<crate::ops::task::TaskChangesSnapshot>()))]
+    #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::ops::task::TaskChangesSnapshot>()))]
     TaskChanges {
         issue: String,
         base: String,
@@ -146,7 +147,7 @@ pub enum Read {
     /// `lf task diff <issue> [path] --base <base>`, or with `--draft` and the
     /// draft on stdin: one Task's patch.
     #[serde(rename = "task.diff")]
-    #[schemars(extend("x-result" = generator.subschema_for::<crate::ops::task::TaskDiffSnapshot>()))]
+    #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::ops::task::TaskDiffSnapshot>()))]
     TaskDiff {
         issue: String,
         path: Option<String>,
@@ -156,7 +157,7 @@ pub enum Read {
     },
     /// `lf task file <issue> <path>`: one file of a Task's checkout.
     #[serde(rename = "task.file")]
-    #[schemars(extend("x-result" = generator.subschema_for::<crate::ops::task::TaskFileSnapshot>()))]
+    #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::ops::task::TaskFileSnapshot>()))]
     TaskFile { issue: String, path: String },
     /// `lf wave list --all`: every Wave on this Machine that is not removed.
     #[serde(rename = "wave.list")]
@@ -168,16 +169,16 @@ pub enum Read {
     MachineSelf,
     /// `lf desktop portfolio`: the repositories this Machine's windows show.
     #[serde(rename = "desktop.portfolio")]
-    #[schemars(extend("x-result" = generator.subschema_for::<crate::portfolio::Portfolio>()))]
+    #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::portfolio::Portfolio>()))]
     DesktopPortfolio,
     /// `lf config catalog --json`: every typed setting and its policies.
     #[serde(rename = "config.catalog")]
-    #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::config::catalog::Definition>>()))]
+    #[schemars(extend("x-result" = generator.subschema_for::<Vec<loopflow_execution::config::catalog::Definition>>()))]
     ConfigCatalog,
     /// `lf --cwd <directory> [--wave <wave>] config settings [--skill|--graph
     /// [--step]] --json`: effective settings and their sources.
     #[serde(rename = "config.settings")]
-    #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::engine::config::Inspection>>()))]
+    #[schemars(extend("x-result" = generator.subschema_for::<Vec<loopflow_execution::engine::config::Inspection>>()))]
     ConfigSettings {
         directory: PathBuf,
         wave: Option<String>,
@@ -187,17 +188,17 @@ pub enum Read {
     },
     /// `lf config get <key> <destination flags> --json`: one file's declaration.
     #[serde(rename = "config.get")]
-    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::config::Declaration>()))]
+    #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::engine::config::Declaration>()))]
     ConfigGet {
-        destination: crate::config::files::Destination,
+        destination: loopflow_execution::config::files::Destination,
         key: String,
     },
     /// `lf config explain <key> <destination flags> --json`: every source's
     /// candidate and the value a launch there resolves.
     #[serde(rename = "config.explain")]
-    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::config::Explanation>()))]
+    #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::engine::config::Explanation>()))]
     ConfigExplain {
-        destination: crate::config::files::Destination,
+        destination: loopflow_execution::config::files::Destination,
         key: String,
     },
     /// `lf --cwd <directory> desktop layout <work>`: a Work's saved panes.
@@ -206,16 +207,16 @@ pub enum Read {
     DesktopLayout { directory: PathBuf, work: String },
     /// `lf --cwd <directory> repo people`: who owns the repository's Tasks.
     #[serde(rename = "repo.people")]
-    #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::ops::people::RepoPerson>>()))]
+    #[schemars(extend("x-result" = generator.subschema_for::<Vec<loopflow_execution::ops::people::RepoPerson>>()))]
     RepoPeople { directory: PathBuf },
     /// `lf --cwd <directory> graph list`: every Graph a Task there can take up.
     #[serde(rename = "graph.list")]
-    #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::graph::compiled::GraphCatalogEntry>>()))]
+    #[schemars(extend("x-result" = generator.subschema_for::<Vec<loopflow_execution::graph::compiled::GraphCatalogEntry>>()))]
     GraphList { directory: PathBuf },
     /// `lf --cwd <directory> desktop view show [expression]`: what a view
     /// shows; no expression is the repository's own.
     #[serde(rename = "desktop.view.get")]
-    #[schemars(extend("x-result" = generator.subschema_for::<crate::work::selection::ViewPlan>()))]
+    #[schemars(extend("x-result" = generator.subschema_for::<loopflow_storage::work::selection::ViewPlan>()))]
     DesktopViewGet {
         directory: PathBuf,
         expression: Option<String>,
@@ -223,7 +224,7 @@ pub enum Read {
     /// `lf --cwd <directory> task runs <task> [--after <after>]`: one page of
     /// the Graphs that ran for a Task.
     #[serde(rename = "task.runs")]
-    #[schemars(extend("x-result" = generator.subschema_for::<crate::durable::GraphProcessPage>()))]
+    #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::durable::GraphProcessPage>()))]
     TaskRuns {
         directory: PathBuf,
         task: String,
@@ -231,12 +232,12 @@ pub enum Read {
     },
     /// `lf process show <id>`: one Graph that ran, with its steps.
     #[serde(rename = "process.get")]
-    #[schemars(extend("x-result" = generator.subschema_for::<crate::durable::GraphProcessDetail>()))]
+    #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::durable::GraphProcessDetail>()))]
     ProcessGet { id: String },
     /// `lf usage --days <days> [--wave|--project|--task …]`: the Session
     /// inputs recorded in that window, by Work.
     #[serde(rename = "session.usage")]
-    #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::session_record::SessionHistory>>()))]
+    #[schemars(extend("x-result" = generator.subschema_for::<Vec<loopflow_execution::session_record::SessionHistory>>()))]
     SessionUsage {
         days: u32,
         wave: Option<String>,
@@ -246,7 +247,7 @@ pub enum Read {
     /// `lf task context <task>`: what each of that Task's Session inputs was
     /// made of.
     #[serde(rename = "task.context")]
-    #[schemars(extend("x-result" = generator.subschema_for::<crate::context_usage::ContextReport>()))]
+    #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::context_usage::ContextReport>()))]
     TaskContext { task: String },
     /// `lf --cwd <directory> wave plan <wave>`: one Wave's Projects and
     /// Tasks, after syncing its repository with the tracker.
@@ -300,7 +301,7 @@ pub enum Read {
     /// `lf --cwd <directory> wave graph show <wave>|--no-wave`: the graph a
     /// new Task there would take up.
     #[serde(rename = "wave.graph")]
-    #[schemars(extend("x-result" = generator.subschema_for::<crate::ops::project::WaveGraph>()))]
+    #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::ops::project::WaveGraph>()))]
     WaveGraph {
         directory: PathBuf,
         wave: Option<String>,
@@ -314,7 +315,7 @@ pub enum Read {
     },
     /// `lf session retention`: how much Session history providers keep.
     #[serde(rename = "session.retention")]
-    #[schemars(extend("x-result" = generator.subschema_for::<crate::transcript::summary::RetentionSummary>()))]
+    #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::transcript::summary::RetentionSummary>()))]
     SessionRetention,
     /// `lf machine doctor`: the ledger's self-audit.
     #[serde(rename = "machine.doctor")]
@@ -323,7 +324,7 @@ pub enum Read {
     /// `lf repo ci --since <since> [--wave <wave>] [--repo <repo>]`:
     /// how failed CI was detected, repaired and landed on this Machine.
     #[serde(rename = "repo.ci")]
-    #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::ci::CiReportDto>()))]
+    #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::ops::ci::CiReportDto>()))]
     RepoCi {
         since: String,
         wave: Option<String>,
@@ -331,7 +332,7 @@ pub enum Read {
     },
     /// `lf account [<provider>] [--cached] --json`: saved service authentication.
     #[serde(rename = "account.list")]
-    #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::account::account_status::AccountReport>()))]
+    #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::provider_auth::operations::account_status::AccountReport>()))]
     AccountList {
         target: Option<String>,
         cached: bool,
@@ -339,7 +340,7 @@ pub enum Read {
     /// `lf --cwd <directory> list [<path>…] --json`: the commands, skills,
     /// graphs and Waves under `path`.
     #[serde(rename = "skill.list")]
-    #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::lf::commands::list::Entry>>()))]
+    #[schemars(extend("x-result" = generator.subschema_for::<Vec<loopflow_execution::skills::listing::Entry>>()))]
     SkillList {
         directory: PathBuf,
         path: Vec<String>,
@@ -347,12 +348,12 @@ pub enum Read {
     /// `lf --cwd <directory> pr checks [--required] --json`: the branch's
     /// check report as the provider prints it, with its state.
     #[serde(rename = "pr.checks")]
-    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::pr::Checks>()))]
+    #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::engine::pr::Checks>()))]
     PrChecks { directory: PathBuf, required: bool },
     /// `lf --cwd <directory> pr reviews [<pr>] --json`: requested reviews
     /// and review submissions, each with the commit it reviewed.
     #[serde(rename = "pr.reviews")]
-    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::pr::Reviews>()))]
+    #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::engine::pr::Reviews>()))]
     PrReviews {
         directory: PathBuf,
         pr: Option<String>,
@@ -361,10 +362,10 @@ pub enum Read {
     /// and whether it reached `until`. Wake, it reads on each change and
     /// ends after the reading that reached it.
     #[serde(rename = "task.wait")]
-    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::task::Waited>()))]
+    #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::engine::task::Waited>()))]
     TaskWait {
         issue: String,
-        until: crate::ops::task::TaskWaitUntil,
+        until: loopflow_execution::ops::task::TaskWaitUntil,
     },
 }
 
@@ -606,8 +607,8 @@ impl Read {
             }
             Self::TaskWait { issue, until } => {
                 let until = match until {
-                    crate::ops::task::TaskWaitUntil::Open => "submitted",
-                    crate::ops::task::TaskWaitUntil::Terminal => "terminal",
+                    loopflow_execution::ops::task::TaskWaitUntil::Open => "submitted",
+                    loopflow_execution::ops::task::TaskWaitUntil::Terminal => "terminal",
                 };
                 words(&[
                     "task",
@@ -642,7 +643,7 @@ impl Read {
                 super::session_history::SessionView::Summary,
             )?),
             Self::CreationGet { request_id } => {
-                value(&crate::engine::creation::lookup(request_id)?)
+                value(&loopflow_execution::engine::creation::lookup(request_id)?)
             }
             Self::PlanBoard {
                 directory,
@@ -704,34 +705,36 @@ impl Read {
                 value(&waves.unwrap_or_default())
             }
             Self::MachineSelf => value(&block_on(local_machine())??),
-            Self::DesktopPortfolio => value(&crate::portfolio::read()?),
+            Self::DesktopPortfolio => value(&loopflow_execution::portfolio::read()?),
             Self::ConfigSettings {
                 directory,
                 wave,
                 skill,
                 graph,
                 step,
-            } => value(&crate::engine::config::settings(
+            } => value(&loopflow_execution::engine::config::settings(
                 directory,
                 wave.as_deref(),
                 skill.as_deref(),
                 graph.as_deref(),
                 step.as_deref(),
             )?),
-            Self::ConfigCatalog => value(&crate::engine::config::catalog()),
+            Self::ConfigCatalog => value(&loopflow_execution::engine::config::catalog()),
             Self::ConfigGet { destination, key } => {
-                value(&crate::engine::config::get(destination, key)?)
+                value(&loopflow_execution::engine::config::get(destination, key)?)
             }
-            Self::ConfigExplain { destination, key } => {
-                value(&crate::engine::config::explain(destination, key)?)
-            }
+            Self::ConfigExplain { destination, key } => value(
+                &loopflow_execution::engine::config::explain(destination, key)?,
+            ),
             Self::DesktopLayout { directory, work } => {
                 super::desktop::saved_layout(None, directory, work)
             }
             Self::RepoPeople { directory } => value(&super::people::people(directory)?.0),
-            Self::GraphList { directory } => value(&crate::graph::compiled::graph_catalog(
-                &crate::repo::working_directory_in(directory)?,
-            )?),
+            Self::GraphList { directory } => {
+                value(&loopflow_execution::graph::compiled::graph_catalog(
+                    &loopflow_execution::repo::working_directory_in(directory)?,
+                )?)
+            }
             Self::DesktopViewGet {
                 directory,
                 expression,
@@ -819,7 +822,7 @@ impl Read {
             Self::RepoPath { id } => {
                 let checkout = super::work_route::repository_path(id)?;
                 let repo =
-                    crate::repository::CanonicalRepo::containing(&checkout)?.ok_or_else(|| {
+                    loopflow_execution::repository::containing(&checkout)?.ok_or_else(|| {
                         not_found(
                             format!("repository plan {id} has no local checkout"),
                             serde_json::json!({ "repo_id": id }),
@@ -828,8 +831,8 @@ impl Read {
                 Ok(repo.to_string().into())
             }
             Self::WaveGraph { directory, wave } => {
-                let repo = crate::repo::working_directory_in(directory)?;
-                value(&block_on(crate::ops::project::wave_graph(
+                let repo = loopflow_execution::repo::working_directory_in(directory)?;
+                value(&block_on(loopflow_execution::ops::project::wave_graph(
                     &repo,
                     wave.as_deref(),
                     wave.is_some(),
@@ -845,26 +848,35 @@ impl Read {
                 })?,
             ),
             Self::MachineDoctor => value(&super::doctor::report()?),
-            Self::RepoCi { since, wave, repo } => value(&crate::engine::repo::ci(
+            Self::RepoCi { since, wave, repo } => value(&loopflow_execution::engine::repo::ci(
                 since,
                 wave.as_deref(),
                 repo.as_deref(),
             )?),
-            Self::AccountList { target, cached } => {
-                value(&crate::engine::account::list(target.as_deref(), *cached)?)
-            }
-
+            Self::AccountList { target, cached } => value(
+                &loopflow_execution::engine::account::list(target.as_deref(), *cached)?,
+            ),
             Self::SkillList { directory, path } => {
-                value(&crate::engine::skill::list(directory, path)?)
+                let repo = loopflow_execution::repo::discover_repo_root(directory)
+                    .map_err(|error| Error::refused(&error, ErrorCode::Invalid))?
+                    .unwrap_or_else(|| directory.to_owned());
+                let entries = super::list::list_children(path, &repo)
+                    .map_err(|error| Error::refused(&error, ErrorCode::Unavailable))?;
+                value(&entries)
             }
             Self::PrChecks {
                 directory,
                 required,
-            } => value(&crate::engine::pr::checks(directory, *required)?),
-            Self::PrReviews { directory, pr } => {
-                value(&crate::engine::pr::reviews(directory, pr.as_deref())?)
+            } => value(&loopflow_execution::engine::pr::checks(
+                directory, *required,
+            )?),
+            Self::PrReviews { directory, pr } => value(&loopflow_execution::engine::pr::reviews(
+                directory,
+                pr.as_deref(),
+            )?),
+            Self::TaskWait { issue, until } => {
+                value(&loopflow_execution::engine::task::waited(issue, *until)?)
             }
-            Self::TaskWait { issue, until } => value(&crate::engine::task::waited(issue, *until)?),
         }
     }
 
@@ -927,11 +939,11 @@ impl Read {
                 transport,
             ),
             Self::TaskWait { issue, until } => {
-                crate::engine::task::subscribe_wait(issue, until, transport)
+                loopflow_execution::engine::task::subscribe_wait(issue, until, transport)
             }
             other => {
-                return Err(crate::engine::Error::new(
-                    crate::engine::ErrorCode::Invalid,
+                return Err(loopflow_execution::engine::Error::new(
+                    loopflow_execution::engine::ErrorCode::Invalid,
                     format!("`lf {}` has no --subscribe", other.argv().join(" ")),
                 )
                 .into())
@@ -978,13 +990,17 @@ fn block_on<F: std::future::Future>(future: F) -> anyhow::Result<F::Output> {
     Ok(tokio::runtime::Runtime::new()?.block_on(future))
 }
 
-fn invalid(message: &str) -> crate::engine::Error {
-    crate::engine::Error::new(crate::engine::ErrorCode::Invalid, message)
+fn invalid(message: &str) -> loopflow_execution::engine::Error {
+    loopflow_execution::engine::Error::new(loopflow_execution::engine::ErrorCode::Invalid, message)
 }
 
 /// A served read's named absence; the CLI prints its message.
-fn not_found(message: impl Into<String>, data: serde_json::Value) -> crate::engine::Error {
-    crate::engine::Error::new(crate::engine::ErrorCode::NotFound, message).with(data)
+fn not_found(
+    message: impl Into<String>,
+    data: serde_json::Value,
+) -> loopflow_execution::engine::Error {
+    loopflow_execution::engine::Error::new(loopflow_execution::engine::ErrorCode::NotFound, message)
+        .with(data)
 }
 
 fn value(value: &impl Serialize) -> anyhow::Result<serde_json::Value> {
@@ -1054,12 +1070,12 @@ mod tests {
     fn session_subscription_keeps_conversations_beyond_the_first_hundred() {
         let home = tempfile::tempdir().unwrap();
         let store =
-            crate::store::sqlite::SqliteStore::open_ephemeral(&home.path().join("store.db"))
+            loopflow_execution::store::opening::open_ephemeral(&home.path().join("store.db"))
                 .unwrap();
         for index in 0..101 {
             store.test_session(
                 &format!("session-{index:03}"),
-                &crate::session_record::new_artifact_key(),
+                &loopflow_execution::session_record::new_artifact_key(),
             );
         }
         let read = Read::SessionList {
@@ -1070,7 +1086,9 @@ mod tests {
             task: None,
         };
         let filter = read.session_filter(home.path()).unwrap();
-        let sessions = store.session_summaries(&filter, 0).unwrap();
+        let sessions =
+            loopflow_execution::store::session_projection::session_summaries(&store, &filter, 0)
+                .unwrap();
         assert_eq!(sessions.len(), 101);
         assert!(sessions.iter().any(|session| session.id == "session-100"));
     }
@@ -1079,10 +1097,10 @@ mod tests {
     fn served_session_lists_include_headless_but_never_completed() {
         let home = tempfile::tempdir().unwrap();
         let store =
-            crate::store::sqlite::SqliteStore::open_ephemeral(&home.path().join("store.db"))
+            loopflow_execution::store::opening::open_ephemeral(&home.path().join("store.db"))
                 .unwrap();
         for id in ["interactive", "headless", "closed", "closed-headless"] {
-            store.test_session(id, &crate::session_record::new_artifact_key());
+            store.test_session(id, &loopflow_execution::session_record::new_artifact_key());
         }
         store.conn.lock().unwrap().execute_batch(
             "UPDATE agent_sessions SET interactive=0 WHERE id IN ('headless','closed-headless');
@@ -1098,7 +1116,10 @@ mod tests {
                     task: None,
                 };
                 let filter = read.session_filter(home.path()).unwrap();
-                let sessions = store.session_summaries(&filter, 0).unwrap();
+                let sessions = loopflow_execution::store::session_projection::session_summaries(
+                    &store, &filter, 0,
+                )
+                .unwrap();
                 let mut ids = sessions
                     .iter()
                     .map(|row| row.id.as_str())

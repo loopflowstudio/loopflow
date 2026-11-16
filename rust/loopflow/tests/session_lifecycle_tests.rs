@@ -2,6 +2,7 @@
 //! The real `lf` binary runs in a private Machine; a script stands in for the provider.
 #![cfg(unix)]
 
+use loopflow_execution::process::attachment;
 mod support;
 
 use std::io::Write;
@@ -34,7 +35,7 @@ impl Fixture {
         let provider = bin.join("opencode");
         std::fs::write(
             &provider,
-            include_str!("support/opencode_server.py")
+            include_str!("../../loopflow-execution/tests/support/opencode_server.py")
                 .replace("__WAIT__", if waits { "True" } else { "False" }),
         )
         .unwrap();
@@ -178,7 +179,8 @@ impl Fixture {
     fn finish_on_resume(&self) {
         std::fs::write(
             self.home.path().join("bin/opencode"),
-            include_str!("support/opencode_server.py").replace("__WAIT__", "False"),
+            include_str!("../../loopflow-execution/tests/support/opencode_server.py")
+                .replace("__WAIT__", "False"),
         )
         .unwrap();
     }
@@ -701,7 +703,7 @@ fn personal_task_launch_resume_and_skill_graph_keep_native_identity() {
             [task_id],
         )
         .unwrap();
-    loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
+    loopflow_execution::store::open_sqlite(&fixture.home.path().join("loopflow.db"))
         .unwrap()
         .observe_pm_issue_change("fixture-deleted", None, true)
         .unwrap();
@@ -899,13 +901,14 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
     for index in 0..113 {
         let id = format!("inventory-{index:03}");
         let foreign_row = index < 110;
-        let session = loopflow::session::LfSession {
+        let session = loopflow_execution::session::LfSession {
             captured: None,
             caller_artifact_key: None,
             task_id: (index >= 110).then(|| task.task.id.clone()),
             wave_id: None,
             graph_lf_process_id: None,
-            work_source: (index >= 110).then_some(loopflow::session::WorkSource::Declared),
+            work_source: (index >= 110)
+                .then_some(loopflow_execution::session::WorkSource::Declared),
             bound_at: None,
             id: id.clone().into(),
             artifact_key: Some(uuid::Uuid::new_v4().simple().to_string()),
@@ -930,7 +933,7 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
                     "ZZZ local"
                 }
             ),
-            title_source: loopflow::session::TitleSource::Human,
+            title_source: loopflow_execution::session::TitleSource::Human,
             request: None,
             ready_summary: None,
             completed_at: None,
@@ -1072,12 +1075,16 @@ fn public_history_discovers_unlinked_native_receipts_without_borrowing_a_later_b
         "native-history",
         &fixture.repo.head_sha(),
     );
-    let store = loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
-        .unwrap();
+    let store =
+        loopflow_execution::store::open_sqlite(&fixture.home.path().join("loopflow.db")).unwrap();
     let closed = store.session(&session).unwrap().unwrap();
-    store
-        .bind_session(&session, closed.captured, &task.task.id)
-        .unwrap();
+    loopflow_execution::store::sessions::bind_session(
+        &store,
+        &session,
+        closed.captured,
+        &task.task.id,
+    )
+    .unwrap();
     let count = serde_json::json!({"inputTokens":12,"outputTokens":3,
         "cachedInputTokens":0,"reasoningOutputTokens":0});
     for (kind, payload) in [
@@ -1504,8 +1511,8 @@ fn provider_parentage_does_not_assign_work_outside_its_checkout() {
     assert!(fixture.run(&LAUNCH).status.success());
     let original = fixture.launches()[0].clone();
     let (session, ..) = fixture.session_row(&original);
-    let store = loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
-        .unwrap();
+    let store =
+        loopflow_execution::store::open_sqlite(&fixture.home.path().join("loopflow.db")).unwrap();
     let origin: String = fixture
         .db()
         .query_row(
@@ -1514,20 +1521,22 @@ fn provider_parentage_does_not_assign_work_outside_its_checkout() {
             |row| row.get(0),
         )
         .unwrap();
-    let origin = loopflow::id::LfProcessId::parse(&origin).unwrap();
+    let origin = loopflow_model::id::LfProcessId::parse(&origin).unwrap();
     let attachment = store
         .session_attachment(&session)
         .unwrap()
         .unwrap_or_else(|| {
-            store
-                .claim_session_attachment(&session, None, &origin, true)
-                .unwrap()
+            attachment::claim_session_attachment(&store, &session, None, &origin, true).unwrap()
         });
     let caller = serde_json::to_string(&attachment.caller(session.clone().into())).unwrap();
     let closed = store.session(&session).unwrap().unwrap();
-    store
-        .bind_session(&session, closed.captured, &task.task.id)
-        .unwrap();
+    loopflow_execution::store::sessions::bind_session(
+        &store,
+        &session,
+        closed.captured,
+        &task.task.id,
+    )
+    .unwrap();
     // Synthetic provider provenance crosses real public CLI admission. The
     // same causal parent may issue taskless, checkout-bound or explicitly selected work.
     for (cwd, args, expected, source, declaration) in [
@@ -1593,8 +1602,7 @@ fn provider_parentage_does_not_assign_work_outside_its_checkout() {
         assert!(retained, "provider-issued work lost its causal parent");
     }
     // A stale provider keeps its original causal parent and grants no Work.
-    store
-        .claim_session_attachment(&session, Some(&attachment), &origin, true)
+    attachment::claim_session_attachment(&store, &session, Some(&attachment), &origin, true)
         .unwrap();
     let before = fixture.launches().len();
     let stale = fixture
@@ -1662,7 +1670,7 @@ fn declared_agent_tools_use_their_checkout_and_keep_the_process_parent() {
 #[ignore = "requires disposable Linux account with no installed Loopflow"]
 fn declared_agent_can_start_another_tasks_graph() {
     assert!(Path::new("/.dockerenv").is_file());
-    assert!(!loopflow::installation::root().unwrap().exists());
+    assert!(!loopflow_execution::installation::root().unwrap().exists());
     let fixture = Fixture::new(false);
     support::bind_task_planning(&fixture.repo);
     let y = fixture.repo.create_named_worktree("task-y");
@@ -1683,8 +1691,8 @@ fn declared_agent_can_start_another_tasks_graph() {
         "- cmd: sync --plan\n- interactive: demo\n",
     )
     .unwrap();
-    let store = loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
-        .unwrap();
+    let store =
+        loopflow_execution::store::open_sqlite(&fixture.home.path().join("loopflow.db")).unwrap();
     // X's explicit Session selection must not become Y's Graph policy.
     support::select_wave_graph(
         fixture.repo.path(),
@@ -2495,7 +2503,7 @@ fn pi_managed_graph_routes_one_branch_and_nested_lf_retains_task_and_checkout() 
         &provider,
         format!(
             "#!/usr/bin/python3 -I\n{}",
-            include_str!("../src/harness/testdata/pi_rpc.py")
+            include_str!("../../loopflow-execution/src/harness/testdata/pi_rpc.py")
         ),
     )
     .unwrap();
@@ -2603,7 +2611,7 @@ fn promotion_explicit_sources_with_run_keep_the_selected_work() {
         fixture.with_attached_clients([child], || {
             let id = fixture.session_row(&capture).0;
             let store =
-                loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
+                loopflow_execution::store::open_sqlite(&fixture.home.path().join("loopflow.db"))
                     .unwrap();
             let attachment = store.session_attachment(&id).unwrap().unwrap();
             let caller = serde_json::to_string(&attachment.caller(id.clone().into())).unwrap();
@@ -2808,7 +2816,7 @@ fn promotion_selects_session_in_owned_and_shared_checkouts() {
             fixture.session_row(&second_capture).0,
         ];
         let store =
-            loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
+            loopflow_execution::store::open_sqlite(&fixture.home.path().join("loopflow.db"))
                 .unwrap();
         let attachment = store.session_attachment(&ids[1]).unwrap().unwrap();
         let caller = serde_json::to_string(&attachment.caller(ids[1].clone().into())).unwrap();

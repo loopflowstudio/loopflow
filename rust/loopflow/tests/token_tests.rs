@@ -1,4 +1,4 @@
-use loopflow::prompt::count_tokens;
+use loopflow_execution::prompt::count_tokens;
 
 #[test]
 fn token_counting() {

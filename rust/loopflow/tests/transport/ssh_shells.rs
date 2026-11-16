@@ -12,7 +12,6 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use super::{desktop_shell_bootstrap, Fixture};
-use loopflow::store::sqlite::SqliteStore;
 
 const TASK: &str = "task_5e55105e000040008000000000000007";
 
@@ -48,10 +47,16 @@ impl Ssh {
         let destination = Fixture::new();
         let machine = destination.shell_task(TASK);
         success(source.command(&["machine", "id"]));
-        let source_store = SqliteStore::new(&source.home.path().join("loopflow.db")).unwrap();
-        source_store
-            .add_machine(&machine, "fixture", "fixture")
-            .unwrap();
+        let source_store =
+            loopflow_execution::store::open_sqlite(&source.home.path().join("loopflow.db"))
+                .unwrap();
+        loopflow_execution::store::machines::add_machine(
+            &source_store,
+            &machine,
+            "fixture",
+            "fixture",
+        )
+        .unwrap();
         let root = source.home.path();
         for name in ["host", "client", "unauthorized"] {
             let mut command = Command::new("ssh-keygen");

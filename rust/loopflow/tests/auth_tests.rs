@@ -27,7 +27,7 @@ fn service_auth_survives_subscription_removal() {
     assert_eq!(status["accounts"][0]["state"], "active");
     let rt = tokio::runtime::Runtime::new().unwrap();
     let store = rt
-        .block_on(loopflow::store::open_existing_store())
+        .block_on(loopflow_execution::store::open_existing_store())
         .unwrap()
         .unwrap();
     assert!(rt

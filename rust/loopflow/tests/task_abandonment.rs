@@ -2,8 +2,8 @@ use crate::support;
 
 use std::process::Command;
 
-use loopflow::id::LfProcessId;
-use loopflow::work::task::{GithubPr, PrPublication};
+use loopflow_execution::work::task::{GithubPr, PrPublication};
+use loopflow_model::id::LfProcessId;
 use loopflow_test_support::TestRepo;
 use rusqlite::params;
 use support::{register_task_with_pr, EnvGuard};

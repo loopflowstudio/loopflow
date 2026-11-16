@@ -1,16 +1,18 @@
 //! `session.boundary`: what a held launch's hook reports at a turn or tool
 //! boundary, for the server to record. The hook opens no store for this; it
 //! reads the Session's steers and Task update from the store itself afterwards
-//! ([`crate::steer::claim`]).
+//! ([`loopflow_execution::steer::claim`]).
+
+use loopflow_execution::process::attachment;
 use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 
-use crate::context_block::ContextDelivery;
 use crate::server::wire::{BoundaryMoment, SessionBoundary, SessionBoundaryAnswer};
-use crate::steer::NativeBoundary;
-use crate::store::sqlite::SqliteStore;
+use loopflow_execution::context_block::ContextDelivery;
+use loopflow_execution::steer::NativeBoundary;
+use loopflow_storage::sqlite::SqliteStore;
 
 /// How long a hook waits for the server before its turn goes on without it.
 pub(crate) const HOOK_DEADLINE: Duration = Duration::from_secs(2);
@@ -103,22 +105,22 @@ pub(super) fn answer(
     if let Some(gap) = gap {
         store.record_recording_gap(&adapter.session, gap.first, gap.last)?;
     }
-    let connection = store.session_connection(&adapter.session)?;
+    let connection = attachment::session_connection(store, &adapter.session)?;
     // Where the server wakes this conversation once it is idle.
     if let Some(inbox) = inbox {
         store.record_agent_inbox(adapter, inbox)?;
     }
     if *moment == BoundaryMoment::Event {
-        crate::harness::pi::observe_native(store, adapter, callback)?;
+        loopflow_execution::harness::pi::observe_native(store, adapter, callback)?;
         return Ok((nothing, None));
     }
     if *moment == BoundaryMoment::Stop {
         // The transcript is the only writer of usage rows; the exit read
         // catches turns it does not show yet. Pi and OpenCode have no hook name.
-        crate::transcript::facts::record_session(
+        loopflow_execution::transcript::facts::record_session(
             store,
             &adapter.session,
-            crate::transcript::facts::Moment::TurnEnd,
+            loopflow_execution::transcript::facts::Moment::TurnEnd,
         );
         // Codex keeps its turns on its app-server; read them now that one
         // ended. A Claude Session records none.
@@ -156,7 +158,7 @@ pub(super) fn after_stop(after: AfterStop) {
             .enable_all()
             .build()?;
         runtime.block_on(async {
-            let Some(store) = crate::store::open_existing_store().await? else {
+            let Some(store) = loopflow_execution::store::open_existing_store().await? else {
                 return Ok(());
             };
             let store = std::sync::Arc::new(store);
@@ -166,7 +168,7 @@ pub(super) fn after_stop(after: AfterStop) {
             let repo = after.repo.to_string_lossy();
             if tokio::time::timeout(
                 PLANNING_REFRESH,
-                crate::ops::linear_observe::sync_repository(&store, &repo),
+                loopflow_execution::ops::linear_observe::sync_repository(&store, &repo),
             )
             .await
             .is_err()
@@ -178,7 +180,7 @@ pub(super) fn after_stop(after: AfterStop) {
             };
             // The turn ended: an update that arrived during it goes out now.
             let (sqlite, ended) = (store.sqlite.clone(), session.clone());
-            crate::journal::request::spawn_blocking(move || {
+            loopflow_execution::journal::request::spawn_blocking(move || {
                 super::wake::after_turn(&sqlite, &ended)
             })
             .await?;
@@ -186,7 +188,8 @@ pub(super) fn after_stop(after: AfterStop) {
                 return Ok(());
             }
             tokio::time::sleep(MOVE_AFTER_STOP).await;
-            crate::ops::human_session::moves_bulk::apply_pending_move(&store, session).await
+            loopflow_execution::ops::human_session::moves_bulk::apply_pending_move(&store, session)
+                .await
         })
     })();
     if let Err(error) = ran {
@@ -204,7 +207,9 @@ async fn record_codex_turns(
 ) {
     let read = tokio::time::timeout(
         CODEX_HISTORY,
-        crate::harness::codex_connection::recover_history(store, session, thread, endpoint),
+        loopflow_execution::harness::codex_connection::recover_history(
+            store, session, thread, endpoint,
+        ),
     )
     .await
     .map_err(|_| anyhow!("Codex history read timed out"))
@@ -216,11 +221,13 @@ async fn record_codex_turns(
 
 #[cfg(test)]
 mod tests {
+    use loopflow_execution::process::attachment;
+
     use super::answer;
-    use crate::context_block::ContextDelivery;
     use crate::server::wire::{BoundaryGap, BoundaryMoment, SessionBoundary};
-    use crate::steer::{NativeBoundary, SteerAdapter};
-    use crate::store::sqlite::SqliteStore;
+    use loopflow_execution::context_block::ContextDelivery;
+    use loopflow_execution::steer::{NativeBoundary, SteerAdapter};
+    use loopflow_storage::sqlite::SqliteStore;
 
     /// A native Session whose provider selected conversation `native`, and a
     /// delivery file for its checkout.
@@ -242,12 +249,16 @@ mod tests {
         std::path::PathBuf,
     ) {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
-        store.test_session("session", &crate::session_record::new_artifact_key());
+        let store =
+            loopflow_execution::store::opening::open_ephemeral(&home.path().join("store.db"))
+                .unwrap();
+        store.test_session(
+            "session",
+            &loopflow_execution::session_record::new_artifact_key(),
+        );
         let process = store.test_lf_process();
-        let claim = store
-            .claim_session_attachment("session", None, &process, false)
-            .unwrap();
+        let claim =
+            attachment::claim_session_attachment(&store, "session", None, &process, false).unwrap();
         store
             .record_agent_process_identity("session", &claim, std::process::id(), 1)
             .unwrap();
@@ -323,8 +334,11 @@ mod tests {
         assert_eq!(identity.task, None);
 
         let task = store
-            .create_task(&crate::work::task::NewTask {
-                repository_id: store.ensure_repository("/repo").unwrap(),
+            .create_task(&loopflow_storage::work::task::NewTask {
+                repository_id: loopflow_execution::repository::location::ensure_repository(
+                    &store, "/repo",
+                )
+                .unwrap(),
                 due_date: None,
                 id: loopflow_model::durable::TaskId::new(),
                 project_id: None,
@@ -347,11 +361,14 @@ mod tests {
             Some((task.identifier.clone(), task.title.clone()))
         );
         let text = compact
-            .block_with_prefix(crate::context_block::ContextMoment::Compact, "")
+            .block_with_prefix(
+                loopflow_execution::context_block::ContextMoment::Compact,
+                "",
+            )
             .unwrap()
             .text;
         assert!(
-            text.starts_with(&crate::prompt::render_reference(&format!(
+            text.starts_with(&loopflow_execution::prompt::render_reference(&format!(
                 "This Session: session\nThis Session's Task: {} {}\n",
                 task.identifier,
                 serde_json::to_string(&task.title).unwrap(),
@@ -383,7 +400,11 @@ mod tests {
     fn a_moved_checkouts_delivery_follows_the_repository() {
         let (home, store, adapter, delivery) = fixture();
         let old = home.path().join("repo");
-        let id = store.ensure_repository(old.to_str().unwrap()).unwrap();
+        let id = loopflow_execution::repository::location::ensure_repository(
+            &store,
+            old.to_str().unwrap(),
+        )
+        .unwrap();
         let mut saved = ContextDelivery::load(&delivery).unwrap();
         saved.repository = Some((id.clone(), old.clone()));
         saved.skill_file = Some(old.join("active.md"));
@@ -471,7 +492,7 @@ mod tests {
     /// neither list; only an empty snapshot settles it.
     #[test]
     fn a_turn_end_settles_only_once_no_watch_or_wakeup_remains() {
-        use crate::store::sqlite::sessions::TerminalRetention::LiveTurn;
+        use loopflow_storage::sqlite::sessions::TerminalRetention::LiveTurn;
         let (_home, store, adapter, delivery) = fixture();
         let terminal = loopflow_model::id::TerminalId::new();
         store.create_terminal(&terminal, "build").unwrap();
@@ -556,7 +577,7 @@ mod tests {
             .session_history("session", 0, 0)
             .unwrap()
             .into_iter()
-            .filter(|event| event.kind == crate::session::SessionEventKind::Usage)
+            .filter(|event| event.kind == loopflow_execution::session::SessionEventKind::Usage)
             .collect::<Vec<_>>();
         assert_eq!(usage.len(), 1);
         assert_eq!(usage[0].provider_turn.as_deref(), Some("u1"));
@@ -615,7 +636,7 @@ mod tests {
         for other in 0..20 {
             store.test_session(
                 &format!("other-{other}"),
-                &crate::session_record::new_artifact_key(),
+                &loopflow_execution::session_record::new_artifact_key(),
             );
         }
         store
@@ -632,8 +653,8 @@ mod tests {
         store
             .save_session_steer("session", "Fixture author", "TRACED")
             .unwrap();
-        let traced = crate::store::query_plans::assert_no_empty_writes(&store, || {
-            crate::store::query_plans::statements(&store, || {
+        let traced = loopflow_storage::query_plans::assert_no_empty_writes(&store, || {
+            loopflow_storage::query_plans::statements(&store, || {
                 let at = |moment, callback: serde_json::Value| {
                     boundary(moment, &adapter, &delivery, callback)
                 };
@@ -647,7 +668,7 @@ mod tests {
                 ),
             )
             .unwrap();
-                let claimed = crate::steer::claim(
+                let claimed = loopflow_execution::steer::claim(
                     &store,
                     &ContextDelivery::load(&delivery).unwrap().repo,
                     &adapter,
@@ -656,7 +677,7 @@ mod tests {
                 )
                 .unwrap()
                 .unwrap();
-                crate::steer::delivered(&store, "session", &claimed);
+                loopflow_execution::steer::delivered(&store, "session", &claimed);
                 answer(
                 &store,
                 &at(
@@ -669,11 +690,11 @@ mod tests {
                 let quiet = NativeBoundary::Activate {
                     source: "PostToolUse",
                 };
-                assert!(
-                    crate::steer::claim(&store, &delivery, &adapter, "native", quiet)
-                        .unwrap()
-                        .is_none()
-                );
+                assert!(loopflow_execution::steer::claim(
+                    &store, &delivery, &adapter, "native", quiet
+                )
+                .unwrap()
+                .is_none());
                 answer(
             &store,
             &at(
@@ -700,7 +721,7 @@ mod tests {
         .unwrap();
             })
         });
-        let found = crate::store::query_plans::growing_scans(&store, &traced);
+        let found = loopflow_storage::query_plans::growing_scans(&store, &traced);
         assert!(found.is_empty(), "{}", found.join("\n"));
     }
 
@@ -727,7 +748,7 @@ mod tests {
             source: "PostToolUse",
         };
         assert!(
-            crate::steer::claim(&store, &delivery, &adapter, "native", quiet)
+            loopflow_execution::steer::claim(&store, &delivery, &adapter, "native", quiet)
                 .unwrap()
                 .is_none()
         );

@@ -52,8 +52,10 @@ same Mac connects; create it only on a Mac with one account. Setup saves the end
 Machine-local `mobile.yaml`, using the shared atomic file writer. It does not
 add service state to `config.yaml` or the preferences catalogue.
 
-`wire.rs` owns the Rust types; `swift/Loopflow/Services/ServerProtocol.swift`
-mirrors them. Executable fixtures live in `rust/loopflow/tests/fixtures/dto/server/`.
+`machine/wire.rs` owns the envelope, endpoint and native request types;
+`server/wire.rs` instantiates the envelope with the CLI read/write operations.
+The Machine client and runtime depend on those values without importing dispatch; `swift/Loopflow/Services/ServerProtocol.swift`
+mirrors them. Executable fixtures live in `rust/loopflow-execution/tests/fixtures/dto/server/`.
 `nc -U machine.sock` is a debugging tool: type `{"type":"status"}`.
 
 `lf server describe --json` prints the protocol as one JSON Schema, generated
@@ -272,7 +274,7 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `account.list` | `lf account [<provider>]` | read; `engine::account::list` (service authentication) |
 | `account.connect`, `.disconnect` | `lf account connect`, `disconnect` | write; `engine::account::connect`, `disconnect` (service authentication) |
 | `skill.run` | `lf skill <name>` (`lf -b`, detached) | write; `engine::skill::run` (the Process carrying the run) |
-| `skill.list` | `lf list [<path>…]` | read; `engine::skill::list` |
+| `skill.list` | `lf list [<path>…]` | read; `lf::commands::list::list_children` |
 | `desktop.portfolio`, `.portfolio.set` | `lf desktop portfolio` (`lf portfolio`) | read, write |
 | `desktop.layout`, `.layout.save` | `lf desktop layout <work> [--save]` | read, write |
 | `desktop.view.list`, `.view.get` | `lf desktop view list`, `lf desktop view show` | read |

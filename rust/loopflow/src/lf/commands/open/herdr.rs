@@ -6,22 +6,9 @@ use std::path::Path;
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 
-use crate::work::selection::SplitAxis;
+use loopflow_storage::work::selection::SplitAxis;
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
-pub(super) struct HerdrLocation {
-    socket: String,
-    pane: String,
-}
-
-impl HerdrLocation {
-    pub(super) fn current() -> Option<Self> {
-        Some(Self {
-            socket: std::env::var("HERDR_SOCKET_PATH").ok()?,
-            pane: std::env::var("HERDR_PANE_ID").ok()?,
-        })
-    }
-}
+use loopflow_execution::terminal_host::HerdrLocation;
 
 pub(super) struct Herdr {
     socket: String,
@@ -181,7 +168,7 @@ pub(super) fn split(axis: SplitAxis, ratio: f64, before: Value, after: Value) ->
 #[cfg(test)]
 mod tests {
     use super::{split, terminal};
-    use crate::work::selection::SplitAxis;
+    use loopflow_storage::work::selection::SplitAxis;
     use std::path::Path;
 
     #[test]

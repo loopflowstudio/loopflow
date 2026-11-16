@@ -5,7 +5,7 @@ use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
 use crate::support;
-use loopflow::server::client::Connection;
+use loopflow_execution::machine::client::Connection;
 use loopflow_test_support::TestRepo;
 use sha2::{Digest, Sha256};
 
@@ -458,7 +458,7 @@ fn task_create_without_recovery_keeps_the_existing_receipt_and_exit_status() {
         "{}",
         String::from_utf8_lossy(&created.stderr)
     );
-    let receipt: loopflow::engine::creation::TaskCreateReceipt =
+    let receipt: loopflow_execution::engine::creation::TaskCreateReceipt =
         serde_json::from_slice(&created.stdout).unwrap();
     assert_eq!(receipt.graph.as_deref(), Some("feature"));
     assert!(receipt.session_id.is_some());
@@ -475,7 +475,7 @@ fn task_create_without_recovery_keeps_the_existing_receipt_and_exit_status() {
         "--json",
     ]);
     assert!(!failed.status.success());
-    let receipt: loopflow::engine::creation::TaskCreateReceipt =
+    let receipt: loopflow_execution::engine::creation::TaskCreateReceipt =
         serde_json::from_slice(&failed.stdout).unwrap();
     assert_eq!(receipt.task.title, "Ordinary failure");
     assert_eq!(receipt.graph.as_deref(), Some("gate"));

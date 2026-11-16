@@ -509,17 +509,19 @@ fn terminal_context_refreshes_without_replacing_instructions_or_losing_failed_se
         env!("CARGO_BIN_EXE_lf"),
         &home.path().join("machine"),
     );
-    let store = loopflow::store::sqlite::SqliteStore::new(&home.path().join("machine/loopflow.db"))
-        .unwrap();
-    store
-        .create_wave(&loopflow::work::wave::Wave::new(
-            loopflow::id::WaveId::new(),
+    let store =
+        loopflow_execution::store::open_sqlite(&home.path().join("machine/loopflow.db")).unwrap();
+    loopflow_execution::work::wave::bootstrap::upsert_wave(
+        &store,
+        &loopflow_execution::work::wave::Wave::new(
+            loopflow_model::id::WaveId::new(),
             "fixture".into(),
-            loopflow::repository::CanonicalRepo::discover(repo.path())
+            loopflow_execution::repository::discover(repo.path())
                 .unwrap()
                 .to_string(),
-        ))
-        .unwrap();
+        ),
+    )
+    .unwrap();
     let bin = home.path().join("bin");
     fs::create_dir(&bin).unwrap();
     let provider = bin.join(harness);
@@ -596,7 +598,8 @@ exit 23
             .collect()
     };
     let provider_context = fs::read_to_string(home.path().join("provider-context")).unwrap();
-    let adapter: loopflow::steer::SteerAdapter = serde_json::from_str(&provider_context).unwrap();
+    let adapter: loopflow_execution::steer::SteerAdapter =
+        serde_json::from_str(&provider_context).unwrap();
     let identity = format!("This Session: {}\n", adapter.session);
     assert!(!instructions.contains(&adapter.session));
     let invoke = |moment: &str| {
@@ -856,11 +859,11 @@ fn claude_opens_lf_created_worktree_already_trusted() {
         "{}.agent-trust",
         repo.path().file_name().unwrap().to_string_lossy()
     ));
-    loopflow::git::worktree_add(
+    loopflow_execution::git::worktree_add(
         repo.path(),
         &worktree,
         "agent-trust",
-        loopflow::git::WorktreeBranch::New {
+        loopflow_execution::git::WorktreeBranch::New {
             start_point: "HEAD",
         },
     )
@@ -1113,8 +1116,8 @@ fn assert_background_conversation(run_graph: bool) {
     // from starting. These receipts deliberately exceed the former count cap.
     let conn = rusqlite::Connection::open(&db).unwrap();
     for _ in 0..16 {
-        let task = loopflow::durable::TaskId::new();
-        let terminal = loopflow::id::TerminalId::new();
+        let task = loopflow_execution::durable::TaskId::new();
+        let terminal = loopflow_model::id::TerminalId::new();
         let session = uuid::Uuid::new_v4().to_string();
         conn.execute(
             "INSERT INTO tasks(id,repository_id,issue_identifier,created_at)

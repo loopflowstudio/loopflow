@@ -6,34 +6,15 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::engine::task;
-
-/// Whether opening may take control, start a thread, or only reveal history.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum SessionOpenIntent {
-    Resume,
-    Start,
-    Reveal,
-}
-
-impl SessionOpenIntent {
-    /// The `lf session resume` flag carrying this intent; ordinary resume has none.
-    pub fn flag(self) -> Option<&'static str> {
-        match self {
-            Self::Resume => None,
-            Self::Start => Some("--start-if-free"),
-            Self::Reveal => Some("--reveal-existing"),
-        }
-    }
-}
+use loopflow_execution::engine::task;
+use loopflow_execution::session::SessionOpenIntent;
 
 /// Moving a Task changes its Wave membership or its Machine ownership.
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 #[serde(untagged)]
 #[schemars(inline)]
 pub(crate) enum TaskMoveResult {
-    Wave(Box<crate::ops::task::TaskEdit>),
+    Wave(Box<loopflow_execution::ops::task::TaskEdit>),
     Machine(Box<loopflow_model::durable::TaskOwnership>),
 }
 
@@ -72,7 +53,7 @@ macro_rules! writes {
             /// Run the shared operation and keep its declared result until serialization.
             pub(crate) fn run(&$this) -> anyhow::Result<WriteResult> {
                 let $directory = $this.directory();
-                let $task_repo = |issue: &str| crate::ops::task::task_repository($directory, Some(issue));
+                let $task_repo = |issue: &str| loopflow_execution::ops::task::task_repository($directory, Some(issue));
                 match $this {
                     $(Self::$name { $($binding)* } => {
                         let result: $output = $run;
@@ -97,10 +78,10 @@ writes! {
         graph: Option<String>,
         session: Option<String>,
         run: bool,
-    } => crate::engine::creation::TaskCreateReceipt;
-    { request_id, title, request, wave, graph, session, run, .. } => crate::engine::creation::create(
+    } => loopflow_execution::engine::creation::TaskCreateReceipt;
+    { request_id, title, request, wave, graph, session, run, .. } => loopflow_execution::engine::creation::create(
         request_id,
-        crate::engine::creation::TaskCreation {
+        loopflow_execution::engine::creation::TaskCreation {
             directory: directory.to_path_buf(),
             title: title.clone(),
             request: request.clone(),
@@ -116,15 +97,15 @@ writes! {
 
     /// `lf task complete <issue>`.
     #[serde(rename = "task.complete")]
-    TaskComplete { directory: PathBuf, issue: String } => crate::work::task::Task;
+    TaskComplete { directory: PathBuf, issue: String } => loopflow_storage::work::task::Task;
     { issue, .. } => {
-        crate::ops::task::task_complete(&task_repo(issue)?, issue, None)?
+        loopflow_execution::ops::task::task_complete(&task_repo(issue)?, issue, None)?
     },
 
     /// `lf task reopen <issue>`.
     #[serde(rename = "task.reopen")]
-    TaskReopen { directory: PathBuf, issue: String } => crate::work::task::Task;
-    { issue, .. } => crate::ops::task::task_reopen(issue, None)?,
+    TaskReopen { directory: PathBuf, issue: String } => loopflow_storage::work::task::Task;
+    { issue, .. } => loopflow_execution::ops::task::task_reopen(issue, None)?,
 
     /// `lf task edit <issue> --notes=<notes>`.
     #[serde(rename = "task.update")]
@@ -132,8 +113,8 @@ writes! {
         directory: PathBuf,
         issue: String,
         notes: String,
-    } => crate::ops::task::TaskEdit;
-    { issue, notes, .. } => crate::ops::task::task_edit(
+    } => loopflow_execution::ops::task::TaskEdit;
+    { issue, notes, .. } => loopflow_execution::ops::task::task_edit(
         &task_repo(issue)?,
         issue,
         None,
@@ -145,7 +126,7 @@ writes! {
     #[serde(rename = "task.abandon")]
     TaskAbandon { directory: PathBuf, issue: String } => String;
     { issue, .. } => {
-        crate::ops::task::task_abandon(&task_repo(issue)?, Some(issue), false)?
+        loopflow_execution::ops::task::task_abandon(&task_repo(issue)?, Some(issue), false)?
     },
 
     /// `lf task claim <issue> --json`.
@@ -154,7 +135,7 @@ writes! {
     { issue, .. } => task::ownership(
         directory,
         issue,
-        crate::ops::task_ownership::OwnershipChange::Claim,
+        loopflow_execution::ops::task_ownership::OwnershipChange::Claim,
     )?,
 
     /// `lf task unassign <issue> --json`.
@@ -163,7 +144,7 @@ writes! {
     { issue, .. } => task::ownership(
         directory,
         issue,
-        crate::ops::task_ownership::OwnershipChange::Unassign,
+        loopflow_execution::ops::task_ownership::OwnershipChange::Unassign,
     )?,
 
     /// `lf [-b] [-a <agent>] task run <issue> [--from <step>] --json`, started
@@ -211,7 +192,7 @@ writes! {
         directory: PathBuf,
         issue: String,
         message: String,
-    } => crate::work::task::comment::TaskComments;
+    } => loopflow_model::comment::TaskComments;
     { issue, message, .. } => task::steer(directory, issue, None, message)?,
 
     /// `lf task report <issue> <message> --json`: progress for the Task's
@@ -221,12 +202,12 @@ writes! {
         directory: PathBuf,
         issue: String,
         message: String,
-    } => crate::work::task::comment::TaskComments;
+    } => loopflow_model::comment::TaskComments;
     { issue, message, .. } => task::report(directory, issue, None, message)?,
 
     /// `lf task interrupt <issue> --json`.
     #[serde(rename = "task.interrupt")]
-    TaskInterrupt { directory: PathBuf, issue: String } => crate::ops::task::TaskControlResult;
+    TaskInterrupt { directory: PathBuf, issue: String } => loopflow_execution::ops::task::TaskControlResult;
     { issue, .. } => task::interrupt(issue)?,
 
     /// `lf task move <issue> --wave <wave>`, or `--no-wave` without one.
@@ -238,8 +219,8 @@ writes! {
         machine: Option<String>,
     } => TaskMoveResult;
     { issue, wave, machine, .. } => match machine {
-        Some(machine) => TaskMoveResult::Machine(Box::new(super::session_move::move_task(issue, machine, None)?)),
-        None => TaskMoveResult::Wave(Box::new(crate::ops::task::task_move_membership(
+        Some(machine) => TaskMoveResult::Machine(Box::new(loopflow_execution::ops::session_move::move_task(issue, machine, None)?)),
+        None => TaskMoveResult::Wave(Box::new(loopflow_execution::ops::task::task_move_membership(
             &task_repo(issue)?, issue, wave.as_deref(),
         )?)),
     },
@@ -253,7 +234,7 @@ writes! {
         path: String,
         revision: String,
         content: String,
-    } => crate::ops::task::TaskFileSave;
+    } => loopflow_execution::ops::task::TaskFileSave;
     {
         issue,
         path,
@@ -262,7 +243,7 @@ writes! {
         ..
     } => {
         let content = super::mutation::read_task_draft(&mut content.as_bytes())?;
-        crate::ops::task::task_save(issue, path, revision, &content)?
+        loopflow_execution::ops::task::task_save(issue, path, revision, &content)?
     },
 
     /// `lf [--wave <wave>] steer [<id>] <message> --json`: a steer
@@ -274,14 +255,14 @@ writes! {
         session: Option<String>,
         wave: Option<String>,
         message: String,
-    } => crate::steer::Steer;
+    } => loopflow_execution::steer::Steer;
     {
         session,
         wave,
         message,
         ..
     } => {
-        use crate::engine::session::SteerScope;
+        use loopflow_execution::engine::session::SteerScope;
         let scope = match (session.as_deref(), wave.as_deref()) {
             (Some(id), _) => SteerScope::Session(id),
             (None, Some(wave)) => SteerScope::Wave(wave),
@@ -289,7 +270,7 @@ writes! {
         };
         tokio::runtime::Runtime::new()?.block_on(async {
             let store = super::session::open_shared_store().await?;
-            anyhow::Ok(crate::engine::session::steer(&store, directory, scope, message).await?)
+            anyhow::Ok(loopflow_execution::engine::session::steer(&store, directory, scope, message).await?)
         })?
     },
 
@@ -299,7 +280,7 @@ writes! {
         directory: PathBuf,
         id: String,
         name: String,
-    } => crate::ops::human_session::SessionRecord;
+    } => loopflow_execution::ops::human_session::SessionRecord;
     { id, name, .. } => super::session::renamed(id, name)?,
 
     /// `lf session observe-status --json <id> --terminal <terminal> --stream
@@ -350,7 +331,7 @@ writes! {
         wave: Option<String>,
         agent: Option<String>,
         intent: SessionOpenIntent,
-    } => crate::ops::human_session::SessionRecord;
+    } => loopflow_execution::ops::human_session::SessionRecord;
     { .. } => self.prepare_session()?,
 
     /// `lf [--agent <agent>] session new <id> --prepare --json`: the
@@ -361,7 +342,7 @@ writes! {
         request_id: String,
         id: String,
         agent: Option<String>,
-    } => crate::ops::human_session::SessionRecord;
+    } => loopflow_execution::ops::human_session::SessionRecord;
     { .. } => self.prepare_session()?,
 
     #[serde(rename = "wave.rename")]
@@ -369,9 +350,9 @@ writes! {
         directory: PathBuf,
         wave: String,
         name: String,
-    } => crate::ops::wave_lifecycle::WaveRenamed;
+    } => loopflow_execution::ops::wave_lifecycle::WaveRenamed;
     { wave, name, .. } => tokio::runtime::Runtime::new()?.block_on(
-        crate::ops::wave_lifecycle::rename(directory, wave, Some(name), None, None),
+        loopflow_execution::ops::wave_lifecycle::rename(directory, wave, Some(name), None, None),
     )?,
 
     #[serde(rename = "wave.remove")]
@@ -379,17 +360,17 @@ writes! {
         directory: PathBuf,
         wave: String,
         preview: bool,
-    } => crate::ops::wave_lifecycle::WaveRemoval;
-    { wave, preview, .. } => crate::ops::wave_lifecycle::remove(directory, wave, *preview, false)?,
+    } => loopflow_execution::ops::wave_lifecycle::WaveRemoval;
+    { wave, preview, .. } => loopflow_execution::ops::wave_lifecycle::remove(directory, wave, *preview, false)?,
 
     #[serde(rename = "wave.machine")]
     WaveMachine {
         directory: PathBuf,
         wave: String,
         machine: String,
-    } => crate::engine::config::Declaration;
-    { wave, machine, .. } => crate::engine::config::set(
-        &crate::config::files::Destination::PersonalWave {
+    } => loopflow_execution::engine::config::Declaration;
+    { wave, machine, .. } => loopflow_execution::engine::config::set(
+        &loopflow_execution::config::files::Destination::PersonalWave {
             repository: directory.to_path_buf(),
             wave: wave.clone(),
         },
@@ -406,7 +387,7 @@ writes! {
         directory: PathBuf,
         on: Option<String>,
         agent: String,
-    } => crate::ops::human_session::moves_bulk::MoveReport;
+    } => loopflow_execution::ops::human_session::moves_bulk::MoveReport;
     {
         on, agent, ..
     } => super::session::moved(on.as_deref(), agent)?,
@@ -418,13 +399,13 @@ writes! {
         directory: PathBuf,
         wave: String,
         objective: Option<String>,
-    } => crate::ops::wave_lifecycle::WaveAdded;
+    } => loopflow_execution::ops::wave_lifecycle::WaveAdded;
     {
         wave, objective, ..
     } => {
-        let repo = crate::repo::require_repo_root(directory, "this command")?;
+        let repo = loopflow_execution::repo::require_repo_root(directory, "this command")?;
 
-        tokio::runtime::Runtime::new()?.block_on(crate::ops::wave_lifecycle::add(
+        tokio::runtime::Runtime::new()?.block_on(loopflow_execution::ops::wave_lifecycle::add(
             &repo,
             wave,
             objective.as_deref(),
@@ -446,9 +427,9 @@ writes! {
         directory: PathBuf,
         wave: String,
         project: String,
-    } => crate::work::project::Project;
+    } => loopflow_storage::work::project::Project;
     { wave, project, .. } => {
-        crate::engine::wave::planning_bind(directory, wave, project)?
+        loopflow_execution::engine::wave::planning_bind(directory, wave, project)?
     },
 
     /// `lf wave plan connect [<wave>|--all] [--team-key <key>]
@@ -460,28 +441,28 @@ writes! {
         all: bool,
         team_key: Option<String>,
         team_name: Option<String>,
-    } => Vec<crate::ops::linear::LinearInitResult>;
+    } => Vec<loopflow_execution::ops::linear::LinearInitResult>;
     {
         wave,
         all,
         team_key,
         team_name,
         ..
-    } => crate::engine::wave::planning_connect(
+    } => loopflow_execution::engine::wave::planning_connect(
         directory,
         wave.as_deref(),
         *all,
         team_key.as_deref(),
         team_name.as_deref(),
-        &crate::engine::Diagnostics,
+        &loopflow_execution::engine::Diagnostics,
     )?,
 
     /// `lf wave plan reteam [--apply] --json`: the moves onto the
     /// repository's Team; a plan without `apply`.
     #[serde(rename = "wave.plan.reteam")]
-    WavePlanReteam { directory: PathBuf, apply: bool } => crate::ops::linear::LinearReteamResult;
+    WavePlanReteam { directory: PathBuf, apply: bool } => loopflow_execution::ops::linear::LinearReteamResult;
     { apply, .. } => {
-        crate::engine::wave::planning_reteam(directory, *apply, &crate::engine::Diagnostics)?
+        loopflow_execution::engine::wave::planning_reteam(directory, *apply, &loopflow_execution::engine::Diagnostics)?
     },
 
     /// `lf graph customize <name>`: copies a builtin Graph into the repository,
@@ -489,7 +470,7 @@ writes! {
     #[serde(rename = "graph.customize")]
     GraphCustomize { directory: PathBuf, name: String } => super::graph::Customized;
     { name, .. } => super::graph::Customized {
-        path: crate::graph::customize(name, &crate::repo::working_directory_in(directory)?)?,
+        path: loopflow_execution::graph::customize(name, &loopflow_execution::repo::working_directory_in(directory)?)?,
     },
 
     /// `lf repo release run [<version>] [-t <target>] --json`, started
@@ -499,10 +480,10 @@ writes! {
         directory: PathBuf,
         version: Option<String>,
         target: Option<String>,
-    } => crate::engine::launch::Launched;
+    } => loopflow_execution::engine::launch::Launched;
     {
         version, target, ..
-    } => crate::engine::repo::release(directory, version.as_deref(), target.as_deref())?,
+    } => loopflow_execution::engine::repo::release(directory, version.as_deref(), target.as_deref())?,
 
     /// `lf [-a <agent>] commit [-m <message>] [-p] [--no-add] [<path>…] --json`.
     #[serde(rename = "checkout.commit")]
@@ -513,7 +494,7 @@ writes! {
         no_add: bool,
         paths: Vec<String>,
         agent: Option<String>,
-    } => crate::engine::checkout::Committed;
+    } => loopflow_execution::engine::checkout::Committed;
     {
         message,
         push,
@@ -521,14 +502,14 @@ writes! {
         paths,
         agent,
         ..
-    } => crate::engine::checkout::commit(
+    } => loopflow_execution::engine::checkout::commit(
         directory,
         message.as_deref(),
         *push,
         *no_add,
         paths,
         agent.as_deref(),
-        &crate::engine::Diagnostics,
+        &loopflow_execution::engine::Diagnostics,
     )?,
 
     /// `lf sync [<onto>] [--plan|--manual|--continue|--abort] [--adopt]
@@ -544,7 +525,7 @@ writes! {
         continue_sync: bool,
         abort: bool,
         adopt: bool,
-    } => crate::engine::checkout::Sync;
+    } => loopflow_execution::engine::checkout::Sync;
     {
         onto,
         preview,
@@ -553,9 +534,9 @@ writes! {
         abort,
         adopt,
         ..
-    } => crate::engine::checkout::sync(
+    } => loopflow_execution::engine::checkout::sync(
         directory,
-        &crate::engine::checkout::SyncInput {
+        &loopflow_execution::engine::checkout::SyncInput {
             onto: onto.as_deref(),
             preview: *preview,
             manual: *manual,
@@ -572,24 +553,24 @@ writes! {
         name: String,
         preview: bool,
         persistent: bool,
-    } => crate::engine::checkout::Checkout;
+    } => loopflow_execution::engine::checkout::Checkout;
     {
         name,
         preview,
         persistent,
         ..
-    } => crate::engine::checkout::create(
+    } => loopflow_execution::engine::checkout::create(
         directory,
         name,
         *preview,
         *persistent,
-        &crate::engine::Diagnostics,
+        &loopflow_execution::engine::Diagnostics,
     )?,
 
     /// `lf account disconnect <provider>`: disconnect a service.
     #[serde(rename = "account.disconnect")]
-    AccountDisconnect { provider: String } => crate::engine::account::Account;
-    { provider } => crate::engine::account::disconnect(provider)?,
+    AccountDisconnect { provider: String } => loopflow_execution::engine::account::Account;
+    { provider } => loopflow_execution::engine::account::disconnect(provider)?,
 
     /// `lf account connect <provider>`: connect a service.
     #[serde(rename = "account.connect")]
@@ -597,8 +578,8 @@ writes! {
         provider: String,
         chrome_profile: Option<String>,
         api_key: bool,
-    } => crate::engine::account::Account;
-    { provider, chrome_profile, api_key } => crate::engine::account::connect(provider, chrome_profile.as_deref(), *api_key)?,
+    } => loopflow_execution::engine::account::Account;
+    { provider, chrome_profile, api_key } => loopflow_execution::engine::account::connect(provider, chrome_profile.as_deref(), *api_key)?,
 
     /// `lf -b [--agent <agent>] graph <name> [message]`, started detached: the
     /// Process carrying the Graph.
@@ -608,13 +589,13 @@ writes! {
         name: String,
         message: Option<String>,
         agent: Option<String>,
-    } => crate::engine::launch::Launched;
+    } => loopflow_execution::engine::launch::Launched;
     {
         name,
         message,
         agent,
         ..
-    } => crate::engine::graph::run(directory, name, message.as_deref(), agent.as_deref())?,
+    } => loopflow_execution::engine::graph::run(directory, name, message.as_deref(), agent.as_deref())?,
 
     /// `lf -b [--agent <agent>] skill <name> [message]`, started detached: the
     /// Process carrying the skill's headless run.
@@ -624,13 +605,13 @@ writes! {
         name: String,
         message: Option<String>,
         agent: Option<String>,
-    } => crate::engine::launch::Launched;
+    } => loopflow_execution::engine::launch::Launched;
     {
         name,
         message,
         agent,
         ..
-    } => crate::engine::skill::run(directory, name, message.as_deref(), agent.as_deref())?,
+    } => loopflow_execution::engine::skill::run(directory, name, message.as_deref(), agent.as_deref())?,
 
     /// `lf [--agent <agent>] pr publish [--title] [--body] --json`: push and
     /// create or refresh the checkout's ready PR.
@@ -640,15 +621,15 @@ writes! {
         title: Option<String>,
         body: Option<String>,
         agent: Option<String>,
-    } => crate::engine::pr::Published;
+    } => loopflow_execution::engine::pr::Published;
     {
         title, body, agent, ..
-    } => crate::engine::pr::publish(
+    } => loopflow_execution::engine::pr::publish(
         directory,
         title.as_deref(),
         body.as_deref(),
         agent.as_deref(),
-        &crate::engine::Diagnostics,
+        &loopflow_execution::engine::Diagnostics,
     )?,
 
     /// `lf [--agent <agent>] pr open [--title] [--body] --json`: push and
@@ -660,15 +641,15 @@ writes! {
         title: Option<String>,
         body: Option<String>,
         agent: Option<String>,
-    } => crate::engine::pr::Published;
+    } => loopflow_execution::engine::pr::Published;
     {
         title, body, agent, ..
-    } => crate::engine::pr::open(
+    } => loopflow_execution::engine::pr::open(
         directory,
         title.as_deref(),
         body.as_deref(),
         agent.as_deref(),
-        &crate::engine::Diagnostics,
+        &loopflow_execution::engine::Diagnostics,
     )?,
 
     /// `lf [--agent <agent>] pr submit [--strict] [--worktree] [--message]
@@ -682,7 +663,7 @@ writes! {
         title: Option<String>,
         body: Option<String>,
         agent: Option<String>,
-    } => crate::engine::pr::Prepared;
+    } => loopflow_execution::engine::pr::Prepared;
     {
         strict,
         worktree,
@@ -691,9 +672,9 @@ writes! {
         body,
         agent,
         ..
-    } => crate::engine::pr::submit(
+    } => loopflow_execution::engine::pr::submit(
         directory,
-        &crate::engine::pr::LandInput {
+        &loopflow_execution::engine::pr::LandInput {
             strict: *strict,
             local: false,
             wait_and_fix: false,
@@ -703,7 +684,7 @@ writes! {
             body: body.clone(),
             agent: agent.clone(),
         },
-        &crate::engine::Diagnostics,
+        &loopflow_execution::engine::Diagnostics,
     )?,
 
     /// `lf [--agent <agent>] pr arm [--strict] [--local] [--worktree]
@@ -719,7 +700,7 @@ writes! {
         title: Option<String>,
         body: Option<String>,
         agent: Option<String>,
-    } => crate::engine::pr::Landed;
+    } => loopflow_execution::engine::pr::Landed;
     {
         strict,
         local,
@@ -729,9 +710,9 @@ writes! {
         body,
         agent,
         ..
-    } => crate::engine::pr::arm(
+    } => loopflow_execution::engine::pr::arm(
         directory,
-        &crate::engine::pr::LandInput {
+        &loopflow_execution::engine::pr::LandInput {
             strict: *strict,
             local: *local,
             wait_and_fix: false,
@@ -741,7 +722,7 @@ writes! {
             body: body.clone(),
             agent: agent.clone(),
         },
-        &crate::engine::Diagnostics,
+        &loopflow_execution::engine::Diagnostics,
     )?,
 
     /// `lf [--agent <agent>] pr land [--wait-and-fix] [--strict] [--local]
@@ -758,7 +739,7 @@ writes! {
         title: Option<String>,
         body: Option<String>,
         agent: Option<String>,
-    } => crate::engine::launch::Launched;
+    } => loopflow_execution::engine::launch::Launched;
     {
         wait_and_fix,
         strict,
@@ -769,9 +750,9 @@ writes! {
         body,
         agent,
         ..
-    } => crate::engine::pr::land(
+    } => loopflow_execution::engine::pr::land(
         directory,
-        &crate::engine::pr::LandInput {
+        &loopflow_execution::engine::pr::LandInput {
             strict: *strict,
             local: *local,
             wait_and_fix: *wait_and_fix,
@@ -791,19 +772,19 @@ writes! {
         directory: PathBuf,
         branch: Option<String>,
         force: bool,
-    } => crate::engine::pr::Abandoned;
-    { branch, force, .. } => crate::engine::pr::abandon(
+    } => loopflow_execution::engine::pr::Abandoned;
+    { branch, force, .. } => loopflow_execution::engine::pr::abandon(
         directory,
         branch.as_deref(),
         *force,
-        &crate::engine::Diagnostics,
+        &loopflow_execution::engine::Diagnostics,
     )?,
 
     /// `lf pr reconcile --json`: check recorded landings once and settle
     /// verified merges.
     #[serde(rename = "pr.reconcile")]
-    PrReconcile { directory: PathBuf } => crate::ops::pr_landing::DeliveryCheck;
-    { .. } => crate::engine::pr::reconcile(directory)?,
+    PrReconcile { directory: PathBuf } => loopflow_execution::ops::pr_landing::DeliveryCheck;
+    { .. } => loopflow_execution::engine::pr::reconcile(directory)?,
 
     /// `lf pr request-review [<pr>] -r <reviewer>… --json`.
     #[serde(rename = "pr.request_review")]
@@ -811,18 +792,18 @@ writes! {
         directory: PathBuf,
         pr: Option<String>,
         reviewers: Vec<String>,
-    } => crate::engine::pr::ReviewRequested;
+    } => loopflow_execution::engine::pr::ReviewRequested;
     { pr, reviewers, .. } => {
-        crate::engine::pr::request_review(directory, pr.as_deref(), reviewers)?
+        loopflow_execution::engine::pr::request_review(directory, pr.as_deref(), reviewers)?
     },
 
     /// `lf desktop portfolio <change> --json`, run from `/`: which
     /// repositories the app shows.
     #[serde(rename = "desktop.portfolio.set")]
     DesktopPortfolioSet {
-        change: crate::portfolio::PortfolioCommand,
-    } => crate::portfolio::Portfolio;
-    { change } => crate::portfolio::change(change, directory)?,
+        change: loopflow_execution::portfolio::PortfolioCommand,
+    } => loopflow_execution::portfolio::Portfolio;
+    { change } => loopflow_execution::portfolio::change(change, directory)?,
 
     /// `lf desktop dashboard query [--revision <revision>] -- <id> <expression>`.
     #[serde(rename = "desktop.dashboard.query")]
@@ -831,7 +812,7 @@ writes! {
         id: String,
         expression: String,
         revision: Option<i64>,
-    } => crate::work::selection::Dashboard;
+    } => loopflow_storage::work::selection::Dashboard;
     {
         id,
         expression,
@@ -854,7 +835,7 @@ writes! {
         directory: PathBuf,
         id: String,
         revision: i64,
-    } => crate::work::selection::Dashboard;
+    } => loopflow_storage::work::selection::Dashboard;
     { id, revision, .. } => super::desktop::save_dashboard(
         None,
         directory,
@@ -871,7 +852,7 @@ writes! {
         directory: PathBuf,
         id: String,
         revision: i64,
-    } => crate::work::selection::Dashboard;
+    } => loopflow_storage::work::selection::Dashboard;
     { id, revision, .. } => super::desktop::save_dashboard(
         None,
         directory,
@@ -889,7 +870,7 @@ writes! {
         id: String,
         name: String,
         revision: i64,
-    } => crate::work::selection::Dashboard;
+    } => loopflow_storage::work::selection::Dashboard;
     {
         id, name, revision, ..
     } => super::desktop::save_dashboard(
@@ -943,7 +924,7 @@ writes! {
         id: String,
         revision: i64,
         slots: String,
-    } => crate::work::selection::Dashboard;
+    } => loopflow_storage::work::selection::Dashboard;
     {
         id,
         revision,
@@ -988,7 +969,7 @@ writes! {
         directory: PathBuf,
         work: String,
         layout: String,
-    } => crate::work::selection::WorkPaneLayout;
+    } => loopflow_storage::work::selection::WorkPaneLayout;
     { work, layout, .. } => {
         super::desktop::save_layout(None, directory, work, &mut layout.as_bytes())?
     },
@@ -997,24 +978,24 @@ writes! {
     /// setting in the destination's file; `value` is YAML.
     #[serde(rename = "config.set")]
     ConfigSet {
-        destination: crate::config::files::Destination,
+        destination: loopflow_execution::config::files::Destination,
         key: String,
         value: String,
-    } => crate::engine::config::Declaration;
+    } => loopflow_execution::engine::config::Declaration;
     {
         destination,
         key,
         value: declared,
-    } => crate::engine::config::set(destination, key, declared)?,
+    } => loopflow_execution::engine::config::set(destination, key, declared)?,
 
     /// `lf config unset <key> <destination flags> --json`: remove that
     /// declaration so other sources choose.
     #[serde(rename = "config.unset")]
     ConfigUnset {
-        destination: crate::config::files::Destination,
+        destination: loopflow_execution::config::files::Destination,
         key: String,
-    } => crate::engine::config::Declaration;
-    { destination, key } => crate::engine::config::unset(destination, key)?,
+    } => loopflow_execution::engine::config::Declaration;
+    { destination, key } => loopflow_execution::engine::config::unset(destination, key)?,
 
     /// Appearance's theme file at `path`: set to `value`, or read when null.
     /// Desktop owns its Apply/Cancel transaction; no CLI spells it.
@@ -1022,14 +1003,16 @@ writes! {
     ConfigTheme {
         path: PathBuf,
         value: Option<String>,
-    } => crate::engine::config::Declaration;
+    } => loopflow_execution::engine::config::Declaration;
     { path, value: theme } => {
-        crate::engine::config::theme(path, theme.as_deref())?
+        loopflow_execution::engine::config::theme(path, theme.as_deref())?
     },
 }
 
 impl Write {
-    fn prepare_session(&self) -> anyhow::Result<crate::ops::human_session::SessionRecord> {
+    fn prepare_session(
+        &self,
+    ) -> anyhow::Result<loopflow_execution::ops::human_session::SessionRecord> {
         let directory = self.directory();
         let (cli, args) = self
             .cli()
@@ -1041,7 +1024,7 @@ impl Write {
         let ran = forward.run(
             &cli,
             directory,
-            &mut super::mutation::CommandIo {
+            &mut loopflow_execution::command::CommandIo {
                 input: &mut std::io::empty(),
                 output: &mut output,
                 error: &mut error,
@@ -1055,7 +1038,7 @@ impl Write {
             });
         }
         for line in diagnostics.lines() {
-            crate::journal::request::diagnostic(format_args!("{line}"));
+            loopflow_execution::journal::request::diagnostic(format_args!("{line}"));
         }
         Ok(serde_json::from_slice(&output)?)
     }
@@ -1063,7 +1046,7 @@ impl Write {
     /// The Session writes whose Work can live on another Machine, and whose
     /// preparation reads the CLI's selectors, as `lf` spells them. SSH runs
     /// this spelling on the destination; nothing else parses it. Task writes
-    /// route through [`crate::engine::task`].
+    /// route through [`loopflow_execution::engine::task`].
     fn cli(&self) -> Option<anyhow::Result<(crate::lf::Cli, Vec<String>)>> {
         let mut args = vec![
             "lf".to_owned(),
@@ -1213,11 +1196,11 @@ mod tests {
     #[test]
     fn typed_answers_keep_the_wire_shape() {
         use super::WriteResult;
-        use crate::engine::task::TaskShip;
+        use loopflow_execution::engine::task::TaskShip;
         use serde_json::json;
 
         let shipping: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../tests/fixtures/dto/server/task_shipping.json"
+            "../../../../loopflow-execution/tests/fixtures/dto/server/task_shipping.json"
         ))
         .unwrap();
         for expected in [

@@ -112,22 +112,25 @@ fn task_abandonment_cli_saves_offline_and_preserves_unresolved_work() {
                 "{}",
                 String::from_utf8_lossy(&output.stderr)
             );
-            let saved: (String, String, bool, bool) = db.query_row(
-                "SELECT id,target,attempted,settled FROM task_state_deliveries WHERE task_id=?1",
-                [registered.task.id.as_str()],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-            ).unwrap();
-            assert_eq!(
-                db.query_row(
-                    "SELECT count(*) FROM task_state_deliveries WHERE task_id=?1",
-                    [registered.task.id.as_str()],
-                    |row| row.get::<_, i64>(0)
+            // A cancellation reaches the tracker as one `state` effect, kept
+            // across repeats; a Task with no tracker object queues none.
+            let saved: Vec<(String, String, String)> = db
+                .prepare(
+                    "SELECT id,json_extract(value_json,'$.value.planning_state'),phase
+                     FROM tracker_effects WHERE task_id=?1 AND kind='state'",
                 )
-                .unwrap(),
-                1
-            );
-            assert_eq!(saved.1, "canceled");
-            assert!(!saved.2 && !saved.3);
+                .unwrap()
+                .query_map([registered.task.id.as_str()], |row| {
+                    Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+                })
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            assert_eq!(saved.len(), usize::from(connected));
+            if let Some((_, target, phase)) = saved.first() {
+                assert_eq!(target, "canceled");
+                assert_eq!(phase, "pending");
+            }
             if let Some(prior) = &receipt {
                 assert_eq!(prior, &saved);
             }

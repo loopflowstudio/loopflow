@@ -2134,8 +2134,8 @@ pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
             }
         }
         let inspection = if task.is_none()
-            && (crate::ops::tracker::configured(&repo)
-                == Some(loopflow_storage::provider::Provider::Linear))
+            && crate::ops::tracker::configured(repo)
+                == Some(loopflow_storage::provider::Provider::Linear)
         {
             let selector = issue.ok_or_else(|| task_error("this checkout has no Task"))?;
             let read = super::linear::inspect_task_planning_async(
@@ -2472,8 +2472,7 @@ pub(super) async fn link_pr_to_planning(store: &SharedStore, task: &Task, pr: &m
             return;
         }
     };
-    if !(crate::ops::tracker::configured(&repo)
-        == Some(loopflow_storage::provider::Provider::Linear))
+    if crate::ops::tracker::configured(&repo) != Some(loopflow_storage::provider::Provider::Linear)
     {
         let posted = async {
             let tracker = super::tracker::Tracker::for_items(&repo).await?;

@@ -123,6 +123,9 @@ fn effects(
                 ELSE json_quote(json_extract(e.conflict_json,'$.value')) END END,
             e.{owner}
          FROM tracker_effects e WHERE e.{owner} IN (SELECT value FROM json_each(?1)) {filter} AND
+         -- A creation for an owner already bound waits only to be settled.
+         NOT (e.kind='create' AND (EXISTS(SELECT 1 FROM tasks t WHERE t.id=e.task_id AND t.external_issue_id IS NOT NULL)
+             OR EXISTS(SELECT 1 FROM projects p WHERE p.id=e.project_id AND p.external_project_id IS NOT NULL))) AND
          (e.phase IN ('pending','attempted') OR (e.conflict_json IS NOT NULL AND NOT EXISTS(
              SELECT 1 FROM tracker_effects later WHERE later.{owner}=e.{owner} AND later.kind=e.kind
              AND later.subject IS e.subject AND later.seq>e.seq AND later.phase='acknowledged')))

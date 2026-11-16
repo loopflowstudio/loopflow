@@ -271,8 +271,8 @@ fn fresh_for(repository: &str) -> i64 {
 /// delta up to date (a no-op inside its window), then report whether local
 /// state is current enough to answer in place of a per-item read.
 pub(crate) async fn team_current(store: &Store, repository: &str) -> bool {
-    if !(crate::ops::tracker::configured(std::path::Path::new(repository))
-        == Some(loopflow_storage::provider::Provider::Linear))
+    if crate::ops::tracker::configured(std::path::Path::new(repository))
+        != Some(loopflow_storage::provider::Provider::Linear)
     {
         return false;
     }

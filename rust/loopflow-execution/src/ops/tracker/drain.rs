@@ -127,9 +127,22 @@ pub(crate) async fn drain_repository(
         .iter()
         .any(|effect| effect.kind == EffectKind::Create)
     {
-        Tracker::for_repository(Path::new(repo)).await?
+        Tracker::for_repository(Path::new(repo)).await
     } else {
-        Tracker::for_items(Path::new(repo)).await?
+        Tracker::for_items(Path::new(repo)).await
+    };
+    let tracker = match tracker {
+        Ok(tracker) => tracker,
+        // Offline or signed out: the queue keeps every effect and says why.
+        Err(error) => {
+            for effect in &unsettled {
+                store
+                    .sqlite
+                    .tracker_effect_error(&effect.id, &error.to_string())
+                    .map_err(message)?;
+            }
+            return Ok(Pass::default());
+        }
     };
     drain(store, repo, &tracker, scope, bound).await
 }
@@ -312,6 +325,25 @@ fn parent_named(effect: &TrackerEffect) -> Option<String> {
     }
 }
 
+/// The tracker id an owner is bound to.
+fn bound(store: &Store, owner: &EffectOwner) -> OpsResult<Option<String>> {
+    Ok(match owner {
+        EffectOwner::Task(id) => store
+            .sqlite
+            .task(id)
+            .map_err(message)?
+            .and_then(|task| task.linear_id)
+            .map(|id| id.as_str().to_owned()),
+        EffectOwner::Project(id) => store
+            .sqlite
+            .project(id)
+            .map_err(message)?
+            .and_then(|project| project.linear_id)
+            .map(|id| id.as_str().to_owned()),
+        EffectOwner::Wave(_) => None,
+    })
+}
+
 /// Whether this effect names a Project being created that has no remote id yet.
 fn parent_pending(store: &Store, effect: &TrackerEffect, creating: &HashSet<String>) -> bool {
     let Some(project) = parent_named(effect).filter(|project| creating.contains(project)) else {
@@ -385,6 +417,22 @@ async fn drain_effect(
         );
         settle(store, budget, &effect, &Settlement::Retire { reason })?;
         return Ok(Step::Done);
+    }
+    // An owner bound some other way (adopted, linked by hand) already has its
+    // tracker object; sending the creation would make a second one.
+    if effect.kind == EffectKind::Create {
+        if let Some(remote) = bound(store, &effect.owner)? {
+            settle(
+                store,
+                budget,
+                &effect,
+                &Settlement::Acknowledged {
+                    revision: None,
+                    remote_id: Some(remote),
+                },
+            )?;
+            return Ok(Step::Done);
+        }
     }
     let parent = parent_pending(store, &effect, creating);
     let decision = match effect.phase {

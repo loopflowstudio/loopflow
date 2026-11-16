@@ -166,14 +166,11 @@ struct SessionBindingDraft: Equatable {
     var error: String?
 }
 
-/// An in-place Session name edit. It belongs to exactly one Session; a
-/// completion for another Session can never touch it.
+/// An in-place Session name edit for exactly one Session. Saving it makes a
+/// pending change and closes it.
 struct SessionRenameDraft: Equatable {
-    let id = UUID()
     let sessionId: String
     var text: String
-    var error: String?
-    var submitting = false
 }
 
 /// A Wave view's named parts, as `lf desktop -p` names them.
@@ -287,8 +284,8 @@ final class WorkNavigation {
         set {
             workspacePresentation.selectedSessionId = newValue
             // Leaving a Session abandons an unsubmitted edit; a submitted one
-            // still settles against its own Session.
-            if let renaming, renaming.sessionId != selectedSessionId, !renaming.submitting {
+            // is already a pending change.
+            if let renaming, renaming.sessionId != selectedSessionId {
                 self.renaming = nil
             }
             if let binding, binding.sessionId != selectedSessionId, !binding.submitting {
@@ -308,8 +305,6 @@ final class WorkNavigation {
     var expandedComments: Set<String> = []
     /// Tasks whose Session history is disclosed; history is read only then.
     var expandedHistory: Set<String> = []
-    /// Wave planning notices whose Details are open, keyed by Task ID.
-    var expandedNotices: Set<String> = []
     /// Graph processes whose graph and steps are open, keyed by Graph process.
     var expandedGraphProcesses: Set<String> = []
     enum Destination: Equatable {

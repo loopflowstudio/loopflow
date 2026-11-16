@@ -62,7 +62,8 @@ public final class NoticeCenter {
             posted += 1
         case .condition:
             if let index = conditions.firstIndex(where: { $0.key == notice.key }) {
-                conditions[index] = notice
+                // The same condition read again stays as shown.
+                if conditions[index].text != notice.text { conditions[index] = notice }
             } else {
                 conditions.append(notice)
             }

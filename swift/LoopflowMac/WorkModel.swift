@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Loopflow
 import Observation
@@ -1253,6 +1254,8 @@ final class WorkModel {
         RepositoryReadingKey(machineId: workMachine ?? savedMachineId, repository: repo)
     }
     private var sessionReadings: [RepositoryReadingKey: Reading<[SessionRecord]>] = [:]
+    /// The Sessions as the Machine last read them.
+    private var sessionsRead: Reading<[SessionRecord]> { sessionReadings[repositoryReadingKey(repoPath ?? "")] ?? .loading }
     private var peerPlanningReadings: [RepositoryReadingKey: Reading<[PeerPlanningStatus]>] = [:]
     private(set) var peerPlanning: Reading<[PeerPlanningStatus]> {
         get { peerPlanningReadings[repositoryReadingKey(repoPath ?? "")] ?? .loading }
@@ -1260,8 +1263,13 @@ final class WorkModel {
     }
     private var peerPlanningGeneration = 0
     @ObservationIgnored private(set) var liveSessionCount: Int?
+    /// The repository's Sessions with this Machine's pending renames made.
     private(set) var sessions: Reading<[SessionRecord]> {
-        get { sessionReadings[repositoryReadingKey(repoPath ?? "")] ?? .loading }
+        get {
+            let read = sessionsRead
+            guard !pendingChanges.changes.isEmpty else { return read }
+            return read.map { pendingChanges.apply(to: $0, readAt: read.readAt) }
+        }
         set {
             sessionReadings[repositoryReadingKey(repoPath ?? "")] = newValue
             liveSessionCount = newValue.value.map { $0.filter { $0.state == .active }.count }
@@ -1562,6 +1570,7 @@ final class WorkModel {
                 for try await frame in opened.frames {
                     guard !Task.isCancelled else { break }
                     retry.receive(frame, scope: workScope, at: .now)
+                    pendingChanges.linkReturned()
                     Perf.begin(Perf.workFrameApply, frame.content.part, id: String(frame.sequence))
                     let (waited, started) = (frame.received.elapsedMs, ContinuousClock.now)
                     await apply(frame)
@@ -1570,8 +1579,12 @@ final class WorkModel {
                 }
                 if !Task.isCancelled { throw RegistryQueryError("Workspace observation ended") }
             } catch {
-                if !Task.isCancelled { workUnavailable(error.localizedDescription) }
+                if !Task.isCancelled {
+                    pendingChanges.linkLost()
+                    workUnavailable(error.localizedDescription)
+                }
             }
+            for part in [WorkPart.planning, .taskList, .selections, .sessions] { pendingChanges.ended(readingKey(part.rawValue)) }
             let delay = retry.failed(at: .now)
             workObservation = nil
             await observation?.cancel()
@@ -1667,7 +1680,7 @@ final class WorkModel {
         subscribedTaskRow = .unavailable(lastGood: subscribedTaskRow.value, reason: reason)
         roadmap = .unavailable(lastGood: roadmap.value, reason: reason)
         if let value = waves.value { waves = .unavailable(lastGood: value, reason: reason) }
-        if repoPath != nil, let value = sessions.value { sessions = .unavailable(lastGood: value, reason: reason) }
+        if repoPath != nil, sessionsRead.value != nil { sessions = sessionsRead.failed(reason) }
         peerPlanningReadings = peerPlanningReadings.mapValues {
             .unavailable(lastGood: $0.value, reason: reason)
         }
@@ -1725,17 +1738,17 @@ final class WorkModel {
         case .sessions(let body):
             guard answers >= max(sessionsFloor, scopeFloor), let repoPath else { return }
             guard let body else {
-                sessions = .unavailable(lastGood: sessions.value, reason: reason)
+                sessions = sessionsRead.failed(reason)
                 break
             }
             guard body.repo.normalizedFilePath == repoPath.normalizedFilePath,
                   !body.includesHeadless else { return }
-            let remote = (sessions.value ?? []).filter {
+            let remote = (sessionsRead.value ?? []).filter {
                 guard let machine = $0.workspace?.machineId else { return false }
                 return workMachine == nil || machine != workMachine
             }
-            let next = Reading.available(body.entries + remote)
-            if sessions != next { sessions = next }
+            let next = Reading.available(body.entries + remote, readAt: frame.readAt)
+            if sessionsRead != next { sessions = next }
             if savedSessionRepos.remove(repositoryReadingKey(repoPath)) != nil {
                 LaunchJournal.home.refreshed("sessions", ms: workOpened.elapsedMs, ok: true)
             }
@@ -1794,6 +1807,7 @@ final class WorkModel {
         case .planning: pendingChanges.read(readingKey(part), roadmap)
         case .taskList: pendingChanges.read(readingKey(part), taskListReading)
         case .selections: pendingChanges.read(readingKey(part), selectionPlans)
+        case .sessions: pendingChanges.read(readingKey(part), sessionsRead)
         default: break
         }
         appliedSequence[part] = frame.sequence
@@ -2309,6 +2323,7 @@ final class WorkModel {
         }
         if navigation.showsSelection { workspaceRegistry?.clearPresentation() }
         setSelection(selection)
+        reportOutsidePlan()
         if let selection { Perf.acknowledged(Perf.taskWorkspaceReady, id: selection.id, owner: navigation.performanceOwner) }
         if selection == nil { navigation.sidebarWaveID = nil }
         if let selection, selection.kind == .wave {
@@ -2664,6 +2679,29 @@ final class WorkModel {
         change(task, .abandon(task: issue), .taskAbandon(directory: directory(task), issue: issue), "abandoned")
     }
 
+    // MARK: Tasks outside the plan
+
+    @ObservationIgnored private var outsidePlanNotice: String?
+
+    /// While the open Wave's reading lists Tasks outside the current plan, one
+    /// condition Notice says so; its action copies every recovery command.
+    private func reportOutsidePlan() {
+        let roadmap = selection.flatMap { $0.kind == .wave ? wave(id: $0.id) : nil }
+        let outside = roadmap?.unavailableTasks ?? []
+        let key = roadmap.map { "outside-plan-\($0.wave.id)" }
+        if let shown = outsidePlanNotice, shown != key || outside.isEmpty { navigation.notices.clear(key: shown) }
+        outsidePlanNotice = outside.isEmpty ? nil : key
+        guard let key, let first = outside.first else { return }
+        let text = outside.count == 1 ? "\(first.taskIdentifier) is outside the current plan"
+            : "\(outside.count) Tasks are outside the current plan"
+        let recovery = outside.map(\.recovery).joined(separator: "\n")
+        let reasons = outside.map { "\($0.taskIdentifier): \($0.reason)" }.joined(separator: "\n")
+        navigation.notices.post(Notice(text, key: key, action: Notice.Action("Copy recovery", help: reasons) {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(recovery, forType: .string)
+        }, kind: .condition))
+    }
+
     // MARK: Changes in the click
 
     /// This window's subscription named for the Machine's changes, which every window shares.
@@ -2704,7 +2742,7 @@ final class WorkModel {
     /// Show `command` on every list now; the Machine's answer or refusal arrives through the Notice.
     private func change(_ task: RoadmapTask, _ command: PendingCommand, _ write: ServedWrite, _ verb: String,
                         accepted: (() -> Void)? = nil) {
-        pendingChanges.make(command, issue: task.task.identifier, verb: verb, write: write,
+        pendingChanges.make(command, subject: task.task.identifier, verb: verb, write: write,
                             notices: navigation.notices) { [weak self] in
             accepted?()
             try? await self?.confirmWorkUpdate()
@@ -2714,7 +2752,7 @@ final class WorkModel {
     /// Start, Auto-Ship and Stop Auto-Ship say "requested" in the click.
     private func request(_ task: RoadmapTask, _ name: String, _ write: ServedWrite, undo: Notice.Action? = nil,
                          refused: @escaping @MainActor () -> Void = {}) {
-        pendingChanges.request(name, issue: task.task.identifier, write: write, notices: navigation.notices,
+        pendingChanges.request(name, subject: task.task.identifier, write: write, notices: navigation.notices,
                                undo: undo, answered: { [weak self] in try? await self?.confirmWorkUpdate() },
                                refused: refused)
     }
@@ -2727,28 +2765,20 @@ final class WorkModel {
     /// Submit the current rename. Success publishes Rust's authoritative
     /// record; rejection keeps the typed name and its error. Either outcome
     /// settles only the Session and repository that started it.
-    func commitSessionRename() async {
-        guard let repo = repoPath, let draft = navigation.renaming, !draft.submitting else { return }
-        let owner = navigation
-        let key = repositoryReadingKey(repo)
-        let target = draft.sessionId
-        owner.renaming?.submitting = true
-        owner.renaming?.error = nil
-        do {
-            let record = try await query.renameSession(id: target, name: draft.text, cwd: repo)
+    func commitSessionRename() {
+        guard let repo = repoPath, let draft = navigation.renaming else { return }
+        navigation.renaming = nil
+        let shown = sessions.value?.first { $0.id == draft.sessionId }?.title ?? draft.sessionId
+        pendingChanges.make(.renameSession(session: draft.sessionId, title: draft.text), subject: shown, verb: "renamed",
+                            write: .sessionRename(directory: repo, id: draft.sessionId, name: draft.text),
+                            notices: navigation.notices) { [weak self] in
             // A read started before the rename must not restore the old name.
-            supersedeSessions()
-            replaceSession(record, key: key)
-            if owner.renaming?.id == draft.id { owner.renaming = nil }
-        } catch {
-            guard owner.renaming?.id == draft.id else { return }
-            owner.renaming?.submitting = false
-            owner.renaming?.error = error.localizedDescription
+            self?.supersedeSessions()
+            await self?.refreshSessions()
         }
     }
 
     func cancelSessionRename() {
-        guard navigation.renaming?.submitting == false else { return }
         navigation.renaming = nil
     }
 
@@ -3093,6 +3123,7 @@ final class WorkModel {
         if roadmap != next { roadmap = next }
         guard case .success(let (_, text)) = result else { return false }
         showsSavedPlanning = false
+        reportOutsidePlan()
         if let text { cache?.saveRoadmap(text) }
         openWarmConversations()
         return true

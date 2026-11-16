@@ -97,7 +97,7 @@ struct PendingChangesTests {
     private func at(_ planning: Int64) -> Revisions { Revisions(["planning": planning, "sessions": 9]) }
 
     private func complete(_ changes: PendingChanges, _ issue: String) {
-        changes.make(.complete(task: issue), issue: issue, verb: "completed",
+        changes.make(.complete(task: issue), subject: issue, verb: "completed",
                      write: .taskComplete(directory: "/repo", issue: issue), notices: notices)
     }
 
@@ -123,7 +123,7 @@ struct PendingChangesTests {
         let changes = changes()
         changes.read("sidebar", try plan())
         changes.read("board", try plan())
-        changes.make(.abandon(task: "LOO-1"), issue: "LOO-1", verb: "abandoned",
+        changes.make(.abandon(task: "LOO-1"), subject: "LOO-1", verb: "abandoned",
                      write: .taskAbandon(directory: "/repo", issue: "LOO-1"), notices: notices)
         await machine.answer(Revisions(["planning": 5]))
         changes.read("sidebar", try plan(at: 5))
@@ -146,7 +146,7 @@ struct PendingChangesTests {
 
     @Test func aPartlyDoneChangeIsKeptUntilCovered() async throws {
         let changes = changes()
-        changes.make(.abandon(task: "LOO-1"), issue: "LOO-1", verb: "abandoned",
+        changes.make(.abandon(task: "LOO-1"), subject: "LOO-1", verb: "abandoned",
                      write: .taskAbandon(directory: "/repo", issue: "LOO-1"), notices: notices)
         // Abandon saved, then failed to delete its branch: the answer still advanced planning.
         await machine.fail(ServerError(code: "conflict", message: "its branch is still checked out", data: .null,
@@ -160,7 +160,7 @@ struct PendingChangesTests {
 
     @Test func aCommandThatChangedNothingDropsAtOnce() async throws {
         let changes = changes()
-        changes.make(.claim(task: "LOO-1"), issue: "LOO-1", verb: "claimed",
+        changes.make(.claim(task: "LOO-1"), subject: "LOO-1", verb: "claimed",
                      write: .taskClaim(directory: "/repo", issue: "LOO-1"), notices: notices)
         changes.read("tasks", try plan())
         await machine.answer(Revisions([:]))
@@ -171,7 +171,7 @@ struct PendingChangesTests {
         let changes = changes()
         for (command, issue) in [(PendingCommand.unassign(task: "LOO-1"), "LOO-1"), (.reopen(task: "LOO-2"), "LOO-2"),
                                  (.move(task: "LOO-3", wave: "other"), "LOO-3")] {
-            changes.make(command, issue: issue, verb: "changed", write: .taskReopen(directory: "/repo", issue: issue),
+            changes.make(command, subject: issue, verb: "changed", write: .taskReopen(directory: "/repo", issue: issue),
                          notices: notices)
         }
         let shown = try plan(["idle", "working"], at: nil)
@@ -188,13 +188,13 @@ struct PendingChangesTests {
         let rows = [try task("LOO-1"), try task("LOO-2"), try task("LOO-3", section: "backlog", owner: nil),
                     try task("LOO-4", wave: "other")]
         let working = { (rows: [RoadmapTask]) in rows.filter { $0.section == .working }.map(\.task.identifier) }
-        changes.make(.complete(task: "LOO-1"), issue: "LOO-1", verb: "completed",
+        changes.make(.complete(task: "LOO-1"), subject: "LOO-1", verb: "completed",
                      write: .taskComplete(directory: "/repo", issue: "LOO-1"), notices: notices)
-        changes.make(.claim(task: "LOO-3"), issue: "LOO-3", verb: "claimed",
+        changes.make(.claim(task: "LOO-3"), subject: "LOO-3", verb: "claimed",
                      write: .taskClaim(directory: "/repo", issue: "LOO-3"), notices: notices)
-        changes.make(.unassign(task: "LOO-2"), issue: "LOO-2", verb: "unassigned",
+        changes.make(.unassign(task: "LOO-2"), subject: "LOO-2", verb: "unassigned",
                      write: .taskUnassign(directory: "/repo", issue: "LOO-2"), notices: notices)
-        changes.make(.move(task: "LOO-4", wave: "product"), issue: "LOO-4", verb: "moved",
+        changes.make(.move(task: "LOO-4", wave: "product"), subject: "LOO-4", verb: "moved",
                      write: .taskMove(directory: "/repo", issue: "LOO-4", wave: "product", machine: nil), notices: notices)
         let product = changes.apply(to: Array(rows.prefix(3)), readAt: at(4), wave: "product", inventory: rows)
         #expect(working(product) == ["LOO-3", "LOO-4"])
@@ -219,7 +219,7 @@ struct PendingChangesTests {
 
     @Test func requestedShowsInTheClickAndARefusalPostsOverIt() async throws {
         let changes = changes()
-        changes.request("Auto-Ship", issue: "LOO-5", write: .taskShip(directory: "/repo", issue: "LOO-5"), notices: notices)
+        changes.request("Auto-Ship", subject: "LOO-5", write: .taskShip(directory: "/repo", issue: "LOO-5"), notices: notices)
         #expect(notices.current?.text == "LOO-5 Auto-Ship requested")
         await machine.fail(ServerError(code: "conflict", message: "it has no checkout", data: .null))
         #expect(notices.current?.text == "LOO-5 Auto-Ship couldn't be requested: it has no checkout")

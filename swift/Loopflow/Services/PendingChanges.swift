@@ -50,6 +50,7 @@ public final class PendingChanges {
 
     public static let awayAfter = Duration.seconds(10)
     public static let awayNotice = "machine-away"
+    public static let awayText = "The Machine is away; showing what was last read"
 
     public private(set) var changes: [Change] = []
     public private(set) var link = Link.connected
@@ -77,7 +78,7 @@ public final class PendingChanges {
     /// "LOO-4 couldn't be completed: …". `answered` runs after an answer, to ask
     /// for the readings that show it.
     @discardableResult
-    public func make(_ command: PendingCommand, issue: String, verb: String, write: ServedWrite, notices: NoticeCenter,
+    public func make(_ command: PendingCommand, subject: String, verb: String, write: ServedWrite, notices: NoticeCenter,
                      answered: @escaping @MainActor () async -> Void = {}) -> String {
         let requestID = UUID().uuidString
         changes.append(Change(requestID: requestID, command: command, answer: nil))
@@ -88,11 +89,11 @@ public final class PendingChanges {
                 await answered()
             case .partlyDone(let revisions, let reason):
                 self.answered(requestID, revisions: revisions)
-                notices.post(Notice("\(issue) was \(verb), but \(reason)", key: requestID))
+                notices.post(Notice("\(subject) was \(verb), but \(reason)", key: requestID))
                 await answered()
             case .refused(let reason):
                 changes.removeAll { $0.requestID == requestID }
-                notices.post(Notice("\(issue) couldn't be \(verb): \(reason)", key: requestID))
+                notices.post(Notice("\(subject) couldn't be \(verb): \(reason)", key: requestID))
             }
         }
         return requestID
@@ -101,17 +102,17 @@ public final class PendingChanges {
     /// Start, Auto-Ship and Stop Auto-Ship change nothing on screen: the Notice
     /// says "LOO-5 Auto-Ship requested" in the click and the Machine's readings
     /// show the rest. A refusal posts over it.
-    public func request(_ name: String, issue: String, write: ServedWrite, notices: NoticeCenter,
+    public func request(_ name: String, subject: String, write: ServedWrite, notices: NoticeCenter,
                         undo: Notice.Action? = nil, answered: @escaping @MainActor () async -> Void = {},
                         refused: @escaping @MainActor () -> Void = {}) {
         let requestID = UUID().uuidString
-        notices.post(Notice("\(issue) \(name) requested", key: requestID, action: undo))
+        notices.post(Notice("\(subject) \(name) requested", key: requestID, action: undo))
         Task {
             switch await deliver(write, requestID: requestID) {
             case .answered, .partlyDone:
                 await answered()
             case .refused(let reason):
-                notices.post(Notice("\(issue) \(name) couldn't be requested: \(reason)", key: requestID))
+                notices.post(Notice("\(subject) \(name) couldn't be requested: \(reason)", key: requestID))
                 refused()
             }
         }
@@ -192,7 +193,7 @@ public final class PendingChanges {
     }
 
     private static var awayCondition: Notice {
-        Notice("The Machine is away; showing what was last read", key: awayNotice, kind: .condition)
+        Notice(awayText, key: awayNotice, kind: .condition)
     }
 
     // MARK: Readings

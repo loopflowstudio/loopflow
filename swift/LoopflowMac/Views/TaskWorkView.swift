@@ -223,6 +223,7 @@ struct TaskWorkflowHeader: View {
     }
 
     private var readingUnavailable: String? {
+        if !model.pendingChanges.acceptsChanges { return PendingChanges.awayText }
         if let error = work.failure ?? model.roadmap.failure { return error }
         if model.showsSavedPlanning { return WorkCache.savedReason }
         return nil
@@ -240,6 +241,7 @@ struct TaskShipControl: View {
     @State private var confirmingAbandon = false
 
     private var readingUnavailable: String? {
+        if !model.pendingChanges.acceptsChanges { return PendingChanges.awayText }
         if let error = model.roadmap.failure { return error }
         if model.showsSavedPlanning { return WorkCache.savedReason }
         return nil
@@ -488,6 +490,7 @@ struct TaskStartOffer: View {
     let task: RoadmapTask
 
     private var unavailable: String? {
+        if !model.pendingChanges.acceptsChanges { return PendingChanges.awayText }
         if let error = model.roadmap.failure { return error }
         if model.showsSavedPlanning { return WorkCache.savedReason }
         return task.runControl.unavailable
@@ -520,7 +523,7 @@ struct TaskActionItems: View {
     @State private var copied: String?
 
     private var unavailable: Bool {
-        model.roadmap.failure != nil || model.showsSavedPlanning
+        model.roadmap.failure != nil || model.showsSavedPlanning || !model.pendingChanges.acceptsChanges
     }
 
     var body: some View {

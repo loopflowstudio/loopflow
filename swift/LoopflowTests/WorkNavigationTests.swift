@@ -843,8 +843,8 @@ struct WorkNavigationTests {
         #expect(throws: Never.self) { try view.inspect().find(viewWithAccessibilityIdentifier: "task-available-human") }
     }
 
-    @Test("Work outside the plan remains explained in Wave details")
-    func unavailableTaskLivesInWaveDetails() async throws {
+    @Test("Work outside the plan is one condition Notice while its Wave is open")
+    func outsidePlanIsAConditionNotice() async throws {
         let model = try model()
         await model.refresh()
         let wave = try #require(model.projection.waves.first)
@@ -853,13 +853,14 @@ struct WorkNavigationTests {
         let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
         #expect(throws: (any Error).self) { try navigator.inspect().find(text: text) }
         model.select(wave.id.work)
-        // One quiet line names the Task; Details discloses reason and recovery.
-        let details = WorkSurfaceView(model: model)
-        #expect(throws: Never.self) { try details.inspect().find(text: "\(task.taskIdentifier) is outside the current plan.") }
-        #expect(throws: (any Error).self) { try details.inspect().find(text: text) }
-        try details.inspect().find(viewWithAccessibilityIdentifier: "wave-notice-details-\(task.taskId)").button().tap()
-        #expect(throws: Never.self) { try details.inspect().find(text: text) }
-        #expect(throws: Never.self) { try details.inspect().find(text: task.recovery) }
+        // One condition Notice names the Task while the Wave is open; its action copies the recovery.
+        let notice = try #require(model.navigation.notices.current)
+        #expect(notice.text == "\(task.taskIdentifier) is outside the current plan")
+        #expect(notice.kind == .condition)
+        #expect(notice.action?.title == "Copy recovery")
+        #expect(notice.action?.help == text)
+        model.select(nil)
+        #expect(model.navigation.notices.current == nil)
     }
 
     @Test("Slow planning does not gate Session reading or navigation")

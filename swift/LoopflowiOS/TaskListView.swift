@@ -70,7 +70,7 @@ final class TaskFeed {
     func complete(_ task: WorkViewPlan.Content) {
         guard let directory = directory(of: task) else { return }
         let issue = task.identifier ?? task.work.id
-        pendingChanges.make(.complete(task: issue), issue: issue, verb: "completed",
+        pendingChanges.make(.complete(task: issue), subject: issue, verb: "completed",
                             write: .taskComplete(directory: directory, issue: issue), notices: notices) { [weak self] in
             try? await self?.observation?.refresh()
         }
@@ -80,7 +80,7 @@ final class TaskFeed {
     func request(_ name: String, _ task: WorkViewPlan.Content, _ write: (String, String) -> ServedWrite) {
         guard let directory = directory(of: task) else { return }
         let issue = task.identifier ?? task.work.id
-        pendingChanges.request(name, issue: issue, write: write(directory, issue), notices: notices) { [weak self] in
+        pendingChanges.request(name, subject: issue, write: write(directory, issue), notices: notices) { [weak self] in
             try? await self?.observation?.refresh()
         }
     }

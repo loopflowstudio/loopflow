@@ -277,7 +277,7 @@ assert_eq!(retained.pm_snapshot_synced_at, expected.pm_snapshot_synced_at);
                     assert!(matches!(retained.pm_writeback, LinearWritebackState::Pending {
                         operation: loopflow_storage::work::task::LinearWritebackOperation::CancelTask, ..
                     }));
-                    runtime.block_on(crate::ops::linear_observe::sync_task_state(&fixture.store, &retained)).unwrap();
+                    runtime.block_on(crate::ops::tracker_observe::sync_task_state(&fixture.store, &retained)).unwrap();
                     // Cancellation must never fall into the old sender's reopen arm.
                     assert_eq!(receipt(), saved);
                 }
@@ -303,7 +303,7 @@ fn task_abandonment_lost_reply_reconciles_without_repeating_cancellation() {
             .unwrap();
         runtime.block_on(async {
             state.lock().await.lose_completion = true;
-            crate::ops::linear_observe::sync_task_state(&fixture.store, task)
+            crate::ops::tracker_observe::sync_task_state(&fixture.store, task)
                 .await
                 .unwrap();
             let pending = fixture
@@ -315,7 +315,7 @@ fn task_abandonment_lost_reply_reconciles_without_repeating_cancellation() {
             assert_eq!(pending.id, receipt.id);
             assert!(pending.attempted);
             assert_eq!(state.lock().await.issues[0]["state"]["type"], "canceled");
-            crate::ops::linear_observe::sync_task_state(&fixture.store, task)
+            crate::ops::tracker_observe::sync_task_state(&fixture.store, task)
                 .await
                 .unwrap();
             assert!(fixture
@@ -346,7 +346,7 @@ fn task_abandonment_adopts_linear_conflict_and_retains_local_decision() {
             provider.issues[0]["state"] = json!({"type":"completed"});
             mark_issue_updated(&mut provider.issues[0]);
             drop(provider);
-            crate::ops::linear_observe::sync_task_state(&fixture.store, task)
+            crate::ops::tracker_observe::sync_task_state(&fixture.store, task)
                 .await
                 .unwrap();
             assert_eq!(state.lock().await.completion_writes, 0);
@@ -403,7 +403,7 @@ fn task_abandonment_missing_linear_state_leaves_the_save_retryable() {
             .unwrap();
         runtime.block_on(async {
             state.lock().await.missing_canceled_state = true;
-            crate::ops::linear_observe::sync_task_state(&fixture.store, task)
+            crate::ops::tracker_observe::sync_task_state(&fixture.store, task)
                 .await
                 .unwrap();
             let pending = fixture
@@ -416,7 +416,7 @@ fn task_abandonment_missing_linear_state_leaves_the_save_retryable() {
             assert!(!pending.attempted);
             assert_eq!(state.lock().await.issues[0]["state"]["type"], "unstarted");
             state.lock().await.missing_canceled_state = false;
-            crate::ops::linear_observe::sync_task_state(&fixture.store, task)
+            crate::ops::tracker_observe::sync_task_state(&fixture.store, task)
                 .await
                 .unwrap();
             assert!(fixture
@@ -1038,7 +1038,7 @@ fn assert_completion_adopts_reopening(during_delivery: bool) {
                 mark_issue_updated(&mut provider.issues[0]);
             }
             drop(provider);
-            crate::ops::linear_observe::sync_task_state(&fixture.store, task)
+            crate::ops::tracker_observe::sync_task_state(&fixture.store, task)
                 .await
                 .unwrap();
             assert!(fixture
@@ -1048,7 +1048,7 @@ fn assert_completion_adopts_reopening(during_delivery: bool) {
                 .unwrap()
                 .is_none());
             // A retired loser must not overwrite Linear on a subsequent connection.
-            crate::ops::linear_observe::sync_task_state(&fixture.store, task)
+            crate::ops::tracker_observe::sync_task_state(&fixture.store, task)
                 .await
                 .unwrap();
             let provider = state.lock().await;
@@ -1115,7 +1115,7 @@ fn task_completion_unseen_reopening_can_be_overwritten_by_unconditional_delivery
             crate::store::task_work::task_graph(&fixture.store.sqlite, &task.id).unwrap();
         runtime.block_on(async {
             state.lock().await.reopen_during_completion = true;
-            crate::ops::linear_observe::sync_task_state(&fixture.store, task)
+            crate::ops::tracker_observe::sync_task_state(&fixture.store, task)
                 .await
                 .unwrap();
             let provider = state.lock().await;
@@ -1132,7 +1132,7 @@ fn task_completion_unseen_reopening_can_be_overwritten_by_unconditional_delivery
                 .pending_task_state(&task.id)
                 .unwrap()
                 .is_none());
-            crate::ops::linear_observe::sync_task_state(&fixture.store, task)
+            crate::ops::tracker_observe::sync_task_state(&fixture.store, task)
                 .await
                 .unwrap();
             assert_eq!(state.lock().await.completion_writes, 1);
@@ -1174,7 +1174,7 @@ fn task_completion_lost_reply_adopts_linear_reopening() {
             provider.lose_completion = true;
         });
         runtime
-            .block_on(crate::ops::linear_observe::sync_task_state(
+            .block_on(crate::ops::tracker_observe::sync_task_state(
                 &fixture.store,
                 task,
             ))
@@ -1185,7 +1185,7 @@ fn task_completion_lost_reply_adopts_linear_reopening() {
             mark_issue_updated(&mut provider.issues[0]);
         });
         runtime
-            .block_on(crate::ops::linear_observe::sync_task_state(
+            .block_on(crate::ops::tracker_observe::sync_task_state(
                 &fixture.store,
                 task,
             ))
@@ -1241,7 +1241,7 @@ fn task_completion_lost_reply_adopts_linear_reopening() {
             .unwrap()
             .is_none());
         runtime
-            .block_on(crate::ops::linear_observe::sync_task_state(
+            .block_on(crate::ops::tracker_observe::sync_task_state(
                 &fixture.store,
                 task,
             ))
@@ -1316,7 +1316,7 @@ fn task_completion_survives_rate_limit_and_unrelated_comment_revision() {
             .unwrap();
         let conn = rusqlite::Connection::open(&fixture.database).unwrap();
         runtime.block_on(async {
-            crate::ops::linear_observe::sync_task_state(&fixture.store, task)
+            crate::ops::tracker_observe::sync_task_state(&fixture.store, task)
                 .await
                 .unwrap();
             assert!(
@@ -1334,7 +1334,7 @@ fn task_completion_survives_rate_limit_and_unrelated_comment_revision() {
             conn.execute("UPDATE linear_team_checks SET attempted_at=0", [])
                 .unwrap();
             state.lock().await.slow_team_check = true;
-            crate::ops::linear_observe::sync_task_state(&fixture.store, task)
+            crate::ops::tracker_observe::sync_task_state(&fixture.store, task)
                 .await
                 .unwrap();
             let pending = fixture
@@ -1350,10 +1350,10 @@ fn task_completion_survives_rate_limit_and_unrelated_comment_revision() {
             provider.comment_moves_issue = true;
             drop(provider);
             // The queued comment publishes first and moves the issue revision.
-            crate::ops::linear_observe::sync_task_comments(&fixture.store, task)
+            crate::ops::tracker_observe::sync_task_comments(&fixture.store, task)
                 .await
                 .unwrap();
-            crate::ops::linear_observe::sync_repository_deliveries(
+            crate::ops::tracker_observe::sync_repository_deliveries(
                 &fixture.store,
                 repo.to_str().unwrap(),
             )
@@ -1395,7 +1395,7 @@ fn task_completion_uncertain_write_retries_after_unrelated_revision() {
         runtime.block_on(async {
             // The request is lost before Linear applies it.
             state.lock().await.fail_completion = true;
-            crate::ops::linear_observe::sync_task_state(&fixture.store, task)
+            crate::ops::tracker_observe::sync_task_state(&fixture.store, task)
                 .await
                 .unwrap();
             assert!(
@@ -1407,10 +1407,10 @@ fn task_completion_uncertain_write_retries_after_unrelated_revision() {
                     .unwrap()
                     .attempted
             );
-            crate::ops::linear_observe::sync_task_comments(&fixture.store, task)
+            crate::ops::tracker_observe::sync_task_comments(&fixture.store, task)
                 .await
                 .unwrap();
-            crate::ops::linear_observe::sync_task_state(&fixture.store, task)
+            crate::ops::tracker_observe::sync_task_state(&fixture.store, task)
                 .await
                 .unwrap();
             let provider = state.lock().await;
@@ -1447,14 +1447,14 @@ fn task_completion_unknown_history_stays_pending_until_explicit_retry() {
         complete_during_outage(runtime, fixture, repo, task, &state);
         runtime.block_on(async {
             state.lock().await.fail_completion = true;
-            crate::ops::linear_observe::sync_task_state(&fixture.store, task)
+            crate::ops::tracker_observe::sync_task_state(&fixture.store, task)
                 .await
                 .unwrap();
-            crate::ops::linear_observe::sync_task_comments(&fixture.store, task)
+            crate::ops::tracker_observe::sync_task_comments(&fixture.store, task)
                 .await
                 .unwrap();
             state.lock().await.history_unavailable = true;
-            crate::ops::linear_observe::sync_task_state(&fixture.store, task)
+            crate::ops::tracker_observe::sync_task_state(&fixture.store, task)
                 .await
                 .unwrap();
             let pending = fixture
@@ -1478,7 +1478,7 @@ fn task_completion_unknown_history_stays_pending_until_explicit_retry() {
                 "unknown evidence neither adopts nor delivers"
             );
             // A person's explicit retry overrides only unknown evidence.
-            crate::ops::linear_observe::deliver_task_state(&fixture.store, task, true)
+            crate::ops::tracker_observe::deliver_task_state(&fixture.store, task, true)
                 .await
                 .unwrap();
             assert_eq!(state.lock().await.completion_writes, 1);
@@ -1501,7 +1501,7 @@ fn task_completion_explicit_retry_adopts_reopening_proved_by_history() {
         runtime.block_on(async {
             // The write lands, its reply is lost, and someone reopens the issue.
             state.lock().await.lose_completion = true;
-            crate::ops::linear_observe::sync_task_state(&fixture.store, task)
+            crate::ops::tracker_observe::sync_task_state(&fixture.store, task)
                 .await
                 .unwrap();
             {
@@ -1509,10 +1509,10 @@ fn task_completion_explicit_retry_adopts_reopening_proved_by_history() {
                 provider.issues[0]["state"] = json!({"type":"unstarted"});
                 mark_issue_updated(&mut provider.issues[0]);
             }
-            crate::ops::linear_observe::sync_task_comments(&fixture.store, task)
+            crate::ops::tracker_observe::sync_task_comments(&fixture.store, task)
                 .await
                 .unwrap();
-            crate::ops::linear_observe::deliver_task_state(&fixture.store, task, true)
+            crate::ops::tracker_observe::deliver_task_state(&fixture.store, task, true)
                 .await
                 .unwrap();
             let provider = state.lock().await;
@@ -1639,8 +1639,8 @@ fn assert_unplaced_completion_retry(lose_response: bool, uncached: bool) {
         complete().unwrap();
         let conn = rusqlite::Connection::open(&fixture.database).unwrap();
         assert_eq!(conn.query_row("SELECT id FROM task_state_deliveries WHERE task_id=?1", [pending.id.as_str()], |r| r.get::<_, String>(0)).unwrap(), delivery.id);
-        runtime.block_on(crate::ops::linear_observe::sync_task_state(&fixture.store, &pending)).unwrap();
-        runtime.block_on(crate::ops::linear_observe::sync_task_state(&fixture.store, &pending)).unwrap();
+        runtime.block_on(crate::ops::tracker_observe::sync_task_state(&fixture.store, &pending)).unwrap();
+        runtime.block_on(crate::ops::tracker_observe::sync_task_state(&fixture.store, &pending)).unwrap();
         let retained = runtime
             .block_on(fixture.store.get_task(&pending.id))
             .unwrap()
@@ -1876,13 +1876,13 @@ fi
             provider.lose_completion = lose_response;
         });
         runtime
-            .block_on(crate::ops::linear_observe::sync_task_state(
+            .block_on(crate::ops::tracker_observe::sync_task_state(
                 &fixture.store,
                 &first,
             ))
             .unwrap();
         runtime
-            .block_on(crate::ops::linear_observe::sync_task_state(
+            .block_on(crate::ops::tracker_observe::sync_task_state(
                 &fixture.store,
                 &first,
             ))
@@ -2884,8 +2884,11 @@ fn exports_later_tasks_after_timeout(after_save: bool) {
                 crate::ops::planning_sync::sync_after_save(&fixture.store, repo.to_str().unwrap())
                     .await;
             } else {
-                crate::ops::linear_observe::sync_repository(&fixture.store, repo.to_str().unwrap())
-                    .await;
+                crate::ops::tracker_observe::sync_repository(
+                    &fixture.store,
+                    repo.to_str().unwrap(),
+                )
+                .await;
             }
             let other = if first == &task.id {
                 &later.id
@@ -3030,13 +3033,13 @@ fn historical_comment_delivery_retains_local_identity_after_linear_readback() {
             .unwrap();
         runtime.block_on(async {
             state.lock().await.lose_comment = true;
-            crate::ops::linear_observe::sync_task_comments(&fixture.store, task)
+            crate::ops::tracker_observe::sync_task_comments(&fixture.store, task)
                 .await
                 .unwrap();
-            crate::ops::linear_observe::refresh_task_comments(&fixture.store, task)
+            crate::ops::tracker_observe::refresh_task_comments(&fixture.store, task)
                 .await
                 .unwrap();
-            crate::ops::linear_observe::sync_task_comments(&fixture.store, task)
+            crate::ops::tracker_observe::sync_task_comments(&fixture.store, task)
                 .await
                 .unwrap();
             let provider = state.lock().await;
@@ -3270,7 +3273,7 @@ fn uncertain_exports_inside_their_window_cost_a_pass_no_requests() {
             let uncertain = seed_uncertain_exports(fixture, task, 20, Some(now()));
             let repository = repo.to_str().unwrap();
             state.lock().await.operations.clear();
-            crate::ops::linear_observe::sync_repository(&fixture.store, repository).await;
+            crate::ops::tracker_observe::sync_repository(&fixture.store, repository).await;
             {
                 let provider = state.lock().await;
                 assert_eq!(
@@ -3991,7 +3994,10 @@ fn linear_on_demand_shares_checks_and_excludes_finished_tasks() {
             conn.execute("DELETE FROM linear_team_checks", []).unwrap();
             state.lock().await.requests = 0;
             let results = futures_util::future::join_all((0..4).map(|_| {
-                crate::ops::linear_observe::check_repository(&fixture.store, repo.to_str().unwrap())
+                crate::ops::tracker_observe::check_repository(
+                    &fixture.store,
+                    repo.to_str().unwrap(),
+                )
             }))
             .await;
             for result in results {
@@ -4004,7 +4010,7 @@ fn linear_on_demand_shares_checks_and_excludes_finished_tasks() {
                 rusqlite::params![now(), task.id.as_str()],
             )
             .unwrap();
-            assert!(!crate::ops::linear_observe::check_repository(
+            assert!(!crate::ops::tracker_observe::check_repository(
                 &fixture.store,
                 repo.to_str().unwrap()
             )
@@ -4025,11 +4031,11 @@ fn linear_on_demand_acquires_comment_only_changes_and_completion() {
         runtime.block_on(async {
             let conn = rusqlite::Connection::open(&fixture.database).unwrap();
             conn.execute("DELETE FROM linear_team_checks", []).unwrap();
-            crate::ops::linear_observe::check_repository(&fixture.store, repo.to_str().unwrap()).await.unwrap();
+            crate::ops::tracker_observe::check_repository(&fixture.store, repo.to_str().unwrap()).await.unwrap();
             let timestamp = time::OffsetDateTime::now_utc().format(&time::format_description::well_known::Rfc3339).unwrap();
             state.lock().await.comments.push(json!({"id":"new-direction","body":"Keep the saved identity", "createdAt":timestamp,"updatedAt":timestamp,"user":{"id":"person-1","displayName":"Jack Heart","name":"Jack Heart"}}));
             conn.execute("UPDATE linear_team_checks SET attempted_at=0", []).unwrap();
-            crate::ops::linear_observe::check_repository(&fixture.store, repo.to_str().unwrap()).await.unwrap();
+            crate::ops::tracker_observe::check_repository(&fixture.store, repo.to_str().unwrap()).await.unwrap();
             assert!(fixture.store.task_steers(&task.id).await.unwrap().iter().any(|steer| steer.text.contains("Keep the saved identity")));
             {
                 let mut provider = state.lock().await;
@@ -4037,7 +4043,7 @@ fn linear_on_demand_acquires_comment_only_changes_and_completion() {
                 mark_issue_updated(&mut provider.issues[0]);
             }
             conn.execute("UPDATE linear_team_checks SET attempted_at=0", []).unwrap();
-            crate::ops::linear_observe::check_repository(&fixture.store, repo.to_str().unwrap()).await.unwrap();
+            crate::ops::tracker_observe::check_repository(&fixture.store, repo.to_str().unwrap()).await.unwrap();
             assert!(fixture.store.task_state(&task.id).await.unwrap().is_terminal());
         });
     });
@@ -4052,7 +4058,7 @@ fn linear_on_demand_failed_check_retains_watermark_and_pending_completion() {
         crate::ops::task::task_complete(repo, task.id.as_str(), Some("Complete after reset"))
             .unwrap();
         runtime.block_on(async {
-            crate::ops::linear_observe::sync_task_state(&fixture.store, task)
+            crate::ops::tracker_observe::sync_task_state(&fixture.store, task)
                 .await
                 .unwrap();
             let receipt = fixture
@@ -4063,7 +4069,7 @@ fn linear_on_demand_failed_check_retains_watermark_and_pending_completion() {
                 .unwrap();
             assert!(!receipt.attempted);
             let before = state.lock().await.requests;
-            crate::ops::linear_observe::sync_repository(&fixture.store, repo.to_str().unwrap())
+            crate::ops::tracker_observe::sync_repository(&fixture.store, repo.to_str().unwrap())
                 .await;
             assert_eq!(state.lock().await.requests, before);
             assert_eq!(
@@ -4077,7 +4083,7 @@ fn linear_on_demand_failed_check_retains_watermark_and_pending_completion() {
                 receipt.id
             );
             tokio::time::sleep(std::time::Duration::from_millis(2100)).await;
-            crate::ops::linear_observe::sync_repository(&fixture.store, repo.to_str().unwrap())
+            crate::ops::tracker_observe::sync_repository(&fixture.store, repo.to_str().unwrap())
                 .await;
             assert!(fixture
                 .store
@@ -4096,7 +4102,7 @@ fn linear_on_demand_failure_throttles_attempts_without_losing_changes() {
         runtime.block_on(async {
             let conn = rusqlite::Connection::open(&fixture.database).unwrap();
             conn.execute("DELETE FROM linear_team_checks", []).unwrap();
-            crate::ops::linear_observe::check_repository(&fixture.store, repo.to_str().unwrap())
+            crate::ops::tracker_observe::check_repository(&fixture.store, repo.to_str().unwrap())
                 .await
                 .unwrap();
             let through: String = conn
@@ -4107,14 +4113,14 @@ fn linear_on_demand_failure_throttles_attempts_without_losing_changes() {
             conn.execute("UPDATE linear_team_checks SET attempted_at=0", [])
                 .unwrap();
             state.lock().await.field_outage = true;
-            assert!(crate::ops::linear_observe::check_repository(
+            assert!(crate::ops::tracker_observe::check_repository(
                 &fixture.store,
                 repo.to_str().unwrap()
             )
             .await
             .is_err());
             let requests = state.lock().await.requests;
-            assert!(!crate::ops::linear_observe::check_repository(
+            assert!(!crate::ops::tracker_observe::check_repository(
                 &fixture.store,
                 repo.to_str().unwrap()
             )
@@ -4136,7 +4142,7 @@ fn linear_on_demand_failure_throttles_attempts_without_losing_changes() {
             }
             conn.execute("UPDATE linear_team_checks SET attempted_at=0", [])
                 .unwrap();
-            crate::ops::linear_observe::check_repository(&fixture.store, repo.to_str().unwrap())
+            crate::ops::tracker_observe::check_repository(&fixture.store, repo.to_str().unwrap())
                 .await
                 .unwrap();
             assert_eq!(
@@ -4763,7 +4769,7 @@ fn linear_scope_reads_each_repository_once_and_refreshes_next_check() {
                 }
                 conn.execute("DELETE FROM linear_team_checks", []).unwrap();
                 crate::ops::planning_client::SCOPE_READS.with_borrow_mut(|reads| reads.clear());
-                assert!(!crate::ops::linear_observe::check_repository(
+                assert!(!crate::ops::tracker_observe::check_repository(
                     &fixture.store,
                     repo.to_str().unwrap()
                 )
@@ -4811,7 +4817,7 @@ fn linear_on_demand_adopts_new_open_issues_without_allocating_execution() {
                 .unwrap()
                 .execute("DELETE FROM linear_team_checks", [])
                 .unwrap();
-            crate::ops::linear_observe::check_repository(&fixture.store, repo.to_str().unwrap())
+            crate::ops::tracker_observe::check_repository(&fixture.store, repo.to_str().unwrap())
                 .await
                 .unwrap();
             let adopted = fixture
@@ -4860,11 +4866,11 @@ fn repeated_legacy_abandonment_delivers_missing_cancellation_once() {
                 .abandon(&work, "explicit legacy cancellation")
                 .await
                 .unwrap();
-            crate::ops::linear_observe::sync_task_state(&fixture.store, task)
+            crate::ops::tracker_observe::sync_task_state(&fixture.store, task)
                 .await
                 .unwrap();
             fixture.store.abandon(&work, "repeat").await.unwrap();
-            crate::ops::linear_observe::sync_task_state(&fixture.store, task)
+            crate::ops::tracker_observe::sync_task_state(&fixture.store, task)
                 .await
                 .unwrap();
             let provider = state.lock().await;

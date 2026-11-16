@@ -303,7 +303,7 @@ async fn task_comments_read_and_publish_without_starting_work() {
             let id = saved.pending_sync[0].clone();
             assert!(provider.lock().await.posted.is_empty());
             assert!(!store.task_owned(&task.id).await.unwrap());
-            crate::ops::linear_observe::sync_task_comments(&store, &task).await.unwrap();
+            crate::ops::tracker_observe::sync_task_comments(&store, &task).await.unwrap();
             assert_eq!(store.sqlite.pending_task_comments(&task.id).unwrap().len(), 1);
             let saved_steers = store.task_steers(&task.id).await.unwrap();
 
@@ -311,22 +311,22 @@ async fn task_comments_read_and_publish_without_starting_work() {
             // The provider commits but loses its first reply. Concurrent catch-up
             // keeps the same UUID and confirms the exact issue and body.
             let (one, two) = tokio::join!(
-                crate::ops::linear_observe::sync_task_comments(&store, &task),
-                crate::ops::linear_observe::sync_task_comments(&store, &task),
+                crate::ops::tracker_observe::sync_task_comments(&store, &task),
+                crate::ops::tracker_observe::sync_task_comments(&store, &task),
             );
             one.unwrap(); two.unwrap();
             assert_eq!(provider.lock().await.posted.len(), 1);
             assert_eq!(provider.lock().await.posted[0]["id"], id);
             assert!(store.sqlite.pending_task_comments(&task.id).unwrap().is_empty());
-            crate::ops::linear_observe::refresh_task_comments(&store, &task).await.unwrap();
-            crate::ops::linear_observe::refresh_task_comments(&store, &task).await.unwrap();
+            crate::ops::tracker_observe::refresh_task_comments(&store, &task).await.unwrap();
+            crate::ops::tracker_observe::refresh_task_comments(&store, &task).await.unwrap();
             assert_eq!(store.task_steers(&task.id).await.unwrap(), saved_steers);
             assert_eq!(store.task_comments(&task.id).unwrap().comments.len(), 5);
 
             provider.lock().await.posted.push(comment("incoming-after-reconnect",
                 Some("2026-09-27T00:00:01Z"), Some("Keep inbound independent"),
                 json!({"id":"person-1","displayName":"Maya","name":null})));
-            crate::ops::linear_observe::refresh_task_comments(&store, &task).await.unwrap();
+            crate::ops::tracker_observe::refresh_task_comments(&store, &task).await.unwrap();
             // Keep this create pending deliberately; connected saves may deliver immediately.
             provider.lock().await.thread = Thread::Failing;
             let saved = task_comment_async(&repo, None, "FIX-7", Some("Local value survives"), true)
@@ -336,8 +336,8 @@ async fn task_comments_read_and_publish_without_starting_work() {
             provider.lock().await.posted.push(comment(&collision,
                 Some("2026-09-27T00:00:03Z"), Some("Provider value survives"),
                 json!({"id":"person-1","displayName":"Maya","name":null})));
-            crate::ops::linear_observe::refresh_task_comments(&store, &task).await.unwrap();
-            crate::ops::linear_observe::sync_task_comments(&store, &task).await.unwrap();
+            crate::ops::tracker_observe::refresh_task_comments(&store, &task).await.unwrap();
+            crate::ops::tracker_observe::sync_task_comments(&store, &task).await.unwrap();
             let conflict = store.task_comments(&task.id).unwrap();
             assert!(conflict.conflicts[&collision].starts_with("Local value survives"));
             assert!(conflict.comments.iter().find(|c| c.id == collision).unwrap().body == "Provider value survives");
@@ -345,7 +345,7 @@ async fn task_comments_read_and_publish_without_starting_work() {
             // A late acknowledgement records delivery, not authority to discard
             // the newer remote value acquired while the create was in flight.
             store.sqlite.record_comment_delivery(&collision, None).unwrap();
-            crate::ops::linear_observe::refresh_task_comments(&store, &task).await.unwrap();
+            crate::ops::tracker_observe::refresh_task_comments(&store, &task).await.unwrap();
             assert_eq!(store.task_comments(&task.id).unwrap().conflicts, conflict.conflicts);
 
             // An acknowledged create with a retained collision must not hide
@@ -356,14 +356,14 @@ async fn task_comments_read_and_publish_without_starting_work() {
                 amended["body"] = json!("Provider correction survives");
                 amended["updatedAt"] = json!("2026-09-25T09:00:01Z");
             }
-            crate::ops::linear_observe::refresh_task_comments(&store, &task).await.unwrap();
+            crate::ops::tracker_observe::refresh_task_comments(&store, &task).await.unwrap();
             assert_eq!(store.task_comments(&task.id).unwrap().comments.iter().find(|c| c.id == collision).unwrap().body, "Provider correction survives");
             assert!(store.task_steers(&task.id).await.unwrap().iter().any(|steer| steer.text.contains("Provider correction survives")));
 
             let before_retry = store.task_steers(&task.id).await.unwrap();
             let posted_before = provider.lock().await.posted.len();
-            crate::ops::linear_observe::sync_task_comments(&store, &task).await.unwrap();
-            crate::ops::linear_observe::refresh_task_comments(&store, &task).await.unwrap();
+            crate::ops::tracker_observe::sync_task_comments(&store, &task).await.unwrap();
+            crate::ops::tracker_observe::refresh_task_comments(&store, &task).await.unwrap();
             assert!(store.sqlite.pending_task_comments(&task.id).unwrap().is_empty());
             assert_eq!(provider.lock().await.posted.len(), posted_before);
             assert_eq!(store.task_steers(&task.id).await.unwrap(), before_retry);

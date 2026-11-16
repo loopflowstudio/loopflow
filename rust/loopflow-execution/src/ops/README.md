@@ -41,7 +41,7 @@ person's own look and ignores it.
 **Deadline.** Each export has its own five-second deadline covering only the
 provider path: Team validation, the look, the workflow state and the send. No
 scope freshness check runs inside a write (`LinearClient::graphql` sends what it
-is given); freshness belongs to work boundaries (`linear_observe::sync_scope`,
+is given); freshness belongs to work boundaries (`tracker_observe::sync_scope`,
 `team_current`) and to `deliver_task_state`, which calls `check_before_write`
 itself. A timeout names the step it interrupted: "Export timed out while sending
 the creation; creation identity and uncertainty retained".

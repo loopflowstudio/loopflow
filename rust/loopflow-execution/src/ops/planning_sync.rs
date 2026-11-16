@@ -82,7 +82,7 @@ pub(crate) async fn sync_after_save(store: &Store, repo: &str) {
                 super::planning_export::sync_repository_exports(store, repo).await?;
                 let (fields, deliveries) = tokio::join!(
                     super::planning_delivery::sync_repository_fields(store, repo),
-                    super::linear_observe::sync_repository_deliveries(store, repo)
+                    super::tracker_observe::sync_repository_deliveries(store, repo)
                 );
                 fields?;
                 deliveries?;
@@ -444,9 +444,9 @@ fn sync_directory(directory: &Path, refresh: bool) -> OpsResult<()> {
         .block_on(async {
             let store = planning_store().await?;
             if refresh {
-                super::linear_observe::refresh_repository(&store, &repo).await;
+                super::tracker_observe::refresh_repository(&store, &repo).await;
             } else {
-                super::linear_observe::sync_repository(&store, &repo).await;
+                super::tracker_observe::sync_repository(&store, &repo).await;
             }
             Ok(())
         })

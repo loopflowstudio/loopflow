@@ -279,22 +279,53 @@ migration ≥ 30 days after this merges: a follow-up Task filed with this PR.
 
 Deepest deletions first, then the queue, then the bridges. Commit at each.
 
-1. **Done (slice 1 commit) — deletions.** `pm_issue_changes` deferred to slice 3
-   with the inbound removal path. Notion, Chapter mechanisms and `lf task
-   sweep`, adoption, the `refresh_async` apply branch, the `pm_issue_changes`
-   decision above. Check: `cargo build -p loopflow`; `cargo test -p
-   loopflow-execution --lib asana_planning_tests`; `grep -rn -i notion rust/ --include=*.rs`
-   empty outside migrations.
-2. **Done (slice 2 commit).** Shared records are `loopflow_storage::planning::{TrackerItem, TrackerObservation, TrackerComment, TrackerProject, StateHistory}`; `PlanningResponse` dies with the old drains in slice 3.
-3. Migration + writer enqueues + `rules.rs` + bounded `drain.rs`; delete the
-   old drains and storage GraphQL. Focused tests per kind on the Linear fake:
-   lost reply, conflict adopt, deletion retire, order evidence; plus
-   `a_pass_with_nothing_unsettled_sends_no_request` and
+1. **Done (f2c37b11a0).** Notion, `lf task sweep` + `ChapterSweep`, legacy
+   Project adoption (`legacy_current` column stays until the contract), the
+   `refresh_async` apply branch and `LinearSyncOptions.plan`.
+   `pm_issue_changes` moves to slice 3 with the inbound removal path.
+2. **Done (85bafbe98a).** Records are
+   `loopflow_storage::planning::{TrackerItem, TrackerObservation,
+   TrackerComment, TrackerProject, StateHistory}`; `PlanningResponse` dies with
+   the old drains.
+3. **Next.** Migration + writer enqueues + `rules.rs` + bounded `drain.rs`;
+   delete the old drains and storage GraphQL. Focused tests per kind on the
+   Linear fake: lost reply, conflict adopt, deletion retire, order evidence;
+   plus `a_pass_with_nothing_unsettled_sends_no_request` and
    `a_pass_sends_at_most_twenty_requests` (100 pending effects).
+   Found while sizing it:
+   - `tracker_effects` needs `canonical_<table>_{insert,update}` identity
+     triggers like `task_changes` (template: `bounded_identity_triggers.sql`;
+     `task_` for `task_id`, `proj_` for `project_id`, `uuid` for `id`, and the
+     `value_json`/`base_json`/`conflict_json` json_tree arms).
+   - Old-table readers outside the deleted writers, each to move onto
+     `tracker_effects`: `task_changes` in `ops/task.rs`, `task/snapshot.rs`,
+     `sqlite/children.rs` ×2, `revisions.rs`, `task_content.rs`, `bin/lf.rs`,
+     `commands/read.rs` ×2, `commands/task_diff.rs`; `task_state_deliveries` in
+     `children.rs` ×2, `durable.rs`, `linear_acceptance.rs` ×4,
+     `planning_sync.rs` ×2, `planning_write.rs` ×2, `revisions.rs` ×4;
+     `task_comment_deliveries` in `children.rs`, `planning_sync.rs`;
+     `project_changes` in `project_content.rs`. `task_creation_intents` and
+     `project_transitions` also carry creation history (`task_history.rs`,
+     `project_selection.rs`): only their export columns stop being written.
 4. `Tracker` enum and the two `effects.rs`; delete `PlanningClient`; Asana
    tests move onto the queue.
-5. Truthful `provider`; renames (`tracker_observe.rs`, `tests/linear/`).
+5. **Renames done** (`ops/tracker_observe.rs`, `rust/loopflow/tests/work/`).
+   Truthful `provider` remains, best done with slice 3's acceptance rewrite:
+   readers join `pm_items`/`pm_projects` on `(repo, provider, id)`, so dropping
+   the predicate loses the index; use `provider IN ('linear','asana')` in
+   joined readers (an IN probe keeps the prefix) and pass the configured
+   provider into `accept_linear_{project,issue,inventory,project_order}_in`,
+   `reconcile_linear_project_teams_in`, `observe_task_state` and
+   `planning_order.rs:211` (≈20 test callers in `tests/work/local_planning.rs`
+   and `tests/support/`). Check with `store::query_plans::tests::`.
 6. `planning.md`, `docs/work.md`, README; file the contract and DTO Tasks.
+
+## Checks run
+
+- `cargo clippy -p loopflow-storage -p loopflow-execution -p loopflow --all-targets -- -D warnings` → clean (after slice 2 + renames).
+- `cargo nextest run -p loopflow-execution --lib -E 'test(asana_planning_tests) | test(task_comments_tests) | test(tracker_observe) | test(linear_observation) | test(planning_order_tests) | test(foreign_projects_do_not_block_refresh) | test(provider_auth::) | test(task_planning_tests::task_abandon)'` → pass.
+- `cargo test -p loopflow --lib lf::tests::` → pass; `cargo test -p loopflow --test integration documented_commands::` → pass.
+- `tests/fixtures/dto/server_schema.json` regenerated (drops `notion`).
 
 ## Done when
 

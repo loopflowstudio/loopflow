@@ -2115,7 +2115,7 @@ pub struct TaskStatus {
 pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
     block_on_task(async {
         let store = task_store().await?;
-        super::linear_observe::sync_repository(&store, &repo.to_string_lossy()).await;
+        super::tracker_observe::sync_repository(&store, &repo.to_string_lossy()).await;
         let mut task = match issue {
             Some(issue) => {
                 super::planning_sync::find_task(&store, &repo.to_string_lossy(), issue).await?
@@ -2343,9 +2343,9 @@ pub fn task_sync(issue: &str, retry_updates: bool) -> OpsResult<String> {
         // ownership read stale or look like an intervening reopening. Retain
         // each result: a failed state attempt still permits the other effects.
         let work = loopflow_model::durable::WorkRef::Task(task.id.clone());
-        let state = super::linear_observe::deliver_task_state(&store, &task, retry_updates).await;
+        let state = super::tracker_observe::deliver_task_state(&store, &task, retry_updates).await;
         let (comments, fields) = tokio::join!(
-            super::linear_observe::sync_task_comments(&store, &task),
+            super::tracker_observe::sync_task_comments(&store, &task),
             super::planning_delivery::deliver_fields(&store, repo, &work, retry_updates),
         );
         state?;
@@ -2968,7 +2968,7 @@ pub(crate) async fn task_comment_async(
     let refresh_error = if message.is_none() && task.linear_id.is_some() {
         match tokio::time::timeout(
             std::time::Duration::from_secs(5),
-            super::linear_observe::refresh_task_comments(&store, &task),
+            super::tracker_observe::refresh_task_comments(&store, &task),
         )
         .await
         {

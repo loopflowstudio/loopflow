@@ -286,9 +286,9 @@ Cross-provider replay fixtures must install stand-ins for both the recorded and
 override providers, with a fixture/system-only PATH. A developer's installed
 provider must neither satisfy a missing fixture nor receive a test launch.
 
-## Linear acquisition fixtures
+## Work and tracker fixtures
 
-Linear acquisition fixtures live under `rust/loopflow/tests/linear/` and compile
+Work and tracker acquisition fixtures live under `rust/loopflow/tests/work/` and compile
 inside the library, where fetched response types stay private. Focused Cargo tests
 build the current CLI and take its path from Cargo’s artifact output:
 
@@ -396,8 +396,7 @@ On macOS it writes and removes one Keychain item scoped to its temporary config
 directory. The fixture copies the candidate, uses private Machines and stops
 only its identified provider process children. Native execution uses synthetic
 Responses, not configured accounts or installed data. Ordinary retry, usage,
-binding and review behavior belong in `session_lifecycle_tests`; legacy Linear Project adoption belongs in
-`ops::linear::adoption_tests`.
+binding and review behavior belong in `session_lifecycle_tests`.
 
 `planning_reconnect_tests` runs public work-watch and Graph-boundary recovery against
 synthetic Linear on Linux, with disposable TLS trust. It covers lost replies,
@@ -820,7 +819,7 @@ Run the same Linux suite when changing Linear mutation inputs or acknowledgement
 the reconnect peer must accept partial Initiative updates and return `success`.
 
 ```bash
-cargo nextest run -p loopflow-execution --lib -E 'test(linear::) | test(ops::linear::) | test(ops::linear_observe::)' --no-fail-fast
+cargo nextest run -p loopflow-execution --lib -E 'test(linear::) | test(ops::linear::) | test(ops::tracker_observe::)' --no-fail-fast
 cargo nextest run -p loopflow --test planning_reconnect_tests --no-fail-fast
 ```
 

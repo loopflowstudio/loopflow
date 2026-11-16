@@ -453,6 +453,16 @@ Checks for this cut:
 
 ### Open product choices
 
+Concept review against `c055cc55ca`: the Claim/Unassign/Reopen vertical cut now
+follows the intended experience through both transports, persisted inputs,
+shared derivation and both hosts' controls. No further concept change follows
+from this review. The counterexamples remain binding: an already-open Reopen
+preserves approval; missing/conflicting inputs cannot certify a destination;
+carrier withdrawal cannot certify Process exit. Product docs now describe the
+built actions, so no builtin skill change is needed. Next demonstration: the
+same Task across both hosts through offline restart, refusal and recovery, with
+native paint/input measured separately. Source review adds no runtime result.
+
 Unanswered, numbered in `scratch/concept-review.html`: (1) queue Abandon offline
 or require a reachable Machine; (2) Cancel before first send or none; (3) phone
 shows Task titles or shows/renames Session names. Built provisional behavior is

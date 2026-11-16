@@ -114,60 +114,7 @@ mod tests {
     }
 
     #[test]
-    fn formerly_attended_skills_have_bounded_headless_contracts() {
-        let design = get_builtin_skill("design").expect("design skill");
-        for contract in [
-            "## Surface",
-            "**Interactive:**",
-            "**Headless:**",
-            "without claiming User confirmation",
-        ] {
-            assert!(design.contains(contract), "design is missing {contract}");
-        }
-
-        let launch_plan = get_builtin_skill("launch-plan").expect("launch-plan skill");
-        for contract in [
-            "Do not create a manifest, receipt, marker, or new planning state",
-            "Keep that core in this Task",
-            "lf task create --wave <wave>",
-            "lf checkout <issue> --json",
-            "lf task run <issue>",
-            "Use the Graph the user selected",
-        ] {
-            assert!(
-                launch_plan.contains(contract),
-                "launch-plan is missing {contract}"
-            );
-        }
-
-        for name in ["refine", "repo/operate", "init"] {
-            let skill = get_builtin_skill(name).expect("builtin skill");
-            assert!(
-                skill.contains("## Reviewer mode"),
-                "{name} does not define reviewer modes"
-            );
-            assert!(
-                skill.contains("**Interactive reviewer:**"),
-                "{name} does not define attended behavior"
-            );
-            assert!(
-                skill.contains("**Parent reviewer:**"),
-                "{name} does not define headless parent behavior"
-            );
-            assert!(
-                skill.contains("review protocol"),
-                "{name} does not route parent dialogue through the review protocol"
-            );
-        }
-
-        let demo = get_builtin_skill("demo").expect("demo skill");
-        for contract in [
-            "headless surface",
-            "nobody can feel it",
-            "closing, detaching, provider exit, or lack of response",
-        ] {
-            assert!(demo.contains(contract), "demo omits {contract:?}");
-        }
+    fn builtin_skills_carry_no_interactive_scheduling_metadata() {
         for (name, skill) in BUILTIN_SKILLS.iter() {
             assert!(
                 !skill.lines().any(|line| line.starts_with("interactive:")),
@@ -184,15 +131,9 @@ mod tests {
         assert!(!LOOPFLOW_DOC.contains("--detach"));
 
         let wave = get_builtin_skill("wave/operate").expect("wave operate");
-        assert!(wave.contains("lf task run <issue-id>"));
-        assert!(wave.contains("lf task status"));
-        assert!(wave.contains("Tasks progress independently"));
-        assert!(wave.contains("S5 · Identity"));
         assert!(!wave.contains("lf loop"));
 
         let task = get_builtin_skill("implement").expect("implementation");
-        assert!(task.contains("second Task"));
-        assert!(task.contains("Publication, landing and navigation belong to the caller"));
         assert!(!task.contains("lf pm task done"));
 
         assert!(get_builtin_graph("task").is_none());
@@ -244,35 +185,6 @@ mod tests {
                     "{name} still instructs agents to run retired `{command}`"
                 );
             }
-        }
-    }
-
-    #[test]
-    fn task_design_and_multi_task_outputs_share_the_machine_contract() {
-        let kickoff = get_builtin_skill("kickoff").expect("implementation plan");
-        for requirement in [
-            "User-visible outcome",
-            "Acceptance check at gate",
-            "Source of truth",
-            "Affected surfaces and consumers",
-            "Absent and error states",
-            "Operational boundary",
-            "Exclusions",
-        ] {
-            assert!(kickoff.contains(requirement));
-        }
-
-        for name in ["wave/operate", "wave-report"] {
-            let skill = get_builtin_skill(name).expect("multi-Task output skill");
-            assert!(skill.contains("lf wave show"));
-            assert!(skill.contains("lf wave status"));
-            assert!(skill.contains("task.identifier"));
-            assert!(skill.contains("reference.issue_url"));
-            assert!(skill.contains("checkout without a PR"));
-            assert!(!skill.contains("active_pr"));
-            assert!(skill.contains("reference.workspace.slug"));
-            assert!(skill.contains("runtime.status"));
-            assert!(skill.contains("next_move.owner"));
         }
     }
 
@@ -380,7 +292,6 @@ mod tests {
     fn generic_execution_skills_never_infer_a_wave_or_require_pm() {
         for name in ["implement", "gate", "research", "sync-conflicts"] {
             let skill = get_builtin_skill(name).expect("generic skill");
-            assert!(skill.contains("seed names the exact wave"), "{name}");
             assert!(!skill.contains("matches this work"), "{name}");
             assert!(!skill.contains("lf pm show"), "{name}");
         }

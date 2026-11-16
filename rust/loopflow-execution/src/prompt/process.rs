@@ -593,7 +593,7 @@ Test skill body.
         assert!(prepared
             .config
             .task_prompt
-            .contains("Turn the design doc into working code."));
+            .contains("Turn the plan into working code."));
         assert!(!prepared
             .config
             .system_prompt

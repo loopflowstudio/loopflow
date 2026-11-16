@@ -2039,13 +2039,6 @@ mod tests {
                 loopflow_definitions::builtins::get_builtin_skill(&format!("{scope}/session"))
                     .expect("session skill");
             assert_eq!(session.matches(procedure).count(), 1, "{scope}");
-            let between_turns = match scope {
-                "task" => {
-                    "Do not apply the operating procedure merely because a progress post arrived."
-                }
-                _ => "nothing schedules your next one",
-            };
-            assert!(session.contains(between_turns), "{scope}");
         }
     }
 

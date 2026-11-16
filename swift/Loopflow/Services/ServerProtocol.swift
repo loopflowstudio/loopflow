@@ -153,6 +153,7 @@ public enum ServerOperation: Encodable, Sendable {
     case read(ServedRead)
     case measuredRead(ServedRead)
     case measuredWrite(ServedWrite)
+    case measuredSubmission(JSONValue)
     case command(ServedWrite)
     case config(ConfigOperation)
     /// The unchanged payload of a submitted creation; never arbitrary command replay.
@@ -188,6 +189,10 @@ public enum ServerOperation: Encodable, Sendable {
             var box = encoder.container(keyedBy: Keys.self)
             try box.encode("performance.write", forKey: .kind)
             try box.encode(change, forKey: .change)
+        case .measuredSubmission(let payload):
+            var box = encoder.container(keyedBy: Keys.self)
+            try box.encode("performance.write", forKey: .kind)
+            try box.encode(payload, forKey: .change)
         case .command(let change): try change.encode(to: encoder)
         case .requestUpload(let bytes):
             var box = encoder.container(keyedBy: Keys.self)

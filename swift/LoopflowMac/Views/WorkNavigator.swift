@@ -141,6 +141,9 @@ struct WorkNavigator: View {
             let source = model.showsSavedWork ? "saved" : "fresh"
             DispatchQueue.main.async { LaunchJournal.home.mark(.usable, ["source": source]) }
         }
+        .onChange(of: model.sidebarTaskIDs + model.sidebarAutonomousTaskIDs) { before, after in
+            Perf.rowsChanged(from: before, to: after, owner: model.navigation.performanceOwner)
+        }
         .onChange(of: model.navigation.sidebarFilter) { _, filter in
             Perf.stateObserved(Perf.hierarchyInteraction, id: "outline:\(filter.rawValue)", owner: model.navigation.performanceOwner)
         }

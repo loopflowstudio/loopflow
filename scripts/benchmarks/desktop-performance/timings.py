@@ -22,6 +22,8 @@ from pathlib import Path
 
 LAUNCH_METRICS = ["pre_main", "restored", "first_frame", "usable_saved", "usable_fresh", "fresh"]
 EXPERIENCES = [
+    ("start_task", "Start → typing", "Start pressed", "Conversation input accepts typing"),
+    ("complete_task", "Complete → row gone", "Complete pressed", "Completed Task row absent"),
     ("open_app", "Open the app", "Launch requested", "Workspace visible and input usable"),
     ("open_task", "Open a Task’s conversation", "Task clicked", "Conversation responds to typing"),
     (
@@ -260,6 +262,21 @@ def _journal(directory: Path) -> dict:
             and known_revision
             and any(e["phase"] == "input" and e["evidence"] == "input_event" for e in events)
         )
+        # The terminal elapsed time includes the original input's queueing.
+        terminal = outcomes[-1] if outcomes else None
+        end_at = terminal.get("at") if terminal else None
+        elapsed = terminal.get("ms") if terminal else None
+        attributed_stalls = None
+        if all(type(v) in (int, float) and math.isfinite(v) for v in (end_at, elapsed)):
+            start_at = end_at - elapsed / 1000
+            attributed_stalls = [
+                stall
+                for stall in stalls
+                if stall.get("build") == attempt["build"]
+                and type(stall.get("at")) in (int, float)
+                and stall["at"] >= start_at
+                and stall["at"] - stall["ms"] / 1000 <= end_at
+            ]
         group["attempts"].append(
             {
                 "observation": observation,
@@ -268,6 +285,7 @@ def _journal(directory: Path) -> dict:
                 "phases": phases,
                 "work": (outcomes[-1] if outcomes else events[-1])["work"],
                 "context": attempt["context"],
+                "stalls": attributed_stalls,
                 "receipt": attempt["receipt"],
             }
         )
@@ -281,6 +299,15 @@ def _journal(directory: Path) -> dict:
                 "outcomes": dict(Counter(a["outcome"] for a in group["attempts"])),
                 "acknowledged": _stats([a["phases"]["acknowledged"] for a in samples]),
                 "usable": _stats([a["phases"]["usable"] for a in samples]),
+                "stall_count": len(
+                    {
+                        (stall["at"], stall["ms"], stall["build"].get("launch"))
+                        for attempt in samples
+                        for stall in attempt["stalls"]
+                    }
+                )
+                if samples and all(a["stalls"] is not None for a in samples)
+                else None,
             }
         )
     return {
@@ -288,6 +315,10 @@ def _journal(directory: Path) -> dict:
         "errors": errors,
         "stalls": stalls,
         "stall_summary": _stats([row["ms"] for row in stalls]),
+        "stall_threshold_counts": {
+            str(threshold): sum(row["ms"] >= threshold for row in stalls)
+            for threshold in (50, 100, 250)
+        },
     }
 
 
@@ -496,17 +527,24 @@ def render_html(report: dict) -> str:
             if scenario.startswith("board_")
             else experience_labels[name] + " · " + scenario.replace("_", " ")
         )
+        title = {
+            "start_to_typing": "Start → typing",
+            "new_task_to_typing": "New Task: Start → typing",
+            "complete_to_row_gone": "Complete → row gone",
+        }.get(scenario, title)
         bars = []
         for group in sorted(groups, key=lambda g: g["repository"] or ""):
             repo = Path((group["repository"] or "").rstrip("/")).name or "Repository not recorded"
             label = {"loopflow": "Loopflow", "manabot": "Manabot", "kata": "Kata"}.get(repo, repo)
             value = group["usable"]["median_ms"]
+            stall_count = group["stall_count"]
+            stall_label = f" · {stall_count} stalls" if stall_count is not None else ""
             bars.append(
                 f'<div class="bar-row"><div class="repo">{escape(label)}</div>'
                 '<div class="track">'
                 f'<div class="bar" style="width:{100 * value / ceiling:.3f}%"></div></div>'
                 f'<div class="bar-value">{value:,.1f}'
-                f"<small>ms · n={group['samples']}</small></div></div>"
+                f"<small>ms · n={group['samples']}{stall_label}</small></div></div>"
             )
         source = (
             "Capture-inclusive upper bound"
@@ -524,6 +562,14 @@ def render_html(report: dict) -> str:
             f"<span>{ceiling:g} ms</span></div>"
             + f'<p class="chart-source">{escape(source)}</p></section>'
         )
+    measured_names = {key[0] for key in workflows}
+    for name, label, start, end in EXPERIENCES[:2]:
+        if name not in measured_names:
+            charts.append(
+                f'<section class="workflow"><h2>{escape(label)}</h2>'
+                f"<p>{escape(start)} → {escape(end)}</p>"
+                '<p class="empty">Unmeasured · no completed observations yet</p></section>'
+            )
     if not charts:
         charts.append(
             '<p class="empty">No completed workflow measurements yet. See coverage below.</p>'
@@ -535,6 +581,9 @@ def render_html(report: dict) -> str:
         f"Median: {stall_summary['median_ms']} ms; max: {stall_summary['max_ms']} ms. "
         "This is a thresholded diagnostic, not a frame-hitch distribution."
     )
+    stall_counts = journal["stall_threshold_counts"]
+    maximum_stall = stall_summary["max_ms"]
+    maximum_stall_label = f"{maximum_stall:,.0f} ms" if maximum_stall is not None else "Unmeasured"
     unavailable = "".join(f"<li>{escape(e)}</li>" for e in journal["errors"])
     rows = []
     options = []
@@ -597,6 +646,10 @@ align-items:center; margin:22px 0}}
 color:#647469; font-size:11px}}
 .axis span {{display:inline; height:auto; background:none}}
 .workflow p.chart-source {{font-size:12px; margin:28px 0 0}}
+.stalls {{margin:32px 0; padding:24px 28px; background:#e2ebe1; border-radius:14px}}
+.stalls p {{color:#52665e}} .stall-counts {{display:flex; flex-wrap:wrap; gap:28px 48px}}
+.stall-counts strong {{display:block; font-size:28px; font-variant-numeric:tabular-nums}}
+.stall-counts span {{display:block; background:none; height:auto; margin-top:6px; color:#52665e}}
 .below-fold {{margin-top:64px; padding-top:28px; border-top:1px solid #d5dfd4}}
 @media(max-width:560px) {{
 body {{margin:24px auto; padding:0 14px}} .workflow {{padding:20px}}
@@ -622,6 +675,15 @@ summary {{cursor:pointer; font-weight:600}} [hidden] {{display:none}}
 Median time from your click · milliseconds · shorter bars are faster.</p>
 <div class="charts">{"".join(charts)}</div>
 <p>Same scale across workflows. Capture cost is included. P95 needs 20 samples per case.</p>
+<aside class="stalls" aria-label="Main-thread stalls">
+<h2>Main-thread stalls</h2>
+<p>Recorded busy turns across the retained journal window.</p>
+<div class="stall-counts">
+<div><strong>{stall_counts["50"]:,}</strong><span>50 ms or longer</span></div>
+<div><strong>{stall_counts["100"]:,}</strong><span>100 ms or longer</span></div>
+<div><strong>{stall_counts["250"]:,}</strong><span>250 ms or longer</span></div>
+<div><strong>{maximum_stall_label}</strong><span>Longest busy turn</span></div></div>
+</aside>
 <section class="below-fold"><h2>Measurement details</h2>
 <p>Builds, acknowledgment times, outcomes and coverage.</p>
 <details id="experience-details"><summary>Samples, timing stages and unmeasured workflows</summary>

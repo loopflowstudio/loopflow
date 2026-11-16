@@ -300,3 +300,24 @@ Build `22d6885a6504d06094d64af0e1134763374c86d5`; macOS 26.0.1; live `~/.lf` sto
 Raw records, conditions and summary: `~/.lf/performance/live/20261116-app-journal/`. Updated HTML: `/tmp/loo916-live-performance.html`. Phone ReplayKit capture and the other experience drivers remain unverified/unmeasured.
 
 Jack Heart: “one bar per repo, one graph per workflow”, with “more detaield info somewhere below-the-fold”. Lead with median usable-result charts; retain acknowledgment, P95, outcomes, work receipts and coverage in the lower details.
+
+## Remaining two journeys
+
+Jack Heart: “a0. Finish 916 with the two journeys it lacks. It does not measure Start → typing or Complete → row gone. Add server spans around the creation steps and put stall counts in the report.”
+
+Keep the script-generated report. Start measures both New Task submission and a
+Task's first Start, linked to the prepared Session's focused input and captured
+frame. Complete requires command acceptance and observed row removal in either
+order. Add request-correlated creation stage timings without text. Show retained
+stall counts and attribute overlapping stalls to workflow attempts by launch and
+original input time. Do not count missing native runs as measurements.
+
+Delete: UI actions that launch their Task before capturing original input; no
+new dashboard server, skill, Watchdog, schema migration or fake timing bars.
+
+Remaining: focused builds/checks, native use of the two journeys, regenerate and
+publish report/PR. The shared submission transport now also requests work receipts.
+
+- `swift test --package-path swift --jobs 2 --filter InteractionTests|LaunchJournalTests|WorkModelTests/taskConfirmationDeadline|ServerClientTests/interactionReceivesItsReadResultAndSQLReceiptTogether|ServerProtocolTests` — 42 tests passed; Desktop app built.
+- `uv run pytest python/tests/test_desktop_timings.py -q` — 12 passed; Ruff passed.
+- `cargo clippy --all-targets --jobs 2 -- -D warnings` and `cargo fmt --check` — passed; focused creation receipt/recovery integration test passed.

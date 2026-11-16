@@ -311,3 +311,34 @@ def test_live_repositories_do_not_pool_their_journeys(tmp_path: Path) -> None:
     groups = timings.summarize(tmp_path)["experiences"]["groups"]
     assert {g["repository"] for g in groups} == {"loopflow", "manabot", "kata"}
     assert all(g["samples"] == 1 for g in groups)
+
+
+def test_workflow_stalls_include_queued_time_and_exclude_other_launches(tmp_path: Path) -> None:
+    directory = tmp_path / "interactions"
+    directory.mkdir()
+    journey = _journey("start_task", "start", "candidate", evidence="captured_frame")
+    for event in journey:
+        event["build"]["launch"] = "current"
+        event["at"] = 101 + event["ms"] / 1000
+    # Input was recorded after queueing; terminal elapsed time still starts at 101.
+    journey[0]["at"] = 101.15
+    same = {"event": "main_thread_stall", "build": journey[0]["build"]}
+    _write(
+        directory / "day.ndjson",
+        journey
+        + [
+            {**same, "at": 101.1, "ms": 100},
+            {**same, "at": 101.3, "ms": 250},
+            {**same, "at": 100, "ms": 500},
+            {**same, "build": {**same["build"], "launch": "other"}, "at": 101.1, "ms": 100},
+        ],
+    )
+    report = timings.summarize(tmp_path)
+    group = report["experiences"]["groups"][0]
+    assert group["stall_count"] == 2
+    assert report["experiences"]["stall_threshold_counts"] == {"50": 4, "100": 4, "250": 2}
+    document = timings.render_html(report)
+    headline = document.split('<section class="below-fold">')[0]
+    assert "Main-thread stalls" in headline
+    assert "Complete → row gone" in headline
+    assert "Unmeasured · no completed observations yet" in headline

@@ -17,7 +17,7 @@ enum Perf {
 
     enum Interval: Hashable {
         case coldStart, workspaceCurrent, hierarchyInteraction, taskWorkspaceReady
-        case workflowReady, workFrameApply, retainedWorkspaceAction
+        case workflowReady, workFrameApply, retainedWorkspaceAction, startTask, completeTask
 
         var signpost: StaticString {
             switch self {
@@ -28,11 +28,13 @@ enum Perf {
             case .workflowReady: "workflow_ready"
             case .workFrameApply: "work_frame_apply"
             case .retainedWorkspaceAction: "retained_workspace_action"
+            case .startTask: "start_task"
+            case .completeTask: "complete_task"
             }
         }
         var recordsInteraction: Bool {
             switch self {
-            case .coldStart, .hierarchyInteraction, .taskWorkspaceReady, .retainedWorkspaceAction: true
+            case .coldStart, .hierarchyInteraction, .taskWorkspaceReady, .retainedWorkspaceAction, .startTask, .completeTask: true
             case .workspaceCurrent, .workflowReady, .workFrameApply: false
             }
         }
@@ -42,6 +44,8 @@ enum Perf {
             case .hierarchyInteraction: "find_work"
             case .taskWorkspaceReady: scenario == "session" ? "return_session" : scenario == "task" ? "open_task" : "open_wave"
             case .retainedWorkspaceAction: "workspace_layout"
+            case .startTask: "start_task"
+            case .completeTask: "complete_task"
             default: "diagnostic"
             }
         }
@@ -76,6 +80,8 @@ enum Perf {
         let interaction: Interaction?
         weak var window: NSWindow?
         var stateObserved = false
+        var commandAccepted = false
+        var rowRemoved = false
     }
 
     private struct Key: Hashable {
@@ -166,6 +172,42 @@ enum Perf {
             await current.interaction?.waitForObservation()
             if pending[key]?.instance == current.instance { pending.removeValue(forKey: key) }
         }
+    }
+
+    @MainActor
+    static func retarget(_ interval: Interval, from id: String, to next: String, owner: UUID) {
+        let key = Key(interval: interval, owner: owner)
+        guard pending[key]?.id == id else { return }
+        if let inherited = InteractionTrace.current, pending[key]?.interaction !== inherited { return }
+        pending[key]?.id = next
+    }
+
+    @MainActor
+    static func finish(_ interval: Interval, id: String, owner: UUID, outcome: Interaction.Outcome) {
+        let key = Key(interval: interval, owner: owner)
+        let inherited = InteractionTrace.current.map { pending[key]?.interaction === $0 } ?? false
+        guard let current = pending[key], current.id == id || inherited else { return }
+        pending.removeValue(forKey: key)
+        if !current.stateObserved { signposter.endInterval(interval.signpost, current.state, "finished") }
+        current.interaction?.finish(outcome)
+    }
+
+    /// Only an observed removal of this row can finish Complete → row gone.
+    @MainActor
+    static func rowsChanged(from before: [String], to after: [String], owner: UUID) {
+        guard let current = pending[Key(interval: .completeTask, owner: owner)],
+              before.contains(current.id), !after.contains(current.id) else { return }
+        let key = Key(interval: .completeTask, owner: owner)
+        pending[key]?.rowRemoved = true
+        if current.commandAccepted { stateObserved(.completeTask, id: current.id, owner: owner) }
+    }
+
+    @MainActor
+    static func completionAccepted(id: String, owner: UUID) {
+        let key = Key(interval: .completeTask, owner: owner)
+        guard let current = pending[key], current.id == id else { return }
+        pending[key]?.commandAccepted = true
+        if current.rowRemoved { stateObserved(.completeTask, id: id, owner: owner) }
     }
 
     /// Observed view state is diagnostic until a real frame confirms presentation.

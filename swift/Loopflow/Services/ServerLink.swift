@@ -104,6 +104,7 @@ public actor ServerLink {
         let measured: ServerOperation? = switch operation {
         case .read(let query): .measuredRead(query)
         case .command(let change): .measuredWrite(change)
+        case .submittedCreation(let payload): .measuredSubmission(payload)
         default: nil
         }
         if let measured, let work = InteractionTrace.current?.work, !work.isSealed {

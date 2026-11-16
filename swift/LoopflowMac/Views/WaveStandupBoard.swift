@@ -271,6 +271,9 @@ struct WaveStandupBoard: View {
             WaveBoardList(rows: standup.rows(shown), people: shown != .backlog && standup.showsPeople) { row in
                 withAnimation(FocusSizing.animation) { model.enter(.task(id: row.id), from: view) }
             }
+            .onChange(of: standup.rows(shown).map(\.id)) { before, after in
+                Perf.rowsChanged(from: before, to: after, owner: model.navigation.performanceOwner)
+            }
             .id(shown)
             .accessibilityIdentifier("wave-section-\(shown.rawValue)")
             .onChange(of: shown) { _, section in

@@ -38,7 +38,7 @@ struct TaskWorkflowHeader: View {
                         .foregroundStyle(palette.textSecondary)
                         .accessibilityIdentifier("task-workflow-position")
                     if let action = runAction(workflow) {
-                        Button(action.label) { Task { await model.startTask(nil, task: task) } }
+                        Button(action.label) { model.startTaskFromInput(nil, task: task) }
                             .buttonStyle(WorkOutlineButtonStyle(emphasized: true))
                             .disabled(unavailable != nil)
                             .help(unavailable ?? action.help)
@@ -48,7 +48,7 @@ struct TaskWorkflowHeader: View {
                     // Start the next run at a step: back, ahead, or waiting at an interactive step.
                     Menu("Start from…") {
                         ForEach([TaskGraph.start] + workflow.interactiveSteps.map(\.name), id: \.self) { step in
-                            Button(step) { Task { await model.startTask(nil, from: step, task: task) } }
+                            Button(step) { model.startTaskFromInput(nil, from: step, task: task) }
                                 .accessibilityIdentifier("task-workflow-move-\(step)")
                         }
                     }
@@ -63,10 +63,10 @@ struct TaskWorkflowHeader: View {
                         .foregroundStyle(palette.textSecondary)
                     Menu("Choose workflow") {
                         ForEach(model.workflowCatalog.value ?? [], id: \.name) { choice in
-                            Button(choice.name) { Task { await model.startTask(choice.name, task: task) } }
+                            Button(choice.name) { model.startTaskFromInput(choice.name, task: task) }
                         }
                     }.task { await model.loadGraphCatalog() }
-                    Button("Start") { Task { await model.startTask(nil, task: task) } }
+                    Button("Start") { model.startTaskFromInput(nil, task: task) }
                         .buttonStyle(WorkOutlineButtonStyle())
                         .disabled(unavailable != nil)
                         .help(unavailable ?? "lf task run \(task.task.identifier)")
@@ -83,7 +83,7 @@ struct TaskWorkflowHeader: View {
                         .disabled(acting || readingUnavailable != nil)
                         .accessibilityIdentifier("task-reopen")
                 } else {
-                    Button("Complete") { Task { await model.completeTask(task) } }
+                    Button("Complete") { model.completeTaskFromInput(task) }
                         .disabled(acting || readingUnavailable != nil)
                         .accessibilityIdentifier("task-complete")
                     Button(task.runtime?.owner == nil ? "Claim" : "Unassign") {
@@ -129,7 +129,7 @@ struct TaskWorkflowHeader: View {
                         choices: choices(workflow, shape),
                         unavailable: unavailable, fits: true,
                         hint: { "lf task run \(task.task.identifier) · to \($0.to)" },
-                        choose: { _ in Task { await model.startTask(nil, task: task) } })
+                        choose: { _ in model.startTaskFromInput(nil, task: task) })
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 Text(task.task.description)
@@ -147,7 +147,7 @@ struct TaskWorkflowHeader: View {
                         .textSelection(.enabled)
                         .accessibilityIdentifier("task-completion-pending")
                     Button("Retry completion") {
-                        Task { await model.completeTask(task) }
+                        model.completeTaskFromInput(task)
                     }
                     .buttonStyle(WorkOutlineButtonStyle())
                     .disabled(acting || readingUnavailable != nil)
@@ -594,7 +594,7 @@ struct TaskStartOffer: View {
             unavailable: unavailable, help: "lf task run \(task.task.identifier)",
             accessibilityLabel: "Start \(task.task.identifier)",
             actionIdentifier: "task-start-\(task.id)",
-            perform: { Task { await model.startTask(nil, task: task) } }
+            perform: { model.startTaskFromInput(nil, task: task) }
         ) {
             Text(task.task.description.isEmpty ? "No description recorded." : task.task.description)
                 .lineLimit(8)
@@ -630,7 +630,7 @@ struct TaskActionItems: View {
         if task.isCompleted {
             Button("Reopen Task") { Task { await model.reopenTask(task) } }.disabled(unavailable)
         } else {
-            Button("Complete Task") { Task { await model.completeTask(task) } }.disabled(unavailable)
+            Button("Complete Task") { model.completeTaskFromInput(task) }.disabled(unavailable)
             Button(task.runtime?.owner == nil ? "Claim Task" : "Unassign Task") {
                 Task { await model.assignTask(task, claimed: task.runtime?.owner == nil) }
             }.disabled(unavailable)

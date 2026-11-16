@@ -58,6 +58,26 @@ Images are discarded immediately and never written to the journal. A Task metada
 pane or a read-only Session is not conversation input readiness. Superseding an
 interaction prevents its pending capture from completing the replacement.
 
+Start → typing begins at the Start button's original event (both New Task and an
+existing Task), follows creation/preparation to the correct Session, and waits for
+the focused terminal to accept input and acquire a frame. Complete → row gone
+requires both a successful completion command and an observed removal of that
+Task's row, in either arrival order. Neither server return nor a filter change by
+itself finishes the journey. Failed commands remain failed attempts.
+
+The report shows stall counts at 50/100/250 ms and the longest busy turn across
+the retained journal window. Each workflow also counts stalls overlapping its
+measured attempts, matched by launch/build and original-input-to-outcome time.
+Missing timestamps leave attribution unavailable. These are busy-turn counts,
+not a scroll frame-drop measurement.
+
+Server creation traces contain `task_creation` and timed `creation_step` spans:
+repository resolution, lock, store open, receipt check, Task filing, primary
+Session preparation, Graph launch and receipt admission. They retain the creation
+request ID and elapsed time, with no request text, title or provider output. New
+Task creation uses the interaction observation ID as its creation request ID, so
+the live journey and server stages can be joined directly.
+
 Each record carries the selected repository (Desktop path or phone repository ID)
 so Loopflow, Manabot and Kata stay separate. Session counts describe the cached
 repository reading, not a sampled Machine-wide concurrency estimate.

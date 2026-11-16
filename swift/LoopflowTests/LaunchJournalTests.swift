@@ -7,6 +7,20 @@ import Testing
 @Suite("Launch journal")
 struct LaunchJournalTests {
     @Test @MainActor
+    func startJourneyFollowsOnlyItsPreparedSession() {
+        let owner = UUID()
+        Perf.begin(.startTask, "start_to_typing", id: "task-one", owner: owner)
+        Perf.retarget(.startTask, from: "another-task", to: "wrong-session", owner: owner)
+        Perf.finish(.startTask, id: "wrong-session", owner: owner, outcome: .failed)
+        #expect(Perf.isPending(.startTask, owner: owner))
+        Perf.retarget(.startTask, from: "task-one", to: "session-one", owner: owner)
+        Perf.finish(.startTask, id: "task-one", owner: owner, outcome: .failed)
+        #expect(Perf.isPending(.startTask, owner: owner))
+        Perf.finish(.startTask, id: "session-one", owner: owner, outcome: .cancelled)
+        #expect(!Perf.isPending(.startTask, owner: owner))
+    }
+
+    @Test @MainActor
     func startupIntervalCanBeginBeforeAppKit() {
         #expect(NSApp == nil)
         Perf.begin(.coldStart, "startup", id: "startup-before-appkit")

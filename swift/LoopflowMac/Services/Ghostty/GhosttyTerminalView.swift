@@ -629,7 +629,10 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
               !hasMarkedText(), let window,
               window.firstResponder == nil || window.firstResponder === window || window.firstResponder === self else { return }
         if window.firstResponder !== self { window.makeFirstResponder(self) }
-        if window.firstResponder === self, let surface { ghostty_surface_set_focus(surface, true) }
+        if window.firstResponder === self, let surface {
+            ghostty_surface_set_focus(surface, true)
+            recordInputReadiness()
+        }
     }
 
     /// Last values sent to the current surface. SwiftUI calls updateNSView on every
@@ -1068,14 +1071,19 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         let accepted = super.becomeFirstResponder()
         if accepted, let surface {
             ghostty_surface_set_focus(surface, true)
-            // The Session pane is visible and accepting input.
-            if connectionAcceptsInput, case .session(let id, _) = terminal {
-                Perf.stateObserved(Perf.taskWorkspaceReady, id: id, prepareFrame: { [weak self] in
-                    if let surface = self?.surface { ghostty_surface_draw(surface) }
-                })
-            }
+            recordInputReadiness()
         }
         return accepted
+    }
+
+    private func recordInputReadiness() {
+        guard window?.firstResponder === self, acceptsFirstResponder, connectionAcceptsInput,
+              surface != nil, case .session(let id, _) = terminal else { return }
+        for interval in [Perf.Interval.taskWorkspaceReady, .startTask] {
+            Perf.stateObserved(interval, id: id, prepareFrame: { [weak self] in
+                if let surface = self?.surface { ghostty_surface_draw(surface) }
+            })
+        }
     }
 
     override func resignFirstResponder() -> Bool {

@@ -270,6 +270,9 @@ final class WorkModel {
         }
         for key in warm {
             guard let workspace = registry.retained(key), !workspace.conversationClosed else { continue }
+            if key.kind == .task, let record = records.first(where: { $0.taskPrimary && $0.names(task: key.id) }) {
+                Perf.retarget(.startTask, from: key.id, to: record.id, owner: navigation.performanceOwner)
+            }
             workspace.startPersistence(query: query, repoPath: repoPath)
             if workspace.multiplexer.sessionPane?.sessionId == nil,
                let record = records.first(where: { record in
@@ -549,6 +552,7 @@ final class WorkModel {
                 executionIdentity = navigation.preparedTaskWorktrees[task.id] ?? task.reference.workspace?.identity
             }
         }
+        Perf.retarget(.startTask, from: task.id, to: sessionID, owner: navigation.performanceOwner)
         var records: [SessionRecord] = []
         if let preparation {
             // Preparation already returned this Session's authoritative reading.
@@ -2489,7 +2493,22 @@ final class WorkModel {
     /// after the step the Task waits at, taking up its Wave's or repository's default first.
     /// The outcome settles only the Task and repository that started it; a
     /// refusal is kept on that Task's draft and changes nothing else.
-    func startTask(_ graph: String?, from: String? = nil, task: RoadmapTask) async {
+    func startTaskFromInput(_ graph: String?, from step: String? = nil, task: RoadmapTask) {
+        let owner = navigation.performanceOwner
+        Perf.userAction(.startTask, scenario: "start_to_typing", id: task.id,
+                        repository: repoPath, liveSessions: liveSessionCount, owner: owner) {
+            Perf.acknowledged(.startTask, id: task.id, owner: owner)
+            Task {
+                let accepted = await startTask(graph, from: step, task: task)
+                if !accepted {
+                    Perf.finish(.startTask, id: task.id, owner: owner, outcome: .failed)
+                }
+            }
+        }
+    }
+
+    @discardableResult
+    func startTask(_ graph: String?, from: String? = nil, task: RoadmapTask) async -> Bool {
         await performTaskAction(task.id) {
             try await query.runTask(issue: task.task.identifier, graph: graph, from: from,
                                     cwd: WaveOrigin.resolve(task.task.repo))
@@ -2516,12 +2535,14 @@ final class WorkModel {
     /// request as the first turn; this window then shows that conversation.
     /// Storage failure keeps the sheet; a submitted request hands uncertainty to recovery.
     func createTask(request: String, wave: WaveSnapshot?, graph: String?) async throws {
-        let requestID = UUID().uuidString
+        let requestID = InteractionTrace.current?.id.uuidString ?? UUID().uuidString
         let owner = navigation
         let presentation = owner.paletteGeneration
         let destination = destinationGeneration
         do {
             let receipt = try await query.createTask(request: request, wave: wave?.name, graph: graph, cwd: repoPath, requestID: requestID)
+            Perf.retarget(.startTask, from: "new-task", to: receipt.sessionId ?? receipt.task.id,
+                          owner: owner.performanceOwner)
             CreationRecovery.shared.awaitingPresentation(requestID, of: .task(receipt.task.id))
             if owner.paletteGeneration == presentation {
                 owner.palette = nil
@@ -2531,6 +2552,7 @@ final class WorkModel {
             }
             try? await confirmWorkUpdate()
         } catch is SubmittedCreationError {
+            Perf.finish(.startTask, id: "new-task", owner: owner.performanceOwner, outcome: .unmeasured)
             // The saved submission owns recovery. Keeping a submit button here
             // would turn a lost answer into another creation identity.
             if owner.paletteGeneration == presentation { owner.palette = nil }
@@ -2614,9 +2636,26 @@ final class WorkModel {
         }
     }
 
-    func completeTask(_ task: RoadmapTask) async {
-        await performTaskAction(task.id) {
+    func completeTaskFromInput(_ task: RoadmapTask) {
+        let owner = navigation.performanceOwner
+        Perf.userAction(.completeTask, scenario: "complete_to_row_gone", id: task.id,
+                        repository: repoPath, liveSessions: liveSessionCount, owner: owner) {
+            Perf.acknowledged(.completeTask, id: task.id, owner: owner)
+            Task {
+                let accepted = await completeTask(task)
+                if !accepted {
+                    Perf.finish(.completeTask, id: task.id, owner: owner, outcome: .failed)
+                }
+            }
+        }
+    }
+
+    @discardableResult
+    func completeTask(_ task: RoadmapTask) async -> Bool {
+        let owner = navigation.performanceOwner
+        return await performTaskAction(task.id) {
             try await query.completeTask(issue: task.task.identifier, cwd: WaveOrigin.resolve(task.task.repo))
+            Perf.completionAccepted(id: task.id, owner: owner)
         }
     }
 

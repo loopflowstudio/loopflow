@@ -222,30 +222,46 @@ one frame, with accepted and confirmed times beside it.
 
 ## Slices
 
-All in one PR; deepest first.
+All in one PR; deepest first. Status as of the first implement pass
+(2026-11-16).
 
-1. **Machine** (This slice): after-reply list and deferred `sync_after_save`;
-   `Revisions` map; `revisions` on responses and errors; `read_at` on frames;
-   `request_id`, `command_answers` migration
-   (`uv run python scripts/new_migration.py command_answers`), protocol 7;
-   DTO fixtures `response.json`, `reading.json`, a `request` with
-   `request_id`, an error with `revisions`. Focused tests: a held
-   `sync_after_save` (stand-in planning remote that blocks) does not delay
-   `task.complete`'s answer; a repeated request ID returns the first answer
-   without running twice; a mismatched fingerprint is invalid.
-2. **Shared Swift**: `Reading`, `SavedReadings`, `PendingChanges`, `Notice`,
-   link state, decoders for the new fields. Unit tests on `PendingChanges`
-   with literal readings: hidden until a covering reading, kept through a
-   stale one, removed on refusal, kept on partial failure.
-3. **Desktop**: cut over and delete the list above. Held-reply tests (LOO-906
-   `ClientWorkQueryTests` style): with the write held, the row is gone, the
-   next Task is selected and the Wave count dropped; releasing with a refusal
-   restores the row and posts the Notice.
-4. **Phone**: actions, `TaskFeed` on `Reading`/`SavedReadings`, Notice.
-5. **Journey**: `Perf` finishes Complete → row gone at the patched frame and
-   records accepted and confirmed (covering reading) times;
-   `timings.py` prints all three. Recorded on the local Machine and a remote
-   one.
+1. **Machine — built.** `journal::request::{after_reply, answer_first}`;
+   `sync_after_save` and the claim's `assert_assignee` defer inside a served
+   write. `Revisions` (storage) on `response`/`error` and `read_at` on frames;
+   `request_id` with `command_answers` (`server/answers.rs`, one migration);
+   protocol 7/7, schema and DTO fixtures (`error_written.json`, `task_ship`
+   carries a request ID). Pi extension and hook fixtures send `request_id`.
+2. **Shared Swift — partly built.** Protocol 7 mirror, `Revisions`,
+   `ServerLink.write(_:requestID:)`, `ServerLink.lostLink`, `RegistryQuery.change`,
+   `PendingChanges` (WorkViewPlan states/removal, Session titles), `Notice`,
+   `NoticeCenter`, `NoticeView`, `WorkFrame.readAt`. Not built: `Reading<Value>`
+   replacing `WorkReading`/`TaskListReading`/`MobileTaskReading`;
+   `SavedReadings`; link state (connected/blip/away). Blip is covered only by
+   Desktop's resend loop on a lost link; away (controls disabled after ~10 s,
+   condition Notice) does not exist.
+3. **Desktop — partly built.** Complete, Abandon, Reopen, Claim, Unassign and
+   Move go through `PendingChanges`; next-Task rule in the click; counts read
+   the patched planning rows (removal only); refusals post the Notice; Start,
+   Auto-Ship, Stop Auto-Ship post "requested" (Undo on Auto-Ship); Wave click
+   selects in the click. Deleted: `TaskRunDraft`, `taskRunDrafts`,
+   `performTaskAction`, `abandoningTaskIDs`, the acting/"Updating Task…"
+   gating, `ShipNotice*`, `dashboardError`, **Retry completion**. Left:
+   Session rename in the click (still awaits its answer); planning-row patches
+   for owner/section/Wave (`RoadmapTask` is immutable; only removal applies);
+   the planning-rows bridge in `sidebarTaskRows`; `CreationRecoveryView`;
+   `WavePlanningNotice`/`expandedNotices`; the ~50 inline load-failure sites.
+4. **Phone — partly built.** Swipe Complete, toolbar Start/Auto-Ship/Stop
+   Auto-Ship, Notice overlay, list failures as a Notice with Try again,
+   `read_at` decoded. Left: `TaskFeedTests` (needs a `RemoteMobileClient`
+   stand-in), resend on a lost link, `Reading`/`SavedReadings`.
+5. **Journey — not started.**
+
+Checks run: `cargo test -p loopflow --lib server::` (90 ok),
+`-p loopflow-storage --lib command_answers revisions::` ok,
+`-p loopflow-execution --lib journal::request:: machine::wire::` ok,
+`--test integration dto_fixtures documented_commands::` ok, clippy and fmt
+clean; `swift test --filter 'PendingChangesTests|WorkModelTests|WorkNavigationTests|DesktopHeadlessTests|ServerProtocolTests|DTOFixtureTests|TaskGraphProofTests|WorkObservation|WorkCLISubscriptionTests|DesktopPerformanceTests|DashboardWorkspaceTests'`
+ok; `scripts/test_ios.py` MobileTaskCreationTests + MachinePairingTests ok.
 
 ## Acceptance at gate (headless)
 

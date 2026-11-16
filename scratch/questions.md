@@ -14,3 +14,15 @@
   Machine (and the reverse) with the existing incompatible message.
 - `command_answers` vs `creation_receipts`: two request-ID memories until
   LOO-932 folds creation into the generic one. Flag for LOO-932.
+- `Reading.readAt`: the plan put `readAt` on `Reading<Value>`. Built instead:
+  `PendingChanges.read(subscription, at:)` keeps each live part's `read_at`,
+  so the reading wrapper needs no new field. `Reading` itself is still to do.
+- An answer whose `revisions` is empty (changed nothing, or the CLI transport
+  that cannot say) drops its patch at once rather than at the next reading.
+- `PendingChanges` is per `WorkModel` (one per window), not per Machine; a
+  second window sees the change at the Machine's next reading.
+- Resend: Desktop resends a change under its request ID while
+  `ServerLink.lostLink` holds (disconnected, unanswered, POSIX), backing off to
+  4 s, with no cap. A Machine that never returns keeps the patch until quit.
+- `outcome_unknown` without revisions counts as refused: the row returns and
+  the Notice carries the message; the next reading shows what happened.

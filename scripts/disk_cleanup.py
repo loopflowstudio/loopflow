@@ -991,39 +991,7 @@ class Cleaner:
                     {"step": "sccache", "status": "retained", "reason": "server not running"}
                 )
                 return
-            cargo_config = (
-                Path(self.env.get("CARGO_HOME", str(self.home / ".cargo"))) / "config.toml"
-            )
-            if cargo_config.exists():
-                status = json.loads(
-                    self._command(
-                        [
-                            "uv",
-                            "run",
-                            "--project",
-                            str(Path(__file__).resolve().parents[1]),
-                            "python",
-                            str(Path(__file__).with_name("build_cache.py")),
-                            "status",
-                            "--json",
-                        ],
-                        allowed=(0, 3),
-                    )
-                )
-                stats = status["stats"]
-                if stats is None:
-                    self.maintenance.append(
-                        {
-                            "step": "sccache",
-                            "status": "retained",
-                            "reason": "configured server not running",
-                        }
-                    )
-                    return
-            else:
-                stats = json.loads(
-                    self._command(["sccache", "--show-stats", "--stats-format", "json"])
-                )
+            stats = json.loads(self._command(["sccache", "--show-stats", "--stats-format", "json"]))
             limit = stats.get("max_cache_size")
             if not isinstance(limit, int) or limit > self.cache_caps["sccache_bytes"]:
                 raise RuntimeError("native sccache limit exceeds the configured cap or is unknown")

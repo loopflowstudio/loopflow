@@ -406,3 +406,53 @@ measured cohort results.
 
 `check_architecture.py`: passed. `report.py --test-loop` on the retained dataset:
 rejects the missing three warm cohorts before writing a report.
+
+## Concept review (2026-11-16): next implement direction
+
+What a person does: `install` once, then plain `cargo`; `status` when a build
+feels cold. What they must learn: a root is *listed* (in the file) or *loaded*
+(in the running daemon), and only an idle exit turns one into the other.
+
+**Biggest mismatch: the idle exit the experience rests on has not happened.**
+Read at review time: pinned daemon pid 35015 up 01:38:30, `60 of 64 loaded`,
+`/tmp/loo921-machine-root` exit 3, cache `10.0 GiB of 10.0 GiB`, 21 GiB free
+disk. Four new roots have compiled cold for as long as they have existed. The
+pinned source confirms there is no other path: the client takes basedirs from
+the daemon's handshake (`cache/ipc_storage.rs`), never from the file.
+
+§3's idle rule has therefore fired ("a registered root still unloaded when its
+first Cargo command starts"). Direction, none of it needing a Rust build:
+
+1. Sample the pinned daemon's request gaps the way "Idle sample" did for the
+   stock one (poll `--show-stats` counters; an hour, not five minutes). Keep the
+   raw gaps with the receipts.
+2. `install` writes `SCCACHE_IDLE_TIMEOUT` under `[env]`: the smallest sampled
+   gap that recurs, per §3. The running daemon keeps 600 s until it next exits;
+   say so in the docs rather than stopping it.
+3. `status` reads the timeout from the configured env. Delete
+   `idle_timeout_seconds: 600`, `idle_seconds` and `idle_note` from the JSON and
+   "idle time unmeasured" from the daemon line and the docs: three fields and a
+   phrase that only ever say "unknown".
+4. `status` refreshes the list before it reads. Code returns 3 for "checkout not
+   listed" as well as "listed, not loaded"; the docs table names only the
+   second. After this, exit 3 has the one documented meaning and nobody runs
+   `refresh` by hand. `refresh` stays as the hook's and `dev-lf`'s verb; drop it
+   from the README's command block.
+5. `build_cache.py`'s docstring (its `--help` description) still describes only
+   the refresh; name the three verbs.
+6. The report states the limit its isolated cache hides: the shared cache sat at
+   its 10 GiB cap during this work, so a warm row is what a surviving entry
+   costs, not a promise that the entry survived.
+
+Unchanged: one command to install, own socket, hook registration, no daemon
+stopped by `install`, incremental rule, serial Cargo. The three warm cohorts
+still wait for disk above the 32 GiB reserve.
+
+Open, only if step 1 finds no gap short enough to recur (answer nobody has
+given): may worktree registration stop the pinned daemon? The brief rules out a
+"per-compile shared-daemon restart" and the docs promise "Nothing here stops or
+restarts it"; a stop at `git worktree add` is neither per-compile nor harmless.
+Unverified and decisive: what a stop costs in client-side mode, where the daemon
+stores and the client compiles, so §"Stopping the daemon is not free" (written
+about server-side compiles) may overstate it. Check that in the pinned source
+before asking.

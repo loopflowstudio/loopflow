@@ -44,3 +44,9 @@ Assumptions taken in kickoff; each is reversible by re-running `install`.
   dependency seeds and an instrumentation basename that bypassed native caching.
   Keep incremental off and the idle timeout unchanged until those rows and the
   production root check are complete.
+
+- **Concept review (2026-11-16): idle rule fired; restart stays unasked.**
+  Daemon up 1h38m with 4 of 64 roots unloaded. Taken: sample pinned-daemon gaps
+  and set `SCCACHE_IDLE_TIMEOUT` per the design's own rule. Not taken without an
+  answer: stopping the daemon when a worktree registers. Also unasked: the
+  10 GiB cap, full at review time with 64 roots, against a disk at 98%.

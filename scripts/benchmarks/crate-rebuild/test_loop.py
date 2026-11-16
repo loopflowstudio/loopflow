@@ -13,10 +13,11 @@ import tempfile
 import time
 from pathlib import Path
 
+import tomlkit
 from run import _timing
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from build_cache import configured_cache, inventory_path, refresh  # noqa: E402
+from build_cache import cargo_configuration, configured_cache, inventory_path, refresh  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[3]
 FILTERS = {
@@ -186,7 +187,8 @@ def main() -> None:
             "rustc": _run(["rustc", "-Vv"], ROOT, env),
             "cpus": os.cpu_count(),
             "machine": list(os.uname()),
-            "cargo_config": (Path.home() / ".cargo/config.toml").read_text(),
+            "jobs": tomlkit.loads(cargo_configuration().read_text()).get("build", {}).get("jobs"),
+            "profiles": tomlkit.loads((ROOT / "Cargo.toml").read_text()).get("profile", {}),
             "filters": FILTERS,
             "created": time.time(),
             "trees": {},
@@ -404,7 +406,10 @@ def main() -> None:
                 _run(["git", "worktree", "remove", "--force", str(tree)], ROOT, env)
     finally:
         _run([str(cache), "--stop-server"], ROOT, env)
-        print(f"Receipts and retained experiment state: {output}; {root}", flush=True)
+        print(f"Receipts: {output}; experiment state: {root}", flush=True)
+    if (output / "passed.json").exists():
+        shutil.rmtree(root)
+        refresh(ROOT, inventory_path())
 
 
 if __name__ == "__main__":

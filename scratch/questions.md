@@ -35,3 +35,10 @@ Assumptions taken in kickoff; each is reversible by re-running `install`.
   null with a reason rather than inventing a countdown. Natural-idle probes
   observe process exit. Cargo install must name package `sccache` because its
   Git repository also contains a test binary package.
+
+- **Cleaner cap observation stays separate.** The installed cleaner is a copied,
+  stdlib-only script, run by `/usr/bin/python3`, with neither the repository nor
+  its dev dependencies present. Importing build-cache configuration broke ten
+  entry-point fixtures (`ModuleNotFoundError: tomlkit`); that attempted change
+  was removed. The existing PATH-based cap observation still needs a separate
+  installed-entry-point design; cache activation does not change the 10 GiB cap.

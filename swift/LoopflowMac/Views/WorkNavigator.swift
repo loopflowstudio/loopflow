@@ -102,8 +102,8 @@ struct WorkNavigator: View {
                         VStack(alignment: .leading, spacing: 5) {
                             Text("Open Task is outside this list")
                             Button("Show working tasks") {
-                                Perf.userAction(Perf.hierarchyInteraction, scenario: "filter", id: "outline",
-                                                liveSessions: model.liveSessionCount, owner: model.navigation.performanceOwner) {
+                                Perf.userAction(Perf.hierarchyInteraction, scenario: "sidebar_working", id: "outline:\(WorkNavigation.SidebarFilter.working.rawValue)",
+                                                repository: model.repoPath, liveSessions: model.liveSessionCount, owner: model.navigation.performanceOwner) {
                                     model.navigation.sidebarFilter = .working
                                     model.navigation.sidebarWaveID = nil
                                 }
@@ -141,8 +141,8 @@ struct WorkNavigator: View {
             let source = model.showsSavedWork ? "saved" : "fresh"
             DispatchQueue.main.async { LaunchJournal.home.mark(.usable, ["source": source]) }
         }
-        .onChange(of: model.navigation.sidebarFilter) { _, _ in
-            Perf.stateObserved(Perf.hierarchyInteraction, id: "outline", owner: model.navigation.performanceOwner)
+        .onChange(of: model.navigation.sidebarFilter) { _, filter in
+            Perf.stateObserved(Perf.hierarchyInteraction, id: "outline:\(filter.rawValue)", owner: model.navigation.performanceOwner)
         }
         .onChange(of: model.navigation.sidebarFocusRequested, initial: true) { _, requested in
             guard requested else { return }
@@ -154,7 +154,7 @@ struct WorkNavigator: View {
         .onKeyPress(.return) {
             guard let focusedWork else { return .ignored }
             Perf.userAction(Perf.taskWorkspaceReady, scenario: focusedWork.kind == .task ? "task" : "wave",
-                            id: focusedWork.id, liveSessions: model.liveSessionCount,
+                            id: focusedWork.id, repository: model.repoPath, liveSessions: model.liveSessionCount,
                             owner: model.navigation.performanceOwner) { model.select(focusedWork) }
             return .handled
         }
@@ -202,7 +202,7 @@ struct WorkNavigator: View {
             : model.navigation.sidebarScope == scope ? .containing : .none
         return Button {
             Perf.userAction(Perf.taskWorkspaceReady, scenario: "wave", id: reference?.id ?? "repository",
-                            liveSessions: model.liveSessionCount, owner: model.navigation.performanceOwner) {
+                            repository: model.repoPath, liveSessions: model.liveSessionCount, owner: model.navigation.performanceOwner) {
                 // Keep the input timestamp through the deliberate selection animation.
                 guard !reduceMotion else { model.select(reference); return }
                 withAnimation(.easeOut(duration: 0.12)) { pressedScope = scope }
@@ -285,7 +285,7 @@ struct WorkNavigator: View {
         .background {
             Button {
                 Perf.userAction(Perf.taskWorkspaceReady, scenario: "task", id: id,
-                                liveSessions: model.liveSessionCount, owner: model.navigation.performanceOwner) {
+                                repository: model.repoPath, liveSessions: model.liveSessionCount, owner: model.navigation.performanceOwner) {
                     model.select(.task(id: id))
                 }
             } label: {

@@ -182,7 +182,11 @@ struct WorkSurfaceView: View {
                 // Exact Available links preserve access to secondary conversations
                 // needing input without restoring a Session inventory.
                 ForEach((sessions ?? []).filter { $0.availability == .available }) { session in
-                    Button { onOpenSession(session) } label: {
+                    Button {
+                        Perf.userAction(Perf.taskWorkspaceReady, scenario: "session", id: session.id,
+                                        repository: model.repoPath, liveSessions: model.liveSessionCount,
+                                        owner: model.navigation.performanceOwner) { onOpenSession(session) }
+                    } label: {
                         Label(session.readySummary ?? "Input needed in \(session.title)", systemImage: "bubble.left")
                     }
                     .buttonStyle(WorkPlainButtonStyle())
@@ -211,7 +215,7 @@ struct WorkSurfaceView: View {
                 TaskCommentsView(model: model, task: task)
             }
             .onChange(of: task.id, initial: true) { _, id in
-                Perf.stateObserved(Perf.taskWorkspaceReady, id: id, owner: model.navigation.performanceOwner)
+                Perf.stateObserved(Perf.taskWorkspaceReady, id: id, owner: model.navigation.performanceOwner, inputReady: false)
             }
         } else {
             missingSelection

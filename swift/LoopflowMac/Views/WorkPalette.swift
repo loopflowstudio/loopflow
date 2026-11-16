@@ -144,7 +144,7 @@ extension WorkModel {
         case .openRepository(let path): openRepository?(path, nil)
         case .wave(let id): openPaletteWave(id)
         case .task(let id):
-            Perf.userAction(Perf.taskWorkspaceReady, scenario: "task", id: id, liveSessions: liveSessionCount, owner: navigation.performanceOwner) {
+            Perf.userAction(Perf.taskWorkspaceReady, scenario: "task", id: id, repository: repoPath, liveSessions: liveSessionCount, owner: navigation.performanceOwner) {
                 Perf.$inputTrace.withValue(UUID().uuidString) {
                 Perf.agentInput("task_click", task: id, detail: "source=" + source)
                 Task { await openPaletteTask(id) }
@@ -197,8 +197,8 @@ struct WorkPalette: View {
             Picker("Sidebar shows", selection: Binding(
                 get: { model.navigation.sidebarFilter },
                 set: { value in
-                    Perf.userAction(Perf.hierarchyInteraction, scenario: "filter", id: "outline",
-                                    liveSessions: model.liveSessionCount, owner: model.navigation.performanceOwner) {
+                    Perf.userAction(Perf.hierarchyInteraction, scenario: "sidebar_\(value.rawValue)", id: "outline:\(value.rawValue)",
+                                    repository: model.repoPath, liveSessions: model.liveSessionCount, owner: model.navigation.performanceOwner) {
                         model.navigation.sidebarFilter = value
                     }
                 }

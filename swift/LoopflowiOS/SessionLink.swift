@@ -28,6 +28,7 @@ final class SessionLink {
     private(set) var state: State = .opening
     /// Draws terminal bytes; `true` clears the screen first.
     @ObservationIgnored var render: ((Data, Bool) -> Void)?
+    @ObservationIgnored var prepareFrame: (() -> Void)?
     @ObservationIgnored private let client: RemoteMobileClient
     @ObservationIgnored private var attachment: RemoteAttachment?
     @ObservationIgnored private var events: Task<Void, Never>?
@@ -39,6 +40,8 @@ final class SessionLink {
     /// From asking for the Session to its first screen, and from input to the next output.
     @ObservationIgnored private var opening: Interaction?
     @ObservationIgnored private var echo: Interaction?
+    @ObservationIgnored private var hasSnapshot = false
+    @ObservationIgnored private var openingObserved = false
 
     init(client: RemoteMobileClient, task: WorkViewPlan.Content) {
         self.client = client
@@ -71,7 +74,9 @@ final class SessionLink {
         guard let size else { wantsOpen = true; return }
         close()
         state = .opening
-        self.opening = Perf.begin("return_session", scenario: "remote_attach")
+        hasSnapshot = false
+        openingObserved = false
+        self.opening = Perf.takeOpening(task.work.id) ?? Perf.begin("return_session", scenario: "remote_attach")
         let opening = generation
         do {
             let link = try await client.attach(sessionID: session, size: size)
@@ -164,8 +169,8 @@ final class SessionLink {
         switch event {
         case .snapshot(let data):
             render?(data, true)
-            if let opening { Perf.end(opening) }
-            opening = nil
+            hasSnapshot = true
+            finishOpeningIfUsable()
         case .output(let data):
             // Another device's grid would garble this one; its next snapshot replaces the screen.
             if state != .elsewhere { render?(data, false) }
@@ -179,6 +184,17 @@ final class SessionLink {
             state = .ended
         case .disconnected(let reason): fail(reason)
         case .geometry, .programStatus: break
+        }
+        finishOpeningIfUsable()
+    }
+
+    private func finishOpeningIfUsable() {
+        guard hasSnapshot, state == .live, let opening, !openingObserved else { return }
+        openingObserved = true
+        Perf.end(opening) { [weak self] in self?.prepareFrame?() }
+        Task {
+            await opening.waitForObservation()
+            if self.opening === opening { self.opening = nil }
         }
     }
 

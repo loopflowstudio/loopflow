@@ -660,7 +660,7 @@ final class WorkModel {
     private func placeSession(_ record: SessionRecord, in target: SessionsWorkspace,
                               store: SessionsStore, registry: SessionsWorkspaceRegistry,
                               navigating: Bool = true) -> SessionsWorkspace {
-        Perf.begin(Perf.taskWorkspaceReady, "session", id: record.id, liveSessions: liveSessionCount, owner: navigation.performanceOwner)
+        Perf.begin(Perf.taskWorkspaceReady, "session", id: record.id, repository: repoPath, liveSessions: liveSessionCount, owner: navigation.performanceOwner)
         let workspace: SessionsWorkspace
         if case .shell(let id, let machine) = store.localTerminal(for: record),
            let key = registry.key(containingShell: id, machineId: machine),
@@ -2276,7 +2276,7 @@ final class WorkModel {
             Perf.begin(Perf.workflowReady, "task", id: requested.id, owner: navigation.performanceOwner)
         }
         if let requested, requested.kind != .project {
-            Perf.begin(Perf.taskWorkspaceReady, requested.kind == .task ? "task" : "wave", id: requested.id, liveSessions: liveSessionCount, owner: navigation.performanceOwner)
+            Perf.begin(Perf.taskWorkspaceReady, requested.kind == .task ? "task" : "wave", id: requested.id, repository: repoPath, liveSessions: liveSessionCount, owner: navigation.performanceOwner)
         }
         let selection: WorkReference?
         if let requested, requested.kind == .project {

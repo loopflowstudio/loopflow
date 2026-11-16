@@ -1,1 +1,11 @@
-{"type":"reading","id":"tasks-1","frame":{"answers":3,"unavailable":"repository is unavailable","body":null},"checkpoint":"fixture-checkpoint"}
+{
+  "type": "reading",
+  "id": "tasks-1",
+  "frame": {
+    "answers": 3,
+    "unavailable": "repository is unavailable",
+    "body": null,
+    "work": null
+  },
+  "checkpoint": "fixture-checkpoint"
+}

@@ -14,7 +14,6 @@ enum ServerClient {
     static func read(_ query: ServedRead, location: ServerLocation = .shared,
                      deadline: Duration = readDeadline) async throws -> String {
         try Task.checkCancellation()
-        InteractionTrace.current?.work.servedRead()
         let link = try await links.link(for: location)
         return try await link.request(.read(query), deadline: deadline).printed
     }

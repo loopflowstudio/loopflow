@@ -219,12 +219,10 @@ The supplied review calls for original event time, separate acknowledgment and
 usable presentation, shared Desktop/phone records, revision attribution, longer
 retention, cheap load context, existing-watchdog stalls and attributed work counts.
 
-Remaining: connect actual frame presentation and validated input readiness;
-connect UIKit event capture; attribute shared-server SQL and all interaction work;
-collect app-journal-driven trials on Loopflow, Manabot and Kata; exercise interleaved
-parent/candidate comparisons. The current producer endpoints are app-state only
-and deliberately unmeasured. Screen capture as a presentation source is an open
-choice in this conversation, not an approved default.
+This review found missing screen observations, UIKit event capture and attributed
+server SQL. The completion pass below replaces those app-state-only endpoints.
+Live journal trials on Loopflow, Manabot and Kata and interleaved parent/candidate
+comparisons still need native capture validation.
 
 SQLite profile callbacks have millisecond resolution even though their values use
 nanosecond units (https://sqlite.org/c3ref/c_trace.html). Fast real statements may
@@ -239,3 +237,34 @@ report zero elapsed time. Assert positive callback count, not positive duration.
 Delete: the replaced phone Wait token, queued-callback completion helper, old
 manual input-trial headline importer, and interaction writer in LaunchJournal.
 Keep launch/read diagnostics and independent native input-capture receipts.
+
+
+## Completion pass, 2026-11-16
+
+Jack Heart: “Still incomplete: actual frame presentation, UIKit event capture and
+full work attribution. Those gaps remain marked unmeasured.
+ Lets get this done?”
+
+Mac uses ScreenCaptureKit with an existing grant to observe its visible window;
+its acquisition timestamp is an upper bound. Phone uses ReplayKit video-frame
+host timestamps during an explicit visual-timing session, with microphone/camera
+disabled. Backgrounding stops the session. No images/audio/video are retained.
+The earlier UIKit hierarchy smoke check was only an offscreen-render check and is
+superseded: it does not prove presentation. Terminal readiness prepares a native
+draw before the screen observation. Stale/future/invalid frame clocks never pass.
+
+The Simulator caught SwiftUI ignoring NSPrincipalClass. The explicit UIKit entry
+point passed the native-action clock test; scene delegates feed SwiftUI scene phase.
+Server SQL scopes cover setup and pulls, inherit workers, and assign evaluation IDs
+to deduplicate shared work. Pending/missing receipts remain sqlComplete=false with
+null SQL totals; counters freeze at outcome. Protocol 6 adds read/write receipts,
+while protocol 5 keeps ordinary requests usable without them.
+
+Remaining verification: final focused checks, real native screen capture and live
+journal trials. A new screen-capture grant needs the person's action or confirmation
+under the computer-use tool policy. No merge approval.
+
+- `uv run pytest python/tests/test_desktop_timings.py python/tests/test_bundle_version.py python/tests/test_loopflow_dev.py -q`: 23 passed; Ruff check/format passed.
+- Simulator `InteractionInputTests`: 2 passed (native event clock, disabled capture stays unmeasured). Final ReplayKit lifecycle build passed.
+- Measured server read/write tests: 2 passed, including an actual disposable repository configuration write. Final Clippy/schema checks pending.
+- Final `cargo clippy --all-targets --jobs 2 -- -D warnings`: passed after extending measured writes over request-journal work. `cargo fmt` and `git diff --check`: passed.

@@ -40,39 +40,68 @@ public final class InteractionWork: @unchecked Sendable {
     public struct Counts: Codable, Sendable, Equatable {
         public var cliReads: Int
         public var servedReads: Int
+        public var servedWrites: Int
         public var projections: Int
         public var sqlStatements: UInt64?
         public var sqlRows: UInt64?
+        public var sqlComplete: Bool
     }
 
     private let lock = NSLock()
-    private var counts = Counts(cliReads: 0, servedReads: 0, projections: 0, sqlStatements: nil, sqlRows: nil)
+    private var counts = Counts(cliReads: 0, servedReads: 0, servedWrites: 0, projections: 0, sqlStatements: 0, sqlRows: 0, sqlComplete: true)
     private var missingSQL = false
+    private var sealed = false
+    private var pendingRequests = 0
+    private var receipts = Set<String>()
 
     public init() {}
 
-    public func cliRead() { lock.withLock { counts.cliReads += 1 } }
+    @discardableResult
+    public func cliRead() -> Bool {
+        lock.withLock {
+            guard !sealed else { return false }
+            counts.cliReads += 1
+            pendingRequests += 1
+            return true
+        }
+    }
     public func servedRead() {
         lock.withLock {
+            guard !sealed else { return }
             counts.servedReads += 1
-            // The shared server has no per-request SQL receipt yet.
-            missingSQL = true
-            counts.sqlStatements = nil
-            counts.sqlRows = nil
+            pendingRequests += 1
+        }
+    }
+    public func servedWrite() {
+        lock.withLock {
+            guard !sealed else { return }
+            counts.servedWrites += 1
+            pendingRequests += 1
         }
     }
     public func sqlUnavailable() {
-        lock.withLock { missingSQL = true; counts.sqlStatements = nil; counts.sqlRows = nil }
+        lock.withLock { if !sealed { missingSQL = true; counts.sqlStatements = nil; counts.sqlRows = nil } }
     }
-    public func project() { lock.withLock { counts.projections += 1 } }
-    public func sql(statements: UInt64, rows: UInt64) {
+    public func project() { lock.withLock { if !sealed { counts.projections += 1 } } }
+    public var isSealed: Bool { lock.withLock { sealed } }
+    public func seal() { lock.withLock { sealed = true } }
+    public func requestFinished() { lock.withLock { if !sealed { pendingRequests -= 1 } } }
+    public func sql(statements: UInt64, rows: UInt64, receipt: String? = nil) {
         lock.withLock {
-            guard !missingSQL else { return }
+            guard !missingSQL, !sealed else { return }
+            if let receipt, !receipts.insert(receipt).inserted { return }
             counts.sqlStatements = (counts.sqlStatements ?? 0) + statements
             counts.sqlRows = (counts.sqlRows ?? 0) + rows
         }
     }
-    public var snapshot: Counts { lock.withLock { counts } }
+    public var snapshot: Counts {
+        lock.withLock {
+            var result = counts
+            result.sqlComplete = !missingSQL && pendingRequests == 0
+            if !result.sqlComplete { result.sqlStatements = nil; result.sqlRows = nil }
+            return result
+        }
+    }
 }
 
 /// One input, its local acknowledgment, usable content, and terminal outcome.
@@ -95,9 +124,11 @@ public final class Interaction {
     public struct Context: Codable, Sendable, Equatable {
         public let thermalState: Int
         public let liveSessions: Int?
-        public init(thermalState: Int, liveSessions: Int?) {
+        public let repository: String?
+        public init(thermalState: Int, liveSessions: Int?, repository: String? = nil) {
             self.thermalState = thermalState
             self.liveSessions = liveSessions
+            self.repository = repository
         }
     }
     public struct Record: Encodable, Sendable {
@@ -127,6 +158,7 @@ public final class Interaction {
     private var usableAt: TimeInterval?
     private var acknowledgmentPresented = false
     private var usabilityPresented = false
+    private var visualObservation: Task<Void, Never>?
 
     public init(name: String, scenario: String, input: InteractionInput?, context: Context,
                 sink: @escaping @Sendable (Record) -> Void) {
@@ -155,10 +187,32 @@ public final class Interaction {
     }
 
     public var isFinished: Bool { terminal }
+    public func waitForObservation() async { await visualObservation?.value }
+
+    /// Serialize the visual oracles so a fast usable result cannot overtake
+    /// acknowledgment. Failed capture never upgrades a model observation.
+    public func observe(_ phase: Phase, capture: @escaping @MainActor () async -> TimeInterval?) {
+        guard !terminal, phase == .acknowledged || phase == .usable else { return }
+        guard let input, input.source != .processStart else {
+            if phase == .usable { finish(.unmeasured) }
+            return
+        }
+        let previous = visualObservation
+        visualObservation = Task { [self] in
+            await previous?.value
+            guard !terminal else { return }
+            if let uptime = await capture(), !terminal {
+                if phase == .acknowledged { acknowledged(at: uptime, evidence: .capturedFrame) }
+                else { usable(at: uptime, evidence: .capturedFrame) }
+            }
+            if phase == .usable { finish(.completed) }
+        }
+    }
 
     public func finish(_ requested: Outcome) {
         guard !terminal else { return }
         terminal = true
+        work.seal()
         let ordered: Bool
         if let acknowledgedAt, let usableAt { ordered = acknowledgedAt <= usableAt }
         else { ordered = false }

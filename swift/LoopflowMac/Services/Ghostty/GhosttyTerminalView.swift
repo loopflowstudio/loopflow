@@ -1069,7 +1069,11 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         if accepted, let surface {
             ghostty_surface_set_focus(surface, true)
             // The Session pane is visible and accepting input.
-            if case .session(let id, _) = terminal { Perf.stateObserved(Perf.taskWorkspaceReady, id: id) }
+            if connectionAcceptsInput, case .session(let id, _) = terminal {
+                Perf.stateObserved(Perf.taskWorkspaceReady, id: id, prepareFrame: { [weak self] in
+                    if let surface = self?.surface { ghostty_surface_draw(surface) }
+                })
+            }
         }
         return accepted
     }

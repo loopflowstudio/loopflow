@@ -46,9 +46,33 @@ The headline table separates acknowledgment and usable-result medians/P95 for ea
 experience, scenario and revision. P95 needs twenty completed samples. Failures,
 superseded, cancelled, unmeasured and unfinished attempts remain counts. Unknown
 revisions stay per-launch. App-state and commit callbacks cannot supply frame
-latencies. **The current call sites record app state only; no ordinary-use journey
-yet proves presentation or validated input readiness.** Mobile also lacks raw
-UIKit input-event capture. Those observations stay unmeasured.
+latencies. Desktop uses ScreenCaptureKit to acquire its visible window; phone uses
+ReplayKit's next composited video frame after readiness. Desktop capture supplies
+a **visual-observation upper bound**, including native acquisition cost; phone
+uses the frame's host-clock timestamp. Neither claims the first compositor
+presentation timestamp. The table keeps these observations separate from
+presentation-callback observations.
+Images are discarded immediately and never written to the journal. A Task metadata
+pane or a read-only Session is not conversation input readiness. Superseding an
+interaction prevents its pending capture from completing the replacement.
+
+Each record carries the selected repository (Desktop path or phone repository ID)
+so Loopflow, Manabot and Kata stay separate. Session counts describe the cached
+repository reading, not a sampled Machine-wide concurrency estimate.
+
+On Desktop, **Help → Enable Visual Timing…** requests macOS screen-capture access.
+Without an existing grant, a visible window, or a complete capture, the attempt
+stays unmeasured. The app never requests access from an ordinary interaction.
+Programmatic changes have no synthetic input and do not trigger capture.
+On phone, **Machine → Start visual timing** starts an explicit ReplayKit capture
+session with camera and microphone disabled. Stop it from the same menu; entering
+the background also stops it. Only video timestamps are consumed. Stale frames,
+failed capture and disabled sessions stay unmeasured; no screen content is saved.
+Terminal readiness prepares a terminal draw before observing the next screen frame.
+
+Phone's UIKit application entry point scopes the original UIEvent through native
+dispatch. Explicit filter/navigation handoffs retain it across later model Tasks;
+scene activation still reaches SwiftUI's scene-phase environment.
 
 Desktop actions capture the AppKit event timestamp before asynchronous work, so
 queued main-thread time is included. Programmatic work has no synthetic input.
@@ -59,10 +83,19 @@ and cannot establish a reactivity baseline. The independent
 [agent-input recorder](agent-input.md) retains its diagnostic receipts; its wall
 intervals do not enter the headline table.
 
-Work receipts count attributed CLI reads, served reads and projections. A traced
-CLI process contributes statement/row totals; missing receipts and shared-server
-SQL attribution remain unavailable, never zero. These counts are diagnostic until
-all work for an interaction is attributed; they are not yet a complete CI gate.
+Work receipts count attributed CLI reads, served reads/writes and projections, with SQL
+statement/row totals from one-off reads/writes and subscription setup/pulls. SQL scopes
+follow inherited workers and reused server connections. Each evaluation has an ID,
+so an interaction counts shared production once. No SQL text or row values leave
+the server. Ordinary CLI invocations keep request tracing off.
+
+`sqlComplete` is false while a requested receipt is pending or unavailable; its
+SQL totals stay null. These attempts cannot supply a complete work-count gate.
+Counters freeze at the terminal observation. Server protocol 6 carries receipts;
+protocol 5 still serves the app, with SQL attribution marked unavailable.
+
+App bundles stamp their source revision on Desktop, phone and development builds.
+Dirty or unknown sources remain per-launch and cannot prove a before/after change.
 
 The existing DesktopVitals run-loop observer records busy main-thread turns of at
 least 50 ms through the same daily journal. Its existing hang watchdog still logs

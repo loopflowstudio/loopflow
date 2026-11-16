@@ -22,7 +22,16 @@ final class TaskFeed {
     private(set) var loaded = false
     private(set) var error: String?
     private(set) var waves: [Wave] = []
-    var filter = TaskList.started
+    var filter = TaskList.started {
+        didSet {
+            guard filter != oldValue else { return }
+            requested?.finish(.superseded)
+            requested = Perf.begin("find_work", scenario: filter.rawValue)
+            if let requested { Perf.acknowledged(requested) }
+        }
+    }
+    private(set) var reading = 0
+    @ObservationIgnored private var requested: Interaction?
     /// The Wave whose Tasks are listed; nil lists every Wave's.
     var wave: String?
     @ObservationIgnored private var waiting: Interaction?
@@ -36,7 +45,8 @@ final class TaskFeed {
     func start() async {
         stop()
         let current = generation
-        waiting = Perf.begin("find_work", scenario: filter.rawValue)
+        waiting = requested ?? Perf.begin("find_work", scenario: filter.rawValue)
+        requested = nil
         // The last reading under each filter, shown at once while the Machine answers.
         // It is kept as wire bytes and read by the live decoder, so a file an older
         // app wrote fails to load instead of showing a stale shape.
@@ -53,9 +63,11 @@ final class TaskFeed {
             repositories = []
             loaded = false
         }
-        let observation = client.observeTasks(expression: filter.expression(wave: wave))
+        let observation = InteractionTrace.$current.withValue(waiting) {
+            client.observeTasks(expression: filter.expression(wave: wave))
+        }
         self.observation = observation
-        reader = Task { [weak self] in
+        reader = InteractionTrace.$current.withValue(waiting) { Task { [weak self] in
             do {
                 for try await update in observation.readings {
                     guard let self, current == self.generation else { return }
@@ -66,8 +78,7 @@ final class TaskFeed {
                         self.loaded = true
                         self.error = nil
                         Perf.launch("tasks_current")
-                        if let waiting = self.waiting { Perf.end(waiting) }
-                        self.waiting = nil
+                        self.reading += 1
                         if changed { self.save(update.wire) }
                         if self.waves.isEmpty, let found = try? await self.client.waves() { self.waves = found }
                     case .failure(let error):
@@ -83,6 +94,17 @@ final class TaskFeed {
                 self.stop()
                 self.error = machineConnectionMessage(error)
             }
+        } }
+    }
+
+    func project() { (requested ?? waiting)?.work.project() }
+
+    func observed() {
+        guard let waiting else { return }
+        Perf.end(waiting)
+        Task {
+            await waiting.waitForObservation()
+            if self.waiting === waiting { self.waiting = nil }
         }
     }
 
@@ -136,6 +158,8 @@ struct TaskListView: View {
     @State private var creation: MobileTaskCreation?
     @State private var created: WorkViewPlan.Content?
     @State private var showingCreated = false
+    @State private var captureError: String?
+    @State private var selectedTask: WorkViewPlan.Content?
     /// The repository shown, by durable ID; empty shows every repository.
     @AppStorage("repository") private var repository = ""
     @Environment(\.colorScheme) private var colorScheme
@@ -151,6 +175,7 @@ struct TaskListView: View {
 
     /// Repositories with matching Tasks, each split into Tasks with a conversation and those without.
     private var sections: [(repository: String, open: [WorkViewPlan.Content], quiet: [WorkViewPlan.Content])] {
+        feed.project()
         let term = search.trimmingCharacters(in: .whitespacesAndNewlines)
         return feed.repositories.compactMap { entry in
             guard shown.isEmpty || entry.repository == shown else { return nil }
@@ -241,6 +266,10 @@ struct TaskListView: View {
                 }
             }
             .searchable(text: $search, prompt: "Search Tasks")
+            .onChange(of: feed.reading) { _, _ in feed.observed() }
+            .navigationDestination(isPresented: Binding(get: { selectedTask != nil }, set: { if !$0 { selectedTask = nil } })) {
+                if let selectedTask { workspace(selectedTask) }
+            }
             .navigationDestination(isPresented: $showingCreated) {
                 if let created { workspace(created) }
             }
@@ -280,6 +309,14 @@ struct TaskListView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
                         Text(client.savedMachine.endpoint.host ?? "Machine")
+                        Button(InteractionFrame.isEnabled ? "Stop visual timing" : "Start visual timing…") {
+                            Task {
+                                do {
+                                    if InteractionFrame.isEnabled { await InteractionFrame.disableCapture() }
+                                    else { try await InteractionFrame.enableCapture() }
+                                } catch { captureError = error.localizedDescription }
+                            }
+                        }
                         Button("Change address", action: onChangeAddress)
                         Button("Forget Machine", role: .destructive) {
                             feed.forget()
@@ -290,6 +327,9 @@ struct TaskListView: View {
                 }
             }
         }
+        .alert("Visual timing unavailable", isPresented: Binding(get: { captureError != nil }, set: { if !$0 { captureError = nil } })) {
+            Button("OK") { captureError = nil }
+        } message: { Text(captureError ?? "") }
         .tint(theme.palette.accentInk)
         .environment(\.palette, theme.palette)
         .onChange(of: repository) { feed.wave = nil }
@@ -305,7 +345,13 @@ struct TaskListView: View {
     }
 
     private func link(_ task: WorkViewPlan.Content) -> some View {
-        NavigationLink { workspace(task) } label: { row(task) }
+        Button {
+            if task.primarySession != nil { Perf.opening(task.work.id) }
+            selectedTask = task
+        } label: {
+            HStack { row(task); Spacer(); Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary) }
+        }
+            .buttonStyle(.plain)
             .listRowInsets(EdgeInsets(top: 12, leading: 20, bottom: 12, trailing: 16))
             .listRowBackground(theme.palette.background)
     }

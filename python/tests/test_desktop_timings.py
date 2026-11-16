@@ -183,16 +183,18 @@ def test_all_experiences_come_from_journal_and_revisions_do_not_pool(tmp_path: P
     _write(journal / "2026-11-16.ndjson", events)
     report = timings.summarize(tmp_path)
     groups = report["experiences"]["groups"]
-    assert len(groups) == len(timings.EXPERIENCES) + 1
+    assert len(groups) == len(timings.EXPERIENCES) + 2
     parent = next(
         g for g in groups if g["name"] == "open_task" and g["build"]["revision"] == "parent"
     )
     assert parent["samples"] == 2
-    assert len(parent["attempts"]) == 4
+    assert len(parent["attempts"]) == 3
     assert parent["acknowledged"]["median_ms"] == 50
     assert parent["usable"]["median_ms"] == 200
     assert parent["usable"]["p95_ms"] is None
-    assert parent["outcomes"] == {"completed": 2, "unmeasured": 1, "unfinished": 1}
+    assert parent["outcomes"] == {"completed": 2, "unfinished": 1}
+    unverified = next(g for g in groups if g["measurement"] == "unverified")
+    assert unverified["outcomes"] == {"unmeasured": 1}
     assert parent["attempts"][0]["work"]["sqlRows"] == 25
     document = timings.render_html(report)
     assert "Ack median ms" in document
@@ -268,3 +270,44 @@ def test_unknown_revision_cannot_pool_launches_or_prove_a_comparison(tmp_path: P
     groups = timings.summarize(tmp_path)["experiences"]["groups"]
     assert len(groups) == 2
     assert all(group["samples"] == 0 for group in groups)
+
+
+def test_capture_bounds_stay_separate_from_presentation_callbacks(tmp_path: Path) -> None:
+    journal = tmp_path / "interactions"
+    journal.mkdir()
+    _write(
+        journal / "2026-11-16.ndjson",
+        _journey("find_work", "presented", "candidate")
+        + _journey("find_work", "captured", "candidate", evidence="captured_frame"),
+    )
+    groups = timings.summarize(tmp_path)["experiences"]["groups"]
+    assert {g["measurement"] for g in groups} == {"capture_upper_bound", "presented_frame"}
+    assert all(g["samples"] == 1 for g in groups)
+
+
+def test_dirty_builds_do_not_pool_between_launches(tmp_path: Path) -> None:
+    journal = tmp_path / "interactions"
+    journal.mkdir()
+    _write(
+        journal / "2026-11-16.ndjson",
+        _journey("find_work", "one", "candidate-dirty")
+        + _journey("find_work", "two", "candidate-dirty"),
+    )
+    groups = timings.summarize(tmp_path)["experiences"]["groups"]
+    assert len(groups) == 2
+    assert all(not g["comparable_build"] for g in groups)
+
+
+def test_live_repositories_do_not_pool_their_journeys(tmp_path: Path) -> None:
+    journal = tmp_path / "interactions"
+    journal.mkdir()
+    rows = []
+    for repository in ("loopflow", "manabot", "kata"):
+        journey = _journey("find_work", repository, "candidate", evidence="captured_frame")
+        for row in journey:
+            row["context"] = {**row["context"], "repository": repository}
+        rows += journey
+    _write(journal / "2026-11-16.ndjson", rows)
+    groups = timings.summarize(tmp_path)["experiences"]["groups"]
+    assert {g["repository"] for g in groups} == {"loopflow", "manabot", "kata"}
+    assert all(g["samples"] == 1 for g in groups)

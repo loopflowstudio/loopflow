@@ -28,6 +28,15 @@ targets:
       - sdk: CoreText.framework
       - sdk: IOSurface.framework
       - sdk: libc++.tbd
+    postBuildScripts:
+      - name: Stamp app build identity
+        script: |
+          set -eu
+          export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+          uv run --project "$SRCROOT/.." python "$SRCROOT/../scripts/bundle_version.py" "$TARGET_BUILD_DIR/$INFOPLIST_PATH"
+        inputFiles:
+          - "$(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)"
+        basedOnDependencyAnalysis: false
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.loopflow.ios.dev

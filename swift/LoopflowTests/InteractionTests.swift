@@ -12,6 +12,54 @@ private final class InteractionRecords: @unchecked Sendable {
 @Suite("Interaction journeys")
 struct InteractionTests {
     @Test @MainActor
+    func screenFrameRequiresFreshFiniteHostTime() {
+        #expect(ScreenFrames.observedTime(presented: 11, acquired: 12, after: 10) == 11)
+        #expect(ScreenFrames.observedTime(presented: 9, acquired: 12, after: 10) == nil)
+        #expect(ScreenFrames.observedTime(presented: 13, acquired: 12, after: 10) == nil)
+        #expect(ScreenFrames.observedTime(presented: .nan, acquired: 12, after: 10) == nil)
+        #expect(ScreenFrames.observedTime(presented: 11, acquired: .infinity, after: 10) == nil)
+    }
+
+    @Test func sharedEvaluationsCountOnceAndPendingReceiptsAreNotZero() {
+        let work = InteractionWork()
+        work.servedRead()
+        #expect(!work.snapshot.sqlComplete)
+        #expect(work.snapshot.sqlStatements == nil)
+        work.sql(statements: 12, rows: 25, receipt: "shared-evaluation")
+        work.sql(statements: 12, rows: 25, receipt: "shared-evaluation")
+        work.requestFinished()
+        #expect(work.snapshot.sqlComplete)
+        #expect(work.snapshot.sqlStatements == 12)
+        #expect(work.snapshot.sqlRows == 25)
+    }
+
+    @Test @MainActor
+    func visualObservationsSerializeAndFreezeWorkAtTheOutcome() async {
+        let records = InteractionRecords()
+        let interaction = Interaction(name: "find_work", scenario: "filter",
+            input: InteractionInput(uptime: 100, source: .uiKitEvent),
+            context: Interaction.Context(thermalState: 0, liveSessions: nil), sink: records.append)
+        interaction.observe(.acknowledged) { 100.1 }
+        interaction.observe(.usable) { 100.2 }
+        await interaction.waitForObservation()
+        #expect(records.values.last?.outcome == .completed)
+        #expect(records.values.map(\.phase) == [.input, .acknowledged, .usable, .outcome])
+        interaction.work.servedRead()
+        #expect(interaction.work.snapshot.servedReads == 0)
+    }
+
+    @Test @MainActor
+    func failedCaptureCannotPromoteStateToACompletedJourney() async {
+        let records = InteractionRecords()
+        let interaction = Interaction(name: "find_work", scenario: "filter",
+            input: InteractionInput(uptime: 100, source: .appKitEvent),
+            context: Interaction.Context(thermalState: 0, liveSessions: nil), sink: records.append)
+        interaction.observe(.acknowledged) { nil }
+        interaction.observe(.usable) { 100.2 }
+        await interaction.waitForObservation()
+        #expect(records.values.last?.outcome == .unmeasured)
+    }
+    @Test @MainActor
     func eventClockIncludesQueueingAndSeparatesAcknowledgmentFromUsability() {
         let records = InteractionRecords()
         let interaction = Interaction(name: "open_task", scenario: "cached",
@@ -21,6 +69,7 @@ struct InteractionTests {
         interaction.work.cliRead()
         interaction.work.project()
         interaction.work.sql(statements: 12, rows: 25)
+        interaction.work.requestFinished()
         interaction.usable(at: 101.2, evidence: .presentedFrame)
         interaction.finish(.completed)
         let events = records.values
@@ -46,7 +95,8 @@ struct InteractionTests {
         interaction.finish(.failed)
         #expect(records.values.last?.outcome == .unmeasured)
         #expect(records.values.count == 4)
-        #expect(records.values.last?.work.sqlStatements == nil)
+        #expect(records.values.last?.work.sqlStatements == 0)
+        #expect(records.values.last?.work.sqlComplete == true)
     }
 
     @Test @MainActor

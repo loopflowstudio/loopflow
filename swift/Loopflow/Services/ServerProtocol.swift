@@ -1,10 +1,10 @@
 import Foundation
 
-/// Revision 5 of the server protocol: one connection per client, a negotiated
+/// Revision 6 of the server protocol: one connection per client, a negotiated
 /// revision, requests multiplexed by id. Mirrors `rust/loopflow/src/server/wire.rs`;
 /// carriers add no Work authority.
 public enum ServerProtocol {
-    public static let revision = 5
+    public static let revision = 6
     public static let minRevision = 5
     /// The largest control-connection message; larger ones travel by ticket.
     public static let maxMessage = 1024 * 1024
@@ -151,6 +151,8 @@ public struct MachineMobileStatus: Codable, Sendable {
 /// A read or write encodes its own `kind` and fields.
 public enum ServerOperation: Encodable, Sendable {
     case read(ServedRead)
+    case measuredRead(ServedRead)
+    case measuredWrite(ServedWrite)
     case command(ServedWrite)
     case config(ConfigOperation)
     /// The unchanged payload of a submitted creation; never arbitrary command replay.
@@ -173,11 +175,19 @@ public enum ServerOperation: Encodable, Sendable {
 
     private enum Keys: String, CodingKey {
         case kind, bytes, session, request, argv, cwd, env, rows, cols, placement, terminalID = "terminal_id"
-        case moment, delivery, adapter, callback, gap, printed, inbox
+        case moment, delivery, adapter, callback, gap, printed, inbox, query, change
     }
     public func encode(to encoder: Encoder) throws {
         switch self {
         case .read(let query): try query.encode(to: encoder)
+        case .measuredRead(let query):
+            var box = encoder.container(keyedBy: Keys.self)
+            try box.encode("performance.read", forKey: .kind)
+            try box.encode(query, forKey: .query)
+        case .measuredWrite(let change):
+            var box = encoder.container(keyedBy: Keys.self)
+            try box.encode("performance.write", forKey: .kind)
+            try box.encode(change, forKey: .change)
         case .command(let change): try change.encode(to: encoder)
         case .requestUpload(let bytes):
             var box = encoder.container(keyedBy: Keys.self)

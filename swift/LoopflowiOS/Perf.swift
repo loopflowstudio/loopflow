@@ -1,9 +1,10 @@
 import Foundation
 import Loopflow
 import os
+import UIKit
 
-/// Shared daily interaction journal. Mobile state observations stay unmeasured
-/// until event timestamps and presented-frame observations are connected.
+/// Shared daily interaction journal, with original UIKit events and native
+/// visual-observation upper bounds. Missing capture never becomes a success.
 @MainActor
 enum Perf {
     private static let signposter = PerfClock.signposter
@@ -17,15 +18,39 @@ enum Perf {
                                   identity: identity)
     }()
 
+    private static var openings: [String: Interaction] = [:]
+
+    static func opening(_ task: String) {
+        openings.removeValue(forKey: task)?.finish(.superseded)
+        let interaction = begin("return_session", scenario: "remote_attach")
+        openings[task] = interaction
+        acknowledged(interaction)
+    }
+
+    static func takeOpening(_ task: String) -> Interaction? { openings.removeValue(forKey: task) }
+
     static func begin(_ name: StaticString, scenario: String) -> Interaction {
         Interaction(name: "\(name)", scenario: scenario, input: InteractionTrace.input,
             context: Interaction.Context(thermalState: ProcessInfo.processInfo.thermalState.rawValue,
-                                         liveSessions: nil), sink: journal.append)
+                                         liveSessions: nil, repository: UserDefaults.standard.string(forKey: "repository").flatMap { $0.isEmpty ? nil : $0 } ?? "all-repositories"), sink: journal.append)
     }
 
-    static func end(_ interaction: Interaction) {
+    private static var window: UIWindow? {
+        UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+            .filter { $0.activationState == .foregroundActive }
+            .flatMap(\.windows).first { $0.isKeyWindow }
+    }
+
+    static func acknowledged(_ interaction: Interaction) {
+        let window = window
+        interaction.acknowledged(at: ProcessInfo.processInfo.systemUptime, evidence: .appState)
+        interaction.observe(.acknowledged) { [weak window] in await InteractionFrame.capture(window: window) }
+    }
+
+    static func end(_ interaction: Interaction, prepareFrame: @escaping @MainActor () -> Void = {}) {
         interaction.usable(at: ProcessInfo.processInfo.systemUptime, evidence: .appState)
-        interaction.finish(.unmeasured)
+        let window = window
+        interaction.observe(.usable) { [weak window] in await InteractionFrame.capture(window: window, prepare: prepareFrame) }
     }
 
     /// Time since the kernel started this process, recorded once per mark.

@@ -136,6 +136,7 @@ struct LoopflowApp: App {
                     .keyboardShortcut("o", modifiers: [.command, .shift])
             }
             CommandGroup(replacing: .help) {
+                Button("Enable Visual Timing…") { InteractionFrame.requestAccess() }
                 Button("Keyboard Shortcuts") { openWindow(id: "keyboard-shortcuts") }
                 Button("Snapshot for Review") {
                     snapshotCurrentWindow()

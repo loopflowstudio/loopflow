@@ -5,8 +5,8 @@ uv run python scripts/benchmarks/desktop-performance/timings.py
 uv run python scripts/benchmarks/desktop-performance/timings.py --json
 uv run python scripts/benchmarks/desktop-performance/timings.py --home /path/to/home
 
-Reads `<Machine>/desktop-cache/timings/{launches,reads}.ndjson`, which the app
-appends to while it runs. Launch milliseconds count from kernel process start.
+Reads daily interaction journals and launch/read diagnostics under
+`<Machine>/desktop-cache/timings/`. Launch diagnostics count from kernel process start.
 """
 
 from __future__ import annotations
@@ -195,16 +195,40 @@ def _journal(directory: Path) -> dict:
     groups = {}
     for observation, attempt in attempts.items():
         revision = attempt["build"].get("revision")
-        known_revision = bool(revision and revision != "unknown")
+        known_revision = bool(
+            revision and revision != "unknown" and not revision.endswith("-dirty")
+        )
         build = {k: v for k, v in attempt["build"].items() if k != "launch" or not known_revision}
         # Unknown builds remain per-launch; never pool before/after by app version.
-        key = (attempt["name"], attempt["scenario"], json.dumps(build, sort_keys=True))
+        kinds = {
+            e["evidence"]
+            for e in attempt["events"]
+            if e["phase"] in ("acknowledged", "usable")
+            and e["evidence"] in ("captured_frame", "presented_frame")
+        }
+        method = (
+            "capture_upper_bound"
+            if "captured_frame" in kinds
+            else "presented_frame"
+            if kinds
+            else "unverified"
+        )
+        key = (
+            attempt["name"],
+            attempt["scenario"],
+            json.dumps(build, sort_keys=True),
+            method,
+            attempt["context"].get("repository"),
+        )
         group = groups.setdefault(
             key,
             {
                 "name": attempt["name"],
                 "scenario": attempt["scenario"],
                 "build": build,
+                "measurement": method,
+                "comparable_build": known_revision,
+                "repository": attempt["context"].get("repository"),
                 "attempts": [],
             },
         )
@@ -439,7 +463,9 @@ def render_html(report: dict) -> str:
             experiences.append(
                 f"<tr><td>{heading}</td><td>{escape(build.get('platform'))}<br>"
                 f"{escape(build.get('app'))} @ {escape(build.get('revision'))}<br>"
-                f"{escape(group['scenario'])}<details><summary>Outcomes, work and context</summary>"
+                f"{escape(group['repository'] or 'repository not recorded')}<br>"
+                f"{escape(group['scenario'])}<br>{escape(group['measurement'])}"
+                "<details><summary>Outcomes, work and context</summary>"
                 f"<pre>{details}</pre></details></td><td>{group['samples']} / "
                 f"{len(group['attempts'])}<br>{escape(outcomes)}</td>"
                 + "".join(f'<td class="num">{v}</td>' for v in numbers)
@@ -514,7 +540,8 @@ summary {{cursor:pointer; font-weight:600}} [hidden] {{display:none}}
 <h1>The waits in everyday use</h1>
 <p>From your action to a usable result · milliseconds, lower is faster</p>
 <p class="note">These times come from the app journal, starting at the input event’s timestamp.
-Acknowledgment and usability need frame evidence.
+Acknowledgment and usability need frame evidence. Native capture observations are upper bounds
+including image acquisition cost; they are grouped separately from presentation callbacks.
 State callbacks and unfinished waits do not enter percentiles.
 P95 needs 20 completed samples per build and case. Missing measurements remain unmeasured.</p>
 <div class="table"><table><thead><tr><th>Experience · start → finish</th><th>Case</th>

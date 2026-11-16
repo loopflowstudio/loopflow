@@ -6,6 +6,7 @@
 // pending the cost is one dictionary lookup and one os_signpost call.
 // Interval definitions: scripts/benchmarks/desktop-performance/README.md.
 
+import AppKit
 import Darwin
 import Foundation
 import Loopflow
@@ -69,9 +70,12 @@ enum Perf {
     }
 
     private struct Pending {
+        let instance = UUID()
         let state: OSSignpostIntervalState
-        let id: String
+        var id: String
         let interaction: Interaction?
+        weak var window: NSWindow?
+        var stateObserved = false
     }
 
     private struct Key: Hashable {
@@ -96,26 +100,27 @@ enum Perf {
     /// Capture before launching Tasks so their model work retains the initiating event.
     @MainActor
     static func userAction<Result>(_ interval: Interval, scenario: String, id: String,
-                                   liveSessions: Int?, owner: UUID, _ action: () -> Result) -> Result {
+                                   repository: String? = nil, liveSessions: Int?, owner: UUID, _ action: () -> Result) -> Result {
         InteractionTrace.$input.withValue(InteractionInput.current) {
-            begin(interval, scenario, id: id, liveSessions: liveSessions, owner: owner)
+            begin(interval, scenario, id: id, repository: repository, liveSessions: liveSessions, owner: owner)
             return InteractionTrace.$current.withValue(pending[Key(interval: interval, owner: owner)]?.interaction, operation: action)
         }
     }
 
     @MainActor
     static func begin(_ interval: Interval, _ scenario: String, id: String, detail: String = "",
-                      liveSessions: Int? = nil, owner: UUID? = nil) {
+                      repository: String? = nil, liveSessions: Int? = nil, owner: UUID? = nil) {
         let key = Key(interval: interval, owner: owner)
         if let inherited = InteractionTrace.current {
             if inherited.isFinished { return }
-            if let existing = pending[key], existing.interaction === inherited {
-                pending[key] = Pending(state: existing.state, id: id, interaction: inherited)
+            if var existing = pending[key], existing.interaction === inherited {
+                existing.id = id
+                pending[key] = existing
                 return
             }
         }
         if let stale = pending.removeValue(forKey: key) {
-            signposter.endInterval(interval.signpost, stale.state, "superseded")
+            if !stale.stateObserved { signposter.endInterval(interval.signpost, stale.state, "superseded") }
             stale.interaction?.finish(.superseded)
         }
         let state = signposter.beginInterval(interval.signpost, id: signposter.makeSignpostID(),
@@ -128,36 +133,50 @@ enum Perf {
             } else { input = InteractionTrace.input }
             interaction = Interaction(name: interval.experience(scenario), scenario: scenario, input: input,
                 context: Interaction.Context(thermalState: ProcessInfo.processInfo.thermalState.rawValue,
-                                             liveSessions: liveSessions), sink: journal.append)
+                                             liveSessions: liveSessions, repository: repository), sink: journal.append)
         } else { interaction = nil }
-        pending[key] = Pending(state: state, id: id, interaction: interaction)
+        let eventWindow = NSApp.currentEvent?.window
+        let window = eventWindow?.canBecomeMain == true ? eventWindow : NSApp.mainWindow ?? NSApp.keyWindow
+        pending[key] = Pending(state: state, id: id, interaction: interaction, window: window)
     }
 
     @MainActor
     static func acknowledged(_ interval: Interval, id: String, owner: UUID? = nil) {
         guard let current = pending[Key(interval: interval, owner: owner)], current.id == id else { return }
         current.interaction?.acknowledged(at: ProcessInfo.processInfo.systemUptime, evidence: .appState)
+        current.interaction?.observe(.acknowledged) { [weak window = current.window] in
+            await InteractionFrame.capture(window: window)
+        }
     }
 
     @MainActor
-    static func end(_ interval: Interval, id: String, owner: UUID? = nil) {
+    static func end(_ interval: Interval, id: String, owner: UUID? = nil, inputReady: Bool = true, prepareFrame: @escaping @MainActor () -> Void = {}) {
         let key = Key(interval: interval, owner: owner)
-        guard let current = pending[key], current.id == id else { return }
-        pending.removeValue(forKey: key)
+        guard var current = pending[key], current.id == id, !current.stateObserved else { return }
+        current.stateObserved = true
+        pending[key] = current
         signposter.endInterval(interval.signpost, current.state, "state_observed")
         current.interaction?.usable(at: ProcessInfo.processInfo.systemUptime, evidence: .appState)
-        current.interaction?.finish(.unmeasured)
+        if inputReady {
+            current.interaction?.observe(.usable) { [weak window = current.window] in
+                await InteractionFrame.capture(window: window, prepare: prepareFrame)
+            }
+        } else { current.interaction?.finish(.unmeasured) }
+        Task {
+            await current.interaction?.waitForObservation()
+            if pending[key]?.instance == current.instance { pending.removeValue(forKey: key) }
+        }
     }
 
     /// Observed view state is diagnostic until a real frame confirms presentation.
     @MainActor
-    static func stateObserved(_ interval: Interval, id: String, owner: UUID? = nil) {
+    static func stateObserved(_ interval: Interval, id: String, owner: UUID? = nil, inputReady: Bool = true, prepareFrame: @escaping @MainActor () -> Void = {}) {
         if owner == nil, pending[Key(interval: interval, owner: nil)] == nil {
             // A terminal callback can lack its window scope. Ambiguity stays
             // unmeasured rather than completing another window's interaction.
             let matches = pending.filter { $0.key.interval == interval && $0.value.id == id }
-            if matches.count == 1, let key = matches.first?.key { end(interval, id: id, owner: key.owner) }
-        } else { end(interval, id: id, owner: owner) }
+            if matches.count == 1, let key = matches.first?.key { end(interval, id: id, owner: key.owner, inputReady: inputReady, prepareFrame: prepareFrame) }
+        } else { end(interval, id: id, owner: owner, inputReady: inputReady, prepareFrame: prepareFrame) }
     }
 
     @MainActor
@@ -167,7 +186,7 @@ enum Perf {
 
     @MainActor
     static func project<Result>(owner: UUID, _ operation: () -> Result) -> Result {
-        let candidates = pending.filter { $0.key.owner == owner }.values.compactMap(\.interaction)
+        let candidates = pending.filter { $0.key.owner == owner && !$0.value.stateObserved }.values.compactMap(\.interaction)
         let work = InteractionTrace.current?.work ?? (candidates.count == 1 ? candidates.first?.work : nil)
         work?.project()
         return operation()

@@ -76,6 +76,14 @@ struct ServerProtocolTests {
         #expect(machine["label"] == .string("studio"))
     }
 
+    @Test func measuredReadsShareTheRustReceiptContract() throws {
+        #expect(try encoded(.request(id: "measured", operation: .measuredRead(.machineSelf), select: nil)) == value("performance_read"))
+    }
+
+    @Test func measuredWritesShareTheRustReceiptContract() throws {
+        #expect(try encoded(.request(id: "measured-write", operation: .measuredWrite(.sessionRename(directory: "/repo", id: "session_5e55105e000040008000000000000001", name: "Focused work")), select: nil)) == value("performance_write"))
+    }
+
     @Test func readinessProbesWithoutHello() throws {
         #expect(try encoded(.status) == value("status_request"))
         guard case .status(let status) = try message("status") else { Issue.record("Missing status"); return }
@@ -412,7 +420,7 @@ struct ServerProtocolTests {
     /// case escapes: the kind exists and carries exactly the described fields.
     @Test func everyEncodedOperationIsTheDescribedOperation() throws {
         let schema = try schema()
-        let described = try ["ServerOperation", "Read", "Write"].reduce(into: [String: Set<String>]()) { all, definition in
+        let described = try ["ServerOperation", "Read", "Write", "MeasuredOperation"].reduce(into: [String: Set<String>]()) { all, definition in
             all.merge(try arms(definition, tag: "kind", of: schema)) { first, _ in first }
         }
         let protocolSource = try source("swift/Loopflow/Services/ServerProtocol.swift")

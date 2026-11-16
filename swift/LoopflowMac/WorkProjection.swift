@@ -255,10 +255,10 @@ final class WorkNavigation {
     var showsSlotHints = false
     var sidebarFilter: SidebarFilter = .working {
         willSet {
-            if newValue != sidebarFilter { Perf.begin(Perf.hierarchyInteraction, "filter", id: "outline", liveSessions: liveSessionCount, owner: performanceOwner) }
+            if newValue != sidebarFilter { Perf.begin(Perf.hierarchyInteraction, "filter", id: "outline:\(newValue.rawValue)", liveSessions: liveSessionCount, owner: performanceOwner) }
         }
         didSet {
-            if oldValue != sidebarFilter { Perf.acknowledged(Perf.hierarchyInteraction, id: "outline", owner: performanceOwner) }
+            if oldValue != sidebarFilter { Perf.acknowledged(Perf.hierarchyInteraction, id: "outline:\(sidebarFilter.rawValue)", owner: performanceOwner) }
         }
     }
     var sidebarFocusRequested = false

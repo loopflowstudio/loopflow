@@ -7,6 +7,33 @@ import Testing
 
 @Suite(.serialized)
 struct ServerClientTests {
+    @Test(arguments: [false, true]) @MainActor
+    func interactionReceivesItsReadResultAndSQLReceiptTogether(write: Bool) async throws {
+        let peer = try ServerPeer()
+        peer.serve { message, respond in
+            guard message["type"] as? String == "request" else { return true }
+            respond(["type": "response", "id": message["id"]!, "trace_id": "trace",
+                     "result": ["result": ["id": "home_fixture"], "work": ["id": "evaluation-one", "statements": 13, "rows": 4]]])
+            return true
+        }
+        let interaction = Interaction(name: "open_task", scenario: "cached", input: nil,
+            context: Interaction.Context(thermalState: 0, liveSessions: nil), sink: { _ in })
+        let value = try await InteractionTrace.$current.withValue(interaction) {
+            if write {
+                try await ServerClient.write(.sessionRename(directory: "/repo", id: "session_fixture", name: "Focused"), location: peer.location)
+            } else {
+                if write {
+                try await ServerClient.write(.sessionRename(directory: "/repo", id: "session_one", name: "Focused work"), location: peer.location)
+            } else { try await ServerClient.read(.machineSelf, location: peer.location) }
+            }
+        }
+        #expect(try JSONDecoder().decode(JSONValue.self, from: Data(value.utf8)) == .object(["id": .string("home_fixture")]))
+        #expect(interaction.work.snapshot.servedReads == (write ? 0 : 1))
+        #expect(interaction.work.snapshot.servedWrites == (write ? 1 : 0))
+        #expect(interaction.work.snapshot.sqlStatements == 13)
+        #expect(interaction.work.snapshot.sqlRows == 4)
+    }
+
     @Test func admissionBusyWaitsThenCompletesTheWriteOnce() async throws {
         let peer = try ServerPeer()
         let requests = Mutex<Int>(0)

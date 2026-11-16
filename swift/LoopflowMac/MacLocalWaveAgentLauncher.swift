@@ -63,7 +63,9 @@ enum LocalWaveAgentLauncher {
     /// facts by shelling the daemonless Machine `lf` over the local store, not
     /// by streaming a center. Throws on a spawn failure or a non-zero exit.
     static func queryLf(_ subargs: [String], cwd: String?, input: String? = nil) async throws -> String {
-        InteractionTrace.current?.work.cliRead()
+        let work = InteractionTrace.current?.work
+        let counted = work?.cliRead() == true
+        defer { if counted { work?.requestFinished() } }
         let lfPath = try controlLfPath()
         let result: (status: Int32, stdout: String, stderr: String)
         do {
@@ -130,7 +132,7 @@ enum LocalWaveAgentLauncher {
         cwd: String? = nil,
         input: String? = nil
     ) async throws -> (status: Int32, stdout: String, stderr: String) {
-        let interaction = InteractionTrace.current
+        let interaction = InteractionTrace.current.flatMap { $0.work.isSealed ? nil : $0 }
         let worker = Task.detached(priority: .userInitiated) {
             try await InteractionTrace.$current.withValue(interaction) {
                 try await collect(args, cwd: cwd, input: input)
@@ -155,7 +157,7 @@ enum LocalWaveAgentLauncher {
                   row["event"] as? String == "end",
                   let statements = row["statements"] as? UInt64,
                   let rows = row["rows"] as? UInt64 else { work.sqlUnavailable(); continue }
-            work.sql(statements: statements, rows: rows)
+            work.sql(statements: statements, rows: rows, receipt: file.lastPathComponent)
         }
     }
 
@@ -174,7 +176,7 @@ enum LocalWaveAgentLauncher {
                 receipts = directory
                 process.environment?["LF_PERF_OUTPUT"] = directory.path
                 process.environment?["LF_PERF_INTERACTION"] = interaction.id.uuidString
-            }
+            } else { interaction.work.sqlUnavailable() }
         }
         defer {
             if let interaction, let receipts {

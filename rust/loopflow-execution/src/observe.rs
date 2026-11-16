@@ -357,7 +357,7 @@ pub fn active() -> bool {
 
 pub fn inherit<T>(read: impl FnOnce() -> T) -> impl FnOnce() -> T {
     let reading = READING.with(|reading| reading.borrow().clone());
-    move || scope(reading, read)
+    loopflow_storage::instrumentation::inherit(move || scope(reading, read))
 }
 
 fn read(fact: Fact) -> Answer {

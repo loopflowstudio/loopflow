@@ -1,10 +1,11 @@
-# Presentation source
+# Remaining verification
 
-SwiftUI state/commit callbacks do not identify the frame that displayed a particular
-change. The shared record rejects those as completed UX measurements. Open choice:
-verify with local capture while a journey is pending (using an already-granted
-permission), or keep those presentation latencies unmeasured until such a source
-is enabled. No capture was added or permission requested by the app.
+Jack Heart: “Lets get this done?”
 
-Remaining independent work: UIKit event capture and complete server-side work
-attribution. Keep the harness and journal together in PR #1950.
+Keep both pieces in #1950. Mac screen acquisition is a visual-observation upper
+bound; phone consumes the next ReplayKit screen frame during an explicit session.
+Neither claims the compositor's first-present time. No bitmaps are written to disk.
+Missing grants, disabled sessions or invalid clocks remain unmeasured.
+
+Verify final builds, real native capture and app-journal trials. Code-level checks
+cover UIKit event dispatch, visual ordering/supersession and request-isolated SQL.

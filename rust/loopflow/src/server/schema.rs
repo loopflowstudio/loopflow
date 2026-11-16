@@ -52,7 +52,7 @@ fn add_examples(schema: &mut Value) {
             .entry(kind)
             .or_insert_with(|| parse(text)["result"].clone());
     }
-    for group in ["Read", "Write", "ServerOperation"] {
+    for group in ["Read", "Write", "ServerOperation", "MeasuredOperation"] {
         let Some(arms) = schema["$defs"][group]["oneOf"].as_array_mut() else {
             continue;
         };
@@ -76,6 +76,9 @@ fn add_examples(schema: &mut Value) {
 /// Recorded requests, embedded so `describe` needs no source tree. Each
 /// names its operation; a test fails when a request fixture is missing here.
 const REQUESTS: &[&str] = &[
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/performance_write.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/performance_read.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/performance_read.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/account_connect.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/account_disconnect.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/account_list.json"),
@@ -396,7 +399,7 @@ mod tests {
     }
 
     fn operations(schema: &Value) -> BTreeMap<String, Value> {
-        ["ServerOperation", "Read", "Write"]
+        ["ServerOperation", "Read", "Write", "MeasuredOperation"]
             .into_iter()
             .flat_map(|definition| arms(schema, definition, "kind"))
             .collect()

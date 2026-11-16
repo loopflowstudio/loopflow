@@ -140,6 +140,7 @@ async fn save_abandon(store: &SharedStore, task: &Task) -> OpsResult<()> {
     crate::ops::planning_sync::sync_after_save(
         store,
         &repository_for_task(store, task)?.to_string_lossy(),
+        &loopflow_storage::sqlite::tracker_effects::EffectOwner::Task(task.id.clone()),
     )
     .await;
     Ok(())
@@ -162,6 +163,7 @@ pub fn task_delete(repo: &Path, issue: &str) -> OpsResult<String> {
         crate::ops::planning_sync::sync_after_save(
             &store,
             &repository_for_task(&store, &task)?.to_string_lossy(),
+            &loopflow_storage::sqlite::tracker_effects::EffectOwner::Task(task.id.clone()),
         )
         .await;
         Ok(task.identifier)

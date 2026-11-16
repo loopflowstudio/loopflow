@@ -65,7 +65,12 @@ pub fn change(repo: &Path, issue: &str, change: OwnershipChange) -> OpsResult<Ta
         }
         let repository = super::task::repository_for_task(&store, &task)?;
         assert_assignee(&store.sqlite, &repository, &task.id).await;
-        super::planning_sync::sync_after_save(&store, &repository.to_string_lossy()).await;
+        super::planning_sync::sync_after_save(
+            &store,
+            &repository.to_string_lossy(),
+            &loopflow_storage::sqlite::tracker_effects::EffectOwner::Task(task.id.clone()),
+        )
+        .await;
         crate::store::ownership::task_ownership(&store.sqlite, &task.id).map_err(message)
     })
 }

@@ -701,6 +701,29 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_save_goes_ahead_of_a_backlog_larger_than_one_pass() {
+        let f = fixture();
+        for _ in 0..30 {
+            let task = f.bound_task();
+            f.title(&task, "Older", "pending", None);
+        }
+        let saved = f.bound_task();
+        f.title(&saved, "Just saved", "pending", None);
+        let owner = EffectOwner::Task(saved.clone());
+        drain(
+            &f.store,
+            "/repo",
+            &f.tracker,
+            Scope::First(&owner),
+            Bound::PASS,
+        )
+        .await
+        .unwrap();
+        assert_eq!(f.fake.requests(), 20);
+        assert_eq!(f.phases(&saved), [EffectPhase::Acknowledged]);
+    }
+
+    #[tokio::test]
     async fn a_lost_reply_waits_for_its_window_and_holds_its_owner() {
         let f = fixture();
         let waiting = f.bound_task();

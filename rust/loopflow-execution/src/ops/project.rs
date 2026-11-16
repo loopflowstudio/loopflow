@@ -72,7 +72,12 @@ pub async fn update_plan(
         .update_project_content(&project.id, krs, metric_targets)
         .map_err(project_error)?;
     drop(_acquisition);
-    super::planning_sync::sync_after_save(&store, wave.repo()).await;
+    super::planning_sync::sync_after_save(
+        &store,
+        wave.repo(),
+        &loopflow_storage::sqlite::tracker_effects::EffectOwner::Project(project.id.clone()),
+    )
+    .await;
     read_saved(&store, &project.id)
 }
 
@@ -254,7 +259,12 @@ pub async fn edit(
         .edit_project(&project.id, name, summary, description)
         .map_err(project_error)?;
     drop(_acquisition);
-    super::planning_sync::sync_after_save(&store, wave.repo()).await;
+    super::planning_sync::sync_after_save(
+        &store,
+        wave.repo(),
+        &loopflow_storage::sqlite::tracker_effects::EffectOwner::Project(project.id.clone()),
+    )
+    .await;
     read_saved(&store, &project.id)
 }
 

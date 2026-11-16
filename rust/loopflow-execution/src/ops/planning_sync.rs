@@ -13,6 +13,7 @@ use std::time::Duration;
 use crate::planning_git::{PlanningGit, PlanningPublication, PlanningRevision};
 use crate::store::{open_store, sqlite::SqliteStore, StorageConfig, Store};
 use loopflow_storage::planning_exchange::PlanningSnapshot;
+use loopflow_storage::sqlite::tracker_effects::EffectOwner;
 
 use super::{OpsError, OpsResult};
 
@@ -66,9 +67,10 @@ enum Exchange {
     Publish { wait: bool },
 }
 
-/// A short command saves first, then makes one foreground exchange attempt.
-/// Failure leaves its successful local mutation and durable pending state intact.
-pub(crate) async fn sync_after_save(store: &Store, repo: &str) {
+/// A short command saves first, then makes one foreground exchange attempt
+/// with the owner it saved ahead of older work. Failure leaves its successful
+/// local mutation and durable pending state intact.
+pub(crate) async fn sync_after_save(store: &Store, repo: &str, saved: &EffectOwner) {
     let attempt = async {
         let config = crate::config::load_config(Some(Path::new(repo)))
             .map_err(message)?
@@ -80,7 +82,7 @@ pub(crate) async fn sync_after_save(store: &Store, repo: &str) {
                 super::tracker::drain::drain_repository(
                     store,
                     repo,
-                    super::tracker::drain::Scope::All,
+                    super::tracker::drain::Scope::First(saved),
                     super::tracker::drain::Bound::PASS,
                 )
                 .await?;

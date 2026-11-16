@@ -1834,7 +1834,12 @@ pub fn task_create(
                 receipt.clone(),
             )
             .await?;
-            super::planning_sync::sync_after_save(&store, &main.to_string_lossy()).await;
+            super::planning_sync::sync_after_save(
+                &store,
+                &main.to_string_lossy(),
+                &loopflow_storage::sqlite::tracker_effects::EffectOwner::Task(task.id.clone()),
+            )
+            .await;
             return store
                 .get_task(&task.id)
                 .await
@@ -1883,7 +1888,12 @@ pub fn task_create(
             receipt,
         )
         .await?;
-        super::planning_sync::sync_after_save(&store, &main.to_string_lossy()).await;
+        super::planning_sync::sync_after_save(
+            &store,
+            &main.to_string_lossy(),
+            &loopflow_storage::sqlite::tracker_effects::EffectOwner::Task(task.id.clone()),
+        )
+        .await;
         store
             .get_task(&task.id)
             .await
@@ -2286,7 +2296,12 @@ pub fn task_reopen(issue: &str, note: Option<&str>) -> OpsResult<Task> {
             .reopen_task(&task.id, note)
             .map_err(task_error)?;
         let repo = repository_for_task(&store, &task)?;
-        super::planning_sync::sync_after_save(&store, &repo.to_string_lossy()).await;
+        super::planning_sync::sync_after_save(
+            &store,
+            &repo.to_string_lossy(),
+            &loopflow_storage::sqlite::tracker_effects::EffectOwner::Task(task.id.clone()),
+        )
+        .await;
         Ok(task)
     })
 }
@@ -2426,7 +2441,12 @@ async fn settle_completion(store: &SharedStore, task: &mut Task, request: i64) -
             .map_err(task_error)?
             .ok_or_else(|| task_error("completed Task is missing"))?;
         let repo = repository_for_task(store, task)?;
-        super::planning_sync::sync_after_save(store, &repo.to_string_lossy()).await;
+        super::planning_sync::sync_after_save(
+            store,
+            &repo.to_string_lossy(),
+            &loopflow_storage::sqlite::tracker_effects::EffectOwner::Task(task.id.clone()),
+        )
+        .await;
         // Cleanup retains live work and unpublished artifacts independently of status.
         retirement::schedule(store, task).await?;
         Ok(())
@@ -2623,6 +2643,7 @@ pub fn task_edit(
         super::planning_sync::sync_after_save(
             &store,
             &repository_for_task(&store, &task)?.to_string_lossy(),
+            &loopflow_storage::sqlite::tracker_effects::EffectOwner::Task(task.id.clone()),
         )
         .await;
         Ok(TaskEdit {
@@ -2675,6 +2696,7 @@ pub fn task_move_membership(repo: &Path, issue: &str, wave: Option<&str>) -> Ops
         super::planning_sync::sync_after_save(
             &store,
             &repository_for_task(&store, &task)?.to_string_lossy(),
+            &loopflow_storage::sqlite::tracker_effects::EffectOwner::Task(task.id.clone()),
         )
         .await;
         Ok(TaskEdit {
@@ -2985,6 +3007,7 @@ pub(crate) async fn append_task_comment_async(
     super::planning_sync::sync_after_save(
         store,
         &repository_for_task(store, task)?.to_string_lossy(),
+        &loopflow_storage::sqlite::tracker_effects::EffectOwner::Task(task.id.clone()),
     )
     .await;
     Ok(id)

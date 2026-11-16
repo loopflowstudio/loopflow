@@ -89,7 +89,7 @@ connected command drains at most one bounded pass.
   running on the same store (`MIGRATIONS.md`, "Who applies what"); there is no
   reader floor any more. An older lf drains the old tables for the window.
 - **Docs disagree with code.** `planning.md:88` "there is no generic planning
-  facade"; `planning_client.rs` is one. `docs/work.md:228` documents Notion.
+  facade"; `planning_client.rs` is one. (User docs dropped Notion in 9d71485f92.)
 
 Prior attempt to mine before writing code: `loo-691-combined`
 (f26a384079 shared records into `crate::planning`; 03b9d4311b Asana Project
@@ -161,7 +161,7 @@ whichever first; owners run with concurrency 4. The per-object effect lock
 file path (`planning_delivery::lock_fields`) is kept so an older lf and this
 one never send for the same object at once. Each send keeps its own 5 s
 deadline: a shared deadline was removed on purpose because a slow first export
-starved every later Task (`planning_sync.rs:81`, `linear_observe.rs:336`), so
+starved every later Task (`planning_sync.rs:81`, `tracker_observe.rs:339`), so
 the bound counts requests, and `sync_after_save` drains the just-saved owner
 before the bounded remainder. Requests go through the existing
 `linear/cooldown.rs::Budget` (creations stay `urgent`). `lf task sync <id>`
@@ -172,12 +172,8 @@ requests.
 every writer: 14 SQL literals and 17 bound `"linear"` parameters in
 `loopflow-storage` (mostly `linear_acceptance.rs`), several reached by Asana
 through `planning_delivery::ingest_task` and `check_scope`. The acceptance
-functions take the provider as an argument. `ops/linear_observe.rs` becomes
-`ops/tracker_observe.rs` (it is the generic delta and comment path for every
-provider, with Linear branches at :65, :102, :459). `tests/linear/` (Graph,
-PR, status, subscribe, Task launch, Wave resolution: almost none of it Linear)
-becomes `tests/work/`; `tests/README.md:400` names a missing
-`adoption_tests`.
+functions take the provider as an argument. (`ops/tracker_observe.rs` and
+`rust/loopflow/tests/work/` already carry their true names.)
 `planning.md`, `docs/work.md`, README say Linear or Asana.
 
 ### Concept review (2026-11-16): settled for slice 3
@@ -188,9 +184,16 @@ Implied by the design; implement builds these. No product choice in them.
   the owner's binding (`pm_items`/`pm_projects`/the Wave's Initiative), or
   for `create` from the configured bridge the caller passes to
   `planning_write::create`. An owner with no binding and no pending `create`
-  gets no effect: a Git-only repository, a Wave on Asana (no Initiative) and
-  a Task made before a tracker was connected enqueue nothing, so `lf repo
-  plan` never lists rows no bridge will drain. A pending effect whose
+  gets no effect: a Git-only repository and a Wave on Asana (no Initiative)
+  enqueue nothing, so `lf repo plan` never lists rows no bridge will drain.
+  **Correction (realign):** today a Task made before a tracker was connected
+  *does* export on connect: `children.rs:140` writes a `task_creation_intents`
+  row for every Task, and `planning_export_owners`
+  (`sqlite/planning_export.rs:45`) picks every Task with an intent and no
+  `external_issue_id`. Slice 3 keeps that: a drain pass with a configured
+  bridge first enqueues `create` for unbound, undeleted Tasks and unmapped
+  Projects that have none (one `INSERT … SELECT`, counted against no request
+  bound). Open alternative in `scratch/questions.md`. A pending effect whose
   provider is not the configured bridge retires with an error naming both.
   This removes the "Asana team fields" Wave mapping: Asana has no Wave
   object, matching `parity.md`'s n/m.
@@ -219,7 +222,9 @@ Implied by the design; implement builds these. No product choice in them.
 
 `uv run python scripts/new_migration.py tracker_effects`. Creates the table,
 index and triggers; copies every unsettled row from the seven receipts into
-it, translating `export_json.input` back to the creation baseline already
+it, except creation intents never prepared (`export_json IS NULL`, which in a
+Git-only repository is every Task: the connect-time enqueue above covers
+those), translating `export_json.input` back to the creation baseline already
 stored beside it (`export_json.baseline`); then marks the copied old rows
 settled (`acknowledged=1` / settled flags) so an older lf on the same store
 does not send them a second time. New code never reads or writes the old
@@ -239,9 +244,12 @@ conflict today.
 
 Each line deletes its exclusive tests and fixtures.
 
-- **Notion:** `notion/` (`mod.rs`, `blocks.rs`), `ops/linear/notion_planning_tests.rs`,
-  `PlanningConfig::Notion`, `PlanningClient::Notion`, the Notion OAuth provider
-  and `account connect notion`, docs/website/glossary mentions. Mine cd7afe0127.
+Done in slice 1 (f2c37b11a0), recoverable from that commit: Notion,
+`ChapterSweep` + `lf task sweep`, legacy Project adoption, the
+`refresh_async` apply branch. "Chapter" names that mean the current Project
+stay (`scratch/questions.md`); `~/.lf/chapter-locks/` stays until the contract
+Task, since an older lf locks the same inode (`planning_sync.rs:594`).
+
 - **The generic facade:** `ops/planning_client.rs` (→ `ops/tracker.rs`),
   `PlanningClient::linear()`, `planning_client::is_linear` and its callers,
   `asana::task_fields`.
@@ -250,39 +258,23 @@ Each line deletes its exclusive tests and fixtures.
   `linear_records::render_project_content` in storage (moves to `linear/`).
 - **Old drains and receipt writers:** `ops/planning_export.rs`,
   `ops/planning_delivery.rs`, `ops/planning_order.rs` delivery,
-  `linear_observe::{sync_repository_deliveries, deliver_task_state,
+  `tracker_observe::{sync_repository_deliveries, deliver_task_state,
   sync_task_comments}`; storage receipt writers in `planning_changes.rs`,
   `task_state_delivery.rs`, `planning_order.rs`, the delivery half of
   `task_comments.rs`, and `task_creation_intents`/`project_transitions` export
   columns' writers. Behavior that survives: every rule above, the #1829 window,
   `lf task sync`, `--retry-updates`, `PlanningSyncStatus` fields.
-- **Chapter mechanisms:** `ChapterSweep`, `chapter_sweep_candidates`,
-  `require_outside_current_chapter` (`ops/linear.rs:2108-2200`) and the `lf
-  task sweep` command that runs them (`lf/mod.rs:2482`,
-  `ops/task/lifecycle.rs:294`); `ops/linear/adoption.rs` and
-  `sqlite/project_adoption.rs`, whose read half runs on every `lf wave sync`
-  (`refresh_inventory` → `checked_projects_with_store`, `linear.rs:1978`) and
-  whose apply half is reachable only from a test. Rename live names and output:
-  `chapter_metric_portfolio`, `validate_chapter_targets`,
-  `metric::ChapterUnavailable`, "unset for this chapter" (`waves.rs:2747/2750`),
-  "Chapter plan:" (`ops/run.rs:39`), `wave_lifecycle.rs` removal counts, CLI
-  help in `lf/mod.rs`. Kept: builtin skills named `*-chapter` (AGENTS.md: a
-  Chapter is the In Progress Project's shared name), migrations, and the
-  `~/.lf/chapter-locks/` path, which an older lf locks on the same inode
-  (`planning_sync.rs:595`); the contract Task renames it.
 - **`pm_issue_changes`:** the brief says it has no production writer; the
   sweep found one. `observe_pm_issue_change` (`sqlite/linear_observations.rs:10`)
-  records a provider removal from `linear_observe.rs:53`, and five readers
-  (`linear_issue_evidence` ×2, `task_acquisitions_in`, `put_item`,
-  `project_accepted_planning`) use it as removal/invalidation evidence. Slice 1
+  records a provider removal from `tracker_observe.rs`, and its readers
+  (`linear/acceptance.rs` ×3, `sqlite/linear_acceptance.rs` ×2,
+  `sqlite/children.rs`) use it as removal/invalidation evidence. Slice 3
   first writes `a_tracker_removal_withdraws_new_launches`; if
   `tasks.planning_deleted_at` and `task_deletions` already carry that fact the
   writer and readers go; otherwise removal becomes a column on `pm_items`
   in the migration and the table goes in the contract.
-- **Receipt-skipping writers:** the non-plan branch of `refresh_async`
-  (`ops/linear.rs:1745-1762`, reachable only from
-  `task_planning_tests.rs:4131`; `lf machine doctor --planning` runs plan
-  mode); PR links (`linear.rs:766-798` save ids after the call;
+- **Receipt-skipping writers:** PR links (`link_pr_with_client`,
+  `ops/linear.rs:749`, saves ids after the call;
   `ops/task.rs:2481` reposts an id-less Asana comment on every publish) become
   `link` effects. Out of scope, explicit admin commands with pre-validation:
   `connect_async::create_wave` (`linear.rs:650`) and reteam

@@ -36,11 +36,17 @@
 - **Losing value after a conflict shows in `lf task show`** (`sync.conflict`),
   the surface the Demo reads; Desktop follows from the DTO. Alternatives were
   `lf repo plan` or Desktop first.
-- **Effects only for bound owners or a pending create.** A Task made before
-  a tracker was connected does not export on connect. Not yet checked against
-  what the old export drain does for such a Task.
+- **Effects only for bound owners or a pending create.** Checked: the old
+  export drain exports every Task with no `external_issue_id` once a tracker
+  is configured, including Tasks made before connect. Slice 3 keeps that with
+  a connect-time `create` enqueue at the start of a drain pass.
 
 ## Open
+
+- Connecting a tracker to a repository with existing Tasks: export all of
+  them (today's behavior, planned) or only Tasks made after connect? The
+  second would make the connect-time enqueue unnecessary, but it drops
+  behavior people may rely on.
 
 - Wire `linear_id` → a neutral name crosses Rust, Swift and ~10 DTO fixtures.
   Planned as a follow-up Task, not here. Is a neutral name wanted at all while

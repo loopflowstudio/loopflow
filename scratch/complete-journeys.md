@@ -37,9 +37,9 @@ LOO-906 execution or ship it.”
   and full-target acceptance remain.
 - Builtin `task/graph/pursue.yaml` runs implement → concept-review → refresh →
   loop. Refresh runs sync and realign. Repo `pursue-auto.yaml` has different
-  ordering but calls the same concept-review. Concept-review currently requests
-  the same broad review headless as with a person. Bound its repeated work in
-  the skill; keep authored Graph steps and decision protocols intact.
+  ordering but calls the same concept-review. The branch now bounds repeated
+  reviews by changed contracts; authored Graph steps and decision protocols
+  remain intact.
 - Loop-or-next already rejects exit-code completion and has no pass limit.
   Strengthen the meaning of progress rather than adding a counter. Realign
   already owns the current plan; no second progress ledger is needed.
@@ -59,9 +59,12 @@ Read-only GitHub observations on 2026-11-16 UTC: PR #1843 is open at
 open and edit the body here. PR #1933 is open at
 `05e7e4c4bf34d20e6ee93e65e77d240369ebff03`, touching operating guidance and
 prompt goldens; reconcile overlapping goldens without changing steer semantics.
-PR #1946 is open at `cb000eccf34229acd8490e967340e347b41f0be9`; its product
+PR #1946 is open at `41509271e1c52ece4f0fb1187e968fe989ad4015`; its product
 scope and execution remain outside this change. No comments or mutations were
-made to those PRs.
+made to those PRs. Realign rechecked all three heads: #1843 and #1933 are
+unchanged; #1946 moved. This does not establish its current implementation or
+performance. The local `origin/main` reference remains `9cafc410ee`; no new
+upstream source changes are present in this checkout.
 
 ## Chosen approach
 
@@ -264,3 +267,12 @@ authored fixtures alone do not close the behavioral-demonstration row.
 Remaining gate work: catalog precedence and standalone-export library checks,
 affected CI suites, clippy and package extraction per scripts/testing.md.
 No product choice, runtime change, Graph change or additional Task was needed.
+
+Realign corrected stale review wording and clarified that agent-trial inputs
+must omit completed solutions and expected review answers. No new scope was
+discovered; the pending demonstration remains the next bounded outcome.
+Wave memory records the replay's limits. The entire selected memory was read;
+there are no immediate child Wave memories. Metrics files were not reread:
+this change makes no metric claim.
+
+- `git diff --check` and `lf context` — pass after reconciliation; both authored-context budgets fit. Existing runtime results were reused, not rerun.

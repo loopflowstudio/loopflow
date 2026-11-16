@@ -1,0 +1,1 @@
+Work in /tmp/loo915-agents-18lrhucp/state. Read input.txt there and execute its scenario and skills. Do not read outside that directory. Do not launch children. Retain commands/results in checks.txt and final report in result.txt. This is a disposable agent demonstration, no live Task or publication.

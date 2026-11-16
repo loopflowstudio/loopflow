@@ -1,0 +1,6 @@
+Read the concept-review and loop-or-next bodies in input.txt. Assess these four independent hypothetical inputs against the working design; do not change code. Use prose outcomes; there is no machine decision protocol. Write assessments to review.txt.
+
+1. Only an internal helper name changed; the interaction, owners, persistence and recovery are unchanged. No open choice or regression.
+2. The test consumer still imports runtime::skill; production imports definitions::skill.
+3. The inventory is unchanged for a second pass. No behavior closed, no new finding, no changed approach.
+4. Every required row and this step's checks is complete; no open findings. Publishing belongs to a later step.

@@ -34,6 +34,22 @@ fix; Infrastructure owns coordinated release, installation and installed proof.
   These are branch receipts; affected-suite gate and installed verification remain
   separate evidence, and native-skill acceptance uses a deterministic provider.
 
+## Journey instruction validation (branch evidence, 2026-11-16)
+
+- LOO-915 changes both builtin skills and the repository implement override;
+  editing only the builtin would leave this repository's effective instruction
+  unchanged. Preview, native export and prompt goldens check delivery separately.
+- The authored ownership and Complete fixtures exercise consumer behavior and
+  reject incomplete controls. Their replay hashes the skills but applies fixed
+  repairs without submitting instructions to an agent. It would pass with the
+  old skill bodies too: source hashes beside a passing run do not establish
+  instruction use. Agent demonstrations remain pending, with completed solutions
+  and expected review answers withheld from their inputs.
+- A complete representative journey can leave named migration rows pending.
+  Headless list consumers establish neither native responsiveness nor fewer
+  production implementation passes. Keep those limits beside the result rather
+  than turning fixture success into full-target acceptance.
+
 ## Check ownership (2026-09-30)
 
 Jack Heart requested fewer checks and no Flow blocks on display access or a

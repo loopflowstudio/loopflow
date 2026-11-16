@@ -17,9 +17,11 @@ also checks that a reducer-only Complete fails before running the completed
 consumer journey. All builds and mutations stay in a temporary directory; no
 agent is launched. Timings cover these small fixture commands, not the product.
 
-For a new agent trial, copy the fixtures into a disposable repository with no
-remote, give the exact scenario input below and the skill sources being tested,
-and retain the submitted prompt, source revision, patch, commands and results.
+For a new agent trial, prepare the starting ownership shape below or the
+reducer-only state used by `run.py` in a disposable repository with no remote.
+Give the exact scenario input and effective skill bodies, withholding the
+completed sources, replay script and expected review answers. Retain the
+submitted prompt, source hashes, patch, commands, results and remaining coverage.
 Do not run either scenario against a live Task. The scenarios grant no authority
 to publish, merge or change the motivating Tasks.
 

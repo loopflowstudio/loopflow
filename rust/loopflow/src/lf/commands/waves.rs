@@ -1722,9 +1722,7 @@ impl<'a> DetailReads<'a> {
         for receipts in facts.planning_receipts.values() {
             planning_connections
                 .entry(receipts.repo.clone())
-                .or_insert_with(|| {
-                    loopflow_execution::ops::planning_client::connected(&receipts.repo)
-                });
+                .or_insert_with(|| loopflow_execution::ops::tracker::connected(&receipts.repo));
         }
         let graphs = store
             .sqlite

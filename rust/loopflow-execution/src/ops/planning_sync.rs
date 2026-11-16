@@ -77,15 +77,13 @@ pub(crate) async fn sync_after_save(store: &Store, repo: &str) {
             crate::config::PlanningConfig::Git { .. } => publish_repository(store, repo).await,
             crate::config::PlanningConfig::Linear { .. }
             | crate::config::PlanningConfig::Asana { .. } => {
-                // Export attempts have individual deadlines. A shared deadline
-                // lets older pending work starve the Task that was just saved.
-                super::planning_export::sync_repository_exports(store, repo).await?;
-                let (fields, deliveries) = tokio::join!(
-                    super::planning_delivery::sync_repository_fields(store, repo),
-                    super::tracker_observe::sync_repository_deliveries(store, repo)
-                );
-                fields?;
-                deliveries?;
+                super::tracker::drain::drain_repository(
+                    store,
+                    repo,
+                    super::tracker::drain::Scope::All,
+                    super::tracker::drain::Bound::PASS,
+                )
+                .await?;
                 Ok(())
             }
         }
@@ -272,7 +270,7 @@ fn exchange_destination(
         let lock = if wait {
             wait_for_publication(&path)?
         } else {
-            super::planning_delivery::lock_delivery(&path)?
+            super::tracker::drain::lock_delivery(&path)?
         };
         let Some(lock) = lock else {
             return Ok(());
@@ -312,7 +310,7 @@ fn exchange_destination(
 fn wait_for_publication(path: &Path) -> OpsResult<Option<std::fs::File>> {
     let deadline = std::time::Instant::now() + PUBLICATION_WAIT;
     loop {
-        if let Some(lock) = super::planning_delivery::lock_delivery(path)? {
+        if let Some(lock) = super::tracker::drain::lock_delivery(path)? {
             return Ok(Some(lock));
         }
         if std::time::Instant::now() >= deadline {
@@ -435,7 +433,7 @@ fn sync_directory(directory: &Path, refresh: bool) -> OpsResult<()> {
     let repo = crate::repository::discover(directory)
         .map_err(message)?
         .to_string();
-    if !super::planning_client::connected(&repo) {
+    if !super::tracker::connected(&repo) {
         return Ok(());
     }
     tokio::runtime::Builder::new_current_thread()
@@ -468,7 +466,7 @@ impl PlanningSync {
         let repo = crate::repository::discover(directory)
             .map_err(message)?
             .to_string();
-        if super::planning_client::connected(&repo) {
+        if super::tracker::connected(&repo) {
             return Ok(Self {
                 stop: None,
                 thread: None,

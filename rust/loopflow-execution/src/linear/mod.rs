@@ -5,6 +5,7 @@ pub mod observations;
 
 use self::project_document::parse_project_document;
 mod cooldown;
+mod effects;
 pub mod request_log;
 mod team_changes;
 

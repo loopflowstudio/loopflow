@@ -4,22 +4,28 @@
 //! else's. A pass stops after its request or time budget, whichever is first.
 
 use std::collections::HashSet;
+use std::fs::File;
+use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
+use loopflow_storage::planning::rules::{self, Decision, LostReply, Observed};
 use loopflow_storage::sqlite::tracker_effects::{
     EffectKind, EffectOwner, EffectPhase, Settlement, TrackerEffect,
 };
 use loopflow_storage::work::edit::WorkValue;
 
-use super::rules::{self, Decision, LostReply};
 use super::{Sent, Tracker};
 use crate::ops::{OpsError, OpsResult};
 use crate::store::Store;
 
 /// The shortest wait between looks for one lost reply.
 const LOOK_WINDOW_SECS: i64 = 600;
+
+/// Each request keeps its own deadline: a shared one once let a slow first
+/// creation starve every later Task, so the pass bound counts requests.
+const REQUEST_DEADLINE: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, Copy)]
 pub struct Bound {
@@ -90,6 +96,36 @@ pub enum Scope<'a> {
     Only(&'a EffectOwner),
 }
 
+/// One bounded pass for `repo` when it has a tracker. With nothing unsettled
+/// it asks the provider nothing, not even to build the bridge.
+pub(crate) async fn drain_repository(
+    store: &Store,
+    repo: &str,
+    scope: Scope<'_>,
+    bound: Bound,
+) -> OpsResult<Pass> {
+    let Some(provider) = super::configured(Path::new(repo)) else {
+        return Ok(Pass::default());
+    };
+    if provider == loopflow_storage::provider::Provider::Linear {
+        crate::ops::linear::sync_retained_relations(store, Path::new(repo)).await?;
+    }
+    store
+        .sqlite
+        .enqueue_tracker_creations(repo, provider)
+        .map_err(message)?;
+    if store
+        .sqlite
+        .unsettled_tracker_effects(repo)
+        .map_err(message)?
+        .is_empty()
+    {
+        return Ok(Pass::default());
+    }
+    let tracker = Tracker::for_repository(Path::new(repo)).await?;
+    drain(store, repo, &tracker, scope, bound).await
+}
+
 /// Drain `repo`'s queue to `tracker` within `bound`.
 pub async fn drain(
     store: &Store,
@@ -144,7 +180,16 @@ pub async fn drain(
     };
     let results: Vec<OpsResult<()>> = futures_util::stream::iter(owners)
         .map(|(owner, queued)| {
-            drain_owner(store, tracker, owner, queued, &creating, &budget, window)
+            drain_owner(
+                store,
+                Path::new(repo),
+                tracker,
+                owner,
+                queued,
+                &creating,
+                &budget,
+                window,
+            )
         })
         .buffer_unordered(bound.concurrency.max(1))
         .collect()
@@ -174,7 +219,41 @@ fn lock(store: &Store, owner: &EffectOwner) -> OpsResult<Option<std::fs::File>> 
         .map_err(message)?
         .join("locks/planning-fields")
         .join(format!("{kind}-{id}.lock"));
-    Ok(crate::ops::planning_delivery::lock_delivery(&path)?)
+    Ok(lock_delivery(&path)?)
+}
+
+/// Serialize provider effects only; saves and acquisition never take this lock.
+/// The file stays in place so another connection always locks the same inode.
+pub(crate) fn lock_delivery(path: &Path) -> std::io::Result<Option<File>> {
+    std::fs::create_dir_all(path.parent().expect("delivery lock has a parent directory"))?;
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)?;
+    match fs2::FileExt::try_lock_exclusive(&lock) {
+        Ok(()) => Ok(Some(lock)),
+        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+async fn look(
+    store: &Store,
+    repo: &Path,
+    tracker: &Tracker,
+    effect: &TrackerEffect,
+) -> Result<Option<Observed>, String> {
+    tokio::time::timeout(REQUEST_DEADLINE, tracker.look(store, repo, effect))
+        .await
+        .unwrap_or_else(|_| Err("Look timed out; the effect waits for the next pass".into()))
+}
+
+async fn send(store: &Store, repo: &Path, tracker: &Tracker, effect: &TrackerEffect) -> Sent {
+    tokio::time::timeout(REQUEST_DEADLINE, tracker.send(store, repo, effect))
+        .await
+        .unwrap_or_else(|_| Sent::Unknown("Request timed out; its reply is unknown".into()))
 }
 
 /// Whether this effect names a Project whose creation has not settled.
@@ -197,8 +276,10 @@ fn parent_pending(effect: &TrackerEffect, creating: &HashSet<String>) -> bool {
     project.is_some_and(|project| creating.contains(&project))
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn drain_owner(
     store: &Store,
+    repo: &Path,
     tracker: &Tracker,
     owner: EffectOwner,
     queued: Vec<TrackerEffect>,
@@ -230,7 +311,7 @@ async fn drain_owner(
                         if !budget.take() {
                             return Ok(());
                         }
-                        let observed = tracker.look(&effect).await;
+                        let observed = look(store, repo, tracker, &effect).await;
                         store
                             .sqlite
                             .look_tracker_effect(&effect.id, now)
@@ -254,7 +335,7 @@ async fn drain_owner(
                 if !budget.take() {
                     return Ok(());
                 }
-                match tracker.look(&effect).await {
+                match look(store, repo, tracker, &effect).await {
                     Ok(observed) => rules::decide(&effect, observed.as_ref(), parent),
                     Err(error) => {
                         store
@@ -281,7 +362,7 @@ async fn drain_owner(
                 {
                     continue;
                 }
-                match tracker.send(&effect).await {
+                match send(store, repo, tracker, &effect).await {
                     Sent::Acknowledged {
                         revision,
                         remote_id,
@@ -307,6 +388,9 @@ async fn drain_owner(
                             .tracker_effect_error(&effect.id, &error)
                             .map_err(message)?;
                         return Ok(());
+                    }
+                    Sent::Unsupported(reason) => {
+                        settle(store, budget, &effect, &Settlement::Retire { reason })?
                     }
                 }
             }
@@ -343,9 +427,9 @@ mod tests {
 
     use super::{drain, Bound, Pass, Scope};
     use crate::ops::tracker::fake::Fake;
-    use crate::ops::tracker::rules::Observed;
     use crate::ops::tracker::Tracker;
     use crate::store::Store;
+    use loopflow_storage::planning::rules::Observed;
 
     struct Fixture {
         _home: tempfile::TempDir,
@@ -520,9 +604,12 @@ mod tests {
             .tracker_effects_for(&EffectOwner::Task(task))
             .unwrap()[0];
         assert_eq!(effect.phase, EffectPhase::Acknowledged);
+        assert_eq!(effect.value, json!({"field":"task_title","value":"Mine"}));
         assert_eq!(
             effect.conflict,
-            Some(json!({"field":"task_title","value":"Mine"}))
+            Some(
+                json!({"revision":"2026-11-02T00:00:00Z","value":{"field":"task_title","value":"Theirs"}})
+            )
         );
     }
 

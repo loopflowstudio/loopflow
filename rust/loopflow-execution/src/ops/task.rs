@@ -2133,21 +2133,23 @@ pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
                 }
             }
         }
-        let inspection =
-            if task.is_none() && super::planning_client::is_linear(&repo.to_string_lossy()) {
-                let selector = issue.ok_or_else(|| task_error("this checkout has no Task"))?;
-                let read = super::linear::inspect_task_planning_async(
-                    repo,
-                    selector,
-                    super::linear::LinearRefresh::Auto,
-                )
-                .await?;
-                task = super::planning_sync::find_task(&store, &repo.to_string_lossy(), selector)
-                    .await?;
-                Some(read)
-            } else {
-                None
-            };
+        let inspection = if task.is_none()
+            && (crate::ops::tracker::configured(&repo)
+                == Some(loopflow_storage::provider::Provider::Linear))
+        {
+            let selector = issue.ok_or_else(|| task_error("this checkout has no Task"))?;
+            let read = super::linear::inspect_task_planning_async(
+                repo,
+                selector,
+                super::linear::LinearRefresh::Auto,
+            )
+            .await?;
+            task =
+                super::planning_sync::find_task(&store, &repo.to_string_lossy(), selector).await?;
+            Some(read)
+        } else {
+            None
+        };
         let planning_error = inspection
             .as_ref()
             .and_then(|read| read.refresh_error.clone());
@@ -2312,21 +2314,30 @@ pub fn task_sync(issue: &str, retry_updates: bool) -> OpsResult<String> {
             .ok_or_else(|| task_error(format!("Task {issue} is unavailable")))?;
         let repository = repository_for_task(&store, &task)?;
         let repo = repository.as_path();
-        let Some(provider) = super::planning_client::remote_name(repo) else {
+        let Some(provider) = super::tracker::remote_name(repo) else {
             return Err(task_error(
                 "Task repository has no remote planning provider",
             ));
         };
-        if task.linear_id.is_none() {
-            let project = task
-                .project_id
-                .clone()
-                .map(loopflow_model::durable::WorkRef::Project);
-            let work = loopflow_model::durable::WorkRef::Task(task.id.clone());
-            // The person's explicit look: ahead of the pass window if need be.
-            for work in project.iter().chain([&work]) {
-                super::planning_export::export(&store, repo, work, true).await?;
-            }
+        // The person's explicit look: an uncertain reply is looked for now, and
+        // with `--retry-updates` an attempted effect the provider lacks is resent.
+        let bound = super::tracker::drain::Bound {
+            windows: !retry_updates,
+            ..super::tracker::drain::Bound::NOW
+        };
+        let project = task
+            .project_id
+            .clone()
+            .map(loopflow_storage::sqlite::tracker_effects::EffectOwner::Project);
+        let owner = loopflow_storage::sqlite::tracker_effects::EffectOwner::Task(task.id.clone());
+        for owner in project.iter().chain([&owner]) {
+            super::tracker::drain::drain_repository(
+                &store,
+                &repo.to_string_lossy(),
+                super::tracker::drain::Scope::Only(owner),
+                bound,
+            )
+            .await?;
         }
         let task = store
             .get_task(&task.id)
@@ -2338,19 +2349,6 @@ pub fn task_sync(issue: &str, retry_updates: bool) -> OpsResult<String> {
                 "Task publication to {provider} remains pending"
             )));
         }
-        // State and field writes share Linear's issue revision. Finish the
-        // state attempt first so our own field acknowledgement cannot make its
-        // ownership read stale or look like an intervening reopening. Retain
-        // each result: a failed state attempt still permits the other effects.
-        let work = loopflow_model::durable::WorkRef::Task(task.id.clone());
-        let state = super::tracker_observe::deliver_task_state(&store, &task, retry_updates).await;
-        let (comments, fields) = tokio::join!(
-            super::tracker_observe::sync_task_comments(&store, &task),
-            super::planning_delivery::deliver_fields(&store, repo, &work, retry_updates),
-        );
-        state?;
-        comments?;
-        fields?;
         let saved = store
             .get_task(&task.id)
             .await
@@ -2474,11 +2472,17 @@ pub(super) async fn link_pr_to_planning(store: &SharedStore, task: &Task, pr: &m
             return;
         }
     };
-    if !super::planning_client::is_linear(&repo.to_string_lossy()) {
+    if !(crate::ops::tracker::configured(&repo)
+        == Some(loopflow_storage::provider::Provider::Linear))
+    {
         let posted = async {
-            super::planning_client::PlanningClient::for_items(&repo)
-                .await?
-                .sync_comment("", issue_id.as_str(), &body)
+            let tracker = super::tracker::Tracker::for_items(&repo).await?;
+            let super::tracker::Tracker::Asana(client) = &tracker else {
+                return Ok(());
+            };
+            let text = tracker.claimed_comment(&body).unwrap_or_default();
+            client
+                .sync_comment(issue_id.as_str(), &text)
                 .await
                 .map_err(|error| task_error(error.to_string()))
         }

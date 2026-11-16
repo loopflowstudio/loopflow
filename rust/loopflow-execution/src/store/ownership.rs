@@ -48,7 +48,7 @@ fn prepare(
                 key: crate::config::participant_email(Path::new(repo)),
                 id: scope.placement.person_id.clone(),
             },
-            planning_connected: crate::ops::planning_client::connected(repo),
+            planning_connected: crate::ops::tracker::connected(repo),
             declared_machines: machine_names(store)?,
             local_label: local_label(),
             owning_machine: machine,
@@ -229,7 +229,7 @@ pub(crate) fn held_planning(
         .map(|(task, (_, repo))| {
             let value = *connected
                 .entry(repo)
-                .or_insert_with(|| crate::ops::planning_client::connected(repo));
+                .or_insert_with(|| crate::ops::tracker::connected(repo));
             (task.clone(), value)
         })
         .collect();

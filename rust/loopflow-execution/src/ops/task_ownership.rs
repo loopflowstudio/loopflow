@@ -75,7 +75,9 @@ pub fn change(repo: &Path, issue: &str, change: OwnershipChange) -> OpsResult<Ta
 /// who this Machine belongs to (`people` id `linear:<viewer>`). Without a viewer
 /// the assignee is left alone; ownership is already saved.
 pub(crate) async fn assert_assignee(store: &SqliteStore, repository: &Path, task: &TaskId) {
-    if !super::planning_client::is_linear(&repository.to_string_lossy()) {
+    if !(crate::ops::tracker::configured(repository)
+        == Some(loopflow_storage::provider::Provider::Linear))
+    {
         return;
     }
     match store.task_claimed_here(task) {

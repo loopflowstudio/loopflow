@@ -15,8 +15,6 @@ use time::OffsetDateTime;
 
 use super::{OpsError, OpsResult};
 use crate::store::{SharedStore, Store};
-use loopflow_storage::planning::StateHistory;
-use loopflow_storage::sqlite::task_state_delivery::TaskStateDelivery;
 use loopflow_storage::work::task::Task;
 
 pub(crate) async fn refresh_task_comments(store: &SharedStore, task: &Task) -> OpsResult<()> {
@@ -31,7 +29,7 @@ pub(crate) async fn refresh_task_comments(store: &SharedStore, task: &Task) -> O
         return Ok(());
     };
     let repository = super::task::repository_for_task(store, &task)?;
-    let planning_connected = super::planning_client::connected(&repository.to_string_lossy());
+    let planning_connected = super::tracker::connected(&repository.to_string_lossy());
     if !planning_connected {
         return Ok(());
     }
@@ -40,7 +38,7 @@ pub(crate) async fn refresh_task_comments(store: &SharedStore, task: &Task) -> O
     if team_current(store, &repository.to_string_lossy()).await {
         return Ok(());
     }
-    let client = super::planning_client::PlanningClient::for_items(&repository).await?;
+    let client = super::tracker::Tracker::for_items(&repository).await?;
     // A coworker deleted the item: remove the Task from the plan, keeping its work.
     if client
         .removed(issue.as_str())
@@ -61,13 +59,13 @@ pub(crate) async fn refresh_task_comments(store: &SharedStore, task: &Task) -> O
     // Linear's team feed accepts provider edits into Work. Asana has
     // none, so this exact read is their acceptance: a renamed or completed task
     // updates the Task, and an unsent local edit stays as a visible conflict.
-    if !matches!(client, super::planning_client::PlanningClient::Linear(_)) {
+    if !matches!(client, super::tracker::Tracker::Linear(_)) {
         if let Some((item, project)) = client
             .issue_ownership(issue.as_str())
             .await
             .map_err(|error| OpsError::Message(error.to_string()))?
         {
-            super::planning_delivery::ingest_task(
+            super::tracker::ingest_task(
                 store,
                 &repository,
                 &item,
@@ -95,10 +93,10 @@ pub(crate) async fn refresh_task_comments(store: &SharedStore, task: &Task) -> O
 fn claim_local_comments(
     store: &Store,
     task: &Task,
-    client: &super::planning_client::PlanningClient,
+    client: &super::tracker::Tracker,
     observation: &mut loopflow_storage::planning::TrackerObservation,
 ) -> OpsResult<()> {
-    if matches!(client, super::planning_client::PlanningClient::Linear(_)) {
+    if matches!(client, super::tracker::Tracker::Linear(_)) {
         return Ok(());
     }
     let local = store.task_comments(&task.id).map_err(message)?.comments;
@@ -118,37 +116,27 @@ fn message(error: impl std::fmt::Display) -> OpsError {
     OpsError::Message(error.to_string())
 }
 
-pub(crate) async fn check_before_write(repo: &std::path::Path) -> OpsResult<()> {
-    let store = super::planning_sync::planning_store().await?;
-    tokio::time::timeout(
-        Duration::from_secs(5),
-        check_repository(&store, &repo.to_string_lossy()),
-    )
-    .await
-    .map_err(message)??;
-    Ok(())
-}
-
 /// Bring the repository's planning scope (a Linear Team or Asana project) up
 /// to date: items people created or edited there become or
 /// update Tasks. Freshness belongs to the scope, even when several repositories
 /// or processes share it.
+#[cfg(test)]
 pub(crate) async fn check_repository(store: &Store, repository: &str) -> OpsResult<bool> {
     check_scope(store, repository, fresh_for(repository)).await
 }
 
 /// `check_repository` unless a check started within `fresh_for` seconds.
 async fn check_scope(store: &Store, repository: &str, fresh_for: i64) -> OpsResult<bool> {
-    let planning_connected = super::planning_client::connected(repository);
+    let planning_connected = super::tracker::connected(repository);
     if !planning_connected {
         return Ok(false);
     }
     let repo = Path::new(repository);
-    let team = super::planning_client::repository_scope(repo)?;
+    let team = super::tracker::repository_scope(repo)?;
     let mut scope_matches = HashMap::from([(repo.to_path_buf(), true)]);
     let mut same_scope = |repo: &Path| {
         *scope_matches.entry(repo.to_path_buf()).or_insert_with(|| {
-            super::planning_client::repository_scope(repo).is_ok_and(|scope| scope == team)
+            super::tracker::repository_scope(repo).is_ok_and(|scope| scope == team)
         })
     };
     let mut live = Vec::new();
@@ -186,7 +174,7 @@ async fn check_scope(store: &Store, repository: &str, fresh_for: i64) -> OpsResu
         .map_err(message)?
         .join("locks/linear-teams")
         .join(key);
-    let Some(_lock) = super::planning_delivery::lock_delivery(&path)? else {
+    let Some(_lock) = super::tracker::drain::lock_delivery(&path)? else {
         return Ok(false);
     };
     let now = OffsetDateTime::now_utc();
@@ -200,7 +188,7 @@ async fn check_scope(store: &Store, repository: &str, fresh_for: i64) -> OpsResu
     let through = now
         .format(&time::format_description::well_known::Rfc3339)
         .map_err(message)?;
-    let client = super::planning_client::PlanningClient::for_items(repo).await?;
+    let client = super::tracker::Tracker::for_items(repo).await?;
     let changes = client
         .changes(&team, since.as_deref(), &through, &live, &finished)
         .await
@@ -243,7 +231,7 @@ async fn check_scope(store: &Store, repository: &str, fresh_for: i64) -> OpsResu
                 .or_else(|| Some(repository.to_owned()))
         };
         let Some(owner) = owner else { continue };
-        super::planning_delivery::ingest_task(
+        super::tracker::ingest_task(
             store,
             std::path::Path::new(&owner),
             &issue,
@@ -270,7 +258,9 @@ async fn check_scope(store: &Store, repository: &str, fresh_for: i64) -> OpsResu
 /// Seconds a finished scope delta answers reads. Linear's stretches as its
 /// shared budget falls; Asana keeps the healthy window.
 fn fresh_for(repository: &str) -> i64 {
-    if super::planning_client::is_linear(repository) {
+    if crate::ops::tracker::configured(std::path::Path::new(repository))
+        == Some(loopflow_storage::provider::Provider::Linear)
+    {
         crate::linear::delta_fresh_secs()
     } else {
         crate::linear::HEALTHY_FRESH_SECS
@@ -281,12 +271,13 @@ fn fresh_for(repository: &str) -> i64 {
 /// delta up to date (a no-op inside its window), then report whether local
 /// state is current enough to answer in place of a per-item read.
 pub(crate) async fn team_current(store: &Store, repository: &str) -> bool {
-    if !super::planning_client::is_linear(repository) {
+    if !(crate::ops::tracker::configured(std::path::Path::new(repository))
+        == Some(loopflow_storage::provider::Provider::Linear))
+    {
         return false;
     }
     check_repository_bounded(store, repository, fresh_for(repository)).await;
-    let Ok(team) = super::planning_client::repository_scope(std::path::Path::new(repository))
-    else {
+    let Ok(team) = super::tracker::repository_scope(std::path::Path::new(repository)) else {
         return false;
     };
     store
@@ -331,259 +322,15 @@ pub(crate) async fn refresh_repository(store: &Store, repository: &str) -> bool 
 
 async fn sync_scope(store: &Store, repository: &str, fresh_for: i64) -> bool {
     let changed = check_repository_bounded(store, repository, fresh_for).await;
-    // Each delivery has its own deadline. A shared deadline repeatedly canceled
-    // the first slow export and starved every later saved Task.
-    if let Err(error) = sync_repository_deliveries(store, repository).await {
-        tracing::debug!(%error, "planning delivery pending");
-    }
-    if let Err(error) = super::planning_export::sync_repository_exports(store, repository).await {
-        tracing::debug!(%error, "planning export pending");
-    }
-    if let Err(error) = super::planning_delivery::sync_repository_fields(store, repository).await {
-        tracing::debug!(%error, "planning field delivery pending");
+    if let Err(error) = super::tracker::drain::drain_repository(
+        store,
+        repository,
+        super::tracker::drain::Scope::All,
+        super::tracker::drain::Bound::PASS,
+    )
+    .await
+    {
+        tracing::debug!(%error, "tracker effects pending");
     }
     changed
-}
-
-pub(super) async fn sync_repository_deliveries(store: &Store, repository: &str) -> OpsResult<()> {
-    if !super::planning_client::connected(repository) {
-        return Ok(());
-    }
-    let pending = store
-        .sqlite
-        .pending_planning_tasks(repository)
-        .map_err(message)?;
-    // State before comments, as `task sync` orders them: our own comment must
-    // not land as an intervening revision while the state write is in flight.
-    futures_util::future::join_all(pending.iter().map(|task| async {
-        let state = sync_task_state(store, task).await;
-        let comments = sync_task_comments(store, task).await;
-        for result in [state, comments] {
-            if let Err(error) = result {
-                tracing::debug!(%error, "planning delivery pending");
-            }
-        }
-    }))
-    .await;
-    Ok(())
-}
-
-pub(crate) async fn sync_task_state(store: &Store, task: &Task) -> OpsResult<()> {
-    deliver_task_state(store, task, false).await
-}
-
-pub(crate) async fn deliver_task_state(store: &Store, task: &Task, retry: bool) -> OpsResult<()> {
-    let path = store
-        .sqlite
-        .home_dir()
-        .map_err(message)?
-        .join("locks/task-state")
-        .join(format!("{}.lock", task.id));
-    let Some(_lock) = super::planning_delivery::lock_delivery(&path)? else {
-        return Ok(());
-    };
-    let Some(delivery) = store.sqlite.pending_task_state(&task.id).map_err(message)? else {
-        return Ok(());
-    };
-    let attempt = async {
-        let task = store
-            .get_task(&task.id)
-            .await
-            .map_err(message)?
-            .ok_or_else(|| OpsError::Message("Task is missing".into()))?;
-        let Some(issue) = &task.linear_id else {
-            return Ok(());
-        };
-        let project = match &task.project_id {
-            Some(id) => Some(
-                store
-                    .get_project(id)
-                    .await
-                    .map_err(message)?
-                    .ok_or_else(|| message("Task Project is missing"))?,
-            ),
-            None => None,
-        };
-        let repository = super::task::repository_for_task(store, &task)?;
-        let Some(provider) = super::planning_client::remote_name(&repository) else {
-            return Ok(());
-        };
-        let client = super::planning_client::PlanningClient::for_items(&repository).await?;
-        let (observed, _) = client
-            .issue_ownership(issue.as_str())
-            .await
-            .map_err(message)?
-            .ok_or_else(|| message(format!("Linked {provider} task is unavailable")))?;
-        if observed.project_id.as_deref()
-            != project
-                .as_ref()
-                .and_then(|p| p.linear_id.as_ref())
-                .map(|id| id.as_str())
-        {
-            return Err(message(format!(
-                "Task membership changed in {provider}; retained local decision"
-            )));
-        }
-        if observed.state.is_none() {
-            return Err(message(format!(
-                "{provider} state is unknown; saved decision retained"
-            )));
-        }
-        let history = state_history(&client, issue.as_str(), &delivery, &observed).await;
-        if !loopflow_storage::sqlite::linear_acceptance::observe_task_state(
-            &store.sqlite,
-            &delivery,
-            &observed,
-            history,
-        )
-        .map_err(message)?
-        {
-            return Ok(());
-        }
-        let attempted = delivery.attempted && history != StateHistory::Unchanged;
-        if attempted && !retry {
-            return Err(OpsError::Message(
-                "Prior state delivery remains uncertain; saved decision retained".into(),
-            ));
-        }
-        let state_id = client
-            .state_id(
-                super::planning_client::StateScope::Item(issue.as_str()),
-                &delivery.target,
-            )
-            .await
-            .map_err(message)?;
-        // Reserve at the send boundary: a slow pre-write check must not leave
-        // an unsent request attempted. Its throttle skips the request's own check.
-        if matches!(client, super::planning_client::PlanningClient::Linear(_)) {
-            if let Err(error) = check_before_write(&repository).await {
-                tracing::debug!(%error, "pre-write Linear check pending");
-            }
-        }
-        if !store
-            .sqlite
-            .attempt_task_state(&delivery, retry)
-            .map_err(message)?
-        {
-            return Ok(());
-        }
-        // Neither provider has an expected-revision guard here. A reopening between
-        // the observation and this mutation can be overwritten; its acknowledgement
-        // settles observed state, not the absence of an intervening edit.
-        let confirmed = match client.set_item_state(issue.as_str(), &state_id).await {
-            Ok(confirmed) => confirmed,
-            Err(error) => {
-                if !attempted && matches!(error, crate::linear::LinearError::RateLimited { .. }) {
-                    store.sqlite.reject_task_state(&delivery).map_err(message)?;
-                }
-                return Err(message(&error));
-            }
-        };
-        // The reserved row carries the attempt and any base evidence moved forward.
-        let history = match store
-            .sqlite
-            .pending_task_state(&delivery.task_id)
-            .map_err(message)?
-        {
-            Some(reserved) if reserved.id == delivery.id => {
-                state_history(&client, issue.as_str(), &reserved, &confirmed).await
-            }
-            _ => StateHistory::Unknown,
-        };
-        if loopflow_storage::sqlite::linear_acceptance::observe_task_state(
-            &store.sqlite,
-            &delivery,
-            &confirmed,
-            history,
-        )
-        .map_err(message)?
-        {
-            return Err(message(format!(
-                "{provider} state write remains uncertain; saved decision retained"
-            )));
-        }
-        Ok::<(), OpsError>(())
-    };
-    let result = tokio::time::timeout(std::time::Duration::from_secs(5), attempt).await;
-    let error = match result {
-        Ok(Ok(())) => return Ok(()),
-        Ok(Err(error)) => error.to_string(),
-        Err(_) => {
-            "Task state delivery timed out; saved decision and delivery identity retained".into()
-        }
-    };
-    store
-        .sqlite
-        .task_state_error(&delivery, &error)
-        .map_err(message)
-}
-
-/// Evidence for a write that may have reached the provider while the state
-/// still reads as its base. Any other observation needs none.
-async fn state_history(
-    client: &super::planning_client::PlanningClient,
-    issue: &str,
-    delivery: &TaskStateDelivery,
-    observed: &loopflow_storage::planning::TrackerItem,
-) -> StateHistory {
-    let (Some(base_revision), Some(base_state)) = (&delivery.base_revision, &delivery.base_state)
-    else {
-        return StateHistory::Unknown;
-    };
-    if !delivery.attempted || observed.state.as_ref() != Some(base_state) {
-        return StateHistory::Unknown;
-    }
-    if observed.revision.as_ref() == Some(base_revision) {
-        return StateHistory::Unchanged;
-    }
-    match client
-        .state_history_since(issue, base_revision, base_state)
-        .await
-    {
-        Ok(history) => history,
-        Err(error) => {
-            tracing::debug!(%error, "Task state history unavailable");
-            StateHistory::Unknown
-        }
-    }
-}
-
-pub(crate) async fn sync_task_comments(store: &Store, task: &Task) -> OpsResult<()> {
-    let task = store
-        .get_task(&task.id)
-        .await
-        .map_err(message)?
-        .ok_or_else(|| OpsError::Message("Task is missing".into()))?;
-    let Some(issue) = &task.linear_id else {
-        return Ok(());
-    };
-    let comments = store
-        .sqlite
-        .pending_task_comments(&task.id)
-        .map_err(message)?;
-    if comments.is_empty() {
-        return Ok(());
-    }
-    let repository = super::task::repository_for_task(store, &task)?;
-    if !super::planning_client::connected(&repository.to_string_lossy()) {
-        return Ok(());
-    }
-    let client = super::planning_client::PlanningClient::for_items(&repository).await?;
-    for comment in comments {
-        let result = tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            client.sync_comment(&comment.id, issue.as_str(), &comment.body),
-        )
-        .await;
-        let error = match result {
-            Ok(Ok(())) => None,
-            Ok(Err(error)) => Some(error.to_string()),
-            Err(_) => Some("Comment delivery timed out; its identity is retained".into()),
-        };
-        store
-            .sqlite
-            .record_comment_delivery(&comment.id, error.as_deref())
-            .map_err(message)?;
-    }
-    Ok(())
 }

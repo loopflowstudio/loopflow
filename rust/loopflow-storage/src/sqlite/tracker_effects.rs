@@ -953,6 +953,17 @@ impl SqliteStore {
         Ok(())
     }
 
+    /// Part of a multi-request effect landed: what the provider now holds is
+    /// the base the rest of it, or a lost reply, is judged against.
+    pub fn rebase_tracker_effect(&self, id: &str, base: &Value) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "UPDATE tracker_effects SET base_json=?2 WHERE id=?1 AND phase IN ('pending','attempted')",
+            params![id, base.to_string()],
+        )?;
+        Ok(())
+    }
+
     /// Record a look in the provider for an attempted effect's lost reply.
     pub fn look_tracker_effect(&self, id: &str, at: i64) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");

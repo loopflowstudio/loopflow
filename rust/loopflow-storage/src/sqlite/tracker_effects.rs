@@ -215,10 +215,12 @@ const COLUMNS: &str = "e.seq,e.id,e.wave_id,e.project_id,e.task_id,e.subject,e.k
     e.base_json,e.conflict_json,e.phase,e.provider,e.remote_id,e.acknowledged_revision,e.error,
     e.attempted_at,e.looked_at";
 
-// Every effect owner reaches its repository through one of these joins.
-const IN_REPO: &str = "(e.task_id IN (SELECT t.id FROM tasks t JOIN repository_plans r ON r.id=t.repository_id WHERE r.repo=?1)
-    OR e.project_id IN (SELECT p.id FROM projects p JOIN waves w ON w.id=p.wave_id WHERE w.repo=?1)
-    OR e.wave_id IN (SELECT id FROM waves WHERE repo=?1))";
+// Every effect owner reaches its repository through one of these joins. Each
+// is a lookup per unsettled row, so a pass costs its queue, not the repository's
+// Task count.
+const IN_REPO: &str = "(EXISTS(SELECT 1 FROM tasks t JOIN repository_plans r ON r.id=t.repository_id WHERE t.id=e.task_id AND r.repo=?1)
+    OR EXISTS(SELECT 1 FROM projects p JOIN waves w ON w.id=p.wave_id WHERE p.id=e.project_id AND w.repo=?1)
+    OR EXISTS(SELECT 1 FROM waves w WHERE w.id=e.wave_id AND w.repo=?1))";
 
 /// A row and its owner; the effect is `Err` for a kind a later lf wrote.
 fn read_effect(row: &Row<'_>) -> StoreResult<Result<TrackerEffect, EffectOwner>> {

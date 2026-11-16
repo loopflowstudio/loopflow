@@ -201,6 +201,48 @@ def main() -> None:
         (c, m, "mixed") for c in range(1, args.cohorts + 1) for m in ("cache", "incremental")
     ]
     specs += [(c, "cache", "execution") for c in range(1, args.cohorts + 1)]
+    if args.resume:
+        for cohort, mode, group in specs:
+            key = f"{cohort}_{mode}_{group}"
+            item = config["trees"].get(key)
+            if item is None:
+                continue
+            cases = (
+                ["seed_app", "seed_execution"]
+                if group == "seed"
+                else ["execution_new"]
+                if group == "execution"
+                else CASES
+            )
+            rows = [
+                r
+                for r in receipts
+                if r["cohort"] == cohort and r["mode"] == mode and r["case"] in cases
+            ]
+            if {r["case"] for r in rows if r["exit_code"] == 0 and r["tests_passed"] == 1} == set(
+                cases
+            ):
+                continue
+            tree = Path(item["path"])
+            if not (tree / "target").exists() and not rows:
+                continue
+            # A partial compilation can populate both caches and incremental state.
+            # Restart that group with distinct edits; keep its earlier raw attempts.
+            attempt = item.get("attempt", 0)
+            archive = output / "abandoned-attempts" / f"{key}_{attempt}"
+            archive.mkdir(parents=True, exist_ok=True)
+            _write(archive / "receipts.json", rows)
+            for case in cases:
+                for path in output.glob(f"{cohort}_{mode}_{case}.*"):
+                    path.rename(archive / path.name)
+                for path in output.glob(f"{cohort}_{mode}_{case}_compilers.jsonl"):
+                    path.rename(archive / path.name)
+            receipts = [r for r in receipts if r not in rows]
+            _write(receipts_path, receipts)
+            shutil.rmtree(tree / "target", ignore_errors=True)
+            _run(["git", "restore", "--source=HEAD", "--worktree", "rust"], tree, env)
+            item["attempt"] = attempt + 1
+            _write(state, config)
     for cohort, mode, group in specs:
         key = f"{cohort}_{mode}_{group}"
         if key in config["trees"]:
@@ -253,7 +295,8 @@ def main() -> None:
                 "CARGO_INCREMENTAL": "1" if mode == "incremental" else "0",
             }
             start = time.monotonic()
-            edit = _edit(tree, owner, stem) if cohort else None
+            edit_suffix = f"{stem}_attempt_{item.get('attempt', 0)}"
+            edit = _edit(tree, owner, edit_suffix) if cohort else None
             before, load_before = stats(), os.getloadavg()
             daemon_before = _processes().get(daemon_pid)
             package, test_filter = FILTERS[owner]
@@ -329,6 +372,7 @@ def main() -> None:
                 "owner": owner,
                 "tree": str(tree),
                 "edit": edit,
+                "edit_suffix": edit_suffix,
                 "command": command,
                 "exit_code": child.returncode,
                 "tests_passed": sum(

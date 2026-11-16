@@ -112,7 +112,7 @@ def test_status_classifies_loaded_roots(tmp_path, monkeypatch, running, loaded, 
         lambda: (wrapper, {"SCCACHE_CONF": str(config), "SCCACHE_SERVER_UDS": str(socket)}),
     )
     stats = {
-        "basedirs": [str(tmp_path)] if loaded else [],
+        "basedirs": [str(tmp_path) + "/"] if loaded else [],
         "stats": {},
         "cache_size": 10,
         "max_cache_size": 100,
@@ -133,7 +133,7 @@ def test_status_classifies_loaded_roots(tmp_path, monkeypatch, running, loaded, 
     monkeypatch.setattr(subprocess, "run", run)
     result = build_cache.cache_status(tmp_path)
     assert result["exit_code"] == expected
-    assert result["loaded_roots"] == (stats["basedirs"] if running else [])
+    assert result["loaded_roots"] == ([str(tmp_path)] if running and loaded else [])
     assert (result["daemon"] is not None) == running
     assert result["idle_seconds"] is None
 

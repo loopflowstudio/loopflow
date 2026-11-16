@@ -34,7 +34,9 @@ Each cohort runs every row once, alternating which mode goes first; three
 cohorts is the minimum. Edits are unique to their cohort, so none can retrieve
 an earlier edited artifact. Worktrees and targets are removed after their
 samples. Cargo commands run one at a time. After an exited run, `--resume` with
-the same output directory continues from the completed samples.
+the same output directory retains completed groups. An interrupted group starts
+again with distinct edits and a fresh target; its earlier raw attempts move to
+`abandoned-attempts/` so partially compiled artifacts cannot bias its samples.
 
 Each sample records wall seconds, client CPU-seconds, the largest single
 process RSS, the peak summed RSS of the Cargo process tree, and the daemon's

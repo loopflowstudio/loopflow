@@ -172,7 +172,8 @@ mode order alternating:
 
 Three cohorts minimum, five if the Machine allows; edits are unique per cohort,
 as in `run.py`. Each worktree and target is removed after its samples. `--resume`
-continues an exited run.
+retains completed groups; an incomplete group restarts with distinct edits and
+a fresh target, retaining previous raw attempts under `abandoned-attempts/`.
 
 Each sample records: wall seconds; client CPU-seconds (`/usr/bin/time -l`);
 largest single process RSS; peak summed RSS of the Cargo process tree (1 s
@@ -338,3 +339,7 @@ PID, uptime, loaded roots and counters; `idle_seconds` is null with a reason.
 The advertised idle countdown is removed from docs. Root probes observe actual
 process exit. No daemon patch or observer service is added. Installation names
 package `sccache` explicitly (its repository contains multiple binary packages).
+
+Checks: root probe and real-crate probe passed with the installed pin (receipts
+`/tmp/loo921-root-proof` and `/tmp/loo921-cache-proof`); focused Python activation,
+dev-entry, cohort validation and third-party inventory: 23 passed.

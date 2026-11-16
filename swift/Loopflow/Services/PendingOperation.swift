@@ -79,6 +79,10 @@ public final class PendingOperation: Identifiable {
            resolutions.allSatisfy({ $0.resolution == .definitelyRefused }) { return false }
         return saved || error == nil
     }
+    public var dispatchPending: Bool {
+        OperationDeclaration(kind: kind)?.isExecution == true && (saved || error == nil)
+            && (evidence?.validation != .bound || evidence?.delivery != .finished)
+    }
     public var isCreation: Bool { kind == "task.create" }
     public var title: String {
         if isCreation { return receipt?.task.title ?? request }
@@ -90,7 +94,7 @@ public final class PendingOperation: Identifiable {
     public var isListed: Bool {
         if waitingForConnection || needsInspection { return true }
         if OperationDeclaration(kind: kind)?.requiresPresentation == true { return recovery?.resultPresented != true }
-        return false
+        return OperationDeclaration(kind: kind)?.isExecution == true
     }
     var waitingForConnection = false
     // Delivery is paused after a failed attempt until Check request deliberately

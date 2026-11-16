@@ -31,10 +31,14 @@ extension ClientWorkQueryTests {
         try await leaveBothWindows(abandon: false, move: true)
     }
 
-    private func leaveBothWindows(abandon: Bool, move: Bool = false, ownership: Bool = false, reopening: Bool = false, pending: Bool = false) async throws {
+    func testExecutionRequestsPublishBeforeDiskWithoutPredictingRuntime() async throws {
+        try await leaveBothWindows(abandon: false, execution: true)
+    }
+
+    private func leaveBothWindows(abandon: Bool, move: Bool = false, ownership: Bool = false, reopening: Bool = false, pending: Bool = false, execution: Bool = false) async throws {
         let fixture = try WorkTestFixture.load()
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         var wire = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(workingPlan(["issue-now", "issue-review"]))) as? [String: Any])
         wire["repo_path"] = "/src/loopflow"
         var contents = try XCTUnwrap(wire["contents"] as? [[String: Any]])
@@ -58,8 +62,10 @@ extension ClientWorkQueryTests {
         let disk = ClientWorkStore(directory: directory, prepareDirectory: { _ in hold.enter() }, machine: { "machine" },
             read: { _ in "null" }, observe: { _ in ServerWatch(updates: AsyncThrowingStream { _ in }, checkpoint: { _ in }, cancel: {}) },
             send: { _ in XCTFail("The gesture must not send") })
+        addTeardownBlock { await disk.close() }
         let owner = WorkInteraction(machine: "machine", store: disk)
-        defer { hold.release(); owner.shutdown() }
+        defer { hold.release() }
+        addTeardownBlock { await owner.shutdown().value }
         _ = owner.open(query) { _ in }
         owner.apply(prepared)
         var entered = hold.entered.makeAsyncIterator()
@@ -79,6 +85,32 @@ extension ClientWorkQueryTests {
         let task = try XCTUnwrap(first.task(id: "issue-now")?.task)
         let controls = TaskWorkflowHeader(model: first, task: task,
             work: .unavailable(lastGood: nil, reason: "Machine offline"))
+        if execution {
+            let states = first.projectedTaskFacts(task)?.states
+            let fixtureURL = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+                .appendingPathComponent("tests/fixtures/dto/task_work.json")
+            let overview = try JSONDecoder().decode(TaskOverview.self, from: Data(contentsOf: fixtureURL))
+            let header = TaskWorkflowHeader(model: first, task: task, work: .available(overview))
+            try header.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-move-demo").button().tap()
+            XCTAssertEqual(second.taskExecution(task)?.presentation().text, "Start requested…")
+            first.shipTask(task)
+            XCTAssertEqual(second.taskExecution(task)?.presentation().text, "Auto-Ship requested…")
+            first.stopShipping(task)
+            XCTAssertEqual(second.taskExecution(task)?.presentation().text, "Stop Auto-Ship requested…")
+            XCTAssertEqual(first.projectedTaskFacts(task)?.states, states)
+            XCTAssertEqual(first.selection, .task(id: "issue-now"))
+            XCTAssertEqual(second.selection, first.selection)
+            hold.release()
+            await owner.persistPending()
+            let records = try await disk.pending()
+            XCTAssertEqual(records.count, 3)
+            XCTAssertTrue(records.allSatisfy { $0.resource == .task(base.contents[0].work) })
+            let commands = try records.map { try JSONDecoder().decode(JSONValue.self, from: $0.payload) }
+            XCTAssertEqual(commands.map { $0["kind"] }, [.string("task.run"), .string("task.ship"), .string("task.hold")])
+            XCTAssertEqual(commands[0]["graph"], .null)
+            XCTAssertEqual(commands[0]["from"], .string("demo"))
+            return
+        }
         if reopening {
             XCTAssertTrue(first.taskCompleted(task) || first.isCompleting(task))
             let button = try controls.inspect().find(viewWithAccessibilityIdentifier: "task-reopen").button()
@@ -109,7 +141,7 @@ extension ClientWorkQueryTests {
             XCTAssertEqual(second.taskOwned(task), true)
             first.reopenTask(task)
             XCTAssertEqual(first.selection, .task(id: "issue-now"))
-            XCTAssertNil(first.navigation.taskRunDrafts[task.id])
+            XCTAssertNil(first.taskExecution(task))
             hold.release()
             await owner.persistPending()
             let records = try await disk.pending()
@@ -155,7 +187,7 @@ extension ClientWorkQueryTests {
     func testCachedQueryNavigationAndOriginOrderDuringHeldCompleteSave() async throws {
         let fixture = try WorkTestFixture.load()
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         var wire = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(workingPlan(["issue-now", "issue-review", "third"]))) as? [String: Any])
         wire["repo_path"] = "/src/loopflow"
         var contents = try XCTUnwrap(wire["contents"] as? [[String: Any]])
@@ -171,8 +203,10 @@ extension ClientWorkQueryTests {
         let hold = HeldIntentDisk()
         let disk = ClientWorkStore(directory: directory, prepareDirectory: { _ in hold.enter() }, machine: { "machine" },
             read: { _ in "null" }, observe: { _ in ServerWatch(updates: AsyncThrowingStream { _ in }, checkpoint: { _ in }, cancel: {}) }, send: { _ in })
+        addTeardownBlock { await disk.close() }
         let owner = WorkInteraction(machine: "machine", store: disk)
-        defer { hold.release(); owner.shutdown() }
+        defer { hold.release() }
+        addTeardownBlock { await owner.shutdown().value }
         _ = owner.open(a) { _ in }; _ = owner.open(b) { _ in }
         owner.apply(prepared)
         var entered = hold.entered.makeAsyncIterator()
@@ -217,7 +251,7 @@ extension ClientWorkQueryTests {
 
     func testStampedSavedQueryRefreshAfterUnrelatedWriteKeepsPendingProjectionAndDestination() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         let read = ServedRead.desktopViewGet(directory: "/repo", expression: "query:picked")
         let disk = store(directory)
         let owner = WorkInteraction(machine: "machine", store: disk)
@@ -291,7 +325,7 @@ extension ClientWorkQueryTests {
 
     func testDelayedDashboardSaveCannotSelectAfterLeavingAndReturningToItsExpression() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         let dashboard = String(decoding: try loadFixtureData("dashboard.json"), as: UTF8.self)
         let (entered, entering) = AsyncStream<Void>.makeStream()
         let (release, releasing) = AsyncStream<Void>.makeStream()
@@ -327,7 +361,7 @@ extension ClientWorkQueryTests {
 
     func testColdQuerySelectsBeforeItsReadAndKeepsItsFailureInThatDestination() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         let owner = WorkInteraction(machine: "machine", store: store(directory))
         defer { owner.shutdown() }
         let query = RegistryQuery(subscribeRead: { _, _ in

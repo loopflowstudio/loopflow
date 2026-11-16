@@ -437,7 +437,7 @@ struct WorkNavigationTests {
         let start = try offer.inspect().find(viewWithAccessibilityIdentifier: "task-start-issue-review").button()
         #expect(!start.isDisabled())
         #expect(throws: Never.self) { try offer.inspect().find(text: task.task.description) }
-        #expect(model.navigation.taskRunDrafts[task.id] == nil)
+        #expect(model.taskExecution(task) == nil)
     }
 
     @Test("Selecting Work closes Find Work and preserves the sidebar preference", arguments: [false, true])

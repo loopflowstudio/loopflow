@@ -48,3 +48,10 @@ Jack Heart, 2026-11-15, conversation discussion:
 
 These are discussion questions, not a decision to split, ship, change product
 behavior or restart the active Graph.
+
+Jack Heart, 2026-11-15, forwarded in comment `90a2c53d-50d4-4962-b4c7-65af61e1943d`:
+> “so that we can use the benchmark to prove each subsequent step”
+
+Benchmark-first extraction is handled in the primary conversation. Finish and
+checkpoint the current Start/Ship/Hold cut, then stop rewrite iteration at the
+review/continuation boundary until that independent benchmark is available.

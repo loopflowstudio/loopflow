@@ -10,6 +10,7 @@ public struct OperationDeclaration {
     enum Kind: String {
         case create = "task.create", newSession = "session.new", complete = "task.complete", reopen = "task.reopen"
         case rename = "session.rename"
+        case run = "task.run", ship = "task.ship", hold = "task.hold"
         case update = "task.update", move = "task.move", abandon = "task.abandon", claim = "task.claim", unassign = "task.unassign"
     }
 
@@ -25,6 +26,9 @@ public struct OperationDeclaration {
         case .claim: "Claim Task"
         case .unassign: "Unassign Task"
         case .rename: "Rename Session"
+        case .run: "Start Task"
+        case .ship: "Auto-Ship"
+        case .hold: "Stop Auto-Ship"
         }
     }
 
@@ -34,9 +38,14 @@ public struct OperationDeclaration {
         switch kind {
         case .create, .newSession: "Starting conversation…"
         case .complete: Self.completionProgress
+        case .run: "Start requested…"
+        case .ship: "Auto-Ship requested…"
+        case .hold: "Stop Auto-Ship requested…"
         case .reopen, .update, .move, .abandon, .claim, .unassign, .rename: nil
         }
     }
+
+    public var isExecution: Bool { kind == .run || kind == .ship || kind == .hold }
 
     var changesMembership: Bool { kind == .complete || kind == .abandon || kind == .move || kind == .claim || kind == .unassign || kind == .reopen }
 
@@ -72,10 +81,18 @@ public struct OperationDeclaration {
         case .claim: stages = ["task.claimed"]
         case .unassign: stages = ["task.unassigned"]
         case .rename: stages = ["session.renamed"]
+        case .run, .ship, .hold: stages = []
         }
     }
 
     func resolutions(in receipt: OperationReceipt) -> [OperationCommit]? {
+        // These commands acknowledge dispatch only. No SQLite stage can prove
+        // Graph/PR success or Process exit. An unknown dispatch stays held;
+        // a finished failure establishes order without proving rollback.
+        if isExecution {
+            guard receipt.validation == .bound, receipt.delivery == .finished else { return nil }
+            return []
+        }
         let resolutions = receipt.commits.filter { stages.contains($0.stage) }
         guard stages.isSubset(of: Set(resolutions.map(\.stage))) else { return nil }
         return resolutions

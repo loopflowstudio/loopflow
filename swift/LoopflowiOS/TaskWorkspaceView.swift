@@ -12,6 +12,7 @@ struct TaskWorkspaceView: View {
     var abandon: (() -> Void)? = nil
     var move: ((String?) -> Void)? = nil
     var edit: ((WorkInteraction.TaskEdit) -> Void)? = nil
+    var execute: ((WorkInteraction.TaskCommand) -> Void)? = nil
     var facts: WorkMembershipPlan.Facts? = nil
     var waves: [Wave] = []
     var completionDirectory: String? = nil
@@ -51,10 +52,20 @@ struct TaskWorkspaceView: View {
                     }
             }
         }
+        .safeAreaInset(edge: .bottom) {
+            if let directory = completionDirectory,
+               let request = client.interaction.taskExecution(issue: task.identifier ?? task.work.id, directory: directory) {
+                PendingOperationRow(operation: request, interaction: client.interaction, edit: { _ in }, context: .conversation)
+                    .padding(8)
+            }
+        }
         .toolbar {
             if abandon != nil {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
+                        if let execute {
+                            TaskExecutionActions(execute: execute)
+                        }
                         if let edit {
                             TaskOwnershipActions(completed: (facts?.states.contains(.done) ?? task.states.contains(.done)) || completionPending,
                                 owned: facts?.owned, edit: edit)
@@ -83,6 +94,15 @@ struct TaskWorkspaceView: View {
             try? await client.interaction.presented(.task(task.work.id))
         }
         .onAppear { PerfClock.interaction(.taskSelect, .contentMounted, id: task.work.id) }
+    }
+}
+
+struct TaskExecutionActions: View {
+    let execute: (WorkInteraction.TaskCommand) -> Void
+    var body: some View {
+        Button("Start") { execute(.start(graph: nil, from: nil)) }.accessibilityIdentifier("task-start")
+        Button("Auto-Ship") { execute(.ship) }.accessibilityIdentifier("task-ship")
+        Button("Stop Auto-Ship") { execute(.stopShipping) }.accessibilityIdentifier("task-ship-stop")
     }
 }
 

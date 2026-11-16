@@ -262,9 +262,8 @@ exact pending commands and receipt recovery stay on the typed input evaluator.
 
 Still remove, with their consumers:
 
-- Desktop `TaskRunDraft.phase`, other mutation refresh barriers
-  (`performTaskAction`) and bind replacement bookkeeping (`replaceSession`,
-  `supersedeSessions`).
+- Other mutation refresh barriers and bind replacement bookkeeping
+  (`replaceSession`, `supersedeSessions`).
 - View-owned mobile `SessionLink` teardown on ordinary Task switching; keep
   explicit Close, background policy and memory-pressure eviction.
 - WorkCache/TaskFeed duplicate authoritative caches and duplicate freshness
@@ -399,15 +398,10 @@ acquire a No Wave label.
 
 ### Task action cut · 2026-11-15
 
-Built: domain results/recovery (`ede0429321`), execution-input reads
-(`0a9a313d54`) and the vertical client cut (`c055cc55ca`). Independently supported
-disposition (nullable completion time, pending completion identity), SQL ownership
-identity/known unowned, publication and retained execution inputs replace aggregate
-lifecycle fields. Graph running, Auto-Ship carrier running, held position, checkout
-and approval stay distinct. Both transports carry one typed membership body; the
-SQLite owner persists facts, incorporation, effects, exact commands and reload
-floors. Old aggregate caches become cold under migrated floors; independent parent
-values survive. `work.activity/2` raw captures replace filtered activity.
+Built: typed Task inputs, domain results/recovery, both transports and persisted
+client reconciliation (`ede0429321`, `0a9a313d54`, `c055cc55ca`). Aggregate lifecycle
+caches become cold while independent parent facts survive; raw activity uses
+`work.activity/2`. Full prior inventory: `b74196d33b:scratch/instant-task-session.md`.
 
 Claim projects ownership intent without inventing an owner DTO; Unassign projects
 known unowned. Reopen evaluates ordered projected disposition, including an earlier
@@ -423,22 +417,47 @@ the save-before-send outbox and canonical Task lane; no ownership/Reopen refresh
 barrier or stale-planning guard remains. Prior design: `d80de2ee6c1b:scratch/instant-task-session.md`
 (Task action cut).
 
-Acceptance map: `ClientWorkQueryTests` (Reopen no-op/unknown predicate, ordered
-Claim/Complete/Reopen with refusal, restart original-ID recovery, two-client either
-order, conflicting support, runtime membership not borrowing ownership);
-`DesktopWorkInteractionTests` and `MobileWorkInteractionTests` (publish before disk,
-selections/routes kept, Reopen before Done); Rust `task_ownership` refusal tests.
+Ownership/Reopen acceptance and prior checks:
+`b74196d33b:scratch/instant-task-session.md` (Task action cut).
 
-Next vertical cut: Start, Ship and Stop Auto-Ship (`WorkModel.startTask`,
-`shipTask`, `stopShipping`) still call `performTaskAction`. Move them onto the shared
-owner projecting accepted intent only (never predicted Graph/PR success), then delete
-`performTaskAction`. Three product questions below do not block it.
+### Execution request cut · 2026-11-15
 
-Checks for this cut:
-- `cargo nextest run -p loopflow --lib -E 'test(work::selection_tests::) | test(lifecycle_time_tracks_complete_reopen_complete_in_one_supported_snapshot) | test(server::schema::tests::)'` — 30 passed, run `9330150a-6f26-4ed9-97a3-48179ab07df8`.
-- `swift build --build-tests --package-path swift` then `scripts/test_desktop.sh --skip-build --filter 'ClientWorkQueryTests|TaskHistoryFilterTests|WaveStandupTests|WorkNavigationTests|WorkSelectionTests|DTOFixtureTests'` — 102 XCTest cases (one opt-in skip) and 133 Swift Testing cases passed.
-- `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/ClientWorkQueryTests -only-testing:LoopflowiOSTests/ReadingStampTests` — 102 cases passed (one opt-in skip); Simulator removed by the runner.
-- `cargo +stable fmt --all -- --check`, `cargo +stable clippy --all-targets -- -D warnings`, `cargo test -p loopflow --test integration documented_commands::`, `uv run python scripts/check_swift_multiplatform_boundaries.py` — passed; stable Rust 1.100.0 emits existing manifest notices for unused `chrono-tz`, `rpassword`, `tokio-stream` dependencies.
+Start (including graph/from), Auto-Ship and Stop Auto-Ship now enter shared
+`WorkInteraction` synchronously on both hosts, save their exact commands before
+send and use the canonical Task lane. They project request progress only. Successful
+finished dispatch retires the request without field effects, synthetic fences or a
+Work refresh barrier; Graph/PR success, approval and carrier exit still need Machine
+readings. Finished failures release ordering while remaining inspectable; uncertain
+sends hold the lane and recover the original ID without replay. Navigation and
+native owners stay put. Phone gains these three Task actions; Desktop's toast now
+says requested instead of asserting shipping/Working success.
+
+Deleted: `performTaskAction`, `TaskRunDraft`, per-window phases/errors, unused
+RegistryQuery run/ship/stop conveniences and exclusive checkpoint fixtures.
+Stream presentation, controls and exact-command coverage remain on the surviving
+shared path. Three product questions below do not block this cut.
+
+Acceptance: shared `ClientWorkQueryTests` cover pending/dispatched/uncertain,
+successful and failed dispatch, persisted identity, retirement and unchanged runtime;
+original-ID recovery includes all three commands. Desktop/phone held-disk tests
+cover immediate request publication, retained navigation, canonical lanes and
+unchanged facts.
+
+Checks:
+- `swift build --build-tests --package-path swift` — passed.
+- `scripts/test_desktop.sh --skip-build --filter 'ClientWorkQueryTests.testExecution|ClientWorkQueryTests.testSavedTaskCommand|ClientWorkQueryTests.testDesktop|DesktopHeadlessTests.taskWorkFollowsTheStream|DesktopHeadlessTests.taskWorkflow|DesktopHeadlessTests.workflowGraph|WorkNavigationTests.unstartedTaskOffersStart'` — 11 XCTest and 5 Swift Testing cases passed; log `/tmp/loo906-desktop-tests.log`.
+- `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/ClientWorkQueryTests/testExecutionDispatchRetiresOnlySuccessfulOriginalOutcomeAndNeverChangesRuntime -only-testing:LoopflowiOSTests/ClientWorkQueryTests/testExecutionRequestsPublishBeforeDiskWithoutPredictingRuntime -only-testing:LoopflowiOSTests/ClientWorkQueryTests/testSavedTaskCommandRecoversOriginalIDAfterRestartWithoutAnotherSubmission` — 3 passed; runner removed its Simulator; log `/tmp/loo906-ios-tests.log`.
+- `uv run python scripts/check_swift_multiplatform_boundaries.py` — passed.
+- `cargo test -p loopflow --test integration documented_commands::` — 4 passed; existing linker unwind-size warning; log `/tmp/loo906-doc-tests.log`.
+
+Sequencing direction: finish/checkpoint this cut, then stop rewrite iteration until
+the independent benchmark is available for comparisons. Extraction stays in the
+primary conversation; no benchmark-owned files change here. Remaining scope stays
+open; no shipping decision. Exact direction: comment `90a2c53d-50d4-4962-b4c7-65af61e1943d`.
+
+Prior ownership/Reopen checks: `b74196d33b:scratch/instant-task-session.md`
+(Task action cut). Gate owns wider suites and the recorded LEAK; native latency
+remains unmeasured.
 
 ### Open product choices
 
@@ -502,17 +521,12 @@ Derived membership answers).
 
 ## Current implementation cut
 
-Start, Complete, Abandon, Move and Session rename publish through shared
-`WorkInteraction`; selection remains local, while save-before-send and original-ID
-recovery belong to SQLite. Both clients import released creations by original
-Machine; uncertain historical sends require inspection. Query leases, scoped
-reload floors and compact retired source identities retain their prior contracts.
-Detailed implementation, migration requirements and prior results:
-`9987fcc9f1:scratch/instant-task-session.md` (Current implementation cut).
-
-Boards, portfolio Roadmap/Now, trails, No Wave grouping, counts and Wave
-detail/history join the query owner's parent/lifecycle fields; native acceptance
-and full interaction cutover remain open.
+Shared `WorkInteraction` owns creation, Complete/Abandon, Move, Session rename,
+ownership/Reopen and execution requests; SQLite owns persistence and original-ID
+recovery. Released creation import, query leases, reload floors and retired source
+identities retain their contracts at `9987fcc9f1:scratch/instant-task-session.md`
+(Current implementation cut). Projected surfaces and native acceptance remain in
+the responsibility inventory below.
 Other remaining work: effect-policy duplication; exhaustive
 effect/dependency declarations and cross-query provenance; other mutation recovery
 and resource lanes; retained mobile `SessionLink`; projected inspection;
@@ -572,7 +586,7 @@ Prior runs: `5c958398a6de`, `aee0e10dc603` (this file).
 | Boards, portfolio, trails, No Wave | Query-owned parent/lifecycle; old planning membership removed | Native acceptance; surface commands at `09ab7e7ab2:scratch/instant-task-session.md` |
 | Wave detail/history/inspector, dated Done | Shared projected join; correlated lifecycle/time; DTO membership merge and page-date filters removed | Native acceptance; unavailable dates stay incomplete |
 | Complete/Abandon, both hosts | Synchronous shared projection/navigation and outbox | Three product questions above; other command families below |
-| Other edits and command recovery | Session rename and Task ownership/Reopen migrated | Wave/Dashboard edits, bind/new/move, settings, file/layout and delivery/Graph actions: migrate real consumers and remove refresh barriers/duplicate policy |
+| Other edits and command recovery | Session rename, Task ownership/Reopen and execution requests migrated | Wave/Dashboard edits, bind/new/move, settings, file/layout and other delivery/Graph actions: migrate real consumers and remove refresh barriers/duplicate policy |
 | Native ownership, navigation | Desktop pool retained; shared synchronous selection | Retained mobile SessionLink, cached revisit/disclosure input and paint measurements |
 | Query cache and inspection | SQLite normalized facts/derived answers | Remove remaining WorkCache/TaskFeed authority; projected inspection beyond this detail cut |
 | Acceptance and latency | Deterministic shared/Desktop/phone checks per cut | Quiet-host native baseline; exhaustive policy/remaining consumer checks; gate owns broader suites, lint and recorded LEAK |

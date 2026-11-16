@@ -2755,17 +2755,9 @@ final class WorkModel {
         return URL(fileURLWithPath: path)
     }
 
-    /// Run the Task's Workflow through `lf task run`, then confirm its subscription
-    /// update. `graph` takes up that graph; `from` starts at that step, and an
-    /// interactive `from` only puts the Task there. Without either, Rust continues
-    /// after the step the Task waits at, taking up its Wave's or repository's default first.
-    /// The outcome settles only the Task and repository that started it; a
-    /// refusal is kept on that Task's draft and changes nothing else.
-    func startTask(_ graph: String?, from: String? = nil, task: RoadmapTask) async {
-        await performTaskAction(task.id) {
-            try await query.runTask(issue: task.task.identifier, graph: graph, from: from,
-                                    cwd: WaveOrigin.resolve(task.task.repo))
-        }
+    /// Publish the exact run request before disk or Machine discovery.
+    func startTask(_ graph: String?, from: String? = nil, task: RoadmapTask) {
+        executeTask(task, action: .start(graph: graph, from: from))
     }
 
     /// The graph a new Task in each scope would take up, keyed by repository and
@@ -2823,26 +2815,24 @@ final class WorkModel {
         if navigation.startingTask === operation { showsTaskLink = false }
     }
 
-    /// Ship the Task, then confirm its subscription update; it moves to Shipping
-    /// and the window's ship toast offers Undo.
-    func shipTask(_ task: RoadmapTask) async {
-        await performTaskAction(task.id) {
-            try await query.shipTask(issue: task.task.identifier, cwd: WaveOrigin.resolve(task.task.repo))
-        }
-        noteShipping(task, shipped: true)
+    func shipTask(_ task: RoadmapTask) {
+        executeTask(task, action: .ship)
+        navigation.shipNotice = ShipNotice(task: task, shipped: true)
     }
 
-    /// Stop Auto-Ship for the Task; it returns to Working and the toast says so.
-    func stopShipping(_ task: RoadmapTask) async {
-        await performTaskAction(task.id) {
-            try await query.stopShipping(issue: task.task.identifier, cwd: WaveOrigin.resolve(task.task.repo))
-        }
-        noteShipping(task, shipped: false)
+    func stopShipping(_ task: RoadmapTask) {
+        executeTask(task, action: .stopShipping)
+        navigation.shipNotice = ShipNotice(task: task, shipped: false)
     }
 
-    private func noteShipping(_ task: RoadmapTask, shipped: Bool) {
-        guard navigation.taskRunDrafts[task.id]?.error == nil else { return }
-        navigation.shipNotice = ShipNotice(task: task, shipped: shipped)
+    func taskExecution(_ task: RoadmapTask) -> PendingOperation? {
+        interaction?.taskExecution(issue: task.task.identifier, directory: WaveOrigin.cached(task.task.repo))
+    }
+
+    private func executeTask(_ task: RoadmapTask, action: WorkInteraction.TaskCommand) {
+        if interaction == nil { interaction = .local(observingMachineId) }
+        let work = projectedTaskFacts(task)?.work ?? WorkWorkspaceKey(repository: task.task.repositoryId, kind: .task, id: task.runtime?.workId ?? task.id)
+        interaction?.executeTask(work, issue: task.task.identifier, directory: WaveOrigin.cached(task.task.repo), action: action)
     }
 
     /// The Work the Machine control describes: the current started Task, else the
@@ -2945,31 +2935,6 @@ final class WorkModel {
     func reopenTask(_ task: RoadmapTask) { editTask(task, edit: .reopen) }
 
     func abandonTask(_ task: RoadmapTask) async { leaveTask(task, abandoning: true) }
-
-    /// Feedback belongs to the navigation and Task that began the command.
-    /// Returns whether the command was accepted, refreshed or not.
-    @discardableResult
-    private func performTaskAction(_ taskId: String, _ action: () async throws -> Void) async -> Bool {
-        let owner = navigation
-        let home = workDataDirectory
-        guard owner.taskRunDrafts[taskId]?.acting != true else { return false }
-        owner.taskRunDrafts[taskId, default: TaskRunDraft()].phase = .runningCommand
-        owner.taskRunDrafts[taskId]?.error = nil
-        do {
-            try await action()
-            owner.taskRunDrafts[taskId]?.phase = .awaitingObservation
-            try await confirmWorkUpdate(after: home)
-            owner.taskRunDrafts[taskId] = nil
-            return true
-        } catch {
-            let accepted = owner.taskRunDrafts[taskId]?.phase == .awaitingObservation
-            owner.taskRunDrafts[taskId]?.phase = nil
-            owner.taskRunDrafts[taskId]?.error = accepted
-                ? "Task update accepted; refresh not confirmed. \(error.localizedDescription)"
-                : error.localizedDescription
-            return accepted
-        }
-    }
 
     func beginSessionRename(_ record: SessionRecord) {
         guard navigation.renaming?.sessionId != record.id else { return }

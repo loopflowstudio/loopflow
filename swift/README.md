@@ -937,6 +937,14 @@ only reconnect. CLI commands and served writes call the same Rust operations,
 which return typed values. Each served mutation runs in a request-scoped worker
 with its directory and `CommandIo`; it creates no Process row for the request.
 Its response trace correlates diagnostics and effects in `logs/lf.log`.
+Start, Auto-Ship and Stop Auto-Ship publish a pending request immediately on both
+hosts and save it before sending, including while disconnected. They retain the
+original Machine and request ID through restart. A successful dispatch retires the
+request; Graph position, shipping, PR state and input readiness still come from
+Machine readings. A failed or uncertain dispatch offers Check request and Inspect.
+An uncertain dispatch holds conflicting Task commands without replay; a finished
+failure allows later commands without asserting rollback. Stop requests withdrawal;
+it never claims that the carrier Process has exited.
 Task run and ship dispatch detached execution under existing Graph owners.
 Terminal launches and remote Task file streams retain their CLI transports;
 Desktop's UI automation remains app-owned.
@@ -944,7 +952,8 @@ Desktop's UI automation remains app-owned.
 Canceling releases the client's wait, but an admitted mutation may still complete.
 Saved requests recover their original IDs after a lost response. Other mutation
 families still need an authoritative refresh before another deliberate edit.
-Task creation (including Session adoption), new Session threads, Complete, Abandon
+Task creation (including Session adoption), new Session threads, Complete, Abandon,
+Claim, Unassign, Reopen, Move, Start, Auto-Ship, Stop Auto-Ship
 and Session rename use the shared
 `ClientWorkStore` outbox. It saves the exact command, request ID, original Machine
 and protocol version in SQLite before sending `operation.submit`. Admission saves

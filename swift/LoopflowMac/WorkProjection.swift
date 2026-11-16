@@ -207,17 +207,6 @@ struct SessionRenameDraft: Equatable {
     var text: String
 }
 
-/// One Task's in-flight execution command and its refusal.
-struct TaskRunDraft: Equatable {
-    enum Phase { case runningCommand, awaitingObservation }
-    var phase: Phase?
-    var acting: Bool { phase != nil }
-    var progress: String {
-        phase == .awaitingObservation ? "Task updated; refreshing…" : "Updating Task…"
-    }
-    var error: String?
-}
-
 /// A Wave view's named parts, as `lf desktop -p` names them.
 enum WaveViewPart: String, CaseIterable, Hashable {
     case board, session, tiles
@@ -342,9 +331,7 @@ final class WorkNavigation {
     }
     var renaming: SessionRenameDraft?
     var binding: SessionBindingDraft?
-    /// Graph drafts by planning Task id; they survive Task and Session navigation.
-    var taskRunDrafts: [String: TaskRunDraft] = [:]
-    /// What the last Auto-Ship or Stop Auto-Ship on the window heading did.
+    /// The last Auto-Ship or Stop Auto-Ship request from this window.
     var shipNotice: ShipNotice?
     var startingTaskSessions: Set<String> = []
     var taskSessionErrors: [String: String] = [:]

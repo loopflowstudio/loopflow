@@ -14,6 +14,42 @@ final class ClientWorkQueryTests: XCTestCase {
         return try JSONDecoder().decode(WorkViewPlan.self, from: JSONSerialization.data(withJSONObject: wire))
     }
 
+    func testExecutionDispatchRetiresOnlySuccessfulOriginalOutcomeAndNeverChangesRuntime() throws {
+        for command in [ServedWrite.taskRun(directory: "/repo", issue: "a", graph: "feature", from: "demo", agent: nil, approve: false),
+                        .taskShip(directory: "/repo", issue: "a"), .taskHold(directory: "/repo", issue: "a")] {
+            for delivery in ["queued", "dispatched", "uncertain", "finished", "failed"] {
+                let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+                addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+                let database = try ClientWorkDatabase(directory: directory)
+                let base = try workingPlan(["a"])
+                _ = try database.cache(ClientWorkQuery(stamp: stamp("list", revision: 6), plans: [base]), key: "list")
+                let before = try database.cached(machine: "machine", key: "list")?.projection.first?.membership.facts
+                let record = SubmittedOperation(requestID: "saved", destination: "machine", payload: try JSONEncoder().encode(command),
+                    version: ServerProtocol.revision, submittedAt: Date(), resource: .task(base.contents[0].work))
+                try database.save(record, sentEpoch: "epoch")
+                guard case .string(let kind) = try JSONDecoder().decode(JSONValue.self, from: record.payload)["kind"] else { return XCTFail("Command needs kind") }
+                var wire = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(receipt(kind: kind))) as? [String: Any])
+                wire["commits"] = []
+                wire["delivery"] = delivery == "failed" ? "finished" : delivery
+                wire["error"] = delivery == "failed" ? "Dispatch outcome needs inspection" : NSNull()
+                wire["result"] = NSNull()
+                let outcome = try JSONDecoder().decode(OperationReceipt.self, from: JSONSerialization.data(withJSONObject: wire))
+                try database.receive(outcome, epoch: "epoch", id: record.id)
+                let next = SubmittedOperation(requestID: "next", destination: "machine", payload: try JSONEncoder().encode(ServedWrite.taskComplete(directory: "/repo", issue: "a")),
+                    version: ServerProtocol.revision, submittedAt: Date().addingTimeInterval(1), resource: record.resource)
+                XCTAssertEqual(try database.earlierResourcePending(next), delivery != "finished" && delivery != "failed")
+                try database.retireIfConverged(record.id)
+                let restarted = try ClientWorkDatabase(directory: directory)
+                XCTAssertEqual(try restarted.pending().count, delivery == "finished" ? 0 : 1)
+                XCTAssertEqual(try restarted.cached(machine: "machine", key: "list")?.projection.first?.membership.facts, before)
+                if delivery != "finished" {
+                    XCTAssertEqual(try restarted.pending().first?.payload, record.payload)
+                    XCTAssertEqual(try restarted.pending().first?.id, record.id)
+                }
+            }
+        }
+    }
+
     func testReopenDerivesRetainedExecutionAndOwnershipInsteadOfGuessingWorking() throws {
         let template = try workingPlan(["a"])
         let initial = try XCTUnwrap(template.membership.facts.first)
@@ -152,33 +188,39 @@ final class ClientWorkQueryTests: XCTestCase {
         XCTAssertTrue(try XCTUnwrap(database.fieldReading(machine: "machine", work: work)).facts.incorporates(receipt.commits[0], field: .ownership))
     }
 
-    func testSavedClaimRecoversOriginalIDAfterRestartWithoutAnotherSubmission() async throws {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
-        let record = SubmittedOperation(requestID: "original-claim", destination: "machine",
-            payload: try JSONEncoder().encode(ServedWrite.taskClaim(directory: "/repo", issue: "a")),
-            version: ServerProtocol.revision, submittedAt: Date())
-        do {
-            let database = try ClientWorkDatabase(directory: directory)
-            try database.save(record, sentEpoch: "epoch")
+    func testSavedTaskCommandRecoversOriginalIDAfterRestartWithoutAnotherSubmission() async throws {
+        for command in [ServedWrite.taskClaim(directory: "/repo", issue: "a"),
+                        .taskRun(directory: "/repo", issue: "a", graph: "feature", from: "demo", agent: nil, approve: false),
+                        .taskShip(directory: "/repo", issue: "a"), .taskHold(directory: "/repo", issue: "a")] {
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+            let record = SubmittedOperation(requestID: "original-command", destination: "machine",
+                payload: try JSONEncoder().encode(command),
+                version: ServerProtocol.revision, submittedAt: Date())
+            do {
+                let database = try ClientWorkDatabase(directory: directory)
+                try database.save(record, sentEpoch: "epoch")
+            }
+            var body = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(receipt(kind: "task.claim", stage: "task.claimed"))) as? [String: Any])
+            guard case .string(let kind) = try JSONDecoder().decode(JSONValue.self, from: record.payload)["kind"] else { return XCTFail("Command needs kind") }
+            body["kind"] = kind
+            body["request_id"] = record.id; body["delivery"] = "uncertain"
+            body["commits"] = []; body["result"] = NSNull()
+            let frame = try JSONDecoder().decode(SubscriptionReading<OperationReceipt>.self,
+                from: JSONSerialization.data(withJSONObject: ["answers": NSNull(), "stamp": JSONSerialization.jsonObject(with: JSONEncoder().encode(stamp("receipt", revision: 8))),
+                    "unavailable": NSNull(), "body": body]))
+            let disk = ClientWorkStore(directory: directory, machine: { "machine" }, read: { _ in throw RegistryQueryError("No one-shot read") },
+                observe: { id in
+                    XCTAssertEqual(id, record.id)
+                    return ServerWatch(updates: AsyncThrowingStream { $0.yield(frame); $0.finish() }, checkpoint: { _ in }, cancel: {})
+                }, send: { _ in XCTFail("Recovery must not submit another command") })
+            addTeardownBlock { await disk.close() }
+            let result = try await disk.reconcile(record)
+            XCTAssertEqual(result?.requestID, record.id)
+            let saved = try await disk.pending()
+            XCTAssertEqual(saved.first?.payload, record.payload)
+            XCTAssertEqual(saved.first?.destination, "machine")
         }
-        var body = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(receipt(kind: "task.claim", stage: "task.claimed"))) as? [String: Any])
-        body["request_id"] = record.id; body["delivery"] = "uncertain"
-        body["commits"] = []; body["result"] = NSNull()
-        let frame = try JSONDecoder().decode(SubscriptionReading<OperationReceipt>.self,
-            from: JSONSerialization.data(withJSONObject: ["answers": NSNull(), "stamp": JSONSerialization.jsonObject(with: JSONEncoder().encode(stamp("receipt", revision: 8))),
-                "unavailable": NSNull(), "body": body]))
-        let disk = ClientWorkStore(directory: directory, machine: { "machine" }, read: { _ in throw RegistryQueryError("No one-shot read") },
-            observe: { id in
-                XCTAssertEqual(id, record.id)
-                return ServerWatch(updates: AsyncThrowingStream { $0.yield(frame); $0.finish() }, checkpoint: { _ in }, cancel: {})
-            }, send: { _ in XCTFail("Recovery must not submit another Claim") })
-        addTeardownBlock { await disk.close() }
-        let result = try await disk.reconcile(record)
-        XCTAssertEqual(result?.requestID, record.id)
-        let saved = try await disk.pending()
-        XCTAssertEqual(saved.first?.payload, record.payload)
-        XCTAssertEqual(saved.first?.destination, "machine")
     }
 
     func testRuntimeMembershipDoesNotBorrowUnknownOwnershipOrPublication() throws {
@@ -211,7 +253,7 @@ final class ClientWorkQueryTests: XCTestCase {
             _ = try database.cache(ClientWorkQuery(stamp: old, plans: [base]), key: "held")
             try database.retainQueries(machine: "machine", keys: ["held"])
             let command: ServedWrite = claiming ? .taskClaim(directory: "/repo", issue: "a") : .taskUnassign(directory: "/repo", issue: "a")
-            try database.save(SubmittedOperation(requestID: "saved", destination: "machine", payload: JSONEncoder().encode(command),
+            try database.save(SubmittedOperation(requestID: "saved", destination: "machine", payload: try JSONEncoder().encode(command),
                 version: ServerProtocol.revision, submittedAt: Date(), resource: .task(unowned.work)))
             XCTAssertTrue(try database.observeEpoch("epoch", id: "saved"))
             let receipt = try fieldReceipt(kind: claiming ? "task.claim" : "task.unassign", stage: claiming ? "task.claimed" : "task.unassigned", revision: claiming ? 8 : 9)
@@ -339,7 +381,7 @@ final class ClientWorkQueryTests: XCTestCase {
             ? .taskUpdate(directory: "/repo", issue: "task", notes: "Original words")
             : .sessionNew(directory: "/repo", requestID: "saved", id: "session", agent: nil)
         try database.save(SubmittedOperation(requestID: "saved", destination: "machine",
-            payload: JSONEncoder().encode(command),
+            payload: try JSONEncoder().encode(command),
             version: ServerProtocol.revision, submittedAt: Date()))
         XCTAssertTrue(try database.observeEpoch("epoch", id: "saved"))
         try database.receive(receipt, epoch: "epoch", id: "saved")
@@ -501,7 +543,7 @@ final class ClientWorkQueryTests: XCTestCase {
     func complete(_ directory: URL) throws -> ClientWorkDatabase {
         let database = try ClientWorkDatabase(directory: directory)
         try database.save(SubmittedOperation(requestID: "saved", destination: "machine",
-            payload: JSONEncoder().encode(ServedWrite.taskComplete(directory: "/repo", issue: "a")),
+            payload: try JSONEncoder().encode(ServedWrite.taskComplete(directory: "/repo", issue: "a")),
             version: ServerProtocol.revision, submittedAt: Date()))
         XCTAssertTrue(try database.observeEpoch("epoch", id: "saved"))
         return database
@@ -1246,7 +1288,7 @@ final class ClientWorkQueryTests: XCTestCase {
             try client.retainQueries(machine: "machine", keys: ["inventory"])
         }
         try clients[0].save(SubmittedOperation(requestID: "saved", destination: "machine",
-            payload: JSONEncoder().encode(ServedWrite.taskComplete(directory: "/repo", issue: "a")),
+            payload: try JSONEncoder().encode(ServedWrite.taskComplete(directory: "/repo", issue: "a")),
             version: ServerProtocol.revision, submittedAt: Date()))
         XCTAssertTrue(try clients[0].observeEpoch("epoch", id: "saved"))
         XCTAssertEqual(try clients[0].cached(machine: "machine", key: "inventory")?.projection.first?.membership.facts.first?.lifecycle.states, [.done])
@@ -1969,7 +2011,7 @@ final class ClientWorkQueryTests: XCTestCase {
         _ = try await client.receivePlans([workingPlan(["a", "b"])], stamp: stamp("list", revision: 6), for: query)
         let database = try complete(directory)
         try database.save(SubmittedOperation(requestID: "later", destination: "machine",
-            payload: JSONEncoder().encode(ServedWrite.taskComplete(directory: "/repo", issue: "b")),
+            payload: try JSONEncoder().encode(ServedWrite.taskComplete(directory: "/repo", issue: "b")),
             version: ServerProtocol.revision, submittedAt: Date()))
         let hidden = try await client.cachedPlans(machine: "machine", for: query)
         XCTAssertEqual(hidden?.projection.first?.taskCount, 0)
@@ -2485,7 +2527,7 @@ final class ClientWorkQueryTests: XCTestCase {
         for index in 0..<(ClientWorkDatabase.retainedEffectLimit + 3) {
             let id = "completion-\(index)"
             try database.save(SubmittedOperation(requestID: id, destination: "machine",
-                payload: JSONEncoder().encode(ServedWrite.taskComplete(directory: "/repo", issue: "a")),
+                payload: try JSONEncoder().encode(ServedWrite.taskComplete(directory: "/repo", issue: "a")),
                 version: ServerProtocol.revision, submittedAt: Date()))
             XCTAssertTrue(try database.observeEpoch("epoch", id: id))
             var wire = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(
@@ -2577,7 +2619,7 @@ final class ClientWorkQueryTests: XCTestCase {
         XCTAssertNil(try database.cached(machine: "machine", key: key(query)))
         try database.retainQueries(machine: "machine", keys: [key(query)])
         try database.save(SubmittedOperation(requestID: "later", destination: "machine",
-            payload: JSONEncoder().encode(ServedWrite.taskComplete(directory: "/repo", issue: "b")),
+            payload: try JSONEncoder().encode(ServedWrite.taskComplete(directory: "/repo", issue: "b")),
             version: ServerProtocol.revision, submittedAt: Date()))
         XCTAssertTrue(try database.observeEpoch("epoch", id: "later"))
         var wire = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(first)) as? [String: Any])

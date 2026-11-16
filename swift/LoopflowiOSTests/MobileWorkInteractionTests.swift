@@ -85,7 +85,11 @@ extension ClientWorkQueryTests {
         try await leaveBothFeeds(abandon: false, reopening: true, pending: true)
     }
 
-    private func leaveBothFeeds(abandon: Bool, move: Bool = false, ownership: Bool = false, reopening: Bool = false, pending: Bool = false) async throws {
+    func testExecutionRequestsPublishBeforeDiskWithoutPredictingRuntime() async throws {
+        try await leaveBothFeeds(abandon: false, execution: true)
+    }
+
+    private func leaveBothFeeds(abandon: Bool, move: Bool = false, ownership: Bool = false, reopening: Bool = false, pending: Bool = false, execution: Bool = false) async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         let query = ServedRead.viewSelect(expression: TaskList.started.expression(wave: nil))
@@ -123,6 +127,28 @@ extension ClientWorkQueryTests {
         _ = await entered.next()
         var route: WorkWorkspaceKey? = base.contents[0].work
         let otherRoute = route
+        if execution {
+            let task = try XCTUnwrap(first.repositories.first?.tasks.first)
+            let states = first.taskFacts[task.work]?.states
+            let menu = TaskExecutionActions { first.execute(task, action: $0) }
+            try menu.inspect().find(button: "Start").tap()
+            XCTAssertEqual(owner.operations.last?.presentation().text, "Start requested…")
+            try menu.inspect().find(button: "Auto-Ship").tap()
+            XCTAssertEqual(owner.operations.last?.presentation().text, "Auto-Ship requested…")
+            try menu.inspect().find(button: "Stop Auto-Ship").tap()
+            XCTAssertEqual(owner.operations.last?.presentation().text, "Stop Auto-Ship requested…")
+            XCTAssertEqual(first.taskFacts[task.work]?.states, states)
+            XCTAssertEqual(second.taskFacts[task.work]?.states, states)
+            XCTAssertEqual(route, otherRoute)
+            hold.release()
+            await owner.persistPending()
+            let records = try await disk.pending()
+            XCTAssertEqual(records.count, 3)
+            XCTAssertTrue(records.allSatisfy { $0.resource == .task(task.work) && $0.destination == "machine" })
+            XCTAssertEqual(try records.map { try JSONDecoder().decode(JSONValue.self, from: $0.payload)["kind"] },
+                [.string("task.run"), .string("task.ship"), .string("task.hold")])
+            return
+        }
         if reopening {
             let task = base.contents[0]
             let menu = TaskOwnershipActions(completed: true, owned: first.taskFacts[task.work]?.owned) { first.edit(task, edit: $0) }

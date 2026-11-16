@@ -164,3 +164,10 @@
   facts/incorporation remain. Missing raw inputs are never reconstructed from
   state labels. Raw activity uses derivation 2 because derivation 1 had already
   suppressed terminal Tasks. No product behavior is inferred from this migration.
+
+- Execution cut, 2026-11-15: Start/Auto-Ship/Stop publish request intent only.
+  A successful finished dispatch releases its canonical Task lane and retires the
+  request without changing fields or installing a synthetic query fence. A finished
+  failure stays inspectable but releases ordering; uncertain dispatch holds
+  conflicting sends. Neither proves rollback or Process exit. This reversible
+  choice uses the existing receipt owner, with no execution-success ledger.

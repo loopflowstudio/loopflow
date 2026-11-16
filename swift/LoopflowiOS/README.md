@@ -103,6 +103,15 @@ missing facts leave it incomplete. Saved changes wait for the original Machine
 through restart. Refusal removes only that change; an uncertain send checks the
 original request. Later navigation, drafts and conversations stay put.
 
+**Task actions → Start**, **Auto-Ship** and **Stop Auto-Ship** show the request
+immediately and save before sending. Start continues the Task's Workflow using
+its existing/default graph. These actions keep the conversation, route and draft.
+Disconnected requests wait for their original Machine through restart. A successful
+dispatch clears the request; it does not predict a running Graph, a merged PR or a
+stopped Process. Failed or uncertain dispatch keeps **Check request** and **Inspect**.
+Uncertain dispatch holds conflicting Task changes until its outcome is known; a
+finished failure allows later commands without asserting rollback.
+
 The device touched last has the terminal. When another device takes it, the
 phone stops drawing and offers **Continue here**.
 

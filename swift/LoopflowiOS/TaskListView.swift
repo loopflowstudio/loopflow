@@ -91,6 +91,11 @@ final class TaskFeed {
 
     private(set) var taskFacts: [WorkWorkspaceKey: WorkMembershipPlan.Facts] = [:]
 
+    func execute(_ task: WorkViewPlan.Content, action: WorkInteraction.TaskCommand) {
+        guard let directory = repositories.first(where: { $0.repository == task.work.repository })?.path else { return }
+        client.interaction.executeTask(task.work, issue: task.identifier ?? task.work.id, directory: directory, action: action)
+    }
+
     func edit(_ task: WorkViewPlan.Content, edit: WorkInteraction.TaskEdit) {
         guard let directory = repositories.first(where: { $0.repository == task.work.repository })?.path else { return }
         client.interaction.editTask(task.work, issue: task.identifier ?? task.work.id, directory: directory, edit: edit)
@@ -379,7 +384,7 @@ struct TaskListView: View {
             abandon: { leave(task, abandoning: true) },
             move: { wave in
                 feed.move(task, to: wave)
-            }, edit: { feed.edit(task, edit: $0) }, facts: feed.taskFacts[task.work], waves: feed.waves.filter { wave in feed.repositories.contains { $0.repository == task.work.repository && $0.path == wave.repo } },
+            }, edit: { feed.edit(task, edit: $0) }, execute: { feed.execute(task, action: $0) }, facts: feed.taskFacts[task.work], waves: feed.waves.filter { wave in feed.repositories.contains { $0.repository == task.work.repository && $0.path == wave.repo } },
             completionDirectory: feed.repositories.first { $0.repository == task.work.repository }?.path)
     }
 

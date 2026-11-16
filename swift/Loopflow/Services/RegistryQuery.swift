@@ -1217,13 +1217,6 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(Customized.self, from: await write(.graphCustomize(directory: cwd ?? "/", name: name))).path
     }
 
-    /// Run the Task's graph until its next interactive step; returns once it
-    /// runs. `graph` takes up another graph; `from` starts at that step instead,
-    /// and an interactive `from` only puts the Task there.
-    public func runTask(issue: String, graph: String?, from: String? = nil, cwd: String?) async throws {
-        _ = try await write(.taskRun(directory: cwd ?? "/", issue: issue, graph: graph, from: from, agent: nil, approve: false))
-    }
-
     /// New Task: Rust files the request in `wave` (nil files it in the
     /// repository), starts it as `lf task run` does and admits its conversation
     /// with the request as the first turn. Returns once the Graph registers.
@@ -1235,18 +1228,6 @@ public struct RegistryQuery: Sendable {
     /// The graph a new Task in `wave`, or the repository when nil, would take up.
     public func waveGraph(wave: String?, cwd: String?) async throws -> WaveGraph {
         try Self.decode(WaveGraph.self, from: await serve(.waveGraph(directory: cwd ?? "/", wave: wave)))
-    }
-
-    /// Ship the Task: run the rest of its graph to the end headless, standing
-    /// in at each interactive step. Returns once it is shipping; it runs on until the Task lands.
-    public func shipTask(issue: String, cwd: String?) async throws {
-        _ = try await write(.taskShip(directory: cwd ?? "/", issue: issue))
-    }
-
-    /// Withdraw a Task's Auto-Ship approval: its ship process stops and any
-    /// auto-merge Loopflow armed is disabled.
-    public func stopShipping(issue: String, cwd: String?) async throws {
-        _ = try await write(.taskHold(directory: cwd ?? "/", issue: issue))
     }
 
     public func moveTask(issue: String, wave: String?, cwd: String?) async throws {

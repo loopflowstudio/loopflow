@@ -261,6 +261,39 @@ public final class WorkInteraction {
         return id
     }
 
+    public enum TaskCommand {
+        case start(graph: String?, from: String?), ship, stopShipping
+    }
+
+    public func taskExecution(issue: String, directory: String) -> PendingOperation? {
+        operations.last { $0.targetIssue == issue && $0.directory == directory && OperationDeclaration(kind: $0.kind)?.isExecution == true }
+    }
+
+    /// Publish a request, never a predicted Graph position or execution result.
+    @discardableResult
+    public func executeTask(_ work: WorkWorkspaceKey, issue: String, directory: String, action: TaskCommand) -> String {
+        let command: ServedWrite
+        let kind: String
+        let graph: String?
+        switch action {
+        case .start(let chosen, let from):
+            command = .taskRun(directory: directory, issue: issue, graph: chosen, from: from, agent: nil, approve: false)
+            kind = "task.run"; graph = chosen
+        case .ship: command = .taskShip(directory: directory, issue: issue); kind = "task.ship"; graph = nil
+        case .stopShipping: command = .taskHold(directory: directory, issue: issue); kind = "task.hold"; graph = nil
+        }
+        let id = UUID().uuidString.lowercased()
+        let payload = try! JSONEncoder().encode(command)
+        let intent = Intent(id: id, payload: payload, submittedAt: Date(), draftID: nil, destination: machine, effect: nil, resource: .task(work))
+        operations.append(PendingOperation(id: id, payload: payload, kind: kind, request: "", directory: directory,
+            wave: nil, graph: graph, submittedAt: intent.submittedAt, destination: machine))
+        intents.append(intent)
+        publish()
+        start()
+        enqueue(intent)
+        return id
+    }
+
     public enum TaskEdit { case claim, unassign, reopen }
 
     /// Membership edits publish synchronously and keep navigation and native owners.

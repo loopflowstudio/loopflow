@@ -95,9 +95,8 @@ activity.
 
 `lf workspace` uses the first available layout:
 
-1. The Task's saved Desktop arrangement.
-2. Its `task_layout` configuration, including Wave preferences.
-3. The builtin Conversation, Task & workflow and Shell layout.
+1. The Task's `task_layout` configuration, including Wave preferences.
+2. The builtin Conversation, Task & workflow and Shell layout.
 
 Only visible panes and their selected tabs open. LF recreates the arrangement as
 closely as the host supports and reports tools it cannot display. A Conversation
@@ -105,11 +104,13 @@ pane uses the same Session resolution and attachment rules as `lf open`. If it
 is already open elsewhere, the workspace reports its location without moving
 input or substituting Task & workflow for the requested conversation.
 
-Arrange a Task in Desktop to save its layout for later launches. Changes made in
-Rex, Herdr or cmux stay in that app; they do not change Desktop's saved layout or
-your templates. Opening another workspace creates another arrangement, without
-duplicating existing conversation views. Unsent file drafts and background tabs
-remain in Desktop.
+Desktop remembers how you arranged each Task on that Mac, and only there: a
+second Mac driving the same Machine keeps its own arrangements, and Rex, Herdr
+and cmux do not see them. To give every host the same starting layout, write it
+as a template below. Changes made in Rex, Herdr or cmux stay in that app; they
+do not change Desktop's arrangements or your templates. Opening another
+workspace creates another arrangement, without duplicating existing
+conversation views. Unsent file drafts and background tabs remain in Desktop.
 
 ## Set a Wave's default
 
@@ -154,7 +155,7 @@ Use these configuration files:
 
 See [configuration scopes](config.md#where-settings-live). Task worktrees share
 the repository's private configuration. The winning scope replaces the whole
-layout. A saved Desktop Task arrangement takes precedence over a template.
+layout.
 Changing a template affects future launches; existing tabs stay as you arranged them.
 
 ## Choose your tools

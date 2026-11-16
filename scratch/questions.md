@@ -19,3 +19,12 @@
   line).
 - **Account marks depend on #1953 (LOO-913) landing first.** If it lands
   after this Task, its own comment-only migration has to carry them.
+- **`lf desktop layout` keeps Dashboard slots only.** The plan removes
+  `desktop.layout`/`.layout.save`, but `query:<id>` slot layouts go through
+  the same command and Dashboards stay. The docs keep `lf desktop layout
+  query:<id> [--save]` and drop `task:`/`wave:`/`repository` selectors. If
+  implement removes the command outright, slots need another verb
+  (`lf desktop dashboard slots` already exists; check whether it duplicates).
+- **Schedule shape for `due_removals.py`.** Docs give `install`/`uninstall`
+  subcommands (mirroring `disk-cleanup.sh`), Monday 09:00, log at
+  `~/Library/Logs/loopflow-due-removals.log`. All three are picks, not asks.

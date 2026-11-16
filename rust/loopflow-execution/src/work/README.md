@@ -94,16 +94,16 @@ lf desktop hide -p query:attention/task:task_33333333333333333333333333333333
 lf desktop move -p query:attention/task:task_33333333333333333333333333333333 --destination task:task_11111111111111111111111111111111
 lf desktop move -p working-tasks/task:task_33333333333333333333333333333333 --destination task:task_11111111111111111111111111111111
 lf desktop layout query:attention --save --revision 6 < slots.json   # null restores the default slots
-lf desktop layout task:task_22222222222222222222222222222222
-lf desktop layout task:task_22222222222222222222222222222222 --save < panes.json
 ```
 
 A Dashboard has its own `DashboardId`, name, query and arrangement. Two Dashboards
 can select the same Tasks independently while reusing each Task's pane and draft
 record. `query:ID` references that Dashboard's selection, including in nested
 expressions. Repository and Wave defaults remain built in; Dashboard edits never
-replace them. Pane layout selectors use durable Work IDs (`repository`,
-`wave:ID`, `task:ID`).
+replace them. Desktop saves each Work's pane layout in its own Application
+Support, keyed by Machine and durable Work ID (`repository`, `wave:ID`,
+`task:ID`); a pane naming a Session the Machine no longer has is dropped on
+load.
 Pin/unpin and Dashboard rename require the current Dashboard revision. Task rename uses
 `task:ID` and the Task's revision, writing through the Task update owner.
 Wave renaming remains `lf wave rename`. All saved-intent commands work headless.

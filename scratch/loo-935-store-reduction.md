@@ -218,3 +218,14 @@ No dual write of pane layouts (server and file). No adapter keeping
 `desktop.layout` for old Desktop builds: Desktop and lf ship together. No
 "keep writing `pools` for the FK". No contract that uses an unrelated aged
 migration as `-- expand:`.
+
+## Docs written (write-docs, 2026-11-16)
+
+`rust/loopflow-storage/src/MIGRATIONS.md` (Leaving marks + enforced rule),
+`AGENTS.md` (SQLite schema bullet), `rust/loopflow-storage/AGENTS.md` (new;
+points at generated `SCHEMA.md`), `scripts/README.md` (Store size and leaving
+members), `docs/workspaces.md` + `docs/config.md` (Desktop layouts per Mac,
+`lf workspace` no longer reads them), `rust/loopflow-execution/src/work/README.md`,
+`rust/loopflow/src/server/README.md`, `docs/dev/reference-code.md`.
+Implement makes the code match: `due_removals.py install|uninstall`, output
+columns as shown, `lf desktop layout` limited to `query:`.

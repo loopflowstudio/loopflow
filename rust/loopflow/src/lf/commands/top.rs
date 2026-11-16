@@ -357,7 +357,9 @@ fn collect_activity(
 
 pub(crate) fn command_label(record: &crate::process::ProcessEntry) -> String {
     match record {
-        crate::process::ProcessEntry::Lf(process) => lf_command_label(process.command.as_deref()),
+        crate::process::ProcessEntry::Lf(process) => {
+            crate::command::lf_command_label(process.command.as_deref())
+        }
         crate::process::ProcessEntry::Agent(process) => {
             agent_command_label(process.command.as_deref())
         }
@@ -373,57 +375,16 @@ fn agent_command_label(command: Option<&str>) -> String {
         .or(command)
         .and_then(|value| Path::new(value).file_name())
         .and_then(|value| value.to_str())
-        .filter(|value| safe_command_word(value))
+        .filter(|value| crate::command::safe_command_word(value))
         .unwrap_or("AgentProcess");
     let subcommand = argv
         .as_ref()
         .and_then(|argv| argv.get(1))
-        .filter(|value| safe_command_word(value));
+        .filter(|value| crate::command::safe_command_word(value));
     match subcommand {
         Some(subcommand) => format!("{program} {subcommand}"),
         None => program.to_owned(),
     }
-}
-
-pub(crate) fn lf_command_label(command: Option<&str>) -> String {
-    let Some(command) = command else {
-        return "lf".to_string();
-    };
-    let Ok(argv) = serde_json::from_str::<Vec<String>>(command) else {
-        return "lf".to_string();
-    };
-    let Some(command) = argv.get(1).filter(|value| !value.starts_with('-')) else {
-        return "lf".to_string();
-    };
-    let grouped = [
-        "machine",
-        "repository",
-        "repo",
-        "pm",
-        "pr",
-        "project",
-        "radio",
-        "task",
-        "wave",
-        "work",
-    ];
-    let operation = grouped
-        .contains(&command.as_str())
-        .then(|| argv.get(2))
-        .flatten()
-        .filter(|value| safe_command_word(value));
-    match operation {
-        Some(operation) => format!("lf {command} {operation}"),
-        None => format!("lf {command}"),
-    }
-}
-
-fn safe_command_word(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 32
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
 }
 
 fn receipt_matches_live_process(

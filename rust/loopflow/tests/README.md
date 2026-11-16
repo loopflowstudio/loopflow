@@ -56,7 +56,7 @@ handler calls (`engine::creation::create`, `ops::human_session::bind`,
 `resolve_session_config` for launch settings, with a Clap-parsed `Cli`;
 `ops::task::explain_task_run` and `explain_task_checkout` for previews;
 `navigation::machine_invocation`, `ssh::parse_remote_command` and
-`machine::transport_failure` for dispatch), with the store and checkout the
+`machine::connection::transport_failure` for dispatch), with the store and checkout the
 CLI would see:
 
 - `LF_HOME` and `LF_BIN` under `test_ambient::EnvGuard`, with

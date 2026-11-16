@@ -3,8 +3,8 @@
 
 use std::path::Path;
 
-use super::{graph, launch, Error, ErrorCode, Result};
-use crate::lf::commands::list::Entry;
+use super::{graph, launch, Result};
+use crate::skills::listing::Entry;
 
 /// `skill.run`: start `lf -b [--agent <agent>] skill <name> [message]`
 /// detached and return the Process carrying it. The terminal form keeps its
@@ -24,20 +24,39 @@ pub fn carry(name: &str) -> anyhow::Result<Option<launch::Launched>> {
     launch::carry("skill.run", format!("skill {name}"))
 }
 
-/// `skill.list`: what `lf list [<path>…]` shows under `path`: commands,
-/// skills, graphs and Waves, each with its invocation and source.
-pub fn list(directory: &Path, path: &[String]) -> Result<Vec<Entry>> {
-    let repo = crate::repo::discover_repo_root(directory)
-        .map_err(|error| Error::refused(&error, ErrorCode::Invalid))?
-        .unwrap_or_else(|| directory.to_owned());
-    crate::lf::commands::list::list_children(path, &repo)
-        .map_err(|error| Error::refused(&error, ErrorCode::Unavailable))
+/// `skill.list`: combine repository definitions and Waves with the adapter’s
+/// command catalogue, retaining invocation spellings and ordering.
+pub fn list(mut entries: Vec<Entry>, commands: Vec<Entry>) -> Vec<Entry> {
+    entries.extend(commands);
+    entries.sort_by(|a, b| (&a.kind, &a.name).cmp(&(&b.kind, &b.name)));
+    entries
 }
 
 #[cfg(test)]
 mod tests {
-    use super::Entry;
+    use super::{list, Entry};
 
+    #[test]
+    fn listing_keeps_both_kinds_and_the_adapters_invocation_spelling() {
+        let definition = Entry {
+            name: "list".into(),
+            kind: "skill".into(),
+            source: ".lf/skills/list.md".into(),
+            description: "unavailable: unreadable source".into(),
+            invocation: "lf skill -- list".into(),
+        };
+        let command = Entry {
+            name: "list".into(),
+            kind: "command".into(),
+            source: "builtin".into(),
+            description: "List available entries".into(),
+            invocation: "lf skill list".into(),
+        };
+        assert_eq!(
+            list(vec![definition.clone()], vec![command.clone()]),
+            vec![command, definition]
+        );
+    }
     #[test]
     fn entries_match_the_shared_fixture_without_defaults() {
         let message: serde_json::Value = serde_json::from_str(include_str!(

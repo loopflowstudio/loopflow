@@ -1,5 +1,6 @@
 //! Machine endpoint, protocol values and blocking client. No request dispatch.
 pub mod client;
+pub(crate) mod connection;
 pub mod mobile;
 pub mod schema;
 pub(crate) mod ssh;

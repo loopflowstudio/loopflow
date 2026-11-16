@@ -244,7 +244,7 @@ pub fn dispatch(cli: &Cli, args: &[String]) -> Result<bool> {
     );
     if task_run {
         // The laptop waited for the run; a rented machine whose work drained goes back now.
-        super::rental::settle(&forward.machine);
+        crate::rental::recovery::settle(&forward.machine);
     }
     result?;
     Ok(true)

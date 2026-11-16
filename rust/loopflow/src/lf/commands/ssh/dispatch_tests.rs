@@ -17,9 +17,9 @@
 use clap::{CommandFactory, Parser};
 
 use super::parse_remote_command;
-use crate::lf::commands::machine::transport_failure;
 use crate::lf::navigation::machine_invocation;
 use crate::lf::Cli;
+use crate::machine::connection::transport_failure;
 
 fn invoke(args: &[&str]) -> Result<Option<(Cli, Vec<String>)>, clap::Error> {
     let argv = std::iter::once("lf")

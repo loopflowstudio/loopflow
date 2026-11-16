@@ -573,7 +573,7 @@ fn current_repository(
 fn command_result(dest: &str, code: Option<i32>) -> anyhow::Result<()> {
     match code {
         Some(0) => Ok(()),
-        Some(255) | None => Err(super::machine::transport_failure(
+        Some(255) | None => Err(crate::machine::connection::transport_failure(
             dest,
             "SSH transport closed; see the SSH error above",
         )),

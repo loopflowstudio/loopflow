@@ -98,7 +98,7 @@ impl PendingRequest {
         let (mutation, operation) = operation(query);
         let process = crate::journal::current_lf_process_id();
         let command = crate::journal::current_command()
-            .map(|command| crate::lf::commands::top::lf_command_label(Some(&command)));
+            .map(|command| crate::command::lf_command_label(Some(&command)));
         let target = ["issueId", "id"]
             .into_iter()
             .find_map(|key| variables.get(key)?.as_str())

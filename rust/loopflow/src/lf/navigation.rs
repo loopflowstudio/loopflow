@@ -1,13 +1,11 @@
 //! Command ownership, shorthand, and read-only inspection share Clap metadata.
-use std::collections::HashMap;
+use crate::skills::listing::{definition_source, format_written_steps};
 use std::path::Path;
 
 use anyhow::Result;
 use clap::{Command, CommandFactory, Parser};
 
 use crate::definition::{resolve_definition, DefinitionKind, Target};
-use crate::graph::Step;
-use crate::graph::XorPath;
 use crate::lf::{Cli, Commands, GraphCommand, SkillCommand};
 
 pub fn command_tree() -> Command {
@@ -623,56 +621,6 @@ pub(crate) fn definition_invocation(tree: &Command, name: &str, kind: Definition
     let escaped =
         resolve_child(owner, name, &[label.to_string()]).map_or(true, |path| path.is_some());
     format!("lf {label} {}{name}", if escaped { "-- " } else { "" })
-}
-
-pub(crate) fn definition_source(repo: &Path, path: Option<&Path>) -> String {
-    path.map(|path| {
-        path.strip_prefix(repo)
-            .unwrap_or(path)
-            .display()
-            .to_string()
-    })
-    .unwrap_or_else(|| "builtin".to_string())
-}
-
-fn format_written_steps(steps: &[Step]) -> String {
-    if steps.is_empty() {
-        return "∅".to_string();
-    }
-    steps
-        .iter()
-        .map(format_written_step)
-        .collect::<Vec<_>>()
-        .join(" → ")
-}
-
-fn format_written_step(step: &Step) -> String {
-    match &step.target {
-        Target::Graph(graph) => graph.name.clone(),
-        Target::Skill(skill) if step.interactive => format!("{} (interactive)", skill.name),
-        target => format_target(target),
-    }
-}
-
-pub(crate) fn format_target(target: &Target) -> String {
-    match target {
-        Target::Skill(skill) => skill.name.clone(),
-        Target::Command(command) => command.to_string(),
-        Target::Graph(graph) => format_written_steps(&graph.items),
-        Target::Xor(xor) => format_xor(xor.router.as_deref(), &xor.paths),
-    }
-}
-
-fn format_xor(router: Option<&str>, paths: &HashMap<String, XorPath>) -> String {
-    let label = router.map_or_else(|| "xor".to_string(), |name| format!("xor[{name}]"));
-    let mut names: Vec<_> = paths.keys().collect();
-    names.sort();
-    let rendered = names
-        .into_iter()
-        .map(|name| format!("{name}: {}", format_written_steps(&paths[name].steps)))
-        .collect::<Vec<_>>()
-        .join(" | ");
-    format!("{label}{{{rendered}}}")
 }
 
 fn definition_help(

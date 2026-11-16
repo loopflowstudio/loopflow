@@ -15,7 +15,7 @@ pub fn recover() {
     if let Err(error) = crate::ops::task::limit_recovery::restart_waiting_runs() {
         tracing::warn!("limit recovery: {error}");
     }
-    if let Err(error) = crate::lf::commands::rental::check() {
+    if let Err(error) = crate::rental::recovery::check() {
         tracing::warn!("Rentals: {error:#}");
     }
 }

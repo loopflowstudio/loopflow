@@ -196,7 +196,7 @@ fn live_lf_processes(
         };
         live.push((
             RunningLfProcess {
-                label: super::top::lf_command_label(record.command.as_deref()),
+                label: crate::command::lf_command_label(record.command.as_deref()),
                 id: record.id,
                 pid,
                 started_at: record.started_at,

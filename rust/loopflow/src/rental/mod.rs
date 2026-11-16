@@ -2,3 +2,5 @@
 
 pub mod sandbox;
 pub use loopflow_storage::rental::*;
+
+pub mod recovery;

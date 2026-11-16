@@ -17,6 +17,7 @@
 //! and coalesces a burst into one frame. The app reads exactly what the `lf`
 //! command would print. A subscription's arguments are fixed; it takes only
 //! checkpoints.
+pub mod events;
 
 #[cfg(test)]
 use crate::performance::subscription_measurement::{Runtime, Stage};
@@ -316,7 +317,7 @@ where
     let shared = mailbox();
     let inbox: Arc<dyn Inbox> = shared.clone();
     let mut reader = Reader::new(shared.clone(), None, args, read, select)?;
-    reader.observer = events.then(crate::server::events::Observer::default);
+    reader.observer = events.then(crate::read_stream::events::Observer::default);
     lock(&shared).pull_at = Some(Instant::now());
     let waker = shared.clone();
     std::thread::spawn(move || {
@@ -455,7 +456,7 @@ struct Reader<A, F> {
     sent: Option<[u8; 32]>,
     /// The dotted paths each body keeps; none keeps it whole.
     select: Option<Vec<String>>,
-    observer: Option<crate::server::events::Observer>,
+    observer: Option<crate::read_stream::events::Observer>,
 }
 
 impl<A, T, F, Fut> Reader<A, F>

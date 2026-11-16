@@ -83,3 +83,68 @@ impl std::fmt::Debug for CommandIo<'_> {
         f.debug_struct("CommandIo").finish_non_exhaustive()
     }
 }
+
+pub(crate) fn lf_command_label(command: Option<&str>) -> String {
+    let Some(command) = command else {
+        return "lf".to_string();
+    };
+    let Ok(argv) = serde_json::from_str::<Vec<String>>(command) else {
+        return "lf".to_string();
+    };
+    let Some(command) = argv.get(1).filter(|value| !value.starts_with('-')) else {
+        return "lf".to_string();
+    };
+    let grouped = [
+        "machine",
+        "repository",
+        "repo",
+        "pm",
+        "pr",
+        "project",
+        "radio",
+        "task",
+        "wave",
+        "work",
+    ];
+    let operation = grouped
+        .contains(&command.as_str())
+        .then(|| argv.get(2))
+        .flatten()
+        .filter(|value| safe_command_word(value));
+    match operation {
+        Some(operation) => format!("lf {command} {operation}"),
+        None => format!("lf {command}"),
+    }
+}
+
+pub(crate) fn safe_command_word(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 32
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::lf_command_label;
+
+    #[test]
+    fn saved_command_labels_show_the_operation_without_its_arguments() {
+        for (saved, label) in [
+            (None, "lf"),
+            (Some("not JSON"), "lf"),
+            (Some(r#"["lf","--task","private-selector","ship"]"#), "lf"),
+            (
+                Some(r#"["lf","task","run","private-selector"]"#),
+                "lf task run",
+            ),
+            (
+                Some(r#"["lf","steer","private-selector","private-message"]"#),
+                "lf steer",
+            ),
+        ] {
+            assert_eq!(lf_command_label(saved), label);
+        }
+    }
+}

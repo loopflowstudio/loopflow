@@ -6,7 +6,6 @@
 use super::schema::Untyped;
 use crate::engine::{Error, ErrorCode};
 use crate::read_stream::SubscriptionFrame;
-use loopflow_model::id::LfProcessId;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -247,37 +246,7 @@ pub struct SessionAttached {
     pub expires_in_ms: u64,
 }
 
-/// An occurrence within the Tasks included in a subscription reading.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "kind", deny_unknown_fields)]
-#[non_exhaustive]
-pub enum SubscriptionEvent {
-    #[serde(rename = "task.shipped")]
-    TaskShipped {
-        task_id: loopflow_storage::work::task::TaskId,
-        pr_id: loopflow_storage::work::task::TaskPrId,
-        number: u32,
-        url: String,
-        merge_commit: String,
-    },
-    #[serde(rename = "task.steer")]
-    TaskSteer {
-        task_id: loopflow_storage::work::task::TaskId,
-        steer: crate::steer::Steer,
-        /// The thread entry when this direction came from a retained comment.
-        comment: Option<loopflow_model::comment::TaskComment>,
-    },
-    #[serde(rename = "graph.step_finished")]
-    GraphStepFinished {
-        task_id: loopflow_storage::work::task::TaskId,
-        graph_process_id: LfProcessId,
-        step: crate::durable::GraphStepProcess,
-    },
-    /// Newer event kinds can be ignored or resynced without losing the connection.
-    #[serde(other)]
-    #[schemars(skip)]
-    Unknown,
-}
+pub use crate::read_stream::events::SubscriptionEvent;
 
 /// One message from the server.
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]

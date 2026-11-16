@@ -112,6 +112,10 @@
   typed operation values, and the peer keeps validation. Wire fields/revision,
   native provider byte paths and readiness remain unchanged. This removes the
   client dependency on `Read`/`Write` without a second protocol implementation.
+- November 15 catalogue cut: retain the existing complete `Entry` value as
+  the typed input. Shared discovery supplies definitions and Waves; the adapter
+  derives invocation spellings and command entries from Clap, then the shared
+  operation merges and sorts. No copied navigation tree or callback service.
 - Landing-command semantics currently depend on full Clap normalization. Keep
   alias/abbreviation/global-flag behavior when supplying typed catalogue values;
   no prefix-based command classifier is selected. Application provenance must

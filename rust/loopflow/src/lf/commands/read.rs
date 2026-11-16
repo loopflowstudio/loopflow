@@ -21,6 +21,7 @@ use super::graph_inventory;
 use super::machine::{local_machine, machines};
 use super::usage;
 use super::waves::list as list_waves;
+use crate::engine::{Error, ErrorCode};
 use crate::lf::SessionListArgs;
 use crate::ops::task::{task_changes, task_diff, task_file};
 use crate::read_stream::{Subscription, Transport};
@@ -351,7 +352,7 @@ pub enum Read {
     /// `lf --cwd <directory> list [<path>…] --json`: the commands, skills,
     /// graphs and Waves under `path`.
     #[serde(rename = "skill.list")]
-    #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::lf::commands::list::Entry>>()))]
+    #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::skills::listing::Entry>>()))]
     SkillList {
         directory: PathBuf,
         path: Vec<String>,
@@ -894,7 +895,12 @@ impl Read {
                 agent.as_deref(),
             )?),
             Self::SkillList { directory, path } => {
-                value(&crate::engine::skill::list(directory, path)?)
+                let repo = crate::repo::discover_repo_root(directory)
+                    .map_err(|error| Error::refused(&error, ErrorCode::Invalid))?
+                    .unwrap_or_else(|| directory.to_owned());
+                let entries = super::list::list_children(path, &repo)
+                    .map_err(|error| Error::refused(&error, ErrorCode::Unavailable))?;
+                value(&entries)
             }
             Self::PrChecks {
                 directory,

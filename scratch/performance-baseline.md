@@ -43,6 +43,20 @@ historical snapshot preparation and timing endpoints. No schema migration.
   `/tmp/loo906-benchmark-host-20261115/preflight.json`.
 - Mini previously observed macOS 15.5 against Desktop's macOS 26 deployment
   target; no compatible quiet-host baseline exists yet.
+- Extraction: `uv run pytest python/tests/test_desktop_performance.py -q` —
+  57 passed; Ruff check/format and `git diff --check` pass.
+- Extracted native SQL — rename/create/cleanup and planning revision triggers
+  pass against an actually migrated disposable store. The automated Python
+  check exercises the native source SQL against the released normalized schema.
+- `swift build --build-tests --package-path swift --jobs 2` — passed (745.85 s).
+- Opt-in `WorkspacePerformanceTests` — ran and passed, 63 observations across
+  256/2048/10k Tasks; debug diagnostic on the loaded host, not a native baseline.
+  `/tmp/loo916-projection-diagnostic.json`, `/tmp/loo916-projection-run.log`.
+- `cargo fmt --check` and `cargo clippy --all-targets --jobs 2 -- -D warnings` —
+  passed. `cargo test -p loopflow --test integration
+  performance_tests::cli_volume_records_real_reads_without_contents --jobs 2` —
+  passed; `/tmp/loo916-rust-test.log`.
+- Mini recheck: macOS 15.5, Macmini9,1, load 1.55/1.47/1.40. No OS change made.
 
 ## Remaining coverage
 

@@ -130,7 +130,8 @@ pub struct TrackerEffect {
     pub subject: Option<String>,
     pub kind: EffectKind,
     pub value: Value,
-    pub base: Option<PlanningBaseline>,
+    /// `{revision, value}` as the provider held it at enqueue.
+    pub base: Option<Value>,
     pub conflict: Option<Value>,
     pub phase: EffectPhase,
     pub provider: Provider,
@@ -211,6 +212,8 @@ fn read_effect(row: &Row<'_>) -> StoreResult<TrackerEffect> {
 
 /// The bridge an owner's effects go to: its binding's, else its pending
 /// creation's. An owner with neither enqueues nothing.
+// Planning writers call this once their receipts move onto the queue (LOO-925).
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn owner_tracker(
     conn: &Connection,
     owner: &EffectOwner,
@@ -263,6 +266,8 @@ pub(crate) fn owner_tracker(
 /// Add one effect for a bound or creating owner, retiring older unsent values
 /// of the same subject. Returns the effect id, or `None` when no bridge carries
 /// this owner.
+// Planning writers call this once their receipts move onto the queue (LOO-925).
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn enqueue(
     conn: &Connection,
     owner: &EffectOwner,

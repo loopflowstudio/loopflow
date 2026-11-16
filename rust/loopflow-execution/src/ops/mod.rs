@@ -43,6 +43,7 @@ pub mod task_ownership;
 pub mod task_run;
 pub mod telemetry;
 pub mod trace;
+pub mod tracker;
 pub mod tracker_observe;
 pub mod util;
 pub mod wave_lifecycle;

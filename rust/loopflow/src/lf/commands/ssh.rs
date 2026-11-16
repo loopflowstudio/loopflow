@@ -320,8 +320,7 @@ pub(super) fn run_with_io(
     }
     let mut preamble = build_preamble(&cmd, &extra_env);
     if let Some(forwarded) = &forwarded {
-        preamble =
-            loopflow_execution::machine::forward::deliver(&target, forwarded)?.apply(&preamble);
+        preamble = loopflow_execution::machine::forward::deliver(&target, forwarded, &preamble)?;
     }
     match io {
         Some(io) => {

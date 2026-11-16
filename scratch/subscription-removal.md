@@ -459,4 +459,8 @@ Checks: `test(setup_token_and_codex_auth_json_reach_a_remote_launch_only_by_name
 `test(agent::tests::)`, `test(documented_commands::)`, workspace clippy — pass
 locally; gate/CI run the suites.
 
+Compress: `deliver(machine, forwarded, preamble)` returns the launch preamble; the
+`Delivery` wrapper is gone. `cargo test -p loopflow-execution --lib machine::forward::`
+and clippy (`loopflow-execution`, `loopflow`) pass.
+
 Do not publish, merge or land. Auto-Ship is on hold for this run.

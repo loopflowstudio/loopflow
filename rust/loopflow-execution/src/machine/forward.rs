@@ -32,26 +32,6 @@ impl std::fmt::Debug for Forwarded {
     }
 }
 
-/// A forwarded environment held on the destination until the launch reads it.
-#[derive(Debug)]
-pub struct Delivery {
-    env_file: Option<String>,
-}
-
-impl Delivery {
-    /// `preamble` with the forwarded environment read, and its file removed,
-    /// before anything else runs.
-    pub fn apply(&self, preamble: &str) -> String {
-        match &self.env_file {
-            Some(file) => format!(
-                "f={}; . \"$f\"; rm -f \"$f\"\n{preamble}",
-                remote_path(file)
-            ),
-            None => preamble.to_owned(),
-        }
-    }
-}
-
 /// Every value `forward` names, or the first one this Machine cannot supply.
 pub fn read(directory: &Path) -> Result<Forwarded> {
     let config = crate::config::load_config(Some(directory))?
@@ -91,10 +71,11 @@ pub fn read(directory: &Path) -> Result<Forwarded> {
 
 /// Put the named files and environment on `machine` over one SSH exchange whose
 /// script carries only names and lengths; the values travel on its stdin. A
-/// destination that already has a named file keeps its own.
-pub fn deliver(machine: &Machine, forwarded: &Forwarded) -> Result<Delivery> {
+/// destination that already has a named file keeps its own. Returns `preamble`
+/// preceded by reading the forwarded environment and removing its file.
+pub fn deliver(machine: &Machine, forwarded: &Forwarded, preamble: &str) -> Result<String> {
     if forwarded.env.is_empty() && forwarded.files.is_empty() {
-        return Ok(Delivery { env_file: None });
+        return Ok(preamble.to_owned());
     }
     let mut script = vec!["set -e".to_owned(), "umask 077".to_owned()];
     let mut input = Vec::new();
@@ -159,7 +140,17 @@ pub fn deliver(machine: &Machine, forwarded: &Forwarded) -> Result<Delivery> {
             eprintln!("{name} keeps its own {path}");
         }
     }
-    Ok(Delivery { env_file })
+    Ok(match env_file {
+        Some(file) => sourced(&file, preamble),
+        None => preamble.to_owned(),
+    })
+}
+
+fn sourced(env_file: &str, preamble: &str) -> String {
+    format!(
+        "f={}; . \"$f\"; rm -f \"$f\"\n{preamble}",
+        remote_path(env_file)
+    )
 }
 
 fn remote_path(relative: &str) -> String {
@@ -203,7 +194,7 @@ fn doppler_value(name: &str, directory: &Path) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{home_relative, valid_name, Delivery};
+    use super::{home_relative, sourced, valid_name};
 
     #[test]
     fn names_and_paths_are_checked_before_anything_moves() {
@@ -221,13 +212,9 @@ mod tests {
 
     #[test]
     fn a_forwarded_environment_is_read_and_removed_before_the_launch() {
-        let delivery = Delivery {
-            env_file: Some(".lf/forward/abc".into()),
-        };
         assert_eq!(
-            delivery.apply("exec lf\n"),
+            sourced(".lf/forward/abc", "exec lf\n"),
             "f=\"$HOME\"/'.lf/forward/abc'; . \"$f\"; rm -f \"$f\"\nexec lf\n"
         );
-        assert_eq!(Delivery { env_file: None }.apply("exec lf\n"), "exec lf\n");
     }
 }

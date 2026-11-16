@@ -28,7 +28,7 @@ pub use delivery::{
     attach_task_github_pr, clear_task_pr_merge_before_head_mutation, fetch_task_refs,
     lock_task_pr_mutation, matching_task_pr_merge_request, reconcile_checkout_pr,
     reconcile_task_pr, record_task_pr_presentation, record_task_pr_range_after_integration,
-    record_task_pr_repair, refresh_task_pr_base, refresh_task_pr_for_publication,
+    refresh_task_pr_base, refresh_task_pr_for_publication,
     request_task_pr_merge, request_task_pr_publication, require_task_pr_range_nonempty,
     settle_task_landing, task_diff_base, task_pr_context, validate_task_pr_range_for_integration,
     TaskPrContext,

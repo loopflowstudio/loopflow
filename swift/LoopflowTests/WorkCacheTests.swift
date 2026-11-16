@@ -800,10 +800,10 @@ struct WorkCacheTests {
 
         // `/src/loopflow` is no repository here, so only the saved workspace can scope the window.
         let unknown = WorkModel(query: source.query, launchCandidates: [Self.repo],
-                                  cache: WorkCache(directory: try temporaryDirectory()))
+                                  cache: WorkCache(directory: try temporaryDirectory()), paneLayouts: nil)
         #expect(unknown.repoPath == nil)
         let returning = WorkModel(query: source.query, launchCandidates: ["/src/missing", Self.repo],
-                                    cache: WorkCache(directory: directory))
+                                    cache: WorkCache(directory: directory), paneLayouts: nil)
         #expect(returning.repoPath == Self.repo)
         #expect(returning.sessions.value?.isEmpty == false)
 

@@ -1063,17 +1063,6 @@ writes! {
         &[("destination".to_owned(), destination.clone())].into(),
     )?,
 
-    /// `lf desktop layout <work> --save`, with `layout` (JSON) on stdin.
-    #[serde(rename = "desktop.layout.save")]
-    DesktopLayoutSave {
-        directory: PathBuf,
-        work: String,
-        layout: String,
-    } => loopflow_storage::work::selection::WorkPaneLayout;
-    { work, layout, .. } => {
-        super::desktop::save_layout(None, directory, work, &mut layout.as_bytes())?
-    },
-
     /// `lf config set <key> <value> <destination flags> --json`: declare a
     /// setting in the destination's file; `value` is YAML.
     #[serde(rename = "config.set")]
@@ -1218,7 +1207,6 @@ impl Write {
         match self {
             Self::TaskSave { content, .. } => Some(content),
             Self::DesktopDashboardSlots { slots, .. } => Some(slots),
-            Self::DesktopLayoutSave { layout, .. } => Some(layout),
             _ => None,
         }
     }
@@ -1277,8 +1265,7 @@ impl Write {
             | Self::DesktopDashboardHide { directory, .. }
             | Self::DesktopDashboardShow { directory, .. }
             | Self::DesktopDashboardSlots { directory, .. }
-            | Self::DesktopDashboardMove { directory, .. }
-            | Self::DesktopLayoutSave { directory, .. } => directory,
+            | Self::DesktopDashboardMove { directory, .. } => directory,
             Self::DesktopPortfolioSet { .. }
             | Self::AccountDisconnect { .. }
             | Self::AccountConnect { .. }

@@ -30,11 +30,8 @@ def _connection(repo: Path, database: str = ":memory:") -> sqlite3.Connection:
             id TEXT PRIMARY KEY, task_id TEXT NOT NULL,
             created_at INTEGER, publication_requested_at INTEGER,
             merge_requested_at INTEGER, merged_at INTEGER, updated_at INTEGER,
-            merge_tracking_complete INTEGER, repair_tracking_complete INTEGER,
+            merge_tracking_complete INTEGER,
             github_observation TEXT, merge_commit TEXT
-        );
-        CREATE TABLE task_pr_repair_incidents (
-            task_pr_id TEXT, kind TEXT, occurred_at INTEGER
         );
     """)
     connection.execute("INSERT INTO waves VALUES (?, ?)", ("wave", str(repo)))
@@ -53,7 +50,6 @@ def _pr(connection: sqlite3.Connection, identity: str, **overrides: object) -> N
         merged_at=SINCE + 300,
         updated_at=SINCE + 310,
         merge_tracking_complete=1,
-        repair_tracking_complete=1,
         github_observation='{"result":{"state":"fresh"}}',
         merge_commit="merge",
     )
@@ -226,7 +222,7 @@ def test_current_pr_owners_measure_intervals_and_preserve_missing_coverage(tmp_p
     _pr(connection, "complete")
     _pr(connection, "missing", merged_at=None)
     _pr(connection, "conflict", github_observation='{"result":{"state":"partial"}}')
-    _pr(connection, "untracked", merge_tracking_complete=0, repair_tracking_complete=0)
+    _pr(connection, "untracked", merge_tracking_complete=0)
     _pr(connection, "old", merged_at=SINCE - 1)
     _pr(connection, "future", merged_at=UNTIL + 1)
     _pr(connection, "open", merge_commit=None)
@@ -245,29 +241,7 @@ def test_current_pr_owners_measure_intervals_and_preserve_missing_coverage(tmp_p
         row = rows[metric]
         assert (row["eligible"], row["measured"], row["p50"]) == (4, 1, expected)
         assert row["verdict"] == "unknown"
-    assert rows["manual_git_repairs"]["measured"] == 1
-    assert rows["manual_git_repairs"]["p50"] == 0
     assert rows["task_first_progress_seconds"]["verdict"] == "unknown"
-
-
-def test_recorded_repair_breaches_even_when_other_coverage_is_missing(tmp_path: Path) -> None:
-    connection = _connection(tmp_path)
-    _pr(connection, "repair", repair_tracking_complete=0)
-    _pr(connection, "missing", merged_at=None)
-    connection.execute(
-        "INSERT INTO task_pr_repair_incidents VALUES ('repair', 'manual_git_repair', ?)",
-        (SINCE + 250,),
-    )
-    report = scorecard.build_report(
-        _policy(),
-        tmp_path,
-        NOW,
-        [],
-        [],
-        scorecard.load_lifecycle(connection, tmp_path, SINCE, UNTIL),
-    )
-    row = next(row for row in report["rows"] if row["id"] == "manual_git_repairs")
-    assert (row["eligible"], row["measured"], row["p50"], row["verdict"]) == (2, 1, 1, "fail")
 
 
 @pytest.mark.parametrize(

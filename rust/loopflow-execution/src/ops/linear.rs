@@ -532,16 +532,11 @@ pub(crate) async fn refresh_inventory_locked(
 ) -> OpsResult<()> {
     let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
     let projects = checked_projects_with_store(repo, ctx, initiative, wave.slug(), store).await?;
-    let mut items = ctx
+    let items = ctx
         .client
         .list_project_issues(&projects)
         .await
         .map_err(linear_error)?;
-    let removed = store
-        .deleted_task_issues(wave.id())
-        .await
-        .map_err(|error| OpsError::Message(error.to_string()))?;
-    items.retain(|item| !removed.contains(&item.id));
     crate::linear::acceptance::accept_linear_inventory(
         store,
         wave.id().clone(),

@@ -1221,7 +1221,7 @@ struct TaskPlanningReadabilityTests {
     private let key = WorkWorkspaceKey(repository: "repo", kind: .task, id: "task-opaque")
 
     private func plan(title: String = "Readable local Task") -> WorkViewPlan {
-        let content = WorkViewPlan.Content(paneRevision: nil, face: nil, work: key, title: title,
+        let content = WorkViewPlan.Content(work: key, title: title,
             states: [.working], identifier: "LOO-905", primarySession: nil, location: nil, argv: nil, unavailable: [])
         return fixtureViewPlan(owner: .init(repository: "repo", kind: .repository, id: "repo"), members: [content])
     }
@@ -1253,7 +1253,7 @@ struct TaskPlanningReadabilityTests {
         let model = WorkModel(query: fixture.query, repoPath: "/src/loopflow")
         let record = try #require(fixture.roadmap.tasks.items.first { $0.id == "issue-now" })
         let work = WorkWorkspaceKey(repository: "repo", kind: .task, id: record.runtime?.workId ?? record.id)
-        let member = WorkViewPlan.Content(paneRevision: nil, face: nil, work: work, title: "Fresh list name",
+        let member = WorkViewPlan.Content(work: work, title: "Fresh list name",
             states: [.working], identifier: record.task.identifier, primarySession: nil, location: nil, argv: nil, unavailable: [])
         let list = fixtureViewPlan(owner: key, members: [member])
         func planning(_ failed: Bool) {
@@ -1377,7 +1377,7 @@ struct TaskPlanningReadabilityTests {
                 waves: .available(fixture.waves), workActivity: .available(fixture.workActivity), repos: [], fixed: true)
         }
         let record = try #require(model.task(id: "issue-now")?.task)
-        let member = WorkViewPlan.Content(paneRevision: nil, face: nil,
+        let member = WorkViewPlan.Content(
             work: .init(repository: "repo", kind: .task, id: record.runtime?.workId ?? record.id),
             title: record.task.name, states: [.working], identifier: record.task.identifier,
             primarySession: nil, location: nil, argv: nil, unavailable: [])
@@ -1497,7 +1497,7 @@ struct TaskPlanningReadabilityTests {
         try await eventually { !model.showsSavedPlanning }
         #expect(model.taskListReading.isLoading)
         #expect(model.sidebarTaskIDs == expected, "fresh planning must not hide rows before the list answers")
-        let content = WorkViewPlan.Content(paneRevision: nil, face: nil,
+        let content = WorkViewPlan.Content(
             work: .init(repository: "repo", kind: .task, id: record.runtime?.workId ?? record.id),
             title: "Fresh local name", states: [.working], identifier: record.task.identifier,
             primarySession: nil, location: nil, argv: nil, unavailable: [])

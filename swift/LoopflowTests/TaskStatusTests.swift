@@ -3,7 +3,7 @@ import Testing
 
 struct TaskStatusTests {
     private func content(_ states: [WorkSelectionState], session: String? = "session", unavailable: [String] = []) -> WorkViewPlan.Content {
-        WorkViewPlan.Content(paneRevision: nil, face: nil, work: .init(repository: "repo", kind: .task, id: "task"), title: "Task",
+        WorkViewPlan.Content(work: .init(repository: "repo", kind: .task, id: "task"), title: "Task",
             states: states, identifier: nil, primarySession: session, location: nil, argv: nil, unavailable: unavailable)
     }
 

@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use crate::ops::{OpsError, OpsResult};
-use crate::store::{PlanningLocks, Store};
+use crate::store::Store;
 use crate::work::wave::Wave;
 use loopflow_storage::planning_sync::PlanningSyncStatus;
 use loopflow_storage::work::project::Project;
@@ -40,8 +40,7 @@ pub async fn bind_project(repo: &Path, name: &str, project_id: &str) -> OpsResul
     )
     .await
     .map_err(project_error)?;
-    let acquisition = super::planning_sync::lock_wave_planning(&wave).await?;
-    import_binding(&store, &wave, &acquisition)?;
+    let _acquisition = super::planning_sync::lock_wave_planning(&wave).await?;
     store
         .sqlite
         .bind_project(wave.id(), project_id)
@@ -74,54 +73,6 @@ pub async fn update_plan(
     drop(_acquisition);
     super::planning_sync::sync_after_save(&store, wave.repo()).await;
     read_saved(&store, &project.id)
-}
-
-/// One-time supported import at an explicit mutation boundary. A failed read is
-/// never permission to create; the original bytes remain durable evidence.
-pub(crate) fn import_binding(store: &Store, wave: &Wave, guard: &PlanningLocks) -> OpsResult<()> {
-    if store
-        .sqlite
-        .project_binding_imported(wave.id())
-        .map_err(project_error)?
-    {
-        return Ok(());
-    }
-    let path = store
-        .sqlite
-        .home_dir()
-        .map_err(project_error)?
-        .join("waves")
-        .join(wave.id().as_str())
-        .join("config.yaml");
-    let original = match std::fs::read_to_string(&path) {
-        Ok(content) => Some(content),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-        Err(error) => {
-            return Err(project_error(format!(
-                "Project binding import at {}: {error}",
-                path.display()
-            )))
-        }
-    };
-    #[derive(serde::Deserialize)]
-    struct Config {
-        pm: Option<Binding>,
-    }
-    #[derive(serde::Deserialize)]
-    struct Binding {
-        linear_project: Option<String>,
-    }
-    let selected = original
-        .as_deref()
-        .map(serde_yaml_ng::from_str::<Config>)
-        .transpose()
-        .map_err(project_error)?
-        .and_then(|config| config.pm)
-        .and_then(|pm| pm.linear_project);
-    store
-        .sqlite
-        .import_project_binding(wave.id(), original.as_deref(), selected.as_deref(), guard)
-        .map_err(project_error)
 }
 
 /// Address a retained Project by durable ID, provider ID, or unique slug/name.

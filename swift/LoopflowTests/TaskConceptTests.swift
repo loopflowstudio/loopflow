@@ -92,7 +92,7 @@ struct TaskConceptTests {
             model.applyFixture(roadmap: .available(roadmap), waves: .available([]), workActivity: .loading, repos: [])
             await model.refreshSessions()
             let members = phase.tasks.map { task in
-                WorkViewPlan.Content(paneRevision: nil, face: nil,
+                WorkViewPlan.Content(
                     work: .init(repository: task.task.repositoryId, kind: .task, id: task.id), title: task.task.name,
                     states: Array(task.selectionStates), identifier: task.task.identifier, primarySession: nil,
                     location: nil, argv: nil, unavailable: [])

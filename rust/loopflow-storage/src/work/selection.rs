@@ -3,12 +3,7 @@ use loopflow_model::id::WaveId;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
-mod panes;
 mod query;
-pub use panes::{
-    BrowserTab, ChangeComparison, FileDraft, FileTab, PaneIntent, PaneKind, PaneTree, ShellTab,
-    TaskLayoutTemplate, WorkPaneLayout,
-};
 
 #[derive(
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, schemars::JsonSchema,
@@ -746,8 +741,6 @@ pub struct ViewPlan {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ViewContent {
-    pub pane_revision: Option<i64>,
-    pub face: Option<PaneIntent>,
     pub work: WorkWorkspaceKey,
     pub title: String,
     pub states: BTreeSet<SelectionState>,

@@ -1681,19 +1681,15 @@ fn completed_task_cleanup_ends_its_held_shell_and_settles_jobs() {
     assert_eq!(viewer.until_close(), json!({"reason":"retired"}));
     fixture.held_ends(&owner);
     fixture.shell_settles(&owner);
-    let (settled, requested): (bool, i64) = fixture
+    let settled: bool = fixture
         .sql()
         .query_row(
-            "SELECT jobs_settled,close_requested FROM desktop_shells WHERE terminal_id=?1",
+            "SELECT jobs_settled FROM desktop_shells WHERE terminal_id=?1",
             [&owner],
-            |r| Ok((r.get(0)?, r.get(1)?)),
+            |r| r.get(0),
         )
         .unwrap();
     assert!(settled);
-    assert_eq!(
-        requested, 0,
-        "automatic cleanup must not store a shell Close"
-    );
     assert!(fixture.repo.path().is_dir());
     let status = Command::new("ps")
         .args(["-p", &job.to_string(), "-o", "stat="])

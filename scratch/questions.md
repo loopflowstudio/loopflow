@@ -28,3 +28,10 @@
 - **Schedule shape for `due_removals.py`.** Docs give `install`/`uninstall`
   subcommands (mirroring `disk-cleanup.sh`), Monday 09:00, log at
   `~/Library/Logs/loopflow-due-removals.log`. All three are picks, not asks.
+
+## Steers (2026-11-16, word for word)
+
+- Jack Heart: "You can drop everything old in this task as a special case".
+- Jack Heart: "we can drop the thing where lf open does anything other than
+  just open the task session in other surfaces."
+- Jack Heart: "we dont need to try to copy our desktop layouts".

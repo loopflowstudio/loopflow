@@ -5,7 +5,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use super::planning_write;
 use super::SqliteStore;
 use crate::work::project::Project;
-use crate::{PlanningLocks, StoreError, StoreResult};
+use crate::{StoreError, StoreResult};
 use loopflow_model::durable::ProjectId;
 use loopflow_model::id::WaveId;
 
@@ -95,7 +95,7 @@ pub fn write_project_binding(
     wave: &WaveId,
     expected: Option<&str>,
     project: &str,
-    _guard: &PlanningLocks,
+    _guard: &crate::PlanningLocks,
 ) -> StoreResult<()> {
     let mut conn = store.conn.lock().expect("store mutex poisoned");
     let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -242,40 +242,6 @@ impl SqliteStore {
             "UPDATE waves SET project_activation_lf_process_id=?2 WHERE id=?1",
             params![wave, process],
         )?;
-        Ok(())
-    }
-
-    pub fn project_binding_imported(&self, wave: &WaveId) -> StoreResult<bool> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM project_binding_imports WHERE wave_id=?1)",
-            [wave],
-            |row| row.get(0),
-        )?)
-    }
-
-    /// Preserve original bytes and select their exact accepted identity atomically.
-    pub fn import_project_binding(
-        &self,
-        wave: &WaveId,
-        original: Option<&str>,
-        project: Option<&str>,
-        _guard: &PlanningLocks,
-    ) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let imported: bool = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM project_binding_imports WHERE wave_id=?1)",
-            [wave],
-            |row| row.get(0),
-        )?;
-        if !imported {
-            if let Some(project) = project {
-                bind_in(&tx, wave, project)?;
-            }
-            tx.execute("INSERT INTO project_binding_imports(wave_id,original_yaml,imported_at) VALUES(?1,?2,unixepoch())", params![wave, original])?;
-        }
-        tx.commit()?;
         Ok(())
     }
 }
@@ -434,7 +400,7 @@ mod tests {
     }
 
     #[test]
-    fn selection_import_is_once_and_only_committed_selection_wakes_readers() {
+    fn only_a_committed_selection_wakes_readers() {
         let dir = tempfile::tempdir().unwrap();
         let store = crate::test_fixture::open(&dir.path().join("loopflow.db")).unwrap();
         let wave = Wave::new(WaveId::new(), "a".into(), "/repo".into());
@@ -451,31 +417,16 @@ mod tests {
         }
         let first = "11111111-1111-4111-8111-111111111111";
         let second = "22222222-2222-4222-8222-222222222222";
-        let original = format!("# preserve me\npm:\n  linear_project: {first}\n");
         let before = store.revisions().unwrap();
         assert_eq!(
             store.project_readiness(wave.id()).unwrap().state,
             ProjectReadinessState::Unconfigured
         );
         assert_eq!(store.revisions().unwrap(), before);
-        assert!(store
-            .import_project_binding(wave.id(), Some(&original), Some("missing"), &guard)
-            .is_err());
-        assert!(!store.project_binding_imported(wave.id()).unwrap());
-        assert_eq!(store.revisions().unwrap(), before);
         write_project_binding(&store, wave.id(), None, first, &guard).unwrap();
         assert!(store.revisions().unwrap().planning > before.planning);
-        let selected = store.revisions().unwrap();
-        // Local and provider IDs select the same stored Project during import too.
-        store
-            .import_project_binding(wave.id(), Some(&original), Some("one"), &guard)
-            .unwrap();
-        assert_eq!(store.revisions().unwrap(), selected);
         write_project_binding(&store, wave.id(), Some(first), second, &guard).unwrap();
         let selected = store.revisions().unwrap();
-        store
-            .import_project_binding(wave.id(), Some(&original), Some(first), &guard)
-            .unwrap();
         assert!(write_project_binding(&store, wave.id(), Some(first), first, &guard).is_err());
         assert_eq!(
             read_project_binding(&store, wave.id()).unwrap().as_deref(),
@@ -487,17 +438,6 @@ mod tests {
             store.project_readiness(wave.id()).unwrap().state,
             ProjectReadinessState::Unavailable
         );
-        let saved: String = store
-            .conn
-            .lock()
-            .unwrap()
-            .query_row(
-                "SELECT original_yaml FROM project_binding_imports WHERE wave_id=?1",
-                [wave.id()],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(saved, original);
     }
 }
 

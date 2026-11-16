@@ -319,3 +319,18 @@ def test_a_contract_of_a_marking_migration_drops_only_marked_members(repo: Path)
     contract.write_text(CONTRACT + "ALTER TABLE waves DROP COLUMN name;\nDROP TABLE graphs;\n")
     result = check(repo)
     assert result.returncode == 0, result.stderr
+
+
+def test_only_the_named_loo_935_contract_skips_the_staging_wait(repo: Path):
+    drop = "DROP TABLE graphs;\n"
+    (repo / MIGRATIONS / "unused_store_members.sql").write_text("-- exports: x\n" + drop)
+    result = check(repo)
+    assert result.returncode == 0, result.stderr
+    assert "unstaged contract (LOO-935)" in result.stdout
+
+    (repo / MIGRATIONS / "unused_store_members.sql").write_text(drop)
+    assert "-- exports:" in check(repo).stderr
+
+    (repo / MIGRATIONS / "unused_store_members.sql").unlink()
+    (repo / MIGRATIONS / "drop_id.sql").write_text("-- exports: x\n" + drop)
+    assert "without naming its expand step" in check(repo).stderr

@@ -9,8 +9,7 @@ use crate::work::project::ProjectEventKind;
 use crate::work::task::TaskEventKind;
 use crate::{StoreError, StoreResult};
 use loopflow_model::durable::{
-    Author, MachineId, ProjectId, TaskId, ToolResponseId, ToolResponseReceipt, ToolResponseWrite,
-    WorkRef, WorkStatus,
+    Author, MachineId, ProjectId, TaskId, WorkRef, WorkStatus,
 };
 use loopflow_model::id::WaveId;
 
@@ -294,62 +293,6 @@ impl SqliteStore {
         conn.query_row(&sql, params![id], |row| row.get(0))
             .map_err(StoreError::from)
     }
-
-    pub fn write_tool_response(
-        &self,
-        work: &WorkRef,
-        write: &ToolResponseWrite,
-    ) -> StoreResult<(ToolResponseReceipt, bool)> {
-        let choice = write.choice.trim();
-        if choice.is_empty() {
-            return Err(StoreError::InvalidData(
-                "tool response choice cannot be empty".to_string(),
-            ));
-        }
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        require_ready_work(&tx, work)?;
-        if let Some(existing) = tool_response_in(&tx, work, &write.request_id)? {
-            if existing.choice != choice {
-                return Err(StoreError::InvalidData(format!(
-                    "tool response {} is already resolved as {:?}",
-                    write.request_id, existing.choice
-                )));
-            }
-            return Ok((existing, false));
-        }
-        let receipt = ToolResponseReceipt {
-            id: ToolResponseId::new(),
-            work: work.clone(),
-            request_id: write.request_id.clone(),
-            choice: choice.to_string(),
-            responded_at: OffsetDateTime::now_utc(),
-        };
-        tx.execute(
-            "INSERT INTO tool_responses (
-                id, work_kind, work_id, request_id, choice, responded_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![
-                receipt.id.as_str(),
-                work.kind(),
-                work.id(),
-                receipt.request_id,
-                receipt.choice,
-                receipt.responded_at.unix_timestamp(),
-            ],
-        )?;
-        tx.commit()?;
-        Ok((receipt, true))
-    }
-
-    pub fn tool_response(
-        &self,
-        work: &WorkRef,
-        request_id: &str,
-    ) -> StoreResult<Option<ToolResponseReceipt>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        tool_response_in(&conn, work, request_id)
-    }
 }
 
 pub(super) fn local_public_name_in(conn: &Connection) -> StoreResult<Option<String>> {
@@ -553,41 +496,6 @@ pub(crate) fn work_for_child_in(conn: &Connection, target: &ChildRef) -> StoreRe
             Ok(WorkRef::Task(task_id.clone()))
         }
     }
-}
-
-fn tool_response_in(
-    conn: &Connection,
-    work: &WorkRef,
-    request_id: &str,
-) -> StoreResult<Option<ToolResponseReceipt>> {
-    let row = conn
-        .query_row(
-            "SELECT id, choice, responded_at FROM tool_responses
-             WHERE work_kind=?1 AND work_id=?2 AND request_id=?3",
-            params![work.kind(), work.id(), request_id],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, i64>(2)?,
-                ))
-            },
-        )
-        .optional()?;
-    let Some((id, choice, responded_at)) = row else {
-        return Ok(None);
-    };
-    Ok(Some(ToolResponseReceipt {
-        id: ToolResponseId::parse(&id).map_err(|error| {
-            StoreError::InvalidData(format!("invalid stored ToolResponse id: {error}"))
-        })?,
-        work: work.clone(),
-        request_id: request_id.to_string(),
-        choice,
-        responded_at: OffsetDateTime::from_unix_timestamp(responded_at).map_err(|error| {
-            StoreError::InvalidData(format!("invalid Decision timestamp: {error}"))
-        })?,
-    }))
 }
 
 #[cfg(test)]
@@ -819,8 +727,8 @@ mod durable_store_tests {
         let losing_task = TaskId::new();
         for id in [&bound_task, &losing_task] {
             conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
-            conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,worktree,created_at)
-                VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,?1,?1,?1,1)",
+            conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,created_at)
+                VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,?1,?1,1)",
                 rusqlite::params![id.as_str(), task.project_id.as_ref().unwrap().as_str()]).unwrap();
         }
         // A done Task is still a valid assignment target.

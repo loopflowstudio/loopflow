@@ -24,7 +24,7 @@ use crate::work::task::NewTask;
 use crate::work::task::{
     CiObservation, GithubObservation, GithubPr, LinearObservationOutcome, LinearWritebackState,
     PrMergeRequest, PrPhase, PrPresentation, PrPublication, Task, TaskEvent, TaskEventKind, TaskId,
-    TaskLinearObservation, TaskPr, TaskPrId, TaskPrRepairKind,
+    TaskLinearObservation, TaskPr, TaskPrId,
 };
 use crate::{PlanningState, StoreError, StoreResult};
 use loopflow_model::durable::{Author, RepositoryId};
@@ -891,16 +891,6 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn record_task_pr_repair_incident(
-        &self,
-        pr_id: &TaskPrId,
-        kind: TaskPrRepairKind,
-        occurred_at: OffsetDateTime,
-    ) -> StoreResult<bool> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        record_task_pr_repair_incident_on(&conn, pr_id, kind, occurred_at)
-    }
-
     pub fn task_prs(&self, task_id: &TaskId) -> StoreResult<Vec<TaskPr>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare(&format!(
@@ -1498,10 +1488,7 @@ pub(super) fn task_acquisitions_in(
                 ELSE NOT EXISTS(SELECT 1 FROM json_each(observed.team_ids)
                                 WHERE value=i.team_id) END
              END,
-         t.planning_deleted_at IS NOT NULL
-         OR EXISTS(SELECT 1 FROM task_deletions d JOIN waves dw ON dw.id=d.wave_id
-                   WHERE dw.repo=w.repo AND d.issue_id=t.external_issue_id)
-         OR COALESCE(changes.removed,0),
+         t.planning_deleted_at IS NOT NULL OR COALESCE(changes.removed,0),
          changes.issue_id IS NOT NULL
          FROM tasks t JOIN repository_plans w ON w.id=t.repository_id LEFT JOIN projects p ON p.id=t.project_id
          LEFT JOIN pm_items i ON i.repo=w.repo AND i.provider='linear' AND i.id=t.external_issue_id
@@ -1547,17 +1534,11 @@ pub(super) fn ids_json<'a>(ids: impl IntoIterator<Item = &'a str>) -> String {
     .to_string()
 }
 
+/// The receipt applies regardless of planning ownership.
 fn task_deleted_on(conn: &Connection, task: &Task) -> StoreResult<bool> {
-    // Either receipt applies regardless of planning ownership.
-    // Registration also checks provider evidence before a Task row exists.
     Ok(conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND planning_deleted_at IS NOT NULL)
-         OR EXISTS(SELECT 1 FROM task_deletions WHERE wave_id=?2 AND issue_id=?3)",
-        params![
-            task.id.as_str(),
-            task.wave_id.as_ref().map(WaveId::as_str),
-            task.linear_id.as_ref().map(|id| id.as_str())
-        ],
+        "SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND planning_deleted_at IS NOT NULL)",
+        [task.id.as_str()],
         |row| row.get(0),
     )?)
 }
@@ -1657,8 +1638,7 @@ fn map_task_checkout(
     })
 }
 
-pub(super) const TASK_VISIBLE: &str = "t.planning_deleted_at IS NULL
-    AND NOT EXISTS(SELECT 1 FROM task_deletions d WHERE d.wave_id=p.wave_id AND d.issue_id=t.external_issue_id)";
+pub(super) const TASK_VISIBLE: &str = "t.planning_deleted_at IS NULL";
 /// Present locally known Linear identity, otherwise the shortest unique local hex prefix.
 pub(super) fn short_task_id(conn: &Connection, id: &TaskId) -> StoreResult<Option<String>> {
     let identifier: Option<String> = conn
@@ -1899,20 +1879,6 @@ fn insert_task_pr(conn: &Connection, pr: &TaskPr) -> StoreResult<()> {
         ],
     )?;
     Ok(())
-}
-
-fn record_task_pr_repair_incident_on(
-    conn: &Connection,
-    pr_id: &TaskPrId,
-    kind: TaskPrRepairKind,
-    occurred_at: OffsetDateTime,
-) -> StoreResult<bool> {
-    Ok(conn.execute(
-        "INSERT INTO task_pr_repair_incidents (task_pr_id, kind, occurred_at)
-         VALUES (?1, ?2, ?3)
-         ON CONFLICT(task_pr_id, kind) DO NOTHING",
-        params![pr_id.as_str(), kind.as_str(), occurred_at.unix_timestamp()],
-    )? == 1)
 }
 
 fn update_task_pr(conn: &Connection, pr: &TaskPr) -> StoreResult<usize> {

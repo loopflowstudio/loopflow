@@ -185,7 +185,6 @@ pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
                 max_machines: *max,
                 max_usd_per_hour: *max_usd_per_hour,
                 hours: hours.min(rental::MAX_HOURS),
-                created_at: now(),
             };
             let price = ondemand.usd_per_hour().map_err(|reason| anyhow!(reason))?;
             loopflow_execution::store::rentals::add_ondemand(sqlite, &ondemand)?;
@@ -582,7 +581,7 @@ pub fn place(
     let sqlite = &store.sqlite;
     if let Some(pool) = placement.pool {
         let record = loopflow_execution::store::rentals::pool(sqlite, pool)?
-            .ok_or_else(|| anyhow!("no pool {pool}; `lf pool add {pool}` creates it"))?;
+            .ok_or_else(|| anyhow!("no pool {pool}; `lf machine pool add {pool}` creates it"))?;
         let machines = loopflow_execution::store::machines::pool_machines(sqlite, pool)?;
         match rental::free_machine(&record, &machines, now()) {
             Ok(free) if placement.quote => {

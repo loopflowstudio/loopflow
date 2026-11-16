@@ -361,8 +361,6 @@ pub(super) fn run_with_io(
                             notes: None,
                             ..
                         },
-                }) | Some(crate::lf::Commands::Desktop {
-                    cmd: crate::lf::DesktopCommand::Layout { save: true, .. },
                 })
             );
             loopflow_execution::machine::ssh::run_ssh_io(

@@ -145,7 +145,7 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             };
             if let Some(pool) = pool {
                 if loopflow_execution::store::rentals::pool(&store.sqlite, pool)?.is_none() {
-                    return Err(anyhow!("no pool {pool}; `lf pool add {pool}` creates it"));
+                    return Err(anyhow!("no pool {pool}; `lf machine pool add {pool}` creates it"));
                 }
             }
             let probe = match probe(target, false).await {

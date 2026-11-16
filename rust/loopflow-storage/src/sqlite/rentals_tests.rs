@@ -29,8 +29,8 @@ fn hand_back_writes_nothing_when_a_claim_lacks_planning_facts() {
         )
         .unwrap();
         conn.execute(
-            "INSERT INTO task_ownership(id,task_id,kind,machine_id,writer_machine_id,at,written_here)
-             VALUES(?1,?2,'claim',?3,?3,1,0)",
+            "INSERT INTO task_ownership(id,task_id,kind,machine_id,writer_machine_id,at)
+             VALUES(?1,?2,'claim',?3,?3,1)",
             rusqlite::params![
                 loopflow_model::durable::OwnershipEntryId::new().as_str(),
                 task.as_str(),
@@ -210,7 +210,7 @@ fn removing_a_pool_keeps_the_machines_cost_and_expiry() {
     store
         .set_machine_ownership_prepared(&machine, &ownership)
         .unwrap();
-    store.remove_pool_record("lab").unwrap();
+    store.clear_pool_machines("lab").unwrap();
     assert_eq!(
         super::ownership_in(&store.conn.lock().unwrap(), &machine).unwrap(),
         Ownership {

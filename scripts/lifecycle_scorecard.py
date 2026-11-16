@@ -120,16 +120,7 @@ def load_lifecycle(
         """
         SELECT pr.id, wave.repo, pr.created_at, pr.publication_requested_at,
                pr.merge_requested_at AS requested_at, pr.merged_at,
-               pr.merge_tracking_complete, pr.repair_tracking_complete,
-               pr.github_observation,
-               EXISTS(SELECT 1 FROM task_pr_repair_incidents incident
-                        WHERE incident.task_pr_id=pr.id
-                          AND incident.kind='avoidable_rebase_agent')
-                   AS avoidable_rebase_agent,
-               EXISTS(SELECT 1 FROM task_pr_repair_incidents incident
-                        WHERE incident.task_pr_id=pr.id
-                          AND incident.kind='manual_git_repair')
-                   AS manual_git_repair
+               pr.merge_tracking_complete, pr.github_observation
           FROM task_prs pr
           JOIN tasks task ON task.id=pr.task_id
           JOIN projects project ON project.id=task.project_id
@@ -456,28 +447,6 @@ def build_report(
     )
     attempt_row["reason"] = "; ".join(filter(None, (attempt_row["reason"], limitation)))
     rows.append(attempt_row)
-    for metric, label, field in [
-        ("avoidable_repairs", "Avoidable repair", "avoidable_rebase_agent"),
-        ("manual_git_repairs", "Manual git repair", "manual_git_repair"),
-    ]:
-        values = [
-            int(bool(pr[field]))
-            for pr in prs
-            if pr["merge_observation_complete"]
-            and pr["merged_at"] is not None
-            and (pr[field] or pr["repair_tracking_complete"])
-        ]
-        rows.append(
-            measured_row(
-                metric,
-                label,
-                None,
-                values,
-                len(prs),
-                metric_budget(policy, metric),
-                minimum,
-            )
-        )
     rows.extend(
         [
             unknown_row(

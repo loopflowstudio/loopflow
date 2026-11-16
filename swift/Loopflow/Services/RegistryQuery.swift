@@ -67,7 +67,6 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     case machineSelf
     case desktopPortfolio
     case configSettings(directory: String, wave: String?, skill: String?, graph: String?, step: String?)
-    case desktopLayout(directory: String, work: String)
     case repoPeople(directory: String)
     case graphList(directory: String)
     case desktopViewGet(directory: String, expression: String?)
@@ -152,8 +151,6 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             return ["config", "settings", "--json"] + (wave.map { ["--wave", $0] } ?? [])
                 + (skill.map { ["--skill", $0] } ?? []) + (graph.map { ["--graph", $0] } ?? [])
                 + (step.map { ["--step", $0] } ?? [])
-        case .desktopLayout(_, let work):
-            return ["desktop", "layout", work]
         case .repoPeople:
             return ["repo", "people", "--json"]
         case .graphList:
@@ -256,8 +253,6 @@ public enum ServedRead: Equatable, Sendable, Encodable {
         case .desktopPortfolio: TaggedFields("desktop.portfolio")
         case .configSettings(let directory, let wave, let skill, let graph, let step):
             TaggedFields("config.settings", ["directory": directory, "wave": wave, "skill": skill, "graph": graph, "step": step])
-        case .desktopLayout(let directory, let work):
-            TaggedFields("desktop.layout", ["directory": directory, "work": work])
         case .repoPeople(let directory): TaggedFields("repo.people", ["directory": directory])
         case .graphList(let directory): TaggedFields("graph.list", ["directory": directory])
         case .desktopViewGet(let directory, let expression):
@@ -400,7 +395,6 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     case desktopDashboardShow(directory: String, id: String, member: String)
     case desktopDashboardSlots(directory: String, id: String, revision: Int64, slots: String)
     case desktopDashboardMove(directory: String, board: String, member: String, destination: String)
-    case desktopLayoutSave(directory: String, work: String, layout: String)
 
     /// The equivalent `lf` command, without its `--cwd`.
     public var argv: [String] {
@@ -499,7 +493,6 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             return ["desktop", "dashboard", "slots", "query:" + id, "--revision=\(revision)"]
         case .desktopDashboardMove(_, let board, let member, let destination):
             return ["desktop", "dashboard", "move", "\(board)/\(member)", "--destination", destination]
-        case .desktopLayoutSave(_, let work, _): return ["desktop", "layout", work, "--save"]
         }
     }
 
@@ -608,7 +601,6 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .sessionStatus(_, _, _, _, _, _, let records):
             (try? JSONEncoder().encode(records)).map { String(decoding: $0, as: UTF8.self) }
         case .desktopDashboardSlots(_, _, _, let slots): slots
-        case .desktopLayoutSave(_, _, let layout): layout
         default: nil
         }
     }
@@ -757,8 +749,6 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .desktopDashboardMove(let directory, let board, let member, let destination):
             TaggedFields("desktop.dashboard.move", ["directory": directory, "board": board, "member": member,
                                        "destination": destination])
-        case .desktopLayoutSave(let directory, let work, let layout):
-            TaggedFields("desktop.layout.save", ["directory": directory, "work": work, "layout": layout])
         }
     }
 
@@ -889,16 +879,6 @@ public struct RegistryQuery: Sendable {
     public func reorderTask(_ task: String, to target: String, repoPath: String) async throws -> [String] {
         try Self.decode([String].self, from: await write(
             .desktopDashboardMove(directory: repoPath, board: "working-tasks", member: "task:" + task, destination: "task:" + target)))
-    }
-
-    public func paneLayout(work: String, repoPath: String) async throws -> WorkPaneLayout? {
-        try Self.decode(WorkPaneLayout?.self, from: await serve(.desktopLayout(directory: repoPath, work: work)))
-    }
-
-    public func savePaneLayout(_ layout: WorkPaneLayout, repoPath: String) async throws -> WorkPaneLayout {
-        let input = String(decoding: try JSONEncoder().encode(layout), as: UTF8.self)
-        return try Self.decode(WorkPaneLayout.self, from: await write(
-            .desktopLayoutSave(directory: repoPath, work: layout.work.selector, layout: input)))
     }
 
     public func portfolio(_ arguments: [String] = []) async throws -> Portfolio {

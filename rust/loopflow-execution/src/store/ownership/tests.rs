@@ -222,7 +222,6 @@ fn hand_back_rejects_a_changed_repository_with_the_same_held_set() {
             max_machines: 1,
             max_usd_per_hour: Usd::parse("1.00").unwrap(),
             hours: 1.0,
-            created_at: time::OffsetDateTime::UNIX_EPOCH,
         },
     )
     .unwrap();
@@ -343,8 +342,8 @@ fn held_scope_batches_ten_thousand_tasks_and_keys_repository_joins() {
         .unwrap();
         tx.execute(
             "WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<10000)
-             INSERT INTO task_ownership(id,task_id,kind,machine_id,at,ordered_at,writer_machine_id,written_here)
-             SELECT printf('own_%032x',i),printf('task_%032x',i),'claim',?1,1,1,?1,1 FROM n",
+             INSERT INTO task_ownership(id,task_id,kind,machine_id,at,ordered_at,writer_machine_id)
+             SELECT printf('own_%032x',i),printf('task_%032x',i),'claim',?1,1,1,?1 FROM n",
             [local.as_str()],
         ).unwrap();
         tx.commit().unwrap();

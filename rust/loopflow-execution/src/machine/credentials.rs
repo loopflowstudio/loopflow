@@ -1821,7 +1821,6 @@ esac
                 max_machines: 1,
                 max_usd_per_hour: usd("0.40"),
                 hours: 4.0,
-                created_at: time::OffsetDateTime::UNIX_EPOCH,
             },
         )
         .unwrap();

@@ -196,16 +196,11 @@ pub fn reorder_dashboard(
 }
 
 fn prepare_plan(plan: &mut ViewPlan) {
-    use loopflow_storage::work::selection::PaneIntent;
     for content in plan.contents.iter_mut().filter(|content| {
         content.work.kind == loopflow_storage::work::selection::WorkWorkspaceKind::Task
             && content.identifier.is_some()
     }) {
-        if let Some(PaneIntent::Session {
-            session_id: Some(session_id),
-            location: Some(location),
-        }) = &content.face
-        {
+        if let (Some(session_id), Some(location)) = (&content.primary_session, &content.location) {
             match crate::ops::human_session::human_session_argv(session_id) {
                 Ok(mut argv) => {
                     // Keep the existing resume command and data-selection fences.

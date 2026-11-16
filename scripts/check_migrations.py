@@ -61,6 +61,10 @@ LEAVING_MARK = re.compile(
 # drop what it left behind: the window in which lf processes on older builds
 # exit. The one place this number lives.
 STAGING_DAYS = 30
+# LOO-935 dropped every member the product had stopped using in one contract,
+# without waiting out the window. This file alone may drop without an aged
+# expand step; it still names where it exported the rows.
+UNSTAGED_CONTRACT = "unused_store_members.sql"
 
 
 @dataclass(frozen=True)
@@ -477,6 +481,12 @@ def _check_staging(local: dict[str, bytes], main: dict[str, bytes], unmerged: li
 def _check_contract(name: str, sql: str, drops: list[str], catalog: Catalog) -> None:
     """A contract names an aged expand step, exports, and drops only what that step superseded."""
     dropped = ", ".join(drops)
+    if name == UNSTAGED_CONTRACT:
+        exports = EXPORTS_MARKER.search(sql)
+        if not exports:
+            _fail(f"{name} drops {dropped} without `-- exports: <where>`")
+        print(f"{name}: unstaged contract (LOO-935), exports {exports.group(1)}")
+        return
     expand = EXPAND_MARKER.search(sql)
     if not expand:
         _fail(

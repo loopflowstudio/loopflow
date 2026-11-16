@@ -784,13 +784,10 @@ pub enum DesktopCommand {
         #[arg(long, global = true, id = "portfolio_json")]
         json: bool,
     },
-    /// Read a Work's pane intent or a Dashboard's slots as JSON, or save a complete pane record from stdin
+    /// Read a Dashboard's slots as JSON; `lf desktop dashboard slots` replaces them
     Layout {
-        /// repository, wave:<durable-id>, task:<durable-id> or query:ID
+        /// query:ID
         work: String,
-        /// Replace the pane record from JSON on stdin instead of reading it
-        #[arg(long)]
-        save: bool,
     },
 
     /// List the window's Tasks by position (as ⌘1–9 select them) and each Task's panes
@@ -1017,7 +1014,7 @@ impl DesktopCommand {
             self,
             Self::View { .. }
                 | Self::Portfolio { cmd: None, .. }
-                | Self::Layout { save: false, .. }
+                | Self::Layout { .. }
         )
     }
 }

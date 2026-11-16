@@ -222,6 +222,11 @@ final class WorkModel {
         }
     }
 
+    private func startPersistence(_ workspace: SessionsWorkspace) {
+        guard let paneLayouts else { return }
+        workspace.startPersistence(layouts: paneLayouts, query: query, sessions: sessions.value.map { Set($0.map(\.id)) })
+    }
+
     func openSelectedWorkspace(deliberate: Bool = true) {
         if let plan = selectedViewPlan { presentView(plan); return }
         guard let registry = workspaceRegistry, let repository = workspaceRepository else { return }
@@ -237,7 +242,7 @@ final class WorkModel {
             workspace.requiresLocationValidation = true
             workspace.present(false)
         }
-        workspace.startPersistence(query: query, repoPath: repoPath)
+        startPersistence(workspace)
         navigation.workspacePresentation = workspace.presentation
         navigation.selectedSessionId = workspace.presentation.selectedSessionId
         openWarmConversations()
@@ -270,7 +275,7 @@ final class WorkModel {
         }
         for key in warm {
             guard let workspace = registry.retained(key), !workspace.conversationClosed else { continue }
-            workspace.startPersistence(query: query, repoPath: repoPath)
+            startPersistence(workspace)
             if workspace.multiplexer.sessionPane?.sessionId == nil,
                let record = records.first(where: { record in
                    switch key.kind {
@@ -1294,6 +1299,8 @@ final class WorkModel {
 
     private let query: RegistryQuery
     @ObservationIgnored private let cache: WorkCache?
+    /// Where this Mac keeps Work pane layouts; `nil` keeps them only in memory.
+    @ObservationIgnored private let paneLayouts: PaneLayoutStore?
     /// The Machine the saved workspace was read from, until `confirmMachine` checks it.
     @ObservationIgnored private(set) var savedMachineId: String?
     var observingMachineId: String? { workMachine ?? savedMachineId }
@@ -1329,15 +1336,17 @@ final class WorkModel {
     init(query: RegistryQuery, repoPath: String? = nil, cache: WorkCache? = nil) {
         self.query = query
         self.cache = cache
+        paneLayouts = nil
         self.repoPath = repoPath.map(WaveOrigin.resolve)
         if let saved = cache?.load() { restore(saved) }
     }
 
     /// A window's model, scoped to the first candidate that names a repository.
     /// One the saved workspace was last scoped to opens without running `git`.
-    init(query: RegistryQuery, launchCandidates: [String], cache: WorkCache?) {
+    init(query: RegistryQuery, launchCandidates: [String], cache: WorkCache?, paneLayouts: PaneLayoutStore?) {
         self.query = query
         self.cache = cache
+        self.paneLayouts = paneLayouts
         let saved = cache?.load()
         for candidate in launchCandidates {
             let path = candidate.normalizedFilePath
@@ -1356,8 +1365,9 @@ final class WorkModel {
     /// The model every window builds: saved workspace first, except in fixture
     /// and proof runs, which render only what they read.
     static func window(query: RegistryQuery, launchCandidates: [String] = []) -> WorkModel {
+        let fixture = AppTestMode.current() != nil
         let model = WorkModel(query: query, launchCandidates: launchCandidates,
-                                cache: AppTestMode.current() == nil ? .home : nil)
+                              cache: fixture ? nil : .home, paneLayouts: fixture ? nil : .home)
         LaunchJournal.home.mark(.restored, ["cache": model.showsSavedWork ? "hit" : "miss"])
         WorkFixture.applyIfRequested(to: model)
         return model
@@ -3208,7 +3218,7 @@ extension WorkModel {
             if let primary = content.primarySession, entry.multiplexer.sessionPane?.sessionId == nil {
                 entry.multiplexer.load(sessionId: primary, location: entry.location, focus: false)
             }
-            entry.startPersistence(query: query, repoPath: repoPath)
+            startPersistence(entry)
         }
         let pages = plan.slots.pages(members)
         registry.present(open: lead + tiles, shown: lead + pages[pageIndex(board, of: pages)].map(\.work))

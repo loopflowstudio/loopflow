@@ -337,10 +337,10 @@ final class SessionsWorkspace {
     private var unavailableDrafts: [WorkFileDraft] = []
     var persistenceError: String?
     private var persistenceQuery: RegistryQuery?
-    private var persistenceRepo: String?
-    @ObservationIgnored private var paneRevision: Int64 = 0
+    private var paneLayouts: PaneLayoutStore?
+    /// The Sessions read when persistence started; a saved pane naming another is emptied.
+    private var knownSessions: Set<String>?
     private var persistenceLoaded = false
-    private var persistenceWriting = false
     @ObservationIgnored private var persistenceTask: Task<Void, Never>?
     private var taskFiles: (store: TaskFilesStore, execution: TaskLocationObservation?)?
 
@@ -2060,10 +2060,13 @@ private struct SidebarDivider: View {
 #endif
 
 extension SessionsWorkspace {
-    func startPersistence(query: RegistryQuery, repoPath: String?) {
-        guard persistenceQuery == nil, let repoPath else { return }
+    /// Restore this Mac's saved layout for the Work, then save each change to it.
+    /// `sessions` is the current Sessions reading, or `nil` before one answers.
+    func startPersistence(layouts: PaneLayoutStore, query: RegistryQuery, sessions: Set<String>?) {
+        guard persistenceQuery == nil, localMachineId != nil else { return }
         persistenceQuery = query
-        persistenceRepo = repoPath
+        paneLayouts = layouts
+        knownSessions = sessions
         persistenceTask = Task { [weak self] in await self?.loadPaneIntent() }
     }
 
@@ -2072,13 +2075,12 @@ extension SessionsWorkspace {
             WorkViewPlan.Location(machineID: files.execution?.machineID ?? location?.machineId ?? localMachineId ?? "",
                                   cwd: files.store.cwd)
         }
-        return multiplexer.paneLayout(work: key, revision: paneRevision,
-            files: taskFiles?.store.browserTab,
+        return multiplexer.paneLayout(files: taskFiles?.store.browserTab,
             drafts: (place.flatMap { place in taskFiles?.store.drafts(location: place) } ?? []) + unavailableDrafts)
     }
 
     func loadPaneIntent() async {
-        guard let query = persistenceQuery, let repo = persistenceRepo, !persistenceWriting, !isRestoringIntent else { return }
+        guard let query = persistenceQuery, let layouts = paneLayouts, let machine = localMachineId, !isRestoringIntent else { return }
         isRestoringIntent = true
         defer { isRestoringIntent = false }
         let before = portableLayout()
@@ -2091,43 +2093,39 @@ extension SessionsWorkspace {
         }
         let preserveCurrent = persistenceLoaded || persistenceError != nil || hadLocalTools
         persistenceError = nil
-        do {
-            let saved = try await query.paneLayout(work: key.selector, repoPath: repo)
-            let needsSave: Bool
-            if let saved {
-                guard saved.work == key else { throw RegistryQueryError("Saved layout belongs to different Work; local edits retained.") }
-                let current = portableLayout()
-                let restored = current == before && !preserveCurrent ? saved : Self.merging(saved, with: current)
-                multiplexer.restore(restored)
-                paneRevision = saved.revision
-                unavailableDrafts = restored.drafts
-                if case .browser(let place?, let browserTabs, _)? = restored.tree.intent(.browser),
-                   case .files(_, let tabs, let selected)? = browserTabs.first(where: { if case .files = $0 { true } else { false } }) {
-                    let fileQuery = place.machineID == localMachineId ? query : query.onMachine(place.machineID, repository: key.repository)
-                    let documents = files(issue: key.id, cwd: place.cwd, query: fileQuery)
-                    documents.restoreTabs(tabs, selected: selected)
-                    documents.restoreDrafts(restored.drafts, location: place)
-                    unavailableDrafts.removeAll { $0.location == place }
-                    // Reconcile every recovered base, including documents with closed tabs.
-                    for draft in restored.drafts where draft.location == place {
-                        do {
-                            let disk = try await fileQuery.taskFile(issue: key.id, path: draft.path)
-                            await documents.document(draft.path).reconcile(disk)
-                        } catch { persistenceError = error.localizedDescription }
-                    }
+        let saved = layouts.load(machineId: machine, work: key)?.keeping(sessions: knownSessions)
+        let needsSave: Bool
+        if let saved {
+            let current = portableLayout()
+            let restored = current == before && !preserveCurrent ? saved : Self.merging(saved, with: current)
+            multiplexer.restore(restored, taskId: key.id)
+            unavailableDrafts = restored.drafts
+            if case .browser(let place?, let browserTabs, _)? = restored.tree.intent(.browser),
+               case .files(_, let tabs, let selected)? = browserTabs.first(where: { if case .files = $0 { true } else { false } }) {
+                let fileQuery = place.machineID == localMachineId ? query : query.onMachine(place.machineID, repository: key.repository)
+                let documents = files(issue: key.id, cwd: place.cwd, query: fileQuery)
+                documents.restoreTabs(tabs, selected: selected)
+                documents.restoreDrafts(restored.drafts, location: place)
+                unavailableDrafts.removeAll { $0.location == place }
+                // Reconcile every recovered base, including documents with closed tabs.
+                for draft in restored.drafts where draft.location == place {
+                    do {
+                        let disk = try await fileQuery.taskFile(issue: key.id, path: draft.path)
+                        await documents.document(draft.path).reconcile(disk)
+                    } catch { persistenceError = error.localizedDescription }
                 }
-                needsSave = portableLayout() != saved
-            } else {
-                needsSave = hadLocalTools
             }
-            // Reloads reuse the workspace's existing observation chain.
-            if !persistenceLoaded {
-                persistenceLoaded = true
-                observePaneIntent()
-            }
-            isRestoringIntent = false
-            if needsSave { await savePaneIntent() }
-        } catch { persistenceError = error.localizedDescription }
+            needsSave = portableLayout() != saved
+        } else {
+            needsSave = hadLocalTools
+        }
+        // Reloads reuse the workspace's existing observation chain.
+        if !persistenceLoaded {
+            persistenceLoaded = true
+            observePaneIntent()
+        }
+        isRestoringIntent = false
+        if needsSave { savePaneIntent() }
     }
 
     private func observePaneIntent() {
@@ -2135,38 +2133,27 @@ extension SessionsWorkspace {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.observePaneIntent()
-                guard self.persistenceError == nil, !self.persistenceWriting, !self.isRestoringIntent else { return }
+                guard self.persistenceError == nil, !self.isRestoringIntent else { return }
                 self.persistenceTask?.cancel()
                 self.persistenceTask = Task { [weak self] in
                     do { try await Task.sleep(for: .milliseconds(300)) } catch { return }
                     // A newer edit can cancel this task after its timer fires but before it
                     // resumes; the save it would start belongs to its successor.
                     guard !Task.isCancelled else { return }
-                    await self?.savePaneIntent()
+                    self?.savePaneIntent()
                 }
             }
         }
     }
 
-    func savePaneIntent() async {
-        guard persistenceLoaded, !persistenceWriting, !isRestoringIntent, persistenceError == nil,
-              let query = persistenceQuery, let repo = persistenceRepo else { return }
-        persistenceWriting = true
-        defer { persistenceWriting = false }
-        do {
-            // Serial writes absorb edits arriving during the previous write without
-            // reusing its revision or applying its older content to the workspace.
-            while true {
-                let submitted = portableLayout()
-                let saved = try await query.savePaneLayout(submitted, repoPath: repo)
-                let unchanged = portableLayout() == submitted
-                paneRevision = saved.revision
-                if unchanged { break }
-            }
-        } catch { persistenceError = error.localizedDescription }
+    func savePaneIntent() {
+        guard persistenceLoaded, !isRestoringIntent, persistenceError == nil,
+              let layouts = paneLayouts, let machine = localMachineId else { return }
+        do { try layouts.save(portableLayout(), machineId: machine, work: key) }
+        catch { persistenceError = error.localizedDescription }
     }
 
-    /// A delayed read contributes missing retained content; current edits own selection and geometry.
+    /// Saved content fills in what the workspace already holds; current edits own selection and geometry.
     /// Both layouts hold the same designated panes, so merging is per kind.
     private static func merging(_ saved: WorkPaneLayout, with current: WorkPaneLayout) -> WorkPaneLayout {
         let prior = saved.tree
@@ -2204,7 +2191,7 @@ extension SessionsWorkspace {
         let drafts = current.drafts + saved.drafts.filter { old in
             !current.drafts.contains { $0.path == old.path && $0.location == old.location }
         }
-        return WorkPaneLayout(work: current.work, revision: saved.revision, tree: merge(current.tree), focused: current.focused,
+        return WorkPaneLayout(tree: merge(current.tree), focused: current.focused,
                               zoomed: current.zoomed, hidden: current.hidden, drafts: drafts)
     }
 }

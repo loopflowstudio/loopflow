@@ -4,7 +4,6 @@
 //! handles live only in this command, or in a Rex follower while it runs.
 use loopflow_execution::store::selections;
 mod layout;
-mod tools;
 
 use layout::layout;
 
@@ -21,11 +20,10 @@ use super::{
     OpenHost, OpenReceipt, OpenReport, OpenStatus, Resolved, WorkspaceArgs,
 };
 use loopflow_model::durable::{MachineId, RepositoryId, TaskId};
-use loopflow_model::id::WaveId;
 use loopflow_storage::sqlite::SqliteStore;
 use loopflow_storage::work::selection::{
     Selection, SelectionExpression, SelectionFilter, SelectionId, SelectionState, SplitAxis,
-    TaskLayoutTemplate, ViewContent, ViewPlan, WorkWorkspaceKey, WorkWorkspaceKind,
+    ViewContent, ViewPlan, WorkWorkspaceKey, WorkWorkspaceKind,
 };
 
 /// Where a Task's tools run: its recorded checkout, else the repository.
@@ -119,14 +117,6 @@ impl Native {
         }
     }
 
-    fn terminal(&self, label: &str, cwd: &Path, argv: Vec<String>) -> Value {
-        match self {
-            Self::Rex(rex) => rex.terminal(label, cwd, argv),
-            Self::Herdr(_) => herdr::terminal(label, cwd, argv),
-            Self::Cmux(_) => cmux::terminal(label, cwd, argv),
-        }
-    }
-
     fn split(&self, axis: SplitAxis, ratio: f64, before: Value, after: Value) -> Value {
         match self {
             Self::Rex(_) => rex::split(axis, ratio, before, after),
@@ -201,31 +191,23 @@ impl Native {
         }
     }
 
-    /// Add one Task's tab with its splits; returns the tab and its new shell count.
+    /// Add one Task's tab: its conversation.
     fn add_task_tab(
         &self,
-        templates: &mut Templates<'_>,
+        store: &SqliteStore,
+        repo: &Path,
         container: &mut Container,
         content: &ViewContent,
         presentation: Presentation<'_>,
-    ) -> Result<(String, usize, Option<super::conversation::Attachment>)> {
-        let template = templates.for_task(&TaskId::parse(&content.work.id)?)?;
-        let repo = templates.repo;
-        let (native_layout, shells, attachment) = layout(
-            templates.store,
-            content,
-            repo,
-            template.as_ref(),
-            presentation,
-            self,
-        )?;
+    ) -> Result<(String, Option<super::conversation::Attachment>)> {
+        let (native_layout, attachment) = layout(store, content, repo, presentation, self)?;
         let tab = self.add_tab(
             container,
             &content.title,
             tool_cwd(content, repo),
             native_layout,
         )?;
-        Ok((tab, shells, attachment))
+        Ok((tab, attachment))
     }
 
     fn focus(&self, container: &Container, tab: &str) -> String {
@@ -663,47 +645,6 @@ fn scope(store: &SqliteStore, target: &Resolved) -> Result<Selection> {
     })
 }
 
-/// Settings that apply to a Task in this Wave.
-fn wave_config(
-    store: &SqliteStore,
-    repo: &Path,
-    wave: Option<&WaveId>,
-) -> Result<Option<loopflow_execution::config::Config>> {
-    let slug = wave
-        .map(|wave| store.get_wave(wave))
-        .transpose()?
-        .flatten()
-        .map(|wave| wave.slug().to_owned());
-    Ok(loopflow_execution::config::load_wave_config(
-        Some(repo),
-        slug.as_deref(),
-    )?)
-}
-
-/// Configured `task_layout` per Wave, read once per launch.
-struct Templates<'a> {
-    store: &'a SqliteStore,
-    repo: &'a Path,
-    read: HashMap<Option<WaveId>, Option<TaskLayoutTemplate>>,
-}
-
-impl Templates<'_> {
-    fn for_task(&mut self, task: &TaskId) -> Result<Option<TaskLayoutTemplate>> {
-        let wave = self
-            .store
-            .task(task)?
-            .context("Task is unavailable")?
-            .wave_id;
-        if let Some(template) = self.read.get(&wave) {
-            return Ok(template.clone());
-        }
-        let template =
-            wave_config(self.store, self.repo, wave.as_ref())?.and_then(|c| c.task_layout);
-        self.read.insert(wave, template.clone());
-        Ok(template)
-    }
-}
-
 /// The container's name: the selected Wave, else the Task's Wave, else the repository.
 fn container_name(store: &SqliteStore, target: &Resolved, selected: &Selection) -> Result<String> {
     let wave = match &selected.expression {
@@ -801,11 +742,6 @@ fn launch(
         Presentation::default()
     };
     let mut receipts = Vec::new();
-    let mut templates = Templates {
-        store,
-        repo,
-        read: HashMap::new(),
-    };
     let mut focused = args.no_focus;
     let mut seen = Vec::new();
     for content in local_tasks {
@@ -821,17 +757,15 @@ fn launch(
         )
         .to_string();
         let opened = native
-            .add_task_tab(&mut templates, &mut container, content, presentation)
-            .map(|(tab, shells, attachment)| {
+            .add_task_tab(store, repo, &mut container, content, presentation)
+            .map(|(tab, attachment)| {
                 let showing = if focused {
                     "Focus preserved".into()
                 } else {
                     focused = true;
                     native.focus(&container, &tab)
                 };
-                receipt.reason = Some(format!(
-                    "Created a new Task tab; {shells} new shells; {showing}"
-                ));
+                receipt.reason = Some(format!("Created a new Task tab; {showing}"));
                 if let Some(attachment) = attachment {
                     attachment.settle(&mut receipt);
                 }
@@ -1018,11 +952,6 @@ fn follow(cli: &crate::lf::Cli, session: &str, args: &WorkspaceArgs) -> Result<(
     )?
     .context("Workspace subscription did not start")?;
     let mut seen: BTreeSet<String> = args.seen.iter().cloned().collect();
-    let mut templates = Templates {
-        store: &store,
-        repo: &target.repository_path,
-        read: HashMap::new(),
-    };
     let native = Native::Rex(rex.clone());
     let mut container = Container::existing(session);
     let local = loopflow_execution::store::machines::local_machine(&store)?.id;
@@ -1055,7 +984,8 @@ fn follow(cli: &crate::lf::Cli, session: &str, args: &WorkspaceArgs) -> Result<(
                 // Mark before creating: an uncertain create is never retried.
                 seen.insert(content.work.id.clone());
                 match native.add_task_tab(
-                    &mut templates,
+                    &store,
+                    &target.repository_path,
                     &mut container,
                     content,
                     Presentation::default(),
@@ -1189,8 +1119,6 @@ mod tests {
     #[test]
     fn only_started_unfinished_tasks_arrive_automatically() {
         let mut content = ViewContent {
-            pane_revision: None,
-            face: None,
             work: WorkWorkspaceKey {
                 repository: "r".into(),
                 kind: WorkWorkspaceKind::Task,

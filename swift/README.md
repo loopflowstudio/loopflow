@@ -1291,10 +1291,12 @@ restore it from Hidden. Rust resolves membership and the first visible occurrenc
 reuse each Task's retained Session, tools and drafts. Focus never changes which
 occurrence wins or replaces its primary Session face.
 
-Task pane layouts, selected shell/file tabs and file drafts save through lfdb.
-A delayed restore keeps newer tabs and edits. Conflicts leave local content intact
-and show an error; **Reload saved intent** reconciles retained content before another
-save. File drafts compare their saved base with disk before editing. Restored shell
+Each Mac saves its own pane layouts, selected shell/file tabs and file drafts, one
+file per Work under `$LF_HOME/desktop-cache/pane-layouts/<machine>/<kind>/`; two
+Macs driving one Machine keep separate layouts. Restoring into open Work keeps its
+newer tabs and edits, and a pane naming a Session the current reading lacks opens
+empty. A failed save leaves local content intact and shows an error; **Reload saved
+intent** reconciles retained content before another save. File drafts compare their saved base with disk before editing. Restored shell
 intent retains its identity without initial commands: opening it attaches to the
 same owner and never replays startup or creates replacement execution.
 

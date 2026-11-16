@@ -126,8 +126,7 @@ async fn ensure_first_project(store: &Store, wave: &crate::work::wave::Wave) -> 
         .sqlite
         .record_project_activation(wave.id(), crate::journal::current_lf_process_id().as_ref())
         .map_err(lifecycle_error)?;
-    let acquisition = super::planning_sync::lock_wave_planning(wave).await?;
-    super::project::import_binding(store, wave, &acquisition)?;
+    let _acquisition = super::planning_sync::lock_wave_planning(wave).await?;
     let id = store
         .sqlite
         .ensure_project(wave.id(), wave.slug())

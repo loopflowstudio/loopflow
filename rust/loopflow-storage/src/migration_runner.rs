@@ -384,11 +384,6 @@ pub(crate) fn validate_persisted_json(conn: &rusqlite::Connection) -> StoreResul
             "dashboard_id",
             "arrangement_json",
         )?);
-        failures.extend(validate_json_column::<
-            crate::work::selection::WorkPaneLayout,
-        >(
-            conn, "work_pane_layouts", "work_id", "layout_json"
-        )?);
         failures.extend(validate_json_column::<crate::work::selection::SlotLayout>(
             conn,
             "dashboards",
@@ -858,6 +853,11 @@ fn migration_preflight(
 ) -> StoreResult<()> {
     if purpose == MigrationPurpose::Upgrade && migration_contains(migration, "settings_authority") {
         (observers.export_contract)(conn, guards)?;
+    }
+    if purpose == MigrationPurpose::Upgrade
+        && migration_contains(migration, crate::migration_exports::UNUSED_STORE_MEMBERS)
+    {
+        crate::migration_exports::export_unused_store_members(conn, guards)?;
     }
     if migration_contains(migration, "canonical_structured_ids") {
         super::canonical_ids::preflight(conn, guards, observers.process_evidence)?;

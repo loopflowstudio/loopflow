@@ -529,12 +529,6 @@ async fn missing_detail_invalidates_cached_admission_without_claiming_deletion()
                     .state,
                 crate::store::PlanningState::Available
             );
-            assert!(fixture
-                .store
-                .deleted_task_issues(wave.id())
-                .await
-                .unwrap()
-                .is_empty());
         })
         .await;
 }

@@ -11,7 +11,7 @@ use std::path::Path;
 
 use crate::asana::AsanaClient;
 use crate::config::PlanningConfig;
-use crate::linear::{LinearClient, LinearResult};
+use crate::linear::LinearClient;
 use crate::store::Store;
 use loopflow_storage::planning::rules::Observed;
 use loopflow_storage::planning::{TrackerItem, TrackerObservation, TrackerProject};
@@ -38,10 +38,39 @@ pub enum Sent {
 
 impl Sent {
     /// A failed request: a rate limit refused it; anything else may have landed.
-    pub(crate) fn failed(error: crate::linear::LinearError) -> Self {
-        match error {
-            crate::linear::LinearError::RateLimited { .. } => Self::Rejected(error.to_string()),
+    pub(crate) fn failed(error: impl Into<BridgeError>) -> Self {
+        match error.into() {
+            error @ BridgeError::RateLimited { .. } => Self::Rejected(error.to_string()),
             error => Self::Unknown(error.to_string()),
+        }
+    }
+}
+
+/// A bridge request that failed, in the tracker's terms. Saved delivery errors
+/// show this text, so it stays the same across retries.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum BridgeError {
+    /// Refused before acting; the reset time is logged where it is first seen.
+    #[error("{tracker} rate limit reached; saved changes retry after it resets")]
+    RateLimited {
+        tracker: &'static str,
+        reset_at_ms: i64,
+    },
+    #[error("{0}")]
+    Message(String),
+}
+
+pub type BridgeResult<T> = Result<T, BridgeError>;
+
+impl From<crate::linear::LinearError> for BridgeError {
+    fn from(error: crate::linear::LinearError) -> Self {
+        match error {
+            crate::linear::LinearError::RateLimited { reset_at_ms } => Self::RateLimited {
+                tracker: "Linear",
+                reset_at_ms,
+            },
+            crate::linear::LinearError::Message(text) => Self::Message(text),
         }
     }
 }
@@ -185,9 +214,9 @@ impl Tracker {
     pub(crate) async fn issue_ownership(
         &self,
         id: &str,
-    ) -> LinearResult<Option<(TrackerItem, Option<TrackerProject>)>> {
+    ) -> BridgeResult<Option<(TrackerItem, Option<TrackerProject>)>> {
         match self {
-            Self::Linear(client) => client.issue_ownership(id).await,
+            Self::Linear(client) => Ok(client.issue_ownership(id).await?),
             Self::Asana(client) => Ok(client.task(id).await?.map(|task| (task, None))),
             #[cfg(test)]
             Self::Fake(_) => Ok(None),
@@ -196,7 +225,7 @@ impl Tracker {
 
     /// Whether the provider positively reports the item deleted: Linear's trash,
     /// Asana's missing task. A lookup that merely finds nothing is not evidence.
-    pub async fn removed(&self, id: &str) -> LinearResult<bool> {
+    pub async fn removed(&self, id: &str) -> BridgeResult<bool> {
         match self {
             Self::Linear(client) => Ok(client
                 .issue_trash(id)
@@ -217,12 +246,12 @@ impl Tracker {
         through: &str,
         live: &[String],
         finished: &[String],
-    ) -> LinearResult<Vec<(TrackerItem, Option<TrackerProject>, TrackerObservation)>> {
+    ) -> BridgeResult<Vec<(TrackerItem, Option<TrackerProject>, TrackerObservation)>> {
         let changes = match self {
             Self::Linear(client) => {
-                return client
+                return Ok(client
                     .team_changes(scope, since, through, live, finished)
-                    .await
+                    .await?)
             }
             Self::Asana(client) => client.changes(since, live, finished).await?,
             #[cfg(test)]
@@ -234,12 +263,12 @@ impl Tracker {
             .collect())
     }
 
-    pub(crate) async fn observe_issue(&self, id: &str) -> LinearResult<TrackerObservation> {
+    pub(crate) async fn observe_issue(&self, id: &str) -> BridgeResult<TrackerObservation> {
         match self {
-            Self::Linear(client) => client.observe_issue(id).await,
+            Self::Linear(client) => Ok(client.observe_issue(id).await?),
             Self::Asana(client) => client.observe(id).await,
             #[cfg(test)]
-            Self::Fake(_) => Err(crate::linear::LinearError::Message("fake tracker".into())),
+            Self::Fake(_) => Err(BridgeError::Message("fake tracker".into())),
         }
     }
 }

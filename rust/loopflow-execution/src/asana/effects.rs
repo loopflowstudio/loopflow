@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 use super::{completed, rich_text, AsanaClient, Task, IDENTITY_LABEL};
 use crate::ops::tracker::{
     creation_id, ingest_task, message, now, observed_task, remote_project, remote_task,
-    repository_scope, visible_text, Sent,
+    repository_scope, visible_text, BridgeError, Sent,
 };
 use crate::ops::OpsResult;
 use crate::store::Store;
@@ -122,7 +122,7 @@ impl AsanaClient {
         data["projects"] = json!(projects);
         let created: Task = match self.send(Method::POST, "/tasks", Some(data)).await {
             Ok(created) => created,
-            Err(error) => return Ok(Sent::failed(error.into())),
+            Err(error) => return Ok(Sent::failed(BridgeError::from(error))),
         };
         self.accepted(store, repo, &id, created).await
     }
@@ -152,7 +152,7 @@ impl AsanaClient {
             .await
         {
             Ok(created) => created,
-            Err(error) => return Ok(Sent::failed(error.into())),
+            Err(error) => return Ok(Sent::failed(BridgeError::from(error))),
         };
         let mirrored = TrackerProject {
             revision: created.modified_at,
@@ -182,9 +182,7 @@ impl AsanaClient {
                 };
                 let current: Task = match self.send(Method::GET, &path, None).await {
                     Ok(current) => current,
-                    Err(error) => {
-                        return Ok(Sent::Rejected(super::LinearError::from(error).to_string()))
-                    }
+                    Err(error) => return Ok(Sent::Rejected(BridgeError::from(error).to_string())),
                 };
                 match self.set_project(&current, target).await {
                     Ok(()) => self.send(Method::GET, &path, None).await,
@@ -199,7 +197,7 @@ impl AsanaClient {
         };
         match updated {
             Ok(updated) => self.accepted(store, repo, &external, updated).await,
-            Err(error) => Ok(Sent::failed(error.into())),
+            Err(error) => Ok(Sent::failed(BridgeError::from(error))),
         }
     }
 

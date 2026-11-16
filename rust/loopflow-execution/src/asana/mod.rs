@@ -24,7 +24,8 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::sync::OnceCell;
 
-use crate::linear::{local_identifier, LinearError, LinearResult};
+use crate::linear::local_identifier;
+use crate::ops::tracker::{BridgeError, BridgeResult};
 use loopflow_storage::planning::{TrackerComment, TrackerItem, TrackerObservation};
 
 const ASANA_BASE_URL: &str = "https://app.asana.com/api/1.0";
@@ -144,7 +145,7 @@ impl AsanaClient {
     }
 
     /// The team project named after the repository, created when the team has none.
-    async fn project(&self) -> LinearResult<&str> {
+    async fn project(&self) -> BridgeResult<&str> {
         self.project
             .get_or_try_init(|| async {
                 let path = format!("/teams/{}/projects?archived=false", self.team);
@@ -176,13 +177,13 @@ impl AsanaClient {
             .map(String::as_str)
     }
 
-    async fn team_projects(&self) -> LinearResult<Vec<Project>> {
+    async fn team_projects(&self) -> BridgeResult<Vec<Project>> {
         self.pages(&format!("/teams/{}/projects?archived=false", self.team))
             .await
     }
 
     /// The team project mirroring Loopflow Project `id`.
-    async fn wave_project(&self, id: &str) -> LinearResult<Option<Project>> {
+    async fn wave_project(&self, id: &str) -> BridgeResult<Option<Project>> {
         Ok(self
             .team_projects()
             .await?
@@ -191,7 +192,7 @@ impl AsanaClient {
     }
 
     /// The revision of the Asana project mirroring Loopflow Project `id`, if any.
-    pub(crate) async fn project_revision(&self, id: &str) -> LinearResult<Option<Option<String>>> {
+    pub(crate) async fn project_revision(&self, id: &str) -> BridgeResult<Option<Option<String>>> {
         Ok(self
             .wave_project(id)
             .await?
@@ -200,7 +201,7 @@ impl AsanaClient {
 
     /// Move the task into the Wave Project `target`, leaving any other mirrored
     /// Wave Project. The repository project and people's own projects stay.
-    async fn set_project(&self, task: &Task, target: Option<String>) -> LinearResult<()> {
+    async fn set_project(&self, task: &Task, target: Option<String>) -> BridgeResult<()> {
         let mirrored: Vec<String> = self
             .team_projects()
             .await?
@@ -231,7 +232,7 @@ impl AsanaClient {
         Ok(())
     }
 
-    pub async fn task(&self, id: &str) -> LinearResult<Option<TrackerItem>> {
+    pub async fn task(&self, id: &str) -> BridgeResult<Option<TrackerItem>> {
         match self
             .send::<Task>(Method::GET, &format!("/tasks/external:{id}"), None)
             .await
@@ -243,7 +244,7 @@ impl AsanaClient {
     }
 
     /// Asana has open and completed tasks; a canceled Task is closed there too.
-    pub(crate) async fn set_state(&self, id: &str, target: &str) -> LinearResult<TrackerItem> {
+    pub(crate) async fn set_state(&self, id: &str, target: &str) -> BridgeResult<TrackerItem> {
         let task: Task = self
             .send(
                 Method::PUT,
@@ -254,7 +255,7 @@ impl AsanaClient {
         self.issue(id, task).await
     }
 
-    pub async fn delete_task(&self, id: &str) -> LinearResult<()> {
+    pub async fn delete_task(&self, id: &str) -> BridgeResult<()> {
         let _: Value = self
             .send(Method::DELETE, &format!("/tasks/external:{id}"), None)
             .await?;
@@ -263,7 +264,7 @@ impl AsanaClient {
 
     /// Post `text` once. Asana stories carry no caller identity, so a Loopflow
     /// comment is its visible text on the task: an existing match is the delivery.
-    pub(crate) async fn sync_comment(&self, issue: &str, text: &str) -> LinearResult<()> {
+    pub(crate) async fn sync_comment(&self, issue: &str, text: &str) -> BridgeResult<()> {
         let task: Task = self
             .send(Method::GET, &format!("/tasks/external:{issue}"), None)
             .await?;
@@ -285,14 +286,14 @@ impl AsanaClient {
         Ok(())
     }
 
-    pub async fn observe(&self, id: &str) -> LinearResult<TrackerObservation> {
+    pub async fn observe(&self, id: &str) -> BridgeResult<TrackerObservation> {
         let task: Task = self
             .send(Method::GET, &format!("/tasks/external:{id}"), None)
             .await?;
         self.observation(task).await
     }
 
-    async fn observation(&self, task: Task) -> LinearResult<TrackerObservation> {
+    async fn observation(&self, task: Task) -> BridgeResult<TrackerObservation> {
         let mut comments = self.comments(&task.gid).await?;
         comments.sort_by(|left, right| {
             left.revision
@@ -316,7 +317,7 @@ impl AsanaClient {
         since: Option<&str>,
         live: &[String],
         finished: &[String],
-    ) -> LinearResult<Vec<(TrackerItem, TrackerObservation)>> {
+    ) -> BridgeResult<Vec<(TrackerItem, TrackerObservation)>> {
         let mut path = format!("/projects/{}/tasks", self.project().await?);
         if let Some(since) = since {
             path.push_str(&format!("?modified_since={since}"));
@@ -347,7 +348,7 @@ impl AsanaClient {
     }
 
     /// Story listing accepts only Asana's own task gid, not `external:`.
-    async fn comments(&self, gid: &str) -> LinearResult<Vec<TrackerComment>> {
+    async fn comments(&self, gid: &str) -> BridgeResult<Vec<TrackerComment>> {
         let stories: Vec<Story> = self.pages(&format!("/tasks/{gid}/stories")).await?;
         Ok(stories
             .into_iter()
@@ -363,7 +364,7 @@ impl AsanaClient {
             .collect())
     }
 
-    async fn issue(&self, id: &str, task: Task) -> LinearResult<TrackerItem> {
+    async fn issue(&self, id: &str, task: Task) -> BridgeResult<TrackerItem> {
         if task.external.as_ref().and_then(|e| e.gid.as_deref()) != Some(id) {
             return Err(message(
                 "Asana returned a task with a different Loopflow identity",
@@ -374,7 +375,7 @@ impl AsanaClient {
 
     /// A task in the repository's team project belongs to the team's plan; one
     /// in a mirrored Wave Project too belongs to that Project.
-    async fn issue_unchecked(&self, id: &str, task: Task) -> LinearResult<TrackerItem> {
+    async fn issue_unchecked(&self, id: &str, task: Task) -> BridgeResult<TrackerItem> {
         let repository = self.project().await?;
         let members: Vec<&str> = task
             .memberships
@@ -418,7 +419,7 @@ impl AsanaClient {
     }
 
     /// Every page of a list read, at Asana's largest page size.
-    async fn pages<T: serde::de::DeserializeOwned>(&self, path: &str) -> LinearResult<Vec<T>> {
+    async fn pages<T: serde::de::DeserializeOwned>(&self, path: &str) -> BridgeResult<Vec<T>> {
         let separator = if path.contains('?') { '&' } else { '?' };
         let mut items = Vec::new();
         let mut offset = None;
@@ -494,7 +495,8 @@ impl AsanaClient {
         }
         if status == StatusCode::TOO_MANY_REQUESTS {
             let now = time::OffsetDateTime::now_utc().unix_timestamp() * 1000;
-            return Err(LinearError::RateLimited {
+            return Err(BridgeError::RateLimited {
+                tracker: "Asana",
                 reset_at_ms: now + retry_after.unwrap_or(60) * 1000,
             }
             .into());
@@ -514,16 +516,16 @@ impl AsanaClient {
 #[derive(Debug)]
 enum AsanaFailure {
     NotFound,
-    Provider(LinearError),
+    Provider(BridgeError),
 }
 
-impl From<LinearError> for AsanaFailure {
-    fn from(error: LinearError) -> Self {
+impl From<BridgeError> for AsanaFailure {
+    fn from(error: BridgeError) -> Self {
         Self::Provider(error)
     }
 }
 
-impl From<AsanaFailure> for LinearError {
+impl From<AsanaFailure> for BridgeError {
     fn from(failure: AsanaFailure) -> Self {
         match failure {
             AsanaFailure::NotFound => message("Asana task is unavailable"),
@@ -555,8 +557,8 @@ fn acquired_identity(gid: &str) -> String {
     .to_string()
 }
 
-fn message(text: impl Into<String>) -> LinearError {
-    LinearError::Message(text.into())
+fn message(text: impl Into<String>) -> BridgeError {
+    BridgeError::Message(text.into())
 }
 
 /// A Loopflow comment's visible text as Asana returns it: the markdown its rich
@@ -565,7 +567,7 @@ pub(crate) fn comment_markdown(text: &str) -> String {
     rich_text::to_markdown(&rich_text::to_html(text))
 }
 
-fn completed(target: &str) -> LinearResult<bool> {
+fn completed(target: &str) -> BridgeResult<bool> {
     match target {
         "completed" | "canceled" => Ok(true),
         // Asana tasks are open or complete; work in progress is open.

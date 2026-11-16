@@ -218,6 +218,52 @@ Implied by the design; implement builds these. No product choice in them.
   (`Adopt` writes `conflict_json`); coalesced, superseded deletion, wrong
   provider → `retired`; `Hold` and `Send` leave the phase unchanged.
 
+### Concept review (2026-11-16, after the queue commits): settled for the cut
+
+Read against a2c956a129 and 7e3fa2ac84. No product choice in these.
+
+- **One enqueue point, by origin.** `planning_write::local` also carries
+  provider facts: the tracker-removal `TaskDeletedAt`
+  (`linear_observations.rs:34`), the adopted `Disposition` after a state
+  conflict (`task_state_delivery.rs:125`), the `TaskLinearId` attach
+  (`planning_export.rs:312`). Enqueueing per writer, as planned, leaves
+  receipts to each caller's memory; enqueueing in `local` would echo those
+  facts back out. So: `WriteOrigin::{Local, Tracker, Import}`. `write_record`
+  under `Local` enqueues one effect per changed value a bridge carries
+  (`EffectKind::of(&WorkValue)`: `Disposition`→state, `TaskOrder`→order,
+  `CommentContent`→comment, `TaskDeletedAt(Some)`→delete, bindings and
+  execution-only values → none, the rest → field; base = the owner's current
+  observation). `Tracker` journals for Git peers like `Local` and enqueues
+  nothing; acceptance, attach, conflict adoption and removal use it. Writers
+  stop calling receipt code; `create` stays in `planning_write::create`.
+- **One conflict rule for both observation sources.** Inbound acceptance
+  settles attempted receipts with its own SQL (`observe_attempts`,
+  `planning_changes.rs:241`) while the drain uses `rules::decide`: two copies
+  of the rule. `rules.rs` is pure over storage types, so it moves to
+  `loopflow_storage::planning::rules`; acceptance calls `decide` for each
+  attempted effect of an owner it just ingested and applies only `Settle`.
+  An acquisition that saw the owner after `attempted_at` makes the drain's
+  look unnecessary. Pending rebase (base ← observed, overlay the local value,
+  `reconcile_edits`) stays in acceptance; it settles nothing. `observe_attempts`
+  is deleted, not ported.
+- **State keeps its history evidence.** Today's state rule reads
+  `StateHistory` (`Unknown` holds, `Unchanged` rebases and resends,
+  `Changed` adopts); `rules::field` compares only the base value and misses a
+  provider A→B→A. `Observed` gains `state_history`; the state rule uses it
+  when the bridge answers one (Linear), the value compare otherwise (Asana).
+- **A pass with nothing to do writes nothing.** `enqueue_tracker_creations`
+  opens an `Immediate` transaction at the start of every pass, on the one
+  write lock every agent shares. Select first on a plain read; open the write
+  only when it returns owners, with `NOT EXISTS` repeated in the insert.
+  Check its plan with `EXPLAIN QUERY PLAN` against a 10k-Task store.
+- **`drain` scope is one argument.** `first: Option<&EffectOwner>, only:
+  bool` → `Scope::{All, First(owner), Only(owner)}`.
+- **An unknown kind fails one owner, not the pass.** `EffectKind::parse`
+  errors the whole `unsettled_tracker_effects` read, so a row a later lf
+  writes stops this one's drain for the repository. Read unknown kinds as a
+  row the pass skips (owner held, `tracing::debug!` once), and drop
+  `decide`'s `_ => Hold` arm for an exhaustive match inside the crate.
+
 ### Migration (one, additive): `tracker_effects`
 
 `uv run python scripts/new_migration.py tracker_effects`. Creates the table,
@@ -332,12 +378,14 @@ Deepest deletions first, then the queue, then the bridges. Commit at each.
      `enqueue`/`owner_tracker`/`impl Tracker` until writers and bridges land).
    **Remaining, one cut with slice 4** (found while building: moving the
    writers before a bridge can send would stop delivery, so these go together):
-   - Writers: `PlanningChanges::record`/`save`, state, comment, order,
-     deletion and creation writers call `tracker_effects::enqueue`; the
+   - Writers: one enqueue in `planning_write::write_record` under
+     `WriteOrigin::Local`, provider facts written as `WriteOrigin::Tracker`
+     (second concept review); the
      `prepare_planning_export` path and `attach_in`'s receipt updates move to
      `create` effects (attach = acknowledge the create by the Task's uuid).
    - Inbound readers of pending receipts (`reconcile_edits`,
-     `observe_attempts`, `observe_task_deletion`, acceptance) read
+     `observe_task_deletion`, acceptance; `observe_attempts` becomes
+     `rules::decide`, moved to storage) read
      `tracker_effects` (`phase`, `subject`, `kind`); list of other readers below.
    - `Tracker::{Linear, Asana}` arms with `send`/`look`/`idempotent`
      (Linear create and comment: our id) in `linear/effects.rs`,

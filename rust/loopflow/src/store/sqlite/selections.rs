@@ -103,7 +103,7 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
     // State, publication and ownership for every Task in a fixed number of
     // statements: a query per Task costs thousands on a large repository.
     let ids: Vec<_> = tasks.iter().map(|task| task.id.clone()).collect();
-    let task_states = super::task_details::states_in(
+    let task_inputs = super::task_details::state_inputs_in(
         conn,
         &super::children::ids_json(ids.iter().map(|id| id.as_str())),
     )?;
@@ -111,15 +111,16 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
     let owners = super::task_ownership::owners_in(conn, &ids)?;
     let mut task_work = Vec::with_capacity(tasks.len());
     for task in tasks {
-        let state = *task_states
+        let inputs = task_inputs
             .get(&task.id)
-            .ok_or_else(|| invalid(format!("Task {} has no state", task.id)))?;
+            .ok_or_else(|| invalid(format!("Task {} has no state inputs", task.id)))?;
+        let state = inputs.state();
         let owned = owners.contains_key(&task.id);
         let states = task_selection_states(
             state,
             owned,
             published.contains(&task.id),
-            task.state.as_deref(),
+            inputs.planning_state.as_deref(),
             reading.activity.get(&task.id),
         );
         let activity_known = states.contains(&SelectionState::Done)
@@ -127,8 +128,8 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
                 .activity
                 .get(&task.id)
                 .is_none_or(|activity| activity.known);
-        let completed_at = (state.lifecycle(task.state.as_deref()) == TaskState::Done)
-            .then_some(task.completed_at)
+        let completed_at = (state.lifecycle(inputs.planning_state.as_deref()) == TaskState::Done)
+            .then(|| inputs.completed_at.clone())
             .flatten();
         let order = reading.order.key(task.id.as_str(), task.rank, &states);
         task_work.push((

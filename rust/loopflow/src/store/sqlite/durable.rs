@@ -516,30 +516,55 @@ fn commit_abandon_in(conn: &Connection, task: &TaskId) -> StoreResult<()> {
     )
 }
 
-/// Completion and abandonment are durable. An open Task's state follows
-/// what it is doing: its Task run, ship process or a Graph in its work has not
-/// exited. Its carrier is the latest Auto-Ship log entry naming one; the
-/// Auto-Ship approval (`shipped_at`) makes that run shipping.
-/// Approved with nothing running, it is idle until recovery restarts its ship process.
+/// Structural predicates, independent of terminal disposition. Withdrawing
+/// Auto-Ship releases its carrier; Graph work and position remain independent.
+#[derive(Debug)]
+pub(super) struct TaskExecutionSql {
+    pub checkout: String,
+    pub graph_running: String,
+    pub carrier_running: String,
+    pub held: String,
+    pub approved: String,
+}
+
+pub(super) fn task_execution_sql(t: &str) -> TaskExecutionSql {
+    TaskExecutionSql {
+        checkout: format!("EXISTS(SELECT 1 FROM task_checkouts c WHERE c.task_id={t}.id)"),
+        carrier_running: format!(
+            "EXISTS(SELECT 1 FROM processes lp WHERE lp.completed_at IS NULL AND lp.id=(SELECT CASE WHEN e.kind IN ('approved','carried') THEN e.lf_process_id END \
+             FROM task_ship_events e WHERE e.task_id={t}.id \
+             AND e.kind IN ('approved','carried','stopped','withdrawn') ORDER BY e.id DESC LIMIT 1))"
+        ),
+        graph_running: format!(
+            "EXISTS(SELECT 1 FROM processes lp WHERE lp.completed_at IS NULL \
+             AND lp.id=(SELECT tg.lf_process_id FROM task_graphs tg WHERE tg.task_id={t}.id)) \
+             OR EXISTS({open_processes})",
+            open_processes = super::task_work::task_open_process_ids(
+                &format!("{t}.id"),
+                "p.kind='lf' AND EXISTS(SELECT 1 FROM graph_processes g \
+                 WHERE g.lf_process_id IN (p.id,p.parent_lf_process_id))",
+            )
+        ),
+        held: format!("EXISTS(SELECT 1 FROM task_graphs tg WHERE tg.task_id={t}.id \
+             AND tg.lf_process_id IS NULL AND tg.step NOT IN ('start','end'))"),
+        approved: format!("{t}.shipped_at IS NOT NULL"),
+    }
+}
+
 pub(crate) fn task_state_sql(t: &str) -> String {
+    let TaskExecutionSql {
+        checkout,
+        graph_running,
+        carrier_running,
+        held,
+        approved,
+    } = task_execution_sql(t);
     format!(
         "CASE WHEN {t}.abandoned_at IS NOT NULL THEN 'abandoned' \
          WHEN {t}.planning_completed=1 THEN 'done' \
-         WHEN EXISTS(SELECT 1 FROM processes lp WHERE lp.completed_at IS NULL AND (lp.id=(SELECT CASE WHEN e.kind IN ('approved','carried') THEN e.lf_process_id END \
-             FROM task_ship_events e WHERE e.task_id={t}.id \
-             AND e.kind IN ('approved','carried','stopped','withdrawn') ORDER BY e.id DESC LIMIT 1) \
-             OR lp.id=(SELECT tg.lf_process_id FROM task_graphs tg WHERE tg.task_id={t}.id))) \
-             OR EXISTS({open_processes}) \
-         THEN CASE WHEN {t}.shipped_at IS NOT NULL THEN 'shipping' ELSE 'moving' END \
-         WHEN {t}.shipped_at IS NULL AND EXISTS(SELECT 1 FROM task_graphs tg WHERE tg.task_id={t}.id \
-             AND tg.lf_process_id IS NULL AND tg.step NOT IN ('start','end')) THEN 'active' \
-         WHEN NOT EXISTS(SELECT 1 FROM task_checkouts c WHERE c.task_id={t}.id) THEN 'unstarted' \
-         ELSE 'idle' END",
-        open_processes = super::task_work::task_open_process_ids(
-            &format!("{t}.id"),
-            "p.kind='lf' AND EXISTS(SELECT 1 FROM graph_processes g \
-                WHERE g.lf_process_id IN (p.id,p.parent_lf_process_id))",
-        )
+         WHEN ({graph_running}) OR ({carrier_running}) THEN CASE WHEN ({approved}) THEN 'shipping' ELSE 'moving' END \
+         WHEN NOT ({approved}) AND ({held}) THEN 'active' \
+         WHEN NOT ({checkout}) THEN 'unstarted' ELSE 'idle' END"
     )
 }
 
@@ -549,13 +574,10 @@ pub(crate) fn task_open_sql(t: &str) -> String {
 }
 
 pub(crate) fn task_state_in(conn: &Connection, task: &TaskId) -> StoreResult<TaskState> {
-    let state: String = conn.query_row(
-        &format!("SELECT {} FROM tasks t WHERE t.id=?1", task_state_sql("t")),
-        [task.as_str()],
-        |row| row.get(0),
-    )?;
-    TaskState::parse(&state)
-        .ok_or_else(|| StoreError::InvalidData(format!("invalid Task state {state:?}")))
+    super::task_details::state_inputs_in(conn, &super::children::ids_json([task.as_str()]))?
+        .remove(task)
+        .map(|inputs| inputs.state())
+        .ok_or(StoreError::NotFound)
 }
 
 pub(crate) fn work_status_in(conn: &Connection, work: &WorkRef) -> StoreResult<WorkStatus> {

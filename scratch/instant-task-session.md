@@ -249,6 +249,10 @@ lifecycle filter, unconditional history resets, and inspector lookup limited to
 recovery and selected inspector now stay on the shared-field join; history pages
 supply no field facts.
 
+Removed in the domain-input cut: `TaskState::parse` and the bulk/single state-label
+read path. Typed disposition/execution inputs preserve state, completion time and
+pending identity; SQL projections share the structural predicates.
+
 Still remove, with their consumers:
 
 - Aggregate lifecycle membership authority in `MembershipFacts.lifecycle`,
@@ -398,8 +402,8 @@ acquire a No Wave label.
 
 ### Task action cut · 2026-11-15
 
-Status: domain results/recovery built (`ede0429321`); the vertical client cut is
-next. Desktop Claim/unassign/Reopen still go through `WorkModel.performTaskAction`.
+Status: domain results/recovery built (`ede0429321`); execution-input reads are
+in the working tree; the vertical client cut is next. Desktop Claim/unassign/Reopen still go through `WorkModel.performTaskAction`.
 
 The current `MembershipFacts.lifecycle` is a derived result, not sufficient input
 for these transitions:
@@ -414,16 +418,10 @@ for these transitions:
   Its membership fact cannot determine the Claim/Unassign action. `RoadmapTask`
   still reads `runtime.owner` from separate DTO content; projecting a section
   alone would leave that control and the inspector stale after retirement.
-- Claim/unassign now record actual ownership and a planning fence, including
-  no-op success. Original-ID recovery returns that result after restart without
-  replaying or replacing a later claim. Definite ownership permission refusals
-  and deleted/abandoned Reopen refusals persist before any domain change.
-  Unassign's assignee clearing moved into this transaction; the old ops write
-  is deleted. Comment delivery has its own `task_comment` correlation; state and
-  assignee edits retain their exact delivery IDs. A pending external ownership
-  comment cannot be mistaken for completed planning delivery. Configuration names
-  are captured before the write lock; historical result labels cannot become
-  SQLite-only field support. No new migration or client projection is claimed.
+- Claim/unassign outcomes, no-op recovery, definite refusals and exact planning
+  delivery correlation are built. Prior domain details and checks:
+  `1c35543dd8a70dfb1915d9fd02ba1b65bbf818dc:scratch/instant-task-session.md`
+  (Task action cut).
 
 Next implement direction: normalize the real inputs in the existing
 field/outbox owner, then derive lifecycle/section once. Keep planning disposition
@@ -431,7 +429,11 @@ and its nullable completion time correlated; expose supported ownership (actual
 owner, including known unowned), publication and the structural execution inputs
 that terminal disposition currently masks. Execution inputs must account for
 checkout, Graph position/running work and Auto-Ship approval independently, since
-Reopen withdraws approval without moving the Graph. External conversation activity
+Reopen withdraws approval without moving the Graph. Running Graph work and the
+Auto-Ship carrier are separate inputs: withdrawal releases the carrier even while
+its Process is unfinished, but retained Graph work can still be Moving. A combined
+running bit cannot predict that transition. Conditional Reopen clears carrier
+and approval together; the already-open no-op retains both. External conversation activity
 and native input readiness remain independently supported; reopening cannot
 certify either. Missing inputs make affected answers incomplete rather than
 inventing an exact destination. No second Task store or hypothetical future DTO.
@@ -463,16 +465,17 @@ recover the original ID after commit-before-reply, handle no-op success and defi
 refusal, and converge under reordered/two-client readings without stale owner
 controls.
 
-Proposed usage for both app READMEs, after that vertical exit:
+Proposed usage for both app READMEs after the vertical exit:
 > **Claim** requests ownership on this Machine; **Unassign** releases ownership
-> while keeping checkout, PR and conversation history. The action and affected
-> lists update immediately. **Reopen** withdraws completion and Auto-Ship approval
-> without restarting or moving the Workflow. Its destination follows the retained
-> execution and ownership facts; missing facts show an incomplete answer.
-> Saved changes wait for their original Machine through disconnection and app
-> restart. A definite refusal removes only that change. An uncertain send checks
-> the original request; it never submits a replacement. Later navigation, drafts
-> and the open conversation stay where they are.
+> while keeping checkout, PR and conversations. Controls and affected lists update
+> immediately. **Reopen** withdraws completion without restarting the Workflow.
+> For completed or completing work it also withdraws Auto-Ship approval; an
+> already-open no-op keeps that approval. The destination follows retained facts;
+> missing facts leave it incomplete. Saved changes wait for the original Machine
+> through restart. Refusal removes only that change; an uncertain send checks the
+> original request. Later navigation, drafts and conversations stay put.
+
+No builtin skill instruction changes follow from this interaction design.
 
 Counterexamples: Claim of an already-owned Task (stale cached owner) still needs
 an actual ownership result and fence; transport return or planning refresh never
@@ -496,15 +499,30 @@ Machine labels. Add unknown-predicate → no-op and Complete → Reopen before s
 to the vertical acceptance cases. Builtin skills and shipped app usage are
 unchanged until this exit.
 
-Checks: `cargo nextest run -p loopflow --lib --test integration -E 'test(unassigning_another_persons_claim) | test(receipt_reads_and_duplicate_admission) | test(server::schema::tests::every_) | test(server::schema::tests::the_checked_in_schema) | test(dto_fixtures::ownership_planning_evidence) | test(documented_commands::)'` — 12 passed; six more domain rows passed earlier. `scripts/test_desktop.sh --filter ServerProtocolTests` — 28 passed. Clippy, `cargo package`, formatting and multiplatform boundaries passed. Gate owns wider suites/iOS and the LEAK.
+Domain input normalization now reads checkout, running Graph work, held position
+and Auto-Ship approval independently of terminal disposition. Bulk Task reads,
+single-Task state, selection completion dates and Reopen use that snapshot owner.
+The old state-label decoder is removed; SQL-only consumers use the same structural
+predicates. The client replacement must retain carrier-running separately from Graph-running,
+not export their OR as the only running input. Carrier support depends on both
+ship events and Process completion; withdrawal is not a Process-exit observation.
+No wire or client cutover is claimed. Remaining vertical exit above
+still includes producer support, normalized client persistence, shared derivation,
+both hosts' actions and their barrier deletions.
+
+Check: `cargo nextest run -p loopflow --lib -E 'test(store::sqlite::task_details::tests::) | test(completion_and_reopen_keep_their_exact_state_delivery_across_restart) | test(lifecycle_time_tracks_complete_reopen_complete_in_one_supported_snapshot)'` — 6 passed (`6043a7b9-8b6c-4b13-8bab-52b5722e0ae8`), including indexed 10k input reads. `cargo fmt` and `cargo clippy --all-targets -- -D warnings` passed. Gate owns wider suites/iOS and the recorded LEAK; native latency remains unmeasured.
 
 ### Open product choices
 
 Unanswered, numbered in `scratch/concept-review.html`: (1) queue Abandon offline
 or require a reachable Machine; (2) Cancel before first send or none; (3) phone
 shows Task titles or shows/renames Session names. Built provisional behavior is
-in `questions.md`. They do not block the engineering cuts; (3) decides
-whether phone rename exists. No answer is inferred in a headless run.
+in `questions.md`. (1) determines whether destructive cleanup can be queued without
+connectivity; (2) determines whether an unsent mistake can be withdrawn; (3)
+determines whether phone conversations have editable Session identity. The input
+normalization and client cut remain specified independently, but this headless
+concept-review returns **Blocked** on these open product choices, as required by
+the review step. No answer is inferred and no execution is restarted.
 
 ### Correlated lifecycle and completion time · 2026-11-15
 
@@ -523,12 +541,9 @@ Pages retain content, original Project association, cursors and range behavior;
 unresolved execution remains reachable. Prior review/counterexamples:
 `b70defa4a63a:scratch/instant-task-session.md` (completion time belongs to the fact).
 
-Acceptance: shared `testDatedHistory…` cases cover D1→Reopen→D2, stale
-arrivals/pages, two clients/restart, held local completion, refusal and changed
-ranges. `testLifecycleTime…` distinguishes known-null, unavailable and omitted
-wire keys; `testLifecycleOnlyCache…` retains the exact pending command through
-cache replacement. Existing detail/history tests retain partial/failed pages and
-unresolved execution. Board consumes one projected fact, including its time.
+Dated-history, time-wire and cache-replacement acceptance:
+`1c35543dd8a70dfb1915d9fd02ba1b65bbf818dc:scratch/instant-task-session.md`
+(Correlated lifecycle and completion time). Board and detail consume one fact.
 
 Checks: focused Desktop, iOS, Rust lifecycle/schema/wire and documented-command
 checks passed; formatting and platform-boundary checks passed. Exact commands,

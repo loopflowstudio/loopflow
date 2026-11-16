@@ -51,9 +51,8 @@
   need a covering replacement reading before showing the unoverlaid membership.
   This avoids a second resolution ledger and guessed replacement Task values.
 
-- Other command families retain conservative per-Machine reload requirements
-  while their declaration and projection policies remain incomplete. Full
-  cross-platform interaction cutover is not claimed.
+- Unmigrated command families keep conservative per-Machine reload requirements
+  while their declaration and projection policies remain incomplete.
 
 - Completion now transfers lagging stored-query effects on retirement; query
   open/close leases belong to the presentation owner. Closed bases now use compact
@@ -153,6 +152,6 @@
   cache bodies leaves exact pending commands and reload floors intact. No product
   answer or separate date cache is introduced.
 
-- Task actions: local Claim/unassign/Reopen derive from normalized ownership,
-  publication and execution inputs, not the aggregate lifecycle fact (working
-  design, Task action cut). Engineering choice; no product answer inferred.
+- Task action design: Claim/unassign/Reopen will derive from normalized ownership,
+  publication and execution inputs. Domain execution input reads are built; client
+  cutover remains open. No product answer inferred.

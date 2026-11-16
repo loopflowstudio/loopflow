@@ -553,8 +553,11 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let task = task_on(&tx, id)?.ok_or(StoreError::NotFound)?;
+        let inputs = super::task_details::state_inputs_in(&tx, &ids_json([id.as_str()]))?
+            .remove(id)
+            .ok_or(StoreError::NotFound)?;
         let permission = require_task_not_deleted(&tx, &task).and_then(|()| {
-            if super::durable::task_state_in(&tx, id)? == TaskState::Abandoned {
+            if inputs.state() == TaskState::Abandoned {
                 Err(StoreError::InvalidAuthority(
                     "An abandoned Task cannot be reopened".into(),
                 ))
@@ -575,11 +578,8 @@ impl SqliteStore {
             }
             return Err(error);
         }
-        let (completed, pending): (bool, Option<i64>) = tx.query_row(
-            "SELECT planning_completed,completion_request FROM tasks WHERE id=?1",
-            [id.as_str()],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )?;
+        let completed = inputs.completed;
+        let pending = inputs.completion_request;
         let mut changes = Vec::new();
         if completed || pending.is_some() {
             tx.execute(

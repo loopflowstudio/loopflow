@@ -450,6 +450,35 @@ pub enum TaskState {
     Abandoned,
 }
 
+/// Recorded execution inputs, retained independently of completion and ownership.
+/// These describe Graph work, not conversation activity or native input readiness.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct TaskExecution {
+    pub checkout: bool,
+    pub graph_running: bool,
+    pub carrier_running: bool,
+    pub held: bool,
+    pub approved: bool,
+}
+
+impl TaskExecution {
+    pub fn state(self) -> TaskState {
+        if self.graph_running || self.carrier_running {
+            if self.approved {
+                TaskState::Shipping
+            } else {
+                TaskState::Moving
+            }
+        } else if self.held && !self.approved {
+            TaskState::Active
+        } else if self.checkout {
+            TaskState::Idle
+        } else {
+            TaskState::Unstarted
+        }
+    }
+}
+
 impl TaskState {
     pub(crate) fn label(&self) -> &'static str {
         match self {
@@ -461,20 +490,6 @@ impl TaskState {
             Self::Done => "done",
             Self::Abandoned => "abandoned",
         }
-    }
-
-    pub(crate) fn parse(label: &str) -> Option<Self> {
-        [
-            Self::Unstarted,
-            Self::Idle,
-            Self::Active,
-            Self::Moving,
-            Self::Shipping,
-            Self::Done,
-            Self::Abandoned,
-        ]
-        .into_iter()
-        .find(|state| state.label() == label)
     }
 
     pub fn is_terminal(&self) -> bool {

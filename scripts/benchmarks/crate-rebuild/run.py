@@ -209,6 +209,21 @@ def main() -> None:
                     tree,
                 )
             snapshots[label] = (sha, trees)
+        (output / "frontiers.json").write_text(
+            json.dumps(
+                [
+                    {
+                        "tree": str(tree),
+                        "revision": sha,
+                        "origin_main": run(["git", "rev-parse", "origin/main"], tree).strip(),
+                    }
+                    for sha, trees in snapshots.values()
+                    for tree in trees
+                ],
+                indent=2,
+            )
+            + "\n"
+        )
         env["SCCACHE_BASEDIRS"] = os.pathsep.join(
             str(tree) for _, trees in snapshots.values() for tree in trees
         )

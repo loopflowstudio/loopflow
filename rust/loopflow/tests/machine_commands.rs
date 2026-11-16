@@ -3964,6 +3964,35 @@ fn a_moved_session_clones_its_repository_where_none_is_checked_out() {
     );
 }
 
+/// A child process the fixture stops when it ends.
+struct Child(std::process::Child);
+
+impl Drop for Child {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+/// The laptop's server, ready, and its socket.
+fn served(fixture: &Machines) -> (Child, String) {
+    use std::time::{Duration, Instant};
+    let server = Child(fixture.command(&["server", "run"]).spawn().unwrap());
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        let output = fixture.run(&["server", "status"]);
+        let status: Value = serde_json::from_slice(&output.stdout).unwrap();
+        if status["ready"] == true {
+            return (server, status["socket"].as_str().unwrap().to_owned());
+        }
+        assert!(
+            Instant::now() < deadline,
+            "server did not become ready: {status}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
 #[test]
 fn served_ownership_routes_to_its_writer_and_never_falls_back_locally() {
     use loopflow::lf::commands::write::Write as Mutation;
@@ -3972,34 +4001,9 @@ fn served_ownership_routes_to_its_writer_and_never_falls_back_locally() {
     use std::io::Read;
     use std::time::{Duration, Instant};
 
-    struct Server(std::process::Child);
-    impl Drop for Server {
-        fn drop(&mut self) {
-            let _ = self.0.kill();
-            let _ = self.0.wait();
-        }
-    }
     let fixture = preview_machines();
-    let plan = SharedPlan::new(&fixture);
-    let task = plan.task();
-    loopflow_execution::store::ownership::claim_task(&plan.remote, &task)
-        .unwrap()
-        .unwrap();
-    plan.to_local();
-    let server = Server(fixture.command(&["server", "run"]).spawn().unwrap());
-    let deadline = Instant::now() + Duration::from_secs(20);
-    let socket = loop {
-        let output = fixture.run(&["server", "status"]);
-        let status: Value = serde_json::from_slice(&output.stdout).unwrap();
-        if status["ready"] == true {
-            break status["socket"].as_str().unwrap().to_owned();
-        }
-        assert!(
-            Instant::now() < deadline,
-            "server did not become ready: {status}"
-        );
-        std::thread::sleep(Duration::from_millis(20));
-    };
+    let (plan, task) = task_on_mini(&fixture);
+    let (server, socket) = served(&fixture);
     let send = |claimed| {
         let mut connection = Connection::open_at(Path::new(&socket)).unwrap();
         connection
@@ -4032,7 +4036,7 @@ fn served_ownership_routes_to_its_writer_and_never_falls_back_locally() {
     );
     // A CLI mutation that takes no body must finish with stdin still open,
     // as it is at a terminal. Sharing request I/O must not wait for EOF.
-    let mut cli = Server(
+    let mut cli = Child(
         fixture
             .command(&["task", "claim", task.as_str(), "--json"])
             .stdin(std::process::Stdio::piped())
@@ -4085,6 +4089,201 @@ fn served_ownership_routes_to_its_writer_and_never_falls_back_locally() {
             .is_some()
     );
     drop(server);
+}
+
+/// A Task mini runs and mini's records claim, read back to the laptop.
+fn task_on_mini(fixture: &Machines) -> (SharedPlan, loopflow_execution::durable::TaskId) {
+    let plan = SharedPlan::new(fixture);
+    let task = plan.task();
+    loopflow_execution::store::ownership::claim_task(&plan.remote, &task)
+        .unwrap()
+        .unwrap();
+    plan.to_local();
+    (plan, task)
+}
+
+#[test]
+fn a_hold_for_a_task_mini_runs_travels_as_the_typed_operation() {
+    let fixture = preview_machines();
+    let (plan, task) = task_on_mini(&fixture);
+    let remote = fixture.root.path().join("remote");
+    let record = fixture.root.path().join("ssh-record");
+    fs::create_dir_all(&record).unwrap();
+    executable(
+        &fixture.root.path().join("bin/ssh"),
+        &format!(
+            r#"#!/bin/sh
+for arg in "$@"; do remote_command="$arg"; done
+printf '%s\n' "$remote_command" >> '{record}/commands'
+cd '{remote}' || exit 1
+tee -a '{record}/input' | env -i HOME='{remote}' PATH=/usr/bin:/bin bash -c "$remote_command"
+"#,
+            record = record.display(),
+            remote = remote.display(),
+        ),
+    );
+    let held = fixture.json(&["task", "hold", task.as_str(), "--json"]);
+    assert_eq!(
+        held,
+        serde_json::json!({"issue": task.as_str(), "stopped": false})
+    );
+
+    let commands = fs::read_to_string(record.join("commands")).unwrap();
+    let exec = commands
+        .lines()
+        .find(|line| line.starts_with("exec "))
+        .unwrap();
+    assert_eq!(
+        exec,
+        format!(
+            "exec 'lf' '--repo-id' '{}' 'server' 'stdio'",
+            plan.repository
+        )
+    );
+    assert!(!commands.contains("hold"), "{commands}");
+    let input = fs::read_to_string(record.join("input")).unwrap();
+    let messages: Vec<Value> = input
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(messages.len(), 2, "{input}");
+    assert_eq!(messages[0]["type"], "hello");
+    assert_eq!(messages[1]["type"], "request");
+    assert_eq!(messages[1]["operation"]["kind"], "task.hold");
+    assert_eq!(messages[1]["operation"]["issue"], task.as_str());
+    // Mini records the call as its own Process.
+    let db = rusqlite::Connection::open(remote.join("store/loopflow.db")).unwrap();
+    let recorded: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM processes WHERE command LIKE '%server%stdio%'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(recorded, 1);
+}
+
+#[test]
+fn an_lf_without_the_typed_entry_names_its_version_and_update() {
+    let fixture = preview_machines();
+    let (plan, task) = task_on_mini(&fixture);
+    let mini = loopflow_execution::store::machines::local_machine(&plan.remote)
+        .unwrap()
+        .id;
+    let ran = fixture.root.path().join("ran-locally");
+    executable(
+        &fixture.root.path().join("remote/.local/bin/lf"),
+        &format!(
+            r#"#!/bin/sh
+case "$*" in
+*"server stdio"*) echo "error: unrecognized subcommand 'stdio'" >&2; exit 2;;
+esac
+case "$1" in
+--version) echo 'lf 0.15.2';;
+machine) echo '{mini}';;
+*) touch '{}';;
+esac
+"#,
+            ran.display()
+        ),
+    );
+    let output = fixture.run(&["task", "hold", task.as_str(), "--json"]);
+    assert!(!output.status.success());
+    let error = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        error.contains("mini runs lf 0.15.2, which cannot take this operation; update it with `ssh -- 'mini' 'lf install'`"),
+        "{error}"
+    );
+    assert!(!ran.exists());
+}
+
+#[test]
+fn a_served_resume_opens_the_session_on_your_session_machine_as_a_typed_operation() {
+    use loopflow::lf::commands::write::Write as Mutation;
+    use loopflow::server::wire::Operation;
+    use loopflow_execution::machine::client::Connection;
+
+    let fixture = Machines::new();
+    let machine = fixture.json(&["machine", "add", "mini", "--json"]);
+    let repo = loopflow_test_support::TestRepo::new();
+    let path = repo.path().canonicalize().unwrap();
+    let identity = fixture
+        .command(&["config", "repository"])
+        .current_dir(&path)
+        .output()
+        .unwrap();
+    assert_success(&identity);
+    let repository = String::from_utf8(identity.stdout).unwrap();
+    let set = fixture
+        .command(&["set", "machine.session", "mini"])
+        .current_dir(&path)
+        .output()
+        .unwrap();
+    assert_success(&set);
+
+    // Mini's `lf server stdio`, answering the request it reads.
+    let mut record: Value = serde_json::from_str::<Vec<Value>>(include_str!(
+        "../../../tests/fixtures/dto/sessions.json"
+    ))
+    .unwrap()
+    .remove(0);
+    record["workspace"]["machine_id"] = machine["id"].clone();
+    let welcome: Value = serde_json::from_str(include_str!(
+        "../../loopflow-execution/tests/fixtures/dto/server/welcome.json"
+    ))
+    .unwrap();
+    let mut response: Value = serde_json::from_str(include_str!(
+        "../../loopflow-execution/tests/fixtures/dto/server/response.json"
+    ))
+    .unwrap();
+    response["id"] = "1".into();
+    response["result"] = record.clone();
+    let record_dir = fixture.root.path().join("stdio");
+    fs::create_dir_all(&record_dir).unwrap();
+    executable(
+        &fixture.root.path().join("remote/.local/bin/lf"),
+        &format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{dir}/arguments'\ncat > '{dir}/input'\ncat <<'ANSWER'\n{welcome}\n{response}\nANSWER\n",
+            dir = record_dir.display(),
+        ),
+    );
+
+    let (_server, socket) = served(&fixture);
+    let mut connection = Connection::open_at(Path::new(&socket)).unwrap();
+    connection
+        .set_read_timeout(Some(std::time::Duration::from_secs(20)))
+        .unwrap();
+    let opened = connection
+        .request(Operation::Write(Mutation::SessionResume {
+            directory: path.clone(),
+            id: None,
+            task: None,
+            wave: None,
+            agent: None,
+            intent: loopflow_execution::session::SessionOpenIntent::Resume,
+        }))
+        .unwrap()
+        .result;
+
+    let arguments = fs::read_to_string(record_dir.join("arguments")).unwrap();
+    assert_eq!(
+        arguments.lines().collect::<Vec<_>>(),
+        ["--repo-id", repository.trim(), "server", "stdio"]
+    );
+    let input = fs::read_to_string(record_dir.join("input")).unwrap();
+    let request: Value = serde_json::from_str(input.lines().nth(1).unwrap()).unwrap();
+    assert_eq!(request["operation"]["kind"], "session.resume");
+    assert_eq!(request["operation"]["intent"], "resume");
+    let argv: Vec<&str> = opened["open_argv"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|arg| arg.as_str().unwrap())
+        .collect();
+    assert_eq!(argv[0], env!("CARGO_BIN_EXE_lf"));
+    assert_eq!(&argv[1..4], &["session", "attach", "--"]);
+    assert!(argv.last().unwrap().contains("LF_VIEWER_STREAM='1'"));
+    assert_eq!(opened["workspace"], record["workspace"]);
 }
 
 /// The held terminal of `owner` under `home`, as the owner names its socket.

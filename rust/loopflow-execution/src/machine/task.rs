@@ -1,7 +1,6 @@
-//! Task routing and preparation of ordinary commands sent over SSH.
+//! Task routing and what a command or operation sent over SSH carries.
 use crate::durable::TaskExecutionRoute;
 use crate::ops::task::remote::TaskSource;
-use crate::provider_account::selection::AccountSelection;
 use anyhow::{anyhow, Result};
 use loopflow_model::durable::{Machine, TaskId};
 use loopflow_storage::sqlite::SqliteStore;
@@ -220,110 +219,4 @@ pub fn resolve_task_id(
 
 pub fn read_registry() -> Result<Option<SqliteStore>> {
     Ok(crate::store::read_existing_registry()?.map(|store| store.sqlite))
-}
-
-/// The typed Task operation being forwarded; command parsing stays at the adapter.
-#[derive(Debug, Clone, Copy)]
-pub enum RemoteTaskOperation<'a> {
-    Run {
-        agent: Option<&'a str>,
-        approve: bool,
-    },
-    Ship,
-    Hold,
-    Ownership,
-}
-
-/// The JSON value an ordinary Task command returns on its owner Machine.
-pub fn run_remote(
-    route: TaskExecutionRoute,
-    directory: &Path,
-    args: &[String],
-    operation: RemoteTaskOperation<'_>,
-) -> Result<serde_json::Value> {
-    let runtime = tokio::runtime::Runtime::new()?;
-    let resident = matches!(operation, RemoteTaskOperation::Ownership);
-    let task = matches!(operation, RemoteTaskOperation::Ship).then(|| route.task_id.to_string());
-    let source = if resident {
-        None
-    } else {
-        runtime.block_on(resolve_task_source(task.as_deref(), directory))?
-    };
-    let target = if resident {
-        let store = crate::store::read_existing_registry()?
-            .ok_or_else(|| anyhow!("Machine unavailable: local registry is absent"))?;
-        runtime.block_on(crate::machine::connection::find_machine(
-            &store,
-            route.machine_id.as_str(),
-        ))?
-    } else {
-        runtime.block_on(crate::machine::connection::resolve_target(
-            route.machine_id.as_str(),
-            false,
-        ))?
-    };
-    let selection = if resident {
-        None
-    } else {
-        let (launching, agent, batch) = match operation {
-            RemoteTaskOperation::Run { agent, approve } => (true, agent, approve),
-            _ => (false, None, false),
-        };
-        Some(
-            runtime
-                .block_on(crate::machine::credentials::prepare_launch(
-                    &target,
-                    &AccountSelection::from_env()?,
-                    &AccountSelection::default(),
-                    launching,
-                    agent,
-                    batch,
-                    directory,
-                ))?
-                .env_value()?,
-        )
-    };
-    let environment =
-        forwarding_environment(directory, &target, selection.as_deref(), source.as_ref())?;
-    let mut command = vec![
-        "lf".into(),
-        "--repo-id".into(),
-        route.repository_id.to_string(),
-    ];
-    command.extend(resident_args(
-        args,
-        task.as_ref(),
-        false,
-        0,
-        true,
-        source.as_ref(),
-    ));
-    let environment: Vec<_> = environment
-        .iter()
-        .map(|(name, value)| (name.as_str(), value.as_str()))
-        .collect();
-    let preamble = crate::machine::ssh::build_preamble(&command, &environment);
-    let (mut output, mut error) = (Vec::new(), Vec::new());
-    let ran = crate::machine::ssh::run_ssh_io(
-        &target.route,
-        false,
-        &preamble,
-        false,
-        &mut crate::command::CommandIo {
-            input: &mut std::io::empty(),
-            output: &mut output,
-            error: &mut error,
-        },
-    );
-    let diagnostics = String::from_utf8_lossy(&error);
-    if let Err(failed) = ran {
-        return Err(match diagnostics.trim() {
-            "" => failed,
-            said => failed.context(format!("the destination said: {said}")),
-        });
-    }
-    for line in diagnostics.lines() {
-        crate::journal::request::diagnostic(format_args!("{line}"));
-    }
-    Ok(serde_json::from_slice(&output)?)
 }

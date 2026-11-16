@@ -86,6 +86,143 @@ pub async fn request(
     Ok(output.stdout)
 }
 
+/// One typed operation, answered by `lf --repo-id <repository> server stdio`
+/// on `machine`: `hello`, then one `request`, on its stdin. Returns the
+/// response's result; an error it answered keeps its code. Its stderr lines
+/// become this request's diagnostics. An `lf` too old for the entry fails
+/// naming its version and the update command; nothing runs here instead.
+pub fn call(
+    machine: &loopflow_model::durable::Machine,
+    repository: &loopflow_model::durable::RepositoryId,
+    environment: &[(String, String)],
+    operation: &impl serde::Serialize,
+) -> anyhow::Result<serde_json::Value> {
+    use super::wire::{ClientMessage, Hello, ServerMessage, MIN_REVISION, REVISION};
+    use crate::engine::{Error, ErrorCode};
+    let messages: [ClientMessage; 2] = [
+        ClientMessage::Hello(Hello {
+            revision: REVISION,
+            min_revision: MIN_REVISION,
+            client: super::client::identity("machine", "lf"),
+        }),
+        ClientMessage::Request {
+            id: "1".into(),
+            operation: serde_json::to_value(operation)?,
+            select: None,
+        },
+    ];
+    let mut input = Vec::new();
+    for message in &messages {
+        serde_json::to_writer(&mut input, message)?;
+        input.push(b'\n');
+    }
+    let command = ["lf", "--repo-id", repository.as_str(), "server", "stdio"].map(str::to_owned);
+    let environment: Vec<_> = environment
+        .iter()
+        .map(|(name, value)| (name.as_str(), value.as_str()))
+        .collect();
+    let (mut output, mut error) = (Vec::new(), Vec::new());
+    let ran = run_ssh_io(
+        &machine.route,
+        false,
+        &build_preamble(&command, &environment),
+        true,
+        &mut crate::command::CommandIo {
+            input: &mut input.as_slice(),
+            output: &mut output,
+            error: &mut error,
+        },
+    );
+    let said = String::from_utf8_lossy(&error);
+    let answers: Vec<ServerMessage> = output
+        .split(|byte| *byte == b'\n')
+        .filter(|line| !line.is_empty())
+        .map(serde_json::from_slice)
+        .collect::<Result<_, _>>()
+        .unwrap_or_default();
+    let failed = |failure: anyhow::Error| match said.trim() {
+        "" => failure,
+        said => failure.context(format!("the destination said: {said}")),
+    };
+    match answers.as_slice() {
+        [ServerMessage::Welcome(_), answer, ..] => {
+            for line in said.lines() {
+                crate::journal::request::diagnostic(format_args!("{line}"));
+            }
+            match answer {
+                ServerMessage::Response { result, .. } => Ok(result.clone()),
+                ServerMessage::Error {
+                    code,
+                    message,
+                    data,
+                    ..
+                } => Err(Error {
+                    code: *code,
+                    message: message.clone(),
+                    data: data.clone(),
+                }
+                .into()),
+                other => anyhow::bail!("unexpected answer from {}: {other:?}", machine.route),
+            }
+        }
+        [ServerMessage::Error {
+            code,
+            message,
+            data,
+            ..
+        }, ..] => Err(Error {
+            code: *code,
+            message: message.clone(),
+            data: data.clone(),
+        }
+        .into()),
+        [ServerMessage::Welcome(_)] => Err(failed(
+            Error::outcome_unknown(&anyhow::anyhow!(
+                "{} closed the connection before answering",
+                machine.route
+            ))
+            .into(),
+        )),
+        _ => match ran {
+            // Clap's usage error: this `lf` has no `server stdio`.
+            Err(exit)
+                if exit
+                    .downcast_ref::<crate::process::CommandExit>()
+                    .is_some_and(|exit| exit.0 == 2) =>
+            {
+                Err(Error::new(ErrorCode::Incompatible, outdated(machine)).into())
+            }
+            Err(failure) => Err(failed(failure)),
+            Ok(()) => Err(failed(anyhow::anyhow!(
+                "{} did not answer the operation",
+                machine.route
+            ))),
+        },
+    }
+}
+
+/// `mini runs lf 0.15.2, which cannot take this operation; update it with …`.
+fn outdated(machine: &loopflow_model::durable::Machine) -> String {
+    let name = machine.label.as_deref().unwrap_or(machine.route.as_str());
+    let update = super::connection::update_command(&machine.route);
+    let version = tokio::runtime::Runtime::new()
+        .ok()
+        .and_then(|runtime| {
+            runtime
+                .block_on(super::connection::probe(&machine.route, false))
+                .ok()
+        })
+        .map(|probe| probe.version);
+    match version {
+        Some(version) => format!(
+            "{name} runs lf {version}, which cannot take this operation; update it with `{update}`"
+        ),
+        None => {
+            format!("{name} runs an lf that cannot take this operation; update it with `{update}`")
+        }
+    }
+}
+
 pub fn run_ssh_io(
     dest: &str,
     forward_agent: bool,

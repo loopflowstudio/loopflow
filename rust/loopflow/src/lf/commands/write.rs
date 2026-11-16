@@ -1,10 +1,13 @@
 //! Writes submitted by native clients to the Loopflow server. [`Write::run`]
 //! calls the shared functions the CLI handlers call and returns the value the
-//! CLI prints with `--json`; the carrier owns its trace.
+//! CLI prints with `--json`; the carrier owns its trace. A write for a Task or
+//! Session another Machine runs goes there as this same value
+//! ([`loopflow_execution::machine::ssh::call`]).
 
 use std::path::{Path, PathBuf};
 
-use serde::{Deserialize, Serialize};
+use anyhow::anyhow;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use loopflow_execution::engine::task;
 use loopflow_execution::session::SessionOpenIntent;
@@ -22,7 +25,7 @@ pub(crate) enum TaskMoveResult {
 // constructs that variant before the server serializes it, so returning a
 // different Rust type is a compile error.
 macro_rules! writes {
-    (run($this:ident, $directory:ident, $task_repo:ident); $(
+    (run($this:ident, $directory:ident, $task_repo:ident, $routed:ident); $(
         $(#[$meta:meta])*
         $name:ident { $($(#[$field_meta:meta])* $field:ident: $input:ty),* $(,)? }
         => $output:ty;
@@ -50,8 +53,19 @@ macro_rules! writes {
         }
 
         impl Write {
-            /// Run the shared operation and keep its declared result until serialization.
-            pub(crate) fn run(&$this) -> anyhow::Result<WriteResult> {
+            /// Run the shared operation where its Work lives and keep its
+            /// declared result until serialization.
+            pub(crate) fn run(&self) -> anyhow::Result<WriteResult> {
+                self.execute(true)
+            }
+
+            /// Run the shared operation here: one that arrived from another
+            /// Machine is never sent on.
+            pub(crate) fn run_here(&self) -> anyhow::Result<WriteResult> {
+                self.execute(false)
+            }
+
+            fn execute(&$this, $routed: bool) -> anyhow::Result<WriteResult> {
                 let $directory = $this.directory();
                 let $task_repo = |issue: &str| loopflow_execution::ops::task::task_repository($directory, Some(issue));
                 match $this {
@@ -66,7 +80,7 @@ macro_rules! writes {
 }
 
 writes! {
-    run(self, directory, task_repo);
+    run(self, directory, task_repo, routed);
     /// File or adopt a Task, with a durable request identity; optionally start it.
     #[serde(rename = "task.create")]
     TaskCreate {
@@ -132,20 +146,26 @@ writes! {
     /// `lf task claim <issue> --json`.
     #[serde(rename = "task.claim")]
     TaskClaim { directory: PathBuf, issue: String } => loopflow_model::durable::TaskOwnership;
-    { issue, .. } => task::ownership(
-        directory,
-        issue,
-        loopflow_execution::ops::task_ownership::OwnershipChange::Claim,
-    )?,
+    { issue, .. } => match self.remote(routed)? {
+        Some(remote) => remote.call(directory)?,
+        None => task::ownership(
+            directory,
+            issue,
+            loopflow_execution::ops::task_ownership::OwnershipChange::Claim,
+        )?,
+    },
 
     /// `lf task unassign <issue> --json`.
     #[serde(rename = "task.unassign")]
     TaskUnassign { directory: PathBuf, issue: String } => loopflow_model::durable::TaskOwnership;
-    { issue, .. } => task::ownership(
-        directory,
-        issue,
-        loopflow_execution::ops::task_ownership::OwnershipChange::Unassign,
-    )?,
+    { issue, .. } => match self.remote(routed)? {
+        Some(remote) => remote.call(directory)?,
+        None => task::ownership(
+            directory,
+            issue,
+            loopflow_execution::ops::task_ownership::OwnershipChange::Unassign,
+        )?,
+    },
 
     /// `lf [-b] [-a <agent>] task run <issue> [--from <step>] --json`, started
     /// detached: the Graph process it started, or where the Task now waits.
@@ -166,24 +186,33 @@ writes! {
         agent,
         approve,
         ..
-    } => task::run(
-        directory,
-        issue,
-        from.as_deref(),
-        graph.as_deref(),
-        agent.as_deref(),
-        *approve,
-    )?,
+    } => match self.remote(routed)? {
+        Some(remote) => remote.call(directory)?,
+        None => task::run(
+            directory,
+            issue,
+            from.as_deref(),
+            graph.as_deref(),
+            agent.as_deref(),
+            *approve,
+        )?,
+    },
 
     /// `lf --task <issue> ship --json`, started detached: approves Auto-Ship.
     #[serde(rename = "task.ship")]
     TaskShip { directory: PathBuf, issue: String } => task::TaskShip;
-    { issue, .. } => task::ship(directory, issue)?,
+    { issue, .. } => match self.remote(routed)? {
+        Some(remote) => remote.call(directory)?,
+        None => task::ship(directory, issue)?,
+    },
 
     /// `lf task hold <issue> --json`: withdraws the Task's Auto-Ship approval.
     #[serde(rename = "task.hold")]
     TaskHold { directory: PathBuf, issue: String } => task::Hold;
-    { issue, .. } => task::hold(directory, issue, None)?,
+    { issue, .. } => match self.remote(routed)? {
+        Some(remote) => remote.call(directory)?,
+        None => task::hold(issue, None)?,
+    },
 
     /// `lf steer <issue> <message> --json`: direction for the Task's
     /// runs, whoever writes it.
@@ -332,7 +361,7 @@ writes! {
         agent: Option<String>,
         intent: SessionOpenIntent,
     } => loopflow_execution::ops::human_session::SessionRecord;
-    { .. } => self.prepare_session()?,
+    { .. } => self.prepare_session(routed)?,
 
     /// `lf [--agent <agent>] session new <id> --prepare --json`: the
     /// conversation on a fresh provider thread, not yet started.
@@ -343,7 +372,7 @@ writes! {
         id: String,
         agent: Option<String>,
     } => loopflow_execution::ops::human_session::SessionRecord;
-    { .. } => self.prepare_session()?,
+    { .. } => self.prepare_session(routed)?,
 
     #[serde(rename = "wave.rename")]
     WaveRename {
@@ -1110,44 +1139,156 @@ writes! {
 }
 
 impl Write {
-    fn prepare_session(
-        &self,
-    ) -> anyhow::Result<loopflow_execution::ops::human_session::SessionRecord> {
-        let directory = self.directory();
-        let (cli, args) = self
-            .cli()
-            .expect("a Session preparation has a CLI spelling")?;
-        let Some(forward) = super::work_route::forward(&cli, &args, directory)? else {
-            return super::session::prepared(&cli, directory);
+    /// The Machine a Task write goes to when that Task runs elsewhere, with
+    /// the write naming its exact Task. `None` runs it here.
+    pub(super) fn remote(&self, routed: bool) -> anyhow::Result<Option<Remote>> {
+        use loopflow_execution::machine::task::{remote_ownership_writer, remote_task};
+        if !routed {
+            return Ok(None);
+        }
+        let (route, launch) = match self {
+            Self::TaskRun {
+                issue,
+                agent,
+                approve,
+                ..
+            } => (
+                remote_task(issue)?,
+                Some(Launch {
+                    launching: true,
+                    agent: agent.clone(),
+                    batch: *approve,
+                }),
+            ),
+            Self::TaskShip { issue, .. } => (
+                remote_task(issue)?,
+                Some(Launch {
+                    launching: false,
+                    agent: None,
+                    batch: false,
+                }),
+            ),
+            Self::TaskHold { issue, .. } => (remote_task(issue)?, None),
+            Self::TaskClaim { issue, .. } | Self::TaskUnassign { issue, .. } => {
+                (remote_ownership_writer(issue)?, None)
+            }
+            _ => return Ok(None),
         };
-        let (mut output, mut error) = (Vec::new(), Vec::new());
-        let ran = forward.run(
-            &cli,
-            directory,
-            &mut loopflow_execution::command::CommandIo {
-                input: &mut std::io::empty(),
-                output: &mut output,
-                error: &mut error,
-            },
-        );
-        let diagnostics = String::from_utf8_lossy(&error);
-        if let Err(failed) = ran {
-            return Err(match diagnostics.trim() {
-                "" => failed,
-                said => failed.context(format!("the destination said: {said}")),
-            });
+        let Some(route) = route else {
+            return Ok(None);
+        };
+        // A shipped Task's Linear mapping resolves on the destination, whose
+        // own Task ID may differ.
+        let source = match self {
+            Self::TaskShip { .. } => tokio::runtime::Runtime::new()?.block_on(
+                loopflow_execution::machine::task::resolve_task_source(
+                    Some(route.task_id.as_str()),
+                    self.directory(),
+                ),
+            )?,
+            _ => None,
+        };
+        let mut write = self.clone();
+        if let Self::TaskRun { issue, .. }
+        | Self::TaskShip { issue, .. }
+        | Self::TaskHold { issue, .. }
+        | Self::TaskClaim { issue, .. }
+        | Self::TaskUnassign { issue, .. } = &mut write
+        {
+            *issue = source
+                .as_ref()
+                .and_then(|source| source.issue_id.clone())
+                .unwrap_or_else(|| route.task_id.to_string());
         }
-        for line in diagnostics.lines() {
-            loopflow_execution::journal::request::diagnostic(format_args!("{line}"));
-        }
-        Ok(serde_json::from_slice(&output)?)
+        Ok(Some(Remote {
+            machine: route.machine_id,
+            repository: route.repository_id,
+            write,
+            launch,
+            source,
+        }))
     }
 
-    /// The Session writes whose Work can live on another Machine, and whose
-    /// preparation reads the CLI's selectors, as `lf` spells them. SSH runs
-    /// this spelling on the destination; nothing else parses it. Task writes
-    /// route through [`loopflow_execution::engine::task`].
-    fn cli(&self) -> Option<anyhow::Result<(crate::lf::Cli, Vec<String>)>> {
+    /// `session.resume` / `session.new`: the conversation prepared where it
+    /// lives, no provider started.
+    fn prepare_session(
+        &self,
+        routed: bool,
+    ) -> anyhow::Result<loopflow_execution::ops::human_session::SessionRecord> {
+        let directory = self.directory();
+        let (cli, args) = self.session_spelling()?;
+        let forward = match routed {
+            true => super::work_route::forward(&cli, &args, directory)?,
+            false => None,
+        };
+        let Some(forward) = forward else {
+            return super::session::prepared(&cli, directory);
+        };
+        let Self::SessionResume {
+            id,
+            task,
+            wave,
+            agent,
+            intent,
+            ..
+        } = self
+        else {
+            anyhow::bail!("only `session.resume` follows its conversation to another Machine");
+        };
+        let runtime = tokio::runtime::Runtime::new()?;
+        let machine = runtime.block_on(loopflow_execution::machine::connection::find_machine(
+            &registry()?,
+            forward.machine.as_str(),
+        ))?;
+        if let Some(id) = id {
+            // A Session resumes on the Machine it moved to, carried there first.
+            loopflow_execution::ops::session_move::move_session(id, machine.id.as_str(), false)?;
+        }
+        let repository = match forward.repository.clone().or(forward
+            .route
+            .as_ref()
+            .map(|route| route.repository_id.clone()))
+        {
+            Some(repository) => repository,
+            None => loopflow_execution::machine::task::current_repository(directory)?
+                .ok_or_else(|| {
+                    anyhow!(
+                        "this Session runs on Machine {}; run `lf repo` here so it can address the repository",
+                        machine.id
+                    )
+                })?,
+        };
+        let write = Self::SessionResume {
+            directory: directory.to_path_buf(),
+            id: id.clone(),
+            task: match (&forward.route, id) {
+                (Some(route), None) => Some(route.task_id.to_string()),
+                _ => task.clone(),
+            },
+            wave: wave.clone().or(forward.wave),
+            agent: agent.clone(),
+            intent: *intent,
+        };
+        let environment = loopflow_execution::machine::task::forwarding_environment(
+            directory, &machine, None, None,
+        )?;
+        let record = serde_json::from_value(loopflow_execution::machine::ssh::call(
+            &machine,
+            &repository,
+            &environment,
+            &crate::server::wire::Operation::Write(write),
+        )?)?;
+        super::ssh::prepared_remotely(
+            record,
+            &machine,
+            false,
+            *intent == SessionOpenIntent::Resume,
+        )
+    }
+
+    /// The Session preparation as `lf` spells it. Its local preparation still
+    /// reads Clap's Session arguments; nothing sends this spelling.
+    fn session_spelling(&self) -> anyhow::Result<(crate::lf::Cli, Vec<String>)> {
         let mut args = vec![
             "lf".to_owned(),
             "--cwd".to_owned(),
@@ -1202,15 +1343,12 @@ impl Write {
                 ]);
                 words
             }
-            _ => return None,
+            _ => anyhow::bail!("not a Session preparation"),
         };
         args.extend(words.into_iter().map(str::to_owned));
-        Some(
-            <crate::lf::Cli as clap::Parser>::try_parse_from(&args)
-                .and_then(crate::lf::Cli::checked)
-                .map_err(anyhow::Error::from)
-                .map(|cli| (cli, args)),
-        )
+        let cli = <crate::lf::Cli as clap::Parser>::try_parse_from(&args)
+            .and_then(crate::lf::Cli::checked)?;
+        Ok((cli, args))
     }
 
     /// What the command reads from stdin.
@@ -1292,6 +1430,70 @@ impl Write {
             | Self::ConfigTheme { .. } => Path::new("/"),
         }
     }
+}
+
+/// A Task write for the Machine that runs its Task.
+#[derive(Debug)]
+pub(super) struct Remote {
+    machine: loopflow_model::durable::MachineId,
+    repository: loopflow_model::durable::RepositoryId,
+    write: Write,
+    launch: Option<Launch>,
+    source: Option<loopflow_execution::ops::task::remote::TaskSource>,
+}
+
+/// The provider logins a run or ship prepares on its destination.
+#[derive(Debug)]
+struct Launch {
+    launching: bool,
+    agent: Option<String>,
+    batch: bool,
+}
+
+impl Remote {
+    /// The destination's answer; nothing runs here instead.
+    pub(super) fn call<T: DeserializeOwned>(&self, directory: &Path) -> anyhow::Result<T> {
+        use loopflow_execution::provider_account::selection::AccountSelection;
+        let runtime = tokio::runtime::Runtime::new()?;
+        let machine = runtime.block_on(loopflow_execution::machine::connection::find_machine(
+            &registry()?,
+            self.machine.as_str(),
+        ))?;
+        let selection = match &self.launch {
+            Some(launch) => Some(
+                runtime
+                    .block_on(loopflow_execution::machine::credentials::prepare_launch(
+                        &machine,
+                        &AccountSelection::from_env()?,
+                        &AccountSelection::default(),
+                        launch.launching,
+                        launch.agent.as_deref(),
+                        launch.batch,
+                        directory,
+                    ))?
+                    .env_value()?,
+            ),
+            None => None,
+        };
+        let environment = loopflow_execution::machine::task::forwarding_environment(
+            directory,
+            &machine,
+            selection.as_deref(),
+            self.source.as_ref(),
+        )?;
+        let answer = loopflow_execution::machine::ssh::call(
+            &machine,
+            &self.repository,
+            &environment,
+            &crate::server::wire::Operation::Write(self.write.clone()),
+        )?;
+        Ok(serde_json::from_value(answer)?)
+    }
+}
+
+fn registry() -> anyhow::Result<loopflow_execution::store::Store> {
+    loopflow_execution::store::read_existing_registry()?
+        .ok_or_else(|| anyhow!("Machine unavailable: local registry is absent"))
 }
 
 #[cfg(test)]
@@ -1421,60 +1623,6 @@ mod tests {
                 serde_json::to_value(&write).unwrap(),
                 serde_json::from_str::<serde_json::Value>(json).unwrap()
             );
-        }
-    }
-
-    #[test]
-    fn routed_writes_spell_the_command_ssh_runs() {
-        let spelled = |json: &str| {
-            let (_, args) = serde_json::from_str::<Write>(json)
-                .unwrap()
-                .cli()
-                .expect("a routed write")
-                .unwrap();
-            args
-        };
-        assert_eq!(
-            spelled(
-                r#"{"kind":"session.resume","directory":"/r","id":null,"task":null,"wave":null,"agent":null,"intent":"resume"}"#
-            ),
-            [
-                "lf",
-                "--cwd",
-                "/r",
-                "--repo",
-                "/r",
-                "session",
-                "resume",
-                "--prepare",
-                "--json"
-            ]
-        );
-        assert_eq!(
-            spelled(
-                r#"{"kind":"session.new","directory":"/r","request_id":"new-thread","id":"session_1","agent":"codex"}"#
-            ),
-            [
-                "lf",
-                "--cwd",
-                "/r",
-                "--agent",
-                "codex",
-                "session",
-                "new",
-                "session_1",
-                "--prepare",
-                "--json",
-                "--request-id",
-                "new-thread"
-            ]
-        );
-        for json in [
-            r#"{"kind":"task.complete","directory":"/r","issue":"FIX-1"}"#,
-            r#"{"kind":"task.hold","directory":"/r","issue":"FIX-1"}"#,
-            r#"{"kind":"task.claim","directory":"/r","issue":"FIX-1"}"#,
-        ] {
-            assert!(serde_json::from_str::<Write>(json).unwrap().cli().is_none());
         }
     }
 }

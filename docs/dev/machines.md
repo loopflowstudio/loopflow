@@ -156,9 +156,33 @@ inside one IMMEDIATE transaction:
 
 | Task is | Writer |
 |---|---|
-| Yours, on another of your Machines | That Machine, over `lf --machine` |
+| Yours, on another of your Machines | That Machine, as a typed operation over SSH |
 | Unowned | Your Wave Machine |
 | Someone else's | Your own Wave Machine; your later claim wins |
+
+A write for a Task another Machine runs travels as the operation itself, not
+as a command line. Running, shipping, holding, claiming or unassigning the Task,
+and opening or resuming its Session, reach the writer the same way:
+
+```bash
+lf task hold LOO-123 --json             # LOO-123 runs on mini; mini answers
+lf --machine mini session history list  # mini's history shows the `lf server stdio` Process
+```
+
+The sender runs `lf --repo-id <id> server stdio` on the writer over SSH and
+writes two JSON lines to its stdin: `hello`, then one `request` carrying the
+operation. The writer checks its Machine identity before admitting the
+Process, runs the operation in that repository and answers one `response` or
+`error`. An operation that arrives this way runs where it arrived; it is never
+forwarded again. Its progress lines come back on stderr. The destination
+records the call as an ordinary Process, so its history shows what was asked
+of it.
+
+A writer with an older `lf` fails the call and names its version and the
+update command, for example ``mini runs lf 0.15.2, which cannot take this
+operation; update it with `ssh -- 'mini' 'lf install'` ``. A writer with a newer
+protocol asks you to update this Machine with `lf install`. Nothing falls back
+to running the write locally.
 
 Nothing routes to another person's Machine, and nobody moves or unclaims
 another person's claim; moving a Task to another person is deferred. The Machine in a claim

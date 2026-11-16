@@ -52,6 +52,28 @@ same Mac connects; create it only on a Mac with one account. Setup saves the end
 Machine-local `mobile.yaml`, using the shared atomic file writer. It does not
 add service state to `config.yaml` or the preferences catalogue.
 
+`lf server stdio` speaks the same protocol on stdin and stdout for one
+connection, with no server running. Another Machine runs it over SSH
+(`lf --repo-id <id> server stdio`) to send a Task or Session write that
+Machine owns:
+
+```text
+→ {"type":"hello","revision":5,…}
+← {"type":"welcome",…}
+→ {"type":"request","id":"1","operation":{"kind":"task.hold",…}}
+← {"type":"response","id":"1","result":{…}}
+```
+
+A revision mismatch gets `incompatible`, as on the socket. `subscribe` and
+every native request (`session.start`, attach, `mobile.*`, uploads) get
+`invalid`, naming the resident server: a stdio connection answers requests,
+nothing more. The entry is an ordinary admitted `lf` Process, recorded in the
+destination's history, and checks `LF_EXPECTED_MACHINE_ID` before admission.
+It runs the operation in the repository `--repo-id` names and never forwards
+it to another Machine. Diagnostics go to stderr. An `lf` older than this entry
+exits 2 with a usage error, which the sender reports as the destination's
+version and its update command.
+
 `machine/wire.rs` owns the envelope, endpoint and native request types;
 `server/wire.rs` instantiates the envelope with the CLI read/write operations.
 The Machine client and runtime depend on those values without importing dispatch; `swift/Loopflow/Services/ServerProtocol.swift`
@@ -373,9 +395,9 @@ the phone's `view.select` Task list and its creation destinations all read it.
   A null `wave` selects the repository. Both paths return the same creation
   receipt, described below. A write whose Work
   lives on another Machine (`task.run`, `task.ship`, `task.hold`,
-  `task.claim`, `task.unassign`, `session.resume`) runs its `lf … --json`
-  spelling there over SSH and returns what that prints, which is the
-  destination's value; it never falls back to local execution. Requests create no Process rows; diagnostics the shared
+  `task.claim`, `task.unassign`, `session.resume`) goes there as the same
+  value, over SSH to that Machine's `lf server stdio`, and returns the
+  destination's answer; it never falls back to local execution. Requests create no Process rows; diagnostics the shared
   functions print go to the request's log. A refusal the shared code names
   (an empty name is `invalid`, a stale Dashboard revision `conflict`, a missing
   record `not_found`) answers that code; any other failure is

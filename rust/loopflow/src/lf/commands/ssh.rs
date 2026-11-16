@@ -8,7 +8,9 @@ use loopflow_execution::durable::TaskExecutionRoute;
 use loopflow_execution::machine::connection::resolve_target;
 use loopflow_execution::machine::ssh::{build_preamble, request, EXPECTED_MACHINE_ID_ENV};
 use loopflow_execution::machine::ssh::{run_ssh, ssh_argv};
+use loopflow_execution::ops::human_session::SessionRecord;
 use loopflow_execution::provider_account::selection::AccountSelection;
+use loopflow_model::durable::Machine;
 use std::io::IsTerminal;
 
 /// Whether `lf --machine <target> <args>` runs on this Machine: the target is
@@ -267,26 +269,9 @@ pub(super) fn run_with_io(
             cmd.push("--json".into());
         }
         let bytes = runtime.block_on(request(&target, &cmd[1..], None))?;
-        let mut record: loopflow_execution::ops::human_session::SessionRecord =
-            serde_json::from_slice(&bytes)?;
-        anyhow::ensure!(
-            record
-                .workspace
-                .as_ref()
-                .is_some_and(|workspace| workspace.machine_id == target.id),
-            "Session reply does not belong to the addressed Machine"
-        );
-        if !record.open_argv.is_empty() {
-            let script = build_preamble(
-                &record.open_argv,
-                &[
-                    (EXPECTED_MACHINE_ID_ENV, target.id.as_str()),
-                    (loopflow_execution::transport::STREAM_ENV, "1"),
-                ],
-            );
-            record.open_argv = ssh_argv(&target.route, forward_agent, &script)?;
-        }
+        let record = serde_json::from_slice(&bytes)?;
         if !connection.prepare {
+            let record = viewed_remotely(record, &target, forward_agent)?;
             anyhow::ensure!(
                 !record.open_argv.is_empty(),
                 "Session has no viewer launch command"
@@ -308,22 +293,7 @@ pub(super) fn run_with_io(
             output(&mut io, &String::from_utf8(bytes)?)?;
             return Ok(());
         }
-        if !record.open_argv.is_empty() {
-            record.open_argv.splice(
-                0..0,
-                [
-                    std::env::current_exe()?.to_string_lossy().into_owned(),
-                    "session".into(),
-                    "attach".into(),
-                    "--".into(),
-                ],
-            );
-        }
-        if !replace && !record.open_argv.is_empty() {
-            record
-                .open_argv
-                .splice(0..0, ["/usr/bin/env".into(), "LF_RELAY_IF_FREE=1".into()]);
-        }
+        let record = prepared_remotely(record, &target, forward_agent, replace)?;
         if connection.json || cli.json {
             output(&mut io, &format!("{}\n", serde_json::to_string(&record)?))?;
         } else {
@@ -379,6 +349,61 @@ pub(super) fn run_with_io(
         ),
         None => run_ssh(&target.route, forward_agent, &preamble),
     }
+}
+
+/// A Session `target` prepared, its viewer command reaching it over SSH.
+fn viewed_remotely(
+    mut record: SessionRecord,
+    target: &Machine,
+    forward_agent: bool,
+) -> anyhow::Result<SessionRecord> {
+    anyhow::ensure!(
+        record
+            .workspace
+            .as_ref()
+            .is_some_and(|workspace| workspace.machine_id == target.id),
+        "Session reply does not belong to the addressed Machine"
+    );
+    if !record.open_argv.is_empty() {
+        let script = build_preamble(
+            &record.open_argv,
+            &[
+                (EXPECTED_MACHINE_ID_ENV, target.id.as_str()),
+                (loopflow_execution::transport::STREAM_ENV, "1"),
+            ],
+        );
+        record.open_argv = ssh_argv(&target.route, forward_agent, &script)?;
+    }
+    Ok(record)
+}
+
+/// A Session `target` prepared, opened from here through `lf session attach`.
+/// `replace` is false for a new or forked thread, which opens only when no
+/// viewer holds the terminal.
+pub(super) fn prepared_remotely(
+    record: SessionRecord,
+    target: &Machine,
+    forward_agent: bool,
+    replace: bool,
+) -> anyhow::Result<SessionRecord> {
+    let mut record = viewed_remotely(record, target, forward_agent)?;
+    if !record.open_argv.is_empty() {
+        record.open_argv.splice(
+            0..0,
+            [
+                std::env::current_exe()?.to_string_lossy().into_owned(),
+                "session".into(),
+                "attach".into(),
+                "--".into(),
+            ],
+        );
+    }
+    if !replace && !record.open_argv.is_empty() {
+        record
+            .open_argv
+            .splice(0..0, ["/usr/bin/env".into(), "LF_RELAY_IF_FREE=1".into()]);
+    }
+    Ok(record)
 }
 
 fn output(

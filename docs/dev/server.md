@@ -54,6 +54,7 @@ server task.run, task.ship ─ engine::launch ─ detached `lf task run`, `lf sh
 server session.start / attach ─ held terminal ─ holder ─ PTY ─ agent
 
 Desktop terminal preparation/launch ─ ordinary CLI ─ held terminals
+write for another Machine's Task ─ SSH ─ destination's `lf server stdio` ─ Write::run_here
 lf --machine host … ─ SSH ─ destination's ordinary lf command
 lf install ─ selected artifacts + OS registration of server
 lf desktop ─ app-owned automation socket ─ windows / panes
@@ -154,7 +155,9 @@ product choices. Removal must preserve Work and credentials.
 
 ## Commands and installed-state migration
 
-`lf server run` is the supervisor's foreground entry. `lf server describe --json`
+`lf server run` is the supervisor's foreground entry. `lf server stdio` answers one
+connection on stdin and stdout; another Machine runs it over SSH to send a
+typed operation (see [Machines](machines.md)). `lf server describe --json`
 prints the protocol's JSON Schema, generated from the wire types, with no server
 running. `lf server status` reports
 readiness without registering a helper. The hidden `install server` operation

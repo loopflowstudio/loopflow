@@ -1,4 +1,5 @@
-//! Client access has no execution or installation authority.
+//! `lf server`: the resident server, its readiness and protocol, and the
+//! stdio entry that runs another Machine's operation here.
 use crate::lf::ServerCommand;
 
 pub fn run(command: &ServerCommand) -> anyhow::Result<()> {
@@ -13,6 +14,11 @@ pub fn run(command: &ServerCommand) -> anyhow::Result<()> {
             Ok(())
         }
         ServerCommand::Run => crate::server::run(),
+        ServerCommand::Stdio => crate::server::stdio::run(
+            &std::env::current_dir()?,
+            std::io::stdin().lock(),
+            std::io::stdout().lock(),
+        ),
         ServerCommand::Status => {
             println!(
                 "{}",

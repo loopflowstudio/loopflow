@@ -6,6 +6,7 @@ mod remote;
 pub mod schema;
 mod service;
 mod statistics;
+pub mod stdio;
 mod subscriptions;
 mod ticket;
 mod wake;

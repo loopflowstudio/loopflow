@@ -365,7 +365,7 @@ impl Connection {
     }
 }
 
-fn identity(kind: &str, name: &str) -> ClientIdentity {
+pub(crate) fn identity(kind: &str, name: &str) -> ClientIdentity {
     ClientIdentity {
         kind: kind.into(),
         platform: std::env::consts::OS.into(),

@@ -119,7 +119,15 @@ fn local(
                 .as_deref()
                 .or(cli.task.as_deref())
                 .context("No Task selected")?;
-            let held = loopflow_execution::engine::task::hold(directory, issue, reason.as_deref())?;
+            // A Task another Machine runs is held there.
+            let write = super::write::Write::TaskHold {
+                directory: directory.to_path_buf(),
+                issue: issue.to_owned(),
+            };
+            let held: loopflow_execution::engine::task::Hold = match write.remote(true)? {
+                Some(remote) => remote.call(directory)?,
+                None => loopflow_execution::engine::task::hold(issue, reason.as_deref())?,
+            };
             if *json {
                 writeln!(io.output, "{}", serde_json::to_string(&held)?)?;
             } else {

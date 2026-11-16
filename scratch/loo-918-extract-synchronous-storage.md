@@ -92,3 +92,7 @@ producer does not rerun on library edits, so metadata cannot mask this regressio
 
 Parent queue CI exposed a preview-cancellation readiness race; its verified
 fixture repair must join through sync before this slice is published.
+
+Parent sync `708ce759f4` retains the storage metadata fixture in its add/add
+conflict. Four documented-command checks and the fragmented preview cancellation
+check pass on the synced tree. Gate/CI own the complete suites and package matrix.

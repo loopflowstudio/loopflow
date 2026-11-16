@@ -151,7 +151,3 @@
   withholds dated membership/counts; All ages stays lifecycle-only. Replacing old
   cache bodies leaves exact pending commands and reload floors intact. No product
   answer or separate date cache is introduced.
-
-- Task action design: Claim/unassign/Reopen will derive from normalized ownership,
-  publication and execution inputs. Domain execution input reads are built; client
-  cutover remains open. No product answer inferred.

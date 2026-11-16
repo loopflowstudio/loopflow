@@ -402,8 +402,8 @@ acquire a No Wave label.
 
 ### Task action cut · 2026-11-15
 
-Status: domain results/recovery built (`ede0429321`); execution-input reads are
-in the working tree; the vertical client cut is next. Desktop Claim/unassign/Reopen still go through `WorkModel.performTaskAction`.
+Status: domain results/recovery (`ede0429321`) and execution-input reads
+(`0a9a313d54`) built; the vertical client cut is next. Desktop Claim/unassign/Reopen still go through `WorkModel.performTaskAction`.
 
 The current `MembershipFacts.lifecycle` is a derived result, not sufficient input
 for these transitions:
@@ -430,10 +430,10 @@ owner, including known unowned), publication and the structural execution inputs
 that terminal disposition currently masks. Execution inputs must account for
 checkout, Graph position/running work and Auto-Ship approval independently, since
 Reopen withdraws approval without moving the Graph. Running Graph work and the
-Auto-Ship carrier are separate inputs: withdrawal releases the carrier even while
-its Process is unfinished, but retained Graph work can still be Moving. A combined
-running bit cannot predict that transition. Conditional Reopen clears carrier
-and approval together; the already-open no-op retains both. External conversation activity
+Auto-Ship carrier stay separate inputs through wire and client persistence:
+withdrawal releases the carrier even while its Process is unfinished, and retained
+Graph work can still be Moving; their OR cannot predict that. Conditional Reopen
+clears carrier and approval together; the already-open no-op retains both. External conversation activity
 and native input readiness remain independently supported; reopening cannot
 certify either. Missing inputs make affected answers incomplete rather than
 inventing an exact destination. No second Task store or hypothetical future DTO.
@@ -457,13 +457,11 @@ their old refresh barriers in that same cut. Keep exact pending requests, IDs,
 receipts and reload floors when replacing cached aggregate facts. Reuse the Task's
 single unreleased migration if domain persistence needs adjustment.
 
-Acceptance adds completed owned/unowned Tasks with and without checkout and at
-held/running Graph positions; published unstarted owned/unowned Tasks; Claim →
-unassign → Claim and Complete → Reopen → Complete. Both hosts must publish before
-held disk/network, retain later selection/drafts/Session, survive offline restart,
-recover the original ID after commit-before-reply, handle no-op success and definite
-refusal, and converge under reordered/two-client readings without stale owner
-controls.
+Acceptance: completed owned/unowned Tasks with/without checkout at held/running
+positions; unstarted owned/unowned; Claim → unassign → Claim; Complete → Reopen →
+Complete. Both hosts publish before held disk/network, keep later selection/drafts/
+Session, survive offline restart, recover the original ID, handle no-op and
+refusal, and converge under reordered two-client readings.
 
 Proposed usage for both app READMEs after the vertical exit:
 > **Claim** requests ownership on this Machine; **Unassign** releases ownership
@@ -482,33 +480,25 @@ an actual ownership result and fence; transport return or planning refresh never
 retires the projected owner. Unassign refusal after a newer local Claim removes
 only the refused layer, never restoring an old owner snapshot.
 
-Review refinement: Reopen is a conditional operation, not an unconditional
-approval-clear patch. Evaluate it over the ordered projected inputs, including
-an earlier local Complete. Known completed/pending completion clears approval;
-known open with no pending completion preserves it. If that predicate is unknown,
-publish the request immediately but leave its approval/destination answer
-incomplete. Re-evaluate as supported inputs arrive, without navigation or input
-readiness changes. A stale Done cache against an already-open approved Machine
-must reconcile to the domain's no-op, never overwrite its approval.
+Reopen is conditional, evaluated over ordered projected inputs including an
+earlier local Complete. An unknown predicate publishes the request but leaves
+approval/destination incomplete until supported inputs arrive, with no navigation
+or input-readiness change. A stale Done cache against an already-open approved
+Machine reconciles to the domain's no-op, never overwriting its approval.
 
 The existing `task.reopened` result is a Task DTO and planning/graphs fence,
 not a complete supported execution reading. Incorporate only values and domains
 the result actually establishes; recover unknown inputs through stamped readings.
 Likewise ownership receipts retain historical labels but cannot certify current
-Machine labels. Add unknown-predicate → no-op and Complete → Reopen before send
-to the vertical acceptance cases. Builtin skills and shipped app usage are
-unchanged until this exit.
+Machine labels. Acceptance also covers unknown-predicate → no-op and Complete →
+Reopen before send.
 
-Domain input normalization now reads checkout, running Graph work, held position
-and Auto-Ship approval independently of terminal disposition. Bulk Task reads,
-single-Task state, selection completion dates and Reopen use that snapshot owner.
-The old state-label decoder is removed; SQL-only consumers use the same structural
-predicates. The client replacement must retain carrier-running separately from Graph-running,
-not export their OR as the only running input. Carrier support depends on both
-ship events and Process completion; withdrawal is not a Process-exit observation.
-No wire or client cutover is claimed. Remaining vertical exit above
-still includes producer support, normalized client persistence, shared derivation,
-both hosts' actions and their barrier deletions.
+Built domain reads (`store/sqlite/task_details.rs`): checkout, Graph running,
+carrier running, held position and Auto-Ship approval, independent of terminal
+disposition; bulk/single-Task reads, selection completion dates and Reopen share
+that snapshot. Carrier support depends on ship events and Process completion;
+withdrawal is not a Process-exit observation. Unbuilt: wire support, normalized
+client persistence, shared derivation, both hosts' actions and barrier deletions.
 
 Check: `cargo nextest run -p loopflow --lib -E 'test(store::sqlite::task_details::tests::) | test(completion_and_reopen_keep_their_exact_state_delivery_across_restart) | test(lifecycle_time_tracks_complete_reopen_complete_in_one_supported_snapshot)'` — 6 passed (`6043a7b9-8b6c-4b13-8bab-52b5722e0ae8`), including indexed 10k input reads. `cargo fmt` and `cargo clippy --all-targets -- -D warnings` passed. Gate owns wider suites/iOS and the recorded LEAK; native latency remains unmeasured.
 
@@ -519,10 +509,9 @@ or require a reachable Machine; (2) Cancel before first send or none; (3) phone
 shows Task titles or shows/renames Session names. Built provisional behavior is
 in `questions.md`. (1) determines whether destructive cleanup can be queued without
 connectivity; (2) determines whether an unsent mistake can be withdrawn; (3)
-determines whether phone conversations have editable Session identity. The input
-normalization and client cut remain specified independently, but this headless
-concept-review returns **Blocked** on these open product choices, as required by
-the review step. No answer is inferred and no execution is restarted.
+determines whether phone conversations have editable Session identity. The
+2026-11-15 concept-review returned Blocked on them; the client cut above does not
+depend on their answers. No answer is inferred.
 
 ### Correlated lifecycle and completion time · 2026-11-15
 

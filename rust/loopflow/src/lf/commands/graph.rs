@@ -1005,10 +1005,11 @@ fn answer_value(text: &str) -> Result<serde_json::Value, String> {
 }
 
 impl RunningGraph<'_> {
-    /// Every skill step's edits become one commit, pushed where the branch
-    /// allows. A Graph contributing to a Task that another run carries leaves
-    /// the checkout's edits to that run. Best-effort: the next step runs
-    /// either way.
+    /// Every skill step's edits become one commit, written and pushed by a
+    /// child `lf commit --step`, so its message-writing agent is a Process of
+    /// this Graph like any other step. A Graph contributing to a Task that
+    /// another run carries leaves the checkout's edits to that run.
+    /// Best-effort: the next step runs either way.
     async fn commit_step(&self, step: &str) {
         let contribution = self.task.is_some() && self.task_run.is_none();
         if contribution
@@ -1016,22 +1017,13 @@ impl RunningGraph<'_> {
                 loopflow_execution::git::intervention_state(self.cwd),
                 Ok(None)
             )
+            || loopflow_execution::git::is_clean(self.cwd).unwrap_or(true)
         {
             return;
         }
-        let (repo, name) = (self.cwd.to_path_buf(), step.to_owned());
-        let committed = loopflow_execution::journal::request::spawn_blocking(move || {
-            loopflow_execution::ops::commit_step(
-                &repo,
-                &name,
-                &loopflow_execution::ops::NullProgress,
-            )
-        })
-        .await;
-        match committed {
-            Ok(Ok(_)) => {}
-            Ok(Err(error)) => tracing::warn!(%step, %error, "could not commit the step's edits"),
-            Err(error) => tracing::warn!(%step, %error, "could not commit the step's edits"),
+        let args = ["commit", "--step", step].map(str::to_owned);
+        if let Err(error) = self.spawn("commit", StepKind::Operation, &args).await {
+            tracing::warn!(%step, %error, "could not commit the step's edits");
         }
     }
 }

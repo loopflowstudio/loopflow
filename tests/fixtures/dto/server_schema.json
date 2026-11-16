@@ -1056,6 +1056,25 @@
       ],
       "type": "string"
     },
+    "BuiltinRelation": {
+      "oneOf": [
+        {
+          "const": "extends",
+          "description": "`extends: builtin`: the builtin's text with the file's appended.",
+          "type": "string"
+        },
+        {
+          "const": "replaces",
+          "description": "A whole skill in the builtin's place, drifting as the builtin changes.",
+          "type": "string"
+        },
+        {
+          "const": "copies",
+          "description": "A whole copy, identical to the builtin today.",
+          "type": "string"
+        }
+      ]
+    },
     "Category": {
       "description": "Display order and feature ownership, independent of settings precedence.",
       "enum": [
@@ -2833,6 +2852,17 @@
     "Entry": {
       "additionalProperties": false,
       "properties": {
+        "builtin": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BuiltinRelation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How a skill file relates to the builtin of the same name; none when\nthere is no such builtin or the entry is the builtin."
+        },
         "description": {
           "type": "string"
         },
@@ -2854,7 +2884,8 @@
         "kind",
         "source",
         "description",
-        "invocation"
+        "invocation",
+        "builtin"
       ],
       "type": "object"
     },
@@ -8974,6 +9005,7 @@
           },
           "x-result-example": [
             {
+              "builtin": null,
               "description": "Find why the code misbehaves, fix the cause, and verify the original workflow.",
               "invocation": "lf debug [message]",
               "kind": "skill",
@@ -8981,6 +9013,15 @@
               "source": "builtin"
             },
             {
+              "builtin": "extends",
+              "description": "Use the change the way the people it is for will use it, and fix what breaks.",
+              "invocation": "lf qa [message]",
+              "kind": "skill",
+              "name": "qa",
+              "source": ".lf/skills/qa.md"
+            },
+            {
+              "builtin": null,
               "description": "design, implement, gate, land",
               "invocation": "lf code [message]",
               "kind": "graph",

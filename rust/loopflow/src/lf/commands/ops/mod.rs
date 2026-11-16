@@ -383,6 +383,13 @@ pub fn run_commit(
     Ok(())
 }
 
+/// `lf commit --step <skill>`: everything a finished skill step left, as one commit.
+pub fn run_step_commit(step: &str, agent_override: Option<&str>) -> Result<()> {
+    let repo_root = find_repo_root()?;
+    loopflow_execution::ops::commit_step(&repo_root, step, agent_override, &CliProgress)?;
+    Ok(())
+}
+
 pub fn connect_wave(
     repo_root: &std::path::Path,
     wave: Option<&str>,

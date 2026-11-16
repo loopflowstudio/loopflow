@@ -106,6 +106,28 @@ impl SkillSource {
         })
     }
 
+    /// How this file stands to the builtin of the same name, if there is one.
+    pub fn builtin_relation(&self) -> Option<crate::skills::listing::BuiltinRelation> {
+        use crate::skills::listing::BuiltinRelation;
+        let path = self.path.as_ref()?;
+        let builtin =
+            builtins::resolve_builtin_skill(&self.name).and_then(builtins::get_builtin_skill)?;
+        let content = crate::observe::read_to_string(path).ok()?;
+        let extends = self.dialect == SkillDialect::Loopflow
+            && split_frontmatter(&content)
+                .and_then(|(frontmatter, _)| serde_yaml_ng::from_str::<Value>(frontmatter).ok())
+                .is_some_and(|value| {
+                    value.get("extends").and_then(Value::as_str) == Some("builtin")
+                });
+        Some(if extends {
+            BuiltinRelation::Extends
+        } else if content.trim() == builtin.trim() {
+            BuiltinRelation::Copies
+        } else {
+            BuiltinRelation::Replaces
+        })
+    }
+
     /// The skill's text. A Loopflow file whose frontmatter says
     /// `extends: builtin` is the builtin of the same name with the file's body
     /// appended, so a repository adds its own section and keeps following the
@@ -393,6 +415,31 @@ mod tests {
         );
         let error = catalog.load_skill("mine").unwrap_err().to_string();
         assert!(error.contains("no builtin skill is named"), "{error}");
+    }
+
+    #[test]
+    fn a_listing_tells_extensions_from_replacements_and_copies() {
+        use crate::skills::listing::BuiltinRelation;
+        let repo = TempDir::new().unwrap();
+        write(
+            repo.path(),
+            ".lf/skills/gate.md",
+            "---\nextends: builtin\n---\n## Here\n",
+        );
+        write(repo.path(), ".lf/skills/qa.md", "Our own QA.\n");
+        write(
+            repo.path(),
+            ".lf/skills/debug.md",
+            loopflow_definitions::builtins::get_builtin_skill("debug").unwrap(),
+        );
+        write(repo.path(), ".lf/skills/mine.md", "Ours alone.\n");
+        let catalog = SkillCatalog::load(Some(repo.path()), None, false).unwrap();
+        let relation = |name: &str| catalog.resolve(name).unwrap().unwrap().builtin_relation();
+        assert_eq!(relation("gate"), Some(BuiltinRelation::Extends));
+        assert_eq!(relation("qa"), Some(BuiltinRelation::Replaces));
+        assert_eq!(relation("debug"), Some(BuiltinRelation::Copies));
+        assert_eq!(relation("mine"), None);
+        assert_eq!(relation("polish"), None);
     }
 
     #[test]

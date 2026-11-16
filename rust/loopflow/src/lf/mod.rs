@@ -581,6 +581,9 @@ pub enum Commands {
         /// Print what the commit left
         #[arg(long)]
         json: bool,
+        /// Commit everything a finished skill step left, titled `lf <SKILL>: …`, and push
+        #[arg(long, value_name = "SKILL", conflicts_with_all = ["message", "no_add", "push", "paths", "json"])]
+        step: Option<String>,
     },
     /// Merge upstream into the current branch (default: main or stack parent)
     Sync(SyncArgs),

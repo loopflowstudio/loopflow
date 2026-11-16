@@ -30,14 +30,7 @@ pub fn launch_session(
         context_file,
     )?;
     let environment = session_environment(config, context_file)?;
-    run_session_command_with_env(
-        &command,
-        &environment,
-        agent_session,
-        config.provider_account_id.as_ref(),
-        None,
-        capture,
-    )
+    run_session_command_with_env(&command, &environment, agent_session, None, capture)
 }
 
 pub(crate) fn resume_session(
@@ -111,7 +104,6 @@ pub fn resume_session_with_env(
         &command,
         &environment,
         provider_session.map(|provider| &provider.agent_session),
-        config.provider_account_id.as_ref(),
         launch_lock,
         None,
     )
@@ -152,39 +144,27 @@ fn spawn_session_command_with_env(
     command: &SessionCommand,
     environment: &BTreeMap<String, String>,
     agent_session: Option<&AgentSessionId>,
-    exact_account_id: Option<&crate::store::ProviderAccountId>,
     launch_lock: Option<File>,
     capture: Option<&LfProcessRuntime>,
 ) -> Result<()> {
-    run_session_command_with_env(
-        command,
-        environment,
-        agent_session,
-        exact_account_id,
-        launch_lock,
-        capture,
-    )?
-    .result(&command.program, agent_session.is_some(), command.holder)
+    run_session_command_with_env(command, environment, agent_session, launch_lock, capture)?.result(
+        &command.program,
+        agent_session.is_some(),
+        command.holder,
+    )
 }
 
 fn run_session_command_with_env(
     command: &SessionCommand,
     environment: &BTreeMap<String, String>,
     agent_session: Option<&AgentSessionId>,
-    exact_account_id: Option<&crate::store::ProviderAccountId>,
     launch_lock: Option<File>,
     capture: Option<&LfProcessRuntime>,
 ) -> Result<SessionCommandOutcome> {
     let _planning_sync =
         crate::ops::planning_sync::PlanningSync::start_for_directory(&command.cwd)?;
-    let outcome = session_command_status_with_env(
-        command,
-        environment,
-        agent_session,
-        exact_account_id,
-        launch_lock,
-        capture,
-    )?;
+    let outcome =
+        session_command_status_with_env(command, environment, agent_session, launch_lock, capture)?;
     if let Some(moved) = &outcome.moved {
         eprintln!("{moved}");
     }
@@ -203,21 +183,6 @@ pub(crate) fn departure_notice(
         }
         Departure::Terminal { to: None } => {
             "This conversation moved to another terminal on this Machine.".into()
-        }
-        Departure::Account { account } => {
-            let label = store
-                .session(session)?
-                .and_then(|session| session.provider)
-                .map(|provider| {
-                    crate::provider_account::catalog::get_provider_account(
-                        store, &provider, &account,
-                    )
-                })
-                .transpose()?
-                .flatten()
-                .and_then(|account| account.login_email.map(|email| email.to_string()))
-                .unwrap_or_else(|| account.to_string());
-            format!("This conversation moved to account {label}: lf resume {session}")
         }
         Departure::Machine { machine, task } => {
             let label = crate::store::machines::machine_by_id(store, &machine)?
@@ -321,17 +286,6 @@ fn record_interactive_opened(environment: &BTreeMap<String, String>) -> Result<(
     Ok(())
 }
 
-/// The model a native launch names (`--model opus`), when it does.
-fn native_model_argument(args: &[String]) -> Option<String> {
-    args.iter()
-        .position(|arg| arg == "--model" || arg == "-m")
-        .and_then(|index| args.get(index + 1).cloned())
-        .or_else(|| {
-            args.iter()
-                .find_map(|arg| arg.strip_prefix("--model=").map(str::to_owned))
-        })
-}
-
 fn native_provider_attachment(
     command: &SessionCommand,
     environment: &BTreeMap<String, String>,
@@ -380,7 +334,6 @@ fn session_command_status_with_env(
     command: &SessionCommand,
     environment: &BTreeMap<String, String>,
     agent_session: Option<&AgentSessionId>,
-    exact_account_id: Option<&crate::store::ProviderAccountId>,
     launch_lock: Option<File>,
     caller_capture: Option<&LfProcessRuntime>,
 ) -> Result<SessionCommandOutcome> {
@@ -452,7 +405,6 @@ fn session_command_status_with_env(
             &command,
             &environment,
             agent_session,
-            exact_account_id,
             launch_lock,
             caller_capture.or(capture.as_ref()),
             &mut progress,
@@ -506,7 +458,6 @@ fn run_native_session(
     command: &SessionCommand,
     environment: &BTreeMap<String, String>,
     agent_session: Option<&AgentSessionId>,
-    exact_account_id: Option<&crate::store::ProviderAccountId>,
     launch_lock: Option<File>,
     capture: Option<&LfProcessRuntime>,
     progress: &mut crate::startup::Startup,
@@ -535,7 +486,6 @@ fn run_native_session(
             command,
             environment,
             agent_session,
-            exact_account_id,
             launch_lock,
             capture,
             progress,
@@ -557,23 +507,9 @@ fn run_native_session(
         "codex" => Some(Provider::Codex),
         _ => None,
     };
-    let account_route = provider
-        .map(|provider| {
-            crate::provider_account::resolve_provider_account_exact_blocking(
-                provider,
-                agent_session.cloned(),
-                exact_account_id.cloned(),
-                crate::work::wave::context::ambient_wave_id(),
-                native_model_argument(&command.args),
-                Some(command.cwd.clone()),
-            )
-        })
-        .transpose()
-        .map_err(|error| anyhow!("failed to select provider account: {error}"))?
-        .flatten();
-    let account = account_route
-        .as_ref()
-        .map(|route| route.account_id().clone());
+    if let (Some(provider), Some(thread)) = (provider, agent_session) {
+        crate::transcript::adopt_native(provider, thread)?;
+    }
 
     progress.stage(format!("Opening {} terminal", command.program));
     progress.finish();
@@ -583,23 +519,8 @@ fn run_native_session(
         .envs(environment);
     let mut title =
         crate::terminal_title::TerminalTitle::prepare(environment, &command.program, &mut process);
-    if let Some(route) = &account_route {
-        process.args(route.provider_args());
-    }
     process.current_dir(&command.cwd);
     crate::provider_auth::apply_provider_env_to_command(&command.program, &mut process);
-    let mut activation = None;
-    if let Some(route) = &account_route {
-        tracing::info!(provider = %command.program, "selected managed provider account");
-        activation = route
-            .launch_as_blocking(&mut process)
-            .map_err(|error| anyhow!("failed to activate provider account: {error}"))?;
-        process.env(
-            crate::session_record::PROVIDER_ACCOUNT_ID_ENV,
-            route.account_id().as_str(),
-        );
-        route.pin_session_blocking(agent_session.cloned())?;
-    }
     if command.program == "claude" {
         crate::harness::claude_trust::accept_created_worktree(&process);
         if crate::harness::claude_trust::awaits_dialog(&process) {
@@ -636,7 +557,7 @@ fn run_native_session(
         }
     }
     if let (Some(capture_dir), Some(agent_session)) = (capture_dir.as_deref(), agent_session) {
-        crate::session_record::write_provider_session(capture_dir, agent_session, account.clone())?;
+        crate::session_record::write_provider_session(capture_dir, agent_session, None)?;
     }
     tracing::debug!(
         elapsed_ms = started.elapsed().as_millis(),
@@ -649,7 +570,7 @@ fn run_native_session(
         // Hand the wait to the execution owner and become the provider, or its
         // client: no launcher sits beside the agent holding the heap that built it.
         if let Some(capture) = capture {
-            capture.observe_provider(agent_session.cloned(), account.clone());
+            capture.observe_provider(agent_session.cloned());
         }
         let exit = crate::harness::native_exit::NativeExit {
             session: attachment.1.clone(),
@@ -658,16 +579,11 @@ fn run_native_session(
             client: owned.is_none(),
             cwd: command.cwd.clone(),
             capture: capture.map(LfProcessRuntime::hand_off),
-            capture_key: environment
-                .get(crate::session_record::CAPTURE_KEY_ENV)
-                .cloned(),
-            account: account.clone(),
             diagnostics: output.diagnostics(),
         };
         match crate::transport::hand_exit_record(&exit) {
             Ok(true) => {
                 let _native = native_return(&attachment);
-                drop(activation);
                 let error = match owned {
                     Some(owner) => crate::harness::agent_process::exec_native(
                         process,
@@ -719,7 +635,6 @@ fn run_native_session(
         }
     })?;
 
-    drop(activation);
     if owned.is_none() {
         crate::transport::report_directory(&command.cwd);
     }
@@ -775,17 +690,8 @@ fn run_native_session(
         false
     });
     if let (Some(path), Some(capture_dir)) = (&reported_thread, capture_dir.as_deref()) {
-        if let Err(error) = record_reported_thread(path, capture_dir, account.clone()) {
+        if let Err(error) = record_reported_thread(path, capture_dir) {
             tracing::warn!(%error, "Codex reported no conversation; it cannot be resumed");
-        }
-    }
-    // Record which home this conversation lives in, so reopening returns there.
-    if let (Some(route), Some(capture_dir), false) = (&account_route, capture_dir.as_deref(), lost)
-    {
-        if let Ok(Some(session)) = crate::session_record::read_provider_session(capture_dir) {
-            if let Err(error) = route.pin_session_blocking(Some(session.agent_session)) {
-                tracing::warn!(%error, "failed to record the provider session's account home");
-            }
         }
     }
     let moved = lost.then(|| departure(&attachment)).flatten();
@@ -798,17 +704,13 @@ fn run_native_session(
 
 /// Record the thread a bare launch's start hook reported as the conversation
 /// `lf resume` reopens.
-fn record_reported_thread(
-    path: &Path,
-    capture_dir: &Path,
-    account: Option<crate::store::ProviderAccountId>,
-) -> Result<()> {
+fn record_reported_thread(path: &Path, capture_dir: &Path) -> Result<()> {
     let thread = std::fs::read_to_string(path)?;
     let _ = std::fs::remove_file(path);
     crate::session_record::write_provider_session(
         capture_dir,
         &AgentSessionId::from(thread.trim()),
-        account,
+        None,
     )?;
     Ok(())
 }
@@ -831,7 +733,6 @@ pub(crate) fn run_native_agent(
         &command,
         &launch.env,
         launch.resume_token.as_ref(),
-        launch.provider_account_id.as_ref(),
         None,
         None,
     )?;
@@ -1009,7 +910,6 @@ fn run_codex_native(
     command: &SessionCommand,
     environment: &BTreeMap<String, String>,
     agent_session: Option<&AgentSessionId>,
-    exact_account_id: Option<&crate::store::ProviderAccountId>,
     launch_lock: Option<File>,
     capture: Option<&LfProcessRuntime>,
     progress: &mut crate::startup::Startup,
@@ -1025,7 +925,6 @@ fn run_codex_native(
     launch.session_attachment = command.attachment.clone();
     launch.conversation_context = command.context.clone();
     launch.resume_token = agent_session.cloned();
-    launch.provider_account_id = exact_account_id.cloned();
     if let Some(skill) = launch.skill_invocation.take() {
         launch.task_prompt = skill.terminal_input("codex", &launch)?.1;
     }
@@ -1051,7 +950,6 @@ fn run_codex_native(
         &client,
         environment,
         Some(&opened.thread),
-        opened.account.as_ref(),
         launch_lock,
         capture,
         progress,
@@ -1061,7 +959,6 @@ fn run_codex_native(
 struct OpenedCodex {
     thread: AgentSessionId,
     endpoint: PathBuf,
-    account: Option<crate::store::ProviderAccountId>,
 }
 
 /// Start the app-server and open the conversation with lf's configuration, so
@@ -1080,7 +977,7 @@ async fn open_codex_native(
     let (events, _events) = tokio::sync::mpsc::unbounded_channel();
     let mut harness = CodexHarness::new(events, ApprovalPolicy::NativeClient);
     harness.set_agent_session(saved.clone());
-    harness.set_provider_account_id(launch.provider_account_id.clone());
+
     match tokio::time::timeout(std::time::Duration::from_secs(20), harness.start(launch)).await {
         Ok(result) => result?,
         Err(_) => {
@@ -1088,7 +985,6 @@ async fn open_codex_native(
             bail!("Codex app-server did not open the conversation within 20s; the owned provider was stopped");
         }
     }
-    let account = harness.provider_account_id();
     let (endpoint, params) = harness
         .native_start()
         .ok_or_else(|| anyhow!("Codex startup ended without its native launch configuration"))?;
@@ -1131,11 +1027,7 @@ async fn open_codex_native(
         .await
         .context("Codex first turn was not sent")?;
     }
-    Ok(OpenedCodex {
-        thread,
-        endpoint,
-        account,
-    })
+    Ok(OpenedCodex { thread, endpoint })
 }
 
 /// lf's line for leaving a native client. The client's own exit text names
@@ -1170,10 +1062,8 @@ mod tests {
         spawn_session_command_with_env,
     };
     use crate::agent::{build_session_command, AgentConfig, ProviderInvocation, SessionCommand};
-    use crate::profile::EmailAddress;
-    use crate::provider_account::new_account;
     use crate::provider_auth::Provider;
-    use crate::store::{CredentialType, ProviderAccountId, ProviderToken, StorageConfig};
+    use crate::store::{CredentialType, ProviderToken, StorageConfig};
     use loopflow_model::id::AgentSessionId;
     use std::collections::BTreeMap;
     use std::ffi::OsString;
@@ -1328,7 +1218,7 @@ mod tests {
             args: Vec::new(),
             cwd: temp.path().to_path_buf(),
         };
-        spawn_session_command_with_env(&command, &capture.environment(), None, None, None, None)
+        spawn_session_command_with_env(&command, &capture.environment(), None, None, None)
             .expect_err("a failed provider fails its launch")
     }
 
@@ -1620,8 +1510,7 @@ mod tests {
             attachment: None,
             remote: None,
         };
-        let result =
-            spawn_session_command_with_env(&command, &BTreeMap::new(), None, None, None, None);
+        let result = spawn_session_command_with_env(&command, &BTreeMap::new(), None, None, None);
         stop.join().unwrap().unwrap();
         result.unwrap();
         assert!(!home.join("provider-client-stops").exists());
@@ -1643,33 +1532,23 @@ mod tests {
             attachment: None,
             remote: None,
         };
-        assert!(session_command_status_with_env(
-            &command,
-            &BTreeMap::new(),
-            None,
-            None,
-            None,
-            None
-        )
-        .unwrap()
-        .status
-        .success());
+        assert!(
+            session_command_status_with_env(&command, &BTreeMap::new(), None, None, None)
+                .unwrap()
+                .status
+                .success()
+        );
         let pid: u32 = std::fs::read_to_string(home.join("pid"))
             .unwrap()
             .parse()
             .unwrap();
         command.program = home.join("absent").display().to_string();
-        assert!(session_command_status_with_env(
-            &command,
-            &BTreeMap::new(),
-            None,
-            None,
-            None,
-            None
-        )
-        .unwrap_err()
-        .to_string()
-        .contains("not installed"));
+        assert!(
+            session_command_status_with_env(&command, &BTreeMap::new(), None, None, None)
+                .unwrap_err()
+                .to_string()
+                .contains("not installed")
+        );
         let store = crate::store::open_sqlite(&home.join("loopflow.db")).unwrap();
         let rows = store.processes_since(0).unwrap();
         let agents = rows
@@ -1753,19 +1632,17 @@ mod tests {
                 attachment: Some((session.id.to_string(), attached.clone())),
                 remote: Some(endpoint.clone()),
             };
-            let result =
-                session_command_status_with_env(&command, &environment, None, None, None, None);
+            let result = session_command_status_with_env(&command, &environment, None, None, None);
             let alive = provider.try_wait()?.is_none();
             let unchanged = store.agent_process(&attached.agent_process_id)? == Some(before);
             command.remote = None;
-            let local =
-                session_command_status_with_env(&command, &environment, None, None, None, None);
+            let local = session_command_status_with_env(&command, &environment, None, None, None);
             command.remote = Some(home.join("other.sock"));
             let wrong_endpoint =
-                session_command_status_with_env(&command, &environment, None, None, None, None);
+                session_command_status_with_env(&command, &environment, None, None, None);
             command.attachment = None;
             let unadmitted =
-                session_command_status_with_env(&command, &BTreeMap::new(), None, None, None, None);
+                session_command_status_with_env(&command, &BTreeMap::new(), None, None, None);
             crate::harness::agent_process::stop_native(
                 &mut provider,
                 Some(&(store, session.id.to_string(), attached)),
@@ -1836,15 +1713,9 @@ mod tests {
                 args: vec!["60".into()],
                 cwd: home.into(),
             };
-            let error = session_command_status_with_env(
-                &command,
-                &capture.environment(),
-                None,
-                None,
-                None,
-                None,
-            )
-            .unwrap_err();
+            let error =
+                session_command_status_with_env(&command, &capture.environment(), None, None, None)
+                    .unwrap_err();
             assert!(
                 error.to_string().contains("conflicting interactive_opened"),
                 "{error:#}"
@@ -1858,86 +1729,6 @@ mod tests {
             Ok(())
         })
         .unwrap();
-    }
-
-    #[allow(clippy::await_holding_lock)]
-    #[tokio::test]
-    async fn session_launch_tui_claude_signs_its_native_home_in_as_a_healthy_managed_login() {
-        let ledger = crate::journal::TestLedgerGuard::new();
-        let _ambient = crate::test_ambient::EnvGuard::new();
-        let temp = tempfile::tempdir().unwrap();
-        ledger.set_db_path(temp.path().join("loopflow.db"));
-        let _restore = EnvRestore::capture(&[
-            "LF_HOME",
-            "LF_TEST_SESSION_ENV",
-            "CLAUDE_CONFIG_DIR",
-            "PATH",
-        ]);
-        std::env::set_var("LF_HOME", temp.path());
-        let native = temp.path().join("native");
-        std::env::set_var("CLAUDE_CONFIG_DIR", &native);
-
-        let bin = temp.path().join("bin");
-        std::fs::create_dir(&bin).unwrap();
-        let claude = bin.join("claude");
-        std::fs::write(
-            &claude,
-            "#!/bin/sh\nprintf '%s' \"$CLAUDE_CONFIG_DIR\" > \"$LF_TEST_SESSION_ENV\"\n",
-        )
-        .unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-
-            let mut permissions = std::fs::metadata(&claude).unwrap().permissions();
-            permissions.set_mode(0o755);
-            std::fs::set_permissions(&claude, permissions).unwrap();
-        }
-        let path = std::env::var_os("PATH").unwrap_or_default();
-        std::env::set_var(
-            "PATH",
-            std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(&path))).unwrap(),
-        );
-        let capture = temp.path().join("session-env");
-        std::env::set_var("LF_TEST_SESSION_ENV", &capture);
-
-        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
-            temp.path().join("loopflow.db"),
-        ))
-        .await
-        .unwrap();
-        let account_home = temp.path().join("accounts/claude/jackstah");
-        let mut account = new_account(
-            Provider::Claude,
-            ProviderAccountId::parse("jackstah").unwrap(),
-            account_home.clone(),
-            Some(EmailAddress::parse("jackstah@gmail.com").unwrap()),
-        );
-        crate::test_support::identity::write_claude_identity(&mut account);
-        store.upsert_provider_account(&account).await.unwrap();
-
-        launch_session(
-            &AgentConfig {
-                agent: Some("claude".to_string()),
-                cwd: Some(temp.path().to_path_buf()),
-                task_prompt: "review it".into(),
-                env: BTreeMap::new(),
-                ..Default::default()
-            },
-            None,
-            None,
-            None,
-        )
-        .unwrap();
-
-        assert_eq!(
-            std::fs::read_to_string(capture).unwrap(),
-            native.to_string_lossy()
-        );
-        assert_eq!(
-            std::fs::read(native.join(".credentials.json")).unwrap(),
-            std::fs::read(account_home.join(".credentials.json")).unwrap()
-        );
     }
 
     #[allow(clippy::await_holding_lock)]

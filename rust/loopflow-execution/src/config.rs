@@ -463,7 +463,7 @@ impl Config {
     }
 }
 
-pub use catalog::{Config, ContextConfig};
+pub use catalog::{Config, ContextConfig, ForwardConfig};
 
 #[derive(schemars::JsonSchema, Debug, Clone, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]

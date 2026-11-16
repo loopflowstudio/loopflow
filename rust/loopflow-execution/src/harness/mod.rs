@@ -7,6 +7,7 @@ pub mod codex;
 #[cfg(unix)]
 pub mod codex_connection;
 mod codex_decode;
+mod codex_rpc;
 mod common;
 #[cfg(test)]
 mod conformance_tests;
@@ -14,7 +15,7 @@ pub mod context;
 mod dispatch;
 #[cfg(all(test, unix))]
 mod dispatch_tests;
-mod fact;
+pub(crate) mod fact;
 mod fact_writer;
 mod lf_tag;
 pub(crate) mod native_exit;
@@ -25,13 +26,9 @@ pub mod pi;
 mod pi_decode;
 pub mod task_updates;
 
-/// Name a codex rate-limit window by duration — shared with the subscription
-/// poller so stream and poll observations land on the same window key.
-pub use codex_decode::window_name as codex_window_name;
-use loopflow_model::id::AgentSessionId;
-
 use anyhow::Result;
 use async_trait::async_trait;
+use loopflow_model::id::AgentSessionId;
 use tokio::sync::mpsc;
 
 use crate::agent::AgentConfig;
@@ -283,13 +280,6 @@ pub trait Harness: Send + Sync {
     /// Seed a previously persisted vendor session id so the next turn resumes
     /// it. Harnesses that take resume state at `start` instead ignore this.
     fn set_agent_session(&mut self, _agent_session: Option<AgentSessionId>) {}
-    /// Pin this Invocation to the exact managed account already recorded in its
-    /// durable route. Accountless providers keep the default no-op.
-    fn set_provider_account_id(&mut self, _account_id: Option<crate::store::ProviderAccountId>) {}
-    /// The managed account selected before the first provider Turn begins.
-    fn provider_account_id(&self) -> Option<crate::store::ProviderAccountId> {
-        None
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

@@ -177,7 +177,6 @@ pub async fn recover_history(
         store.clone(),
         session.to_owned(),
         None,
-        None,
         Default::default(),
     ));
     let mut cursor = Value::Null;
@@ -196,10 +195,7 @@ pub async fn recover_history(
             .as_array()
             .ok_or_else(|| anyhow!("Native history response has no turns"))?
             .len();
-        history
-            .inbound(&json!({"result":result}), Some(thread))
-            .await
-            .1?;
+        history.inbound(&json!({"result":result}), Some(thread)).1?;
         let next = result.get("nextCursor").cloned().unwrap_or(Value::Null);
         if next.is_null() {
             break;
@@ -228,13 +224,12 @@ pub(crate) async fn start_turn(
         store.clone(),
         session.to_owned(),
         Some(attachment.clone()),
-        None,
         Default::default(),
     ));
     let id = format!("lf-initial-{}", uuid::Uuid::new_v4());
     let request = json!({"id":id,"method":"turn/start",
         "params":{"threadId":thread,"input":[{"type":"text","text":text}]}});
-    if let Err(error) = history.outbound(&request).await {
+    if let Err(error) = history.outbound(&request) {
         tracing::warn!(error = %format!("{error:#}"), session, "Codex first turn unrecorded");
     }
     upstream
@@ -243,7 +238,6 @@ pub(crate) async fn start_turn(
     let reply = reply_within(&mut upstream, &id, "turn/start", REPLY_LIMIT).await?;
     if let Err(error) = history
         .inbound(&json!({"id":id,"result":reply}), Some(thread))
-        .await
         .1
     {
         tracing::warn!(error = %format!("{error:#}"), session, "Codex first turn unrecorded");

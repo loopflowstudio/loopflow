@@ -20,7 +20,6 @@
         ],
         "agent_process_id": null,
         "availability": null,
-        "blocked": false,
         "cwd": "/elsewhere",
         "detail": "",
         "graph_membership": {
@@ -86,7 +85,6 @@
         ],
         "agent_process_id": null,
         "availability": null,
-        "blocked": false,
         "cwd": "/repo/fix-2/nested",
         "detail": "",
         "graph_membership": {
@@ -152,7 +150,6 @@
         ],
         "agent_process_id": null,
         "availability": null,
-        "blocked": false,
         "cwd": "/repo/fix-2",
         "detail": "",
         "graph_membership": {
@@ -216,7 +213,6 @@
         ],
         "agent_process_id": null,
         "availability": null,
-        "blocked": false,
         "cwd": "/repo/fix-2",
         "detail": "",
         "graph_membership": {
@@ -282,7 +278,6 @@
         ],
         "agent_process_id": null,
         "availability": null,
-        "blocked": false,
         "cwd": "/repo/fix-2",
         "detail": "",
         "graph_membership": {
@@ -742,7 +737,6 @@
         ],
         "agent_process_id": "aff7c43d-5479-436f-9dc1-9ca331c797a3",
         "availability": null,
-        "blocked": false,
         "cwd": "/elsewhere",
         "detail": "",
         "graph_membership": {
@@ -830,7 +824,6 @@
         ],
         "agent_process_id": null,
         "availability": null,
-        "blocked": false,
         "cwd": "/repo/fix-2/nested",
         "detail": "",
         "graph_membership": {
@@ -896,7 +889,6 @@
         ],
         "agent_process_id": null,
         "availability": null,
-        "blocked": false,
         "cwd": "/repo/fix-2",
         "detail": "",
         "graph_membership": {
@@ -960,7 +952,6 @@
         ],
         "agent_process_id": null,
         "availability": null,
-        "blocked": false,
         "cwd": "/repo/fix-2",
         "detail": "",
         "graph_membership": {
@@ -1026,7 +1017,6 @@
         ],
         "agent_process_id": null,
         "availability": null,
-        "blocked": false,
         "cwd": "/repo/fix-2",
         "detail": "",
         "graph_membership": {
@@ -1495,7 +1485,6 @@
         ],
         "agent_process_id": "aff7c43d-5479-436f-9dc1-9ca331c797a3",
         "availability": null,
-        "blocked": false,
         "cwd": "/elsewhere",
         "detail": "",
         "graph_membership": {
@@ -1583,7 +1572,6 @@
         ],
         "agent_process_id": null,
         "availability": null,
-        "blocked": false,
         "cwd": "/repo/fix-2/nested",
         "detail": "",
         "graph_membership": {
@@ -1649,7 +1637,6 @@
         ],
         "agent_process_id": null,
         "availability": null,
-        "blocked": false,
         "cwd": "/repo/fix-2",
         "detail": "",
         "graph_membership": {
@@ -1713,7 +1700,6 @@
         ],
         "agent_process_id": null,
         "availability": null,
-        "blocked": false,
         "cwd": "/repo/fix-2",
         "detail": "",
         "graph_membership": {
@@ -1779,7 +1765,6 @@
         ],
         "agent_process_id": null,
         "availability": null,
-        "blocked": false,
         "cwd": "/repo/fix-2",
         "detail": "",
         "graph_membership": {
@@ -2239,7 +2224,6 @@
         ],
         "agent_process_id": "aff7c43d-5479-436f-9dc1-9ca331c797a3",
         "availability": "available",
-        "blocked": false,
         "cwd": "/elsewhere",
         "detail": "",
         "graph_membership": {
@@ -2327,7 +2311,6 @@
         ],
         "agent_process_id": null,
         "availability": null,
-        "blocked": false,
         "cwd": "/repo/fix-2/nested",
         "detail": "",
         "graph_membership": {
@@ -2393,7 +2376,6 @@
         ],
         "agent_process_id": null,
         "availability": null,
-        "blocked": false,
         "cwd": "/repo/fix-2",
         "detail": "",
         "graph_membership": {
@@ -2457,7 +2439,6 @@
         ],
         "agent_process_id": null,
         "availability": null,
-        "blocked": false,
         "cwd": "/repo/fix-2",
         "detail": "",
         "graph_membership": {
@@ -2523,7 +2504,6 @@
         ],
         "agent_process_id": null,
         "availability": null,
-        "blocked": false,
         "cwd": "/repo/fix-2",
         "detail": "",
         "graph_membership": {
@@ -2994,7 +2974,6 @@
         ],
         "agent_process_id": "aff7c43d-5479-436f-9dc1-9ca331c797a3",
         "availability": "available",
-        "blocked": false,
         "cwd": "/elsewhere",
         "detail": "",
         "graph_membership": {
@@ -3082,7 +3061,6 @@
         ],
         "agent_process_id": null,
         "availability": null,
-        "blocked": false,
         "cwd": "/repo/fix-2/nested",
         "detail": "",
         "graph_membership": {
@@ -3148,7 +3126,6 @@
         ],
         "agent_process_id": null,
         "availability": null,
-        "blocked": false,
         "cwd": "/repo/fix-2",
         "detail": "",
         "graph_membership": {
@@ -3212,7 +3189,6 @@
         ],
         "agent_process_id": null,
         "availability": null,
-        "blocked": false,
         "cwd": "/repo/fix-2",
         "detail": "",
         "graph_membership": {
@@ -3278,7 +3254,6 @@
         ],
         "agent_process_id": null,
         "availability": null,
-        "blocked": false,
         "cwd": "/repo/fix-2",
         "detail": "",
         "graph_membership": {

@@ -330,25 +330,10 @@ pub enum Read {
         wave: Option<String>,
         repo: Option<String>,
     },
-    /// `lf account [<login|provider>] [--cached] --json`: every login's
-    /// state on this Machine.
+    /// `lf account [<provider>] --json`: saved service authentication.
     #[serde(rename = "account.list")]
-    #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::provider_account::operations::account_status::AccountReport>()))]
-    AccountList {
-        target: Option<String>,
-        cached: bool,
-    },
-    /// `lf --cwd <directory> account next [-a <harness>:<model>] [--repo <repo>] [--default]
-    /// --json`: how the repository selects an account for each provider.
-    #[serde(rename = "account.next")]
-    #[schemars(extend("x-result" = generator.subschema_for::<Vec<loopflow_execution::provider_account::routing::NextLaunch>>()))]
-    AccountNext {
-        directory: PathBuf,
-        repo: Option<String>,
-        default: bool,
-        #[serde(deserialize_with = "Option::deserialize")]
-        agent: Option<String>,
-    },
+    #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::provider_auth::operations::account_status::AccountReport>()))]
+    AccountList { target: Option<String> },
     /// `lf --cwd <directory> list [<path>…] --json`: the commands, skills,
     /// graphs and Waves under `path`.
     #[serde(rename = "skill.list")]
@@ -584,34 +569,13 @@ impl Read {
                 argv.push("--json".into());
                 argv
             }
-            Self::AccountList { target, cached } => {
+            Self::AccountList { target } => {
                 let mut argv = words(&["account"]);
                 argv.extend(target.iter().cloned());
-                if *cached {
-                    argv.push("--cached".into());
-                }
                 argv.push("--json".into());
                 argv
             }
-            Self::AccountNext {
-                directory,
-                repo,
-                default,
-                agent,
-            } => {
-                let mut argv = at(directory, &["account", "next"]);
-                if let Some(agent) = agent {
-                    argv.extend(words(&["--agent", agent]));
-                }
-                if let Some(repo) = repo {
-                    argv.extend(words(&["--repo", repo]));
-                }
-                if *default {
-                    argv.push("--default".into());
-                }
-                argv.push("--json".into());
-                argv
-            }
+
             Self::SkillList { directory, path } => {
                 let mut argv = at(directory, &["list"]);
                 argv.extend(path.iter().cloned());
@@ -883,19 +847,8 @@ impl Read {
                 wave.as_deref(),
                 repo.as_deref(),
             )?),
-            Self::AccountList { target, cached } => value(
-                &loopflow_execution::engine::account::list(target.as_deref(), *cached)?,
-            ),
-            Self::AccountNext {
-                directory,
-                repo,
-                default,
-                agent,
-            } => value(&loopflow_execution::engine::account::next(
-                directory,
-                repo.as_deref(),
-                *default,
-                agent.as_deref(),
+            Self::AccountList { target } => value(&loopflow_execution::engine::account::list(
+                target.as_deref(),
             )?),
             Self::SkillList { directory, path } => {
                 let repo = loopflow_execution::repo::discover_repo_root(directory)
@@ -1056,21 +1009,6 @@ mod tests {
     #[test]
     fn desktop_encodings_name_their_reads() {
         let read = |json: &str| serde_json::from_str::<Read>(json).unwrap().argv();
-        assert_eq!(
-            read(
-                r#"{"kind":"account.next","directory":"/r","repo":null,"default":true,"agent":"claude:fable"}"#
-            ),
-            [
-                "--cwd",
-                "/r",
-                "account",
-                "next",
-                "--agent",
-                "claude:fable",
-                "--default",
-                "--json"
-            ]
-        );
         assert_eq!(
             read(
                 r#"{"kind":"session.history","since":"7d","limit":50,"wave":null,"project":"p","task":null}"#

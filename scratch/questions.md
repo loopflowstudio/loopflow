@@ -52,6 +52,22 @@
 - **A pending `order` looks before it sends** (one request): moves need the
   provider's complete list.
 
+- **`conflict_json` holds the provider's winning `{revision, value}`**; the
+  effect's `value_json` is the local value that lost. Status shows both.
+- **Head-of-line per subject, not per owner**, except that everything on an
+  owner waits behind its unsettled `create`. Old state and comment delivery
+  were independent; a stuck state write no longer blocks a comment.
+- **Edits to an owner with neither a tracker object nor a queued `create` are
+  not queued**: the creation reads current values when it is queued.
+- **A historical filing's `create` keeps store words only**; its original
+  Team and state ids are not retained.
+- **`lf task sync` looks now; `--retry-updates` also ignores the look window**
+  (`Bound { windows: !retry_updates }`).
+- **Linear is idempotent only for comments.** A Linear create with an existing
+  id is an error, so a lost creation reply is looked for, never resent.
+- **Order sends one confirmed move at a time** within one send and rebases the
+  effect after each move.
+
 ## Open
 
 - Connecting a tracker to a repository with existing Tasks: export all of

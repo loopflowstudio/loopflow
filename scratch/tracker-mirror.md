@@ -361,80 +361,55 @@ Deepest deletions first, then the queue, then the bridges. Commit at each.
    `loopflow_storage::planning::{TrackerItem, TrackerObservation,
    TrackerComment, TrackerProject, StateHistory}`; `PlanningResponse` dies with
    the old drains.
-3. **Queue, rules, drain: built** (two commits after aed51ad6a8).
-   - `migrations/tracker_effects.sql`: table, partial unsettled index,
-     owner indexes, revision triggers (`looked_at` NULL ↔ value only),
-     canonical identity triggers; copies each attempted receipt and the newest
-     unsent value per subject for bound or creating owners, then marks every
-     old receipt settled (creations: attempted, `export_observed_at` = max int).
-     Dry run on a backup of `~/.lf/loopflow.db` (2026-11-16): 77 effects
-     (17 comment, 8 create, 1 delete, 39 field, 12 state), 0 sendable old rows.
-   - `sqlite/tracker_effects.rs`: records, `enqueue` (coalescing),
-     `owner_tracker`, `enqueue_tracker_creations` (connect-time, comments
-     queued behind the create), unsettled read, attempt/reject/error/look/settle.
-   - `ops/tracker/rules.rs` (per kind + `lost_reply`), `ops/tracker/drain.rs`
-     (bounded pass, per-owner lock file kept), `ops/tracker.rs` (`Tracker`
-     with only its test arm; `#[cfg_attr(not(test), allow(..))]` on
-     `enqueue`/`owner_tracker`/`impl Tracker` until writers and bridges land).
-   **Remaining, one cut with slice 4** (found while building: moving the
-   writers before a bridge can send would stop delivery, so these go together):
-   - Writers: one enqueue in `planning_write::write_record` under
-     `WriteOrigin::Local`, provider facts written as `WriteOrigin::Tracker`
-     (second concept review); the
-     `prepare_planning_export` path and `attach_in`'s receipt updates move to
-     `create` effects (attach = acknowledge the create by the Task's uuid).
-   - Inbound readers of pending receipts (`reconcile_edits`,
-     `observe_task_deletion`, acceptance; `observe_attempts` becomes
-     `rules::decide`, moved to storage) read
-     `tracker_effects` (`phase`, `subject`, `kind`); list of other readers below.
-   - `Tracker::{Linear, Asana}` arms with `send`/`look`/`idempotent`
-     (Linear create and comment: our id) in `linear/effects.rs`,
-     `asana/effects.rs`; Observed built from `TrackerItem`/`TrackerProject`.
-   - `sync_after_save`, `sync_scope` and `lf task sync` call `drain`
-     (`Bound::PASS`, `Scope::First`; `Bound::NOW`, `Scope::Only`); delete the four drains,
-     storage GraphQL, `PlanningClient`; move `lock_delivery` into `drain.rs`.
-   - `lf repo plan` lists unsettled effects; `lf task show` `sync.conflict`.
-   - From the second concept review, still unbuilt: `enqueue_tracker_creations`
-     reads before it opens a write (EXPLAIN on 10k Tasks); unknown kinds skip
-     one owner instead of failing `unsettled_tracker_effects`
-     (`EffectKind::parse`, `tracker_effects.rs:195`); `decide` loses its
-     `_ => Hold` arm once it lives in storage; `Observed.state_history`.
-   - Tests on the Linear fake per kind; existing `asana_planning_tests`,
-     `task_comments_tests`, `planning_order_tests` move onto the queue.
-   Found while sizing it:
-   - Old-table readers outside the deleted writers, each to move onto
-     `tracker_effects`: `task_changes` in `ops/task.rs`, `task/snapshot.rs`,
-     `sqlite/children.rs` ×2, `revisions.rs`, `task_content.rs`, `bin/lf.rs`,
-     `commands/read.rs` ×2, `commands/task_diff.rs`; `task_state_deliveries` in
-     `children.rs` ×2, `durable.rs`, `linear_acceptance.rs` ×4,
-     `planning_sync.rs` ×2, `planning_write.rs` ×2, `revisions.rs` ×4;
-     `task_comment_deliveries` in `children.rs`, `planning_sync.rs`;
-     `project_changes` in `project_content.rs`. `task_creation_intents` and
-     `project_transitions` also carry creation history (`task_history.rs`,
-     `project_selection.rs`): only their export columns stop being written.
-4. `Tracker` enum and the two `effects.rs`; delete `PlanningClient`; Asana
-   tests move onto the queue.
-5. **Renames done** (`ops/tracker_observe.rs`, `rust/loopflow/tests/work/`).
-   Truthful `provider` remains, best done with slice 3's acceptance rewrite:
-   readers join `pm_items`/`pm_projects` on `(repo, provider, id)`, so dropping
-   the predicate loses the index; use `provider IN ('linear','asana')` in
-   joined readers (an IN probe keeps the prefix) and pass the configured
-   provider into `accept_linear_{project,issue,inventory,project_order}_in`,
-   `reconcile_linear_project_teams_in`, `observe_task_state` and
-   `planning_order.rs:211` (≈20 test callers in `tests/work/local_planning.rs`
-   and `tests/support/`). Check with `store::query_plans::tests::`.
-6. `planning.md`, `docs/work.md`, README; file the contract and DTO Tasks.
+3. **Queue, rules, drain, writers, readers: done** (a2c956a129 onward).
+   Migration and queue as before (dry run on the live store: 77 effects, 0
+   sendable old rows). `planning_write` has `WriteOrigin::{Local, Tracker,
+   Import}`; `Local` writes queue one effect per changed value
+   (`EffectKind::of`); a record created in the write queues none (its tracker
+   learns it through `create`), except a new comment. Acceptance, comment
+   ingestion and order observation settle attempted effects with
+   `planning::rules::decide` (moved to storage, exhaustive) and overlay unsettled
+   local values (`tracker_effects::reconcile_in`). Sync status, Task rows and
+   threads read the queue. Deleted: storage `planning_changes.rs`,
+   `planning_export.rs`, the `task_state_delivery` API.
+4. **Bridges: done.** `Tracker {Linear, Asana}` in `ops/tracker.rs`;
+   `linear/effects.rs`, `asana/effects.rs`. Deleted `PlanningClient`,
+   `ops/planning_{client,export,delivery,order}.rs`, tracker_observe's delivery
+   half, `asana::task_fields`. `drain_repository` asks nothing when the queue
+   is empty, builds the Team-validated Linear client only when a `create` is
+   queued, and leaves a bridge error (offline) on each effect.
+5. **Truthful `provider`: done** for acceptance writes
+   (`accept_linear_{project,issue}_in` take the bridge); joined readers match
+   `IN ('linear','asana')`; Linear-only acceptance (teams, inventory, order)
+   writes `linear`. `lf repo plan` lists the queue (`PlanStatus.effects`, schema
+   regenerated). `sync.conflict` is the existing `adopted_linear` change in
+   `lf task show`.
+6. **Remaining.**
+   - Docs: `docs/dev/planning.md`, `docs/dev/reference.md:89`,
+     `rust/loopflow-execution/src/ops/README.md` (still names the deleted drains
+     and `check_before_write`). File the contract-migration and DTO Tasks.
+   - `sync_after_save` drains `Scope::All`; the plan said the just-saved owner
+     first, which needs the owner from each caller.
+   - PR links still go out beside the queue (`link_pr_with_client`, the Asana
+     PR comment in `ops/task.rs`). GOAL.md name/summary as Wave `field`
+     effects: not built (`EffectKind::of` queues nothing for Wave values).
+   - `pm_issue_changes`: write `a_tracker_removal_withdraws_new_launches`,
+     then decide whether the table goes.
+   - Linear-fake tests now cover creation through the queue, order and its lost
+     reply, comments. Missing end to end on the fake: lost field reply, conflict
+     adopt, deletion retire (rules and drain cover them with the test bridge).
+     68 old-drain tests went with the drains.
+   - `uncreated()` plans on `tasks.external_issue_id` on an empty store; check
+     against a 10k-Task store.
 
 ## Checks run
 
-- `cargo test -p loopflow-storage --lib -- tracker_effects planning_update_triggers revisions::` → 13 pass (upgrade fixture included).
-- `cargo test -p loopflow-execution --lib ops::tracker::` → 12 pass (rules per kind; drain: 0 requests when empty, 20 of 100, window hold, look settles, conflict adopts, wrong bridge retires); rerun after `Scope` → 12 pass, clippy clean.
-- `cargo clippy -p loopflow-storage -p loopflow-execution -p loopflow --all-targets -- -D warnings` → clean after the drain commit.
-
-- `cargo clippy -p loopflow-storage -p loopflow-execution -p loopflow --all-targets -- -D warnings` → clean (after slice 2 + renames).
-- `cargo nextest run -p loopflow-execution --lib -E 'test(asana_planning_tests) | test(task_comments_tests) | test(tracker_observe) | test(linear_observation) | test(planning_order_tests) | test(foreign_projects_do_not_block_refresh) | test(provider_auth::) | test(task_planning_tests::task_abandon)'` → pass.
-- `cargo test -p loopflow --lib lf::tests::` → pass; `cargo test -p loopflow --test integration documented_commands::` → pass.
-- `tests/fixtures/dto/server_schema.json` regenerated (drops `notion`).
+- `cargo test -p loopflow-storage --lib` → 371 pass (before the provider cut; touched modules rerun after).
+- `cargo nextest run -p loopflow-execution --lib -E '(test(ops::tracker) | test(ops::linear::) | test(store::) | test(asana::)) - test(linear_on_demand_shares_checks_and_excludes_finished_tasks)'` → pass except `native_runner_is_quiet_until_its_turn_ends_codex_foreground`, whose fixture's `sccache rustc -vV` fails here ("cannot find binary path"); CI.
+- `cargo nextest run -p loopflow --lib -E 'test(local_planning::)' -j 4` → 32 pass. At default parallelism several fixtures' `lf` calls failed with empty stderr and passed alone.
+- `cargo clippy -p loopflow-storage -p loopflow-execution -p loopflow --all-targets -- -D warnings` → clean.
+- Offline demo (temp `LF_HOME`, Linear config, no origin): create, edit, complete → `lf repo plan` lists `create`, `title`, `complete` pending with the bridge error.
+- Not run: `binary(task_abandonment)` (ported), `test(documented_commands::)`, `binary(two_people)`, `test(transport::)`; gate/CI.
 
 ## Done when
 

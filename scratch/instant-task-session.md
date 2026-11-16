@@ -461,15 +461,19 @@ remains unmeasured.
 
 ### Open product choices
 
-Concept review against `c055cc55ca`: the Claim/Unassign/Reopen vertical cut now
-follows the intended experience through both transports, persisted inputs,
-shared derivation and both hosts' controls. No further concept change follows
-from this review. The counterexamples remain binding: an already-open Reopen
-preserves approval; missing/conflicting inputs cannot certify a destination;
-carrier withdrawal cannot certify Process exit. Product docs now describe the
-built actions, so no builtin skill change is needed. Next demonstration: the
-same Task across both hosts through offline restart, refusal and recovery, with
-native paint/input measured separately. Source review adds no runtime result.
+Concept review against `3bc9365e8c`: Start/Auto-Ship/Stop now follow the shared
+request contract through both hosts, persistence, dispatch and original-ID
+recovery. No further concept change follows. A finished successful dispatch
+retires only its request; a finished failure releases ordering but stays
+inspectable; uncertainty holds conflicting sends. None certifies Graph/PR success,
+rollback, approval or Process exit. Stop queued behind an uncertain Start/Ship is
+still a request, never a promise of immediate withdrawal. Product docs describe
+this distinction; no builtin skill change is needed. Keep the previous Reopen
+counterexamples binding. Next demonstration, after the independent benchmark is
+available: the same Task on both hosts through restart, uncertain dispatch and
+later Machine readings, measuring request publication separately from runtime
+and native input. Source review adds no runtime result. Stop rewrite iteration
+at this continuation boundary as recorded above.
 
 Unanswered, numbered in `scratch/concept-review.html`: (1) queue Abandon offline
 or require a reachable Machine; (2) Cancel before first send or none; (3) phone

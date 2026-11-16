@@ -125,7 +125,7 @@ fn local(
                 issue: issue.to_owned(),
             };
             let held: loopflow_execution::engine::task::Hold = match write.remote()? {
-                Some(remote) => remote.call(directory)?,
+                Some(remote) => remote.call()?,
                 None => loopflow_execution::engine::task::hold(issue, reason.as_deref())?,
             };
             if *json {
@@ -186,28 +186,18 @@ fn task(repo: &Path, command: &TaskCommand, io: &mut CommandIo<'_>) -> Result<()
     match command {
         TaskCommand::Create { .. } => super::task_create::create(repo, command, io, false, None),
         TaskCommand::Claim { issue, json } | TaskCommand::Unassign { issue, json } => {
-            use super::write::Write;
-            use loopflow_execution::ops::task_ownership::{render, OwnershipChange};
-            let (requested, write) = match command {
-                TaskCommand::Claim { .. } => (
-                    OwnershipChange::Claim,
-                    Write::TaskClaim {
-                        directory: repo.to_path_buf(),
-                        issue: issue.clone(),
-                    },
-                ),
-                _ => (
-                    OwnershipChange::Unassign,
-                    Write::TaskUnassign {
-                        directory: repo.to_path_buf(),
-                        issue: issue.clone(),
-                    },
-                ),
+            use super::write::{Write, WriteResult};
+            use loopflow_execution::ops::task_ownership::render;
+            let (directory, issue) = (repo.to_path_buf(), issue.clone());
+            let write = match command {
+                TaskCommand::Claim { .. } => Write::TaskClaim { directory, issue },
+                _ => Write::TaskUnassign { directory, issue },
             };
             // A Task whose ownership another Machine writes is changed there.
-            let ownership: loopflow_model::durable::TaskOwnership = match write.remote()? {
-                Some(remote) => remote.call(repo)?,
-                None => loopflow_execution::engine::task::ownership(repo, issue, requested)?,
+            let (WriteResult::TaskClaim(ownership) | WriteResult::TaskUnassign(ownership)) =
+                write.run()?
+            else {
+                unreachable!("an ownership write answers with ownership")
             };
             if *json {
                 writeln!(io.output, "{}", serde_json::to_string(&ownership)?)?;

@@ -473,7 +473,7 @@ pub(super) async fn welcome<C: Carrier>(
 }
 
 /// The newest revision both sides speak.
-fn negotiate(hello: &Hello) -> Option<u32> {
+pub(super) fn negotiate(hello: &Hello) -> Option<u32> {
     let revision = REVISION.min(hello.revision);
     (revision >= MIN_REVISION && revision >= hello.min_revision).then_some(revision)
 }

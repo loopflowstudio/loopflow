@@ -30,7 +30,7 @@ pub fn run(directory: &Path, input: impl BufRead, mut output: impl Write) -> any
         }
         Err(error) => return send(&mut output, &refused(None, error.to_string())),
     };
-    let Some(revision) = negotiate(&hello) else {
+    let Some(revision) = super::service::negotiate(&hello) else {
         return send(&mut output, &incompatible(&hello));
     };
     send(&mut output, &welcome(revision)?)?;
@@ -54,12 +54,6 @@ pub fn run(directory: &Path, input: impl BufRead, mut output: impl Write) -> any
         send(&mut output, &answer)?;
     }
     Ok(())
-}
-
-/// The newest revision both sides speak, as the resident server negotiates.
-fn negotiate(hello: &Hello) -> Option<u32> {
-    let revision = REVISION.min(hello.revision);
-    (revision >= MIN_REVISION && revision >= hello.min_revision).then_some(revision)
 }
 
 /// Read where the request came from: the sender shows it.

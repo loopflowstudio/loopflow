@@ -144,60 +144,56 @@ pub fn call(
         "" => failure,
         said => failure.context(format!("the destination said: {said}")),
     };
-    match answers.as_slice() {
+    let answer = match answers.as_slice() {
         [ServerMessage::Welcome(_), answer, ..] => {
             for line in said.lines() {
                 crate::journal::request::diagnostic(format_args!("{line}"));
             }
-            match answer {
-                ServerMessage::Response { result, .. } => Ok(result.clone()),
-                ServerMessage::Error {
-                    code,
-                    message,
-                    data,
-                    ..
-                } => Err(Error {
-                    code: *code,
-                    message: message.clone(),
-                    data: data.clone(),
-                }
-                .into()),
-                other => anyhow::bail!("unexpected answer from {}: {other:?}", machine.route),
-            }
+            answer
         }
-        [ServerMessage::Error {
+        // A refused hello: the revisions differ.
+        [refused @ ServerMessage::Error { .. }, ..] => refused,
+        [ServerMessage::Welcome(_)] => {
+            return Err(failed(
+                Error::outcome_unknown(&anyhow::anyhow!(
+                    "{} closed the connection before answering",
+                    machine.route
+                ))
+                .into(),
+            ))
+        }
+        _ => {
+            return match ran {
+                // Clap's usage error: this `lf` has no `server stdio`.
+                Err(exit)
+                    if exit
+                        .downcast_ref::<crate::process::CommandExit>()
+                        .is_some_and(|exit| exit.0 == 2) =>
+                {
+                    Err(Error::new(ErrorCode::Incompatible, outdated(machine)).into())
+                }
+                Err(failure) => Err(failed(failure)),
+                Ok(()) => Err(failed(anyhow::anyhow!(
+                    "{} did not answer the operation",
+                    machine.route
+                ))),
+            };
+        }
+    };
+    match answer {
+        ServerMessage::Response { result, .. } => Ok(result.clone()),
+        ServerMessage::Error {
             code,
             message,
             data,
             ..
-        }, ..] => Err(Error {
+        } => Err(Error {
             code: *code,
             message: message.clone(),
             data: data.clone(),
         }
         .into()),
-        [ServerMessage::Welcome(_)] => Err(failed(
-            Error::outcome_unknown(&anyhow::anyhow!(
-                "{} closed the connection before answering",
-                machine.route
-            ))
-            .into(),
-        )),
-        _ => match ran {
-            // Clap's usage error: this `lf` has no `server stdio`.
-            Err(exit)
-                if exit
-                    .downcast_ref::<crate::process::CommandExit>()
-                    .is_some_and(|exit| exit.0 == 2) =>
-            {
-                Err(Error::new(ErrorCode::Incompatible, outdated(machine)).into())
-            }
-            Err(failure) => Err(failed(failure)),
-            Ok(()) => Err(failed(anyhow::anyhow!(
-                "{} did not answer the operation",
-                machine.route
-            ))),
-        },
+        other => anyhow::bail!("unexpected answer from {}: {other:?}", machine.route),
     }
 }
 

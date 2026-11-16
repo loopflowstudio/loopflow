@@ -145,7 +145,7 @@ No `dispatch` module yet. `Write::run` routes and `Write::run_here` runs here
   skew error.
 
 `run_remote`, `Write::prepare_session`'s SSH half and the "destination said"
-copies fold into it. `prepare_launch` stays in `write::Remote::call` (run,
+copies fold into it. `prepare_launch` stays in `Write::remote` (run,
 ship) and the CLI's `ssh::run`; LOO-913 (#1953) deletes both, see Decisions.
 
 ### Directory on the destination
@@ -257,9 +257,9 @@ Each one goes in a named PR below.
   manner of Jujutsu's CLI snapshot tests.
 - Route once, in `Write::run`: `remote()` → `Remote::call::<$output>` →
   `WriteResult`, else `run_here`. The six `match remote { Some … None … }`
-  arms in `writes!` become local-only, and the CLI's hand-routed copies
-  (`mutation.rs` hold and claim/unassign, `write::run_task`) become calls to
-  the dispatcher. session.resume's `move_session` before and
+  arms in `writes!` become local-only, and the CLI's last hand-routed copy
+  (`mutation.rs` hold, which carries a reason the write lacks) becomes a call
+  to the dispatcher. session.resume's `move_session` before and
   `prepared_remotely` after move into that one routed path. `ContinueRun`
   stays while execution cannot name `Write`; every caller passes `run_task`.
 
@@ -302,7 +302,7 @@ Departures not covered above:
   still reads Clap's arguments until PR 2. `ssh::run_with_io` keeps its IO
   for `mutation::run`'s CLI forward.
 - Two CLI paths had routed only through the deleted engine `remote_on`, and
-  now ask `Write::remote`: `lf task claim/unassign` for a Task whose move from
+  now call `Write::run`: `lf task claim/unassign` for a Task whose move from
   here was sent (mini answers whether it arrived), and the Graph a move
   continues on arrival. `ops::session_move::{move_task, move_session}` take
   the application's `write::run_task` as a `ContinueRun` function pointer,
@@ -346,7 +346,7 @@ matches it, or changes the docs with it.
 
 ## Checks
 
-- `cargo test -p loopflow --test integration machine_commands::`: 58 pass, including `a_served_run_for_a_task_mini_runs_starts_it_there` (stub mini stdio) and the move continuation's real Graph on mini (implement).
+- `cargo test -p loopflow --test integration machine_commands::`: 59 pass after compress, including `a_served_run_for_a_task_mini_runs_starts_it_there` (stub mini stdio) and the move continuation's real Graph on mini (implement).
 - `cargo test -p loopflow --lib server::stdio:: lf::commands::write::tests:: adapter_tests:: lf::tests::`; `-p loopflow-execution --lib engine::task:: machine::ssh::`: pass (implement).
 - `documented_commands::`, `cli_discovery::`, `served_reads server_operations_match_their_lf_commands`: pass (implement).
 - `cargo nextest run -p loopflow -p loopflow-execution --lib -E 'test(lf::commands::write::tests::) | test(adapter_tests::) | test(session_move::)'`: 15 pass (implement).

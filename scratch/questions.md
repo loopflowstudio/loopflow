@@ -17,8 +17,15 @@
   the transcript path, and log it); one reader per provider behind one
   function. Existing `output` rows get no new writes and are deleted under
   retention, not moved.
-- Still open: whether `lf history` lists finished Processes a main record
-  pins (A), or (C) those records keep outcome, end time and error themselves.
+- Where Process rows live. Jack Heart, 2026-11-16: "i guess i wonder if all
+  process info should just be in a separate db/", then, after the prior-art
+  comparison (Kubernetes: pod status with leases, events with TTL in a
+  separate etcd, records keep their own status; Slurm: slurmdbd accounting
+  apart from the controller): "ok. kube and slurm seem like reliable prior
+  art." Direction: every Process row, live and finished, lives in the
+  Machine-history file; nothing moves at exit. This settles the `lf history`
+  question as (C): records in `loopflow.db` keep the results their readers
+  need on their own row.
 - The plan calls the retention pass "the existing hourly `lf top --prune`
   pass", but nothing in the repo schedules `lf process prune` (only manual
   runs and `scripts/disk-cleanup.sh` paths). Docs say retention applies when

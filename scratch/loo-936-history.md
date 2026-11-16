@@ -1,6 +1,6 @@
 # LOO-936: record only what the product reads, history apart from state
 
-Status: 2026-11-16, slice 1 committed (`0cdba4ed89`); slices 2–5 remain.
+Status: 2026-11-16, slice 1 committed (`0cdba4ed89`), slice 2 and `opened_at` committed; Process placement revised (see the last section), code for slices 2–4 paused for its review.
 Old `provider_session_observed`/`provider_account_selected` rows still sit in
 live stores (tests seed them); slice 5's move pass deletes them. The inventory below is the review a person reads before
 code changes (brief: "Start with an inventory a person reviews before code
@@ -255,3 +255,121 @@ wording), `docs/troubleshooting.md` (what survives, disk, orphaned prune),
 `docs/dev/machines.md` (`history.db` beside `loopflow.db`). Slice 5 checks
 them against the code; the docs also promise `lf doctor` reports
 `history.db` size and oldest row.
+
+## Revised direction, 2026-11-16: every Process row in the history file
+
+Replaces "Process exit moves, never copies" (approach 3) and slice 4; quotes in
+`questions.md`. `history.db` holds every Process row, live and finished, plus
+Session history. Nothing moves at exit; retention deletes old finished rows in
+place; `lf history` reads one table. Records in `loopflow.db` hold Process ids
+with no foreign key across files and keep the results their readers need on
+their own row (Graph step and ship outcome, end time, error), so
+`failure_cause` and old Graphs never depend on a Process row retention
+removed. No transaction spans both files: Process row first, pointer second; a
+Process row nothing points to is harmless and the liveness check reaps it.
+Task-list wake-ups on Process start and exit come from the history file's
+revision. Slice 1, retention 30/90 days, the server-scheduled prune and
+`output` read from transcripts stand. Code for slices 2–4 stops until this
+section is reviewed (slice 2's `history.rs` and `opened_at` are committed:
+`be56185174`, the `opened_at` commit after it).
+
+### Counts (production code, branch at `be56185174`)
+
+Method: every SQL string literal outside tests that names `processes`
+(a scan of `rust/**/*.rs` with test files and `#[cfg(test)]` modules excluded), grouped by
+function, then each writer's transaction read by hand through its `_in`
+helpers. All of them are in `loopflow-storage`, plus
+`server/subscription_measurement.rs`.
+
+- 101 statements name `processes`: 56 touch only `processes`, 43 read it
+  joined with a main table (41 functions), 2 are fixture writes.
+- **8 transactions write `processes` together with another table**, all
+  under the agent-attachment fence; 5 go through `attach_in`
+  (`processes.rs:611`), which writes `processes.attachment_token` and
+  `attached_lf_process_id`, `agent_sessions.agent_process_id` and
+  `session_activity` together. 3 more (last rows) tie a Process write to main
+  without writing both tables:
+
+| Transaction | Writes beside `processes` |
+| --- | --- |
+| `SessionTransfer::claim_attachment` (`processes.rs:64`) → `attach_in` | `agent_sessions`, `session_activity` |
+| `SessionTransfer::claim_input` (`processes.rs:84`) → `claim_session_input_in` (`sessions.rs:555`) | `session_events` (captured), `agent_sessions.current_capture`, + `attach_in` |
+| `SessionTransfer::replace_agent` (`processes.rs:119`) | `agent_sessions.provider_thread`, + `attach_in` |
+| `SessionTransfer::finish` (`processes.rs:173`) | `agent_sessions.completed_at`, `session_events` (`attachment_exit`) |
+| `SessionTransfer::commit` (`processes.rs:280`) → `complete_dead_headless_run_in` | `agent_sessions.completed_at` |
+| `attach_session` (`processes.rs:1484`) | + `attach_in` |
+| `prepare_agent_process` (`processes.rs:1560`) | + `attach_in` |
+| `record_session_connection` (`processes.rs:1222`) | `agent_sessions.provider_thread`, transition row (`session_events`) |
+| `release_agent_ancestry` (`processes.rs:1386`) | `processes` only, but reads `agent_sessions` for the fence |
+| `record_process_within` (`sqlite.rs:1919`) | `held_terminals` reference (FK `held_terminal_id`) |
+| `relocate_repository` (`repositories.rs:116`) | `relocated_task_processes` (FK `ON DELETE CASCADE`), `tasks`, `task_checkouts` |
+
+- **Schema across the line:** 15 foreign keys reference `processes`
+  (`agent_sessions` ×2, `ci_incidents`, `desktop_shells` ×2,
+  `graph_process_steps`, `graph_processes`, `session_events`,
+  `steer_adapters`, `steer_batches`, `task_graphs`, `tasks.ship_lf_process_id`,
+  `waves.project_activation_lf_process_id`, and the two `ON DELETE CASCADE`
+  tables `agent_limit_recoveries`, `relocated_task_processes`); `processes`
+  references `agent_sessions`, `held_terminals`, `session_events`. 11 triggers
+  on `processes`; `task_update_processes_*` read `graph_processes`,
+  `graph_process_steps`, `task_graphs` and write main `store_revisions`, so
+  they cannot follow the rows into another file.
+- **43 joined reads** (file:line, function): `canonical_ids.rs:52` preflight;
+  `ci_incidents.rs:244` pr_repair_lifetimes; `durable.rs:407` task_state_sql
+  (Task moving/shipping); `graph_inventory.rs` 58 graphs_in, 110 entry_in,
+  225 process_under_graph, 445 graph_child_after, 489/535
+  graph_execution_facts; `processes.rs` 209 finish, 311 agent_process_query
+  (10 tables), 481 process_query, 532 attachment_in, 650 attach_in, 1034
+  saved_session_connection, 1084 agent_process_identity;
+  `project_selection.rs:347` readiness_in; `provider_transitions.rs` 95
+  live_process, 173 observe_in; `repositories.rs:138` relocate_repository;
+  `session_events.rs` 395 record_session_activity, 435 session_liveness, 578
+  session_turn_origin; `sessions.rs` 69 session_projection_inputs_in, 168
+  (summary fragment), 264 available_sql, 368 summary_query (11 tables), 771
+  session_terminal, 789 session_owner, 814 process_session, 838
+  terminal_retention, 1107 pending_inputs, 1900 require_current_actor_in;
+  `steers.rs` 69/94 with_provider_context, 174 record_native_turn, 233
+  idle_conversation_candidates, 692 claim_session_steers;
+  `task_retirement.rs:65` task_close_candidates; `task_work.rs` 119
+  lf_process_ids, 142 task_of_process, 185 completed_graph_steps, 647
+  task_open_process_pairs.
+
+### What the counts say
+
+The joined reads move by naming `history.processes` through the read-only
+attachment; SQLite plans each side with its own indexes. The hard part is the
+attachment fence: all 8 transactions change or check
+`processes.attachment_token` and `agent_sessions.agent_process_id` together,
+and 20 statements join `agent_sessions` to `processes` on that pair
+(`attachment_in`, `require_current_actor_in`, `with_provider_context`,
+`record_session_activity`, `session_turn_origin`, `summary_query`, …; one,
+`record_agent_inbox`, is a write the scan counted only as a join). "Process row first, pointer second" splits it. Two ways to
+keep the fence whole, for review:
+
+- **The attachment moves to `agent_sessions`.** `attachment_token` and
+  `attached_lf_process_id` are which Process holds this Session now: state of
+  the Session, not of the Process. In `loopflow.db` beside
+  `agent_process_id`, every fence and the 8 transactions stay in one file;
+  the Process row in the history file keeps pid, times and outcome. The
+  attachment then names its Process by id with no cross-file key.
+- **Fences read across files.** Leave the token on the Process row and check
+  it through the attachment; a handoff becomes two commits with a window
+  where the Session points at a Process whose token has not changed yet.
+
+The first is smaller and matches the prior art (a pod's binding lives on the
+pod, the node lease apart). Questions for review: does the attachment move to
+`agent_sessions`; does Task moving/shipping (`durable.rs:407`) read Process
+liveness from the history file's revision, or does each Graph and ship record
+carry `ended_at` itself so state reads never join the history file.
+
+### Revised slices (replaces 2–4)
+
+2. Done: `history.rs` (writer, read-only attachment, gap). Schema gains
+   `processes` (all columns Process readers use) when slice 4 lands.
+3. Session history kinds and the state columns, as planned (`opened_at`
+   done), `output` dropped.
+4. Every Process row in the history file: attachment state onto
+   `agent_sessions` (if accepted), result columns on the pointing records,
+   the 15 foreign keys dropped with the cascade tables cleaned up explicitly,
+   `task_update_processes_*` replaced by the history revision, the 43 reads
+   repointed, `FORGETTABLE` replaced by retention by age.

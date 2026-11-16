@@ -169,6 +169,8 @@ Dependency and bundled-resource changes also require the
 even when no Python paths changed.
 On macOS it builds the CLI before isolated Python checkout-refresh proofs, so
 native archives and Cargo dependencies are fetched before networking is disabled.
+For Python tests on a fresh checkout, run `cargo fetch --locked` before disabling
+networking; the provenance fixture compiles a small Cargo workspace offline.
 `binary(name)` matches the standalone `[[test]]` binaries in
 `rust/loopflow/Cargo.toml` and the CLI's own unit tests as `binary(lf)`;
 suites inside `integration` take `test(name::)`, and an unknown binary name

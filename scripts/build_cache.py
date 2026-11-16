@@ -225,7 +225,8 @@ def cache_status(repo: Path) -> dict:
         and all(c in "0123456789abcdef" for c in wrapper.parent.parent.name)
     )
     config = Path(env.get("SCCACHE_CONF", str(inventory_path())))
-    listed = json.loads(config.read_text()).get("basedirs", []) if config.exists() else []
+    refresh(repo, config)
+    listed = json.loads(config.read_text())["basedirs"]
     root = subprocess.check_output(
         ["git", "rev-parse", "--show-toplevel"], cwd=repo, text=True
     ).removesuffix("\n")
@@ -238,9 +239,9 @@ def cache_status(repo: Path) -> dict:
         "daemon": None,
         "loaded_roots": [],
         "stats": None,
-        "idle_seconds": None,
-        "idle_timeout_seconds": 600,
-        "idle_note": "sccache does not expose last-request time; idle is unmeasured",
+        "configured_idle_timeout_seconds": int(env["SCCACHE_IDLE_TIMEOUT"])
+        if "SCCACHE_IDLE_TIMEOUT" in env
+        else None,
     }
     if not pinned:
         return {**result, "exit_code": 1}
@@ -297,15 +298,17 @@ def main() -> None:
                 print(json.dumps(result, indent=2))
             else:
                 daemon, stats = result["daemon"], result["stats"]
+                timeout = result["configured_idle_timeout_seconds"]
+                idle = f"{timeout}s" if timeout is not None else "sccache default (600s)"
                 print(
                     f"wrapper  {result['wrapper']} "
                     f"({'pinned' if result['pinned'] else 'not pinned'})"
                 )
                 print(
                     f"daemon   pid {daemon['pid']}, same executable, up {daemon['uptime']}; "
-                    "idle time unmeasured"
+                    f"configured idle timeout {idle} (next start)"
                     if daemon
-                    else "daemon   not running; next build loads the list"
+                    else f"daemon   not running; next build loads the list; idle timeout {idle}"
                 )
                 print(
                     f"roots    {len(result['loaded_roots'])} "

@@ -26,8 +26,8 @@ Assumptions taken in kickoff; each is reversible by re-running `install`.
 - **Idle timeout**: kickoff kept 600 s unless a root stayed unloaded at its
   first build. That happened; see the concept review entry below.
 - **Idle telemetry revision (2026-11-16):** pinned `ServerInfo` exposes basedirs
-  and counters, but no last-request timestamp. `status` reports idle seconds as
-  null with a reason rather than inventing a countdown. Natural-idle probes
+  and counters, but no last-request timestamp. `status` reports configured
+  next-start timeout; unknown-only idle fields are removed. Natural-idle probes
   observe process exit. Cargo install must name package `sccache` because its
   Git repository also contains a test binary package.
 
@@ -49,3 +49,22 @@ Assumptions taken in kickoff; each is reversible by re-running `install`.
   and set `SCCACHE_IDLE_TIMEOUT` per the design's own rule. Not taken without an
   answer: stopping the daemon when a worktree registers. Also unasked: the
   10 GiB cap, full at review time with 64 roots, against a disk at 98%.
+
+- **Implementation correction (2026-11-16): no timeout from counter polling.**
+  Pinned `src/server.rs:954–960` resets idle on every RPC, including stats and
+  client-side storage calls. Polling prevents natural idle; compile counters
+  cannot recover all request gaps. Keep 600 s until passive request timestamps
+  covering an hour exist. This replaces the concept review's proposed polling
+  method, not the fired idle rule. No daemon restart or logging service added.
+
+- **Concept review 2 (2026-11-16 12:11): one question stops the idle work.**
+  Cache-file mtimes give a passive gap sample (upper bounds): pinned daemon up
+  1h45m, longest gap 249 s, none of 300 s; 12 of 120 s, 4 of 180 s. The running
+  daemon holds 600 s and reads a new timeout only at start, so nothing changes
+  without one stop of the shared daemon. Unanswered: may the pinned daemon be
+  stopped — (a) once by hand so a 120 s timeout takes effect, (b) by the
+  `post-checkout` hook whenever a new root is unloaded, or (c) never, with the
+  docs saying a busy Machine may not load a new root? Source read, not run: in
+  client-side mode a stop kills no compile; compiles still running 10 s later
+  lose their cache write. Still unasked from the first review: the 10 GiB cap,
+  full with 64 roots.

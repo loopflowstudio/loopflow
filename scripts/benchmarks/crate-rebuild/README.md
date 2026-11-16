@@ -58,6 +58,10 @@ worktree plus three edits* that decides whether incremental compilation stays
 off by default. It states concurrent-worktree capacity as unmeasured: the peak
 tree RSS and CPU-seconds describe one loop.
 
+The shared Machine cache reached its 10 GiB cap during LOO-921 (2026-11-16).
+The private warm-cache rows measure the cost of surviving entries, not their
+survival rate under shared-cache eviction. The cap stays unchanged.
+
 ## Cache probes and the revision comparison
 
 The probe builds the actual model, definition-content, terminal and storage crates in two separate

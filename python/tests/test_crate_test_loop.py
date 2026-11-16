@@ -100,9 +100,11 @@ def test_report_selects_incremental_only_when_both_edit_totals_win(
     result = json.loads((output / "loo-921.json").read_text())
     assert result["default_incremental"] is default
     assert result["concurrent_worktree_capacity"] is None
+    assert "10 GiB cap" in result["shared_cache_limit"]
     assert len(result["receipts"]) == 39
     assert (output / "loo-921-raw.json.gz").exists()
     assert "A Rust edit through a passing test" in (output / "loo-921.html").read_text()
+    assert result["shared_cache_limit"] in (output / "loo-921.html").read_text()
 
 
 def test_resume_complete_measurement_reuses_receipts_without_a_target(

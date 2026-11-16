@@ -109,11 +109,19 @@ def test_status_classifies_loaded_roots(tmp_path, monkeypatch, running, loaded, 
     if running:
         socket.touch()
     config = tmp_path / "cache.json"
-    config.write_text(json.dumps({"basedirs": [str(tmp_path)]}))
+    config.write_text(json.dumps({"basedirs": [], "cache": {"disk": {"size": 123}}}))
+    monkeypatch.setattr(build_cache, "worktree_roots", lambda repo: {str(tmp_path)})
     monkeypatch.setattr(
         build_cache,
         "configured_cache",
-        lambda: (wrapper, {"SCCACHE_CONF": str(config), "SCCACHE_SERVER_UDS": str(socket)}),
+        lambda: (
+            wrapper,
+            {
+                "SCCACHE_CONF": str(config),
+                "SCCACHE_SERVER_UDS": str(socket),
+                "SCCACHE_IDLE_TIMEOUT": "120",
+            },
+        ),
     )
     stats = {
         "basedirs": [str(tmp_path) + "/"] if loaded else [],
@@ -139,12 +147,15 @@ def test_status_classifies_loaded_roots(tmp_path, monkeypatch, running, loaded, 
     assert result["exit_code"] == expected
     assert result["loaded_roots"] == ([str(tmp_path)] if running and loaded else [])
     assert (result["daemon"] is not None) == running
-    assert result["idle_seconds"] is None
+    assert result["configured_idle_timeout_seconds"] == 120
+    assert result["listed_roots"] == [str(tmp_path)]
+    assert json.loads(config.read_text())["cache"]["disk"]["size"] == 123
 
 
 def test_missing_wrapper_is_actionable(tmp_path, monkeypatch):
     monkeypatch.setattr(build_cache, "configured_cache", lambda: (tmp_path / "missing", {}))
     monkeypatch.setattr(build_cache, "inventory_path", lambda: tmp_path / "inventory")
+    monkeypatch.setattr(build_cache, "worktree_roots", lambda repo: {str(tmp_path)})
     monkeypatch.setattr(subprocess, "check_output", lambda *args, **kwargs: str(tmp_path))
     assert build_cache.cache_status(tmp_path)["exit_code"] == 1
 

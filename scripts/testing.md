@@ -304,7 +304,7 @@ uv run python scripts/build_cache.py status    # in any worktree
 
 ```text
 wrapper  ~/.local/share/loopflow/sccache/ca81ec2a…/bin/sccache (pinned)
-daemon   pid 4242, same executable, up 3m; idle time unmeasured
+daemon   pid 4242, same executable, up 3m; configured idle timeout sccache default (600s) (next start)
 roots    61 of 61 loaded; this checkout loaded
 Rust     258 hits, 1 miss
 cache    6.2 GiB of 10 GiB
@@ -333,18 +333,21 @@ A new worktree registers itself. `install` adds a block to the repository's
 checkouts `lf` creates for Tasks. The block lists the new root in
 `~/.cache/loopflow/sccache.json` (under `XDG_CACHE_HOME` when set), in the
 background, and cannot fail a checkout. `scripts/dev-lf` refreshes the same list
-before it builds, and `uv run python scripts/build_cache.py refresh` does it by
-hand. Roots from other repositories stay in the file.
+before it builds; `status` refreshes before reading it. Roots from other
+repositories stay in the file.
 
 The daemon reads that list once, when it starts. It exits after ten minutes
-without a compile and the next build starts it again with the current list.
-The daemon API does not expose its last-request time, so status cannot give an
-idle countdown.
+without a request and the next build starts it again with the current list.
+`status` shows the configured timeout for the next daemon start; a running
+daemon may have started with another value. Zero disables idle exit.
+Reading statistics also resets the idle timer: repeatedly running `status`
+postpones the exit. The API exposes neither the active timeout nor the last
+request time.
 Nothing here stops or restarts it: a stop drops other worktrees' compiles. Until
 then a new worktree's builds work and miss, and `status` reports the unloaded root:
 
 ```text
-roots    60 of 61 loaded; this checkout loads at the daemon's next idle exit (idle time unmeasured)
+roots    60 of 61 loaded; this checkout loads at the daemon's next idle exit
 ```
 
 | `status` exit | Meaning | Do |
@@ -369,6 +372,11 @@ The pinned daemon listens on its own socket,
 `~/.cache/loopflow/sccache-<revision, first 8>.sock`, and keeps the Machine's existing
 cache directory and size cap. A Homebrew sccache daemon that was already running
 gets no more requests and exits by itself.
+
+The shared cache reached its 10 GiB cap during LOO-921. Entries can be evicted
+before another worktree needs them. Warm measurements in a private cache show
+the cost of a surviving entry; they do not measure how often shared entries
+survive. Installation leaves the cap unchanged.
 
 **Repeated edits.** The dev and test profiles turn incremental compilation off,
 because an incremental crate is never cached. To trade the cache for faster

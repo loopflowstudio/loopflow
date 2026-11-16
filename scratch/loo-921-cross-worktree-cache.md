@@ -198,8 +198,8 @@ plus the gzipped raw receipts, alongside LOO-650's.
 - `SCCACHE_IDLE_TIMEOUT`: stays at sccache's 600 s unless the Machine check shows
   a registered root still unloaded when its first Cargo command starts; then
   `install` sets the smallest sampled value that would have loaded it. **This
-  rule fired** (Concept review below); the value waits on the pinned-daemon gap
-  sample.
+  rule fired** (Concept review below); the value waits on a passive request-gap
+  sample. Counter polling cannot supply it (implementation correction below).
 - Concurrent-worktree capacity: reported as unmeasured. The report carries
   per-loop peak tree RSS and CPU-seconds as inputs, not a budget.
 
@@ -259,6 +259,9 @@ Not touched: `.cargo/` in the repository (none exists), CI workflows,
 - The paragraph in `scripts/testing.md` saying ordinary Cargo "does not run this
   inventory refresh" and "Neither path installs a wrapper".
 - `/tmp/loo650-sccache` is left alone; nothing may reference it.
+- Status's hardcoded `idle_timeout_seconds`, `idle_seconds`, `idle_note` and
+  the repeated "idle time unmeasured" copy: removed; retain configured timeout
+  reporting and distinguish next-start configuration from running state.
 
 ## Forbidden outcomes
 
@@ -272,10 +275,10 @@ Not touched: `.cargo/` in the repository (none exists), CI workflows,
 
 ## Remaining implementation acceptance
 
-- Concept-review steps 1–4 and 6 below: pinned-daemon gap sample,
-  `SCCACHE_IDLE_TIMEOUT` from it, `status` without the unknown-only idle fields
-  and refreshing first, report limit on the capped shared cache. Step 5
-  (`--help` text) is done.
+- Passive pinned-daemon request-gap sample and `SCCACHE_IDLE_TIMEOUT` from it.
+  The polling method from concept-review step 1 is invalid; see correction below.
+  Status refresh, configured-timeout reporting and shared-cache report limit
+  are implemented; timeout installation remains pending measurement.
 - Three warm paired cohorts (2, 3 and 4), then `results/loo-921.{json,html}` and
   gzipped raw receipts, default selection and measured documentation.
 - The production shared-daemon new-root check after a natural idle exit. The
@@ -338,7 +341,10 @@ Stock shared daemon, 2026-11-16 10:13–10:18, `compile_requests` polled every 5
 for 271 s (load average falling from 48 to 12): 204 s with no request, then 85
 requests in the last 67 s. The same daemon had been up 56 minutes, so no 600 s
 gap in that hour. Minutes-long gaps exist; ten-minute gaps were not seen. Slice
-2 repeats this against the pinned daemon before the idle-timeout rule is applied.
+2 originally planned to repeat this against the pinned daemon. This is a
+compile-counter sample, not an idle-gap sample: each stats request resets idle
+and client-side storage traffic need not change these counters. It cannot
+justify the idle timeout.
 
 ## Docs written ahead of the code (2026-11-16)
 
@@ -462,3 +468,107 @@ Unverified and decisive: what a stop costs in client-side mode, where the daemon
 stores and the client compiles, so §"Stopping the daemon is not free" (written
 about server-side compiles) may overstate it. Check that in the pinned source
 before asking.
+
+## Implementation correction (2026-11-16): polling changes the idle behavior
+
+Pinned source `mozilla/sccache@ca81ec2a2566efc623692741440d99c710268841`,
+`src/server.rs:954–960`, sends `ServerMessage::Request` before dispatching
+every RPC, including `GetStats`, `StorageHandshake`, `StorageGetRaw`,
+`StoragePutRaw` and `RecordStats`. Confirmed in Cargo's installed source at
+`~/.cargo/git/checkouts/sccache-e66579fa6a82ca59/ca81ec2/src/server.rs`.
+An hour of 5-second stats polling prevents any idle exit longer than 5 seconds.
+Flat compile counters also omit intervening storage traffic. The proposed
+method therefore cannot establish recurring request gaps or pick a timeout.
+
+Dependent timeout work stops here. The 600 s default remains unchanged.
+The missing input is passive request timestamps covering at least an hour
+(for example, request logging enabled at the next natural daemon start),
+including storage requests; neither PID uptime nor compile counters replaces
+that input. No observer service, daemon patch or shared-daemon restart is added.
+The sampling method needs review before implementation resumes on this part.
+
+Status now refreshes before reading, removes the three unknown-only fields and
+reports `configured_idle_timeout_seconds` (null means upstream default).
+Human output distinguishes next-start configuration from active state; docs
+explain that stats reads postpone idle exit. The report's JSON and HTML state
+the isolated-cache limitation under the shared cache's observed 10 GiB cap.
+
+Machine observation at this pass: pinned PID 35015 up 01:43:16, 60 of 64 roots
+loaded, Rust 1313 hits / 622 misses, cache 10.0 / 10.0 GiB; `df -h /tmp`
+still 21 GiB free. No benchmark or production Cargo check was started.
+
+Check: `uv run pytest python/tests/test_build_cache.py python/tests/test_crate_test_loop.py`
+— 19 passed; gate/CI retains documented-command and broader checks.
+
+## Concept review 2 (2026-11-16 12:11): idle exit cannot load a root on this Machine
+
+**A passive gap sample exists without touching the daemon.** Every cache write,
+and every hit served through `get_file` (`lru_disk_cache/mod.rs:427`,
+`set_file_times`), leaves an mtime under `~/Library/Caches/Mozilla.sccache`.
+Requests that touch no file (handshake, a miss's lookup, stats, `RecordStats`)
+are absent, so a gap between mtimes is an upper bound on a true idle gap.
+
+Read at 12:11, pinned pid 35015 started 10:25:55 (up 1h45m), 1018 file
+timestamps since its start, 3805 files in the cache:
+
+| Gap at least | 30 s | 60 s | 90 s | 120 s | 180 s | 240 s | 300 s | 600 s |
+|---|---|---|---|---|---|---|---|---|
+| Count | 56 | 30 | 19 | 12 | 4 | 2 | 0 | 0 |
+
+Longest: 249.1 s from 11:36:49, 240.8 s from 10:27:21, 206.4 s from 11:31:54.
+
+What that settles:
+
+- No timeout of 250 s or more would have fired in 1h45m. 600 s is not a
+  mechanism here; "exits after ten minutes without a request" is true and has
+  not happened. `60 of 64 loaded` was unchanged at 12:10.
+- A shorter value is bounded, not shown: 120 s had at most 12 chances, 180 s at
+  most 4, and each count may be zero.
+- **No timeout change reaches the running daemon.** `SCCACHE_IDLE_TIMEOUT` is
+  read at daemon start, and this daemon holds 600 s with no gap to exit in. Any
+  value `install` writes waits for an exit that the sample says does not come.
+  Every way forward begins with one stop of the shared daemon, which the brief,
+  the docs and Forbidden outcomes all withhold.
+
+**What a stop costs, read from the pinned source (not run).** In client-side
+mode the compiler runs in the client (`commands.rs:729`, `do_compile_client_side`);
+the daemon only answers storage RPCs on one connection the client holds for the
+whole compile. A stop cannot kill a compile. After the 10 s `SHUTDOWN_TIMEOUT`
+a client still compiling loses its cache write and its `RecordStats`.
+§"Stopping the daemon is not free" and the Alternatives entry ("drops other
+worktrees' compiles") describe server-side compiles and overstate it. Not
+verified by a run: what a client sees when it connects during those 10 s.
+
+**The distinction people must learn for no benefit is listed/loaded.** It
+exists only because the load waits for an idle exit. Three shapes, the choice
+between them unanswered:
+
+- *a. One stop by hand, then a short timeout.* `install` writes
+  `SCCACHE_IDLE_TIMEOUT` (120 s by the table); someone runs `--stop-server`
+  once. Listed/loaded, exit 3 and the "next idle exit" line stay. Whether roots
+  then load is watched passively: the daemon pid changing by itself (`ps`, no RPC).
+- *b. Registration stops the daemon.* The hook block stops the pinned daemon
+  when its checkout is not loaded; the next compile starts it with the list.
+  Listed becomes loaded within seconds; the idle-timeout work, exit 3's waiting
+  meaning and the "loads at next idle exit" copy are deleted. Cost per new
+  worktree: cache writes of compiles in flight past 10 s. This is the
+  Alternatives entry "the next step only if the idle sample … shows roots
+  waiting past their first build"; that condition is met.
+- *c. Neither.* Keep 600 s. Docs say a busy Machine may never load a new root,
+  and the Task's "new-root hit after natural idle" is reported as not reached.
+
+**Next implement direction, whichever answer comes** (no Rust build):
+
+1. `scripts/testing.md` and `scripts/README.md`: next to "exits after ten
+   minutes without a request", say what this Machine showed: no gap of 300 s
+   in 1h45m, so a new root can stay unloaded for as long as builds keep coming.
+2. Rewrite §"Stopping the daemon is not free" and the Alternatives entry to the
+   client-side cost above.
+3. Replace "the missing input is passive request timestamps" in Remaining
+   implementation acceptance with the mtime sample; no logging service.
+4. Timeout installation, the hook stop, and any change to exit 3 wait for the
+   answer.
+
+Unchanged: one command to install, own socket, hook registration, incremental
+rule, serial Cargo, three warm cohorts once disk is above the 32 GiB reserve
+(21 GiB at 12:10).

@@ -99,6 +99,10 @@ def _test_loop(source: Path, output: Path) -> None:
         "default_incremental": incremental,
         "concurrent_worktree_capacity": None,
         "capacity_note": "Unmeasured; all Cargo commands ran serially",
+        "shared_cache_limit": "The shared Machine cache reached its 10 GiB cap during "
+        "LOO-921 (2026-11-16). These isolated warm-cache samples measure the cost "
+        "of a surviving entry; they do not establish that an entry survives "
+        "eviction between worktrees on the shared cache.",
         "method": "Workspace wrapper records all compiler intervals. Cache deltas are "
         "attributed to a compiler only when no other interval overlaps. "
         "Two statistics RPCs per workspace compiler are included in timings. "
@@ -189,6 +193,7 @@ Median [minimum–maximum]. Each sample passes one focused test and includes its
 <p>Revision <code>{html.escape(config["revision"])}</code>.<br>{html.escape(config["rustc"])}</p>
 <p>{html.escape(load_note)} {html.escape(interruption_note)}</p>
 <p>{html.escape(calibration_note)}</p>
+<p>{html.escape(payload["shared_cache_limit"])}</p>
 <h2>Elapsed seconds</h2>{table("wall_seconds")}
 <h2>Three edits, elapsed seconds</h2><p>Application includes new-worktree creation and its first
 build.

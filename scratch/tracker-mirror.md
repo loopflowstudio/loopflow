@@ -264,6 +264,44 @@ Read against a2c956a129 and 7e3fa2ac84. No product choice in these.
   row the pass skips (owner held, `tracing::debug!` once), and drop
   `decide`'s `_ => Hold` arm for an exhaustive match inside the crate.
 
+### Concept review (2026-11-16, after the cut): next implement direction
+
+Read against 3d21fe1ccb..90f825a173. No product choice in these.
+
+- **Follow-up relations are an eighth receipt.** `drain_repository` calls
+  `linear::sync_retained_relations` on every Linear pass: a
+  `follow_through_intent` task event is the receipt, a
+  `follow_through_relation_confirmed` event the settlement, and each pending
+  relation gets its own 5 s deadline outside the pass's request bound. It is a
+  `link` effect owned by the source Task, subject `relation:<relation_id>`,
+  enqueued where the intent is recorded; the migration (still in draft) copies
+  pending relations. Asana answers `Unsupported`. Deleted:
+  `sync_retained_relations`, `pending_retained_relations`,
+  `confirm_retained_relation`, the provider check in `drain.rs`, and the
+  `locks/follow-through-relations` lock path. The intent event stays as
+  history.
+- **PR links are `link` effects, subject `pr:<url>`.** Publish enqueues,
+  drains `Scope::First(task)`, then reads the effect's `error` into
+  `pr.linear_link_error`: the same line at publish, with a receipt and a
+  retry on the next pass instead of the next publish. This removes the
+  `Tracker::Asana(client)` match in `ops/task.rs:2478`, a forbidden outcome,
+  and `link_pr_with_client`'s ids-after-the-call.
+- **The bridge's error is the tracker's, not Linear's.** `asana/mod.rs` returns
+  `LinearResult`/`LinearError` (28 mentions) and `Sent::failed` takes a
+  `LinearError`. A `tracker::BridgeError { RateLimited { .. }, Message }` in
+  `ops/tracker.rs`, which `LinearError` and `AsanaFailure` convert into, makes
+  the Target's "Linear* types stay inside `linear/`" true for Asana.
+- **Saves drain their own owner first.** `sync_after_save` takes the saved
+  `EffectOwner` and drains `Scope::First`; `machine/task.rs:86` already does.
+  With 20 requests a pass and a backlog in `seq` order, `Scope::All` can leave
+  the edit someone just made for a later command.
+- **The pending diagnostic names `lf repo plan`.** `planning_sync.rs:94` says
+  "See `lf planning status`", a moved alias.
+- **"Done when" grep excludes migrations.** Its only hits are applied
+  migrations (`0.14.8.001_release.sql`, `bounded_identity_triggers.sql`),
+  which are immutable: `grep -rn 'teamId\|stateId\|assigneeId'
+  rust/loopflow-storage/src | grep -v migrations` is empty today.
+
 ### Migration (one, additive): `tracker_effects`
 
 `uv run python scripts/new_migration.py tracker_effects`. Creates the table,
@@ -388,11 +426,10 @@ Deepest deletions first, then the queue, then the bridges. Commit at each.
    - Docs: `docs/dev/planning.md`, `docs/dev/reference.md:89`,
      `rust/loopflow-execution/src/ops/README.md` (still names the deleted drains
      and `check_before_write`). File the contract-migration and DTO Tasks.
-   - `sync_after_save` drains `Scope::All`; the plan said the just-saved owner
-     first, which needs the owner from each caller.
-   - PR links still go out beside the queue (`link_pr_with_client`, the Asana
-     PR comment in `ops/task.rs`). GOAL.md name/summary as Wave `field`
-     effects: not built (`EffectKind::of` queues nothing for Wave values).
+   - The "after the cut" concept review above, in order: relations and PR
+     links as `link` effects, `BridgeError`, `sync_after_save` with its owner,
+     the diagnostic. GOAL.md name/summary as Wave `field` effects: not built
+     (`EffectKind::of` queues nothing for Wave values).
    - `pm_issue_changes`: write `a_tracker_removal_withdraws_new_launches`,
      then decide whether the table goes.
    - Linear-fake tests now cover creation through the queue, order and its lost
@@ -417,7 +454,7 @@ Deepest deletions first, then the queue, then the bridges. Commit at each.
 - Creating, editing, steering, completing, reordering and deleting a Task in a
   Linear- or Asana-configured repository each leave one `tracker_effects` row
   that `lf repo plan --json` shows and the next pass settles.
-- `grep -rn 'teamId\|stateId\|assigneeId' rust/loopflow-storage/src` is empty.
+- `grep -rn 'teamId\|stateId\|assigneeId' rust/loopflow-storage/src | grep -v migrations` is empty.
 - `grep -rln -i notion rust/*/src --include=*.rs | grep -v migrations` is empty;
   `grep -rn -i chapter rust/*/src --include=*.rs | grep -v migrations` lists
   no live behavior.

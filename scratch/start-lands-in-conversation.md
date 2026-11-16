@@ -216,6 +216,14 @@ Differences from the approach above:
   `session_id`). Nothing prunes `creation_receipts`; whatever later expires
   request IDs must keep `admitted` rows.
 
+Concept review of dde1d32a15: the model holds (one transaction; a crash after
+commit and before `hold_conversation` repeats as Complete and the conversation
+sets up when opened). One cleanup before slice 2: `file_task_in` builds the
+same `TaskCreationRecord` twice (adopted and new branches, `ops/task.rs` ~1988
+and ~2051) from a `Receipt`/`Admit` pair that mirrors
+`TaskCreationRecord`/`TaskAdmission`. Build it in one helper taking
+`(existing, id, title, wave)`; keep one pair of types.
+
 Remaining, in order:
 1. Slice 2 (Desktop, phone): consume `TaskCreated.session`/`.overview`; Swift
    `TaskCreated` decodes them, nothing reads them yet.

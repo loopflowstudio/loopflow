@@ -108,7 +108,7 @@ one frame, with accepted and confirmed times beside it.
   | Complete | hidden from every list but Done; disposition done | gone |
   | Abandon | hidden from every list; disposition abandoned | gone |
   | Reopen | disposition open; section Working if owned and started, else Backlog | moved |
-  | Claim | owner = this person; section Working if started | owner shown |
+  | Claim | owner = the repository reading's `viewer`; section Working if started | owner shown |
   | Unassign | owner nil; section Backlog | moved |
   | Move | Wave = target | moved between Wave lists |
   | Session rename | Session title | new title |
@@ -269,6 +269,37 @@ Checks: `swift test --filter 'PendingChangesTests|WorkModelTests|WorkNavigationT
 passed; `scripts/test_ios.py -only-testing:LoopflowiOSTests/MobileTaskCreationTests`
 19 passed; `documented_commands::` 4 passed. `WorkNavigationProofTests` (display) edited for rename in the
 click, not run here: gate/CI. Rust unchanged since the first pass.
+
+## Next implement direction (concept review, pass 2, 2026-11-16)
+
+The seven directions are built. Four places still miss the brief; none is a
+product choice.
+
+1. **Claim shows its owner.** The brief: "Move, Claim, Unassign, Reopen and
+   Session rename show their result in the click." Section-only Claim shows
+   nothing for an unstarted Task. The Machine knows who a claim names (the
+   repository's Git identity, `TaskOwner`); the client must not guess it. The
+   repository's `task_list` reading gains `viewer: TaskOwner?` (required,
+   nullable: null when Git has no identity), Rust resolving it with the claim's
+   own resolver in `task_ownership.rs`. Claim sets `runtime.owner = viewer` on the
+   repository's planning rows (list rows carry states only); with no viewer,
+   the section move only. DTO fixture and
+   each language's fixture test take the field. `docs/surfaces.md` "your name
+   as owner" then holds.
+2. **Read failures post from one place.** The ~50 inline sites go together:
+   every part's reading on Desktop is assigned through one `WorkModel`
+   function that posts an event Notice keyed by the part on a transition into
+   failure, and none while `pendingChanges.link == .away` (the away condition
+   already says it). Views read `.value` and show the last good reading or
+   empty. The phone's `TaskFeed` does the same through the same rule.
+3. **The planning-rows bridge goes.** `sidebarTaskRows`' fallback to
+   `visibleTasks` is the second list evaluator the plan forbids. Desktop saves
+   `task_list` readings through `SavedReadings` and draws the first frame from
+   them; before any reading, the sidebar is empty.
+4. **The refusal Notice carries "Show".** `make` takes the action; Desktop's
+   selects the Task, the phone's opens its workspace.
+
+Then `TaskFeedTests` with a `ServerCarrier` stand-in, as planned.
 
 ## Acceptance at gate (headless)
 

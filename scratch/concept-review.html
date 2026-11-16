@@ -23,66 +23,47 @@
 </style>
 </head>
 <body><main>
-<h1>LOO-931: one change path, conditions under events</h1>
-<p class="meta">Task LOO-931 · step concept-review (headless) · 2026-11-16 · built from
+<h1>LOO-931: what the built change path still misses</h1>
+<p class="meta">Task LOO-931 · step concept-review pass 2 (headless) · 2026-11-16 · built from
 <code>scratch/show-changes-at-once.md</code>, <code>scratch/questions.md</code>,
-<code>swift/Loopflow/Services/PendingChanges.swift</code>, <code>Notice.swift</code>,
-<code>swift/LoopflowMac/WorkModel.swift</code>, <code>swift/LoopflowiOS/TaskListView.swift</code>,
-<code>WaveStandupBoard.swift</code></p>
+<code>swift/Loopflow/Services/PendingChanges.swift</code>, <code>Notice.swift</code>, <code>Reading.swift</code>,
+<code>swift/LoopflowMac/WorkModel.swift</code>, <code>rust/loopflow-model/src/durable.rs</code></p>
 
-<p><strong>Decision needed: none.</strong> Everything below follows from the brief's model, so it goes back
-to implement as direction. The one choice left open from kickoff (phone Abandon) is still in question 1.</p>
+<p><strong>Decision needed: none.</strong> The seven directions from pass 1 are built: one
+<code>PendingChanges</code> per Machine owns make, request, resend and the link; <code>Reading</code> carries
+<code>readAt</code>; <code>NoticeCenter</code> holds conditions under one event. Four gaps remain, each settled by
+the brief. They go back to implement.</p>
 
 <h2>The biggest mismatch</h2>
 <div class="callout">
-<p>"Pending change" is one concept in the brief and three pieces of code in the build. Desktop
-(<code>WorkModel.change / request / send</code>) and phone (<code>TaskFeed</code>) each write the
-send → answer → refuse → Notice switch. Only Desktop resends on a lost link. A reading's revisions sit in
-<code>WorkModel.readAt[part]</code>, mirrored inside <code>PendingChanges.readings</code>.</p>
+<p>The brief: "Move, Claim, Unassign, Reopen and Session rename show their result in the click." Claim on an
+unstarted Task shows nothing: the client has no person to put in <code>owner</code>, so only the section moves,
+and only when the Task was started. The Machine already knows who a claim names. It should say so on the
+reading.</p>
 </div>
-
-<h2>Actions → concepts → APIs</h2>
 <table>
-<tr><th>Someone does</th><th>Built</th><th>Proposed</th></tr>
-<tr><td>Complete, Abandon, Claim, Move…</td>
-<td class="old">app adds patch, app sends, app switches on answer, app posts Notice</td>
-<td class="new"><code>pendingChanges.make(.complete(task:), issue:, verb:, write:)</code>; the app only passes its send closure</td></tr>
-<tr><td>Start, Auto-Ship, Stop Auto-Ship</td>
-<td class="old">"requested" after the Machine answers</td>
-<td class="new">"requested" in the click; a refusal posts over it</td></tr>
-<tr><td>Move LOO-3 to another Wave</td>
-<td class="old">list moves; Wave counts stay (planning rows take removal only)</td>
-<td class="new"><code>apply(to: [RoadmapTask], readAt:)</code> patches disposition, owner, Wave, section; counts follow</td></tr>
-<tr><td>Machine stops for 10 s</td>
-<td class="old">Desktop resends forever, controls stay live; phone refuses at once</td>
-<td class="new">link state (connected, blip, away) beside the changes, one per Machine; away greys controls and posts one condition</td></tr>
-<tr><td>A Task outside the plan</td>
-<td class="old">planned: an event toast per board load</td>
-<td class="new">a condition Notice per Wave while the reading lists it · Copy recovery</td></tr>
+<tr><th></th><th>Click Claim on unstarted LOO-3</th></tr>
+<tr><td class="old">built</td><td>Row unchanged until the next reading names the owner.</td></tr>
+<tr><td class="new">proposed</td><td>Repository <code>task_list</code> reading carries <code>viewer: TaskOwner?</code>;
+Claim sets <code>runtime.owner = viewer</code> in the click. No Git identity → section move only.</td></tr>
 </table>
 
-<h2>Notice: one slot, two kinds</h2>
-<p>Built, a new Notice replaces the current one. Proposed, events replace events; conditions stay underneath:</p>
-<pre>away posted        →  shows "Machine is away"
-Complete refused   →  shows "LOO-4 couldn't be completed: its PR #12 is open"
-six seconds later  →  shows "Machine is away" again
-Machine returns    →  clear(key: "away") → nothing shown</pre>
-<p>Without this, any event posted while away hides "away" for good.</p>
+<h2>Actions → concepts → APIs (what changes)</h2>
+<table>
+<tr><th>Action</th><th>Concept</th><th>API</th></tr>
+<tr><td>Claim</td><td>Pending change, owner from the Machine</td><td class="new"><code>task_list.viewer</code> (DTO, required nullable)</td></tr>
+<tr><td>A read fails</td><td>Notice event keyed by part; none while away</td><td class="new">one assignment function in <code>WorkModel</code>; ~50 inline sites go</td></tr>
+<tr><td>Launch</td><td>Saved reading</td><td class="new"><code>SavedReadings</code> for Desktop <code>task_list</code>; <code>sidebarTaskRows</code> planning fallback goes</td></tr>
+<tr><td>Change refused</td><td>Notice with one action</td><td class="new"><code>make(…, action:)</code> "Show" selects / opens the Task</td></tr>
+</table>
 
-<h2>What goes</h2>
-<p><code>WorkModel.change</code>, <code>request</code>, <code>send</code>, <code>Sent</code>, <code>WorkModel.readAt</code>,
-<code>TaskFeed</code>'s send copies, <code>PendingChanges.removes(task:at:)</code>, <code>shown(_ tasks:)</code>,
-<code>WorkReading</code>, <code>TaskListReading</code>, <code>MobileTaskReading</code>, <code>WavePlanningNotice</code>.</p>
+<h2>Why the bridge must go</h2>
+<p><code>sidebarTaskRows</code> falls back to planning rows' sections before the list reads. That is a second
+list evaluator, which the plan forbids; a saved reading draws the same first frame from the Machine's own answer.</p>
 
 <h2>Questions</h2>
 <ol>
-<li>Phone Abandon. The brief says Complete and Abandon on "Desktop and phone", then lists what the phone gains
-without Abandon. Built: no phone Abandon.
-<br>a) leave it Desktop-only · b) add a swipe Abandon beside Complete</li>
-<li>A Task outside the plan as a condition Notice.
-<br>a) condition per Wave, as proposed · b) keep the inline board line (the brief lists it among the surfaces to replace)</li>
-<li>Several windows on one Machine.
-<br>a) one <code>PendingChanges</code> per Machine, shared by windows, as proposed · b) per window, the other window catches up at its next reading</li>
+<li>Phone Abandon (open since kickoff): the phone gains the four actions the brief names; Abandon stays
+Desktop-only. a) keep, b) add Abandon to the phone's swipe.</li>
 </ol>
-</main></body>
-</html>
+</main></body></html>

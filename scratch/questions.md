@@ -22,9 +22,9 @@
   4 s, with no cap. A Machine that never returns keeps the patch until quit.
 - Planning rows: Complete marks the row done (it stays in Done lists, as the
   table says) rather than removing it; Abandon removes it.
-- Claim does not show the owner in the click: Desktop has no local person
-  identity to fill `TaskOwner`. The section moves; the owner arrives with the
-  reading. Docs still say "your name as owner".
+- Claim's owner comes from a `viewer: TaskOwner?` on the repository's
+  `task_list` reading (concept review pass 2, item 1); with no Git identity
+  the Claim moves the section only.
 - Rename refusal closes the edit and the typed name is gone; the Notice says
   why. Before, the typed name stayed in the field with its error.
 - Desktop counts any end of the Work observation as the link lost; the next

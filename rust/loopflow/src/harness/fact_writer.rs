@@ -1,12 +1,12 @@
 //! The one writer of what decoders establish: Session receipts, availability,
-//! the native conversation selection and account capacity.
+//! and the native conversation selection.
 //!
 //! Each turn's `completed` receipt also carries what filled its context: the
 //! first and peak request the provider reported, the tool results returned
 //! into the main conversation, and compactions.
 //!
-//! Availability is display evidence and account effects are best effort, so
-//! their failures warn. A receipt failure is returned to the driver, which
+//! Availability is display evidence, so its failures warn. A receipt failure
+//! is returned to the driver, which
 //! decides whether its stream can continue.
 
 use std::collections::{BTreeSet, HashMap};
@@ -19,7 +19,6 @@ use super::fact::{Decoded, ProviderFact, ProviderTurn, Signal};
 use crate::chat::types::{ConversationEvent, ConversationItem};
 use crate::id::AgentSessionId;
 use crate::process::SessionAttachment;
-use crate::provider_account::ProviderAccountRoute;
 use crate::session::{
     SessionActivity, SessionEventKind, SessionPreview, SessionTurnOrigin, TurnContext,
 };
@@ -36,7 +35,6 @@ pub(super) struct FactWriter {
     /// Absent for readers with no live attachment, such as history backfill:
     /// they retain receipts but say nothing about current availability.
     attachment: Option<SessionAttachment>,
-    route: Option<ProviderAccountRoute>,
     requests: RequestOrigins,
     activity: SessionActivityTracker,
     context: TurnContext,
@@ -55,14 +53,12 @@ impl FactWriter {
         store: SqliteStore,
         session: String,
         attachment: Option<SessionAttachment>,
-        route: Option<ProviderAccountRoute>,
         requests: RequestOrigins,
     ) -> Self {
         Self {
             store,
             session,
             attachment,
-            route,
             requests,
             activity: SessionActivityTracker::default(),
             context: TurnContext::default(),
@@ -83,27 +79,10 @@ impl FactWriter {
     }
 
     /// Write every fact in one decoded message, in order, including the
-    /// account effects only a launch with an account route has.
+    /// provider receipts and availability.
     pub(super) async fn write(&mut self, decoded: &[Decoded]) -> Result<()> {
         super::dispatch::off_reactor(|| self.record(decoded))?;
-        let Some(route) = &self.route else {
-            return Ok(());
-        };
-        for fact in decoded.iter().filter_map(Decoded::fact) {
-            match fact {
-                ProviderFact::SessionObserved(thread) => {
-                    if let Err(error) = route.pin_session(thread).await {
-                        tracing::warn!(%error, session = self.session, "failed to pin provider session account");
-                    }
-                }
-                ProviderFact::RateLimit(signal) => {
-                    if let Err(error) = route.record_rate_limit(signal).await {
-                        tracing::warn!(%error, session = self.session, "failed to record provider rate limit");
-                    }
-                }
-                _ => {}
-            }
-        }
+
         Ok(())
     }
 
@@ -465,7 +444,6 @@ mod tests {
             store.clone(),
             "conversation".into(),
             Some(attachment.clone()),
-            None,
             Default::default(),
         )
     }
@@ -1110,7 +1088,6 @@ mod tests {
                     store.clone(),
                     "conversation".into(),
                     Some(attachment.clone()),
-                    None,
                     origins.clone(),
                 )
             };

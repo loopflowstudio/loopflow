@@ -4,9 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::id::{AgentSessionId, WaveId};
-use crate::profile::{
-    AccessProfile, AuthBrowserBinding, EmailAddress, ProfileId, ProviderRoute, RouteScope,
-};
+use crate::profile::{AccessProfile, AuthBrowserBinding, EmailAddress, ProfileId};
 use crate::provider_auth::Provider;
 use crate::work::wave::{Wave, WaveLocator};
 mod canonical_ids;
@@ -526,38 +524,11 @@ impl Store {
         run_sqlite(&self.sqlite, |store| store.list_provider_tokens()).await
     }
 
+    #[cfg(test)]
     pub async fn upsert_provider_account(&self, account: &ProviderAccount) -> StoreResult<()> {
         let account = account.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.upsert_provider_account(&account)
-        })
-        .await
-    }
-
-    pub async fn record_provider_account_identity(
-        &self,
-        provider: &str,
-        account_id: &ProviderAccountId,
-        email: &str,
-        subject: &str,
-        plan: Option<&str>,
-        credential_digest: Option<&str>,
-    ) -> StoreResult<()> {
-        let provider = provider.to_string();
-        let account_id = account_id.clone();
-        let email = email.to_string();
-        let subject = subject.to_string();
-        let credential_digest = credential_digest.map(str::to_string);
-        let plan = plan.map(str::to_string);
-        run_sqlite(&self.sqlite, move |store| {
-            store.record_provider_account_identity(
-                &provider,
-                &account_id,
-                &email,
-                &subject,
-                plan.as_deref(),
-                credential_digest.as_deref(),
-            )
         })
         .await
     }
@@ -582,154 +553,6 @@ impl Store {
         let provider = provider.map(str::to_string);
         run_sqlite(&self.sqlite, move |store| {
             store.list_provider_accounts(provider.as_deref())
-        })
-        .await
-    }
-
-    pub async fn update_provider_account_lifecycle(
-        &self,
-        account: &ProviderAccount,
-    ) -> StoreResult<()> {
-        let account = account.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.update_provider_account_lifecycle(&account)
-        })
-        .await
-    }
-
-    pub async fn clear_provider_account_cooldown(
-        &self,
-        provider: &str,
-        account_id: &ProviderAccountId,
-    ) -> StoreResult<()> {
-        let provider = provider.to_string();
-        let account_id = account_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.clear_provider_account_cooldown(&provider, &account_id)
-        })
-        .await
-    }
-
-    pub async fn reset_provider_account_health(
-        &self,
-        provider: &str,
-        account_id: &ProviderAccountId,
-    ) -> StoreResult<()> {
-        let provider = provider.to_string();
-        let account_id = account_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.reset_provider_account_health(&provider, &account_id)
-        })
-        .await
-    }
-
-    pub async fn update_provider_account_credential_state(
-        &self,
-        provider: &str,
-        account_id: &ProviderAccountId,
-        state: CredentialState,
-    ) -> StoreResult<()> {
-        let provider = provider.to_string();
-        let account_id = account_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.update_provider_account_credential_state(&provider, &account_id, state)
-        })
-        .await
-    }
-
-    pub async fn record_provider_account_credential_invalidated(
-        &self,
-        provider: &str,
-        account_id: &ProviderAccountId,
-        reason: &str,
-    ) -> StoreResult<()> {
-        let provider = provider.to_string();
-        let account_id = account_id.clone();
-        let reason = reason.to_string();
-        run_sqlite(&self.sqlite, move |store| {
-            store.record_provider_account_credential_invalidated(&provider, &account_id, &reason)
-        })
-        .await
-    }
-
-    pub async fn record_provider_account_health(
-        &self,
-        provider: &str,
-        account_id: &ProviderAccountId,
-        utilization_percent: Option<u8>,
-        cooldown_until: Option<i64>,
-        cooldown_reason: Option<&str>,
-    ) -> StoreResult<()> {
-        let provider = provider.to_string();
-        let account_id = account_id.clone();
-        let cooldown_reason = cooldown_reason.map(str::to_string);
-        run_sqlite(&self.sqlite, move |store| {
-            store.record_provider_account_health(
-                &provider,
-                &account_id,
-                utilization_percent,
-                cooldown_until,
-                cooldown_reason.as_deref(),
-            )
-        })
-        .await
-    }
-
-    pub(crate) async fn provider_account_capacity_revision(
-        &self,
-        provider: &str,
-        account_id: &ProviderAccountId,
-    ) -> StoreResult<i64> {
-        let provider = provider.to_owned();
-        let account_id = account_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.provider_account_capacity_revision(&provider, &account_id)
-        })
-        .await
-    }
-
-    pub(crate) async fn record_provider_account_capacity(
-        &self,
-        provider: &str,
-        account_id: &ProviderAccountId,
-        capacity: AccountCapacity,
-    ) -> StoreResult<()> {
-        let provider = provider.to_owned();
-        let account_id = account_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.record_provider_account_capacity(&provider, &account_id, &capacity)
-        })
-        .await
-    }
-
-    /// Commit a poll only while its starting capacity revision is still current.
-    pub(crate) async fn reconcile_provider_account_capacity(
-        &self,
-        account: &ProviderAccount,
-        revision: i64,
-        windows: &[AccountLimitWindow],
-    ) -> StoreResult<bool> {
-        let account = account.clone();
-        let windows = windows.to_vec();
-        run_sqlite(&self.sqlite, move |store| {
-            store.reconcile_provider_account_capacity(&account, revision, &windows)
-        })
-        .await
-    }
-
-    pub async fn upsert_provider_account_limits(
-        &self,
-        provider: &str,
-        account_id: &ProviderAccountId,
-        windows: &[AccountLimitWindow],
-        source: &str,
-    ) -> StoreResult<()> {
-        let provider = provider.to_string();
-        let account_id = account_id.clone();
-        let windows = windows.to_vec();
-        let source = source.to_string();
-        run_sqlite(&self.sqlite, move |store| {
-            store.upsert_provider_account_limits(&provider, &account_id, &windows, &source)
         })
         .await
     }
@@ -794,49 +617,6 @@ impl Store {
         .await
     }
 
-    pub async fn set_provider_route(&self, route: &ProviderRoute) -> StoreResult<()> {
-        let route = route.clone();
-        run_sqlite(&self.sqlite, move |store| store.set_provider_route(&route)).await
-    }
-
-    pub async fn clear_provider_route(
-        &self,
-        scope: &RouteScope,
-        provider: Provider,
-    ) -> StoreResult<bool> {
-        let scope = scope.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.clear_provider_route(&scope, provider)
-        })
-        .await
-    }
-
-    pub async fn provider_route(
-        &self,
-        scope: &RouteScope,
-        provider: Provider,
-    ) -> StoreResult<Option<ProviderRoute>> {
-        let scope = scope.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.provider_route(&scope, provider)
-        })
-        .await
-    }
-
-    pub async fn pin_provider_session_route(
-        &self,
-        provider: Provider,
-        agent_session: &AgentSessionId,
-        account_id: &ProviderAccountId,
-    ) -> StoreResult<()> {
-        let agent_session = agent_session.clone();
-        let account_id = account_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.pin_provider_session_route(provider, &agent_session, &account_id)
-        })
-        .await
-    }
-
     pub async fn provider_session_account(
         &self,
         provider: Provider,
@@ -845,44 +625,6 @@ impl Store {
         let agent_session = agent_session.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.provider_session_account(provider, &agent_session)
-        })
-        .await
-    }
-
-    pub async fn record_provider_account_switch(
-        &self,
-        provider: Provider,
-        account_id: &ProviderAccountId,
-        cause: &'static str,
-    ) -> StoreResult<()> {
-        let account_id = account_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.record_provider_account_switch(provider, &account_id, cause)
-        })
-        .await
-    }
-
-    pub async fn provider_account_switched_since(
-        &self,
-        provider: Provider,
-        since: i64,
-    ) -> StoreResult<Option<ProviderAccountId>> {
-        run_sqlite(&self.sqlite, move |store| {
-            store.provider_account_switched_since(provider, since)
-        })
-        .await
-    }
-
-    pub async fn select_provider_account(
-        &self,
-        provider: Provider,
-        candidates: &[ProviderAccountId],
-        model: Option<&str>,
-    ) -> StoreResult<Option<ProviderAccountSelection>> {
-        let candidates = candidates.to_vec();
-        let model = model.map(str::to_owned);
-        run_sqlite(&self.sqlite, move |store| {
-            store.select_provider_account(provider, &candidates, model.as_deref())
         })
         .await
     }
@@ -1084,19 +826,6 @@ impl RoutingState {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProviderAccountSelection {
-    pub account: ProviderAccount,
-}
-
-#[derive(Debug)]
-pub(crate) struct AccountCapacity {
-    pub utilization_percent: Option<u8>,
-    pub cooldown_until: Option<i64>,
-    pub cooldown_reason: Option<String>,
-    pub windows: Vec<AccountLimitWindow>,
-}
-
 /// One observed subscription rate-limit window: how much of the plan's
 /// `session`/`weekly`/`weekly:<model>` window an account has consumed.
 #[derive(
@@ -1196,15 +925,11 @@ pub async fn open_existing_store() -> StoreResult<Option<Store>> {
 pub type SharedStore = Arc<Store>;
 #[cfg(test)]
 mod tests {
-    use super::{
-        may_apply_migrations, read_nonterminal_task_worktrees, CredentialState, ProviderAccount,
-        ProviderAccountId, RoutingState, StorageConfig,
-    };
+    use super::{may_apply_migrations, read_nonterminal_task_worktrees, StorageConfig};
     use crate::child::ChildRef;
     use crate::durable::{Author, WorkRef};
     use crate::id::WaveId;
     use crate::linear::{LinearIssueId, LinearProjectId};
-    use crate::profile::EmailAddress;
     use crate::test_linear_input::{InventoryFixture, SeedLinear};
     use crate::work::project::{Project, ProjectId};
     use crate::work::task::{
@@ -3658,92 +3383,6 @@ mod tests {
                 .len(),
             1
         );
-    }
-
-    fn provider_account(provider: &str, account_id: &str, utilization: u8) -> ProviderAccount {
-        ProviderAccount {
-            provider: provider.to_string(),
-            account_id: ProviderAccountId::parse(account_id).unwrap(),
-            home: Some(PathBuf::from(format!("/accounts/{provider}/{account_id}"))),
-            login_email: Some(EmailAddress::parse(&format!("{account_id}@example.com")).unwrap()),
-            observed_email: None,
-            observed_subject: None,
-            observed_credential_digest: None,
-            observed_plan: None,
-            credential_state: CredentialState::Connected,
-            routing_state: RoutingState::Automatic,
-            plan: None,
-            paid_through: None,
-            utilization_percent: Some(utilization),
-            cooldown_until: None,
-            cooldown_reason: None,
-            last_selected_at: None,
-            created_at: 1,
-            updated_at: 1,
-        }
-    }
-
-    #[tokio::test]
-    async fn lifecycle_updates_do_not_overwrite_runtime_health() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
-            dir.path().join("registry.db"),
-        ))
-        .await
-        .unwrap();
-        let mut stale_account = provider_account("claude", "primary", 0);
-        store.upsert_provider_account(&stale_account).await.unwrap();
-        store
-            .record_provider_account_health(
-                "claude",
-                &stale_account.account_id,
-                Some(100),
-                Some(OffsetDateTime::now_utc().unix_timestamp() + 300),
-                Some("rate-limited"),
-            )
-            .await
-            .unwrap();
-
-        stale_account.plan = Some("max".to_string());
-        stale_account.routing_state = RoutingState::ExplicitOnly;
-        store
-            .update_provider_account_lifecycle(&stale_account)
-            .await
-            .unwrap();
-
-        let account = store
-            .get_provider_account("claude", &stale_account.account_id)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(account.plan.as_deref(), Some("max"));
-        assert_eq!(account.routing_state, RoutingState::ExplicitOnly);
-        assert_eq!(account.utilization_percent, Some(100));
-        assert_eq!(account.cooldown_reason.as_deref(), Some("rate-limited"));
-    }
-
-    #[tokio::test]
-    async fn provider_login_email_is_unique_within_each_provider() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
-            dir.path().join("registry.db"),
-        ))
-        .await
-        .unwrap();
-        let primary = provider_account("claude", "primary", 0);
-        let mut duplicate = provider_account("claude", "duplicate", 0);
-        duplicate.login_email = primary.login_email.clone();
-
-        store.upsert_provider_account(&primary).await.unwrap();
-        assert!(store.upsert_provider_account(&duplicate).await.is_err());
-        assert!(store
-            .get_provider_account("claude", &duplicate.account_id)
-            .await
-            .unwrap()
-            .is_none());
-
-        duplicate.provider = "codex".to_string();
-        store.upsert_provider_account(&duplicate).await.unwrap();
     }
 
     #[tokio::test]

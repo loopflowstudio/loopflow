@@ -4,7 +4,6 @@
 use crate::durable::TaskExecutionRoute;
 use crate::lf::Cli;
 use crate::ops::task::remote::TaskSource;
-use crate::provider_account::selection::AccountSelection;
 use anyhow::{anyhow, Context};
 use clap::Parser;
 use std::io::IsTerminal;
@@ -168,22 +167,6 @@ pub(super) fn run_with_io(
         None if cli.repo.is_some() => None,
         None => current_repository(directory)?,
     };
-    // Preview forwards only authored selectors. Account lookup and connection
-    // belong to launch, on neither side of this read. The target launches in
-    // its own shared home.
-    let selection = if preview || resident_operation {
-        None
-    } else {
-        Some(
-            runtime
-                .block_on(super::machine_credentials::prepare_launch(
-                    &target,
-                    &AccountSelection::from_env()?,
-                    cli,
-                ))?
-                .env_value()?,
-        )
-    };
     let source_json = source.as_ref().map(serde_json::to_string).transpose()?;
     let user_name = crate::config::participant_name_in(directory)?.unwrap_or_default();
     let origin = runtime.block_on(super::machine::local_machine())?;
@@ -194,12 +177,6 @@ pub(super) fn run_with_io(
         (EXPECTED_MACHINE_ID_ENV, target.id.as_str()),
         (crate::config::USER_NAME_ENV, user_name.as_str()),
     ];
-    if let Some(selection) = selection.as_deref() {
-        extra_env.push((
-            crate::provider_account::selection::ACCOUNT_SELECTION_ENV,
-            selection,
-        ));
-    }
     let agent = std::env::var(crate::config::AGENT_OVERRIDE_ENV).ok();
     if let Some(agent) = agent.as_deref() {
         extra_env.push((crate::config::AGENT_OVERRIDE_ENV, agent));
@@ -417,7 +394,6 @@ fn resident_args(
     // Automatic Work routing carries the resolved plan, not a path on this Machine.
     let task_flag = cli.task.as_ref().map(|task| format!("--task={task}"));
     let mut remove_repo = routed && cli.repo.is_some();
-    let mut remaining = cli.account.len() + cli.only_account.len();
     let mut result = Vec::new();
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
@@ -431,13 +407,6 @@ fn resident_args(
             remove_repo = false;
         } else if remove_repo && arg.starts_with("--repo=") {
             remove_repo = false;
-        } else if remaining > 0 && matches!(arg.as_str(), "--account" | "--only-account") {
-            iter.next();
-            remaining -= 1;
-        } else if remaining > 0
-            && (arg.starts_with("--account=") || arg.starts_with("--only-account="))
-        {
-            remaining -= 1;
         } else if let Some(source) = source.filter(|_| {
             (arg == "--task" && iter.as_slice().first() == cli.task.as_ref())
                 || task_flag.as_ref() == Some(arg)
@@ -749,30 +718,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn remote_preferences_cannot_relax_the_resident_account_restriction() {
-        let args = ["--account", "person@", "skill", "implement"].map(str::to_string);
-        assert_eq!(
-            resident_args(&args, &parse_remote_command(&args).unwrap(), false, None),
-            ["skill", "implement"]
-        );
-    }
-    #[test]
-    fn remote_prompt_preserves_literal_account_flags() {
-        let args = [
-            "--only-account=codex=person@",
-            "skill",
-            "implement",
-            "--",
-            "--shared",
-            "--account=other@",
-        ]
-        .map(str::to_string);
-        assert_eq!(
-            resident_args(&args, &parse_remote_command(&args).unwrap(), false, None),
-            ["skill", "implement", "--", "--shared", "--account=other@"]
-        );
-    }
     #[test]
     fn repository_paths_stay_on_explicit_machine_but_not_automatic_work_routes() {
         for selection in [vec!["--repo", "~/src/remote"], vec!["--repo=~/src/remote"]] {

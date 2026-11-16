@@ -6,7 +6,7 @@ at turn boundaries, interjects through hooks and records what happened.
 
 A skill keeps one `LfProcess` across successive provider `AgentProcess` instances.
 Its shared `LfProcessRuntime` in [`process/runtime.rs`](../process/runtime.rs)
-holds the current attachment, provider, account, thread and outcome, with no
+holds the current attachment, provider, thread and outcome, with no
 separate execution ID. Native launch and headless respawn use that private state;
 harness input, shutdown and pending operations retain the exact store and
 attachment selected at launch. Claude respawn gets a new attachment through the
@@ -16,7 +16,7 @@ The runtime holds a `SessionRecorder` under the same lock. The recorder publishe
 input in [`session_record/capture.rs`](../session_record/capture.rs) and writes
 history and receipts in [`session_record.rs`](../session_record.rs); it cannot
 launch or stop a provider. Provider identity in memory advances before best-effort
-history writes, so a recording failure cannot change which account or thread a
+history writes, so a recording failure cannot change which provider or thread a
 retry continues. Later observations retry unrecorded identity without duplicating
 successful writes.
 
@@ -27,9 +27,12 @@ panic. A failed receipt write remains a headless caller error. Retrying that
 write can record the same outcome but cannot reopen the runtime or change its
 result.
 
-Account selection can refuse before a provider requests a spawn. Fallback retires
-that reservation without recording an OS exit. Once a spawn is requested, retry
-still needs an observed exit or confirmed shutdown before replacing it.
+Native clients own authentication. Saved account rows never select or activate
+credentials. Headless classified refusals follow configured model/harness order;
+interactive refusals leave the thread open without resending input. Once a spawn
+is requested, retry needs an observed exit or confirmed shutdown before replacing
+it. Passive usage and refusal facts remain provider-authored and write no account
+routing state.
 
 Native exit handles attachment cleanup separately and adopts a plain
 `SessionRecorder` from `CaptureHandoff` to finish recording. It does not reconstruct
@@ -76,10 +79,7 @@ memory or, for hooks that are a fresh process at every boundary, in a
 the server sends the marker's gap with its request; the server writes it into
 the Session's history as one `store-gap` observation (first and last miss) and
 the hook clears the marker, so a turn lf never saw reads as unknown rather than
-as still running. Work that can outlast a hook's timeout runs beside it: Claude's
-`StopFailure` hook starts `--moment record-limit` in its own OS session and exits,
-because a kill between a token reply and the profile write would lose a rotated
-grant. The Pi extension and OpenCode plugin live inside the provider's
+as still running. Native usage refusals remain with the provider; hooks do not switch logins. The Pi extension and OpenCode plugin live inside the provider's
 process, so they send the same request on a `machine.sock` connection of their
 own, one per boundary, instead of starting `lf` at each boundary
 ([OpenCode and Pi report from inside the provider](../server/README.md#opencode-and-pi-report-from-inside-the-provider)).

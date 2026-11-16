@@ -1,7 +1,5 @@
 use crate::support;
-use loopflow::store::{CredentialState, ProviderAccount, ProviderAccountId, RoutingState};
 use loopflow_test_support::TestRepo;
-use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -190,7 +188,7 @@ for line in sys.stdin:
         "agent-proof",
         &repo.head_sha(),
     );
-    connect_fixture_claude(home.path(), &registered.store);
+
     support::managed_codex_account(home.path());
 
     for (path, content) in [
@@ -352,44 +350,6 @@ for line in sys.stdin:
     assert_eq!(models, ["haiku", "sonnet"]);
 }
 
-fn connect_fixture_claude(home: &Path, store: &loopflow::store::Store) {
-    let name = "fixture";
-    let account_home = home.join("accounts/claude").join(name);
-    fs::create_dir_all(&account_home).unwrap();
-    let account_home = account_home.canonicalize().unwrap();
-    let credential =
-        r#"{"claudeAiOauth":{"accessToken":"fixture-only","expiresAt":4102444800000}}"#;
-    fs::write(account_home.join(".credentials.json"), credential).unwrap();
-    tokio::runtime::Runtime::new()
-        .unwrap()
-        .block_on(store.upsert_provider_account(&ProviderAccount {
-            provider: "claude".into(),
-            account_id: ProviderAccountId::parse(name).unwrap(),
-            home: Some(account_home),
-            login_email: Some(
-                loopflow::profile::EmailAddress::parse(&format!("{name}@example.com")).unwrap(),
-            ),
-            observed_email: Some(format!("{name}@example.com")),
-            observed_subject: Some(name.into()),
-            observed_credential_digest: Some(format!(
-                "{:x}",
-                Sha256::digest(credential.as_bytes())
-            )),
-            observed_plan: None,
-            credential_state: CredentialState::Connected,
-            routing_state: RoutingState::Automatic,
-            plan: None,
-            paid_through: None,
-            utilization_percent: None,
-            cooldown_until: None,
-            cooldown_reason: None,
-            last_selected_at: None,
-            created_at: 1,
-            updated_at: 1,
-        }))
-        .unwrap();
-}
-
 // Record the preferences and documents actually delivered across the provider
 // boundary. No installed provider, credentials, or network participates.
 const CLAUDE_SETTINGS: &str = r#"#!/usr/bin/python3
@@ -514,7 +474,7 @@ fn exercise_live_occurrence_preferences(overrides: bool) {
             &loopflow::store::StorageConfig::sqlite(home.path().join("loopflow.db")),
         ))
         .unwrap();
-    connect_fixture_claude(home.path(), &store);
+
     for (path, content) in [
         (".lf/config.yaml", "agent: claude:repo\nyolo: true\nchrome: true\ndocs: [repo.txt]\ncontext: [context.txt]\ndiff: false\ndiff_files: false\n"),
         (".lf/skills/probe.md", "---\nagent: claude:skill\ndocs: [skill.txt]\n---\nReport the selected settings."),
@@ -748,13 +708,8 @@ fn choices_and_fallbacks_agree_in_inspection_runtime_and_exported_recipes() {
         &[("claude", CLAUDE_SETTINGS), ("gh", "#!/bin/sh\nexit 1\n")],
         Some(home.path()),
     );
-    let store = tokio::runtime::Runtime::new()
-        .unwrap()
-        .block_on(loopflow::store::open_ephemeral_store(
-            &loopflow::store::StorageConfig::sqlite(home.path().join("loopflow.db")),
-        ))
-        .unwrap();
-    connect_fixture_claude(home.path(), &store);
+    support::seed_store(home.path());
+
     repo.create_file(".lf/config.yaml", "diff: false\ndiff_files: false\n");
     repo.create_file(
         ".lf/skills/probe.md",
@@ -957,17 +912,12 @@ with (home / 'session-children.jsonl').open('a') as output:
         .output()
         .unwrap();
     assert!(pushed.status.success());
-    let store = tokio::runtime::Runtime::new()
-        .unwrap()
-        .block_on(loopflow::store::open_ephemeral_store(
-            &loopflow::store::StorageConfig::sqlite(home.path().join("loopflow.db")),
-        ))
-        .unwrap();
+    support::seed_store(home.path());
     let _checkouts = TaskCheckouts {
         home: home.path(),
         repo: repo.path(),
     };
-    connect_fixture_claude(home.path(), &store);
+
     support::managed_codex_account(home.path());
     write_preferences(
         home.path(),
@@ -1076,13 +1026,8 @@ fn explicit_graph_agent_reaches_composed_routers_and_repeated_steps() {
         &[("claude", CLAUDE_SETTINGS), ("gh", "#!/bin/sh\nexit 1\n")],
         Some(home.path()),
     );
-    let store = tokio::runtime::Runtime::new()
-        .unwrap()
-        .block_on(loopflow::store::open_ephemeral_store(
-            &loopflow::store::StorageConfig::sqlite(home.path().join("loopflow.db")),
-        ))
-        .unwrap();
-    connect_fixture_claude(home.path(), &store);
+    support::seed_store(home.path());
+
     repo.create_file(
         ".lf/config.yaml",
         "agent: codex\ndiff: false\ndiff_files: false\n",
@@ -1314,7 +1259,7 @@ fn configuration_table_keeps_defaults_and_candidate_details_opt_in() {
     let home = tempfile::tempdir().unwrap();
     fs::write(
         home.path().join("config.yaml"),
-        "default_agent: codex\nmachine: workstation\naccount:\n  claude: [work]\ntheme: light\nuser:\n  name: Test User\n",
+        "default_agent: codex\nmachine: workstation\nauth_browsers: {linear: {default: [Work]}}\ntheme: light\nuser:\n  name: Test User\n",
     )
     .unwrap();
     repo.create_file(".lf/skills/config-table-proof.md", "Inspect settings.\n");
@@ -1350,7 +1295,7 @@ fn configuration_table_keeps_defaults_and_candidate_details_opt_in() {
     let machines = &table[positions[1]..positions[2]];
     assert!(machines.contains("machine.tasks") && machines.contains("workstation"));
     let accounts = &table[positions[2]..positions[3]];
-    assert!(accounts.contains("account.claude") && accounts.contains("work"));
+    assert!(accounts.contains("auth_browsers") && accounts.contains("Work"));
     assert!(table.contains("SETTING") && table.contains("VALUE") && table.contains("FROM"));
     assert!(
         table.contains("claude") && table.contains("Shared project · skill config-table-proof")

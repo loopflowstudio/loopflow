@@ -224,7 +224,6 @@ impl OpenCodeHarness {
                 store.clone(),
                 session.clone(),
                 Some(attachment.clone()),
-                None,
                 Default::default(),
             ),
         }));

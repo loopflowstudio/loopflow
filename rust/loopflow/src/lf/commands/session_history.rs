@@ -165,8 +165,8 @@ pub(crate) fn render(selector: &str, view: SessionView, json: bool) -> Result<St
             .as_ref()
             .and_then(|manifest| manifest.process.as_ref())
         {
-            Some(launch) if launch.replay_unavailable_reason().is_none() => "available",
-            Some(_) | None => "unavailable",
+            Some(_) => "available",
+            None => "unavailable",
         }
     )?;
     writeln!(&mut output, "Evidence gaps: {}", snapshot.evidence_gaps)?;

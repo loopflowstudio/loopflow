@@ -349,9 +349,6 @@ pub(crate) fn resolve_session_config(
         if !importing && provider == "codex" {
             config.task_prompt = request.codex_initial_input();
         }
-        if resumes_native {
-            config.provider_account_id = request.account_id;
-        }
         config.system_prompt = request.system_prompt;
         config.conversation_context = request.conversation_context;
         config.write_scope = request.write_scope;
@@ -386,7 +383,6 @@ pub(crate) fn resolve_session_config(
             .flatten()
         {
             config.resume_token = Some(native.agent_session);
-            config.provider_account_id = native.account_id.or(config.provider_account_id);
         }
     }
     Ok(config)

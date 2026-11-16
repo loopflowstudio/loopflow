@@ -19,10 +19,11 @@ builds; `lf help --all` prints the same tree locally. Canonical command paths ar
 owning Wave. `task run` places a Task's worktree and then runs like
 `lf --task ISSUE graph GRAPH`; every Graph naming a Task is equally its work.
 
-A preference (`--account`) permits fallback. A restriction (`--only-account`)
-limits this launch and its children. A Graph retains its provider selections;
-children check their destination's access before starting a provider.
-Account observations distinguish unavailable, expired and measured capacity.
+`-a` selects an explicit harness/model. Headless launches can follow configured
+`agents` fallbacks when no explicit choice pins them; interactive launches
+require an explicit retry or move. Claude and Codex use native authentication on
+the execution Machine. Saved subscription accounts and old account preferences
+do not select credentials.
 
 JSON readers emit one document; a watched read such as
 `lf process list --watch --json` emits NDJSON until stdin closes. Diagnostics go to stderr. Exit 0 means the requested

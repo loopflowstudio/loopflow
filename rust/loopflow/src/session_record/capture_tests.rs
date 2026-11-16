@@ -712,7 +712,6 @@ fn manifest_round_trips_the_exact_prepared_process_without_ambient_authority() {
         system_prompt: "system context\r\nwith unicode λ\n \t".to_string(),
         task_prompt: "authored task\n\nwith trailing space ".to_string(),
         agent: Some("codex:gpt-5.6".to_string()),
-        provider_account_id: Some(crate::store::ProviderAccountId::parse("engineering").unwrap()),
         max_turns: Some(7),
         resume_token: Some("resume-secret".into()),
         skip_permissions: true,
@@ -756,9 +755,7 @@ fn manifest_round_trips_the_exact_prepared_process_without_ambient_authority() {
     );
     // Interrupted/tampered context reconciliation is covered by
     // reserved_publication_retains_conflicting_inputs.
-    assert!(bytes
-        .windows(b"engineering".len())
-        .any(|window| window == b"engineering"));
+    assert!(saved["process"]["account_id"].is_null());
     assert!(!bytes
         .windows(b"resume-secret".len())
         .any(|window| window == b"resume-secret"));

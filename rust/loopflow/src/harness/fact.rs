@@ -2,9 +2,9 @@
 //!
 //! Each harness has one decoder that turns a native message into an ordered
 //! `Vec<Decoded>`: `Fact` for what Loopflow records (receipts, availability,
-//! account capacity, native conversation identity) and `Display` for what a
+//! passive quota readings, native conversation identity) and `Display` for what a
 //! person watches live. Decoders hold only the cross-message correlation their
-//! provider needs; `FactWriter` owns every store and account effect.
+//! provider needs; `FactWriter` owns receipts and availability writes.
 
 use std::collections::BTreeSet;
 
@@ -12,7 +12,23 @@ use serde_json::Value;
 
 use crate::chat::types::{ConversationEvent, Lifecycle};
 use crate::id::AgentSessionId;
-use crate::provider_account::RateLimitSignal;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct RateLimitSignal {
+    pub utilization_percent: Option<u8>,
+    pub resets_at: Option<i64>,
+    pub limited: bool,
+    pub reason: String,
+    /// Per-window subscription state carried by the native provider event.
+    pub windows: Vec<crate::store::AccountLimitWindow>,
+    /// The one model the limit applies to, as the provider scopes it; `None`
+    /// limits the whole account, unless `credits`.
+    pub model: Option<String>,
+    /// Usage credits ran out. They pay for one model, so the limit holds the
+    /// model the launch ran, never the account.
+    pub credits: bool,
+}
 
 /// One provider turn in its native conversation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -101,6 +117,7 @@ pub(crate) enum Decoded {
 }
 
 impl Decoded {
+    #[cfg(test)]
     pub(crate) fn fact(&self) -> Option<&ProviderFact> {
         match self {
             Self::Fact(fact) => Some(fact),

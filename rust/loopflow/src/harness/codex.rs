@@ -39,9 +39,7 @@ use crate::harness::{ApprovalPolicy, Harness, HarnessError, SendCurrentOutcome};
 use crate::os_process::{
     agent_process_lifeline_path, hold_agent_process_lifeline, kill_process_group,
 };
-use crate::provider_account::{resolve_provider_account_exact, ProviderAccountRoute};
 use crate::provider_auth::Provider;
-use crate::store::ProviderAccountId;
 
 fn build_thread_request(
     launch: &AgentConfig,
@@ -62,7 +60,7 @@ fn build_thread_request(
 }
 
 /// What an AgentProcess started by `command` would inherit, including the
-/// account route's and any wrapper's own overrides, read from a short-lived
+/// native configuration and any wrapper's overrides, read from a short-lived
 /// stdio app-server started the same way.
 async fn read_inherited_config(
     command: &std::process::Command,
@@ -79,7 +77,7 @@ async fn read_inherited_config(
     if let Some(directory) = command.get_current_dir() {
         probe.current_dir(directory);
     }
-    let mut connection = crate::provider_auth::codex::Connection::start(&mut probe)
+    let mut connection = super::codex_rpc::Connection::start(&mut probe)
         .await
         .map_err(|error| anyhow!("Codex config/read failed: {error}"))?;
     let inherited = connection
@@ -270,8 +268,6 @@ pub struct CodexHarness {
     shutdown_requested: Arc<AtomicBool>,
     agent_session: Arc<Mutex<Option<AgentSessionId>>>,
     resume_agent_session: Option<AgentSessionId>,
-    account_route: Option<ProviderAccountRoute>,
-    requested_account_id: Option<ProviderAccountId>,
     /// Live turn id (from turn/started, cleared at turn/completed); steer and
     /// interrupt address the turn with it.
     current_turn_id: Arc<Mutex<Option<String>>>,
@@ -314,8 +310,6 @@ impl CodexHarness {
             shutdown_requested: Arc::new(AtomicBool::new(false)),
             agent_session: Arc::new(Mutex::new(None)),
             resume_agent_session: None,
-            account_route: None,
-            requested_account_id: None,
             current_turn_id: Arc::new(Mutex::new(None)),
             initialize_request_id: Arc::new(AtomicI64::new(0)),
             thread_start_request_id: Arc::new(AtomicI64::new(0)),
@@ -447,20 +441,9 @@ impl Harness for CodexHarness {
         self.shutdown_requested.store(false, Ordering::Relaxed);
         self.launch = Some(config.clone());
         self.should_seed_prompt = true;
-        let model = config
-            .agent
-            .as_deref()
-            .and_then(|agent| crate::config::parse_agent(agent).1);
-        let account_route = resolve_provider_account_exact(
-            Provider::Codex,
-            self.resume_agent_session.as_ref(),
-            self.requested_account_id.as_ref(),
-            crate::work::wave::context::ambient_wave_id().as_ref(),
-            model.as_deref(),
-            config.cwd.as_deref(),
-        )
-        .await?;
-        self.account_route = account_route;
+        if let Some(thread) = self.resume_agent_session.as_ref() {
+            crate::transcript::adopt_native(Provider::Codex, thread)?;
+        }
         *self
             .agent_session
             .lock()
@@ -663,16 +646,6 @@ impl Harness for CodexHarness {
     fn set_agent_session(&mut self, agent_session: Option<AgentSessionId>) {
         self.resume_agent_session = agent_session;
     }
-
-    fn set_provider_account_id(&mut self, account_id: Option<ProviderAccountId>) {
-        self.requested_account_id = account_id;
-    }
-
-    fn provider_account_id(&self) -> Option<ProviderAccountId> {
-        self.account_route
-            .as_ref()
-            .map(|route| route.account_id().clone())
-    }
 }
 
 impl CodexHarness {
@@ -771,9 +744,6 @@ impl CodexHarness {
                     .join("agent.sock")
             });
         let mut command = Command::new("codex");
-        if let Some(route) = &self.account_route {
-            command.args(route.provider_args());
-        }
         command
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
@@ -792,12 +762,6 @@ impl CodexHarness {
         if let Some(cwd) = &launch.cwd {
             command.current_dir(cwd);
         }
-        // Held until the AgentProcess has spawned, so a concurrent switch cannot
-        // replace the native login between activation and startup.
-        let activation = match &self.account_route {
-            Some(route) => route.launch_as(command.as_std_mut()).await?,
-            None => None,
-        };
         super::configure_vendor_std_env(command.as_std_mut())?;
         // Codex's shell policy need not inherit arbitrary app-server environment.
         // Pass only explicit launch and freshly resolved lf executable/Machine
@@ -829,7 +793,7 @@ impl CodexHarness {
                 if let Some(instructions) = instructions {
                     config["developer_instructions"] = instructions;
                 }
-                // Before the subcommand, after the route's and any wrapper's own
+                // Before the subcommand, after any wrapper's own
                 // overrides: a repeat after `app-server` would replace those.
                 command.args(config_overrides(&config)?);
             }
@@ -856,7 +820,6 @@ impl CodexHarness {
         } else {
             None
         };
-        drop(activation);
 
         // The AgentProcess runs in its own group and deliberately survives this
         // harness, so no destructor or signal hook can be what stops it. The
@@ -922,7 +885,6 @@ impl CodexHarness {
             owner.0.clone(),
             owner.1.clone(),
             Some(owner.2.clone()),
-            self.account_route.clone(),
             Default::default(),
         ))));
         let writer_stream = stream.clone();
@@ -985,7 +947,6 @@ impl CodexHarness {
         let thread_start_request_id = self.thread_start_request_id.clone();
         let pending_requests = self.pending_requests.clone();
         let retired_requests = self.retired_requests.clone();
-        let account_route = self.account_route.clone();
         let reader_owner = owner.clone();
         let reader_task = tokio::spawn(async move {
             let mut initialized_tx = Some(initialized_tx);
@@ -1041,15 +1002,6 @@ impl CodexHarness {
                             if let Some(tx) = thread_id_tx.take() {
                                 let _ = tx.send(thread_id);
                             }
-                        }
-                        Decoded::Fact(ProviderFact::RateLimit(signal))
-                            if signal.limited && account_route.is_some() =>
-                        {
-                            let _ = event_tx.send(ConversationEvent::Error {
-                                code: "provider_rate_limited".to_string(),
-                                message: signal.reason,
-                                evidence: None,
-                            });
                         }
                         Decoded::Fact(_) => {}
                     }
@@ -1154,7 +1106,9 @@ impl CodexHarness {
             }
         });
 
-        let stderr_task = stderr.map(|stderr| spawn_stderr_logger(stderr, "harness::codex"));
+        let diagnostic = Arc::new(Mutex::new(String::new()));
+        let stderr_task = stderr
+            .map(|stderr| spawn_stderr_logger(stderr, "harness::codex", Some(diagnostic.clone())));
 
         self.child = child;
         self.outbound_tx = Some(outbound_tx);
@@ -1172,11 +1126,29 @@ impl CodexHarness {
                 "version": env!("CARGO_PKG_VERSION"),
             }
         });
-        self.send_request("initialize", initialize).await?;
-        tokio::time::timeout(Duration::from_secs(15), initialized_rx)
-            .await
-            .map_err(|_| anyhow!("timed out waiting for codex initialize response"))?
-            .map_err(|_| anyhow!("codex initialize channel closed"))?;
+        let initialized = async {
+            self.send_request("initialize", initialize).await?;
+            tokio::time::timeout(Duration::from_secs(15), initialized_rx)
+                .await
+                .map_err(|_| anyhow!("timed out waiting for codex initialize response"))?
+                .map_err(|_| anyhow!("codex initialize channel closed"))
+        }
+        .await;
+        if let Err(error) = initialized {
+            if let Some(mut task) = self.stderr_task.take() {
+                if tokio::time::timeout(Duration::from_secs(1), &mut task)
+                    .await
+                    .is_err()
+                {
+                    task.abort();
+                }
+            }
+            let diagnostic = diagnostic.lock().expect("stderr diagnostic lock poisoned");
+            return Err(anyhow!(
+                "{error}{}",
+                crate::os_process::exit_reason(&diagnostic)
+            ));
+        }
         self.send_notification("initialized").await?;
 
         if self.approval == ApprovalPolicy::NativeClient {

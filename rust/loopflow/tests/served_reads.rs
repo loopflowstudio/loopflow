@@ -165,98 +165,6 @@ fn configuration_edits_use_the_server_without_work_processes() {
 }
 
 #[test]
-fn account_holds_and_rotation_use_the_same_machine_state_as_the_cli() {
-    use loopflow::lf::commands::read::Read;
-    use loopflow::lf::commands::write::Write;
-
-    // Codex puts its Unix socket below HOME; macOS temp roots can exceed SUN_LEN.
-    let home = tempfile::tempdir_in("/tmp").unwrap();
-    let _env = EnvGuard::with_home(&[], Some(home.path()));
-    std::env::set_var("LF_HOME", home.path().canonicalize().unwrap());
-    support::register_codex_login(home.path(), "work");
-    let repo = TestRepo::new();
-    let _server = Server::start(repo.path(), home.path());
-    let report = || {
-        server_read(Read::AccountList {
-            target: Some("codex=work@".into()),
-            cached: true,
-        })
-    };
-    // Served reads share observations; commands and bare reads stay direct.
-    let observed = |field: &str, expected: Value| {
-        let deadline = std::time::Instant::now() + Duration::from_secs(10);
-        loop {
-            let current = report();
-            if current["accounts"][0][field] == expected {
-                return;
-            }
-            assert!(
-                std::time::Instant::now() < deadline,
-                "account {field} did not become {expected}: {current}"
-            );
-            std::thread::sleep(Duration::from_millis(50));
-        }
-    };
-    let login = "codex=work@".to_owned();
-    assert!(server_write(Write::AccountPause {
-        login: login.clone()
-    })
-    .is_null());
-    observed("routing", "explicit_only".into());
-    read(
-        repo.path(),
-        home.path(),
-        &["account", "unpause", &login],
-        None,
-    );
-    observed("routing", "automatic".into());
-    assert!(server_write(Write::AccountUse {
-        login: login.clone()
-    })
-    .is_null());
-    observed("held", true.into());
-    let cli: Value = serde_json::from_str(&read(
-        repo.path(),
-        home.path(),
-        &["account", &login, "--cached", "--json"],
-        None,
-    ))
-    .unwrap();
-    assert_eq!(report(), cli);
-    for agent in [None, Some("claude:fable")] {
-        let next = server_read(Read::AccountNext {
-            agent: agent.map(str::to_owned),
-            directory: repo.path().to_owned(),
-            repo: None,
-            default: true,
-        });
-        let mut argv = vec!["account", "next", "--default", "--json"];
-        if let Some(agent) = agent {
-            argv.extend(["--agent", agent]);
-        }
-        let cli: Value =
-            serde_json::from_str(&read(repo.path(), home.path(), &argv, None)).unwrap();
-        assert_eq!(next, cli);
-        assert_eq!(next[0]["model"], serde_json::json!(agent.map(|_| "fable")));
-        assert!(next[1]["model"].is_null());
-    }
-    assert!(server_write(Write::AccountUse {
-        login: "auto".into()
-    })
-    .is_null());
-    observed("held", false.into());
-    read(
-        repo.path(),
-        home.path(),
-        &["account", "pause", &login],
-        None,
-    );
-    observed("routing", "explicit_only".into());
-    assert!(server_write(Write::AccountUnpause { login }).is_null());
-    observed("routing", "automatic".into());
-}
-
-#[test]
 fn served_binding_moves_the_conversation_to_the_task_checkout() {
     use loopflow::lf::commands::write::Write;
 
@@ -1040,7 +948,6 @@ fn server_operations_match_their_lf_commands() {
         | Read::MachineDoctor
         | Read::RepoCi { .. }
         | Read::AccountList { .. }
-        | Read::AccountNext { .. }
         | Read::SkillList { .. }
         | Read::PrChecks { .. }
         | Read::PrReviews { .. }
@@ -1389,11 +1296,11 @@ fn server_operations_match_their_lf_commands() {
         | Write::CheckoutCreate { .. }
         | Write::AccountDisconnect { .. }
         | Write::AccountConnect { .. }
-        | Write::AccountSet { .. }
-        | Write::AccountRedeemReset { .. }
-        | Write::AccountPause { .. }
-        | Write::AccountUnpause { .. }
-        | Write::AccountUse { .. }
+
+
+
+
+
         | Write::GraphRun { .. }
         | Write::SkillRun { .. }
         | Write::PrPublish { .. }
@@ -1465,11 +1372,10 @@ fn server_operations_match_their_lf_commands() {
                     id: session.clone(),
                     agent: None,
                 },
-                // No fixture login is held back, so nothing is blocked to move.
+                // No fixture Session uses Pi, so this selection moves nothing.
                 Write::SessionMove {
                     directory: directory.clone(),
-                    blocked: true,
-                    on: None,
+                    on: Some("pi".into()),
                     agent: "codex".into(),
                 },
                 Write::TaskComplete {
@@ -2336,14 +2242,10 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
         }
         Write::SessionMove {
             directory,
-            blocked,
             on,
             agent,
         } => {
             let mut spelled = words(&["--agent", agent, "session", "move", "--all", "--json"]);
-            if *blocked {
-                spelled.push("--blocked".into());
-            }
             if let Some(on) = on {
                 spelled.extend(words(&["--on", on]));
             }
@@ -2517,98 +2419,23 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             spelled.push("--json".into());
             (path(directory), spelled)
         }
-        Write::AccountDisconnect { provider, email } => {
-            let target = email
-                .as_ref()
-                .map(|email| format!("{provider}={email}"))
-                .unwrap_or_else(|| provider.clone());
-            let spelled = words(&["account", "disconnect", &target]);
-            ("/".into(), spelled)
+        Write::AccountDisconnect { provider } => {
+            ("/".into(), words(&["account", "disconnect", provider]))
         }
         Write::AccountConnect {
             provider,
-            email,
             chrome_profile,
-            import,
             api_key,
         } => {
-            let target = email
-                .as_ref()
-                .map(|email| format!("{provider}={email}"))
-                .unwrap_or_else(|| provider.clone());
-            let mut spelled = words(&["account", "connect", &target]);
+            let mut spelled = words(&["account", "connect", provider]);
             if let Some(profile) = chrome_profile {
                 spelled.extend(words(&["--chrome-profile", profile]));
             }
-            for (flag, on) in [("--import", import), ("--api-key", api_key)] {
-                if *on {
-                    spelled.push(flag.into());
-                }
+            if *api_key {
+                spelled.push("--api-key".into());
             }
             ("/".into(), spelled)
         }
-        Write::AccountSet {
-            provider,
-            email,
-            login_email,
-            plan,
-            clear_plan,
-            paid_through,
-            clear_paid_through,
-            clear_cooldown,
-            chrome_profiles,
-            clear_chrome_profiles,
-        } => {
-            let target = email
-                .as_ref()
-                .map(|email| format!("{provider}={email}"))
-                .unwrap_or_else(|| provider.clone());
-            let mut spelled = words(&["account", "set", &target]);
-            for (flag, value) in [
-                ("--login-email", login_email),
-                ("--plan", plan),
-                ("--paid-through", paid_through),
-            ] {
-                if let Some(value) = value {
-                    spelled.extend(words(&[flag, value]));
-                }
-            }
-            for (flag, on) in [
-                ("--clear-plan", clear_plan),
-                ("--clear-paid-through", clear_paid_through),
-                ("--clear-cooldown", clear_cooldown),
-                ("--clear-chrome-profiles", clear_chrome_profiles),
-            ] {
-                if *on {
-                    spelled.push(flag.into());
-                }
-            }
-            for profile in chrome_profiles {
-                spelled.extend(words(&["--chrome-profile", profile]));
-            }
-            ("/".into(), spelled)
-        }
-        Write::AccountRedeemReset {
-            provider,
-            email,
-            idempotency_key,
-            credit_id,
-        } => {
-            let mut spelled = words(&["account", "redeem-reset", &format!("{provider}={email}")]);
-            for (flag, value) in [
-                ("--idempotency-key", idempotency_key),
-                ("--credit-id", credit_id),
-            ] {
-                if let Some(value) = value {
-                    spelled.extend(words(&[flag, value]));
-                }
-            }
-            spelled.push("--json".into());
-            ("/".into(), spelled)
-        }
-        Write::AccountUse { login } => ("/".into(), words(&["account", "use", login])),
-        Write::AccountPause { login } => ("/".into(), words(&["account", "pause", login])),
-        Write::AccountUnpause { login } => ("/".into(), words(&["account", "unpause", login])),
         Write::GraphRun {
             directory,
             name,

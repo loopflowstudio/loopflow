@@ -19,7 +19,7 @@ The launch prompt names the reviewer.
   would clear it.
 
 Never show credential values or read tokens from dotfiles or environment
-variables; use `lf account`.
+variables. Use `lf account` for services; Claude and Codex own native sign-in.
 
 ## Start from the request
 
@@ -42,8 +42,7 @@ Read-only. A missing optional command is a fact, not a failure.
 git rev-parse --show-toplevel
 lf --version
 lf account --cached          # last known state; no provider request
-lf account --json            # managed account status
-lf account next
+lf account --json            # service authentication status
 lf machine self --json
 lf wave list --json
 command -v claude codex opencode
@@ -103,7 +102,7 @@ accounts are needed. Offer only the missing ones:
 ```bash
 lf account connect github
 lf account connect linear
-lf account connect claude
+claude                         # native sign-in; codex login for Codex
 ```
 
 OAuth client credentials come from the environment, then Doppler. In a Doppler
@@ -160,7 +159,6 @@ one, use the ids the commands print:
 ```bash
 lf machine add <ssh-target> --label <label>
 lf --machine <machine-id> account --cached
-lf --machine <machine-id> account next
 lf --wave <wave> set machine <machine-label>   # this Wave's new Tasks
 lf --repo <repo> set machine <machine-label>   # this repository's new Tasks
 lf task move <issue> --machine <machine-label> # one Task, with its Session
@@ -169,7 +167,7 @@ lf machine list
 
 The Machine choice is personal and never committed. Existing Tasks stay put
 until `lf task move`. Before setting a Wave Machine, check remotely that it has
-`lf`, the repository and the accounts. `lf --machine` runs the remote `lf`; use
+`lf`, the repository, service access and native agent authentication. `lf --machine` runs the remote `lf`; use
 `ssh` for anything else, and `lf machine connect` in a foreground terminal for
 logins.
 

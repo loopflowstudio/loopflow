@@ -8,8 +8,8 @@ use serde_json::{json, Value};
 
 use super::fact::{self, Decoded, ProviderFact, ProviderTurn, Signal};
 use crate::chat::types::{ConversationEvent, ConversationItem, FileEdit, Lifecycle, TurnUsage};
+use crate::harness::fact::RateLimitSignal;
 use crate::harness::lf_tag::LfTagParser;
-use crate::provider_account::RateLimitSignal;
 
 /// One persistent Claude process's stream.
 #[derive(Debug, Default)]
@@ -397,10 +397,7 @@ fn rate_limit_signal(value: &Value) -> Option<RateLimitSignal> {
         .get("status")
         .and_then(Value::as_str)
         .unwrap_or("rate_limit_event");
-    let limited = matches!(
-        status.to_ascii_lowercase().as_str(),
-        "rejected" | "blocked" | "limited" | "rate_limit_reached"
-    );
+    let limited = status.eq_ignore_ascii_case("rejected");
     let utilization_percent = info
         .get("utilization")
         .or_else(|| info.get("used_percent"))
@@ -431,7 +428,7 @@ fn rate_limit_signal(value: &Value) -> Option<RateLimitSignal> {
         Some("seven_day_overage_included") => info
             .get("model")
             .and_then(Value::as_str)
-            .map(crate::provider_account::claude_model_family),
+            .map(claude_model_family),
         rate_type => rate_type.and_then(claude_limit_model).map(str::to_owned),
     };
     // The stream event carries one window at a time, named as Claude names
@@ -951,6 +948,14 @@ fn flush_text_delta_parser(out: &mut Vec<Decoded>, state: &mut ReaderState, turn
     }
 }
 
+fn claude_model_family(model: &str) -> String {
+    let model = model.to_ascii_lowercase();
+    crate::config::CLAUDE_MODEL_FAMILIES
+        .into_iter()
+        .find(|family| model.contains(family))
+        .map_or(model, str::to_owned)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1197,164 +1202,6 @@ mod tests {
             r#"{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","rate_limit_type":"seven_day","utilization":1.0}}"#,
         )
         .credits);
-    }
-
-    #[tokio::test]
-    async fn claude_usage_reconciliation_decoder_records_and_refreshes_the_reported_family() {
-        use crate::provider_account::{account_held_until, new_account, ProviderAccountRoute};
-        use crate::provider_auth::Provider;
-        use crate::store::{AccountLimitWindow, ProviderAccountId, StorageConfig};
-        let root = tempfile::tempdir().unwrap();
-        let store = std::sync::Arc::new(
-            crate::store::open_ephemeral_store(&StorageConfig::sqlite(
-                root.path().join("store.db"),
-            ))
-            .await
-            .unwrap(),
-        );
-        let account = new_account(
-            Provider::Claude,
-            ProviderAccountId::parse("first").unwrap(),
-            root.path().join("first"),
-            None,
-        );
-        store.upsert_provider_account(&account).await.unwrap();
-        let route = ProviderAccountRoute::shared(
-            Provider::Claude,
-            account.account_id.clone(),
-            store.clone(),
-            root.path().join("first"),
-            false,
-        );
-        let signal = rate_limit(
-            r#"{"type":"rate_limit_event","rate_limit_info":{
-            "status":"rejected","rate_limit_type":"seven_day_overage_included",
-            "model":"Claude Opus 4.5","utilization":1.0}}"#,
-        );
-        route.record_rate_limit(&signal).await.unwrap();
-        let limits = store.provider_account_limits(None).await.unwrap();
-        assert_eq!(limits[0].window, "seven_day_opus");
-        assert_eq!(limits[0].model.as_deref(), Some("opus"));
-        assert!(account_held_until(&account, &limits, Some("opus"), 1).is_some());
-        assert_eq!(
-            account_held_until(&account, &limits, Some("sonnet"), 1),
-            None
-        );
-        let revision = store
-            .provider_account_capacity_revision("claude", &account.account_id)
-            .await
-            .unwrap();
-        assert!(store
-            .reconcile_provider_account_capacity(
-                &account,
-                revision,
-                &[AccountLimitWindow {
-                    window: "seven_day_opus".into(),
-                    used_percent: 11,
-                    resets_at: None,
-                    plan: None,
-                    model: Some("opus".into()),
-                    limited_until: None,
-                }]
-            )
-            .await
-            .unwrap());
-        let limits = store.provider_account_limits(None).await.unwrap();
-        assert_eq!(account_held_until(&account, &limits, Some("opus"), 1), None);
-    }
-
-    /// A reported model never narrows a global bucket or relabels a named one.
-    #[tokio::test]
-    async fn claude_usage_reconciliation_bucket_scope_outranks_the_reported_model() {
-        use crate::provider_account::{account_held_until, new_account, ProviderAccountRoute};
-        use crate::provider_auth::Provider;
-        use crate::store::{AccountLimitWindow, ProviderAccountId, StorageConfig};
-        let poll = |window: &str, used_percent: u8, model: Option<&str>| AccountLimitWindow {
-            window: window.into(),
-            used_percent,
-            resets_at: None,
-            plan: None,
-            model: model.map(str::to_owned),
-            limited_until: None,
-        };
-        let root = tempfile::tempdir().unwrap();
-        let store = std::sync::Arc::new(
-            crate::store::open_ephemeral_store(&StorageConfig::sqlite(
-                root.path().join("store.db"),
-            ))
-            .await
-            .unwrap(),
-        );
-        for (name, event) in [
-            (
-                "global",
-                r#"{"status":"rejected","rate_limit_type":"seven_day","model":"fable","utilization":1.0}"#,
-            ),
-            (
-                "named",
-                r#"{"status":"rejected","rate_limit_type":"seven_day_fable","model":"sonnet","utilization":1.0}"#,
-            ),
-        ] {
-            let id = ProviderAccountId::parse(name).unwrap();
-            let account = new_account(Provider::Claude, id.clone(), root.path().join(name), None);
-            store.upsert_provider_account(&account).await.unwrap();
-            let route = ProviderAccountRoute::shared(
-                Provider::Claude,
-                id.clone(),
-                store.clone(),
-                root.path().join(name),
-                false,
-            );
-            let signal = rate_limit(&format!(
-                r#"{{"type":"rate_limit_event","rate_limit_info":{event}}}"#
-            ));
-            route.record_rate_limit(&signal).await.unwrap();
-            let held = |account: &crate::store::ProviderAccount, limits: &[_], model| {
-                account_held_until(account, limits, Some(model), 1).is_some()
-            };
-            let current = store
-                .get_provider_account("claude", &id)
-                .await
-                .unwrap()
-                .unwrap();
-            let limits = store.provider_account_limits(None).await.unwrap();
-            let limits: Vec<_> = limits.into_iter().filter(|l| l.account_id == id).collect();
-            if name == "named" {
-                assert_eq!(limits[0].window, "seven_day_fable");
-                assert_eq!(limits[0].model.as_deref(), Some("fable"));
-                assert!(held(&current, &limits, "fable"));
-                assert!(!held(&current, &limits, "sonnet"));
-                continue;
-            }
-            assert!(held(&current, &limits, "fable"));
-            assert!(held(&current, &limits, "sonnet"));
-            for (polled, recovers) in [
-                (poll("seven_day_fable", 11, Some("fable")), false),
-                (poll("seven_day", 66, None), true),
-            ] {
-                let revision = store
-                    .provider_account_capacity_revision("claude", &id)
-                    .await
-                    .unwrap();
-                assert!(store
-                    .reconcile_provider_account_capacity(&current, revision, &[polled])
-                    .await
-                    .unwrap());
-                let current = store
-                    .get_provider_account("claude", &id)
-                    .await
-                    .unwrap()
-                    .unwrap();
-                let limits: Vec<_> = store
-                    .provider_account_limits(None)
-                    .await
-                    .unwrap()
-                    .into_iter()
-                    .filter(|l| l.account_id == id)
-                    .collect();
-                assert_eq!(!held(&current, &limits, "sonnet"), recovers);
-            }
-        }
     }
 
     /// A limit on one model leaves the account's other models usable.

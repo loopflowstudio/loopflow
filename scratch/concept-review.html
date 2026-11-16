@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-913 — Native login and Session history</title>
+<style>
+:root { color-scheme: light dark; font: 17px/1.5 system-ui, sans-serif; background: light-dark(#faf8f3,#191b1e); color: light-dark(#242a30,#e7e6e1); }
+body { max-width: 760px; margin: 36px auto; padding: 0 22px 40px; }
+h1 { font-size: 1.9rem; line-height: 1.15; margin: 12px 0 20px; }
+h2 { font-size: 1.12rem; margin: 28px 0 8px; }
+p { margin: 10px 0; }
+header, small { font-size: .8rem; color: light-dark(#59616b,#abb3bb); }
+code, pre { font: .87rem/1.5 ui-monospace, monospace; }
+pre { padding: 14px; background: light-dark(#efeee8,#23272c); white-space: pre-wrap; overflow-wrap: anywhere; border-left: 3px solid light-dark(#6b6550,#b9ad80); }
+table { border-collapse: collapse; width: 100%; font-size: .88rem; }
+th, td { text-align: left; vertical-align: top; padding: 9px 6px; border-bottom: 1px solid light-dark(#d5d3cd,#41464d); }
+th:first-child, td:first-child { padding-left: 0; }
+.decision { border-left: 3px solid light-dark(#996440,#d9a576); padding-left: 15px; }
+li { margin: 10px 0; }
+@media(max-width: 540px) { body { margin-top: 20px; padding-inline: 14px; } table { font-size: .76rem; } code { font-size: .8rem; } }
+</style>
+<header>LOO-913 · concept-review · 2026-11-15<br>
+Built from scratch/subscription-removal.md, docs/subscriptions.md,
+docs/config.md, agent/mod.rs, transcript/mod.rs, ops/human_session.rs,
+lf/commands/session.rs and session_launch_contract.rs.</header>
+<h1>Show an old account as history.</h1>
+<div class="decision">
+<p><strong>Next implement direction:</strong> replace “on saved-B” with
+“historical account: saved-B” in Session displays. The native client may now
+be using login A. Keep the saved attribution; it cannot identify today's login.</p>
+<p>No open product choice. The existing design already requires this distinction.</p>
+</div>
+
+<h2>Actions → concepts → APIs</h2>
+<table>
+<thead><tr><th>Action</th><th>Before removal</th><th>Implemented in this checkout</th></tr></thead>
+<tbody>
+<tr><td>Sign in, launch</td><td>Saved account order → selection and activation</td><td>Native login → Claude/Codex start; <code>AgentConfig</code> has no account authority</td></tr>
+<tr><td>Resume old work</td><td>Saved account + native thread → account route</td><td>Session + native thread → <code>adopt_native</code>; transcript-only copy when needed</td></tr>
+<tr><td>Provider refuses input</td><td>Account cooldown → rotation or reset wait</td><td>Recorded refusal + headless policy → <code>_fallthrough_rungs</code>; interactive input needs a deliberate retry or move</td></tr>
+<tr><td>Read Session list</td><td>Saved account → “on saved-B”</td><td><strong>Still misleading.</strong> Retained <code>SessionRecord.account</code> is historical; display wording needs the proposed change</td></tr>
+</tbody>
+</table>
+
+<h2>One interaction</h2>
+<p><strong>Implemented:</strong> sign in through the native client, then resume the old thread.</p>
+<pre>codex login
+lf resume &lt;session-id&gt;
+lf session list
+
+Current list:  … active … Design … on saved-B
+Proposed:      … active … Design … historical account: saved-B</pre>
+<p>The Session and native thread survive. Native authentication supplies the login.
+Stored account rows and credentials stay intact. A new Session with no account
+attribution gets no account suffix and makes no claim about the native identity.</p>
+
+<h2>Failure and recovery</h2>
+<table>
+<thead><tr><th>Case</th><th>Behavior already implemented</th></tr></thead>
+<tbody>
+<tr><td>Headless refusal, bare or Task</td><td>Try configured model/harness order; keep receipts and seed history when changing harness. Exhaustion stops with the provider error and next-step advice.</td></tr>
+<tr><td>Interactive refusal, bare or Task</td><td>Keep provider, thread and refusal visible. No automatic follow-up input. Retry deliberately or use <code>lf -a claude resume &lt;session-id&gt;</code>.</td></tr>
+<tr><td>Old isolated transcript missing</td><td>Report missing history; retain stored attribution and original thread selection. Never copy credentials or silently substitute a new thread.</td></tr>
+<tr><td>Remote native login missing</td><td>Destination client reports its login error. Sign in there, then launch again; no Claude/Codex credential transfer.</td></tr>
+</tbody>
+</table>
+<p>A bare harness pin keeps that harness; bare Claude may try its other models.
+A model pin stays on that model. Quota snapshots and successful answers mentioning
+limits do not authorize fallback.</p>
+
+<h2>Counterexample that exposes the mismatch</h2>
+<p>An old Session has saved-B attribution. Native resume runs the same thread
+using login A. “On saved-B” now misstates the launch, although retaining saved-B
+is correct for history. Fix the label and field documentation; keep the wire key
+and stored value. No identity lookup, new selector or migration is needed.</p>
+<p>Usage docs and init/operator skills already direct Claude/Codex sign-in to
+native clients and retain <code>lf account</code> for service authentication.</p>
+
+<h2>Review questions, resolved by the working design</h2>
+<ol>
+<li>Does Task membership permit automatic interactive retry? <strong>No.</strong>
+Headless policy owns continuation; Task membership owns reporting.</li>
+<li>Does an old account label select or identify the current native login?
+<strong>No.</strong> It is historical attribution. Display correction is proposed.</li>
+<li>What goes next? <strong>Iterate to implement</strong> the historical wording,
+check old attributed and new unattributed Session displays, then return to gate.
+No code changed during this review.</li>
+</ol>
+</html>

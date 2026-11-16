@@ -357,8 +357,7 @@ fn kept_exit_record(place: &Place, terminal: &TerminalId) -> crate::process::Ses
         client: false,
         cwd: "/".into(),
         capture: None,
-        capture_key: None,
-        account: None,
+
         diagnostics: ("/absent.log".into(), 0),
     };
     std::fs::write(

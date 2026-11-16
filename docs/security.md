@@ -80,46 +80,28 @@ is ready to ship. `lf pr submit` leaves the exact-head merge to a person;
 whether a PR merged. Release authority is separate and depends on the target's
 configured publisher workflow and credentials.
 
-## Understand account authority over SSH
+## Understand credential authority over SSH
 
 ```bash
 lf machine add mini
 lf machine connect mini github
-lf machine connect mini codex work@example.com
 lf machine connect mini opencode
 lf machine connect mini linear
-lf --machine mini --account codex=work@ implement
+ssh mini                         # sign in with the native Claude/Codex client
+lf --machine mini -a codex implement
 ```
 
-Only explicitly added machines receive credentials. OpenSSH checks the known host
-key and Loopflow checks the saved machine identity before transfer. Adding or
-checking a machine does not sign it in. Connecting runs in the foreground; a
-headless caller needing browser approval stops with the connect command.
+Claude and Codex use destination-native authentication. Loopflow does not transfer
+those credentials, change native logins or provision subscription access on owned
+Machines or rentals. Set up the destination before unattended work; a missing
+login produces the native client's authentication error.
 
-Claude and Codex receive a fresh login minted in a private laptop directory,
-not the laptop's existing refresh credential. Linear receives a fresh OAuth grant.
-An OpenCode Console login gets a fresh device grant in a private laptop directory,
-checked to be the same OpenCode account; an OpenCode API key has no grant and is
-copied, like a GitHub token. OpenCode Zen must accept either before installation;
-it names no owner, so an API key's owner is not verified.
-Each login is checked against the intended provider identity before installation.
-GitHub receives gh's selected token through `gh auth login --with-token
---insecure-storage`; gh configures its HTTPS Git credential helper. Existing
-matching logins are retained and unrelated accounts remain.
-
-Credential bytes travel through SSH stdin. They never enter command arguments,
-exported environment variables, command records or diagnostic output. Native files
-are installed atomically with owner-only permissions. The target and other code
-running as that OS user can read them, just as after a normal login. Trust the
-remote OS account with the account's refresh authority.
-
-SSH provider launches run in the target's shared provider home, switched to the
-selected stored login; without a Keychain login there, Claude keeps it in a
-file. An owned target refreshes its own login. A rental holds only a Claude
-access token, which the laptop refreshes from a login it keeps for rentals and
-sends again before it expires, never while a Session runs. Neither depends on
-an origin broker or SSH-forwarded socket.
-Local shared-account behavior remains described in [subscriptions](subscriptions.md).
+Service credential transfer remains explicit. OpenSSH checks the known host key
+and Loopflow checks the saved Machine identity before transfer. Linear receives a
+fresh OAuth grant. OpenCode Console uses a fresh device grant; an OpenCode API
+key is copied, like a GitHub token. Trust the destination OS user with any
+credential installed there. Credential bytes travel through SSH stdin, never
+command arguments or diagnostic output. Native files use owner-only permissions.
 
 Linear credentials in SQLite are encrypted. The encryption key lives in an
 owner-only `provider-token.key` file. An existing platform key is retained before

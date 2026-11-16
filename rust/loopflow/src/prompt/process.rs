@@ -211,8 +211,6 @@ fn prepare_prompt(
         fallback_agents: config.fallback_agents(),
         max_turns: None,
         resume_token: None,
-        provider_account_id: None,
-        provider_account_authority_home: None,
         cwd: Some(repo_root),
         write_scope: crate::agent::AgentWriteScope::Configured,
         execution_boundary: None,

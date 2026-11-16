@@ -1768,10 +1768,6 @@ fn run() -> anyhow::Result<()> {
                     cmd: loopflow::lf::ConfigCommand::Settings { .. }
                 } | Commands::Open(_)
                     | Commands::Workspace(_)
-                    | Commands::Account {
-                        cmd: Some(loopflow::lf::AccountCommand::Next { .. }),
-                        ..
-                    }
             )
         )
     {
@@ -2050,19 +2046,6 @@ fn run() -> anyhow::Result<()> {
     }
 
     {
-        let account_selection =
-            loopflow::provider_account::selection::AccountSelection::from_flags(
-                &cli.account,
-                &cli.only_account,
-            )?;
-        let _account_selection = if !account_selection.is_default() {
-            Some(EnvGuard::set(
-                loopflow::provider_account::selection::ACCOUNT_SELECTION_ENV,
-                account_selection.env_value()?,
-            ))
-        } else {
-            None
-        };
         debug!(batch = cli.batch, "parsed CLI arguments");
 
         dispatch(cli, &args)
@@ -2413,11 +2396,7 @@ fn task_run_open_args(cli: &Cli) -> Option<TaskRunOpen> {
     if let Some(agent) = &cli.agent {
         args.extend(["--agent".into(), agent.clone()]);
     }
-    for (flag, values) in [
-        ("--account", &cli.account),
-        ("--only-account", &cli.only_account),
-        ("--setting", &cli.settings),
-    ] {
+    for (flag, values) in [("--setting", &cli.settings)] {
         for value in values {
             args.extend([flag.to_owned(), value.clone()]);
         }
@@ -3040,20 +3019,6 @@ fn execute_command(
             }),
         },
         Some(Commands::ContextBlock {
-            moment: ContextMoment::Limit,
-            ..
-        }) => {
-            loopflow::provider_account::observe_native_limit();
-            Ok(())
-        }
-        Some(Commands::ContextBlock {
-            moment: ContextMoment::RecordLimit,
-            ..
-        }) => {
-            loopflow::provider_account::record_limit();
-            Ok(())
-        }
-        Some(Commands::ContextBlock {
             delivery, moment, ..
         }) => loopflow::lf::commands::context::emit_block(delivery.as_deref(), *moment),
         Some(Commands::Holder { .. }) => unreachable!("the holder dispatches before any store"),
@@ -3076,13 +3041,7 @@ fn execute_command(
             target,
             cached,
             json,
-        }) => loopflow::lf::commands::account::run(
-            cmd.as_ref(),
-            target.as_deref(),
-            *cached,
-            *json,
-            cli.agent.as_deref(),
-        ),
+        }) => loopflow::lf::commands::account::run(cmd.as_ref(), target.as_deref(), *cached, *json),
         Some(Commands::Server { cmd }) => loopflow::lf::commands::server::run(cmd),
         Some(Commands::Machine { cmd }) => loopflow::lf::commands::machine::run(cmd, cli.batch),
         Some(Commands::Pr { cmd }) => in_repo_runtime(args, |_| {
@@ -3375,8 +3334,6 @@ mod tests {
             "/checkout",
             "--agent",
             "claude",
-            "--account",
-            "personal",
             "task",
             "run",
             "LOO-42",
@@ -3399,7 +3356,6 @@ mod tests {
         assert!(opened.wt.is_none());
         assert!(opened.cwd.is_none());
         assert_eq!(opened.agent, cli.agent);
-        assert_eq!(opened.account, cli.account);
     }
 
     #[test]
@@ -3572,7 +3528,7 @@ mod tests {
         for invocation in [
             vec!["--task", "LOO-438", "skill", "task/session"],
             vec!["--wt", "feature", "skill", "debug"],
-            vec!["-b", "-c", "--account", "fixture", "graph", "ship-api"],
+            vec!["-b", "-c", "--setting", "chrome=false", "graph", "ship-api"],
             vec!["task", "run", "LOO-438", "pursue"],
             vec!["pr", "publish"],
             vec!["pr", "open"],
@@ -3582,7 +3538,7 @@ mod tests {
                 for position in 0..=invocation.len() {
                     // Do not split another option from its value.
                     if position > 0
-                        && matches!(invocation[position - 1], "--task" | "--wt" | "--account")
+                        && matches!(invocation[position - 1], "--task" | "--wt" | "--setting")
                     {
                         continue;
                     }
@@ -3704,32 +3660,6 @@ mod tests {
         ];
         let result = reorder_args(args);
         assert_eq!(result, vec!["lf", "-a", "codex", "debug"]);
-    }
-
-    #[test]
-    fn reorder_args_repeatable_account_flags_after_skill() {
-        let args = [
-            "lf",
-            "implement",
-            "--account",
-            "claude=personal",
-            "--account",
-            "codex=reserve",
-        ]
-        .map(String::from)
-        .to_vec();
-
-        assert_eq!(
-            reorder_args(args),
-            vec![
-                "lf",
-                "--account",
-                "claude=personal",
-                "--account",
-                "codex=reserve",
-                "implement"
-            ]
-        );
     }
 
     #[test]

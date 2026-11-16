@@ -624,12 +624,6 @@ pub fn place(
         );
         return Ok(true);
     }
-    if batch {
-        runtime.block_on(async {
-            let accounts = crate::provider_account::open_account_store().await?;
-            super::machine_credentials::require_unattended_logins(&accounts).await
-        })?;
-    }
     // The Task's own repository, wherever this checkout was first recorded.
     let (_, task) = runtime.block_on(crate::ops::task::resolve_saved_task(repo, None, issue))?;
     let (rental, machine) = rent(&runtime, sqlite, name, None, None, false)?;
@@ -733,11 +727,7 @@ fn prepare(
         Login::GitHub,
         None,
         None,
-        false,
         batch,
-    ))?;
-    runtime.block_on(super::machine_credentials::connect_claude_accounts(
-        &machine, batch,
     ))?;
     let planning = crate::config::load_config(Some(repo))?
         .unwrap_or_default()
@@ -748,7 +738,6 @@ fn prepare(
             Login::Linear,
             None,
             None,
-            false,
             batch,
         ))?;
     }

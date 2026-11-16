@@ -92,8 +92,6 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     case repoCi(since: String, wave: String?, repo: String?)
     /// Every login's state on this Machine; `cached` skips the providers.
     case accountList(target: String?, cached: Bool)
-    /// How the repository selects an account for each provider.
-    case accountNext(directory: String, repo: String?, default: Bool, agent: String?)
     /// The commands, skills, graphs and Waves under `path`, as `lf list` shows them.
     case skillList(directory: String, path: [String])
     /// The branch's check report as the provider prints it, with its state.
@@ -199,8 +197,6 @@ public enum ServedRead: Equatable, Sendable, Encodable {
         case .accountList(let target, let cached):
             return ["account"] + argument(nil, target) + (cached ? ["--cached"] : [])
                 + ["--json"]
-        case .accountNext(_, let repo, let `default`, let agent):
-            return ["account", "next"] + argument("--agent", agent) + argument("--repo", repo) + (`default` ? ["--default"] : []) + ["--json"]
         case .skillList(_, let path):
             return ["list"] + path + ["--json"]
         case .prChecks(_, let required):
@@ -291,8 +287,6 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             TaggedFields("repo.ci", ["since": since, "wave": wave, "repo": repo])
         case .accountList(let target, let cached):
             TaggedFields("account.list", ["target": target, "cached": cached])
-        case .accountNext(let directory, let repo, let `default`, let agent):
-            TaggedFields("account.next", ["directory": directory, "repo": repo, "default": `default`, "agent": agent])
         case .skillList(let directory, let path): TaggedFields("skill.list", ["directory": directory, "path": path])
         case .prChecks(let directory, let required):
             TaggedFields("pr.checks", ["directory": directory, "required": required])
@@ -345,7 +339,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     case waveRemove(directory: String, wave: String, preview: Bool)
     case waveMachine(directory: String, wave: String, machine: String)
     /// Move the open Sessions the selector names to an agent.
-    case sessionMove(directory: String, blocked: Bool, on: String?, agent: String)
+    case sessionMove(directory: String, on: String?, agent: String)
     case waveCreate(directory: String, wave: String, objective: String?)
     case waveSync(directory: String, wave: String)
     case wavePlanBind(directory: String, wave: String, project: String)
@@ -361,18 +355,10 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     case checkoutSync(directory: String, onto: String?, preview: Bool, manual: Bool, continueSync: Bool, abort: Bool,
                       adopt: Bool)
     case checkoutCreate(directory: String, name: String, preview: Bool, persistent: Bool)
-    /// Run from `/`: the Machine's logins, not a repository's.
-    case accountDisconnect(provider: String, email: String?)
+    /// Service credentials on the Machine, run from `/`.
+    case accountDisconnect(provider: String)
     /// Served, no browser profile is chosen interactively.
-    case accountConnect(provider: String, email: String?, chromeProfile: String?, import: Bool, apiKey: Bool)
-    case accountSet(provider: String, email: String?, loginEmail: String?, plan: String?,
-                    clearPlan: Bool, paidThrough: String?, clearPaidThrough: Bool, clearCooldown: Bool,
-                    chromeProfiles: [String], clearChromeProfiles: Bool)
-    /// `file` is a path on the Machine; the token never travels in the request.
-    case accountRedeemReset(provider: String, email: String, idempotencyKey: String?, creditId: String?)
-    case accountUse(login: String)
-    case accountPause(login: String)
-    case accountUnpause(login: String)
+    case accountConnect(provider: String, chromeProfile: String?, apiKey: Bool)
     /// Started detached and headless; the result is the Process carrying the run.
     case graphRun(directory: String, name: String, message: String?, agent: String?)
     /// Started detached and headless; the result is the Process carrying the run.
@@ -406,7 +392,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     public var argv: [String] {
         switch self {
         case .prPublish, .prOpen, .prSubmit, .prArm, .prLand, .prAbandon, .prReconcile, .prRequestReview: return prArgv
-        case .accountDisconnect, .accountConnect, .accountSet, .accountRedeemReset, .accountUse, .accountPause, .accountUnpause:
+        case .accountDisconnect, .accountConnect:
             return accountArgv
         case .graphRun(_, let name, let message, let agent):
             return ["--batch"] + argument("--agent", agent) + ["graph", name] + argument(nil, message)
@@ -458,8 +444,8 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .waveRename(_, let wave, let name): return ["wave", "rename", wave, name, "--json"]
         case .waveRemove(_, let wave, let preview): return ["wave", "remove", wave, "--json"] + (preview ? ["--preview"] : [])
         case .waveMachine(_, let wave, let machine): return ["--wave", wave, "set", "machine", machine, "--json"]
-        case .sessionMove(_, let blocked, let on, let agent):
-            return ["--agent", agent, "session", "move", "--all"] + (blocked ? ["--blocked"] : [])
+        case .sessionMove(_, let on, let agent):
+            return ["--agent", agent, "session", "move", "--all"]
                 + argument("--on", on) + ["--json"]
         case .waveCreate(_, let wave, let objective): return ["wave", "create", wave] + argument("--objective", objective) + ["--json"]
         case .waveSync(_, let wave): return ["wave", "sync", wave, "--json"]
@@ -552,33 +538,13 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         }
     }
 
-    private static func accountTarget(_ provider: String, _ email: String?) -> String {
-        email.map { "\(provider)=\($0)" } ?? provider
-    }
-
-    /// The `account` namespace's spellings.
     private var accountArgv: [String] {
         switch self {
-        case .accountDisconnect(let provider, let email):
-            return ["account", "disconnect", Self.accountTarget(provider, email)]
-        case .accountConnect(let provider, let email, let chromeProfile, let `import`, let apiKey):
-            let argv = ["account", "connect", Self.accountTarget(provider, email)] + argument("--chrome-profile", chromeProfile)
-            return argv + Self.flags([("--import", `import`), ("--api-key", apiKey)])
-        case .accountSet(let provider, let email, let loginEmail, let plan, let clearPlan, let paidThrough,
-                         let clearPaidThrough, let clearCooldown, let chromeProfiles, let clearChromeProfiles):
-            var argv = ["account", "set", Self.accountTarget(provider, email)]
-            argv += argument("--login-email", loginEmail) + argument("--plan", plan)
-            argv += argument("--paid-through", paidThrough)
-            argv += Self.flags([("--clear-plan", clearPlan), ("--clear-paid-through", clearPaidThrough),
-                                ("--clear-cooldown", clearCooldown), ("--clear-chrome-profiles", clearChromeProfiles)])
-            for profile in chromeProfiles { argv += ["--chrome-profile", profile] }
-            return argv
-        case .accountRedeemReset(let provider, let email, let idempotencyKey, let creditId):
-            return ["account", "redeem-reset", Self.accountTarget(provider, email)] + argument("--idempotency-key", idempotencyKey)
-                + argument("--credit-id", creditId) + ["--json"]
-        case .accountUse(let login): return ["account", "use", login]
-        case .accountPause(let login): return ["account", "pause", login]
-        case .accountUnpause(let login): return ["account", "unpause", login]
+        case .accountDisconnect(let provider):
+            return ["account", "disconnect", provider]
+        case .accountConnect(let provider, let chromeProfile, let apiKey):
+            return ["account", "connect", provider] + argument("--chrome-profile", chromeProfile)
+                + Self.flags([("--api-key", apiKey)])
         default: return []
         }
     }
@@ -669,8 +635,8 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             TaggedFields("wave.remove", ["directory": directory, "wave": wave, "preview": preview])
         case .waveMachine(let directory, let wave, let machine):
             TaggedFields("wave.machine", ["directory": directory, "wave": wave, "machine": machine])
-        case .sessionMove(let directory, let blocked, let on, let agent):
-            TaggedFields("session.move", ["directory": directory, "blocked": blocked, "on": on, "agent": agent])
+        case .sessionMove(let directory, let on, let agent):
+            TaggedFields("session.move", ["directory": directory, "on": on, "agent": agent])
         case .waveCreate(let directory, let wave, let objective):
             TaggedFields("wave.create", ["directory": directory, "wave": wave, "objective": objective])
         case .waveSync(let directory, let wave):
@@ -695,24 +661,10 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .checkoutCreate(let directory, let name, let preview, let persistent):
             TaggedFields("checkout.create", ["directory": directory, "name": name, "preview": preview,
                                              "persistent": persistent])
-        case .accountDisconnect(let provider, let email):
-            TaggedFields("account.disconnect", ["provider": provider, "email": email])
-        case .accountConnect(let provider, let email, let chromeProfile, let `import`, let apiKey):
-            TaggedFields("account.connect", ["provider": provider, "email": email, "chrome_profile": chromeProfile,
-                                             "import": `import`, "api_key": apiKey])
-        case .accountSet(let provider, let email, let loginEmail, let plan, let clearPlan, let paidThrough,
-                         let clearPaidThrough, let clearCooldown, let chromeProfiles, let clearChromeProfiles):
-            TaggedFields("account.set", ["provider": provider, "email": email, "login_email": loginEmail,
-                                         "plan": plan, "clear_plan": clearPlan,
-                                         "paid_through": paidThrough, "clear_paid_through": clearPaidThrough,
-                                         "clear_cooldown": clearCooldown, "chrome_profiles": chromeProfiles,
-                                         "clear_chrome_profiles": clearChromeProfiles])
-        case .accountRedeemReset(let provider, let email, let idempotencyKey, let creditId):
-            TaggedFields("account.redeem_reset", ["provider": provider, "email": email,
-                                                  "idempotency_key": idempotencyKey, "credit_id": creditId])
-        case .accountUse(let login): TaggedFields("account.use", ["login": login])
-        case .accountPause(let login): TaggedFields("account.pause", ["login": login])
-        case .accountUnpause(let login): TaggedFields("account.unpause", ["login": login])
+        case .accountDisconnect(let provider):
+            TaggedFields("account.disconnect", ["provider": provider])
+        case .accountConnect(let provider, let chromeProfile, let apiKey):
+            TaggedFields("account.connect", ["provider": provider, "chrome_profile": chromeProfile, "api_key": apiKey])
         case .graphRun(let directory, let name, let message, let agent):
             TaggedFields("graph.run", ["directory": directory, "name": name, "message": message, "agent": agent])
         case .skillRun(let directory, let name, let message, let agent):
@@ -1361,14 +1313,6 @@ public struct RegistryQuery: Sendable {
     public func resetSession(_ session: SessionRecord, agent: String?, cwd: String?, requestID: String = UUID().uuidString) async throws -> SessionRecord {
         try Self.decode(SessionRecord.self, from: await write(
             .sessionNew(directory: cwd ?? "/", requestID: requestID, id: session.id, agent: agent)))
-    }
-
-    /// Move the open Sessions whose login cannot take their model now to
-    /// `agent` (`harness[:model]`) or `account`: idle ones at their next open,
-    /// busy ones after their turn. The report says which went where.
-    public func moveBlockedSessions(agent: String, cwd: String?) async throws -> SessionMoveReport {
-        try Self.decode(SessionMoveReport.self, from: await write(
-            .sessionMove(directory: cwd ?? "/", blocked: true, on: nil, agent: agent)))
     }
 
     /// Create a Task around the selected conversation without launching work.

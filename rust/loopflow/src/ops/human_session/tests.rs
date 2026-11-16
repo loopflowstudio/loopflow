@@ -1,6 +1,83 @@
+struct LiveSessionFixture {
+    store: SharedStore,
+    database: std::path::PathBuf,
+    _env: crate::test_ambient::EnvGuard,
+    _home: SessionHome,
+}
+
+/// A real process standing in for a running provider, reaped even when an
+/// assertion fails.
+struct RunningAgent(std::process::Child);
+
+impl Drop for RunningAgent {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+impl LiveSessionFixture {
+    async fn new() -> Self {
+        let home = SessionHome::new();
+        let store = home.store().await;
+        let env = crate::test_ambient::EnvGuard::clear(&["CODEX_HOME", "CLAUDE_CONFIG_DIR"]);
+        Self {
+            store,
+            database: home.home.path().join("loopflow.db"),
+            _env: env,
+            _home: home,
+        }
+    }
+
+    fn codex_session(&self, id: &str, model: Option<&str>) -> LfSession {
+        let session = self
+            .store
+            .sqlite
+            .test_session(id, &crate::session_record::new_artifact_key());
+        let thread = format!("thread-{id}");
+        rusqlite::Connection::open(&self.database)
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET provider='codex',provider_thread=?2,model=?3 WHERE id=?1",
+                rusqlite::params![&session.id, &thread, model],
+            )
+            .unwrap();
+        session
+    }
+
+    fn run(&self, session: &LfSession) -> RunningAgent {
+        let parent = crate::id::LfProcessId::new();
+        rusqlite::Connection::open(&self.database)
+            .unwrap()
+            .execute(
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?1,1)",
+                [&parent],
+            )
+            .unwrap();
+        let attachment = self
+            .store
+            .sqlite
+            .claim_session_attachment(&session.id, None, &parent, true)
+            .unwrap();
+        let mut command = std::process::Command::new("/bin/sleep");
+        command.env_clear().arg("60");
+        RunningAgent(
+            crate::harness::agent_process::spawn_native(
+                command,
+                &(
+                    self.store.sqlite.clone(),
+                    session.id.to_string(),
+                    attachment,
+                ),
+                crate::session::Holder::Caller,
+            )
+            .unwrap(),
+        )
+    }
+}
+
 fn listed_session(store: &crate::store::SharedStore, id: &str) -> super::SessionRecord {
-    let capacity = crate::provider_account::LaunchCapacity::read(&store.sqlite).unwrap();
-    super::listed(store, id, &capacity).unwrap().unwrap()
+    super::listed(store, id).unwrap().unwrap()
 }
 
 #[test]
@@ -186,7 +263,7 @@ fn session_metadata_keeps_unknown_position_visible() {
         wave_name: Some("Infrastructure".into()),
         task_identifier: Some("INF-123".into()),
     };
-    let row = super::summary_surface(&summary, &LaunchCapacity::default());
+    let row = super::summary_surface(&summary);
     assert_eq!(row.id, summary.id);
     assert_eq!(row.work, Some(crate::durable::WorkRef::Task(task)));
     assert_eq!(row.wave_id, Some(wave));
@@ -202,14 +279,14 @@ fn session_metadata_keeps_unknown_position_visible() {
     ));
     summary.graph_step_latest = true;
     assert!(matches!(
-        super::summary_surface(&summary, &LaunchCapacity::default()).graph_membership,
+        super::summary_surface(&summary).graph_membership,
         super::SessionGraphMembership::Step {
             occurrence: super::SessionGraphOccurrence::Current,
             ..
         }
     ));
     summary.graph.as_mut().unwrap().state = crate::session::GraphProcessSummaryState::Stopped;
-    let row = super::summary_surface(&summary, &LaunchCapacity::default());
+    let row = super::summary_surface(&summary);
     assert!(matches!(
         row.graph_membership,
         super::SessionGraphMembership::Step {
@@ -224,16 +301,16 @@ fn session_metadata_keeps_unknown_position_visible() {
     );
     summary.graph_lf_process_id = None;
     assert!(matches!(
-        super::summary_surface(&summary, &LaunchCapacity::default()).graph_membership,
+        super::summary_surface(&summary).graph_membership,
         super::SessionGraphMembership::Unknown { .. }
     ));
     summary.independent = true;
     assert_eq!(
-        super::summary_surface(&summary, &LaunchCapacity::default()).graph_membership,
+        super::summary_surface(&summary).graph_membership,
         super::SessionGraphMembership::Independent
     );
     summary.ready_summary = Some("Exact retained feedback".into());
-    let row = super::summary_surface(&summary, &LaunchCapacity::default());
+    let row = super::summary_surface(&summary);
     assert_eq!(row.state, super::SessionState::Unknown);
     assert_eq!(row.ready_summary, summary.ready_summary);
     assert_eq!(row.availability, None);
@@ -264,7 +341,6 @@ fn session_metadata_keeps_unknown_position_visible() {
     }
 }
 
-use crate::provider_account::LaunchCapacity;
 use std::ffi::OsString;
 
 use super::human_session_argv;
@@ -708,346 +784,6 @@ fn session_page_preserves_the_continuation_and_required_entries() {
 }
 
 /// A Machine with stored Codex logins, whose shared home `sign_in` moves.
-struct Logins {
-    store: SharedStore,
-    database: std::path::PathBuf,
-    root: tempfile::TempDir,
-    _env: crate::test_ambient::EnvGuard,
-    _home: SessionHome,
-}
-
-/// A real process standing in for a running provider, reaped even when an
-/// assertion fails.
-struct RunningAgent(std::process::Child);
-
-impl Drop for RunningAgent {
-    fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
-}
-
-impl Logins {
-    async fn new() -> Self {
-        let home = SessionHome::new();
-        let store = home.store().await;
-        let root = tempfile::tempdir().unwrap();
-        let env = crate::test_ambient::EnvGuard::clear(&["CODEX_HOME", "CLAUDE_CONFIG_DIR"]);
-        std::env::set_var("CODEX_HOME", root.path().join("native"));
-        std::env::set_var("CLAUDE_CONFIG_DIR", root.path().join("native-claude"));
-        Self {
-            store,
-            database: home.home.path().join("loopflow.db"),
-            root,
-            _env: env,
-            _home: home,
-        }
-    }
-
-    fn write_codex_auth(home: &std::path::Path, name: &str) {
-        use base64::Engine;
-        std::fs::create_dir_all(home).unwrap();
-        let claims = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(
-            serde_json::json!({"email": format!("{name}@example.com"), "sub": name}).to_string(),
-        );
-        std::fs::write(
-            home.join("auth.json"),
-            serde_json::json!({"tokens": {"access_token": "fixture", "id_token": format!("h.{claims}.s")}})
-                .to_string(),
-        )
-        .unwrap();
-    }
-
-    fn store_login(
-        &self,
-        provider: crate::provider_auth::Provider,
-        name: &str,
-        cooldown_until: Option<i64>,
-    ) -> crate::store::ProviderAccountId {
-        let id = crate::provider_account::parse_account_id(name).unwrap();
-        let home = self.root.path().join(provider.as_str()).join(name);
-        Self::write_codex_auth(&home, name);
-        let mut account = crate::provider_account::new_account(
-            provider,
-            id.clone(),
-            home,
-            Some(crate::profile::EmailAddress::parse(&format!("{name}@example.com")).unwrap()),
-        );
-        account.cooldown_until = cooldown_until;
-        self.store.sqlite.upsert_provider_account(&account).unwrap();
-        id
-    }
-
-    fn sign_in(&self, name: &str) {
-        Self::write_codex_auth(&self.root.path().join("native"), name);
-    }
-
-    /// A Codex conversation last run on `account`.
-    fn codex_session(
-        &self,
-        id: &str,
-        model: Option<&str>,
-        account: &crate::store::ProviderAccountId,
-    ) -> LfSession {
-        let session = self
-            .store
-            .sqlite
-            .test_session(id, &crate::session_record::new_artifact_key());
-        let thread = format!("thread-{id}");
-        rusqlite::Connection::open(&self.database)
-            .unwrap()
-            .execute(
-                "UPDATE agent_sessions SET provider='codex',provider_thread=?2,model=?3 WHERE id=?1",
-                rusqlite::params![&session.id, &thread, model],
-            )
-            .unwrap();
-        self.store
-            .sqlite
-            .pin_provider_session_route(
-                crate::provider_auth::Provider::Codex,
-                &crate::id::AgentSessionId::from(thread.as_str()),
-                account,
-            )
-            .unwrap();
-        session
-    }
-
-    fn run(&self, session: &LfSession) -> RunningAgent {
-        let parent = crate::id::LfProcessId::new();
-        rusqlite::Connection::open(&self.database)
-            .unwrap()
-            .execute(
-                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?1,1)",
-                [&parent],
-            )
-            .unwrap();
-        let attachment = self
-            .store
-            .sqlite
-            .claim_session_attachment(&session.id, None, &parent, true)
-            .unwrap();
-        let mut command = std::process::Command::new("/bin/sleep");
-        command.env_clear().arg("60");
-        RunningAgent(
-            crate::harness::agent_process::spawn_native(
-                command,
-                &(
-                    self.store.sqlite.clone(),
-                    session.id.to_string(),
-                    attachment,
-                ),
-                crate::session::Holder::Caller,
-            )
-            .unwrap(),
-        )
-    }
-
-    async fn selected(&self, blocked: bool, on: Option<&str>) -> anyhow::Result<Vec<String>> {
-        let filter = crate::session::SessionFilter {
-            blocked,
-            on: on.map(str::to_owned),
-            ..Default::default()
-        };
-        let mut ids: Vec<String> = super::list(&self.store, &filter)
-            .await?
-            .into_iter()
-            .map(|session| session.id.to_string())
-            .collect();
-        ids.sort();
-        Ok(ids)
-    }
-}
-
-fn an_hour_from_now() -> Option<i64> {
-    Some(time::OffsetDateTime::now_utc().unix_timestamp() + 3_600)
-}
-
-#[allow(clippy::await_holding_lock)]
-#[tokio::test]
-async fn selectors_read_the_login_a_running_codex_kept() {
-    let _lock = crate::journal::test_env_lock();
-    let logins = Logins::new().await;
-    let provider = crate::provider_auth::Provider::Codex;
-    let work = logins.store_login(provider, "work", an_hour_from_now());
-    let spare = logins.store_login(provider, "spare", None);
-    let on_work = logins.codex_session("on-work", None, &work);
-    let on_spare = logins.codex_session("on-spare", None, &spare);
-    logins.codex_session("stopped", None, &work);
-    let _agents = [logins.run(&on_work), logins.run(&on_spare)];
-
-    // work@ ran out and the next launch moved the home to spare@.
-    logins.sign_in("spare");
-    assert_eq!(logins.selected(true, None).await.unwrap(), ["on-work"]);
-    assert_eq!(
-        logins.selected(false, Some("work@")).await.unwrap(),
-        ["on-work"]
-    );
-    assert_eq!(
-        logins.selected(false, Some("spare@")).await.unwrap(),
-        ["on-spare", "stopped"]
-    );
-
-    // The home's login is out: a running Codex on spare@ keeps working, and a
-    // stopped Session would launch on the home.
-    logins.sign_in("work");
-    assert_eq!(
-        logins.selected(true, None).await.unwrap(),
-        ["on-work", "stopped"]
-    );
-    assert_eq!(
-        logins.selected(false, Some("spare@")).await.unwrap(),
-        ["on-spare"]
-    );
-}
-
-#[allow(clippy::await_holding_lock)]
-#[tokio::test]
-async fn on_spells_a_login_as_every_account_command_does() {
-    let _lock = crate::journal::test_env_lock();
-    let logins = Logins::new().await;
-    let provider = crate::provider_auth::Provider::Codex;
-    let work = logins.store_login(provider, "work", None);
-    logins.store_login(provider, "worker", None);
-    logins.store_login(provider, "codex", None);
-    logins.sign_in("work");
-    logins.codex_session("fable", Some("fable"), &work);
-    logins.codex_session("plain", None, &work);
-    let both = ["fable", "plain"];
-
-    for spelling in [
-        "work@",
-        "codex=work@",
-        "work@example.com",
-        "WORK@EXAMPLE.COM",
-    ] {
-        assert_eq!(
-            logins.selected(false, Some(spelling)).await.unwrap(),
-            both,
-            "{spelling}"
-        );
-    }
-    assert!(logins
-        .selected(false, Some("worker@"))
-        .await
-        .unwrap()
-        .is_empty());
-
-    // A harness name keeps its meaning, even beside a login that starts with it.
-    assert_eq!(logins.selected(false, Some("codex")).await.unwrap(), both);
-    assert_eq!(logins.selected(false, Some("CODEX")).await.unwrap(), both);
-    assert_eq!(
-        logins.selected(false, Some("codex:fable")).await.unwrap(),
-        ["fable"]
-    );
-    assert!(logins
-        .selected(false, Some("claude"))
-        .await
-        .unwrap()
-        .is_empty());
-
-    let unknown = logins.selected(false, Some("nobody@")).await.unwrap_err();
-    assert!(unknown.to_string().contains("no stored login matches"));
-    let ambiguous = logins.selected(false, Some("wor")).await.unwrap_err();
-    assert!(ambiguous.to_string().contains("could be"), "{ambiguous}");
-
-    logins.store_login(crate::provider_auth::Provider::Claude, "work", None);
-    let shared = logins.selected(false, Some("work@")).await.unwrap_err();
-    assert!(shared.to_string().contains("--on claude=work@"), "{shared}");
-    assert!(logins
-        .selected(false, Some("claude=work@"))
-        .await
-        .unwrap()
-        .is_empty());
-    assert_eq!(
-        logins.selected(false, Some("codex=work@")).await.unwrap(),
-        both
-    );
-}
-
-#[allow(clippy::await_holding_lock)]
-#[tokio::test]
-async fn moving_an_unknown_login_says_so_instead_of_moving_nothing() {
-    let _lock = crate::journal::test_env_lock();
-    let logins = Logins::new().await;
-    let filter = crate::session::SessionFilter {
-        on: Some("nobody@".into()),
-        ..Default::default()
-    };
-    let error = super::moves_bulk::move_sessions(&logins.store, &filter, "claude:opus")
-        .await
-        .unwrap_err();
-    assert!(error.to_string().contains("no stored login matches"));
-}
-
-#[allow(clippy::await_holding_lock)]
-#[tokio::test(flavor = "multi_thread")]
-async fn task_detail_reads_capacity_once_for_all_sessions() {
-    let _lock = crate::journal::test_env_lock();
-    let logins = Logins::new().await;
-    let account = logins.store_login(crate::provider_auth::Provider::Codex, "work", None);
-    logins.sign_in("work");
-    let repo = loopflow_test_support::TestRepo::new();
-    let task = logins
-        .store
-        .sqlite
-        .create_task(&crate::work::task::NewTask {
-            repository_id: logins
-                .store
-                .sqlite
-                .ensure_repository(repo.path().to_str().unwrap())
-                .unwrap(),
-            id: crate::durable::TaskId::new(),
-            project_id: None,
-            title: "Many Sessions".into(),
-            description: String::new(),
-            due_date: None,
-        })
-        .unwrap();
-    // `lf task status`, Desktop and screens read this on the write store.
-    let mut status =
-        crate::store::query_plans::assert_no_empty_writes(&logins.store.sqlite, || {
-            tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current()
-                    .block_on(crate::ops::task::registered_task_status(
-                        &logins.store,
-                        task,
-                    ))
-                    .unwrap()
-            })
-        });
-    let capacity = crate::provider_account::LaunchCapacity::read(&logins.store.sqlite).unwrap();
-    let mut expected = Vec::new();
-    for id in ["first", "second", "third"] {
-        let session = logins.codex_session(id, Some("gpt-5"), &account);
-        expected.push(crate::lf::commands::session::SessionFacts::of(
-            super::listed(&logins.store, id, &capacity)
-                .unwrap()
-                .unwrap(),
-        ));
-        status
-            .overview
-            .as_mut()
-            .unwrap()
-            .sessions
-            .push(crate::task_work::TaskSession {
-                id: session.id,
-                title: session.title,
-                interactive: session.interactive,
-                graph_lf_process_id: None,
-                completed_at: None,
-            });
-    }
-    crate::provider_account::CAPACITY_READS.set(0);
-    let detail = crate::lf::commands::waves::task_detail(&logins.store, status)
-        .await
-        .unwrap();
-    assert_eq!(crate::provider_account::CAPACITY_READS.get(), 1);
-    assert_eq!(
-        serde_json::to_value(detail.sessions).unwrap(),
-        serde_json::to_value(expected).unwrap()
-    );
-}
-
 #[test]
 fn no_raw_leaves_raw_conversations_out_of_the_list() {
     use clap::Parser;
@@ -1789,9 +1525,8 @@ fn new_thread_before_a_first_provider_keeps_the_original_prompt_and_retries_once
 #[tokio::test]
 async fn a_held_task_conversation_without_a_view_offers_attach() {
     let _lock = crate::journal::test_env_lock();
-    let logins = Logins::new().await;
-    let work = logins.store_login(crate::provider_auth::Provider::Codex, "work", None);
-    let session = logins.codex_session("held", None, &work);
+    let logins = LiveSessionFixture::new().await;
+    let session = logins.codex_session("held", None);
     let _agent = logins.run(&session);
     let task = TaskId::new();
     let created = logins

@@ -6,10 +6,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::time::{Duration, Instant};
 
-use loopflow::store::{CredentialState, ProviderAccount, ProviderAccountId, RoutingState};
 use loopflow::work::task::{GithubPr, PrPublication};
 use loopflow_test_support::{MachineServer, TestRepo};
-use sha2::{Digest, Sha256};
 
 fn command(repo: &Path, home: &Path, args: &[&str]) -> Command {
     let mut command = Command::new(loopflow_test_support::lf_binary());
@@ -343,7 +341,7 @@ const HOLD_SKILL: (&str, &str) = (".lf/skills/hold.md", "Hold.");
 /// the test writes `release` in the home.
 fn holding_task() -> GraphTask {
     let task = GraphTask::with_tools(&[("claude", HOLDING_CLAUDE)]);
-    connect_fixture_claude(task.home.path(), &task.registered.store);
+
     crate::config::files::update(&task.home.path().join("config.yaml"), |value| {
         value["agent"] = "claude".into();
         Ok(())
@@ -934,50 +932,6 @@ fn a_refused_bare_task_run_returns_its_refusal() {
     assert!(support::recorded_graphs(task.home.path()).is_empty());
 }
 
-/// A headless Task requires an account record even when the provider is a
-/// stand-in. Its synthetic credential never leaves the network sandbox.
-pub(crate) fn connect_fixture_claude(home: &Path, store: &loopflow::store::Store) {
-    connect_claude_account(home, store, "fixture");
-}
-
-/// Connect a managed Claude account `name`, signed in as `name@example.com`.
-fn connect_claude_account(home: &Path, store: &loopflow::store::Store, name: &str) {
-    let account_home = home.join("accounts/claude").join(name);
-    fs::create_dir_all(&account_home).unwrap();
-    let credential = format!(
-        r#"{{"claudeAiOauth":{{"accessToken":"fixture-{name}","expiresAt":4102444800000}}}}"#
-    );
-    fs::write(account_home.join(".credentials.json"), &credential).unwrap();
-    tokio::runtime::Runtime::new()
-        .unwrap()
-        .block_on(store.upsert_provider_account(&ProviderAccount {
-            provider: "claude".into(),
-            account_id: ProviderAccountId::parse(name).unwrap(),
-            home: Some(account_home),
-            login_email: Some(
-                loopflow::profile::EmailAddress::parse(&format!("{name}@example.com")).unwrap(),
-            ),
-            observed_email: Some(format!("{name}@example.com")),
-            observed_subject: Some(name.into()),
-            observed_credential_digest: Some(format!(
-                "{:x}",
-                Sha256::digest(credential.as_bytes())
-            )),
-            observed_plan: None,
-            credential_state: CredentialState::Connected,
-            routing_state: RoutingState::Automatic,
-            plan: None,
-            paid_through: None,
-            utilization_percent: None,
-            cooldown_until: None,
-            cooldown_reason: None,
-            last_selected_at: None,
-            created_at: 1,
-            updated_at: 1,
-        }))
-        .unwrap();
-}
-
 /// A Claude stand-in that records each launch's arguments, home and the login
 /// that home carries: the stand-in Keychain on macOS, else its file.
 const CLAUDE_RECORDER: &str = r#"#!/usr/bin/python3
@@ -1007,7 +961,7 @@ for line in sys.stdin:
 "#;
 
 #[test]
-fn a_task_run_takes_its_waves_agent_and_account_without_flags() {
+fn a_task_run_takes_its_waves_agent_without_flags() {
     let repo = TestRepo::new();
     support::bind_task_planning(&repo);
     repo.create_branch("wave-setup");
@@ -1027,8 +981,7 @@ fn a_task_run_takes_its_waves_agent_and_account_without_flags() {
         "wave-setup",
         &repo.head_sha(),
     );
-    connect_claude_account(home.path(), &registered.store, "fixture");
-    connect_claude_account(home.path(), &registered.store, "work");
+
     for (path, content) in [
         (".lf/skills/probe.md", "Probe."),
         (".lf/graphs/proof.yaml", "- step: {name: probe}\n"),
@@ -1044,16 +997,8 @@ fn a_task_run_takes_its_waves_agent_and_account_without_flags() {
     );
     repo.stage_all();
     repo.commit("Set up the Wave once");
-    for args in [
-        &[
-            "--wave",
-            "task-pr-tests",
-            "set",
-            "account.claude",
-            "work@example.com",
-        ][..],
-        &["-b", "task", "run", "INF-123", "proof"],
-    ] {
+    {
+        let args = &["-b", "task", "run", "INF-123", "proof"];
         let output = command(repo.path(), home.path(), args).output().unwrap();
         assert!(
             output.status.success(),
@@ -1089,20 +1034,14 @@ fn a_task_run_takes_its_waves_agent_and_account_without_flags() {
             args.windows(2).any(|pair| pair == ["--model", "opus"]),
             "{launch}"
         );
-        // The shared home ran signed in as the Wave's account.
+        // The native home is inherited, without installing a saved login.
         assert_eq!(
             launch["claude_home"].as_str().map(Path::new),
             std::env::var_os("CLAUDE_CONFIG_DIR")
                 .as_deref()
                 .map(Path::new)
         );
-        assert!(
-            launch["claude_login"]
-                .as_str()
-                .unwrap()
-                .contains("fixture-work"),
-            "{launch}"
-        );
+        assert!(launch["claude_login"].is_null());
     }
 }
 
@@ -2737,7 +2676,7 @@ for line in sys.stdin:
 
 fn shipping_task() -> GraphTask {
     let task = GraphTask::with_tools(&[("claude", STAND_IN_CLAUDE)]);
-    connect_fixture_claude(task.home.path(), &task.registered.store);
+
     crate::config::files::update(&task.home.path().join("config.yaml"), |value| {
         value["agent"] = "claude".into();
         Ok(())
@@ -3104,7 +3043,7 @@ sys.exit(3)
 #[test]
 fn task_ship_restarts_after_a_failure_wait_instead_of_on_every_read() {
     let task = GraphTask::with_tools(&[("claude", FAILING_CLAUDE)]);
-    connect_fixture_claude(task.home.path(), &task.registered.store);
+
     crate::config::files::update(&task.home.path().join("config.yaml"), |value| {
         value["agent"] = "claude".into();
         Ok(())
@@ -3182,7 +3121,7 @@ for line in sys.stdin:
 #[test]
 fn task_ship_blocked_at_verification_waits_there_without_building_again() {
     let task = GraphTask::with_tools(&[("claude", BLOCKED_CLAUDE)]);
-    connect_fixture_claude(task.home.path(), &task.registered.store);
+
     crate::config::files::update(&task.home.path().join("config.yaml"), |value| {
         value["agent"] = "claude".into();
         Ok(())

@@ -1026,16 +1026,14 @@ pub(crate) async fn task_detail(
     let row = snapshot_task_details(store, vec![&task], false, &shared)?
         .pop()
         .expect("a registered Task has a row");
-    let capacity = crate::provider_account::LaunchCapacity::read(&store.sqlite)?;
+
     let mut sessions = Vec::new();
     for session in status
         .overview
         .map(|overview| overview.sessions)
         .unwrap_or_default()
     {
-        if let Some(record) =
-            crate::ops::human_session::listed(store, session.id.as_str(), &capacity)?
-        {
+        if let Some(record) = crate::ops::human_session::listed(store, session.id.as_str())? {
             sessions.push(SessionFacts::of(record));
         }
     }
@@ -2482,18 +2480,6 @@ fn print_setup(setup: &crate::work::wave::setup::WaveSetup) {
     }
     line("tasks machine", &setup.tasks_machine);
     line("session machine", &setup.session_machine);
-    for (provider, route) in &setup.accounts {
-        let accounts = if route.accounts.is_empty() {
-            "unrouted".to_string()
-        } else {
-            route.accounts.join(" -> ")
-        };
-        println!(
-            "  {:<16} {accounts} ({})",
-            format!("{provider} accounts"),
-            route.source.as_str()
-        );
-    }
 }
 
 /// The Wave line `lf wave show` and `lf wave status` open with. A removed Wave

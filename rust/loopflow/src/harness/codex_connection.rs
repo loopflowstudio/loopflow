@@ -177,7 +177,6 @@ pub(crate) async fn recover_history(
         store.clone(),
         session.to_owned(),
         None,
-        None,
         Default::default(),
     ));
     let mut cursor = Value::Null;
@@ -228,7 +227,6 @@ pub(crate) async fn start_turn(
         store.clone(),
         session.to_owned(),
         Some(attachment.clone()),
-        None,
         Default::default(),
     ));
     let id = format!("lf-initial-{}", uuid::Uuid::new_v4());

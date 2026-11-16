@@ -126,7 +126,7 @@ headless Sessions. Finished conversations belong in `lf history`; an exact
 `--page --json` returns a stable-ID page; pass its `next` value to `--after`
 with the same filters for the following page. Raw conversations appear only
 in unpaged lists and have no primary scope. They also stay out of selections
-by `--search`, `--blocked` or `--on`.
+by `--search` or `--on`.
 
 ## Run one in your terminal
 
@@ -294,7 +294,7 @@ The pane's connection row explains which conversation came back:
 | **Same process** | The existing provider process is still serving the conversation. |
 | **Resumed in a new process** | A replacement process reopened the same provider conversation. |
 | **Forked from …** | A new provider conversation carries history from the source. “Original was running at fork” describes that moment, not its current status. |
-| **New conversation; earlier one left behind** | The new provider conversation does not carry the earlier history, as can happen on account failover. |
+| **New conversation; earlier one left behind** | The new provider conversation does not carry the earlier history, when earlier history could not be transferred. |
 
 `lf session history <session>` keeps the observed provider changes. Unknown
 history stays unknown; a connection alone does not establish continuity. Reading
@@ -513,36 +513,24 @@ no checkout is adopted. Binding starts no Graph, and leaves done or landed Tasks
 closed. Closed or headless Sessions cannot become primary.
 `--dry-run` shows the exact target first.
 
-## Which login it runs on
+## Native login and recovery
 
 ```bash
-lf --account claude=work@ : "draft the migration"     # prefer this login, fall back to the route
-lf --only-account claude=personal@ -b task run LOO-12 # this login only, for every step and child
+codex login
+lf -a codex resume <session-id>
 ```
 
-A new launch tries the repository's account route, then your default route,
-then any eligible login with room. A resumed Session runs on the active login.
-A Graph carries its selection to every step; run a fresh Graph to choose
-again. Connecting logins and setting routes: [Ops](ops.md).
+Launch and resume use the native client's authentication on the execution
+Machine. The Session retains its native thread and recorded history; historical
+account labels do not select credentials. See [Native authentication](subscriptions.md).
 
-## Move what a limit blocks
+Interactive Sessions keep provider refusals visible and send no automatic
+follow-up input. Retry explicitly after resolving authentication or capacity,
+or select another model or harness with `-a` on resume. Task membership does
+not change this policy. Headless runs follow configured model/harness fallbacks.
 
-```bash
-lf session list --blocked                    # whose next message would fail
-lf session move --blocked -a claude:opus     # continue them on Opus
-lf account use claude=work@                  # switch the Machine's login and stay there; every open Claude follows
-```
-
-`--blocked` and `--on <account|harness[:model]>` select Sessions; `list`
-previews what an `-a` move moves. An idle Session continues on the new agent at
-its next open, seeded with its conversation; a busy one moves after its turn.
-Logins belong to the Machine, not to a Session: every open Claude runs on the
-active one. A running Codex keeps its login until you restart it on another:
-`lf --account codex=<login> resume <session>`. `--blocked` and `--on` read the
-login each Session uses. `use` holds launches there until the login fills up
-or `lf account use auto`.
-
-Interactive Sessions only; nothing is written to your preferences. More: [Subscriptions](subscriptions.md#when-an-account-runs-out).
+`lf session list --on claude` filters by harness; `--on claude:opus` also filters
+by model. Login selectors and catalog-derived `--blocked` filtering are removed.
 
 ## Reference
 

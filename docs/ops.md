@@ -2,9 +2,8 @@
 
 Your Task came back as a pull request. This page takes it the rest of the way:
 landed, with failing CI repaired for you, then released. It also covers the
-environment that work runs in: checkouts, other machines, and the provider
-accounts that pay for it. Each section is one `lf` noun: `pr`, `repository`,
-`wt`, `machine`, `account`.
+environment that work runs in: checkouts, other Machines, native provider logins
+and service authentication.
 
 Land, publish, CI repair and release are Loopflow's own verbs, so Skills and
 Graphs that use them don't care which code host is behind them. GitHub is the
@@ -162,10 +161,8 @@ tail ~/.lf/logs/refresh.log    # what each scheduled update did
 Installing a build schedules `lf install` on your stream: daily at 09:00 local
 time, or the cadence already set. On macOS this is the LaunchAgent
 `com.loopflow.refresh`, which also runs at login and whenever it loads. On Linux
-it is a crontab line. The same schedule renews rental Claude logins every 2
-hours (`com.loopflow.rental-renewal`, the crontab line ending `# loopflow rental
-renewal`; logs in `~/.lf/logs/rental-renewal.log`); with no live rental it does
-nothing.
+it is a crontab line. Subscription credentials are not renewed by this schedule;
+the native client owns refresh on its execution Machine.
 
 Turn it off on macOS:
 
@@ -342,7 +339,7 @@ access, and [Surfaces](surfaces.md) for app-owned Desktop automation.
 
 ```bash
 lf machine add mini                              # save an SSH destination; offers to install lf
-lf machine connect mini claude jack@example.com  # a login of its own, approved in this laptop's browser
+ssh mini                                        # sign in with the native client on mini
 lf --machine mini task list                      # any command, run there
 lf task move LOO-12 --machine mini               # move a Task there with its Session; you stay its person
 lf --wave product set machine mini               # new Tasks in Wave `product` run there
@@ -356,7 +353,6 @@ Group machines you own into a pool, and rent more when none is free:
 
 ```bash
 lf pool add lab && lf machine add jack@mini --pool lab
-lf machine connect code-1 claude jack@example.com # once: approve the laptop's Claude login for rentals
 lf ondemand add code --provider daytona --vcpus 4 --memory-gb 8 --max 2 --max-usd-per-hour 0.40
 lf ondemand add gpu --provider runpod --vcpus 8 --memory-gb 32 --gpu A40 --max 1 --max-usd-per-hour 1
 lf task run LOO-570 --pool lab --rent code --quote   # where it would run, the most it could cost
@@ -365,7 +361,10 @@ lf --wave infrastructure set machine.capacity code            # the Wave's new T
 lf machine end code-1                                # give a rented machine back now
 ```
 
-Providers read their keys from the environment (`doppler run -- lf …`):
+Claude/Codex authentication must be provisioned on the destination independently
+before unattended work; rentals receive no subscription credentials from lf.
+
+Rental providers read their keys from the environment (`doppler run -- lf …`):
 Daytona `DAYTONA_API_KEY`; Modal `MODAL_TOKEN_ID`/`MODAL_TOKEN_SECRET` or
 `~/.modal.toml`; RunPod `RUNPOD_API_KEY`; AWS `AWS_ACCESS_KEY_ID`,
 `AWS_SECRET_ACCESS_KEY` and `AWS_REGION`. `--gpu` rents one GPU on RunPod, AWS or Modal, on a
@@ -382,30 +381,18 @@ goes back 15 minutes after its last Task finished; first its Sessions and
 Processes are copied home, so `lf session list` shows them "from code-1".
 Unpushed work refuses the give-back unless you pass `--force`.
 
-## Accounts
+## Authentication
 
 ```bash
-lf account                                         # one row per login: weekly room, what to fix
-lf account connect codex=work@example.com --chrome-profile Work
-lf set account.codex work@,personal@               # this repository: work first
-lf account next                                    # which login the next launch takes, and why
-lf account use work@                               # stay on work@ until it fills up; `use auto` undoes it
-lf account pause personal@                         # out of rotation
+codex login                          # on the Machine that runs Codex
+lf -a codex implement
+lf account connect linear --chrome-profile Work
 ```
 
-Connect registers a login you already have. It runs the provider's sign-in in
-the Chrome profile you name and refuses a login that doesn't match the email.
-Every launch takes the eligible account on the largest plan with the most
-weekly quota left per hour until its window resets, switching the shared login
-when another account ranks ahead; route order breaks ties. `lf account use`
-holds launches on one login until it fills up or `lf account use auto`.
-`lf account --cached` reads saved evidence without contacting providers.
-
-Unknown capacity stays unknown, never zero.
-
-For one launch, `--account codex=work@` prefers an account and keeps fallback;
-`--only-account` restricts the launch and its children. See
-[Sessions](sessions.md) for how a launch picks its account.
+Claude and Codex own their native logins. Loopflow does not select subscriptions,
+switch credentials or poll quotas. GitHub, planning services, Doppler and OpenCode
+retain service authentication through `lf account`. See
+[Native authentication](subscriptions.md) for homes, resume and refusal recovery.
 
 ## Reference
 
@@ -425,7 +412,7 @@ For one launch, `--account codex=work@` prefers an account and keeps fallback;
 | `lf pool …`, `lf ondemand …` | Machines you own, machines you rent |
 | `lf server status` | Observe local client access and connection errors |
 | `lf install` | Update Loopflow and its server registration |
-| `lf account [connect\|route\|use\|token\|set]` | Provider logins, capacity and routing |
+| `lf account` | Service authentication |
 
 Every flag is in the [`lf` reference](lf-reference.md): [`lf pr`](lf-reference.md#lf-pr),
 [`lf repo`](lf-reference.md#lf-repo), [`lf wt`](lf-reference.md#lf-wt),

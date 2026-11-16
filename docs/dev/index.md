@@ -63,7 +63,7 @@ The implementation follows the same order as the diagram:
 | Parse and dispatch | [`lf/mod.rs`](../../rust/loopflow/src/lf/mod.rs) | One command and launch context |
 | Find the Skill | [`skills/catalog.rs`](../../rust/loopflow/src/skills/catalog.rs) | One selected Skill source |
 | Assemble context | [`prompt/mod.rs`](../../rust/loopflow/src/prompt/mod.rs) | System and task prompts |
-| Select credentials and route | [`provider_account.rs`](../../rust/loopflow/src/provider_account.rs) | Harness, account, model, credential |
+| Select the model and harness | [`agent/mod.rs`](../../rust/loopflow/src/agent/mod.rs) | Configured launch and headless fallback order |
 | Launch and normalize | [`harness/`](../../rust/loopflow/src/harness) | Provider output and usage events |
 | Record command and conversation evidence | [`journal/`](../../rust/loopflow/src/journal) and the store | Process completion, LfSession history and immutable payloads |
 

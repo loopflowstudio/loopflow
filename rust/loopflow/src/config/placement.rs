@@ -53,50 +53,6 @@ pub(crate) fn expand_shorthand(value: &mut Value) -> Result<()> {
     Ok(())
 }
 
-/// Ordered account references; exact IDs, login emails and unambiguous prefixes
-/// are resolved against the executor's account observations at launch.
-#[derive(schemars::JsonSchema, Debug, Clone, Serialize, Deserialize)]
-#[serde(try_from = "AccountOrderInput", into = "Vec<String>")]
-pub struct AccountOrder(pub Vec<String>);
-
-#[derive(schemars::JsonSchema, Debug, Deserialize)]
-#[serde(untagged)]
-enum AccountOrderInput {
-    List(Vec<String>),
-    CommaSeparated(String),
-}
-impl TryFrom<AccountOrderInput> for AccountOrder {
-    type Error = String;
-    fn try_from(value: AccountOrderInput) -> Result<Self, Self::Error> {
-        let values = match value {
-            AccountOrderInput::List(values) => values,
-            AccountOrderInput::CommaSeparated(value) => value
-                .split(',')
-                .map(|value| value.trim().to_owned())
-                .collect(),
-        };
-        let mut seen = std::collections::HashSet::new();
-        if values
-            .iter()
-            .any(|value| value.is_empty() || !seen.insert(value.clone()))
-        {
-            return Err("account references must be nonempty and unique".into());
-        }
-        Ok(Self(values))
-    }
-}
-impl From<AccountOrder> for Vec<String> {
-    fn from(value: AccountOrder) -> Self {
-        value.0
-    }
-}
-impl std::ops::Deref for AccountOrder {
-    type Target = [String];
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
 #[derive(schemars::JsonSchema, Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MachineDeclaration {
@@ -167,21 +123,6 @@ pub(crate) fn write(
     super::files::edit(&path, &path_parts, value, super::keys::Root::General)
 }
 
-pub(crate) fn route_location(
-    conn: &Connection,
-    scope: &crate::profile::RouteScope,
-) -> Result<(PathBuf, Vec<String>)> {
-    match scope {
-        crate::profile::RouteScope::Default => location(conn, None),
-        crate::profile::RouteScope::Wave(id) => {
-            location(conn, Some(&DefaultScope::Wave(id.clone())))
-        }
-        crate::profile::RouteScope::Repo(repo) => {
-            Ok((super::files::private_path(repo.as_path())?, vec![]))
-        }
-    }
-}
-
 pub(crate) fn global_settings(conn: &Connection) -> Result<super::Config> {
     let (path, _) = location(conn, None)?;
     let declarations = [super::ConfigDeclarations {
@@ -233,75 +174,26 @@ pub struct AccountDeclaration {
     pub paid_through: Option<String>,
 }
 
-pub(crate) fn account_preferences(
-    config: &super::Config,
+pub(crate) fn historical_account_labels(conn: &Connection) -> Result<Value> {
+    let (path, _) = location(conn, None)?;
+    super::files::read(&path)
+}
+
+/// Read old labels for history, without interpreting routing preferences.
+pub(crate) fn historical_account(
+    document: &Value,
     mut account: crate::store::ProviderAccount,
 ) -> Result<crate::store::ProviderAccount> {
-    if let Some(declaration) = config
-        .accounts
-        .get(&account.provider)
+    account.login_email = document
+        .get("accounts")
+        .and_then(|providers| providers.get(&account.provider))
         .and_then(|accounts| accounts.get(account.account_id.as_str()))
-    {
-        account.login_email = declaration.login_email.clone();
-        account.routing_state = declaration
-            .routing_state
-            .unwrap_or(crate::store::RoutingState::Automatic);
-        account.plan = declaration.plan.clone();
-        account.paid_through = declaration
-            .paid_through
-            .as_deref()
-            .map(parse_date)
-            .transpose()?;
-    }
+        .and_then(|account| account.get("login_email"))
+        .and_then(Value::as_str)
+        .map(crate::profile::EmailAddress::parse)
+        .transpose()
+        .map_err(anyhow::Error::msg)?;
     Ok(account)
-}
-
-pub(crate) fn parse_date(value: &str) -> Result<time::Date> {
-    let format = time::format_description::parse_borrowed::<2>("[year]-[month]-[day]")?;
-    Ok(time::Date::parse(value, &format)?)
-}
-
-pub(crate) fn write_account_preferences(
-    conn: &Connection,
-    account: &crate::store::ProviderAccount,
-) -> Result<()> {
-    let declaration = AccountDeclaration {
-        login_email: account.login_email.clone(),
-        routing_state: Some(account.routing_state),
-        plan: account.plan.clone(),
-        paid_through: account.paid_through.map(|date| date.to_string()),
-    };
-    let (path, _) = location(conn, None)?;
-    super::files::update(&path, |document| {
-        if let Some(accounts) = document
-            .get("accounts")
-            .and_then(|accounts| accounts.get(&account.provider))
-            .and_then(Value::as_mapping)
-        {
-            for (id, value) in accounts {
-                if id.as_str() == Some(account.account_id.as_str()) {
-                    continue;
-                }
-                let existing: AccountDeclaration = serde_yaml_ng::from_value(value.clone())?;
-                anyhow::ensure!(
-                    account.login_email.is_none() || existing.login_email != account.login_email,
-                    "{} login {} already belongs to account {}",
-                    account.provider,
-                    account
-                        .login_email
-                        .as_ref()
-                        .expect("duplicate login is present"),
-                    id.as_str().unwrap_or_default()
-                );
-            }
-        }
-        super::settings::insert(
-            document,
-            &["accounts", &account.provider, account.account_id.as_str()],
-            serde_yaml_ng::to_value(declaration)?,
-        );
-        Ok(())
-    })
 }
 
 #[derive(schemars::JsonSchema, Debug, Clone, Serialize, Deserialize)]

@@ -10,9 +10,9 @@ use super::fact::{self, Decoded, ProviderFact, ProviderTurn, Signal};
 use crate::chat::types::{
     ConversationEvent, ConversationItem, FileEdit, ItemDelta, Lifecycle, TurnUsage,
 };
+use crate::harness::fact::RateLimitSignal;
 use crate::harness::lf_tag::LfTagParser;
 use crate::id::AgentSessionId;
-use crate::provider_account::RateLimitSignal;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ItemPhase {

@@ -284,17 +284,13 @@ pub struct SessionFilter {
     pub limit: usize,
     /// Present for stable-ID pages; empty starts the first page.
     pub after: Option<String>,
-    /// Only Sessions whose next message would fail: their login cannot take
-    /// their model now.
-    pub blocked: bool,
-    /// Only Sessions using this login (`work@`, `claude=work@`) or on `harness[:model]`.
+    /// Only Sessions on `harness[:model]`.
     pub on: Option<String>,
 }
 
 impl Default for SessionFilter {
     fn default() -> Self {
         Self {
-            blocked: false,
             on: None,
             orphan: false,
             repo: None,

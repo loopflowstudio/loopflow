@@ -68,17 +68,16 @@ def test_docs_security_page_states_resident_login_guarantees(page: Page, base_ur
     assert "--forward-agent" in text
 
 
-def test_docs_subscriptions_page_owns_account_selection(page: Page, base_url: str):
+def test_docs_subscriptions_page_owns_native_auth_and_retry_policy(page: Page, base_url: str):
     page.goto(f"{base_url}/docs/subscriptions")
     content = page.locator(".docs-content")
     assert content.is_visible()
     text = " ".join(content.inner_text().split())
-    assert "--only-account" in text
-    assert "repository account route" in text
-    assert "lf --machine mini --account codex=work@ implement" in text
-    assert "Invocation selectors resolve against the laptop's managed logins" in text
-    assert "cannot fall back to a different login" in text
-    assert "Route candidates belong to the executing machine" in text
+    assert "Each launch uses the native client's authentication" in text
+    assert "Headless, with or without a Task" in text
+    assert "Interactive, with or without a Task" in text
+    assert "Loopflow never waits for a subscription reset" in text
+    assert "does not transfer Claude/Codex credentials" in text
 
 
 def test_docs_nonexistent_redirects(page: Page, base_url: str):

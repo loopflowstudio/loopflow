@@ -37,7 +37,6 @@ pub(crate) fn parse_artifact_key(value: &str) -> Result<String, crate::durable::
 }
 
 pub const CAPTURE_KEY_ENV: &str = "LF_CAPTURE_KEY";
-pub(crate) const PROVIDER_ACCOUNT_ID_ENV: &str = "LF_PROVIDER_ACCOUNT_ID";
 const SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone)]
@@ -117,7 +116,7 @@ impl AgentProcessRequest {
             skill_invocation: config.skill_invocation.clone(),
             output_schema: config.output_schema.clone(),
             agent: config.resolved_agent()?,
-            account_id: config.provider_account_id.clone(),
+            account_id: None,
             max_turns: config.max_turns,
             write_scope: config.write_scope,
             execution_boundary: config.execution_boundary.clone(),
@@ -125,13 +124,6 @@ impl AgentProcessRequest {
             chrome: config.chrome,
             codex_service_tier: config.codex_service_tier,
         })
-    }
-
-    pub(crate) fn replay_unavailable_reason(&self) -> Option<&'static str> {
-        let (harness, _) = crate::config::parse_agent(&self.agent);
-        matches!(harness.as_str(), "claude" | "codex")
-            .then_some("managed Claude/Codex replay requires a recorded account ID")
-            .filter(|_| self.account_id.is_none())
     }
 }
 

@@ -215,7 +215,6 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             use crate::ops::human_session::moves_bulk::{move_sessions, parse_target};
             let target = parse_target(cli.agent.as_deref())?;
             let filter = crate::session::SessionFilter {
-                blocked: selector.blocked,
                 on: selector.on.clone(),
                 repo: if *all {
                     None
@@ -418,7 +417,6 @@ pub(crate) fn list_filter(
     directory: &std::path::Path,
 ) -> anyhow::Result<crate::session::SessionFilter> {
     Ok(crate::session::SessionFilter {
-        blocked: args.selector.blocked,
         on: args.selector.on.clone(),
         available: args.available,
         raw: !args.no_raw,
@@ -575,14 +573,12 @@ pub(crate) fn bound(id: &str, task: &str, preview: bool) -> anyhow::Result<Sessi
 
 /// The report `lf session move --all --json` prints for the selector and agent.
 pub(crate) fn moved(
-    blocked: bool,
     on: Option<&str>,
     agent: &str,
 ) -> anyhow::Result<crate::ops::human_session::moves_bulk::MoveReport> {
     use crate::ops::human_session::moves_bulk::{move_sessions, parse_target};
     let target = parse_target(Some(agent))?;
     let filter = crate::session::SessionFilter {
-        blocked,
         on: on.map(str::to_owned),
         repo: None,
         ..Default::default()

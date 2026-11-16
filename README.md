@@ -95,14 +95,13 @@ agent: claude:opus
 
 ```bash
 lf --wave infrastructure set machine mini                       # and run on your mini
-lf --wave infrastructure set account.claude work@example.com    # billed to your work login
 lf wave status infrastructure                                   # each setting and where it came from
 ```
 
 **Without a Task,** `lf` still launches any agent or Skill directly:
 
 ```bash
-lf : "fix the flaky retry test"            # an agent, on whichever of your logins has room
+lf : "fix the flaky retry test"            # an agent, using your native login
 lf -a codex : "fix the flaky retry test"   # the same thing on Codex
 lf debug -c                                # a Skill: paste an error, it finds and fixes the cause
 lf resume                                  # return to this scope’s conversation
@@ -116,7 +115,7 @@ You want to do something; here's how through `lf`.
 |---|---|
 | run agents in parallel, each Task in its own worktree and branch | `lf task create "…" --run` |
 | run on Claude Code, Codex, OpenCode or Pi, per run or per Skill | `lf -a codex : "…"` |
-| use every Claude and Codex login you pay for, routed to the one with room | `lf account` |
+| authenticate GitHub, planning services and OpenCode | `lf account` |
 | open a Task conversation here (a sibling tab from an agent) | `lf open --task <ID>` |
 | keep work already in progress: a dirty checkout, another tool's worktree | `lf task create --worktree . --title "…"` |
 | land when checks pass, with CI failures repaired for you | `lf land --wait-and-fix` |

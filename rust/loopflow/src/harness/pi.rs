@@ -265,7 +265,6 @@ impl PiHarness {
             store,
             session,
             Some(attachment),
-            None,
             Default::default(),
         ));
         self.stdin = child.stdin.take();
@@ -273,7 +272,7 @@ impl PiHarness {
         self.stderr = child
             .stderr
             .take()
-            .map(|stderr| super::common::spawn_stderr_logger(stderr, "pi"));
+            .map(|stderr| super::common::spawn_stderr_logger(stderr, "pi", None));
         self.child = Some(child);
         self.reader = Some(self.spawn_reader(stdout));
         let info = self.request(json!({"type":"get_state"})).await?;
@@ -576,7 +575,6 @@ pub(crate) fn observe_native(
             store.clone(),
             adapter.session.to_string(),
             Some(attachment),
-            None,
             Default::default(),
         );
         writer.record(&[ProviderFact::SessionObserved(thread.clone()).into()])?;

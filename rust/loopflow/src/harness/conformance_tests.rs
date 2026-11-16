@@ -396,7 +396,6 @@ fn opencode_native_history_preserves_output_and_tools_and_leaves_usage_to_the_tr
         store.clone(),
         session.clone(),
         Some(attachment),
-        None,
         Default::default(),
     );
     let agent_session = AgentSessionId::from(session.as_str());

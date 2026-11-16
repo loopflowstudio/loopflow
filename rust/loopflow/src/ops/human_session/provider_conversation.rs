@@ -11,10 +11,10 @@ use anyhow::{anyhow, bail, Result};
 
 use super::{append_input, local_capture_dir, lock_session_process, publish_prepared_input};
 use crate::harness::HarnessKind;
-use crate::provider_account::activation::native_home;
 use crate::provider_auth::Provider;
 use crate::session::{LfSession, TitleSource};
 use crate::store::{ProviderAccountId, SharedStore};
+use crate::transcript::native_home;
 use crate::transcript::{conversation_home, is_user_input, json_lines, recorded_cwd, transcript};
 
 pub(super) async fn human_input_times<'a>(
@@ -238,8 +238,8 @@ pub(crate) async fn select(
             .expect("conversations are found only for agent providers");
         crate::transcript::copy_between(harness, id, &home, &native_home(provider, None))?;
         store
-            .pin_provider_session_route(provider, &id.into(), account)
-            .await?;
+            .sqlite
+            .record_native_conversation_home(provider, &id.into())?;
     }
     Ok(session)
 }

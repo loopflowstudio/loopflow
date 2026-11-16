@@ -21,14 +21,15 @@ fn launch_startup_proof(
 }
 
 /// A connected managed Claude account, which Task work launches as.
-fn connect_fixture_account(home: &std::path::Path, store: &loopflow::store::sqlite::SqliteStore) {
+fn connect_fixture_account(home: &std::path::Path) {
     let account_home = home.join("accounts/claude/fixture");
     fs::create_dir_all(&account_home).unwrap();
     let credential = serde_json::json!({"claudeAiOauth":{"accessToken":"fixture-only","expiresAt":4102444800000i64}}).to_string();
     fs::write(account_home.join(".credentials.json"), &credential).unwrap();
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    store
-        .upsert_provider_account(&loopflow::store::ProviderAccount {
+    support::seed_historical_account(
+        home,
+        &loopflow::store::ProviderAccount {
             provider: "claude".into(),
             account_id: loopflow::store::ProviderAccountId::parse("fixture").unwrap(),
             home: Some(account_home),
@@ -52,22 +53,23 @@ fn connect_fixture_account(home: &std::path::Path, store: &loopflow::store::sqli
             last_selected_at: None,
             created_at: now,
             updated_at: now,
-        })
-        .unwrap();
+        },
+    )
+    .unwrap();
 }
 
 /// The same launch, with `lf_bin` as the `lf` it runs for its own commands.
 fn launch_startup_proof_through(
     repo: &TestRepo,
     home: &std::path::Path,
-    store: &loopflow::store::sqlite::SqliteStore,
+    _store: &loopflow::store::sqlite::SqliteStore,
     lf_bin: &std::path::Path,
     task: Option<&str>,
 ) -> std::process::Output {
     if task.is_none() {
         fs::write(home.join("expect-bare"), "").unwrap();
     }
-    connect_fixture_account(home, store);
+    connect_fixture_account(home);
     let bin = home.join("bin");
     fs::create_dir(&bin).unwrap();
     // Signing the shared Claude home in goes through the Keychain on macOS.
@@ -320,9 +322,7 @@ impl InteractiveTask {
         let home = tempfile::tempdir().unwrap();
         let _task =
             support::register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
-        let store =
-            loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
-        connect_fixture_account(home.path(), &store);
+        connect_fixture_account(home.path());
         let bin = home.path().join("bin");
         fs::create_dir(&bin).unwrap();
         fs::write(bin.join("security"), support::FAKE_SECURITY).unwrap();
@@ -489,7 +489,7 @@ fn public_context_capability_survives_claim_changes_and_rejects_children_and_rep
         support::register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
     let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
     let mut server = Some(MachineServer::start(env!("CARGO_BIN_EXE_lf"), home.path()));
-    connect_fixture_account(home.path(), &store);
+    connect_fixture_account(home.path());
     // Signing the shared Claude home in goes through the Keychain on macOS.
     let security = home.path().join("security");
     fs::write(&security, support::FAKE_SECURITY).unwrap();

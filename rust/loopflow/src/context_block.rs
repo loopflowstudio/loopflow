@@ -33,11 +33,6 @@ pub enum ContextMoment {
     /// (whose changes become steers for the next boundary) and applies a
     /// pending Session move.
     Stop,
-    /// A native turn ended on a usage limit: start `RecordLimit` and return.
-    Limit,
-    /// Started by a limit hook: record the limit and move the shared login to
-    /// an account with capacity.
-    RecordLimit,
 }
 
 /// Captured source identities, not frozen context. Hooks reread scratch and Wave
@@ -333,7 +328,6 @@ impl ContextDelivery {
         // A held prompt always runs: the server records the turn it starts.
         Ok(serde_json::json!({
             "Stop": hook(format!("{command} stop")),
-            "StopFailure": [{"matcher":"rate_limit","hooks":[{"type":"command","command":format!("{command} limit"),"timeout":30}]}],
             "PostToolUse": steer,
             "UserPromptSubmit": hook(format!("{command} tool")),
             "SessionStart": start,
@@ -963,6 +957,24 @@ mod tests {
                 .as_str()
                 .unwrap()
                 .starts_with("s=\"$LF_STEER_SEEN\""));
+        }
+    }
+
+    #[test]
+    fn native_hooks_never_install_a_subscription_switcher() {
+        let _lock = crate::journal::test_env_lock();
+        let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN"]);
+        let repo = tempdir().unwrap();
+        let delivery = delivery(repo.path());
+        std::env::set_var("LF_HOME", &delivery.home);
+        std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
+        for holder in [
+            crate::session::Holder::Caller,
+            crate::session::Holder::Server,
+        ] {
+            let hooks = delivery.hook_settings(holder).unwrap();
+            assert!(hooks.get("StopFailure").is_none());
+            assert!(!hooks.to_string().contains("record-limit"));
         }
     }
 

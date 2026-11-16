@@ -91,7 +91,6 @@ fn wave_detail_preserves_graph_and_machine() {
         snapshot.setup.skill_agents["implement"].source,
         loopflow::config::ConfigSource::Repository
     );
-    assert_eq!(snapshot.setup.accounts["claude"].accounts, ["work"]);
     let Evidence::Ok {
         items: projects, ..
     } = &snapshot.projects

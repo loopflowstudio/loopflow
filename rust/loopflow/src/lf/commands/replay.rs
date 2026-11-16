@@ -30,12 +30,6 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
             source.artifact_key
         )
     })?;
-    if let Some(reason) = request.replay_unavailable_reason() {
-        return Err(anyhow!(
-            "capture {} cannot be replayed: {reason}",
-            source.artifact_key
-        ));
-    }
     let (harness, model) = crate::config::parse_agent(&request.agent);
     if harness != source.harness || model != source.model {
         return Err(anyhow!(
@@ -50,8 +44,6 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
         skill_invocation: request.skill_invocation.clone(),
         output_schema: request.output_schema.clone(),
         agent: Some(request.agent.clone()),
-        provider_account_id: request.account_id.clone(),
-        provider_account_authority_home: request.account_id.as_ref().map(|_| home.to_path_buf()),
         max_turns: request.max_turns,
         cwd: Some(source.cwd.clone()),
         write_scope: request.write_scope,
@@ -63,18 +55,13 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
     };
     config.apply_agent_override();
     let (selected_harness, model) = crate::config::parse_agent(config.agent()?);
-    if selected_harness != harness {
-        config.provider_account_id = None;
-        config.provider_account_authority_home = None;
-    }
     if !check_cli_available(&selected_harness) {
         return Err(anyhow!(
             "'{selected_harness}' CLI is unavailable on this Machine"
         ));
     }
-    crate::agent::pin_provider_account_id_blocking(&mut config).map_err(anyhow::Error::from)?;
     request.agent = config.agent()?.to_owned();
-    request.account_id = config.provider_account_id.clone();
+    request.account_id = None;
     let spec = SessionCaptureSpec {
         harness: selected_harness,
         model,
@@ -210,27 +197,7 @@ for line in sys.stdin:
         std::fs::create_dir(&decoy_home).unwrap();
         let registry = home.path().join("loopflow.db");
 
-        let account_id = if harness == "claude" {
-            let mut account = crate::provider_account::new_account(
-                crate::provider_auth::Provider::Claude,
-                crate::store::ProviderAccountId::parse("replay-fixture").unwrap(),
-                home.path().join("accounts/claude/replay-fixture"),
-                Some(crate::profile::EmailAddress::parse("replay@example.com").unwrap()),
-            );
-            crate::provider_account::identity::tests::write_claude_identity(&mut account);
-            tokio::runtime::Runtime::new().unwrap().block_on(async {
-                let store = crate::store::open_ephemeral_store(
-                    &crate::store::StorageConfig::sqlite(registry.clone()),
-                )
-                .await
-                .unwrap();
-                store.upsert_provider_account(&account).await.unwrap();
-            });
-            Some(account.account_id)
-        } else {
-            None
-        };
-
+        let account_id = Some(crate::store::ProviderAccountId::parse("historical-login").unwrap());
         let request = AgentProcessRequest {
             conversation_context: None,
             system_prompt: "recorded system".to_string(),

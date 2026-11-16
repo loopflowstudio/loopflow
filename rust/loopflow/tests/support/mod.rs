@@ -296,10 +296,10 @@ pub fn register_codex_login(home: &Path, name: &str) {
     )
     .unwrap();
     seed_store(home);
-    let store = loopflow::store::sqlite::SqliteStore::new(&home.join("loopflow.db")).unwrap();
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    store
-        .upsert_provider_account(&loopflow::store::ProviderAccount {
+    seed_historical_account(
+        home,
+        &loopflow::store::ProviderAccount {
             provider: "codex".into(),
             account_id: loopflow::store::ProviderAccountId::parse(name).unwrap(),
             home: Some(account_home),
@@ -318,8 +318,9 @@ pub fn register_codex_login(home: &Path, name: &str) {
             last_selected_at: None,
             created_at: now,
             updated_at: now,
-        })
-        .unwrap();
+        },
+    )
+    .unwrap();
 }
 
 /// A launch routes by the process directory: the checkout it runs in, never
@@ -357,10 +358,10 @@ pub fn register_claude_login(home: &Path, name: &str) {
     fs::write(account_home.join(".credentials.json"), &credential).unwrap();
     let email = format!("{name}@example.com");
     seed_store(home);
-    let store = loopflow::store::sqlite::SqliteStore::new(&home.join("loopflow.db")).unwrap();
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    store
-        .upsert_provider_account(&loopflow::store::ProviderAccount {
+    seed_historical_account(
+        home,
+        &loopflow::store::ProviderAccount {
             provider: "claude".into(),
             account_id: loopflow::store::ProviderAccountId::parse(name).unwrap(),
             home: Some(account_home),
@@ -382,8 +383,9 @@ pub fn register_claude_login(home: &Path, name: &str) {
             last_selected_at: None,
             created_at: now,
             updated_at: now,
-        })
-        .unwrap();
+        },
+    )
+    .unwrap();
 }
 
 pub struct EnvGuard {
@@ -451,8 +453,7 @@ impl EnvGuard {
         } else {
             env::set_var("LF_HOME", lf_home.path());
         }
-        // A shared launch signs its provider's native home in as the routed
-        // account; that home must never be the developer's own.
+        // Native provider homes must never reach the developer's own credentials.
         env::set_var("CODEX_HOME", lf_home.path().join("native-codex"));
         env::set_var("CLAUDE_CONFIG_DIR", lf_home.path().join("native-claude"));
         Self {
@@ -930,10 +931,10 @@ pub fn managed_codex_account(home: &Path) {
     )
     .unwrap();
     seed_store(home);
-    let store = loopflow::store::sqlite::SqliteStore::new(&home.join("loopflow.db")).unwrap();
     let account_id = loopflow::store::ProviderAccountId::parse("fixture").unwrap();
-    store
-        .upsert_provider_account(&loopflow::store::ProviderAccount {
+    seed_historical_account(
+        home,
+        &loopflow::store::ProviderAccount {
             provider: "codex".into(),
             account_id: account_id.clone(),
             home: Some(account_home),
@@ -954,15 +955,17 @@ pub fn managed_codex_account(home: &Path) {
             last_selected_at: None,
             created_at: 1,
             updated_at: 1,
-        })
-        .unwrap();
-    store
-        .set_provider_route(&loopflow::profile::ProviderRoute {
-            scope: loopflow::profile::RouteScope::Default,
-            provider: loopflow::provider_auth::Provider::Codex,
-            accounts: vec![account_id],
-            created_at: 1,
-            updated_at: 1,
-        })
-        .unwrap();
+        },
+    )
+    .unwrap();
+}
+
+#[allow(dead_code)] // Shared historical seed used by standalone test binaries.
+pub fn seed_historical_account(
+    home: &Path,
+    account: &loopflow::store::ProviderAccount,
+) -> rusqlite::Result<usize> {
+    let db = rusqlite::Connection::open(home.join("loopflow.db"))?;
+    db.execute("INSERT INTO provider_accounts(provider,account_id,home,credential_state,utilization_percent,cooldown_until,cooldown_reason,created_at,updated_at,observed_email,observed_subject) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+        rusqlite::params![account.provider,account.account_id.as_str(),account.home.as_ref().map(|p|p.to_string_lossy()),account.credential_state.as_str(),account.utilization_percent,account.cooldown_until,account.cooldown_reason,account.created_at,account.updated_at,account.observed_email,account.observed_subject])
 }

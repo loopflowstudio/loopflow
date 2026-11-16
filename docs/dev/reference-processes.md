@@ -178,8 +178,8 @@ stops showing this Machine as owner for any other reason, such as a stale
 Machine's unclaim, the owner claims again.
 
 The target uses its own store, repository, provider homes, OS locks and payload
-directory. Reads remain Machine-local. Foreground SSH may explicitly forward
-selected account authority; detached processes use installed credentials.
+directory. Reads remain Machine-local. Claude and Codex use destination-native authentication for foreground and detached
+launches; SSH does not forward subscription credentials.
 
 Wave selection always resolves `(canonical repository, slug)` to one UUID.
 Bare-slug diagnostics fail when more than one repository owns the slug; no

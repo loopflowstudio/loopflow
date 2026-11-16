@@ -834,29 +834,21 @@ mod tests {
     fn recovery_import_keeps_order_and_requires_explicit_replacement() {
         let dir = tempfile::tempdir().unwrap();
         let recovery = dir.path().join("recovery.yaml");
-        std::fs::write(&recovery, "repo: {old: {account: {codex: [one, two]}}}\n").unwrap();
+        std::fs::write(&recovery, "repo: {old: {agents: [codex, claude]}}\n").unwrap();
         let repo = dir.path().join("clone");
         std::fs::create_dir(&repo).unwrap();
         super::import(&repo, None, false, &recovery, "/repo/old", false).unwrap();
         let path = private_path(&repo).unwrap();
         assert_eq!(
-            crate::config::files::read(&path).unwrap()["account"]["codex"][0],
-            "one"
+            crate::config::files::read(&path).unwrap()["agents"][0],
+            "codex"
         );
-        set(
-            &repo,
-            None,
-            false,
-            false,
-            "account.codex",
-            Some("[two, one]"),
-        )
-        .unwrap();
+        set(&repo, None, false, false, "agents", Some("[claude, codex]")).unwrap();
         assert!(super::import(&repo, None, false, &recovery, "/repo/old", false).is_err());
         super::import(&repo, None, false, &recovery, "/repo/old", true).unwrap();
         assert_eq!(
-            crate::config::files::read(&path).unwrap()["account"]["codex"][0],
-            "one"
+            crate::config::files::read(&path).unwrap()["agents"][0],
+            "codex"
         );
     }
 
@@ -996,28 +988,21 @@ mod tests {
             None,
             false,
             false,
-            "account.codex",
-            Some("[one, two]"),
+            "agent",
+            Some("claude:sonnet"),
         )
         .unwrap();
-        set(
-            second.path(),
-            None,
-            false,
-            false,
-            "account.codex",
-            Some("[two, one]"),
-        )
-        .unwrap();
+        set(second.path(), None, false, false, "agent", Some("codex")).unwrap();
         let accounts = |repo| {
             crate::config::load_config(Some(repo))
                 .unwrap()
                 .unwrap()
-                .account["codex"]
-                .clone()
+                .agent()
+                .unwrap()
+                .to_owned()
         };
-        assert_eq!(accounts(first.path())[0].as_str(), "one");
-        assert_eq!(accounts(second.path())[0].as_str(), "two");
+        assert_eq!(accounts(first.path()), "claude:sonnet");
+        assert_eq!(accounts(second.path()), "codex");
         assert!(!home.path().join("loopflow.db").exists());
     }
 

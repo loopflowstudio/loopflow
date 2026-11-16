@@ -104,7 +104,6 @@ async fn stalled_dispatch() {
         store.clone(),
         "conversation".into(),
         Some(attachment.clone()),
-        None,
         Default::default(),
     ));
     history

@@ -193,10 +193,7 @@ pub fn task_detail(directory: &Path, issue: &str) -> Result<TaskDetail> {
     let current_session = store
         .sqlite
         .task_primary(&id)?
-        .map(|session| {
-            let capacity = crate::provider_account::LaunchCapacity::read(&store.sqlite)?;
-            crate::ops::human_session::listed(&store, session.id.as_str(), &capacity)
-        })
+        .map(|session| crate::ops::human_session::listed(&store, session.id.as_str()))
         .transpose()?
         .flatten();
     let checks = pane
@@ -231,8 +228,8 @@ pub fn session_card(id: &str) -> Result<SessionCard> {
     let store = crate::store::read_existing_registry()?
         .map(Arc::new)
         .context("no Loopflow store exists on this Machine")?;
-    let capacity = crate::provider_account::LaunchCapacity::read(&store.sqlite)?;
-    let session = crate::ops::human_session::listed(&store, id, &capacity)?.ok_or_else(|| {
+
+    let session = crate::ops::human_session::listed(&store, id)?.ok_or_else(|| {
         crate::engine::Error::new(
             crate::engine::ErrorCode::NotFound,
             format!("Session {id} is not recorded"),

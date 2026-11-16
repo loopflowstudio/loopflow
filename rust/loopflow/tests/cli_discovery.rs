@@ -125,8 +125,8 @@ fn inspection_is_identical_across_spellings_and_has_no_launch_side_effects() {
             vec!["install", "advance-switch", "--help"],
         ],
         vec![
-            vec!["help", "account", "next"],
-            vec!["account", "next", "--help"],
+            vec!["help", "account", "connect"],
+            vec!["account", "connect", "--help"],
         ],
         vec![
             vec!["help", "paired"],
@@ -522,8 +522,8 @@ fn shorthand_stops_at_leaf_and_passthrough_boundaries() {
     let normalized =
         |args: &[&str]| normalize_args(args.iter().map(|arg| arg.to_string()).collect()).unwrap();
     assert_eq!(
-        normalized(&["lf", "account", "nex"]),
-        ["lf", "account", "next"]
+        normalized(&["lf", "account", "connec"]),
+        ["lf", "account", "connect"]
     );
     assert_eq!(
         normalized(&["lf", "land", "--wait-and-fix"]),
@@ -1111,8 +1111,6 @@ fn remote_selection_preserves_command_arguments_and_literal_boundaries() {
     use loopflow::lf::navigation::machine_invocation;
     let args = [
         "lf",
-        "--account",
-        "personal@",
         "--machine=mini",
         "--forward-agent",
         "--task",
@@ -1125,13 +1123,10 @@ fn remote_selection_preserves_command_arguments_and_literal_boundaries() {
     .map(String::from);
     let (cli, command) = machine_invocation(&args).unwrap().unwrap();
     assert_eq!(cli.machine.as_deref(), Some("mini"));
-    assert!(cli.account.is_empty());
     assert!(cli.forward_agent);
     assert_eq!(
         command,
         [
-            "--account",
-            "personal@",
             "--task",
             "LOO-123",
             "implement",

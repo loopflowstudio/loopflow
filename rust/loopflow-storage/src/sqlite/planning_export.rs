@@ -135,7 +135,7 @@ impl SqliteStore {
                 let project = super::children::project_in(&tx, id)?;
                 let description = &project.description;
                 let input = json!({"id":uuid,"teamIds":[team],"name":project.name,"description":project.summary,
-                    "content":format!("{}\n{}", description, crate::linear_records::render_project_content(&project.krs, &project.metric_targets)),"useDefaultTemplate":false});
+                    "content":format!("{}\n{}", description, crate::planning::render_project_content(&project.krs, &project.metric_targets)),"useDefaultTemplate":false});
                 (
                     vec![
                         WorkValue::ProjectName(Some(project.name)),
@@ -386,8 +386,8 @@ impl PlanningExport {
         &self,
         team: &str,
         revision: Option<String>,
-    ) -> StoreResult<crate::linear_records::LinearProject> {
-        let mut project = crate::linear_records::LinearProject {
+    ) -> StoreResult<crate::planning::TrackerProject> {
+        let mut project = crate::planning::TrackerProject {
             id: self.id.clone(),
             revision,
             slug: String::new(),
@@ -403,7 +403,7 @@ impl PlanningExport {
         for value in &self.baseline {
             match value {
                 WorkValue::ProjectName(Some(name)) => {
-                    project.slug = crate::linear_records::project_slug(name);
+                    project.slug = crate::planning::project_slug(name);
                     project.name = name.clone();
                 }
                 WorkValue::ProjectSummary(summary) => project.summary = summary.clone(),

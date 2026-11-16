@@ -22,12 +22,12 @@ pub(crate) mod project_document;
 
 use thiserror::Error;
 
-pub use loopflow_storage::linear_records::{
-    local_identifier, LinearComment, LinearIssue, LinearIssueObservation, LinearProject,
-    StateHistory,
+pub use loopflow_storage::planning::local_identifier;
+pub use loopflow_storage::planning::{project_slug, terminal_reason};
+pub use loopflow_storage::planning::{LinearBindingError, LinearIssueId, LinearProjectId};
+use loopflow_storage::planning::{
+    StateHistory, TrackerComment, TrackerItem, TrackerObservation, TrackerProject,
 };
-pub use loopflow_storage::linear_records::{project_slug, terminal_reason};
-pub use loopflow_storage::linear_records::{LinearBindingError, LinearIssueId, LinearProjectId};
 
 /// The result of adopting or creating a provider team for a repository. The stable
 /// `id` owns identity; `key` is mutable presentation (the Task prefix).
@@ -42,7 +42,7 @@ pub(crate) fn validate_project_ownership(
     wave: &str,
     initiative_id: &str,
     expected_team_id: Option<&str>,
-    project: &LinearProject,
+    project: &TrackerProject,
 ) -> LinearResult<()> {
     if project.initiative_ids.as_slice() != [initiative_id] {
         return Err(LinearError::Message(format!(
@@ -82,8 +82,8 @@ pub enum LinearError {
     Message(String),
 }
 
-impl From<loopflow_storage::linear_records::ProjectDocumentError> for LinearError {
-    fn from(error: loopflow_storage::linear_records::ProjectDocumentError) -> Self {
+impl From<loopflow_storage::planning::ProjectDocumentError> for LinearError {
+    fn from(error: loopflow_storage::planning::ProjectDocumentError) -> Self {
         Self::Message(error.0)
     }
 }
@@ -1024,7 +1024,7 @@ impl LinearClient {
         }
     }
 
-    pub async fn list_projects(&self, initiative_id: &str) -> LinearResult<Vec<LinearProject>> {
+    pub async fn list_projects(&self, initiative_id: &str) -> LinearResult<Vec<TrackerProject>> {
         let mut after = None;
         let mut projects = Vec::new();
         loop {
@@ -1072,8 +1072,8 @@ impl LinearClient {
 
     pub(crate) async fn list_project_issues(
         &self,
-        projects: &[LinearProject],
-    ) -> LinearResult<Vec<LinearIssue>> {
+        projects: &[TrackerProject],
+    ) -> LinearResult<Vec<TrackerItem>> {
         let lists = futures_util::future::try_join_all(
             projects.iter().map(|project| self.list_items(&project.id)),
         )
@@ -1081,7 +1081,7 @@ impl LinearClient {
         Ok(lists.into_iter().flatten().collect())
     }
 
-    pub(crate) async fn list_items(&self, project_id: &str) -> LinearResult<Vec<LinearIssue>> {
+    pub(crate) async fn list_items(&self, project_id: &str) -> LinearResult<Vec<TrackerItem>> {
         self.list_issue_nodes(project_id)
             .await?
             .into_iter()
@@ -1224,7 +1224,7 @@ impl LinearClient {
     pub(crate) async fn issue_ownership(
         &self,
         issue_id: &str,
-    ) -> LinearResult<Option<(LinearIssue, Option<LinearProject>)>> {
+    ) -> LinearResult<Option<(TrackerItem, Option<TrackerProject>)>> {
         let response: IssueOwnershipData = self
             .graphql(
                 &format!("query IssueOwnership($id: String!) {{ issue(id: $id) {{ {ISSUE_RESPONSE_FIELDS} }} }}"),
@@ -1364,7 +1364,7 @@ impl LinearClient {
     pub(crate) async fn find_project(
         &self,
         project_id: &str,
-    ) -> LinearResult<Option<LinearProject>> {
+    ) -> LinearResult<Option<TrackerProject>> {
         // A filtered collection has an explicit empty result. The singular Project
         // endpoint can return NOT_FOUND as a GraphQL error, indistinguishable from
         // inaccessible evidence without provider-specific error guessing.
@@ -1398,14 +1398,14 @@ impl LinearClient {
             .transpose()
     }
 
-    pub(crate) async fn project_ownership(&self, project_id: &str) -> LinearResult<LinearProject> {
+    pub(crate) async fn project_ownership(&self, project_id: &str) -> LinearResult<TrackerProject> {
         self.project_node(project_id).await?.into_observation()
     }
 
     pub(crate) async fn project_content_observation(
         &self,
         id: &str,
-    ) -> LinearResult<(LinearProject, String)> {
+    ) -> LinearResult<(TrackerProject, String)> {
         let node = self.project_node(id).await?;
         let content = node.content.clone().unwrap_or_default();
         Ok((node.into_observation()?, content))
@@ -1436,7 +1436,7 @@ impl LinearClient {
     pub(crate) async fn find_export_issue(
         &self,
         id: &str,
-    ) -> LinearResult<Option<(LinearIssue, Option<LinearProject>)>> {
+    ) -> LinearResult<Option<(TrackerItem, Option<TrackerProject>)>> {
         let response: Value = self
             .graphql(
                 r#"query FindExportIssue($id: ID!) {
@@ -1497,7 +1497,7 @@ impl LinearClient {
         id: &str,
         project: &str,
         initiative: &str,
-    ) -> LinearResult<LinearProject> {
+    ) -> LinearResult<TrackerProject> {
         let query = format!("mutation DeliverProjectAttachment($input: InitiativeToProjectCreateInput!) {{ initiativeToProjectCreate(input: $input) {{ success initiativeToProject {{ project {{ {PROJECT_RESPONSE_FIELDS} }} }} }} }}");
         let response: Value = self
             .graphql(
@@ -1568,7 +1568,7 @@ impl LinearClient {
         &self,
         item_id: &str,
         state_id: &str,
-    ) -> LinearResult<LinearIssue> {
+    ) -> LinearResult<TrackerItem> {
         let query = format!("mutation SetIssueState($id: String!, $stateId: String!) {{ issueUpdate(id: $id,input: {{stateId: $stateId}}) {{ success issue {{ {ISSUE_RESPONSE_FIELDS} }} }} }}");
         let response: Value = self
             .graphql(&query, json!({"id":item_id,"stateId":state_id}))
@@ -1760,10 +1760,7 @@ impl LinearClient {
     }
 
     /// Read one issue's title, description, comments, and revision marker.
-    pub(crate) async fn observe_issue(
-        &self,
-        issue_id: &str,
-    ) -> LinearResult<LinearIssueObservation> {
+    pub(crate) async fn observe_issue(&self, issue_id: &str) -> LinearResult<TrackerObservation> {
         let response: IssueObservationData = self
             .graphql(
                 ISSUE_OBSERVATION_QUERY,
@@ -1776,7 +1773,7 @@ impl LinearClient {
         let mut page = issue.comments;
         let mut comments = Vec::new();
         loop {
-            comments.extend(page.nodes.into_iter().map(LinearComment::from));
+            comments.extend(page.nodes.into_iter().map(TrackerComment::from));
             if !page.page_info.has_next_page {
                 break;
             }
@@ -1802,7 +1799,7 @@ impl LinearClient {
                 .cmp(&right.revision)
                 .then(left.id.cmp(&right.id))
         });
-        Ok(LinearIssueObservation {
+        Ok(TrackerObservation {
             revision: issue.updated_at,
             title: issue.title,
             description: issue.description.unwrap_or_default(),
@@ -1815,10 +1812,10 @@ impl LinearClient {
 pub enum PlanningResponse {
     Task {
         issue: Box<OrderedIssue>,
-        project: Option<Box<LinearProject>>,
+        project: Option<Box<TrackerProject>>,
     },
     Project {
-        project: Box<LinearProject>,
+        project: Box<TrackerProject>,
         content: String,
     },
 }
@@ -2017,7 +2014,7 @@ struct CommentNode {
     user: Option<CommentUser>,
 }
 
-impl From<CommentNode> for LinearComment {
+impl From<CommentNode> for TrackerComment {
     fn from(node: CommentNode) -> Self {
         Self {
             id: node.id,
@@ -2059,7 +2056,7 @@ struct IssueNode<P = IdNode> {
 
 #[derive(Debug)]
 pub struct OrderedIssue {
-    pub item: LinearIssue,
+    pub item: TrackerItem,
     pub priority_sort_order: f64,
     pub sort_order: f64,
 }
@@ -2098,14 +2095,14 @@ struct IssueFields {
 }
 
 impl IssueNode {
-    fn into_issue(self, rank: u32) -> LinearResult<LinearIssue> {
+    fn into_issue(self, rank: u32) -> LinearResult<TrackerItem> {
         self.fields
             .into_issue(rank, self.project.map(|project| project.id))
     }
 }
 
 impl IssueFields {
-    fn into_issue(self, rank: u32, project_id: Option<String>) -> LinearResult<LinearIssue> {
+    fn into_issue(self, rank: u32, project_id: Option<String>) -> LinearResult<TrackerItem> {
         if let Some(date) = &self.completed_at {
             time::OffsetDateTime::parse(date, &time::format_description::well_known::Rfc3339)
                 .map_err(|error| {
@@ -2138,7 +2135,7 @@ impl IssueFields {
             &time::format_description::well_known::Rfc3339,
         )
         .map_err(|error| LinearError::Message(format!("invalid Linear issue revision: {error}")))?;
-        Ok(LinearIssue {
+        Ok(TrackerItem {
             revision: Some(self.updated_at),
             id: self.id,
             identifier,
@@ -2165,7 +2162,7 @@ struct IssueOwnershipData {
 }
 
 impl IssueNode<ProjectNode> {
-    fn into_ownership(self) -> LinearResult<(LinearIssue, Option<LinearProject>)> {
+    fn into_ownership(self) -> LinearResult<(TrackerItem, Option<TrackerProject>)> {
         let item = self
             .fields
             .into_issue(0, self.project.as_ref().map(|project| project.id.clone()))?;
@@ -2334,9 +2331,9 @@ fn patch_project_field(
 }
 
 impl ProjectNode {
-    fn into_observation(self) -> LinearResult<LinearProject> {
+    fn into_observation(self) -> LinearResult<TrackerProject> {
         let content = parse_project_document(self.content.as_deref().unwrap_or_default())?;
-        Ok(LinearProject {
+        Ok(TrackerProject {
             description: Some(content.observed_description()),
             id: self.id,
             revision: self.revision,
@@ -2787,7 +2784,7 @@ mod tests {
         assert_eq!(
             observation.comments,
             vec![
-                LinearComment {
+                TrackerComment {
                     author_name: Some("Jack".to_string()),
                     id: "c-1".to_string(),
                     created_at: None,
@@ -2795,7 +2792,7 @@ mod tests {
                     body: "please prioritize".to_string(),
                     author_id: Some("user-human".to_string()),
                 },
-                LinearComment {
+                TrackerComment {
                     author_name: None,
                     id: "c-2".to_string(),
                     created_at: None,
@@ -2803,7 +2800,7 @@ mod tests {
                     body: "PR: https://x".to_string(),
                     author_id: Some("user-loopflow".to_string()),
                 },
-                LinearComment {
+                TrackerComment {
                     author_name: None,
                     id: "c-3".to_string(),
                     created_at: None,
@@ -2822,7 +2819,7 @@ mod tests {
 
     #[test]
     fn an_agent_steer_round_trips_as_its_sessions_for_its_requester() {
-        let comment = LinearComment {
+        let comment = TrackerComment {
             id: "c-agent".into(),
             created_at: None,
             revision: None,
@@ -3487,7 +3484,7 @@ mod retained_relation_tests;
 
 #[cfg(test)]
 mod model_tests {
-    use super::{project_slug, LinearProject};
+    use super::{project_slug, TrackerProject};
 
     #[test]
     fn project_slug_is_deterministic() {
@@ -3501,6 +3498,6 @@ mod model_tests {
             "id":"project-1", "slug":"plan", "name":"Plan", "summary":"",
             "metric_targets":[], "krs":[], "initiative_ids":[], "team_ids":[]
         });
-        assert!(serde_json::from_value::<LinearProject>(value).is_err());
+        assert!(serde_json::from_value::<TrackerProject>(value).is_err());
     }
 }

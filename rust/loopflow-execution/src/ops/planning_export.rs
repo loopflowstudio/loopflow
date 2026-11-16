@@ -383,7 +383,7 @@ async fn attach_project(
     client: &PlanningClient,
     export: &PlanningExport,
     wave: &loopflow_model::id::WaveId,
-    mut project: crate::linear::LinearProject,
+    mut project: loopflow_storage::planning::TrackerProject,
 ) -> OpsResult<()> {
     let initiative = export
         .initiative

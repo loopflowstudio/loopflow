@@ -297,7 +297,7 @@ pub fn task_detail_facts(
 pub(crate) fn apply_linear_observation(
     store: &SqliteStore,
     task_id: &TaskId,
-    observation: &loopflow_storage::linear_records::LinearIssueObservation,
+    observation: &loopflow_storage::planning::TrackerObservation,
     observed_at: time::OffsetDateTime,
     planning_connected: bool,
 ) -> StoreResult<loopflow_storage::work::task::LinearObservationOutcome> {

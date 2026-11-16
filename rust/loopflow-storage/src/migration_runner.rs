@@ -834,7 +834,7 @@ fn convert_project_content(conn: &rusqlite::Connection) -> StoreResult<()> {
         })?
         .collect::<Result<Vec<_>, _>>()?;
     for (id, body) in rows {
-        let document = crate::linear_records::project_document::parse_project_document(&body)
+        let document = crate::planning::project_document::parse_project_document(&body)
             .map_err(|error| StoreError::InvalidData(format!("Project {id}: {error}")))?;
         conn.execute(
             "UPDATE projects SET description=?2,krs=?3,metric_targets=?4 WHERE id=?1",
@@ -5920,8 +5920,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        let content =
-            crate::linear_records::project_document::parse_project_document(&text).unwrap();
+        let content = crate::planning::project_document::parse_project_document(&text).unwrap();
         assert_eq!(serde_json::to_value(content.krs).unwrap(), project["krs"]);
         assert_eq!(
             serde_json::to_value(content.metric_targets).unwrap(),

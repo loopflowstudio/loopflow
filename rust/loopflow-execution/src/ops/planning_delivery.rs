@@ -505,8 +505,8 @@ fn task_input(store: &Store, change: &PlanningChange) -> OpsResult<Value> {
 pub(super) async fn ingest_task(
     store: &Store,
     repo: &Path,
-    issue: &crate::linear::LinearIssue,
-    project: Option<&crate::linear::LinearProject>,
+    issue: &loopflow_storage::planning::TrackerItem,
+    project: Option<&loopflow_storage::planning::TrackerProject>,
     observed_at: i64,
 ) -> OpsResult<()> {
     let team = super::planning_client::repository_scope(repo)?;

@@ -1396,7 +1396,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
             canonical.to_string(),
         );
         loopflow_execution::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
-        let project = loopflow_execution::linear::LinearProject {
+        let project = loopflow_storage::planning::TrackerProject {
             description: None,
             id: "provider-project".into(),
             revision: Some("2026-10-08T10:00:00Z".into()),
@@ -1669,7 +1669,7 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
             canonical.to_string(),
         );
         loopflow_execution::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
-        let project = loopflow_execution::linear::LinearProject {
+        let project = loopflow_storage::planning::TrackerProject {
             description: None,
             id: "provider-project".into(),
             revision: Some("2026-10-08T10:00:00Z".into()),
@@ -2034,7 +2034,7 @@ fn moving_saves_membership_offline_and_retains_inbound_changes() {
                 project.linear_id =
                     Some(loopflow_execution::linear::LinearProjectId::new(name).unwrap());
                 store.insert_project(&project).unwrap();
-                let observed = loopflow_execution::linear::LinearProject {
+                let observed = loopflow_storage::planning::TrackerProject {
                     id: name.into(),
                     slug: project.slug.clone(),
                     name: project.name.clone(),
@@ -3106,7 +3106,7 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
     project.linear_id =
         Some(loopflow_execution::linear::LinearProjectId::new("provider-project").unwrap());
     store.insert_project(&project).unwrap();
-    let observed: loopflow_execution::linear::LinearProject = serde_json::from_value(json!({
+    let observed: loopflow_storage::planning::TrackerProject = serde_json::from_value(json!({
         "id":"provider-project", "slug":project.slug, "name":project.name,
         "summary":"", "description":"Saved Project prose", "status":"started",
         "krs":[], "metric_targets":[], "initiative_ids":["initiative"], "team_ids":["team"], "revision":null
@@ -3250,8 +3250,8 @@ fn observed_issue(
     project: &str,
     title: &str,
     description: &str,
-) -> loopflow_execution::linear::LinearIssue {
-    loopflow_execution::linear::LinearIssue {
+) -> loopflow_storage::planning::TrackerItem {
+    loopflow_storage::planning::TrackerItem {
         id: id.into(),
         identifier: "FIX-1".into(),
         name: title.into(),

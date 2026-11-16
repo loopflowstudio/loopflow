@@ -11,7 +11,7 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::linear_records::{LinearBindingError, LinearIssueId};
+use crate::planning::{LinearBindingError, LinearIssueId};
 use crate::pr_landing::PrLandingId;
 use crate::work::project::ProjectId;
 pub use loopflow_model::durable::TaskId;
@@ -744,7 +744,7 @@ mod tests {
         GithubPr, LinearWritebackOperation, LinearWritebackState, PrPhase, PrPublication, Task,
         TaskEventKind, TaskId, TaskPr, TaskPrId,
     };
-    use crate::linear_records::LinearIssueId;
+    use crate::planning::LinearIssueId;
 
     #[test]
     fn events_recorded_before_the_graph_rename_still_read() {

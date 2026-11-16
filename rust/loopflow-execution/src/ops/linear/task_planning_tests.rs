@@ -629,7 +629,7 @@ fn task_completion_ingestion_preserves_baseline_and_atomically_adopts_linear() {
                 &fixture.store.sqlite,
                 &delivery,
                 &late,
-                crate::linear::StateHistory::Unknown
+                loopflow_storage::planning::StateHistory::Unknown
             )
             .unwrap()
         );
@@ -763,7 +763,7 @@ fn task_completion_late_acknowledgement_preserves_explicit_reopening() {
                 &fixture.store.sqlite,
                 &completed,
                 &late,
-                crate::linear::StateHistory::Unknown
+                loopflow_storage::planning::StateHistory::Unknown
             )
             .unwrap()
         );
@@ -1230,7 +1230,7 @@ fn task_completion_lost_reply_adopts_linear_reopening() {
                 &fixture.store.sqlite,
                 &original,
                 &late,
-                crate::linear::StateHistory::Unknown
+                loopflow_storage::planning::StateHistory::Unknown
             )
             .unwrap()
         );

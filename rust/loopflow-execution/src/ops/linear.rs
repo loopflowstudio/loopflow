@@ -12,7 +12,6 @@ use std::time::{Duration, Instant};
 
 use crate::linear::LinearClient;
 use crate::linear::LinearError;
-use crate::linear::LinearProject;
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
 use crate::provider_auth::{
@@ -25,6 +24,7 @@ use crate::store::{
 };
 use crate::work::wave::config::{read_wave_config, update_wave_config};
 use crate::work::wave::Wave;
+use loopflow_storage::planning::TrackerProject;
 use loopflow_storage::work::task::Task;
 use loopflow_storage::work::wave::normalize_wave_name;
 use serde::{Deserialize, Serialize};
@@ -1015,7 +1015,7 @@ pub(crate) async fn acquire_task(
     Ok(task)
 }
 
-pub(crate) fn singular_project_initiative(project: &LinearProject) -> OpsResult<String> {
+pub(crate) fn singular_project_initiative(project: &TrackerProject) -> OpsResult<String> {
     match project.initiative_ids.as_slice() {
         [initiative] => Ok(initiative.clone()),
         initiatives => Err(OpsError::Message(format!(
@@ -1123,7 +1123,7 @@ async fn reteam_async(
 async fn accept_reteam_project(
     resolved: &ResolvedReteamContext,
     wave: &crate::work::wave::Wave,
-    project: &LinearProject,
+    project: &TrackerProject,
     acquisition: Arc<crate::store::PlanningLocks>,
     expected_teams: &[String],
 ) -> OpsResult<()> {
@@ -1864,7 +1864,7 @@ fn matching_initiative_id(
     }
 }
 
-fn ensure_unique_project_slugs(projects: &[LinearProject], wave: &str) -> OpsResult<()> {
+fn ensure_unique_project_slugs(projects: &[TrackerProject], wave: &str) -> OpsResult<()> {
     let mut names_by_slug = BTreeMap::new();
     for project in projects {
         if project.slug.is_empty() {
@@ -1889,7 +1889,7 @@ pub(super) async fn checked_projects_with_store(
     initiative: &str,
     wave: &str,
     store: &Store,
-) -> OpsResult<Vec<LinearProject>> {
+) -> OpsResult<Vec<TrackerProject>> {
     let mut projects = ctx
         .client
         .list_projects(initiative)
@@ -1933,12 +1933,12 @@ pub(super) async fn checked_projects_with_store(
     Ok(projects)
 }
 
-pub(super) fn project_is_foreign(project: &LinearProject, team_id: &str) -> bool {
+pub(super) fn project_is_foreign(project: &TrackerProject, team_id: &str) -> bool {
     !project.team_ids.is_empty() && !project.team_ids.iter().any(|id| id == team_id)
 }
 
 fn validate_project_ownership(
-    project: &LinearProject,
+    project: &TrackerProject,
     wave: &str,
     initiative_id: &str,
     team_id: &str,
@@ -2934,7 +2934,7 @@ mod tests {
 
     #[test]
     fn duplicate_linear_project_slugs_are_drift() {
-        let project = |id: &str, name: &str| LinearProject {
+        let project = |id: &str, name: &str| TrackerProject {
             description: None,
             revision: None,
             id: id.to_string(),

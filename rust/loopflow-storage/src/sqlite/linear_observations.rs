@@ -1,5 +1,5 @@
 //! Retained Linear acquisition evidence, independent of accepted Work and delivery.
-pub use crate::linear_records::revision_nanos;
+pub use crate::planning::revision_nanos;
 use crate::sqlite::{planning_write, SqliteStore};
 use crate::work::edit::WorkValue as Edit;
 use crate::{PlanningState, StoreError, StoreResult};

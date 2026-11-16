@@ -23,10 +23,8 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::sync::OnceCell;
 
-use crate::linear::{
-    local_identifier, LinearComment, LinearError, LinearIssue, LinearIssueObservation,
-    LinearResult, OrderedIssue, PlanningResponse,
-};
+use crate::linear::{local_identifier, LinearError, LinearResult, OrderedIssue, PlanningResponse};
+use loopflow_storage::planning::{TrackerComment, TrackerItem, TrackerObservation};
 
 const ASANA_BASE_URL: &str = "https://app.asana.com/api/1.0";
 const TASK_FIELDS: &str = "gid,external,name,html_notes,completed,completed_at,modified_at,permalink_url,due_on,assignee.gid,memberships.project.gid";
@@ -285,7 +283,7 @@ impl AsanaClient {
         self.response(id, task).await
     }
 
-    pub async fn task(&self, id: &str) -> LinearResult<Option<LinearIssue>> {
+    pub async fn task(&self, id: &str) -> LinearResult<Option<TrackerItem>> {
         match self
             .send::<Task>(Method::GET, &format!("/tasks/external:{id}"), None)
             .await
@@ -317,7 +315,7 @@ impl AsanaClient {
     }
 
     /// Asana has open and completed tasks; a canceled Task is closed there too.
-    pub(crate) async fn set_state(&self, id: &str, target: &str) -> LinearResult<LinearIssue> {
+    pub(crate) async fn set_state(&self, id: &str, target: &str) -> LinearResult<TrackerItem> {
         let task: Task = self
             .send(
                 Method::PUT,
@@ -359,21 +357,21 @@ impl AsanaClient {
         Ok(())
     }
 
-    pub async fn observe(&self, id: &str) -> LinearResult<LinearIssueObservation> {
+    pub async fn observe(&self, id: &str) -> LinearResult<TrackerObservation> {
         let task: Task = self
             .send(Method::GET, &format!("/tasks/external:{id}"), None)
             .await?;
         self.observation(task).await
     }
 
-    async fn observation(&self, task: Task) -> LinearResult<LinearIssueObservation> {
+    async fn observation(&self, task: Task) -> LinearResult<TrackerObservation> {
         let mut comments = self.comments(&task.gid).await?;
         comments.sort_by(|left, right| {
             left.revision
                 .cmp(&right.revision)
                 .then(left.id.cmp(&right.id))
         });
-        Ok(LinearIssueObservation {
+        Ok(TrackerObservation {
             revision: task.modified_at,
             title: task.name,
             description: rich_text::to_markdown(&task.html_notes),
@@ -390,7 +388,7 @@ impl AsanaClient {
         since: Option<&str>,
         live: &[String],
         finished: &[String],
-    ) -> LinearResult<Vec<(LinearIssue, LinearIssueObservation)>> {
+    ) -> LinearResult<Vec<(TrackerItem, TrackerObservation)>> {
         let mut path = format!("/projects/{}/tasks", self.project().await?);
         if let Some(since) = since {
             path.push_str(&format!("?modified_since={since}"));
@@ -421,12 +419,12 @@ impl AsanaClient {
     }
 
     /// Story listing accepts only Asana's own task gid, not `external:`.
-    async fn comments(&self, gid: &str) -> LinearResult<Vec<LinearComment>> {
+    async fn comments(&self, gid: &str) -> LinearResult<Vec<TrackerComment>> {
         let stories: Vec<Story> = self.pages(&format!("/tasks/{gid}/stories")).await?;
         Ok(stories
             .into_iter()
             .filter(|story| story.resource_subtype.as_deref() == Some("comment_added"))
-            .map(|story| LinearComment {
+            .map(|story| TrackerComment {
                 id: story.gid,
                 revision: story.created_at.clone(),
                 created_at: story.created_at,
@@ -449,7 +447,7 @@ impl AsanaClient {
         })
     }
 
-    async fn issue(&self, id: &str, task: Task) -> LinearResult<LinearIssue> {
+    async fn issue(&self, id: &str, task: Task) -> LinearResult<TrackerItem> {
         if task.external.as_ref().and_then(|e| e.gid.as_deref()) != Some(id) {
             return Err(message(
                 "Asana returned a task with a different Loopflow identity",
@@ -460,7 +458,7 @@ impl AsanaClient {
 
     /// A task in the repository's team project belongs to the team's plan; one
     /// in a mirrored Wave Project too belongs to that Project.
-    async fn issue_unchecked(&self, id: &str, task: Task) -> LinearResult<LinearIssue> {
+    async fn issue_unchecked(&self, id: &str, task: Task) -> LinearResult<TrackerItem> {
         let repository = self.project().await?;
         let members: Vec<&str> = task
             .memberships
@@ -477,7 +475,7 @@ impl AsanaClient {
         } else {
             None
         };
-        Ok(LinearIssue {
+        Ok(TrackerItem {
             revision: Some(task.modified_at),
             id: id.to_string(),
             identifier: local_identifier(id),

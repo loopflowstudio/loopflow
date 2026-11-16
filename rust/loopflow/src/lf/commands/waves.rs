@@ -3698,7 +3698,7 @@ mod tests {
             directory.path().display().to_string(),
         );
         store.create_wave(&wave).await.unwrap();
-        let mut item = loopflow_execution::linear::LinearIssue {
+        let mut item = loopflow_storage::planning::TrackerItem {
             branch_name: None,
             revision: None,
             id: "removed".into(),
@@ -3903,7 +3903,7 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         let selected = "999bdbdd-c045-41a6-8ffc-a97c4a40b0b3";
         let predecessor = "218967b6-a760-4b7c-9a46-11d9d61a42c2";
-        let project = |id: &str, name: &str| loopflow_execution::linear::LinearProject {
+        let project = |id: &str, name: &str| loopflow_storage::planning::TrackerProject {
             description: None,
             id: id.into(),
             name: name.into(),
@@ -3916,7 +3916,7 @@ mod tests {
             initiative_ids: vec!["initiative".into()],
             team_ids: vec!["team".into()],
         };
-        let item = loopflow_execution::linear::LinearIssue {
+        let item = loopflow_storage::planning::TrackerItem {
             id: "issue".into(),
             identifier: "FIX-1".into(),
             name: "Unreviewed backlog".into(),

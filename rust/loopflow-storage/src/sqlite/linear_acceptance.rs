@@ -4,7 +4,7 @@ use super::{
     self as sqlite, planning_changes, planning_export, planning_write, task_state_delivery,
     SqliteStore,
 };
-use crate::linear_records::{revision_nanos, LinearIssue, LinearProject, StateHistory};
+use crate::planning::{revision_nanos, StateHistory, TrackerItem, TrackerProject};
 use crate::work::edit::{Disposition, WorkValue as Edit};
 use crate::{StoreError, StoreResult};
 use loopflow_model::durable::ProjectId;
@@ -15,7 +15,7 @@ pub fn accept_linear_project_in(
     store: &SqliteStore,
     wave: &WaveId,
     initiative: &str,
-    project: &LinearProject,
+    project: &TrackerProject,
     observed_at: i64,
 ) -> StoreResult<()> {
     let mut conn = store.conn.lock().expect("store mutex poisoned");
@@ -49,7 +49,7 @@ pub fn reconcile_linear_project_teams_in(
     store: &SqliteStore,
     wave: &WaveId,
     initiative: &str,
-    project: &LinearProject,
+    project: &TrackerProject,
     observed_at: i64,
 ) -> StoreResult<()> {
     let mut conn = store.conn.lock().expect("store mutex poisoned");
@@ -107,8 +107,8 @@ pub fn reconcile_linear_project_teams_in(
 pub fn accept_linear_issue_in(
     store: &SqliteStore,
     repo: &str,
-    issue: &LinearIssue,
-    project: Option<&LinearProject>,
+    issue: &TrackerItem,
+    project: Option<&TrackerProject>,
     observed_at: i64,
     confirmed_wave: Option<(&WaveId, &str)>,
 ) -> StoreResult<()> {
@@ -156,8 +156,8 @@ pub fn accept_linear_inventory_in(
     store: &SqliteStore,
     wave: &WaveId,
     initiative: &str,
-    projects: &[LinearProject],
-    issues: &[LinearIssue],
+    projects: &[TrackerProject],
+    issues: &[TrackerItem],
     observed_at: i64,
 ) -> StoreResult<()> {
     let mut conn = store.conn.lock().expect("store mutex poisoned");
@@ -235,7 +235,7 @@ pub fn accept_linear_project_order_in(
     store: &SqliteStore,
     repo: &str,
     project: &str,
-    items: &[LinearIssue],
+    items: &[TrackerItem],
 ) -> StoreResult<bool> {
     let mut conn = store.conn.lock().expect("store mutex poisoned");
     let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -262,7 +262,7 @@ fn same_ids(left: &[String], right: &[String]) -> bool {
 fn validate_project_membership(
     conn: &Connection,
     repo: &str,
-    project: &LinearProject,
+    project: &TrackerProject,
 ) -> StoreResult<()> {
     // Run before the ingestion transaction: disputed ownership must remain
     // recorded even when rejecting the incoming facts rolls that transaction back.
@@ -300,7 +300,7 @@ fn put_project(
     conn: &Connection,
     repo: &str,
     observed_at: i64,
-    project: &LinearProject,
+    project: &TrackerProject,
 ) -> StoreResult<()> {
     let krs = serde_json::to_string(&project.krs)?;
     let metric_targets = serde_json::to_string(&project.metric_targets)?;
@@ -364,7 +364,7 @@ fn put_item(
     conn: &Connection,
     repo: &str,
     observed_at: i64,
-    item: &LinearIssue,
+    item: &TrackerItem,
 ) -> StoreResult<bool> {
     let revision = revision_nanos(item.revision.as_deref())?;
     let change: Option<(Option<i64>, bool)> = conn
@@ -450,7 +450,7 @@ fn put_item(
 pub fn observe_task_state(
     store: &SqliteStore,
     delivery: &sqlite::task_state_delivery::TaskStateDelivery,
-    observed: &LinearIssue,
+    observed: &TrackerItem,
     history: StateHistory,
 ) -> StoreResult<bool> {
     let mut conn = store.conn.lock().expect("store mutex poisoned");
@@ -497,7 +497,7 @@ fn observe_order(
     conn: &Connection,
     repo: &str,
     external: &str,
-    items: &[LinearIssue],
+    items: &[TrackerItem],
 ) -> StoreResult<bool> {
     let project: Option<String> = conn.query_row("SELECT p.id FROM projects p JOIN waves w ON w.id=p.wave_id WHERE p.external_project_id=?1 AND w.repo=?2", params![external,repo], |row| row.get(0)).optional()?;
     let Some(project) = project.map(ProjectId::from_raw) else {
@@ -827,13 +827,13 @@ fn require_accepted_initiative(
 
 #[cfg(test)]
 mod tests {
-    use crate::linear_records::{LinearIssue, LinearProject};
+    use crate::planning::{TrackerItem, TrackerProject};
     use rusqlite::{params, Connection};
 
     #[derive(Debug, serde::Deserialize)]
     struct Inventory {
-        projects: Vec<LinearProject>,
-        items: Vec<LinearIssue>,
+        projects: Vec<TrackerProject>,
+        items: Vec<TrackerItem>,
     }
 
     #[test]
@@ -857,7 +857,7 @@ mod tests {
             let mut project = snapshot.projects[0].clone();
             project.revision = Some("2026-10-05T12:00:00Z".into());
             project.name = historical_name.into();
-            project.slug = crate::linear_records::project_slug(historical_name);
+            project.slug = crate::planning::project_slug(historical_name);
             conn.execute(
                 "INSERT INTO pm_projects(repo,provider,id,observed_at,body)
                 VALUES('/repo','linear',?1,10,?2)",
@@ -879,7 +879,7 @@ mod tests {
             let original = stored(&conn);
 
             project.name = "Product — Customer requests".into();
-            project.slug = crate::linear_records::project_slug(&project.name);
+            project.slug = crate::planning::project_slug(&project.name);
             project.summary.push_str(" re-rendered");
             super::put_project(&conn, "/repo", 9, &project).unwrap();
             assert_eq!(stored(&conn), original, "an earlier read is ignored");

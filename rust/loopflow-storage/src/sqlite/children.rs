@@ -17,7 +17,7 @@ use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Transact
 use time::OffsetDateTime;
 
 use crate::execution::TaskState;
-use crate::linear_records::{LinearIssueId, LinearProjectId};
+use crate::planning::{LinearIssueId, LinearProjectId};
 use crate::rows::now_unix;
 use crate::work::project::{Project, ProjectEvent, ProjectEventKind, ProjectId};
 use crate::work::task::NewTask;
@@ -964,7 +964,7 @@ impl SqliteStore {
     pub fn apply_linear_observation_prepared(
         &self,
         task_id: &TaskId,
-        observation: &crate::linear_records::LinearIssueObservation,
+        observation: &crate::planning::TrackerObservation,
         observed_at: OffsetDateTime,
         planning_connected: bool,
         machine_names: &std::collections::HashMap<loopflow_model::durable::MachineId, String>,
@@ -1413,8 +1413,7 @@ pub(super) fn require_task_planning(conn: &Connection, task: &Task) -> StoreResu
         |row| row.get(0),
     )?;
     // Upstream cancellation stops a Task that hasn't set out; one under way keeps going.
-    if crate::linear_records::terminal_reason(state.as_deref()).is_some() && !under_way(conn, task)?
-    {
+    if crate::planning::terminal_reason(state.as_deref()).is_some() && !under_way(conn, task)? {
         return Err(StoreError::InvalidAuthority(
             "terminal planning state cannot start work; its execution history is preserved".into(),
         ));

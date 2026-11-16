@@ -14,8 +14,8 @@ use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 
 use super::{OpsError, OpsResult};
-use crate::linear::StateHistory;
 use crate::store::{SharedStore, Store};
+use loopflow_storage::planning::StateHistory;
 use loopflow_storage::sqlite::task_state_delivery::TaskStateDelivery;
 use loopflow_storage::work::task::Task;
 
@@ -96,7 +96,7 @@ fn claim_local_comments(
     store: &Store,
     task: &Task,
     client: &super::planning_client::PlanningClient,
-    observation: &mut crate::linear::LinearIssueObservation,
+    observation: &mut loopflow_storage::planning::TrackerObservation,
 ) -> OpsResult<()> {
     if matches!(client, super::planning_client::PlanningClient::Linear(_)) {
         return Ok(());
@@ -524,7 +524,7 @@ async fn state_history(
     client: &super::planning_client::PlanningClient,
     issue: &str,
     delivery: &TaskStateDelivery,
-    observed: &crate::linear::LinearIssue,
+    observed: &loopflow_storage::planning::TrackerItem,
 ) -> StateHistory {
     let (Some(base_revision), Some(base_state)) = (&delivery.base_revision, &delivery.base_state)
     else {

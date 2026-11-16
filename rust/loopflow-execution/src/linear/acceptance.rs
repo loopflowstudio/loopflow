@@ -12,8 +12,8 @@ pub(crate) async fn accept_linear_inventory(
     store: &Store,
     wave: WaveId,
     initiative: String,
-    projects: Vec<crate::linear::LinearProject>,
-    issues: Vec<crate::linear::LinearIssue>,
+    projects: Vec<loopflow_storage::planning::TrackerProject>,
+    issues: Vec<loopflow_storage::planning::TrackerItem>,
     observed_at: i64,
     acquisition: Option<Arc<PlanningLocks>>,
 ) -> StoreResult<()> {
@@ -27,7 +27,7 @@ pub(crate) async fn reconcile_linear_project_teams(
     store: &Store,
     wave: &WaveId,
     initiative: &str,
-    project: crate::linear::LinearProject,
+    project: loopflow_storage::planning::TrackerProject,
     observed_at: i64,
     acquisition: Arc<PlanningLocks>,
 ) -> StoreResult<()> {
@@ -42,8 +42,8 @@ pub(crate) async fn reconcile_linear_project_teams(
 pub(crate) async fn accept_linear_issue(
     store: &Store,
     repo: &str,
-    issue: crate::linear::LinearIssue,
-    project: Option<crate::linear::LinearProject>,
+    issue: loopflow_storage::planning::TrackerItem,
+    project: Option<loopflow_storage::planning::TrackerProject>,
     observed_at: i64,
     confirmed_wave: Option<(WaveId, String)>,
     acquisition: Option<Arc<PlanningLocks>>,

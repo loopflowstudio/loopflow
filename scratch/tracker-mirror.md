@@ -285,7 +285,7 @@ Deepest deletions first, then the queue, then the bridges. Commit at each.
    decision above. Check: `cargo build -p loopflow`; `cargo test -p
    loopflow-execution --lib asana_planning_tests`; `grep -rn -i notion rust/ --include=*.rs`
    empty outside migrations.
-2. Shared records into `loopflow_storage::planning`; `Linear*` stays in `linear/`.
+2. **Done (slice 2 commit).** Shared records are `loopflow_storage::planning::{TrackerItem, TrackerObservation, TrackerComment, TrackerProject, StateHistory}`; `PlanningResponse` dies with the old drains in slice 3.
 3. Migration + writer enqueues + `rules.rs` + bounded `drain.rs`; delete the
    old drains and storage GraphQL. Focused tests per kind on the Linear fake:
    lost reply, conflict adopt, deletion retire, order evidence; plus

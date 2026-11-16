@@ -8,11 +8,9 @@ use std::path::Path;
 
 use crate::asana::AsanaClient;
 use crate::config::PlanningConfig;
-use crate::linear::{
-    LinearClient, LinearIssue, LinearIssueObservation, LinearProject, LinearResult,
-    PlanningResponse, StateHistory,
-};
+use crate::linear::{LinearClient, LinearResult, PlanningResponse};
 use crate::provider_auth::Provider;
+use loopflow_storage::planning::{StateHistory, TrackerItem, TrackerObservation, TrackerProject};
 
 use super::{OpsError, OpsResult};
 
@@ -160,7 +158,7 @@ impl PlanningClient {
     pub(crate) async fn find_export_issue(
         &self,
         id: &str,
-    ) -> LinearResult<Option<(LinearIssue, Option<LinearProject>)>> {
+    ) -> LinearResult<Option<(TrackerItem, Option<TrackerProject>)>> {
         match self {
             Self::Linear(client) => client.find_export_issue(id).await,
             Self::Asana(client) => Ok(client.task(id).await?.map(|task| (task, None))),
@@ -170,7 +168,7 @@ impl PlanningClient {
     pub(crate) async fn issue_ownership(
         &self,
         id: &str,
-    ) -> LinearResult<Option<(LinearIssue, Option<LinearProject>)>> {
+    ) -> LinearResult<Option<(TrackerItem, Option<TrackerProject>)>> {
         match self {
             Self::Linear(client) => client.issue_ownership(id).await,
             Self::Asana(client) => Ok(client.task(id).await?.map(|task| (task, None))),
@@ -212,7 +210,7 @@ impl PlanningClient {
         }
     }
 
-    pub(crate) async fn set_item_state(&self, id: &str, state: &str) -> LinearResult<LinearIssue> {
+    pub(crate) async fn set_item_state(&self, id: &str, state: &str) -> LinearResult<TrackerItem> {
         match self {
             Self::Linear(client) => client.set_item_state(id, state).await,
             Self::Asana(client) => client.set_state(id, state).await,
@@ -265,7 +263,7 @@ impl PlanningClient {
         through: &str,
         live: &[String],
         finished: &[String],
-    ) -> LinearResult<Vec<(LinearIssue, Option<LinearProject>, LinearIssueObservation)>> {
+    ) -> LinearResult<Vec<(TrackerItem, Option<TrackerProject>, TrackerObservation)>> {
         let changes = match self {
             Self::Linear(client) => {
                 return client
@@ -280,7 +278,7 @@ impl PlanningClient {
             .collect())
     }
 
-    pub(crate) async fn observe_issue(&self, id: &str) -> LinearResult<LinearIssueObservation> {
+    pub(crate) async fn observe_issue(&self, id: &str) -> LinearResult<TrackerObservation> {
         match self {
             Self::Linear(client) => client.observe_issue(id).await,
             Self::Asana(client) => client.observe(id).await,

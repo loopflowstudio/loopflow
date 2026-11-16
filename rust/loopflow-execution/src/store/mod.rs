@@ -24,8 +24,8 @@ pub use loopflow_storage::execution;
 pub use loopflow_storage::graph;
 pub use loopflow_storage::graph_process;
 pub use loopflow_storage::instrumentation;
-pub use loopflow_storage::linear_records;
 pub use loopflow_storage::machine_records;
+pub use loopflow_storage::planning;
 pub mod machines;
 pub use loopflow_storage::metric;
 mod metrics;
@@ -928,7 +928,7 @@ mod tests {
     use loopflow_model::durable::{Author, WorkRef};
     use loopflow_model::id::WaveId;
     use loopflow_storage::child::ChildRef;
-    use loopflow_storage::linear_records::{LinearIssueId, LinearProjectId};
+    use loopflow_storage::planning::{LinearIssueId, LinearProjectId};
     use loopflow_storage::work::project::{Project, ProjectId};
     use loopflow_storage::work::task::{
         CiIncident, GithubPr, LinearWritebackState, PrPhase, PrPresentation, PrPublication, Task,
@@ -1953,9 +1953,8 @@ mod tests {
         );
         store.create_wave(&other).await.unwrap();
         let mut foreign = make_project(&other);
-        foreign.linear_id = Some(
-            loopflow_storage::linear_records::LinearProjectId::new("foreign-project").unwrap(),
-        );
+        foreign.linear_id =
+            Some(loopflow_storage::planning::LinearProjectId::new("foreign-project").unwrap());
         store.create_project(&foreign).await.unwrap();
         let mut response = snapshot.clone();
         response.synced_at = 2;
@@ -2291,9 +2290,8 @@ mod tests {
         store.create_project(&predecessor).await.unwrap();
         select_project(&store, &predecessor);
         let mut successor = make_project(&wave);
-        successor.linear_id = Some(
-            loopflow_storage::linear_records::LinearProjectId::new("successor-project").unwrap(),
-        );
+        successor.linear_id =
+            Some(loopflow_storage::planning::LinearProjectId::new("successor-project").unwrap());
         let task = make_task(&store, &wave, &predecessor);
         let pr = make_task_pr(&task);
         store.seed_task(&task, &pr).await.unwrap();

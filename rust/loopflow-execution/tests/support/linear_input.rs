@@ -1,16 +1,16 @@
 //! Captured Linear input for preservation and delayed-observation fixtures.
 #![allow(dead_code)]
 use loopflow::id::WaveId;
-use loopflow::linear::LinearIssue;
-use loopflow::linear::LinearProject;
+use loopflow_storage::planning::TrackerItem;
+use loopflow_storage::planning::TrackerProject;
 use loopflow::store::sqlite::SqliteStore;
 use loopflow::store::{PlanningLocks, Store, StoreResult};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Inventory {
-    pub projects: Vec<LinearProject>,
-    pub items: Vec<LinearIssue>,
+    pub projects: Vec<TrackerProject>,
+    pub items: Vec<TrackerItem>,
 }
 
 /// One acquired Linear inventory. Input to ingestion, never a local Work reading.
@@ -26,8 +26,8 @@ pub struct InventoryFixture {
 /// A planning observation; neither Project ownership nor execution is required.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct IssueFixture {
-    pub item: loopflow::linear::LinearIssue,
-    pub project: Option<loopflow::linear::LinearProject>,
+    pub item: loopflow_storage::planning::TrackerItem,
+    pub project: Option<loopflow_storage::planning::TrackerProject>,
     pub observed_at: i64,
 }
 

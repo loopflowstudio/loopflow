@@ -14,7 +14,7 @@ use super::SqliteStore;
 pub(super) fn ingest_task_comment(
     conn: &Connection,
     task: &TaskId,
-    comment: &crate::linear_records::LinearComment,
+    comment: &crate::planning::TrackerComment,
     machine_names: &std::collections::HashMap<loopflow_model::durable::MachineId, String>,
 ) -> StoreResult<bool> {
     // A historical filing keeps its original local UUID. Only its Linear
@@ -401,7 +401,7 @@ mod tests {
         let initial_state = store.task_state(&task).unwrap();
         store.append_task_comment(&task, &original).unwrap();
         let steers = store.task_steers(&task).unwrap();
-        let observed = crate::linear_records::LinearComment {
+        let observed = crate::planning::TrackerComment {
             id: original.id.clone(),
             body: "Provider body".into(),
             author_id: Some("person-2".into()),
@@ -457,11 +457,11 @@ mod tests {
             original
         );
         assert_eq!(
-            serde_json::from_str::<crate::linear_records::LinearComment>(&receipt.1).unwrap(),
+            serde_json::from_str::<crate::planning::TrackerComment>(&receipt.1).unwrap(),
             observed
         );
         assert!(!receipt.2);
-        let stale = crate::linear_records::LinearComment {
+        let stale = crate::planning::TrackerComment {
             body: original.body.clone(),
             revision: Some("2026-10-08T01:00:00Z".into()),
             ..observed.clone()
@@ -477,7 +477,7 @@ mod tests {
             store.task_comment_thread(&task).unwrap().thread.comments,
             thread.comments
         );
-        let amended = crate::linear_records::LinearComment {
+        let amended = crate::planning::TrackerComment {
             body: "Later provider correction".into(),
             revision: Some("2026-10-08T01:04:00Z".into()),
             ..observed

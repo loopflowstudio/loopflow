@@ -505,7 +505,7 @@ while not (home / 'finish').exists() and time.monotonic() < deadline:
     db.execute(
         "ATTACH ?1 AS history",
         [
-            loopflow_storage::history::history_path(&home.path().join("loopflow.db"))
+            loopflow_storage::journals::history_path(&home.path().join("loopflow.db"))
                 .to_string_lossy()
                 .as_ref(),
         ],

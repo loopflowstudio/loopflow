@@ -211,7 +211,8 @@ Do not take the first N commits and call that the history.
 scratch/                  # working notes; default delivery clears added files
 ~/.lf/                    # Global config, skills, and the local store
   loopflow.db             # What lf needs now: Tasks, Sessions, running Processes
-  history.db              # What already happened: turns, usage, finished commands
+  history.db              # What already happened: Session history, 90 days
+  usage.db                # One row per provider turn: tokens, time, skill, model
 ```
 
 `scratch/` dies with the PR; `.lf/wave/` lives forever. Design docs go in

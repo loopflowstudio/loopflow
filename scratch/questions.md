@@ -105,3 +105,14 @@ tables and whether Process rows are needed are in LOO-953's
   the first row too).
 - `NativeTurn.start_seq`/`completion_seq` now hold the turn row's id, so
   Desktop's DTO keeps its shape; both are opaque.
+
+## Slice 5 choices (2026-11-16, headless, reversible)
+
+- History and turns pin a finished `lf` Process for 30 days after it
+  finished (`FORGETTABLE`), then it is forgotten; captured inputs still pin
+  theirs. This is how "30 days for finished Processes" was read.
+- The server runs the store part of `lf process prune` only (no receipt
+  removal, no agent reaping), hourly.
+- `Watch::JOURNALS` for the Session list, `lf history` and the Task
+  view/status; everything else `Watch::STATE`. A journal write wakes a
+  watching subscription within the 1 s revision check, not by file event.

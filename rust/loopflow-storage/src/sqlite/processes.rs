@@ -187,7 +187,7 @@ impl SessionTransfer<'_> {
         // Only a departure has a reader: the next attachment asks where the
         // conversation went. An exit without one leaves no history.
         let exit = departure
-            .map(|departure| -> StoreResult<crate::history::Row> {
+            .map(|departure| -> StoreResult<crate::journals::Row> {
                 let payload = serde_json::json!({
                     "type": "attachment_exit", "outcome": outcome, "attachment_token": expected.token,
                     "departure": serde_json::to_value(departure)
@@ -198,7 +198,7 @@ impl SessionTransfer<'_> {
                     [session],
                     |row| row.get(0),
                 )?;
-                let mut row = crate::history::Row::observed(
+                let mut row = crate::journals::Row::observed(
                     session,
                     format!("attachment:{}:exit", expected.token),
                     captured,
@@ -318,15 +318,18 @@ fn agent_process_query() -> String {
 /// issued it, no running parent may still read its result, and no row
 /// references it. Exit and prune both forget exactly these rows. Agent-side
 /// references (steers, Session activity, `caller_agent_process_id`) name only
-/// `kind='agent'` rows, which are never forgotten.
+/// `kind='agent'` rows, which are never forgotten. History and turns name a
+/// Process without holding it: they keep it for 30 days after it finished,
+/// so recent Task history still finds its work, then let it go.
 pub(super) const FORGETTABLE: &str = "p.kind='lf' AND p.completed_at IS NOT NULL
     AND p.via_agent IS NOT 1
     AND NOT EXISTS(SELECT 1 FROM processes r WHERE r.id=p.parent_lf_process_id AND r.completed_at IS NULL)
     AND NOT EXISTS(SELECT 1 FROM processes c WHERE c.parent_lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM processes a WHERE a.kind='agent' AND a.attached_lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM session_events WHERE lf_process_id=p.id)
-    AND NOT EXISTS(SELECT 1 FROM history.session_history WHERE lf_process_id=p.id)
-    AND NOT EXISTS(SELECT 1 FROM usage.turns WHERE lf_process_id=p.id)
+    AND (p.completed_at < CAST(strftime('%s','now') AS INTEGER) - 30*86400 OR (
+        NOT EXISTS(SELECT 1 FROM history.session_history WHERE lf_process_id=p.id)
+        AND NOT EXISTS(SELECT 1 FROM usage.turns WHERE lf_process_id=p.id)))
     AND NOT EXISTS(SELECT 1 FROM graph_processes WHERE lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM graph_process_steps WHERE lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM graph_process_steps WHERE graph_lf_process_id=p.id)

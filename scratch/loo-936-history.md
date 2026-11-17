@@ -1,7 +1,7 @@
 # LOO-936: record only what the product reads, history apart from state
 
-Status: 2026-11-16, slices 1–4 committed (slice 4: "Turn table as built"; reviewed, see "Concept review after slice 4");
-merged with main through #1962 (`4a7c949b9e`). Remaining: slice 5. Since #1955
+Status: 2026-11-16, slices 1–5 built (slice 5: "Slice 5 as built");
+merged with main through #1962 (`4a7c949b9e`). Remaining: gate. Since #1955
 an agent Process records no outcome, so a departure-less attachment exit now
 leaves nothing (no history row, no `processes.outcome`). Process rows are LOO-953 ("Remove Process rows:
 liveness on Sessions and Graph runs", its own worktree); nothing here moves
@@ -164,14 +164,7 @@ sqlite3 -readonly ~/.lf/usage.db "select skill, sum(output_tokens), sum(ended_at
 2. **Done.** `history.rs`: writer, read-only attachment, gap.
 3. **Done**, see "Slice 3 as built".
 4. **Done**, see "Turn table as built".
-5. Retention on the server's clock, the move pass for observation rows a
-   released lf leaves in main (turn rows already convert, see below),
-   `history`/`turns` revisions declared by their reads, `history.db` and
-   `usage.db` statistics (`ANALYZE` both, `store::query_plans` over the
-   `usage.turns` reads at load size), measurements, docs check (`data.md`
-   "Loopflow keeps no copy of the stream"; add `usage.db` everywhere
-   `history.db` is named; `lf doctor` reports both files' size and oldest
-   row), and the rename below.
+5. **Built**, see "Slice 5 as built".
 
 ## Delete — do not maintain
 
@@ -181,8 +174,9 @@ and its emission in the four decoders, `SessionEventKind::Output`,
 `TurnFacts::final_answer`, `MEMBERSHIP_KIND`, `RetentionReport::usage_rows`,
 `StoreRevisions::usage` (now `history`), `store_revision_usage_insert`, the
 `legacy_review_feedback` write and the unused `process_history` table.
-Remaining: `FORGETTABLE`'s `session_events`/`history.session_history` arms
-(slice 5 retention by age).
+Slice 5 bounded `FORGETTABLE`'s journal arms by age (history and turns pin
+a finished Process for 30 days) and renamed `HistoryFile`/`history.rs` to
+`JournalFile`/`journals.rs`, `server/statistics.rs` to `maintenance.rs`.
 
 ## Forbidden outcomes
 
@@ -205,8 +199,7 @@ Renaming `session_events` (now only inputs) and `agent_sessions`: LOO-937.
   `session_observation_receipt`, `session_events_provider_session`,
   `session_input_membership`, `session_provider_transitions`,
   `session_input_outcome_window`, `session_event_input`,
-  `session_events_turn`, …) and the `retain_task_agent_turn` trigger (no
-  `started` rows in main); expand step = this Task's migration.
+  `session_events_turn`, …); expand step = this Task's migration.
 - Drop the `usage` revision domain row.
 
 ## Before / after to report
@@ -461,3 +454,58 @@ Still open, none blocking slice 5: turn-row retention (one constant), and
 whether reports group by the values frozen at dispatch or follow later binds
 through the Session id (`questions.md`); "interrupted" for an unknown
 OpenCode completion.
+
+## Slice 5 as built (2026-11-16)
+
+- `JournalFile` in `journals.rs` (was `HistoryFile`, `history.rs`).
+- `retention::prune(database, dead, now)`, run by the Machine server at start
+  and hourly (`server/maintenance.rs`, beside the daily statistics refresh,
+  which now also optimizes `history.db` and `usage.db` through their writers).
+  Order: close dead Processes; in `loopflow.db` carry `provider-session:*`
+  onto the captured row and `interactive_opened` onto `opened_at`, null
+  `processes.attachment_exit_seq`, delete unread observations
+  (`UNREAD_OBSERVATION`) and `observed`/`output` rows past 90 days; move the
+  remaining `observed` rows to `history.db` in seq batches (`INSERT OR
+  IGNORE`, then delete); convert turn rows; delete `history.session_history`
+  past `HISTORY_DAYS` = 90 and reclaim `history.db`; forget Processes;
+  reclaim main. `FORGETTABLE`: a history or turn row pins a finished Process
+  only until 30 days after it finished. Turns: no retention.
+- A released lf's transitions moved by the pass do not update
+  `agent_sessions.transition` (the summary's latest); detect-and-name skew.
+- `read_stream::Watch` (`STATE`, `JOURNALS`) is an argument of
+  `start`/`run`; Session list, `lf history` (Desktop Session History) and the
+  Task view/status watch journals, every other subscription state only.
+- `lf doctor` `journals` check: both files' size and oldest row; warns when
+  history is past 92 days. `lf process prune` prints moved/forgotten counts.
+- Docs: `data.md` State and history and owner table, `telemetry.md`,
+  `troubleshooting.md`, `index.md`, `environment.md`, `machines.md` now name
+  `usage.db`, the server's hourly clock, and no Process move.
+- The live-copy run found `retain_task_agent_turn` refusing to delete a
+  Task's last `started` row, so turn conversion failed on a real store; the
+  migration drops the trigger (a Task's work is its turns now).
+- Tests: `retention::history_tests::prune_moves_old_shape_history_out_and_forgets_only_aged_rows`
+  (seeded old shape → new files, second pass idempotent),
+  `read_stream::tests::a_turn_reaches_a_subscription_that_watches_turns`,
+  `history_and_turns_reach_only_the_reads_that_watch_them`.
+- `reclaim` stepped `PRAGMA incremental_vacuum` once through
+  `execute_batch`, which freed nothing on the incremental store; it now steps
+  it to the end in 10,000-page transactions.
+
+Measured 2026-11-16 on a `.backup` copy of `~/.lf/loopflow.db` (the
+storage `prune` called directly; no agent reaping): migration 6.6–18 s; first
+prune 58 s: 116k observations moved, 30,469 turns converted, 105k rows
+forgotten, 33 Processes forgotten; second prune 0.5 s, all zeros. Files:
+`loopflow.db` 997 MB → 607 MB after reclaim (10.5 s, four chunks before the
+chunk was cut to 10,000 pages; the rest is mostly `processes`, LOO-953),
+`history.db` 119 MB, `usage.db` 21 MB. `session_events` left: 21,601
+`captured`, 24,141 `output` (gone at 90 days). Single statements on the copy:
+null `attachment_exit_seq` 0.7 s, one 10k unread-delete batch 0.7 s, one 10k
+move-delete batch 0.3 s. After `ANALYZE`, every journal read checked plans
+`SEARCH` (`turns` by session, input, start/end window, Task, Process;
+`session_history` by receipt, order, window). Revision rates after the change
+are not measurable until this build is installed (the live Machine runs the
+released lf).
+
+Check results: storage `retention`/`turns`/`journals`/`revisions`/forget
+tests 20 passed; storage+execution `retention`, `read_stream::tests`,
+forget tests 13 passed; `documented_commands::` 4 passed; `cargo clippy --all-targets -- -D warnings` clean. Gate: `binary(served_reads)` (server maintenance), `test(store::query_plans::tests::)`, `test(session_cli_tests::)`.

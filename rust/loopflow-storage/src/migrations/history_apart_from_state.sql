@@ -103,3 +103,7 @@ CREATE INDEX session_capture_provider_thread ON session_events(provider_thread)
 
 -- Usage rows live in history.db, whose own revision row counts them.
 DROP TRIGGER store_revision_usage_insert;
+
+-- A Task's work is its turns in usage.db now; `started` rows in
+-- session_events convert there and go, including a Task's last one.
+DROP TRIGGER retain_task_agent_turn;

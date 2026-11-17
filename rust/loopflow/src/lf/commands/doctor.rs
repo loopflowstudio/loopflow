@@ -88,6 +88,10 @@ pub fn report() -> Result<DoctorReport> {
     let rows = events.as_ref().map_or(0, |(events, _)| events.len());
     // Binary freshness remains useful when the store cannot open.
     checks.extend(check_installation(&database_path));
+    checks.push(check_journals(
+        &database_path,
+        time::OffsetDateTime::now_utc().unix_timestamp(),
+    ));
     checks.push(check_running_binaries());
     checks.push(check_binary_freshness());
     checks.push(check_contention(
@@ -139,6 +143,60 @@ fn check_running_binaries() -> Check {
 const CONTENTION_WINDOW_SECONDS: i64 = 86_400;
 
 /// Who waited on the store's write lock and who held it, by binary, from lf.log.
+/// `history.db` and `usage.db` grow with use: their sizes and oldest rows. A
+/// history row past retention means no prune has run on this Machine.
+fn check_journals(database: &Path, now: i64) -> Check {
+    const NAME: &str = "journals";
+    let journals = [
+        (
+            loopflow_storage::journals::history_path(database),
+            "SELECT MIN(observed_at) FROM session_history",
+        ),
+        (
+            loopflow_storage::journals::usage_path(database),
+            "SELECT MIN(COALESCE(started_at,ended_at)) FROM turns",
+        ),
+    ];
+    let mut parts = Vec::new();
+    let mut stale = false;
+    for (path, oldest) in journals {
+        let name = path.file_name().unwrap_or_default().to_string_lossy();
+        let Ok(metadata) = std::fs::metadata(&path) else {
+            parts.push(format!("{name} absent"));
+            continue;
+        };
+        let oldest: Option<i64> = rusqlite::Connection::open_with_flags(
+            &path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .and_then(|conn| conn.query_row(oldest, [], |row| row.get(0)))
+        .unwrap_or(None);
+        let since = oldest
+            .and_then(|at| time::OffsetDateTime::from_unix_timestamp(at).ok())
+            .map_or("empty".into(), |at| format!("oldest {}", at.date()));
+        if name == "history.db"
+            && oldest.is_some_and(|at| {
+                at < now - (loopflow_storage::sqlite::retention::HISTORY_DAYS + 2) * 86_400
+            })
+        {
+            stale = true;
+        }
+        parts.push(format!(
+            "{name} {:.1} MB, {since}",
+            metadata.len() as f64 / 1_000_000.0
+        ));
+    }
+    let detail = parts.join("; ");
+    if stale {
+        Check::warn(
+            NAME,
+            format!("{detail}; history is past retention: is the Machine server running? `lf process prune` applies it now"),
+        )
+    } else {
+        Check::ok(NAME, detail)
+    }
+}
+
 fn check_contention(log: &Path, since: i64) -> Check {
     const NAME: &str = "contention";
     let binaries = match read_contention(log, since) {

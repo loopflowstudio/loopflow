@@ -506,7 +506,7 @@ mod tests {
             .unwrap();
         store.append_history(
             "observation",
-            &[crate::history::Row::observed(
+            &[crate::journals::Row::observed(
                 "conversation",
                 "store-gap:1:2".into(),
                 None,

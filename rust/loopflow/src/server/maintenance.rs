@@ -1,37 +1,58 @@
-//! Keep the store's planner statistics current. Unanalyzed, SQLite guesses
-//! every table holds a million rows and can pick a scan over an index; a
-//! bounded `PRAGMA optimize` measures the tables that changed. The server runs
-//! it once when it starts and then about once a day, never per connection or
-//! per command. Failures are logged and retried at the next tick.
+//! Store upkeep on the server's clock. Planner statistics: unanalyzed, SQLite
+//! guesses every table holds a million rows and can pick a scan over an index;
+//! a bounded `PRAGMA optimize` measures the tables that changed, once when the
+//! server starts and then about once a day. Retention: the store prune that
+//! `lf process prune` runs, at start and then every hour, so `history.db`
+//! keeps 90 days and history an earlier lf wrote into `loopflow.db` moves out.
+//! Neither runs per connection or per command. Failures are logged and retried
+//! at the next tick.
 use std::path::Path;
 use std::time::{Duration, SystemTime};
 
-const EVERY: Duration = Duration::from_secs(24 * 60 * 60);
-/// How often the thread checks the wall-clock deadline. `SystemTime`, unlike
+const STATISTICS_EVERY: Duration = Duration::from_secs(24 * 60 * 60);
+const RETENTION_EVERY: Duration = Duration::from_secs(60 * 60);
+/// How often the thread checks the wall-clock deadlines. `SystemTime`, unlike
 /// `Instant`, keeps counting while a Mac sleeps.
 const TICK: Duration = Duration::from_secs(10 * 60);
 
 pub(super) fn start() {
     let spawned = std::thread::Builder::new()
-        .name("store-statistics".into())
+        .name("store-maintenance".into())
         .spawn(|| loopflow_execution::journal::request::isolate(maintain));
     if let Err(error) = spawned {
-        tracing::warn!(%error, "store statistics are not maintained by this server");
+        tracing::warn!(%error, "the store is not maintained by this server");
     }
 }
 
 fn maintain() {
     let path = loopflow_execution::store::default_db_path();
-    let mut due = SystemTime::now();
+    let mut statistics_due = SystemTime::now();
+    let mut retention_due = SystemTime::now();
     loop {
-        if SystemTime::now() >= due {
+        if SystemTime::now() >= retention_due {
+            match retain(&path) {
+                Ok(()) => retention_due = SystemTime::now() + RETENTION_EVERY,
+                Err(error) => tracing::warn!(%error, "store retention failed"),
+            }
+        }
+        if SystemTime::now() >= statistics_due {
             match refresh(&path) {
-                Ok(()) => due = SystemTime::now() + EVERY,
+                Ok(()) => statistics_due = SystemTime::now() + STATISTICS_EVERY,
                 Err(error) => tracing::warn!(%error, "store statistics refresh failed"),
             }
         }
         std::thread::sleep(TICK);
     }
+}
+
+fn retain(path: &Path) -> anyhow::Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    let report = loopflow_execution::store::retention::prune(path, now)?;
+    tracing::info!(?report, "store retention");
+    Ok(())
 }
 
 fn refresh(path: &Path) -> anyhow::Result<()> {

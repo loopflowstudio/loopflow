@@ -1307,7 +1307,7 @@ fn recording_failure_cannot_forget_the_thread_used_by_retry() {
             )?;
             // A resume reference is state on the input's captured row; every
             // other provider fact is history in the history file.
-            let history = rusqlite::Connection::open(loopflow_storage::history::history_path(
+            let history = rusqlite::Connection::open(loopflow_storage::journals::history_path(
                 &crate::session_record::row_database(&capture.artifact_dir())?,
             ))?;
             let (target, trigger) = if source.starts_with("provider-session") {

@@ -111,12 +111,12 @@ answer) and why: Claude removes conversations idle longer than
 `cleanupPeriodDays` (30 days unless set in its `settings.json`); Codex, OpenCode
 and Pi keep everything. Raise `cleanupPeriodDays` to keep more Claude history.
 
-lf keeps its own records of what happened in `~/.lf/history.db`, apart from
-the store of current work: 90 days of Session history (turns, outcomes, usage,
-provider changes) and 30 days of commands that finished. Commands a Graph step,
-a ship or another current record still names stay listed for as long as that
-record exists. Older rows go when `lf process prune` runs; `lf session usage
---weekly` reads back as far as that.
+lf keeps its own records of what happened apart from the store of current
+work: 90 days of Session history (outcomes, provider changes) in
+`~/.lf/history.db`, and one row per provider turn (time, status, model,
+tokens, and the Task, Wave, skill and Graph step it ran for) in
+`~/.lf/usage.db`, kept. The Machine server prunes history past 90 days every
+hour; `lf process prune` does the same at once.
 
 Replay a captured request as new work, with the same prompt, model and permissions, using current native authentication; the original record is left alone:
 
@@ -132,11 +132,11 @@ lf process list --json          # one parseable snapshot, for another tool or ag
 lf process prune --dry-run      # receipts, orphaned providers and Process rows safe to remove
 ```
 
-Both show only processes the OS says are alive; finished calls drop out and move
-to `lf session history`. `lf process prune` removes stale receipts and provider
-processes whose lf parent is provably dead, never an unclaimed provider, then
-moves finished Process rows nothing current references into history, drops
-history past its retention and compacts both files.
+Both show only processes the OS says are alive; finished calls drop out.
+`lf process prune` removes stale receipts and provider processes whose lf
+parent is provably dead, never an unclaimed provider, then closes Process rows
+whose exit is proven, forgets finished ones nothing current references, drops
+history past its retention and compacts the files.
 
 ## How big the codebase is
 
@@ -171,7 +171,7 @@ Each check reports ok, warn or fail with its detail. `--json` returns the same a
 | `lf session history search TEXT` / `lf session retention` | Find text in recent conversations / what providers still keep |
 | `lf replay ID` | New work from a captured request |
 | `lf process list`, `lf process top` | Live process trees |
-| `lf process prune` | Remove dead receipts and orphaned providers; move finished Processes to history; expire old history |
+| `lf process prune` | Remove dead receipts and orphaned providers; forget finished Processes; expire old history |
 | `lf repo tokens [--days N]` | Codebase size in lines and tokens |
 | `lf machine doctor [--plan]` | Installation, storage and process integrity |
 

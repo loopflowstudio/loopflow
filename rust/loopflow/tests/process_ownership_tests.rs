@@ -323,7 +323,7 @@ async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
         .unwrap();
     let connection = rusqlite::Connection::open(&database).unwrap();
     let history =
-        rusqlite::Connection::open(loopflow_storage::history::history_path(&database)).unwrap();
+        rusqlite::Connection::open(loopflow_storage::journals::history_path(&database)).unwrap();
     let parent = LfProcessId::new();
     let raw = serde_json::to_string(&["lf", "pr", "land", "--strict", "%_ literal"]).unwrap();
     connection

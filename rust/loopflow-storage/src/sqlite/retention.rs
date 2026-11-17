@@ -1,9 +1,11 @@
 //! Retention: the store keeps facts, and streams stay in files.
 //!
 //! This prune closes Processes whose OS process is gone without recording its exit,
-//! then forgets finished Processes nothing needs, as exit does. Each step is
-//! one short transaction on its own connection, so live writers wait well
-//! under their busy timeout.
+//! then forgets finished Processes nothing needs, as exit does. It moves the
+//! history an earlier lf kept in `loopflow.db` into `history.db` and its turns
+//! into `usage.db`, and forgets history older than [`HISTORY_DAYS`]. Each step
+//! is one short transaction on its own connection, so live writers wait well
+//! under their busy timeout. The Machine server runs it every hour.
 
 use std::path::Path;
 use std::time::Duration;
@@ -14,39 +16,190 @@ use serde::{Deserialize, Serialize};
 use crate::StoreResult;
 
 const PROCESS_BATCH: i64 = 10_000;
+/// Rows moved or forgotten per transaction.
+const ROW_BATCH: i64 = 10_000;
+/// Pages freed per incremental vacuum transaction: 40 MB of 4 KiB pages,
+/// about a second of write lock on a laptop disk.
+const VACUUM_PAGES: i64 = 10_000;
 /// Every live writer waits this long; each prune transaction stays well under.
 const BUSY_TIMEOUT: Duration = Duration::from_secs(15);
+/// Session history is kept this long after it was observed. Turns in
+/// `usage.db` and the inputs in `loopflow.db` are kept.
+pub const HISTORY_DAYS: i64 = 90;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RetentionReport {
     pub closed_processes: u64,
     pub forgotten_processes: u64,
+    /// Observations an earlier lf kept in `loopflow.db`, now in `history.db`.
+    pub moved_observations: u64,
     /// Turns an earlier lf kept as three rows, now one row in `usage.turns`.
     pub converted_turns: u64,
+    /// Rows past [`HISTORY_DAYS`], and rows nothing reads, deleted.
+    pub forgotten_history: u64,
     pub vacuumed: bool,
 }
 
-/// Prune `database` once.
+/// Prune `database` once, at `now` in seconds.
 ///
 /// # Errors
 /// When the store cannot be opened or a prune transaction fails.
 pub fn prune(
     database: &Path,
     dead: &[(crate::process::ProcessEntry, Option<String>, i64)],
+    now: i64,
 ) -> StoreResult<RetentionReport> {
     let conn = Connection::open(database)?;
     conn.busy_timeout(BUSY_TIMEOUT)?;
     // Nothing references the rows deleted here (see each predicate), and
     // per-row foreign-key probes would scan session_events for each delete.
     conn.execute_batch("PRAGMA foreign_keys = OFF;")?;
-    crate::history::attach(&conn, database);
+    crate::journals::attach(&conn, database);
     let closed_processes = close_dead_processes(&conn, dead)?;
+    let cutoff = now - HISTORY_DAYS * 86_400;
+    let mut forgotten_history = forget_unread_rows(&conn, cutoff)?;
+    let moved_observations = move_observations(&conn, database)?;
+    let converted_turns = super::turns::convert_turn_rows(database)?;
+    forgotten_history += forget_old_history(database, cutoff)?;
     Ok(RetentionReport {
         closed_processes,
         forgotten_processes: forget_processes(&conn)?,
-        converted_turns: super::turns::convert_turn_rows(database)?,
+        moved_observations,
+        converted_turns,
+        forgotten_history,
         vacuumed: reclaim(&conn)?,
     })
+}
+
+// ---------------------------------------------------------------------------
+// History an earlier lf kept in loopflow.db
+
+/// Observations in `loopflow.db` nothing reads: kinds no lf writes or reads
+/// any more, departure-less attachment exits, and the facts that became
+/// columns, once carried there. Over alias `e`.
+const UNREAD_OBSERVATION: &str = "e.kind='observed' AND (
+    json_extract(e.payload,'$.source') IN ('task_update','codex_relay','codex_submission')
+    OR json_extract(e.payload,'$.type') IN ('provider_launch','driver_exit','legacy_flow',
+        'legacy_flow_review','agent_process_replaced','agent_process_ancestry_repaired',
+        'interactive_opened')
+    OR json_extract(e.payload,'$.evidence.type') IN ('provider_account_selected',
+        'provider_session_observed')
+    OR (json_extract(e.payload,'$.type')='attachment_exit'
+        AND json_type(e.payload,'$.departure') IS NULL)
+    OR instr(e.receipt_key,':provider-session:')>0)";
+
+/// Carry the state facts an earlier lf wrote as observations onto their
+/// owners, then delete what nothing reads in `loopflow.db`: unread
+/// observations, history past `cutoff` (turn rows excepted: they convert),
+/// and copies of the provider's last message past `cutoff`.
+fn forget_unread_rows(conn: &Connection, cutoff: i64) -> StoreResult<u64> {
+    let tx = rusqlite::Transaction::new_unchecked(conn, TransactionBehavior::Immediate)?;
+    // The newest resume reference an input observed, as the migration did.
+    tx.execute(
+        "UPDATE session_events AS c SET
+             provider_thread=json_extract(o.payload,'$.evidence.provider_session_id'),
+             provider_account=json_extract(o.payload,'$.evidence.account_id')
+         FROM (SELECT session_id,substr(receipt_key,1,instr(receipt_key,':provider-session:')-1) AS input,
+                 payload,ROW_NUMBER() OVER (PARTITION BY session_id,
+                     substr(receipt_key,1,instr(receipt_key,':provider-session:')-1) ORDER BY seq DESC) AS newest
+               FROM session_events WHERE kind='observed' AND instr(receipt_key,':provider-session:')>0
+                 AND json_valid(payload) AND json_extract(payload,'$.evidence.schema_version')=1
+                 AND length(json_extract(payload,'$.evidence.provider_session_id'))>0) AS o
+         WHERE c.kind='captured' AND c.session_id=o.session_id AND c.receipt_key=o.input
+           AND o.newest=1",
+        [],
+    )?;
+    tx.execute(
+        "UPDATE agent_sessions AS s SET opened_at=MAX(COALESCE(s.opened_at,0),o.opened_at)
+         FROM (SELECT session_id,MAX(json_extract(payload,'$.opened_at_ms')) AS opened_at
+               FROM session_events WHERE kind='observed' AND json_valid(payload)
+                 AND json_extract(payload,'$.type')='interactive_opened' GROUP BY session_id) AS o
+         WHERE s.id=o.session_id AND s.interactive=1",
+        [],
+    )?;
+    // Nothing reads which observation a Process's attachment exit was.
+    tx.execute(
+        "UPDATE processes SET attachment_exit_seq=NULL WHERE attachment_exit_seq IS NOT NULL",
+        [],
+    )?;
+    tx.commit()?;
+    let mut forgotten = 0;
+    loop {
+        let deleted = conn.execute(
+            &format!(
+                "DELETE FROM session_events WHERE seq IN (
+                     SELECT e.seq FROM session_events e WHERE ({UNREAD_OBSERVATION})
+                        OR (e.kind IN ('observed','output') AND e.observed_at < ?1)
+                     LIMIT ?2)"
+            ),
+            params![cutoff, ROW_BATCH],
+        )?;
+        forgotten += deleted as u64;
+        if deleted == 0 {
+            return Ok(forgotten);
+        }
+    }
+}
+
+/// Move the observations left in `loopflow.db` into `history.db`, oldest
+/// first: each batch is written there, then deleted here, so a pass cut short
+/// moves the rest next time and a row already moved is not written twice.
+fn move_observations(conn: &Connection, database: &Path) -> StoreResult<u64> {
+    let history = crate::journals::JournalFile::beside(&crate::journals::HISTORY, Some(database));
+    let mut moved = 0;
+    loop {
+        let last: Option<i64> = conn.query_row(
+            "SELECT MAX(seq) FROM (SELECT seq FROM session_events WHERE kind='observed'
+                 ORDER BY seq LIMIT ?1)",
+            [ROW_BATCH],
+            |row| row.get(0),
+        )?;
+        let Some(last) = last else {
+            return Ok(moved);
+        };
+        history
+            .write("history move", |tx| {
+                Ok(tx.execute(
+                    "INSERT OR IGNORE INTO session_history(session_id,provider_thread,provider_turn,
+                         kind,receipt_key,lf_process_id,agent_process_id,task_id,wave_id,
+                         captured_event,observed_at,payload)
+                     SELECT session_id,provider_thread,provider_turn,kind,receipt_key,lf_process_id,
+                         agent_process_id,task_id,wave_id,captured_event,observed_at,payload
+                     FROM store.session_events WHERE kind='observed' AND seq<=?1 ORDER BY seq",
+                    [last],
+                )?)
+            })
+            .ok_or_else(|| crate::StoreError::InvalidData("history.db is unavailable".into()))?;
+        moved += conn.execute(
+            "DELETE FROM session_events WHERE kind='observed' AND seq<=?1",
+            [last],
+        )? as u64;
+    }
+}
+
+/// Forget Session history observed before `cutoff`, then return its pages.
+fn forget_old_history(database: &Path, cutoff: i64) -> StoreResult<u64> {
+    let history = crate::journals::JournalFile::beside(&crate::journals::HISTORY, Some(database));
+    let mut forgotten = 0;
+    loop {
+        let deleted = history
+            .write("history retention", |tx| {
+                Ok(tx.execute(
+                    "DELETE FROM session_history WHERE seq IN (
+                         SELECT seq FROM session_history WHERE observed_at < ?1 LIMIT ?2)",
+                    params![cutoff, ROW_BATCH],
+                )?)
+            })
+            .ok_or_else(|| crate::StoreError::InvalidData("history.db is unavailable".into()))?;
+        forgotten += deleted as u64;
+        if deleted == 0 {
+            break;
+        }
+    }
+    let conn = Connection::open(crate::journals::history_path(database))?;
+    conn.busy_timeout(BUSY_TIMEOUT)?;
+    reclaim(&conn)?;
+    Ok(forgotten)
 }
 
 /// Saved identities and locators for observation before pruning.
@@ -145,8 +298,19 @@ fn reclaim(conn: &Connection) -> StoreResult<bool> {
     let free: i64 = conn.query_row("PRAGMA freelist_count", [], |row| row.get(0))?;
     let mode: i64 = conn.query_row("PRAGMA auto_vacuum", [], |row| row.get(0))?;
     if mode == 2 {
-        conn.execute_batch("PRAGMA incremental_vacuum;")?;
-        return Ok(false);
+        // Each step frees pages; a statement not stepped to its end frees
+        // none. Chunks keep each write transaction short.
+        let mut left = free + 1;
+        loop {
+            let free: i64 = conn.query_row("PRAGMA freelist_count", [], |row| row.get(0))?;
+            if free == 0 || free >= left {
+                return Ok(false);
+            }
+            left = free;
+            let mut vacuum = conn.prepare(&format!("PRAGMA incremental_vacuum({VACUUM_PAGES})"))?;
+            let mut steps = vacuum.query([])?;
+            while steps.next()?.is_some() {}
+        }
     }
     if free * 2 <= pages {
         return Ok(false);
@@ -208,7 +372,7 @@ mod tests {
         process(4, Some(3), true, false);
         process(5, None, true, true);
 
-        assert_eq!(prune(&path, &[]).unwrap().forgotten_processes, 3);
+        assert_eq!(prune(&path, &[], now).unwrap().forgotten_processes, 3);
 
         let left: Vec<String> = conn
             .prepare("SELECT id FROM processes ORDER BY id")
@@ -250,7 +414,7 @@ mod observation_tests {
         )
         .unwrap();
         assert_eq!(
-            prune(&path, &[(saved, locator, 10)])
+            prune(&path, &[(saved, locator, 10)], 10)
                 .unwrap()
                 .closed_processes,
             0
@@ -264,10 +428,177 @@ mod observation_tests {
             .unwrap());
         let (current, locator) = unfinished_processes(&path).unwrap().remove(0);
         assert_eq!(
-            prune(&path, &[(current, locator, 10)])
+            prune(&path, &[(current, locator, 10)], 10)
                 .unwrap()
                 .closed_processes,
             1
         );
+    }
+}
+
+#[cfg(test)]
+mod history_tests {
+    use rusqlite::{params, Connection};
+
+    use super::{prune, HISTORY_DAYS};
+
+    /// An earlier lf's store: one Session whose history sits in
+    /// `loopflow.db` beside its input, and a `history.db` with one row past
+    /// retention and one within it.
+    #[test]
+    fn prune_moves_old_shape_history_out_and_forgets_only_aged_rows() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("loopflow.db");
+        let store = crate::test_fixture::open(&path).unwrap();
+        let input = crate::session_record::new_artifact_key();
+        let session = store.test_session("conversation", &input);
+        let captured = session.captured.unwrap();
+        let now = 2_000_000_000;
+        let recent = now - 86_400;
+        let aged = now - (HISTORY_DAYS + 1) * 86_400;
+
+        let conn = Connection::open(&path).unwrap();
+        let observe = |kind: &str, receipt: String, at: i64, payload: serde_json::Value| {
+            conn.execute(
+                "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
+                 VALUES('conversation',?1,?2,?3,?4,?5)",
+                params![kind, receipt, at, payload.to_string(), captured],
+            )
+            .unwrap();
+        };
+        observe(
+            "observed",
+            format!("{input}:manifest.json"),
+            recent,
+            serde_json::json!({"source":"manifest.json"}),
+        );
+        observe(
+            "observed",
+            "attachment:kept:exit".into(),
+            recent,
+            serde_json::json!({"type":"attachment_exit","departure":{"kind":"handoff"}}),
+        );
+        observe(
+            "observed",
+            format!("{input}:store-gap:1:2"),
+            aged,
+            serde_json::json!({"source":"store-gap"}),
+        );
+        // Nothing reads these.
+        observe(
+            "observed",
+            "task_update:x:accepted".into(),
+            recent,
+            serde_json::json!({"source":"task_update"}),
+        );
+        observe(
+            "observed",
+            "attachment:gone:exit".into(),
+            recent,
+            serde_json::json!({"type":"attachment_exit","outcome":"completed"}),
+        );
+        observe(
+            "observed",
+            format!("{input}:events.jsonl:1"),
+            recent,
+            serde_json::json!({"evidence":{"type":"provider_account_selected"}}),
+        );
+        // State facts that became columns.
+        observe(
+            "observed",
+            format!("{input}:provider-session:agent"),
+            recent,
+            serde_json::json!({
+            "evidence":{"schema_version":1,"provider_session_id":"thread-1","account_id":"work"}}),
+        );
+        observe(
+            "observed",
+            format!("{input}:interactive_opened:a"),
+            recent,
+            serde_json::json!({"type":"interactive_opened","opened_at_ms":1_234}),
+        );
+        // A Task's only turn, as three rows: it converts, and the rows go.
+        // Only the Task id matters here, not the Task.
+        conn.execute_batch("PRAGMA foreign_keys=OFF").unwrap();
+        for (kind, at) in [("started", recent), ("completed", recent + 5)] {
+            conn.execute(
+                "INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,
+                     task_id,observed_at,payload,captured_event)
+                 VALUES('conversation','thread','turn',?1,?1,
+                     'task_00000000000000000000000000000001',?2,'{}',?3)",
+                params![kind, at, captured],
+            )
+            .unwrap();
+        }
+        // Copies of the provider's last message go by age, never moved.
+        observe("output", "answer:old".into(), aged, serde_json::json!({}));
+        observe("output", "answer:new".into(), recent, serde_json::json!({}));
+        store
+            .execute_history(
+                "INSERT INTO session_history(session_id,kind,receipt_key,observed_at,payload)
+                 VALUES('conversation','observed','history:old',?1,'{}'),
+                       ('conversation','observed','history:new',?2,'{}')",
+                params![aged, recent],
+            )
+            .unwrap();
+
+        let first = prune(&path, &[], now).unwrap();
+        assert_eq!((first.moved_observations, first.converted_turns), (2, 1));
+
+        let main: Vec<(String, String)> = conn
+            .prepare("SELECT kind,receipt_key FROM session_events ORDER BY seq")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            main,
+            [
+                ("captured".to_string(), input.clone()),
+                ("output".into(), "answer:new".into())
+            ]
+        );
+        let state: (Option<String>, Option<String>, Option<i64>) = conn
+            .query_row(
+                "SELECT c.provider_thread,c.provider_account,s.opened_at
+                 FROM session_events c JOIN agent_sessions s ON s.id=c.session_id
+                 WHERE c.seq=?1",
+                [captured],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            state,
+            (Some("thread-1".into()), Some("work".into()), Some(1_234))
+        );
+        let history = || -> Vec<String> {
+            let mut kept: Vec<String> = Connection::open(crate::journals::history_path(&path))
+                .unwrap()
+                .prepare("SELECT receipt_key FROM session_history")
+                .unwrap()
+                .query_map([], |row| row.get(0))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            kept.sort();
+            kept
+        };
+        let moved = history();
+        let mut expected = vec![
+            format!("{input}:manifest.json"),
+            "attachment:kept:exit".to_string(),
+            "history:new".to_string(),
+        ];
+        expected.sort();
+        assert_eq!(moved, expected);
+
+        // A second pass finds nothing left to move and keeps what it moved.
+        let second = prune(&path, &[], now).unwrap();
+        assert_eq!(
+            (second.moved_observations, second.forgotten_history),
+            (0, 0)
+        );
+        assert_eq!(history(), moved);
     }
 }

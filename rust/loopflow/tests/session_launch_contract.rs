@@ -287,14 +287,14 @@ fn machine_db(home: &Path) -> rusqlite::Connection {
     let db = rusqlite::Connection::open(&store).unwrap();
     db.execute(
         "ATTACH ?1 AS history",
-        [loopflow_storage::history::history_path(&store)
+        [loopflow_storage::journals::history_path(&store)
             .to_string_lossy()
             .as_ref()],
     )
     .unwrap();
     db.execute(
         "ATTACH ?1 AS usage",
-        [loopflow_storage::history::usage_path(&store)
+        [loopflow_storage::journals::usage_path(&store)
             .to_string_lossy()
             .as_ref()],
     )

@@ -510,6 +510,7 @@ pub(crate) fn subscribe_list(
         headless: filter.headless,
     };
     loopflow_execution::read_stream::start(
+        loopflow_execution::read_stream::Watch::JOURNALS,
         args,
         move |store, args| {
             let filter = loopflow_execution::session::SessionFilter {

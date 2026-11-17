@@ -2400,7 +2400,7 @@ for line in sys.stdin:
             "{:?}",
             graphs
         );
-        let history = rusqlite::Connection::open(loopflow_storage::history::history_path(
+        let history = rusqlite::Connection::open(loopflow_storage::journals::history_path(
             &home.path().join("loopflow.db"),
         ))
         .unwrap();

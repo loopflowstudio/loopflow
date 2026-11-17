@@ -1819,7 +1819,7 @@ pub(super) fn retain_history_in(
     conn: &Connection,
     session: &LfSession,
     observations: &[crate::session::SessionObservation],
-) -> StoreResult<Vec<crate::history::Row>> {
+) -> StoreResult<Vec<crate::journals::Row>> {
     let mut history = Vec::new();
     for observation in observations {
         let captured: Option<(i64,String)> = conn.query_row(
@@ -1858,7 +1858,7 @@ pub(super) fn retain_history_in(
                 [captured],
             )?;
         }
-        let mut row = crate::history::Row::observed(
+        let mut row = crate::journals::Row::observed(
             &session.id,
             format!("{}:{}", observation.artifact_key, observation.source),
             Some(captured),

@@ -541,7 +541,8 @@ schema validation and migration authority still apply to every build; ordinary
 main-Machine opens never initialize or advance its schema.
 
 `LF_HOME` explicitly selects a private, disposable Home. Its store is
-always `$LF_HOME/loopflow.db`, with history in `$LF_HOME/history.db`; no other
+always `$LF_HOME/loopflow.db`, with history and turns in `$LF_HOME/history.db`
+and `$LF_HOME/usage.db`; no other
 variable selects either. Every variable
 Loopflow sets or reads is listed in [Environment](environment.md). A private Home
 migrates itself on open, including a branch's unmerged migration; editing that

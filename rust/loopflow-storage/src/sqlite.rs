@@ -148,14 +148,14 @@ pub struct SqliteStore {
     pub(crate) token_key: token_crypto::TokenKeySource,
     /// This connection's writer of `history.db`, opened at its first write.
     #[cfg(feature = "test-support")]
-    pub history: Arc<crate::history::HistoryFile>,
+    pub history: Arc<crate::journals::JournalFile>,
     #[cfg(not(feature = "test-support"))]
-    pub(crate) history: Arc<crate::history::HistoryFile>,
+    pub(crate) history: Arc<crate::journals::JournalFile>,
     /// This connection's writer of `usage.db`, opened at its first write.
     #[cfg(feature = "test-support")]
-    pub usage: Arc<crate::history::HistoryFile>,
+    pub usage: Arc<crate::journals::JournalFile>,
     #[cfg(not(feature = "test-support"))]
-    pub(crate) usage: Arc<crate::history::HistoryFile>,
+    pub(crate) usage: Arc<crate::journals::JournalFile>,
 }
 
 fn waves_in(conn: &Connection, repo: Option<&str>) -> StoreResult<Vec<Wave>> {
@@ -185,14 +185,19 @@ impl SqliteStore {
     }
 
     /// Refresh `sqlite_stat1` for tables whose size changed enough to move a
-    /// plan. Bounded by `analysis_limit`, it holds the write lock under a
-    /// second on a store of 770 MB. The Machine server runs it at start and
-    /// about once a day; nothing else does.
+    /// plan, in the store and in `history.db` and `usage.db`. Bounded by
+    /// `analysis_limit`, it holds the write lock under a second on a store of
+    /// 770 MB. The Machine server runs it at start and about once a day;
+    /// nothing else does. A journal that cannot be measured is a gap.
     pub fn refresh_statistics(&self) -> StoreResult<()> {
+        const OPTIMIZE: &str = "PRAGMA analysis_limit=400; PRAGMA main.optimize=0x10002;";
         self.conn
             .lock()
             .expect("store mutex poisoned")
-            .execute_batch("PRAGMA analysis_limit=400; PRAGMA main.optimize=0x10002;")?;
+            .execute_batch(OPTIMIZE)?;
+        for journal in [&self.history, &self.usage] {
+            journal.write("statistics", |tx| Ok(tx.execute_batch(OPTIMIZE)?));
+        }
         Ok(())
     }
 
@@ -213,8 +218,8 @@ impl SqliteStore {
             .filter(|path| !path.is_empty())
             .map(PathBuf::from);
         match &path {
-            Some(path) => crate::history::attach(&conn, path),
-            None => crate::history::attach_empty(&conn),
+            Some(path) => crate::journals::attach(&conn, path),
+            None => crate::journals::attach_empty(&conn),
         }
         Self::with_journals(conn, token_key, path.as_deref())
     }
@@ -229,12 +234,12 @@ impl SqliteStore {
         Self {
             conn: Arc::new(Mutex::new(conn)),
             token_key,
-            history: Arc::new(crate::history::HistoryFile::beside(
-                &crate::history::HISTORY,
+            history: Arc::new(crate::journals::JournalFile::beside(
+                &crate::journals::HISTORY,
                 path,
             )),
-            usage: Arc::new(crate::history::HistoryFile::beside(
-                &crate::history::USAGE,
+            usage: Arc::new(crate::journals::JournalFile::beside(
+                &crate::journals::USAGE,
                 path,
             )),
         }
@@ -278,13 +283,13 @@ impl SqliteStore {
 
     /// Append `rows` to Session history in one transaction, after the state
     /// they describe has committed; a failure is a recording gap.
-    pub(crate) fn append_history(&self, what: &str, rows: &[crate::history::Row]) {
+    pub(crate) fn append_history(&self, what: &str, rows: &[crate::journals::Row]) {
         if rows.is_empty() {
             return;
         }
         self.write_history(what, |tx| {
             for row in rows {
-                crate::history::append_in(tx, row)?;
+                crate::journals::append_in(tx, row)?;
             }
             Ok(())
         });
@@ -678,7 +683,7 @@ impl SqliteStore {
         crate::instrumentation::observe_sqlite(&conn);
         configure_write_connection(&mut conn, path, SQLITE_WRITE_BUSY_TIMEOUT)?;
         super::migration_runner::apply_sqlite(build, &conn, observers)?;
-        crate::history::attach(&conn, path);
+        crate::journals::attach(&conn, path);
         Ok(Self::with_journals(conn, token_key, Some(path)))
     }
 
@@ -747,7 +752,7 @@ impl SqliteStore {
         if may_apply_migrations {
             migrate_plaintext_provider_tokens(&mut conn, token_key)?;
         }
-        crate::history::attach(&conn, path);
+        crate::journals::attach(&conn, path);
         Ok(Self::with_journals(conn, token_key, Some(path)))
     }
 
@@ -786,7 +791,7 @@ impl SqliteStore {
         conn.prepare(
             "SELECT id, trace_id, parent_lf_process_id, started_at, completed_at, outcome, exit_code, pid FROM processes LIMIT 0",
         )?;
-        crate::history::attach(&conn, path);
+        crate::journals::attach(&conn, path);
         Ok(Self::with_journals(conn, token_key, Some(path)))
     }
 
@@ -802,7 +807,7 @@ impl SqliteStore {
         )?;
         crate::instrumentation::observe_sqlite(&conn);
         conn.execute_batch("PRAGMA query_only = ON; PRAGMA busy_timeout = 5000;")?;
-        crate::history::attach(&conn, path);
+        crate::journals::attach(&conn, path);
         Ok(Self::with_journals(conn, token_key, Some(path)))
     }
 

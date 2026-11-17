@@ -144,6 +144,7 @@ pub fn subscribe_ps(
     transport: loopflow_execution::read_stream::Transport,
 ) -> Result<Option<loopflow_execution::read_stream::Subscription>> {
     loopflow_execution::read_stream::start(
+        loopflow_execution::read_stream::Watch::STATE,
         (),
         {
             let mut reader = ActivityReader::default();
@@ -574,10 +575,12 @@ fn render_prune_report(report: &ProcessPruneReport) -> String {
     }
     if let Some(store) = &report.store {
         output.push_str(&format!(
-            "store: closed {} dead Processes · forgot {} finished · converted {} turns{}\n",
+            "store: closed {} dead Processes · forgot {} finished · moved {} observations · converted {} turns · forgot {} history rows{}\n",
             store.closed_processes,
             store.forgotten_processes,
+            store.moved_observations,
             store.converted_turns,
+            store.forgotten_history,
             if store.vacuumed { " · vacuumed" } else { "" },
         ));
     }

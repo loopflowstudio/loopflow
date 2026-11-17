@@ -429,9 +429,9 @@ struct LegacyRow {
 pub fn convert_turn_rows(database: &std::path::Path) -> StoreResult<u64> {
     let conn = rusqlite::Connection::open(database)?;
     conn.busy_timeout(std::time::Duration::from_secs(15))?;
-    crate::history::attach(&conn, database);
-    let history = crate::history::HistoryFile::beside(&crate::history::HISTORY, Some(database));
-    let usage = crate::history::HistoryFile::beside(&crate::history::USAGE, Some(database));
+    crate::journals::attach(&conn, database);
+    let history = crate::journals::JournalFile::beside(&crate::journals::HISTORY, Some(database));
+    let usage = crate::journals::JournalFile::beside(&crate::journals::USAGE, Some(database));
     let mut converted = 0;
     loop {
         let threads: Vec<(String, String)> = conn
@@ -476,7 +476,7 @@ pub fn convert_turn_rows(database: &std::path::Path) -> StoreResult<u64> {
 /// Write the turns of one Session thread from its legacy rows.
 fn convert_thread(
     conn: &rusqlite::Connection,
-    usage: &crate::history::HistoryFile,
+    usage: &crate::journals::JournalFile,
     session: &str,
     thread: &str,
 ) -> StoreResult<u64> {
@@ -826,7 +826,7 @@ mod tests {
         let (home, store) = store();
         let thread = "thread".into();
         store.record_turn_start("conversation", &thread, "first", 1);
-        let mut other = rusqlite::Connection::open(crate::history::usage_path(
+        let mut other = rusqlite::Connection::open(crate::journals::usage_path(
             &home.path().join("loopflow.db"),
         ))
         .unwrap();
@@ -872,7 +872,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let database = home.path().join("loopflow.db");
         // A history file from before turns moved out, which kept them.
-        rusqlite::Connection::open(crate::history::history_path(&database))
+        rusqlite::Connection::open(crate::journals::history_path(&database))
             .unwrap()
             .execute_batch(
                 "CREATE TABLE session_history (seq INTEGER PRIMARY KEY, session_id TEXT NOT NULL,

@@ -271,7 +271,7 @@ pub fn usage_path(store: &Path) -> PathBuf {
 /// write, and reopened after a failure. `store` is the store beside which the
 /// journal lives; a store without a file keeps none.
 #[derive(Debug)]
-pub struct HistoryFile {
+pub struct JournalFile {
     journal: &'static Journal,
     store: Option<PathBuf>,
     state: Mutex<WriterState>,
@@ -283,7 +283,7 @@ struct WriterState {
     gap: RecordingGap,
 }
 
-impl HistoryFile {
+impl JournalFile {
     /// The writer of `journal` kept beside the store at `store`, or of none
     /// for a store without a file.
     pub(crate) fn beside(journal: &'static Journal, store: Option<&Path>) -> Self {

@@ -1210,7 +1210,7 @@ mod tests {
             &conn,
             "session_list_indexes",
         );
-        crate::history::attach_empty(&conn);
+        crate::journals::attach_empty(&conn);
         conn.execute_batch(
             "INSERT INTO repository_plans(id,repo,selected) VALUES('repo_11111111111111111111111111111111','/repo',1);
              INSERT INTO tasks(id,repository_id,issue_identifier,worktree,checkout_machine_id,created_at)
@@ -1390,7 +1390,7 @@ mod tests {
             &conn,
             "session_list_indexes",
         );
-        crate::history::attach_empty(&conn);
+        crate::journals::attach_empty(&conn);
         conn.execute_batch(
             "INSERT INTO repository_plans(id,repo,selected) VALUES('repo_11111111111111111111111111111111','/repo',1);
              WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<1000)

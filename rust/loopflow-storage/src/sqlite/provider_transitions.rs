@@ -118,7 +118,7 @@ pub(crate) fn observe_in(
     session: &str,
     thread: &str,
     source: &str,
-) -> StoreResult<Option<crate::history::Row>> {
+) -> StoreResult<Option<crate::journals::Row>> {
     let Some(process) = live_process(conn, session)? else {
         return Ok(None);
     };
@@ -172,7 +172,7 @@ pub(crate) fn observe_in(
         [session],
         |row| Ok((row.get(0)?, row.get(1)?)),
     )?;
-    let mut row = crate::history::Row::observed(
+    let mut row = crate::journals::Row::observed(
         session,
         format!("provider-transition:{}:{}", process, uuid::Uuid::new_v4()),
         captured,
@@ -228,7 +228,7 @@ impl SqliteStore {
             .ok_or(crate::StoreError::NotFound)?;
         self.append_history(
             "provider lineage",
-            &[crate::history::Row::observed(
+            &[crate::journals::Row::observed(
                 &next.id,
                 format!(
                     "lineage:{}",

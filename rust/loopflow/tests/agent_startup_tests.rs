@@ -247,7 +247,7 @@ while [ ! -f "$LF_HOME/release" ]; do sleep 0.02; done
         )
         .unwrap();
     // Irrelevant history must not become a scan in the launch path.
-    let history = rusqlite::Connection::open(loopflow_storage::history::history_path(
+    let history = rusqlite::Connection::open(loopflow_storage::journals::history_path(
         &home.join("loopflow.db"),
     ))
     .unwrap();

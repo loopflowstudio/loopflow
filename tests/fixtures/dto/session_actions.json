@@ -17,7 +17,7 @@
     "state": "detached",
     "action": {
       "label": "Reconnect",
-      "help": "Show the running Session in this terminal"
+      "help": "View the running conversation here: lf resume metadata"
     }
   },
   {

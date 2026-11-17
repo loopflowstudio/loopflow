@@ -52,8 +52,8 @@
     },
     "state": "unknown",
     "opening": {
-      "label": "Open here",
-      "help": "Open this Session in a terminal"
+      "label": "Start conversation",
+      "help": "No saved provider history; this starts it"
     },
     "impediments": [],
     "unavailable": []
@@ -168,10 +168,10 @@
       "fork": false,
       "prepare_only": false
     },
-    "state": "unknown",
+    "state": "active",
     "opening": {
       "label": "Open here",
-      "help": "Open this Session in a terminal"
+      "help": "View the running conversation here: lf resume session-proof"
     },
     "impediments": [],
     "unavailable": [
@@ -283,10 +283,7 @@
       "prepare_only": false
     },
     "state": "unknown",
-    "opening": {
-      "label": "Open here",
-      "help": "Open this Session in a terminal"
-    },
+    "opening": null,
     "impediments": [],
     "unavailable": []
   }

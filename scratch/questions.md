@@ -87,3 +87,8 @@
 
 - Conflicts combined both sides: `prepare_plan` sets main's `viewer` and keeps the branch's `primary_session` argv; `SessionRecord` keeps `action` with main's `var title`; the `WorkViewPlan` codec extension from main stays, `Content` without pane fields; `WorkModel` keeps `paneLayouts` beside main's `pendingChanges`, and drops `conversationStart` with main's `failure` rename; the placeholder reads "Open the conversation here."; WorkModelTests takes main's "planning is not a second list".
 - `cargo check --workspace --all-targets`: pass; `swift build --build-tests --package-path swift`: pass; `cargo test -p loopflow-execution --lib store::selections::`: 23 pass.
+
+## Picks made headless (one resume decision, 2026-11-17)
+
+- **TakeOver reads an admitted holder nothing says ended** (process recorded, evidence not Dead), as listing did; `--explain` previously required Live evidence and said Resume for unknown evidence.
+- **`--explain` reads `held` from the summary** instead of a separate `session_terminal` query, and Start/Resume from `has_provider_history` instead of `input_provider_session`.

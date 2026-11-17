@@ -217,11 +217,11 @@ fn session_metadata_wire_preserves_unknown_observation_and_occurrence() {
     );
 }
 
-#[test]
-fn session_metadata_keeps_unknown_position_visible() {
+/// An interactive Session's summary with recorded history and unknown process evidence.
+fn summary_fixture() -> crate::session::SessionSummary {
     let task = TaskId::new();
     let wave = loopflow_model::id::WaveId::new();
-    let mut summary = crate::session::SessionSummary {
+    crate::session::SessionSummary {
         transition: None,
         preview: None,
         has_provider_history: true,
@@ -266,7 +266,36 @@ fn session_metadata_keeps_unknown_position_visible() {
         independent: false,
         wave_name: Some("Infrastructure".into()),
         task_identifier: Some("INF-123".into()),
+    }
+}
+
+/// A summary whose projected state is `state`: a running one has an agent
+/// process, a detached one is held and unviewed.
+fn summary_in(state: super::SessionState, interactive: bool) -> crate::session::SessionSummary {
+    use crate::journal::ProcessIdentityEvidence::*;
+    let mut summary = summary_fixture();
+    summary.interactive = interactive;
+    summary.agent_process_evidence = match state {
+        super::SessionState::Unknown => Unknown,
+        super::SessionState::Active | super::SessionState::Detached => Live,
+        super::SessionState::Closed => Dead,
     };
+    summary.agent_process_id = matches!(
+        state,
+        super::SessionState::Active | super::SessionState::Detached
+    )
+    .then(loopflow_model::id::AgentProcessId::new);
+    summary.held = state == super::SessionState::Detached;
+    summary.unviewed = summary.held;
+    assert_eq!(super::session_state(&summary), state);
+    summary
+}
+
+#[test]
+fn session_metadata_keeps_unknown_position_visible() {
+    let mut summary = summary_fixture();
+    let task = summary.task_id.clone().unwrap();
+    let wave = summary.wave_id.clone().unwrap();
     let row = super::summary_surface(&summary);
     assert_eq!(row.id, summary.id);
     assert_eq!(row.work, Some(loopflow_model::durable::WorkRef::Task(task)));
@@ -366,13 +395,7 @@ fn session_action_fixtures_match_the_shared_boundary() {
     .unwrap();
     for case in cases {
         assert_eq!(
-            super::session_action(
-                case.state,
-                true,
-                true,
-                case.state == super::SessionState::Active,
-                false
-            ),
+            super::session_action(&summary_in(case.state, true)),
             case.action
         );
     }
@@ -393,13 +416,7 @@ fn session_action_fixtures_match_the_shared_boundary() {
         let session: super::SessionRecord = serde_json::from_str(fixture).unwrap();
         assert_eq!(
             session.action,
-            super::session_action(
-                session.state,
-                session.interactive,
-                true,
-                session.state == super::SessionState::Active,
-                false
-            )
+            super::session_action(&summary_in(session.state, session.interactive))
         );
         assert_eq!(session.work_path.as_deref(), Some("product / LOO-291"));
         let mut untitled = serde_json::to_value(&session).unwrap();
@@ -423,13 +440,7 @@ fn graph_membership_fixtures_cover_every_projection_and_are_required() {
     for session in &sessions {
         assert_eq!(
             session.action,
-            super::session_action(
-                session.state,
-                session.interactive,
-                true,
-                session.state == super::SessionState::Active,
-                false
-            )
+            super::session_action(&summary_in(session.state, session.interactive))
         );
         kinds.push(match &session.graph_membership {
             super::SessionGraphMembership::Step { occurrence, .. } => match occurrence {
@@ -738,18 +749,57 @@ fn session_page_preserves_the_continuation_and_required_entries() {
 
 #[test]
 fn opening_reads_as_what_resume_does_there() {
-    use super::SessionState::*;
-    let label = |state, history, occupied, consumed| {
-        super::session_action(state, true, history, occupied, consumed)
-            .unwrap()
-            .label
+    use super::SessionResumeIntent::*;
+    let _lock = crate::journal::test_env_lock();
+    let _home = SessionHome::new();
+    let mut summary = summary_fixture();
+    summary.captured = None;
+    let label = |intent, summary: &crate::session::SessionSummary| {
+        super::opening(intent, summary).map(|action| action.label)
     };
-    assert_eq!(label(Closed, false, false, true), "Try again");
-    assert_eq!(label(Closed, true, false, true), "Open here");
-    assert_eq!(label(Closed, false, false, false), "Start conversation");
-    assert_eq!(label(Active, false, true, true), "Take over");
-    assert_eq!(label(Detached, true, true, false), "Reconnect");
-    assert!(super::session_action(Closed, false, false, false, true).is_none());
+    assert_eq!(label(Resume, &summary).as_deref(), Some("Open here"));
+    assert_eq!(label(TakeOver, &summary).as_deref(), Some("Take over"));
+    assert_eq!(
+        label(Start, &summary).as_deref(),
+        Some("Start conversation")
+    );
+    assert_eq!(label(View, &summary).as_deref(), Some("Open here"));
+    assert_eq!(label(NewThread, &summary), None);
+    summary.unviewed = true;
+    assert_eq!(label(View, &summary).as_deref(), Some("Reconnect"));
+    // A captured launch whose marker the launcher consumed.
+    summary.captured = Some(1);
+    assert_eq!(label(Start, &summary).as_deref(), Some("Try again"));
+    let dir = super::local_capture_dir(summary.artifact_key.as_deref().unwrap()).unwrap();
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("prepared"), "").unwrap();
+    assert_eq!(
+        label(Start, &summary).as_deref(),
+        Some("Start conversation")
+    );
+    summary.interactive = false;
+    assert_eq!(label(Resume, &summary), None);
+}
+
+#[test]
+fn one_decision_reads_a_sessions_holder_process_and_history() {
+    use super::SessionResumeIntent::*;
+    use super::SessionState::*;
+    let intent = |state| super::resume_intent(&summary_in(state, true));
+    assert_eq!(intent(Detached), View);
+    assert_eq!(intent(Active), TakeOver);
+    assert_eq!(intent(Closed), Resume);
+    assert_eq!(intent(Unknown), Resume);
+    let mut admitted = summary_in(Unknown, true);
+    admitted.agent_process_id = Some(loopflow_model::id::AgentProcessId::new());
+    assert_eq!(
+        super::resume_intent(&admitted),
+        TakeOver,
+        "an admitted holder nothing says ended"
+    );
+    let mut fresh = summary_in(Closed, true);
+    fresh.has_provider_history = false;
+    assert_eq!(super::resume_intent(&fresh), Start);
 }
 
 #[test]
@@ -806,6 +856,20 @@ fn preparing_a_consumed_first_launch_offers_try_again_and_changes_nothing() {
         std::fs::remove_file(dir.join("prepared")).unwrap();
         let listed = listed_session(&store, &record.id);
         assert_eq!(listed.action.as_ref().unwrap().label, "Try again");
+        // `--explain` reads its Action and the opening from one decision.
+        let explained = super::explain_resume(
+            &store,
+            std::path::Path::new("/"),
+            super::SessionTarget::Session(&record.id),
+            false,
+            false,
+        )
+        .await;
+        assert_eq!(
+            explained.action.unwrap().intent,
+            super::SessionResumeIntent::Start
+        );
+        assert_eq!(explained.opening, listed.action);
         let prepared = super::open(
             &store,
             std::path::Path::new("/"),

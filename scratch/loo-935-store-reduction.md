@@ -1,6 +1,6 @@
 # LOO-935: remove what the product no longer uses, and keep it removed
 
-Status (2026-11-17): `lf resume` does one thing (Rust, Swift, docs done) and main through #1960 is merged (conflict notes in `questions.md`); before it, `lf task view`, `lf open --diff`, the Rex follower and Task widening went and every view of a held terminal types. Next: one resume decision (below), then gate.
+Status (2026-11-17): `lf resume` does one thing (Rust, Swift, docs done) and main through #1960 is merged (conflict notes in `questions.md`); before it, `lf task view`, `lf open --diff`, the Rex follower and Task widening went and every view of a held terminal types. One resume decision is built (below). Next: gate.
 
 ## Demo
 
@@ -296,7 +296,7 @@ missed "Attachment failed"; gate/CI decides). Swift: `swift build --build-tests`
 and `test_desktop.sh --skip-build` over 20 session/workspace/DTO suites (309):
 pass; display suites left to gate/CI.
 
-## One resume decision (concept review, 2026-11-17: next implement)
+## One resume decision (concept review, 2026-11-17: built)
 
 Resume does one thing, but three functions still decide what it will do, from
 different evidence: `session_action` (process evidence → "Take over"),
@@ -316,6 +316,15 @@ under an Action of View.
   `explain_resume` takes `opening` from the same value it reports as `intent`.
 - Test: a label table keyed by intent, and one explain row whose intent and
   opening come from one decision. Wire shapes unchanged.
+
+Built: `resume_intent` and `opening(intent, session)` in `ops/human_session.rs`;
+`session_action` composes them; `held_action`/`projected_action` are gone;
+`read_resume` applies only per-invocation choices (NewThread, prepare-only) to
+`resume_intent`. Fixtures: `session_actions.json` detached help now reads the
+held copy, `session_resume_explanations.json` openings match their intents.
+Checks: `cargo test -p loopflow-execution --lib ops::human_session::` (46),
+`--test integration dto_fixtures::session_` (4), clippy execution,
+`test_desktop.sh --filter DTOFixtureTests` (56): pass.
 
 Not this Task: what `lf open` itself does. Jack Heart: "lets start with maknig
 resume do what it should do. and then we can talk about what opens does".

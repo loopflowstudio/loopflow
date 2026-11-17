@@ -212,31 +212,29 @@ async fn read_resume(
         .map(|key| store.sqlite.input_provider_session(key))
         .transpose()?
         .flatten();
-    // A metadata read does not acquire viewer control or probe the endpoint.
-    let connection = store.sqlite.session_terminal(&session.id)?;
     // Opening checks the harness before any holder: another agent never
     // takes over the running one, it starts a thread from the log.
     let handoff = provider.as_ref().and(super::handoff_agent(&session));
     // Opening refuses a Run whatever the flags, so nothing would happen.
     let refusal = super::run_refusal(&store.sqlite, &session)?;
-    // Explanation and opening use the same recorded Process evidence.
+    // Explanation and opening use the same recorded Process evidence; a
+    // metadata read does not acquire viewer control or probe the endpoint.
     let metadata = session_projection::session_summary(
         &store.sqlite,
         &session.id,
         report.resolution.observed_at,
     )?
     .ok_or_else(|| super::session_not_found(&session.id))?;
-    let state = super::session_state(&metadata);
-    let intent = if !fork && !prepare_only && handoff.is_some() {
-        SessionResumeIntent::NewThread
-    } else if !prepare_only && connection.is_some() {
-        SessionResumeIntent::View
-    } else if !prepare_only && super::is_running(state) {
-        SessionResumeIntent::TakeOver
-    } else if provider.is_none() {
-        SessionResumeIntent::Start
-    } else {
-        SessionResumeIntent::Resume
+    let intent = match super::resume_intent(&metadata) {
+        _ if !fork && !prepare_only && handoff.is_some() => SessionResumeIntent::NewThread,
+        SessionResumeIntent::View | SessionResumeIntent::TakeOver if prepare_only => {
+            if metadata.has_provider_history {
+                SessionResumeIntent::Resume
+            } else {
+                SessionResumeIntent::Start
+            }
+        }
+        intent => intent,
     };
     match refusal {
         Some(refusal) => report.impediments.push(refusal),
@@ -249,7 +247,7 @@ async fn read_resume(
             })
         }
     }
-    if connection.is_some() {
+    if metadata.held {
         report.unavailable.push("Retained execution endpoint is not probed; an unavailable owner leaves continuity unknown".into());
     }
     if !prepare_only {
@@ -275,7 +273,7 @@ async fn read_resume(
                 .into(),
         );
     }
-    report.state = Some(state);
-    report.opening = super::projected_action(&metadata);
+    report.state = Some(super::session_state(&metadata));
+    report.opening = super::opening(intent, &metadata);
     Ok(())
 }

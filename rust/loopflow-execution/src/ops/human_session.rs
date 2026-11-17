@@ -270,75 +270,76 @@ pub struct SessionAction {
     pub help: String,
 }
 
-/// A Run opens nowhere: `lf resume` takes only Sessions.
-pub(crate) fn session_action(
-    state: SessionState,
-    interactive: bool,
-    has_provider_history: bool,
-    occupied: bool,
-    launch_consumed: bool,
+/// What `lf resume` does with this Session here, before the choices one
+/// invocation makes (another agent, a fork, preparation only).
+pub(crate) fn resume_intent(session: &crate::session::SessionSummary) -> SessionResumeIntent {
+    if session.held {
+        SessionResumeIntent::View
+    } else if session.agent_process_id.is_some()
+        && session.agent_process_evidence != crate::journal::ProcessIdentityEvidence::Dead
+    {
+        SessionResumeIntent::TakeOver
+    } else if session.has_provider_history {
+        SessionResumeIntent::Resume
+    } else {
+        SessionResumeIntent::Start
+    }
+}
+
+/// How `intent` reads on this Session. A Run opens nowhere, since `lf resume`
+/// takes only Sessions; another harness's new thread is chosen per invocation,
+/// so no record reads as one.
+pub(crate) fn opening(
+    intent: SessionResumeIntent,
+    session: &crate::session::SessionSummary,
 ) -> Option<SessionAction> {
-    if !interactive {
+    if !session.interactive {
         return None;
     }
-    let (label, help) = match state {
-        SessionState::Detached => ("Reconnect", "Show the running Session in this terminal"),
-        _ if occupied => (
+    let (label, help) = match intent {
+        SessionResumeIntent::View => (
+            if session.unviewed {
+                "Reconnect"
+            } else {
+                "Open here"
+            },
+            format!("View the running conversation here: lf resume {}", session.id),
+        ),
+        SessionResumeIntent::TakeOver => (
             "Take over",
-            "Continue here; the client that has it ends, unsent text there is lost",
+            "Continue here; the client that has it ends, unsent text there is lost".into(),
         ),
-        _ if has_provider_history => ("Open here", "Open this Session in a terminal"),
-        _ if launch_consumed => (
+        SessionResumeIntent::Resume => ("Open here", "Open this Session in a terminal".into()),
+        SessionResumeIntent::Start if launch_consumed(session) => (
             "Try again",
-            "The previous launch ended before the provider saved any history; this repeats its request",
+            "The previous launch ended before the provider saved any history; this repeats its request".into(),
         ),
-        _ => ("Start conversation", "No saved provider history; this starts it"),
+        SessionResumeIntent::Start => (
+            "Start conversation",
+            "No saved provider history; this starts it".into(),
+        ),
+        SessionResumeIntent::NewThread => return None,
     };
     Some(SessionAction {
         label: label.to_string(),
-        help: help.to_string(),
+        help,
     })
 }
 
-fn projected_action(session: &crate::session::SessionSummary) -> Option<SessionAction> {
-    if session.interactive && session.held {
-        return Some(held_action(session));
-    }
-    let occupied = session.agent_process_id.is_some()
-        && session.agent_process_evidence != crate::journal::ProcessIdentityEvidence::Dead;
-    // Listing reads the marker alone: `capture_is_prepared` opens the store per Session.
-    let launch_consumed = session.interactive
-        && session.captured.is_some()
-        && !occupied
-        && !session.has_provider_history
+/// Its first launch ended before the provider saved history. Listing reads the
+/// marker alone: `capture_is_prepared` opens the store per Session.
+fn launch_consumed(session: &crate::session::SessionSummary) -> bool {
+    session.captured.is_some()
         && session
             .artifact_key
             .as_deref()
             .and_then(local_capture_dir)
-            .is_some_and(|dir| !dir.join("prepared").is_file());
-    session_action(
-        session_state(session),
-        session.interactive,
-        session.has_provider_history,
-        occupied,
-        launch_consumed,
-    )
+            .is_some_and(|dir| !dir.join("prepared").is_file())
 }
 
-/// A held terminal takes any number of views; opening one adds another.
-fn held_action(session: &crate::session::SessionSummary) -> SessionAction {
-    SessionAction {
-        label: if session.unviewed {
-            "Reconnect"
-        } else {
-            "Open here"
-        }
-        .to_string(),
-        help: format!(
-            "View the running conversation here: lf resume {}",
-            session.id
-        ),
-    }
+/// How opening this Session here reads.
+pub(crate) fn session_action(session: &crate::session::SessionSummary) -> Option<SessionAction> {
+    opening(resume_intent(session), session)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -667,7 +668,7 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
     let state = session_state(session);
     // Without a command that opens it, nothing here can open it.
     let (action, open_argv) = match human_session_argv(&session.id) {
-        Ok(argv) => (projected_action(session), argv),
+        Ok(argv) => (session_action(session), argv),
         Err(error) => {
             tracing::warn!(%error, session = %session.id, "Session connection unavailable");
             (None, Vec::new())
@@ -1489,7 +1490,7 @@ pub async fn surface(store: &SharedStore, session: &LfSession) -> Result<Session
     let metadata = viewed_summary(&store.sqlite, &session.id)?
         .ok_or_else(|| session_not_found(&session.id))?;
     let state = session_state(&metadata);
-    let action = projected_action(&metadata);
+    let action = session_action(&metadata);
     let open_argv = human_session_argv(&session.id)?;
     let graph_membership = match (&session.graph_lf_process_id, &metadata.graph) {
         (None, _) if metadata.independent => SessionGraphMembership::Independent,

@@ -1959,7 +1959,7 @@ mod tests {
                 &snapshot.initiative,
                 &old,
                 20,
-                loopflow_storage::provider::Provider::Linear
+                loopflow_storage::planning_sync::TrackerKind::Linear
             )
             .is_err()
         );
@@ -2009,7 +2009,7 @@ mod tests {
             &snapshot.initiative,
             &confirmed,
             10,
-            loopflow_storage::provider::Provider::Linear,
+            loopflow_storage::planning_sync::TrackerKind::Linear,
         )
         .unwrap();
         let accepted = store
@@ -2042,7 +2042,7 @@ mod tests {
                 &snapshot.initiative,
                 &confirmed,
                 20,
-                loopflow_storage::provider::Provider::Linear
+                loopflow_storage::planning_sync::TrackerKind::Linear
             )
             .is_err()
         );
@@ -2622,7 +2622,7 @@ mod tests {
             &snapshot.initiative,
             &observed,
             10,
-            loopflow_storage::provider::Provider::Linear,
+            loopflow_storage::planning_sync::TrackerKind::Linear,
         )
         .unwrap();
 

@@ -15,7 +15,7 @@ use crate::linear::LinearClient;
 use crate::store::Store;
 use loopflow_storage::planning::rules::Observed;
 use loopflow_storage::planning::{TrackerItem, TrackerObservation, TrackerProject};
-use loopflow_storage::provider::Provider;
+use loopflow_storage::planning_sync::TrackerKind;
 use loopflow_storage::sqlite::tracker_actions::{ActionKind, TrackerAction};
 use loopflow_storage::work::edit::{Disposition, WorkValue};
 
@@ -84,10 +84,10 @@ fn transport(repo: &Path) -> Option<PlanningConfig> {
 
 /// The tracker that sends through the action queue: Linear or Asana. Git
 /// exchanges its journal instead, so it answers none.
-pub fn queued_tracker(repo: &Path) -> Option<Provider> {
+pub fn queued_tracker(repo: &Path) -> Option<TrackerKind> {
     match transport(repo)? {
-        PlanningConfig::Linear { .. } => Some(Provider::Linear),
-        PlanningConfig::Asana { .. } => Some(Provider::Asana),
+        PlanningConfig::Linear { .. } => Some(TrackerKind::Linear),
+        PlanningConfig::Asana { .. } => Some(TrackerKind::Asana),
         _ => None,
     }
 }
@@ -493,7 +493,7 @@ pub(crate) async fn ingest_task(
         confirmed
             .as_ref()
             .map(|(wave, initiative)| (wave, initiative.as_str())),
-        queued_tracker(repo).unwrap_or(Provider::Linear),
+        queued_tracker(repo).unwrap_or(TrackerKind::Linear),
     )
     .map_err(message)
 }

@@ -24,7 +24,7 @@ other implementation and proof gaps.
 | plan | the shared Waves, Projects and Tasks; a Wave's plan is its Project | |
 | Project | the Wave's current plan | Chapter |
 | tracker | where the plan is mirrored: Git, Linear or Asana | bridge; provider means the agent's provider |
-| action | one outgoing change for Linear or Asana in `tracker_actions`: queued, sent, then confirmed, conflicted or retired; Git exchanges the journal instead. Prose near Desktop says "tracker action": Desktop's actions are buttons | effect |
+| action | one outgoing change for Linear or Asana in `tracker_actions`: queued or sent (open), then confirmed, conflicted (lost, until answered) or retired; Git exchanges the journal instead. Prose near Desktop says "tracker action": Desktop's actions are buttons | effect |
 | event | one incoming change from a tracker | |
 | sync | moving the plan in either direction | |
 | Work | the model's name, in dev docs only | |
@@ -274,15 +274,19 @@ the planning disposition: it neither moves a local Task nor authorizes cleanup.
 Session/Process records and checkout paths never enter the Git document.
 
 One view answers "where does my change stand" on every tracker:
-`TrackerActionStatus` (`planning_sync.rs`), with phase `queued`, `sent` or
-`conflicted`. `lf repo plan` lists every open action in the repository, and a
-Task's or Project's `sync` is its slice. An action stays open until confirmed;
-a conflicted one stays, with the losing `local_value` and the winning
-`tracker_value`, until a later save of its subject. Git has no queue: a field's
-competing journal heads are its conflicts, the winner's value as
-`tracker_value`, open until a save names them all as parents. They appear in
-`sync` only; `lf repo plan` on Git lists its destinations. `lf repo plan`
-also presents Git acquisition/publication receipts and held projections. The retained
+`TrackerActionStatus` (`planning_sync.rs`). An action is open while `queued`
+or `sent`, and lost while `conflicted`, with the losing `local_value` and the
+winning `tracker_value`. `lf repo plan` lists the repository's open and lost
+actions ("3 open · 1 lost"), and a Task's or Project's `sync` is its slice. A
+lost action retires when it is answered: a later save of its subject
+("answered by a later save"), an event that changes that field again at a
+newer revision ("changed again in Linear"), or `answer_lost_values`
+(`lf task sync --keep-theirs | --use-mine`, Desktop's Keep / Use mine). Git
+has no queue: a field's competing journal heads are its lost values, the
+winner's value as `tracker_value`, until a save names them all as parents;
+an answer records the chosen value with every head as a parent. `lf repo plan`
+on Git lists its destinations, its acquisition/publication receipts and held
+projections, then its lost values. The retained
 mutation journal grows with every edit, so `lf repo plan journal` reads it on
 request: every change, losing values included, and the ranked candidate IDs, which
 are not applied or published evidence; rejected projections retain their failure reasons.

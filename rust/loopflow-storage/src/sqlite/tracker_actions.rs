@@ -7,7 +7,6 @@ use serde_json::Value;
 
 use super::SqliteStore;
 use crate::planning_sync::{ActionOwnerKind, PlanningBaseline, TrackerActionStatus, TrackerKind};
-use crate::provider::Provider;
 use crate::rows::now_unix;
 use crate::work::edit::WorkValue;
 use crate::{StoreError, StoreResult};
@@ -183,7 +182,7 @@ pub struct TrackerAction {
     pub base: Option<Value>,
     pub conflict: Option<Value>,
     pub phase: ActionPhase,
-    pub provider: Provider,
+    pub tracker: TrackerKind,
     pub remote_id: Option<String>,
     pub confirmed_revision: Option<String>,
     pub error: Option<String>,
@@ -250,8 +249,7 @@ impl TrackerAction {
             ),
             subject: self.subject.clone(),
             phase: self.phase,
-            tracker: TrackerKind::of(self.provider)
-                .expect("tracker_actions.provider is checked to be linear or asana"),
+            tracker: self.tracker,
             error: self.error.clone(),
             local_value: shown(&self.value),
             tracker_value: self
@@ -302,7 +300,7 @@ pub enum Resolution {
 
 pub(super) const COLUMNS: &str =
     "e.seq,e.id,e.wave_id,e.project_id,e.task_id,e.subject,e.kind,e.value_json,
-    e.base_json,e.conflict_json,e.phase,e.provider,e.remote_id,e.confirmed_revision,e.error,
+    e.base_json,e.conflict_json,e.phase,e.tracker,e.remote_id,e.confirmed_revision,e.error,
     e.sent_at,e.looked_at";
 
 // Every action owner reaches its repository through one of these joins. Each
@@ -337,7 +335,7 @@ pub(super) fn read_action(row: &Row<'_>) -> StoreResult<Result<TrackerAction, Ac
     };
     let base: Option<String> = row.get(8)?;
     let conflict: Option<String> = row.get(9)?;
-    let provider: String = row.get(11)?;
+    let tracker: String = row.get(11)?;
     Ok(Ok(TrackerAction {
         seq: row.get(0)?,
         id: row.get(1)?,
@@ -350,9 +348,7 @@ pub(super) fn read_action(row: &Row<'_>) -> StoreResult<Result<TrackerAction, Ac
             .map(|conflict| serde_json::from_str(&conflict))
             .transpose()?,
         phase: ActionPhase::parse(&row.get::<_, String>(10)?)?,
-        provider: provider
-            .parse()
-            .map_err(|_| StoreError::InvalidData(format!("unknown tracker {provider}")))?,
+        tracker: TrackerKind::parse(&tracker)?,
         remote_id: row.get(12)?,
         confirmed_revision: row.get(13)?,
         error: row.get(14)?,
@@ -366,7 +362,7 @@ pub(super) fn read_action(row: &Row<'_>) -> StoreResult<Result<TrackerAction, Ac
 pub(crate) fn owner_tracker(
     conn: &Connection,
     owner: &ActionOwner,
-) -> StoreResult<Option<Provider>> {
+) -> StoreResult<Option<TrackerKind>> {
     let bound: Option<Option<String>> = match owner {
         ActionOwner::Task(id) => conn
             .query_row(
@@ -388,13 +384,13 @@ pub(crate) fn owner_tracker(
             .optional()?,
         ActionOwner::Wave(_) => None,
     };
-    let provider = match bound {
+    let tracker = match bound {
         // A binding acquired before observations recorded their tracker.
-        Some(provider) => Some(provider.unwrap_or_else(|| "linear".into())),
+        Some(tracker) => Some(tracker.unwrap_or_else(|| "linear".into())),
         None => conn
             .query_row(
                 &format!(
-                    "SELECT provider FROM tracker_actions WHERE {}=?1 AND kind='create'
+                    "SELECT tracker FROM tracker_actions WHERE {}=?1 AND kind='create'
                      AND phase!='retired' ORDER BY seq DESC LIMIT 1",
                     owner.column()
                 ),
@@ -403,12 +399,8 @@ pub(crate) fn owner_tracker(
             )
             .optional()?,
     };
-    provider
-        .map(|provider: String| {
-            provider
-                .parse()
-                .map_err(|_| StoreError::InvalidData(format!("unknown tracker {provider}")))
-        })
+    tracker
+        .map(|tracker: String| TrackerKind::parse(&tracker))
         .transpose()
 }
 
@@ -423,10 +415,10 @@ pub(crate) fn enqueue(
     value: &Value,
     base: Option<&Value>,
 ) -> StoreResult<Option<String>> {
-    let Some(provider) = owner_tracker(conn, owner)? else {
+    let Some(tracker) = owner_tracker(conn, owner)? else {
         return Ok(None);
     };
-    insert(conn, owner, kind, subject, value, base, provider).map(Some)
+    insert(conn, owner, kind, subject, value, base, tracker).map(Some)
 }
 
 /// Queue what a local save of `value` on `table`/`id` asks a tracker to do.
@@ -633,9 +625,17 @@ fn insert(
     subject: Option<&str>,
     value: &Value,
     base: Option<&Value>,
-    provider: Provider,
+    tracker: TrackerKind,
 ) -> StoreResult<String> {
     let column = owner.column();
+    // A later save answers a value the tracker won.
+    conn.execute(
+        &format!(
+            "UPDATE tracker_actions SET phase='retired',error='answered by a later save'
+             WHERE {column}=?1 AND kind=?2 AND subject IS ?3 AND phase='conflicted'"
+        ),
+        params![owner.id(), kind.as_str(), subject],
+    )?;
     if kind.coalesces() {
         conn.execute(
             &format!(
@@ -648,7 +648,7 @@ fn insert(
     let id = uuid::Uuid::new_v4().to_string();
     conn.execute(
         &format!(
-            "INSERT INTO tracker_actions(id,{column},subject,kind,value_json,base_json,phase,provider)
+            "INSERT INTO tracker_actions(id,{column},subject,kind,value_json,base_json,phase,tracker)
              VALUES(?1,?2,?3,?4,?5,?6,'queued',?7)"
         ),
         params![
@@ -658,7 +658,7 @@ fn insert(
             kind.as_str(),
             value.to_string(),
             base.map(Value::to_string),
-            provider.as_str()
+            tracker.as_str()
         ],
     )?;
     Ok(id)
@@ -787,6 +787,7 @@ pub(crate) fn reconcile_in(
         ..Default::default()
     };
     let seen = crate::planning::revision_nanos(revision)?;
+    retire_changed_again(conn, owner, seen, edits)?;
     let mut resolved = Vec::new();
     for action in &actions {
         if action.phase != ActionPhase::Sent {
@@ -848,6 +849,46 @@ pub(crate) fn reconcile_in(
         *edit = value;
     }
     Ok(resolved)
+}
+
+/// A value the tracker won stops being lost once the tracker changes that field
+/// again: the person it lost to moved on, so there is nothing left to answer.
+fn retire_changed_again(
+    conn: &Connection,
+    owner: &ActionOwner,
+    seen: Option<i64>,
+    edits: &[WorkValue],
+) -> StoreResult<()> {
+    let mut query = conn.prepare(&format!(
+        "SELECT {COLUMNS} FROM tracker_actions e WHERE e.{}=?1 AND e.phase='conflicted'",
+        owner.column()
+    ))?;
+    let lost = query
+        .query_and_then([owner.id()], read_action)?
+        .filter_map(|row| row.map(Result::ok).transpose())
+        .collect::<StoreResult<Vec<_>>>()?;
+    for action in lost {
+        let Some(conflict) = &action.conflict else {
+            continue;
+        };
+        let Ok(won) = serde_json::from_value::<WorkValue>(conflict["value"].clone()) else {
+            continue;
+        };
+        let newer = seen > crate::planning::revision_nanos(conflict["revision"].as_str())?;
+        let changed = edits
+            .iter()
+            .any(|edit| edit.field() == won.field() && *edit != won);
+        if newer && changed {
+            conn.execute(
+                "UPDATE tracker_actions SET phase='retired',error=?2 WHERE id=?1 AND phase='conflicted'",
+                params![
+                    action.id,
+                    format!("changed again in {}", action.tracker.display_name())
+                ],
+            )?;
+        }
+    }
+    Ok(())
 }
 
 /// Called by every ingestion path before it can allocate a new local identity.
@@ -950,7 +991,7 @@ pub(crate) fn retain_filing_create_in(
         None,
         &serde_json::to_value(baseline)?,
         None,
-        Provider::Linear,
+        TrackerKind::Linear,
     )?;
     conn.execute(
         "UPDATE tracker_actions SET phase='sent',sent_at=?2,
@@ -971,7 +1012,7 @@ pub(crate) fn retain_relation_in(
     target: &str,
 ) -> StoreResult<()> {
     conn.execute(
-        "INSERT OR IGNORE INTO tracker_actions(id,task_id,subject,kind,value_json,phase,provider)
+        "INSERT OR IGNORE INTO tracker_actions(id,task_id,subject,kind,value_json,phase,tracker)
          SELECT lower(?2),?1,'relation:'||lower(?2),'link',json_object('target',t.id),'queued','linear'
          FROM tasks t WHERE (t.id=?3 OR t.external_issue_id=?3 OR t.id='task_'||replace(lower(?3),'-',''))
             AND t.planning_deleted_at IS NULL
@@ -1013,9 +1054,13 @@ fn uncreated(conn: &Connection, repo: &str) -> StoreResult<Vec<ActionOwner>> {
 
 impl SqliteStore {
     /// Give every unbound local Project and Task in `repo` a `create` for
-    /// `provider`, including those made before the tracker was connected, then
+    /// `tracker`, including those made before the tracker was connected, then
     /// queue their comments behind it. Sends nothing.
-    pub fn enqueue_tracker_creations(&self, repo: &str, provider: Provider) -> StoreResult<usize> {
+    pub fn enqueue_tracker_creations(
+        &self,
+        repo: &str,
+        tracker: TrackerKind,
+    ) -> StoreResult<usize> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         // Every pass asks; almost every pass finds nothing, so it reads first
         // and takes the shared write lock only when there is something to queue.
@@ -1033,7 +1078,7 @@ impl SqliteStore {
                 None,
                 &baseline,
                 None,
-                provider,
+                tracker,
             )?;
             if let ActionOwner::Task(task) = owner {
                 // A creation opens the item; a Task already started or done
@@ -1058,7 +1103,7 @@ impl SqliteStore {
                         None,
                         &serde_json::to_value(disposition)?,
                         None,
-                        provider,
+                        tracker,
                     )?;
                 }
                 let mut comments = tx.prepare(
@@ -1082,7 +1127,7 @@ impl SqliteStore {
                         Some(&comment),
                         &serde_json::to_value(content)?,
                         None,
-                        provider,
+                        tracker,
                     )?;
                 }
             }
@@ -1233,7 +1278,7 @@ impl SqliteStore {
 #[cfg(test)]
 mod tests {
     use super::{ActionKind, ActionOwner, ActionPhase, Resolution};
-    use crate::provider::Provider;
+    use crate::planning_sync::TrackerKind;
     use crate::sqlite::SqliteStore;
     use crate::work::edit::WorkValue;
     use loopflow_model::durable::TaskId;
@@ -1378,13 +1423,13 @@ mod tests {
         let bound = task(&store, true);
         assert_eq!(
             store
-                .enqueue_tracker_creations("/repo", Provider::Asana)
+                .enqueue_tracker_creations("/repo", TrackerKind::Asana)
                 .unwrap(),
             1
         );
         assert_eq!(
             store
-                .enqueue_tracker_creations("/repo", Provider::Asana)
+                .enqueue_tracker_creations("/repo", TrackerKind::Asana)
                 .unwrap(),
             0,
             "a second pass queues nothing new"
@@ -1393,7 +1438,7 @@ mod tests {
         assert_eq!(actions.len(), 1);
         assert_eq!(actions[0].owner, ActionOwner::Task(earlier.clone()));
         assert_eq!(actions[0].kind, ActionKind::Create);
-        assert_eq!(actions[0].provider, Provider::Asana);
+        assert_eq!(actions[0].tracker, TrackerKind::Asana);
         assert_eq!(actions[0].value[0]["field"], "task_title");
         // The creating owner now carries later edits to the same tracker.
         assert!(enqueue(&store, &earlier, ActionKind::Field, "task_title").is_some());
@@ -1418,7 +1463,7 @@ mod tests {
             )
             .unwrap();
         store
-            .enqueue_tracker_creations("/repo", Provider::Linear)
+            .enqueue_tracker_creations("/repo", TrackerKind::Linear)
             .unwrap();
         let kinds = |task: &TaskId| -> Vec<ActionKind> {
             store
@@ -1437,7 +1482,7 @@ mod tests {
         let (_dir, store) = store();
         let task = task(&store, false);
         store
-            .enqueue_tracker_creations("/repo", Provider::Linear)
+            .enqueue_tracker_creations("/repo", TrackerKind::Linear)
             .unwrap();
         {
             let conn = store.conn.lock().unwrap();
@@ -1515,7 +1560,7 @@ mod upgrade_tests {
         assert_eq!(
             rows(
                 &conn,
-                "SELECT coalesce(project_id,task_id)||' '||kind||' '||coalesce(subject,'-')||' '||phase||' '||provider
+                "SELECT coalesce(project_id,task_id)||' '||kind||' '||coalesce(subject,'-')||' '||phase||' '||tracker
                  FROM tracker_actions ORDER BY seq"
             ),
             [

@@ -11,6 +11,7 @@ use super::test_fixture::{now, Fixture, PlanningEnvironment};
 use super::LINEAR_TEST_CONTEXT;
 use crate::ops::NullProgress;
 use loopflow_model::durable::WorkStatus;
+use loopflow_storage::sqlite::tracker_actions::ActionPhase;
 use loopflow_storage::work::task::{
     LinearWritebackState, Observation, PrPhase, Task, TaskPr, TaskPrId,
 };
@@ -594,7 +595,7 @@ fn task_sync_still_adopts_a_newer_linear_state() {
             provider.issues[0]["state"] = json!({"type":"started"});
             mark_issue_updated(&mut provider.issues[0]);
         });
-        crate::ops::task::task_sync(repo, task.id.as_str()).unwrap();
+        crate::ops::task::task_sync(repo, task.id.as_str(), None, None).unwrap();
         let saved = runtime
             .block_on(fixture.store.get_task(&task.id))
             .unwrap()
@@ -604,11 +605,106 @@ fn task_sync_still_adopts_a_newer_linear_state() {
     });
 }
 
+/// Completes the Task while Linear moves it to started first, so the
+/// completion loses; then answers it.
+fn answer_a_lost_completion(
+    answer: loopflow_storage::planning_sync::LostAnswer,
+) -> (Option<String>, usize) {
+    let mut answered = None;
+    with_planning_task(|runtime, fixture, repo, task, state| {
+        runtime.block_on(state.lock()).fail_completion = true;
+        crate::ops::task::task_complete(repo, task.id.as_str(), None).unwrap();
+        runtime.block_on(async {
+            let mut provider = state.lock().await;
+            provider.issues[0]["state"] = json!({"type":"started"});
+            mark_issue_updated(&mut provider.issues[0]);
+        });
+        let lost = || {
+            fixture
+                .store
+                .task_tracker_sync(&task.id)
+                .unwrap()
+                .actions
+                .into_iter()
+                .filter(|action| action.phase == ActionPhase::Conflicted)
+                .map(|action| action.line())
+                .collect::<Vec<_>>()
+        };
+        crate::ops::task::task_sync(repo, task.id.as_str(), None, None).unwrap();
+        assert_eq!(
+            lost(),
+            [r#"complete · conflicted · lost: "completed" · linear: "started""#]
+        );
+        crate::ops::task::task_sync(repo, task.id.as_str(), Some(answer), None).unwrap();
+        assert!(lost().is_empty());
+        let saved = runtime
+            .block_on(fixture.store.get_task(&task.id))
+            .unwrap()
+            .unwrap();
+        answered = Some((
+            saved.state,
+            runtime.block_on(state.lock()).completion_writes,
+        ));
+    });
+    answered.unwrap()
+}
+
+#[test]
+fn a_lost_completion_closes_when_linear_changes_the_state_again() {
+    with_planning_task(|runtime, fixture, repo, task, state| {
+        runtime.block_on(state.lock()).fail_completion = true;
+        crate::ops::task::task_complete(repo, task.id.as_str(), None).unwrap();
+        let move_to = |kind: &str| {
+            runtime.block_on(async {
+                let mut provider = state.lock().await;
+                provider.issues[0]["state"] = json!({"type": kind});
+                mark_issue_updated(&mut provider.issues[0]);
+            })
+        };
+        let lost = || {
+            fixture
+                .store
+                .task_tracker_sync(&task.id)
+                .unwrap()
+                .actions
+                .iter()
+                .filter(|action| action.phase == ActionPhase::Conflicted)
+                .count()
+        };
+        move_to("started");
+        crate::ops::task::task_sync(repo, task.id.as_str(), None, None).unwrap();
+        assert_eq!(lost(), 1);
+        // A coworker moves it again; the next refresh brings that event in.
+        move_to("canceled");
+        runtime
+            .block_on(crate::ops::linear::refresh_wave(repo, "product"))
+            .unwrap();
+        assert_eq!(lost(), 0);
+        assert_eq!(runtime.block_on(state.lock()).completion_writes, 0);
+    });
+}
+
+#[test]
+fn keeping_the_trackers_state_closes_the_lost_completion_and_sends_nothing() {
+    assert_eq!(
+        answer_a_lost_completion(loopflow_storage::planning_sync::LostAnswer::KeepTheirs),
+        (Some("started".into()), 0)
+    );
+}
+
+#[test]
+fn using_mine_sends_the_lost_completion_again() {
+    assert_eq!(
+        answer_a_lost_completion(loopflow_storage::planning_sync::LostAnswer::UseMine),
+        (Some("completed".into()), 1)
+    );
+}
+
 #[test]
 fn task_sync_publishes_saved_task_and_reuses_its_identity() {
     with_export_plan(|runtime, fixture, repo, task, state| {
         assert!(task.linear_id.is_none());
-        let result = crate::ops::task::task_sync(repo, task.id.as_str()).unwrap();
+        let result = crate::ops::task::task_sync(repo, task.id.as_str(), None, None).unwrap();
         let saved = runtime
             .block_on(fixture.store.get_task(&task.id))
             .unwrap()
@@ -616,7 +712,7 @@ fn task_sync_publishes_saved_task_and_reuses_its_identity() {
         assert!(saved.linear_id.is_some());
         assert!(result.contains(&saved.identifier));
         assert!(!saved.identifier.starts_with("lf-"));
-        crate::ops::task::task_sync(repo, task.id.as_str()).unwrap();
+        crate::ops::task::task_sync(repo, task.id.as_str(), None, None).unwrap();
         assert_eq!(runtime.block_on(state.lock()).creation_writes, 2);
     });
 }

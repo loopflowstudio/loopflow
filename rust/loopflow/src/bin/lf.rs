@@ -17,6 +17,7 @@ use loopflow_execution::definition::DefinitionKind;
 use loopflow_execution::journal::{self, with_runtime, LfEventFields, LfEventType, LfNode};
 
 use loopflow_execution::ops::project::update_plan;
+use loopflow_execution::store::planning_sync::LostAnswer;
 
 #[derive(Clone, Default)]
 struct FlagTables {
@@ -998,8 +999,21 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             unreachable!("workspace commands dispatch before repository binding")
         }
         TaskCommand::Checkout { .. } => unreachable!("checkout is dispatched before Work binding"),
-        TaskCommand::Sync { issue } => {
-            println!("{}", loopflow_execution::ops::task::task_sync(repo, issue)?);
+        TaskCommand::Sync {
+            issue,
+            keep_theirs,
+            use_mine,
+            action,
+        } => {
+            let answer = match (keep_theirs, use_mine) {
+                (true, _) => Some(LostAnswer::KeepTheirs),
+                (_, true) => Some(LostAnswer::UseMine),
+                _ => None,
+            };
+            println!(
+                "{}",
+                loopflow_execution::ops::task::task_sync(repo, issue, answer, action.as_deref())?
+            );
             Ok(())
         }
         TaskCommand::List {

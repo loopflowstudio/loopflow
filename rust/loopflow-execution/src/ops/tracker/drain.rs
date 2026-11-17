@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
 use loopflow_storage::planning::rules::{self, Decision, LostReply, Observed};
-use loopflow_storage::provider::Provider;
+use loopflow_storage::planning_sync::TrackerKind;
 use loopflow_storage::sqlite::tracker_actions::{
     ActionKind, ActionOwner, ActionPhase, Resolution, TaskLink, TrackerAction,
 };
@@ -79,10 +79,10 @@ pub(crate) async fn drain_repository(
     scope: Scope<'_>,
     bound: Bound,
 ) -> OpsResult<Pass> {
-    let Some(provider) = super::queued_tracker(Path::new(repo)) else {
+    let Some(tracker) = super::queued_tracker(Path::new(repo)) else {
         return Ok(Pass::default());
     };
-    let actions = queued(store, repo, provider)?;
+    let actions = queued(store, repo, tracker)?;
     if actions.is_empty() {
         return Ok(Pass::default());
     }
@@ -112,26 +112,26 @@ pub(crate) async fn drain_repository(
     drain(store, repo, &tracker, actions, scope, bound).await
 }
 
-/// The repository's unconfirmed actions for `provider`, after queueing a
+/// The repository's unconfirmed actions for `tracker`, after queueing a
 /// creation for each owner made before the tracker was connected. An action
 /// queued for another tracker retires here, before any tracker is built, so a
 /// switched repository that is offline or signed out does not keep it.
-fn queued(store: &Store, repo: &str, provider: Provider) -> OpsResult<Vec<TrackerAction>> {
+fn queued(store: &Store, repo: &str, tracker: TrackerKind) -> OpsResult<Vec<TrackerAction>> {
     store
         .sqlite
-        .enqueue_tracker_creations(repo, provider)
+        .enqueue_tracker_creations(repo, tracker)
         .map_err(message)?;
     let (actions, elsewhere): (Vec<_>, Vec<_>) = store
         .sqlite
         .unconfirmed_tracker_actions(repo)
         .map_err(message)?
         .into_iter()
-        .partition(|action| action.provider == provider);
+        .partition(|action| action.tracker == tracker);
     for action in elsewhere {
         let reason = format!(
             "queued for {}, but this repository uses {}",
-            action.provider.display_name(),
-            provider.display_name()
+            action.tracker.display_name(),
+            tracker.display_name()
         );
         store
             .sqlite
@@ -526,7 +526,7 @@ mod tests {
     use std::sync::Arc;
 
     use loopflow_model::durable::TaskId;
-    use loopflow_storage::provider::Provider;
+    use loopflow_storage::planning_sync::TrackerKind;
     use loopflow_storage::sqlite::tracker_actions::{ActionOwner, ActionPhase};
     use loopflow_storage::work::edit::WorkValue;
     use serde_json::json;
@@ -596,7 +596,7 @@ mod tests {
         fn title(&self, task: &TaskId, value: &str, phase: &str, looked_at: Option<i64>) {
             let looked = looked_at.map(|at| at.to_string()).unwrap_or_default();
             self.sql(
-                "INSERT INTO tracker_actions(id,task_id,subject,kind,value_json,base_json,phase,provider,looked_at)
+                "INSERT INTO tracker_actions(id,task_id,subject,kind,value_json,base_json,phase,tracker,looked_at)
                  VALUES(?1,?2,'task_title','field',?3,?4,?5,'linear',NULLIF(?6,''))",
                 &[
                     &uuid::Uuid::new_v4().to_string(),
@@ -614,7 +614,7 @@ mod tests {
         }
 
         async fn drain(&self, scope: Scope<'_>) -> Pass {
-            let actions = queued(&self.store, "/repo", Provider::Linear).unwrap();
+            let actions = queued(&self.store, "/repo", TrackerKind::Linear).unwrap();
             drain(
                 &self.store,
                 "/repo",
@@ -700,7 +700,7 @@ mod tests {
         // spend the pass before the edit's turn.
         f.store
             .sqlite
-            .enqueue_tracker_creations("/repo", Provider::Linear)
+            .enqueue_tracker_creations("/repo", TrackerKind::Linear)
             .unwrap();
         let task = f.bound_task();
         f.title(&task, "Renamed", "queued", None);
@@ -803,7 +803,7 @@ mod tests {
         );
         let relation = uuid::Uuid::new_v4().to_string();
         f.sql(
-            "INSERT INTO tracker_actions(id,task_id,subject,kind,value_json,phase,provider)
+            "INSERT INTO tracker_actions(id,task_id,subject,kind,value_json,phase,tracker)
              VALUES(?1,?2,'relation:'||?1,'link',json_object('target',?3),'queued','linear')",
             &[&relation, source.as_str(), target.as_str()],
         );
@@ -831,7 +831,7 @@ mod tests {
         let f = fixture();
         let task = f.bound_task();
         f.title(&task, "Renamed", "queued", None);
-        f.sql("UPDATE tracker_actions SET provider='asana'", &[]);
+        f.sql("UPDATE tracker_actions SET tracker='asana'", &[]);
         f.pass().await;
         assert_eq!(f.fake.requests(), 0);
         assert_eq!(f.phases(&task), [ActionPhase::Retired]);

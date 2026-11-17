@@ -738,7 +738,7 @@ fn accept_project(
         initiative,
         project,
         now(),
-        loopflow_storage::provider::Provider::Linear,
+        loopflow_storage::planning_sync::TrackerKind::Linear,
     )
     .map_err(message)
 }

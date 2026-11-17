@@ -97,8 +97,24 @@ struct DesktopHeadlessTests {
         for action in sync.actions {
             #expect(try view.inspect().find(text: action.text).string() == action.text)
         }
+        #expect(try view.inspect().findAll(ViewType.Button.self).isEmpty)
         let confirmed = try JSONDecoder().decode(TrackerSync.self, from: Data("{\"actions\":[]}".utf8))
         #expect(try TrackerSyncView(sync: confirmed).inspect().findAll(ViewType.Text.self).isEmpty)
+    }
+
+    @Test("A lost line on a Task offers Keep theirs and Use mine")
+    func trackerSyncAnswers() throws {
+        let data = try Data(contentsOf: fixtures.appendingPathComponent("tracker_sync.json"))
+        let sync = try JSONDecoder().decode(TrackerSync.self, from: data)
+        let lost = try #require(sync.actions.first { $0.phase == .conflicted })
+        var answers: [(String, LostAnswer)] = []
+        let view = TrackerSyncView(sync: sync) { action, answer in answers.append((action.id, answer)) }
+        let buttons = try view.inspect().findAll(ViewType.Button.self)
+        #expect(buttons.count == 2 * sync.actions.filter { $0.phase == .conflicted }.count)
+        try view.inspect().find(viewWithAccessibilityIdentifier: "tracker-keep-theirs-\(lost.id)").button().tap()
+        try view.inspect().find(viewWithAccessibilityIdentifier: "tracker-use-mine-\(lost.id)").button().tap()
+        #expect(answers.map(\.0) == [lost.id, lost.id])
+        #expect(answers.map(\.1) == [.keepTheirs, .useMine])
     }
 
     @Test("A builtin Workflow offers Customize beside its interactive steps")

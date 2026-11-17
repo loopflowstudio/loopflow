@@ -315,6 +315,9 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     case taskRun(directory: String, issue: String, graph: String?, from: String?, agent: String?, approve: Bool)
     case taskShip(directory: String, issue: String)
     case taskHold(directory: String, issue: String)
+    /// Exchange the Task with its tracker now, first answering the values it
+    /// lost, or the one `action` names.
+    case taskSync(directory: String, issue: String, answer: LostAnswer?, action: String?)
     case taskSteer(directory: String, issue: String, message: String)
     case taskReport(directory: String, issue: String, message: String)
     case taskInterrupt(directory: String, issue: String)
@@ -418,6 +421,13 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
                 + [graph].compactMap { $0 } + argument("--from", from) + ["--json"]
         case .taskShip(_, let issue): return ["--task", issue, "ship", "--json"]
         case .taskHold(_, let issue): return ["task", "hold", issue, "--json"]
+        case .taskSync(_, let issue, let answer, let action):
+            let flag: [String] = switch answer {
+            case .keepTheirs: ["--keep-theirs"]
+            case .useMine: ["--use-mine"]
+            case nil: []
+            }
+            return ["task", "sync", issue] + flag + argument("--action", action)
         case .taskSteer(_, let issue, let message): return ["steer", issue, message, "--json"]
         case .taskReport(_, let issue, let message): return ["task", "report", issue, message, "--json"]
         case .taskInterrupt(_, let issue): return ["task", "interrupt", issue, "--json"]
@@ -600,6 +610,8 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
                                       "approve": approve])
         case .taskShip(let directory, let issue):
             TaggedFields("task.ship", ["directory": directory, "issue": issue])
+        case .taskSync(let directory, let issue, let answer, let action):
+            TaggedFields("task.sync", ["directory": directory, "issue": issue, "answer": answer, "action": action])
         case .taskHold(let directory, let issue):
             TaggedFields("task.hold", ["directory": directory, "issue": issue])
         case .taskSteer(let directory, let issue, let message):
@@ -1164,6 +1176,11 @@ public struct RegistryQuery: Sendable {
     /// auto-merge Loopflow armed is disabled.
     public func stopShipping(issue: String, cwd: String?) async throws {
         _ = try await write(.taskHold(directory: cwd ?? "/", issue: issue))
+    }
+
+    /// Answer a value the Task's tracker kept over a local one, then sync it.
+    public func answerLost(issue: String, answer: LostAnswer, action: String, cwd: String?) async throws {
+        _ = try await write(.taskSync(directory: cwd ?? "/", issue: issue, answer: answer, action: action))
     }
 
     public func moveTask(issue: String, wave: String?, cwd: String?) async throws {

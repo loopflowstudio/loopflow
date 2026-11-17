@@ -252,7 +252,7 @@ async fn check_scope(store: &Store, repository: &str, fresh_for: i64) -> OpsResu
 /// shared budget falls; Asana keeps the healthy window.
 fn fresh_for(repository: &str) -> i64 {
     if crate::ops::tracker::queued_tracker(std::path::Path::new(repository))
-        == Some(loopflow_storage::provider::Provider::Linear)
+        == Some(loopflow_storage::planning_sync::TrackerKind::Linear)
     {
         crate::linear::delta_fresh_secs()
     } else {
@@ -265,7 +265,7 @@ fn fresh_for(repository: &str) -> i64 {
 /// state is current enough to answer in place of a per-item read.
 pub(crate) async fn team_current(store: &Store, repository: &str) -> bool {
     if crate::ops::tracker::queued_tracker(std::path::Path::new(repository))
-        != Some(loopflow_storage::provider::Provider::Linear)
+        != Some(loopflow_storage::planning_sync::TrackerKind::Linear)
     {
         return false;
     }

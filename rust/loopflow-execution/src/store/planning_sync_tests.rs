@@ -44,7 +44,7 @@ fn disconnected_planning_keeps_sent_and_conflicted_actions() {
             ),
             ("00000000-0000-4000-8000-000000000003", "queued", None),
         ] {
-            conn.execute("INSERT INTO tracker_actions(id,task_id,kind,value_json,phase,provider,conflict_json) VALUES(?1,?2,'state',?3,?4,'linear',?5)", rusqlite::params![id, task.id.as_str(), completed, phase, conflict]).unwrap();
+            conn.execute("INSERT INTO tracker_actions(id,task_id,kind,value_json,phase,tracker,conflict_json) VALUES(?1,?2,'state',?3,?4,'linear',?5)", rusqlite::params![id, task.id.as_str(), completed, phase, conflict]).unwrap();
         }
     }
     let open = store.sqlite.task_tracker_actions(&task.id).unwrap();
@@ -158,6 +158,83 @@ fn a_git_title_that_lost_shows_as_conflicted_until_saved_again() {
         .unwrap()
         .actions
         .is_empty());
+}
+
+/// Two Machines rename the Task concurrently; "Theirs" wins on clock.
+fn git_rename_conflict(store: &Store, task: &Task) {
+    let conn = store.sqlite.conn.lock().unwrap();
+    let (created, clock): (String, i64) = conn
+        .query_row(
+            "SELECT id,clock FROM planning_peer_changes WHERE object_id=?1 AND field='task_title'",
+            [task.id.as_str()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    for (id, title, at) in [
+        ("00000000-0000-4000-8000-00000000000a", "Mine", clock + 1),
+        ("00000000-0000-4000-8000-00000000000b", "Theirs", clock + 2),
+    ] {
+        let mutation = serde_json::json!({
+            "edit": {"target": task.id.as_str(), "change": {"field": "task_title", "value": title}},
+            "clock": at,
+            "parents": [created],
+        });
+        conn.execute(
+            "INSERT INTO planning_peer_changes(id,record_table,mutation) VALUES(?1,'tasks',?2)",
+            rusqlite::params![id, mutation.to_string()],
+        )
+        .unwrap();
+    }
+    conn.execute(
+        "UPDATE tasks SET issue_title='Theirs' WHERE id=?1",
+        [task.id.as_str()],
+    )
+    .unwrap();
+}
+
+#[test]
+fn a_git_value_that_lost_is_answered_by_keeping_theirs_or_using_mine() {
+    use loopflow_storage::planning_sync::{LostAnswer, TrackerKind};
+    for (answer, title) in [
+        (LostAnswer::KeepTheirs, "Theirs"),
+        (LostAnswer::UseMine, "Mine"),
+    ] {
+        let home = tempfile::tempdir().unwrap();
+        let store = Store {
+            sqlite: crate::store::opening::open_ephemeral(&home.path().join("registry.db"))
+                .unwrap(),
+        };
+        let repo = TestRepo::new();
+        let task = task(&store.sqlite, &repo);
+        git_rename_conflict(&store, &task);
+        let repository = repo.path().to_str().unwrap();
+        assert_eq!(
+            store
+                .sqlite
+                .repository_tracker_actions(repository, TrackerKind::Git)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            store
+                .sqlite
+                .answer_lost_values(&task.id, answer, None)
+                .unwrap(),
+            1
+        );
+        assert!(store
+            .task_tracker_sync(&task.id)
+            .unwrap()
+            .actions
+            .is_empty());
+        assert!(store
+            .sqlite
+            .repository_tracker_actions(repository, TrackerKind::Git)
+            .unwrap()
+            .is_empty());
+        assert_eq!(store.sqlite.task(&task.id).unwrap().unwrap().title, title);
+    }
 }
 
 #[test]

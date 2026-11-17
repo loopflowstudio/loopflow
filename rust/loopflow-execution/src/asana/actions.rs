@@ -425,7 +425,7 @@ async fn accept_mirror(
         &mirrored.initiative_ids[0],
         mirrored,
         now(),
-        loopflow_storage::provider::Provider::Asana,
+        loopflow_storage::planning_sync::TrackerKind::Asana,
     )
     .map_err(message)
 }

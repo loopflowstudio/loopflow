@@ -165,3 +165,33 @@ Jack Heart's answers to the page, word for word: "1a 2a 3a for now, possibly
 a follow up task? 4a 5a". The defaults being built match. Git on the queue
 (3c) is already LOO-938's peer half ("Send every planning change through one
 queue": planning_peer_changes/observed/routes); no new Task filed.
+
+## Concept review round 2 (2026-11-17, at e5cb52f2f6)
+
+Page: `scratch/concept-review.html`. Jack Heart, word for word: "1a 2a 3a 4a".
+- 1a: conflicted leaves "open". `lf repo plan` reports open (queued|sent) and
+  lost (conflicted) separately ("2 open · 1 lost"). A lost row shows on its
+  Task until answered, until a later tracker event changes that field, or
+  until dismissed. Desktop line gets Keep theirs / Use mine. Data unchanged;
+  dismiss = conflicted -> retired, error "kept the tracker's value".
+- 2a: CLI dismiss is `lf task sync <id> --keep-theirs`.
+- 3a: `tracker_actions.provider` -> `tracker` (migration edited in place),
+  `queued_tracker()` returns TrackerKind; `lf repo plan` on Git lists Git's
+  lost rows; docs drop "On Linear and Asana" and the `journal` copy-back line;
+  header `Tracker: linear.`
+- 4a: `lf repo plan` rename added to LOO-955 ("ok, you can put it in 955.").
+
+Built, calls taken headless:
+- Lost rows close by a write, not a read rule: a later save of the subject,
+  an event that changes the field at a newer revision ("changed again in
+  Linear"), or an answer. `lost` = `phase='conflicted'`; the old "until a
+  later confirmed save" read clause is gone.
+- `--use-mine` added beside `--keep-theirs` (with `--action <id>` for one
+  line) so Desktop's two buttons have one CLI spelling and one served write,
+  `task.sync`. Without `--action`, an answer covers every lost line on the
+  Task. Reversible: drop `--use-mine` if `lf task edit` is the only way wanted.
+- Git answers record the chosen value with every journal head as a parent.
+- `lf repo plan --json` keeps one `actions` list (phase tells open from lost);
+  text prints "N open · M lost", open lines first, and the answer hint.
+- 4a filed as a steer on LOO-955.
+

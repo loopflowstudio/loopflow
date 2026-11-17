@@ -267,7 +267,7 @@ fn link(action: &TrackerAction, observed: Option<&Observed>) -> Decision {
 mod tests {
     use super::{decide, lost_reply, Decision, LostReply, Observed};
     use crate::planning::StateHistory;
-    use crate::provider::Provider;
+    use crate::planning_sync::TrackerKind;
     use crate::sqlite::tracker_actions::{
         ActionKind, ActionOwner, ActionPhase, Resolution, TrackerAction,
     };
@@ -286,7 +286,7 @@ mod tests {
             base: None,
             conflict: None,
             phase,
-            provider: Provider::Linear,
+            tracker: TrackerKind::Linear,
             remote_id: None,
             confirmed_revision: None,
             error: None,

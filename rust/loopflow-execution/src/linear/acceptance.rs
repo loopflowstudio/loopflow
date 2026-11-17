@@ -62,7 +62,7 @@ pub(crate) async fn accept_linear_issue(
             confirmed_wave
                 .as_ref()
                 .map(|(wave, initiative)| (wave, initiative.as_str())),
-            loopflow_storage::provider::Provider::Linear,
+            loopflow_storage::planning_sync::TrackerKind::Linear,
         )
     })
     .await
@@ -113,7 +113,7 @@ mod tests {
             None,
             43,
             None,
-            loopflow_storage::provider::Provider::Linear,
+            loopflow_storage::planning_sync::TrackerKind::Linear,
         )
         .unwrap();
         assert_eq!(
@@ -155,7 +155,7 @@ mod tests {
             None,
             44,
             None,
-            loopflow_storage::provider::Provider::Linear,
+            loopflow_storage::planning_sync::TrackerKind::Linear,
         )
         .unwrap();
         let detached = store.task(&original.id).unwrap().unwrap();
@@ -523,7 +523,7 @@ mod tests {
             Some(&project),
             43,
             None,
-            loopflow_storage::provider::Provider::Linear,
+            loopflow_storage::planning_sync::TrackerKind::Linear,
         )
         .unwrap();
         assert_eq!(teams(), serde_json::to_string(&project.team_ids).unwrap());
@@ -539,7 +539,7 @@ mod tests {
             Some(&project),
             44,
             None,
-            loopflow_storage::provider::Provider::Linear,
+            loopflow_storage::planning_sync::TrackerKind::Linear,
         )
         .unwrap_err()
         .to_string();
@@ -558,7 +558,7 @@ mod tests {
             Some(&project),
             45,
             None,
-            loopflow_storage::provider::Provider::Linear,
+            loopflow_storage::planning_sync::TrackerKind::Linear,
         )
         .unwrap();
         assert_eq!(state(), PlanningState::Available);

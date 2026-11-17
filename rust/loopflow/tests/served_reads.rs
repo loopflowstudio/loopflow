@@ -1298,6 +1298,9 @@ fn server_operations_match_their_lf_commands() {
         | Write::WavePlanBind { .. }
         | Write::WavePlanConnect { .. }
         | Write::WavePlanReteam { .. }
+        // Syncing exchanges with the tracker; its spelling is below and
+        // task_planning_tests answers a lost value through it.
+        | Write::TaskSync { .. }
         | Write::GraphCustomize { .. }
         // Releasing, committing, syncing and creating worktrees change the
         // repository and its remote; their spellings are compared below.
@@ -2084,6 +2087,27 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
         ),
         Write::TaskHold { directory, issue } => {
             (path(directory), words(&["task", "hold", issue, "--json"]))
+        }
+        Write::TaskSync {
+            directory,
+            issue,
+            answer,
+            action,
+        } => {
+            let mut args = words(&["task", "sync", issue]);
+            match answer {
+                Some(loopflow_execution::store::planning_sync::LostAnswer::KeepTheirs) => {
+                    args.push("--keep-theirs".into())
+                }
+                Some(loopflow_execution::store::planning_sync::LostAnswer::UseMine) => {
+                    args.push("--use-mine".into())
+                }
+                None => {}
+            }
+            if let Some(action) = action {
+                args.extend(["--action".into(), action.clone()]);
+            }
+            (path(directory), args)
         }
         Write::TaskRun {
             directory,

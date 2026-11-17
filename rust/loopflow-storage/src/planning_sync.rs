@@ -1,9 +1,8 @@
-//! What an owner's tracker has yet to confirm and what it won: the open
-//! tracker actions `lf repo plan`, `lf task show` and Desktop read.
+//! What an owner's tracker has yet to confirm and what it won: the open and
+//! lost tracker actions `lf repo plan`, `lf task show` and Desktop read.
 
 use serde::{Deserialize, Serialize};
 
-use crate::provider::Provider;
 use crate::sqlite::tracker_actions::{ActionKind, ActionPhase};
 
 /// A pending field edit and its provider baseline, independent of connection state.
@@ -50,7 +49,8 @@ impl TrackerActions {
 }
 
 /// A Task's or Project's slice of `lf repo plan`'s actions: what its tracker
-/// has yet to confirm, and each value the tracker won until it is saved again.
+/// has yet to confirm (open), and each value the tracker won (lost) until it
+/// is answered.
 /// Read-only; these rows never confer execution authority.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TrackerSync {
@@ -79,6 +79,17 @@ pub struct TrackerActionStatus {
     pub local_value: serde_json::Value,
     /// The tracker's winning value, when conflicted.
     pub tracker_value: Option<serde_json::Value>,
+}
+
+/// How a person answers a value the tracker won: `lf task sync --keep-theirs`
+/// or `--use-mine`, and Desktop's two buttons on the line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LostAnswer {
+    /// The tracker's value stands; the line closes.
+    KeepTheirs,
+    /// Save the losing value again, which sends it.
+    UseMine,
 }
 
 /// What a tracker action addresses.
@@ -120,12 +131,23 @@ impl TrackerKind {
         }
     }
 
-    /// The queued tracker a provider names; `None` for a provider that is not one.
-    pub fn of(provider: Provider) -> Option<Self> {
-        match provider {
-            Provider::Linear => Some(Self::Linear),
-            Provider::Asana => Some(Self::Asana),
-            _ => None,
+    /// How a person names it: `Git`, `Linear`, `Asana`.
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::Git => "Git",
+            Self::Linear => "Linear",
+            Self::Asana => "Asana",
+        }
+    }
+
+    pub fn parse(value: &str) -> crate::StoreResult<Self> {
+        match value {
+            "git" => Ok(Self::Git),
+            "linear" => Ok(Self::Linear),
+            "asana" => Ok(Self::Asana),
+            other => Err(crate::StoreError::InvalidData(format!(
+                "unknown tracker {other}"
+            ))),
         }
     }
 }

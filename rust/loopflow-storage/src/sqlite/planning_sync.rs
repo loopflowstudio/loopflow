@@ -1,25 +1,27 @@
 //! What a Project or Task has waiting for its tracker, and what the tracker
-//! won: open tracker actions, and the losing heads Git's journal keeps.
+//! won: open and lost tracker actions, the losing heads Git's journal keeps,
+//! and a person's answer to a lost value.
 use std::collections::{BTreeMap, HashMap};
 
 use rusqlite::Connection;
 
 use super::children::ids_json;
 use super::tracker_actions::{change_word, read_action, ActionKind, ActionPhase, COLUMNS, IN_REPO};
-use super::SqliteStore;
+use super::{planning_write, SqliteStore};
 use crate::planning_exchange::{winning_heads, PlanningMutation};
-use crate::planning_sync::{ActionOwnerKind, TrackerActionStatus, TrackerActions, TrackerKind};
+use crate::planning_sync::{
+    ActionOwnerKind, LostAnswer, TrackerActionStatus, TrackerActions, TrackerKind,
+};
+use crate::work::edit::{WorkEdit, WorkValue};
 use crate::StoreResult;
 use loopflow_model::durable::{ProjectId, TaskId};
 
-// An action is open while unconfirmed, or while it is its subject's latest
-// conflict: a later save of the subject resolves it. A creation for an owner
-// already bound waits only to be resolved.
-const OPEN: &str = "NOT (e.kind='create' AND (EXISTS(SELECT 1 FROM tasks t WHERE t.id=e.task_id AND t.external_issue_id IS NOT NULL)
-        OR EXISTS(SELECT 1 FROM projects p WHERE p.id=e.project_id AND p.external_project_id IS NOT NULL)))
-    AND (e.phase IN ('queued','sent') OR NOT EXISTS(
-        SELECT 1 FROM tracker_actions later WHERE (later.task_id=e.task_id OR later.project_id=e.project_id OR later.wave_id=e.wave_id)
-        AND later.kind=e.kind AND later.subject IS e.subject AND later.seq>e.seq AND later.phase IN ('confirmed','conflicted')))";
+// An action shows while queued or sent, and while conflicted: a value that
+// lost stays until it is answered (`answer_lost_values`, a later save, or the
+// tracker changing that field again). A creation for an owner already bound
+// waits only to be resolved.
+const SHOWN: &str = "NOT (e.kind='create' AND (EXISTS(SELECT 1 FROM tasks t WHERE t.id=e.task_id AND t.external_issue_id IS NOT NULL)
+        OR EXISTS(SELECT 1 FROM projects p WHERE p.id=e.project_id AND p.external_project_id IS NOT NULL)))";
 
 impl SqliteStore {
     pub fn task_tracker_actions(&self, task: &TaskId) -> StoreResult<TrackerActions> {
@@ -53,14 +55,36 @@ impl SqliteStore {
         Ok(TrackerActions { repo, actions })
     }
 
-    /// Every open action in `repo`, in send order: what `lf repo plan` lists.
-    pub fn open_tracker_actions(&self, repo: &str) -> StoreResult<Vec<TrackerActionStatus>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
+    /// What `lf repo plan` lists: on Linear and Asana every open and lost
+    /// action in send order; on Git each value its journal lost.
+    pub fn repository_tracker_actions(
+        &self,
+        repo: &str,
+        tracker: TrackerKind,
+    ) -> StoreResult<Vec<TrackerActionStatus>> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        if tracker == TrackerKind::Git {
+            let tx = conn.savepoint()?;
+            let ids: Vec<String> = tx
+                .prepare(
+                    "SELECT t.id FROM tasks t JOIN repository_plans r ON r.id=t.repository_id WHERE r.repo=?1
+                     UNION ALL SELECT p.id FROM projects p JOIN waves w ON w.id=p.wave_id WHERE w.repo=?1",
+                )?
+                .query_map([repo], |row| row.get(0))?
+                .collect::<rusqlite::Result<_>>()?;
+            let mut lost: Vec<_> = git_conflicts(&tx, &ids_json(ids.iter().map(String::as_str)))?
+                .into_values()
+                .flatten()
+                .collect();
+            tx.commit()?;
+            lost.sort_by(|a, b| (&a.owner_id, &a.subject).cmp(&(&b.owner_id, &b.subject)));
+            return Ok(lost);
+        }
         // Two arms so each reads its own partial index.
         let mut query = conn.prepare(&format!(
-            "SELECT {COLUMNS} FROM tracker_actions e WHERE e.phase IN ('queued','sent') AND {IN_REPO} AND {OPEN}
+            "SELECT {COLUMNS} FROM tracker_actions e WHERE e.phase IN ('queued','sent') AND {IN_REPO} AND {SHOWN}
              UNION ALL
-             SELECT {COLUMNS} FROM tracker_actions e WHERE e.phase='conflicted' AND {IN_REPO} AND {OPEN}
+             SELECT {COLUMNS} FROM tracker_actions e WHERE e.phase='conflicted' AND {IN_REPO} AND {SHOWN}
              ORDER BY 1"
         ))?;
         let rows = query.query_and_then([repo], read_action)?;
@@ -72,10 +96,108 @@ impl SqliteStore {
         }
         Ok(actions)
     }
+
+    /// Answer the values a Task lost, or the one `action` names: keep the
+    /// tracker's, or save the local one again, which queues it (Git records
+    /// either as the field's merge). Returns how many were answered.
+    pub fn answer_lost_values(
+        &self,
+        task: &TaskId,
+        answer: LostAnswer,
+        action: Option<&str>,
+    ) -> StoreResult<usize> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let lost: Vec<_> = task_tracker_actions_in(&tx, std::slice::from_ref(task))?
+            .remove(task)
+            .ok_or(crate::StoreError::NotFound)?
+            .actions
+            .into_iter()
+            .filter(|row| row.phase == ActionPhase::Conflicted)
+            .filter(|row| action.is_none_or(|id| row.id == id))
+            .collect();
+        if let (Some(id), true) = (action, lost.is_empty()) {
+            return Err(crate::StoreError::InvalidData(format!(
+                "{id} is not a value this Task lost"
+            )));
+        }
+        for row in &lost {
+            if row.tracker == TrackerKind::Git {
+                answer_git(&tx, &row.id, answer)?;
+            } else {
+                answer_queued(&tx, &row.id, answer)?;
+            }
+        }
+        tx.commit()?;
+        Ok(lost.len())
+    }
 }
 
-/// Each Task's open tracker actions, in one statement per kind across all
-/// repositories.
+fn answer_queued(conn: &Connection, id: &str, answer: LostAnswer) -> StoreResult<()> {
+    let reason = match answer {
+        LostAnswer::KeepTheirs => "kept the tracker's value",
+        LostAnswer::UseMine => {
+            let action = conn
+                .query_row_and_then(
+                    &format!("SELECT {COLUMNS} FROM tracker_actions e WHERE e.id=?1"),
+                    [id],
+                    read_action,
+                )?
+                .map_err(|_| crate::StoreError::NotFound)?;
+            let change = serde_json::from_value::<WorkValue>(action.value).map_err(|_| {
+                crate::StoreError::InvalidData(format!(
+                    "a lost {} cannot be saved again; make the change again",
+                    action.kind.as_str()
+                ))
+            })?;
+            planning_write::local(
+                conn,
+                &[WorkEdit {
+                    target: action.owner.id().to_owned(),
+                    change,
+                }],
+            )?;
+            "answered by a later save"
+        }
+    };
+    conn.execute(
+        "UPDATE tracker_actions SET phase='retired',error=?2 WHERE id=?1 AND phase='conflicted'",
+        rusqlite::params![id, reason],
+    )?;
+    Ok(())
+}
+
+/// Git keeps the field's competing heads; the answer is a save of the chosen
+/// value that names all of them as parents.
+fn answer_git(conn: &Connection, id: &str, answer: LostAnswer) -> StoreResult<()> {
+    let mutation: String = conn.query_row(
+        "SELECT mutation FROM planning_peer_changes WHERE id=?1",
+        [id],
+        |row| row.get(0),
+    )?;
+    let lost = serde_json::from_str::<PlanningMutation>(&mutation)?.edit;
+    let edit = match answer {
+        LostAnswer::UseMine => {
+            planning_write::local(conn, std::slice::from_ref(&lost))?;
+            lost
+        }
+        LostAnswer::KeepTheirs => {
+            let table = planning_write::table(&lost.change);
+            let change = planning_write::read(conn, table, &lost.target)?
+                .into_iter()
+                .find(|value| value.field() == lost.change.field())
+                .ok_or(crate::StoreError::NotFound)?;
+            WorkEdit {
+                target: lost.target,
+                change,
+            }
+        }
+    };
+    planning_write::settle(conn, &edit)
+}
+
+/// Each Task's open and lost tracker actions, in one statement per kind
+/// across all repositories.
 pub(super) fn task_tracker_actions_in(
     conn: &Connection,
     tasks: &[TaskId],
@@ -118,7 +240,7 @@ pub(super) fn task_tracker_actions_in(
     Ok(open)
 }
 
-/// Open actions of every owner in `ids` (a JSON array), by owner id.
+/// Open and lost actions of every owner in `ids` (a JSON array), by owner id.
 fn owned_actions(
     conn: &Connection,
     owner: &str,
@@ -129,7 +251,7 @@ fn owned_actions(
     let mut query = conn.prepare(&format!(
         "SELECT {COLUMNS} FROM tracker_actions e
          WHERE e.{owner} IN (SELECT value FROM json_each(?1)) {filter}
-         AND e.phase IN ('queued','sent','conflicted') AND {OPEN} ORDER BY e.seq"
+         AND e.phase IN ('queued','sent','conflicted') AND {SHOWN} ORDER BY e.seq"
     ))?;
     let mut owners = HashMap::<_, Vec<_>>::new();
     for row in query.query_and_then([ids], read_action)? {
@@ -144,7 +266,7 @@ fn owned_actions(
 }
 
 /// Git keeps a field's concurrent values as competing heads of its journal;
-/// every head but the winner is a value that lost, open until a later save of
+/// every head but the winner is a value that lost, shown until a later save of
 /// the field names all of them as parents.
 fn git_conflicts(
     conn: &Connection,

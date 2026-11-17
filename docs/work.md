@@ -222,8 +222,8 @@ planning:
 ```
 
 Ref names are not access control; pick a remote whose readers should see the
-plan. When two people edit the same field, the later edit wins and the other
-value stays in `lf repo plan journal`, ready to copy back.
+plan. When two people edit the same field, the later edit wins; the other
+value shows as lost on its Task and in `lf repo plan` until you answer it.
 
 ### Linear or Asana
 
@@ -266,11 +266,12 @@ queue waits:
 
 ```text
 $ lf repo plan
-Planning: linear. 4 open actions.
+Tracker: linear. 3 open · 1 lost.
   LOO-412  title · queued · Offline
   LOO-412  comment · queued · Offline
   LOO-398  complete · sent, waiting for linear to confirm
   LOO-377  title · conflicted · lost: "Offline rename" · linear: "Renamed in Linear"
+Answer a lost line: lf task sync <task> --keep-theirs, or --use-mine.
 ```
 
 When a send failed, the line ends with why: offline, signed out, or the
@@ -282,9 +283,12 @@ once every ten minutes, so the change lands once. `lf task sync LOO-398` looks
 now.
 
 When a coworker changed the same field in the tracker before your edit
-arrived, the tracker's value wins and the line shows both until you save that
-field again; copy yours back with `lf task edit` if it should stand. On Git,
-`lf task sync` shows a Task's losing values the same way, as `git`.
+arrived, the tracker's value wins and your edit is lost, not open: nothing is
+left to send. The line shows both values on the Task until you answer it.
+`lf task sync LOO-377 --keep-theirs` closes it; `--use-mine` saves yours again
+and sends it; so does editing that field. It also closes on its own when a
+coworker changes that field again in the tracker. On Git, a value the journal
+lost shows the same way, as `git`.
 
 A Wave not yet connected to an Initiative has nothing to exchange. Its Tasks
 stay local and `lf wave sync` shows them without asking Linear, until
@@ -489,10 +493,10 @@ position; retry it alone if it fails. `lf task reopen` keeps the same PR.
 **Sync.** `lf task sync LOO-12` exchanges that Task with its tracker now. On
 Linear or Asana it looks for every change sent without an answer and resends
 what the tracker lacks; on Git it exchanges the planning ref. Between syncs,
-every `lf` command sends one short batch. It prints what is still open: a
-change queued or sent, or one whose value lost to the tracker's, until you save
-that field again. On Linear and Asana, `lf repo plan` lists the same lines for the whole
-repository.
+every `lf` command sends one short batch. It prints what is still open (a
+change queued or sent) and what was lost to the tracker's value, until you
+answer it with `--keep-theirs` or `--use-mine`. `lf repo plan` lists the same
+lines for the whole repository.
 `lf wave sync` refreshes from the tracker first; a Wave with no Initiative skips
 the refresh and still succeeds.
 

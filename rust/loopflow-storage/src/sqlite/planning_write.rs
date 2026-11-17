@@ -342,20 +342,41 @@ pub(crate) fn capture(conn: &Connection, table: &str, target: &str) -> StoreResu
                 .collect::<Result<BTreeSet<String>, _>>()?;
             parents
         };
-        let clock = conn.query_row(
-            "SELECT max(CAST(unixepoch('subsec')*1000 AS INTEGER),COALESCE(max(clock)+1,0)) FROM planning_peer_changes",
-            [], |row| row.get(0),
-        )?;
-        let mutation = PlanningMutation {
-            edit,
-            clock,
-            parents,
-        };
-        let id = uuid::Uuid::new_v4().to_string();
-        retain(conn, &id, &mutation)?;
-        observe(conn, &mutation.edit, std::iter::once(id.as_str()))?;
+        record(conn, edit, parents)?;
     }
     Ok(())
+}
+
+/// Record `edit` with every journal head of its field as a parent, so Git's
+/// competing values resolve to it. Nothing when the field has one head.
+pub(crate) fn settle(conn: &Connection, edit: &WorkEdit) -> StoreResult<()> {
+    let mut query = conn.prepare(
+        "SELECT c.id FROM planning_peer_changes c WHERE c.object_id=?1 AND c.field=?2 AND NOT EXISTS(
+             SELECT 1 FROM planning_peer_changes child,json_each(child.mutation,'$.parents') parent
+             WHERE child.object_id=c.object_id AND child.field=c.field AND parent.value=c.id)",
+    )?;
+    let heads = query
+        .query_map(params![edit.target, edit.change.field()], |row| row.get(0))?
+        .collect::<Result<BTreeSet<String>, _>>()?;
+    if heads.len() < 2 {
+        return Ok(());
+    }
+    record(conn, edit.clone(), heads)
+}
+
+fn record(conn: &Connection, edit: WorkEdit, parents: BTreeSet<String>) -> StoreResult<()> {
+    let clock = conn.query_row(
+        "SELECT max(CAST(unixepoch('subsec')*1000 AS INTEGER),COALESCE(max(clock)+1,0)) FROM planning_peer_changes",
+        [], |row| row.get(0),
+    )?;
+    let mutation = PlanningMutation {
+        edit,
+        clock,
+        parents,
+    };
+    let id = uuid::Uuid::new_v4().to_string();
+    retain(conn, &id, &mutation)?;
+    observe(conn, &mutation.edit, std::iter::once(id.as_str()))
 }
 
 pub(crate) fn retain(conn: &Connection, id: &str, change: &PlanningMutation) -> StoreResult<()> {

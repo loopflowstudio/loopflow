@@ -68,6 +68,7 @@ use crate::store::{open_existing_store, SharedStore, Store};
 use crate::work::wave::Wave;
 use loopflow_model::durable::WorkStatus;
 use loopflow_storage::child::ChildRef;
+use loopflow_storage::planning_sync::LostAnswer;
 use loopflow_storage::sqlite::{SqliteStore, TaskCheckout};
 use loopflow_storage::work::task::{
     GithubPr, Observation, PrMergeMode, PrPhase, PrPublication, Task, TaskEventKind, TaskPr,
@@ -2145,7 +2146,7 @@ pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
         }
         let inspection = if task.is_none()
             && crate::ops::tracker::queued_tracker(repo)
-                == Some(loopflow_storage::provider::Provider::Linear)
+                == Some(loopflow_storage::planning_sync::TrackerKind::Linear)
         {
             let selector = issue.ok_or_else(|| task_error("this checkout has no Task"))?;
             let read = super::linear::inspect_task_planning_async(
@@ -2322,8 +2323,14 @@ pub fn start_conversation_beside(task: &Task) {
 /// `lf task sync`: exchange the Task with its tracker now. Linear and Asana
 /// look for every sent action and resend what the tracker lacks; Git
 /// exchanges the repository's planning ref, so a peer's Task this Machine
-/// has not fetched yet is found in `repo`'s planning.
-pub fn task_sync(repo: &Path, issue: &str) -> OpsResult<String> {
+/// has not fetched yet is found in `repo`'s planning. An `answer` first
+/// settles the values the Task lost, or the one `action` names.
+pub fn task_sync(
+    repo: &Path,
+    issue: &str,
+    answer: Option<LostAnswer>,
+    action: Option<&str>,
+) -> OpsResult<String> {
     block_on_task(async {
         let store = task_store().await?;
         let task = match store.get_task_by_issue(issue).await.map_err(task_error)? {
@@ -2337,6 +2344,12 @@ pub fn task_sync(repo: &Path, issue: &str) -> OpsResult<String> {
         };
         let repository = repository_for_task(&store, &task)?;
         let repo = repository.to_string_lossy();
+        if let Some(answer) = answer {
+            store
+                .sqlite
+                .answer_lost_values(&task.id, answer, action)
+                .map_err(task_error)?;
+        }
         let Some(tracker) = super::tracker::queued_tracker(&repository) else {
             let acquired = super::planning_sync::acquire_repository(&store, &repo).await;
             super::planning_sync::publish_repository_now(&store, &repo).await?;
@@ -2379,7 +2392,7 @@ pub fn task_sync(repo: &Path, issue: &str) -> OpsResult<String> {
     })
 }
 
-/// What `lf task sync` prints once the exchange ran: each open action, else
+/// What `lf task sync` prints once the exchange ran: each open and lost line, else
 /// that the Task is in sync.
 async fn synced(store: &Store, task: &loopflow_storage::work::task::TaskId) -> OpsResult<String> {
     let saved = store

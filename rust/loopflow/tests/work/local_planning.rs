@@ -1153,7 +1153,7 @@ fn project_creation_binding_and_activation_save_offline() {
                     "initiative",
                     &incoming,
                     20,
-                    loopflow_storage::provider::Provider::Linear,
+                    loopflow_storage::planning_sync::TrackerKind::Linear,
                 )
                 .unwrap();
                 // The unsent activation is sent last, so it stays pending and
@@ -1440,7 +1440,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
             "initiative",
             &project,
             17,
-            loopflow_storage::provider::Provider::Linear,
+            loopflow_storage::planning_sync::TrackerKind::Linear,
         )
         .unwrap();
         let id = store.list_projects(Some(wave.id())).unwrap()[0].id.clone();
@@ -1554,7 +1554,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
                 "initiative",
                 &incoming,
                 18,
-                loopflow_storage::provider::Provider::Linear,
+                loopflow_storage::planning_sync::TrackerKind::Linear,
             )
             .unwrap();
             let read = project_with_sync(&store, &id);
@@ -1588,7 +1588,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
                 "initiative",
                 &incoming,
                 19,
-                loopflow_storage::provider::Provider::Linear,
+                loopflow_storage::planning_sync::TrackerKind::Linear,
             )
             .unwrap();
             let read = project_with_sync(&store, &id);
@@ -1650,7 +1650,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
                 "initiative",
                 &incoming,
                 20,
-                loopflow_storage::provider::Provider::Linear,
+                loopflow_storage::planning_sync::TrackerKind::Linear,
             )
             .unwrap();
             let read = project_with_sync(&store, &id);
@@ -1718,7 +1718,7 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
             "initiative",
             &project,
             17,
-            loopflow_storage::provider::Provider::Linear,
+            loopflow_storage::planning_sync::TrackerKind::Linear,
         )
         .unwrap();
         let project_id = store.list_projects(Some(wave.id())).unwrap()[0].id.clone();
@@ -2086,7 +2086,7 @@ fn moving_saves_membership_offline_and_retains_inbound_changes() {
                     name,
                     &observed,
                     1,
-                    loopflow_storage::provider::Provider::Linear,
+                    loopflow_storage::planning_sync::TrackerKind::Linear,
                 )
                 .unwrap();
                 observations.push(observed);
@@ -3029,7 +3029,7 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
         "initiative",
         &observed,
         17,
-        loopflow_storage::provider::Provider::Linear,
+        loopflow_storage::planning_sync::TrackerKind::Linear,
     )
     .unwrap();
     let db = rusqlite::Connection::open(&path).unwrap();
@@ -3127,7 +3127,7 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
         }
     }
     // A pending membership save explains the difference without replacing content.
-    db.execute("INSERT INTO tracker_actions(id,task_id,subject,kind,value_json,phase,provider) VALUES('00000000-0000-4000-8000-0000000000aa',?1,'task_project','field',?2,'queued','linear')", rusqlite::params![id.as_str(),serde_json::to_string(&WorkValue::TaskProject(saved.project_id.as_ref().map(ToString::to_string))).unwrap()]).unwrap();
+    db.execute("INSERT INTO tracker_actions(id,task_id,subject,kind,value_json,phase,tracker) VALUES('00000000-0000-4000-8000-0000000000aa',?1,'task_project','field',?2,'queued','linear')", rusqlite::params![id.as_str(),serde_json::to_string(&WorkValue::TaskProject(saved.project_id.as_ref().map(ToString::to_string))).unwrap()]).unwrap();
     assert_eq!(read()["plan_state"], "available");
     store
         .observe_pm_issue_change("provider-task", None, true)

@@ -494,7 +494,10 @@ mod tests {
         let traced = assert_no_empty_writes(&store, || {
             statements(&store, || {
                 store
-                    .enqueue_tracker_creations("/elsewhere", crate::provider::Provider::Linear)
+                    .enqueue_tracker_creations(
+                        "/elsewhere",
+                        crate::planning_sync::TrackerKind::Linear,
+                    )
                     .unwrap();
                 store.unconfirmed_tracker_actions("/elsewhere").unwrap();
             })

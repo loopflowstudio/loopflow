@@ -304,7 +304,7 @@ async fn task_comments_read_and_publish_without_starting_work() {
 
             let task = store.get_task_by_issue("FIX-7").await.unwrap().unwrap();
             rusqlite::Connection::open(directory.path().join("loopflow.db")).unwrap()
-                .execute("INSERT INTO tracker_actions(id,task_id,kind,value_json,base_json,phase,provider,error,sent_at,looked_at)
+                .execute("INSERT INTO tracker_actions(id,task_id,kind,value_json,base_json,phase,tracker,error,sent_at,looked_at)
                     VALUES('00000000-0000-4000-8000-00000000c0de',?1,'state',
                         '{\"field\":\"disposition\",\"value\":{\"planning_state\":\"completed\",\"planning_completed\":true,\"planning_completed_at\":null}}',
                         '{\"revision\":\"2026-09-29T12:00:00.123Z\",\"value\":{\"field\":\"disposition\",\"value\":{\"planning_state\":\"unstarted\",\"planning_completed\":false,\"planning_completed_at\":null}}}',

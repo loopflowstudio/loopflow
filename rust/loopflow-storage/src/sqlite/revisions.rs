@@ -334,7 +334,7 @@ mod tests {
         )
         .unwrap();
         conn.execute(
-            "INSERT INTO tracker_actions(id,task_id,kind,value_json,phase,provider,error)
+            "INSERT INTO tracker_actions(id,task_id,kind,value_json,phase,tracker,error)
              VALUES(?1,?2,'state','{}','sent','linear','rate limited')",
             params![delivery, task.as_str()],
         )

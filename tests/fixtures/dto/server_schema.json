@@ -4276,6 +4276,21 @@
       ],
       "type": "string"
     },
+    "LostAnswer": {
+      "description": "How a person answers a value the tracker won: `lf task sync --keep-theirs`\nor `--use-mine`, and Desktop's two buttons on the line.",
+      "oneOf": [
+        {
+          "const": "keep_theirs",
+          "description": "The tracker's value stands; the line closes.",
+          "type": "string"
+        },
+        {
+          "const": "use_mine",
+          "description": "Save the losing value again, which sends it.",
+          "type": "string"
+        }
+      ]
+    },
     "Machine": {
       "properties": {
         "created_at": {
@@ -5892,10 +5907,10 @@
       "type": "object"
     },
     "PlanStatus": {
-      "description": "What `repo.plan` answers: the tracker, for Git its destinations with\ntheir import and publication evidence, and every open tracker action.",
+      "description": "What `repo.plan` answers: the tracker, for Git its destinations with\ntheir import and publication evidence, and every open and lost tracker\naction.",
       "properties": {
         "actions": {
-          "description": "What the tracker has yet to confirm, and each value it won until it\nis saved again, in send order.",
+          "description": "What the tracker has yet to confirm (open: `queued`, `sent`), in send\norder, and each value it kept over a local one (lost: `conflicted`)\nuntil it is answered. On Git, only lost values: Git keeps no queue.",
           "items": {
             "$ref": "#/$defs/TrackerActionStatus"
           },
@@ -14857,7 +14872,7 @@
       "type": "string"
     },
     "TrackerSync": {
-      "description": "A Task's or Project's slice of `lf repo plan`'s actions: what its tracker\nhas yet to confirm, and each value the tracker won until it is saved again.\nRead-only; these rows never confer execution authority.",
+      "description": "A Task's or Project's slice of `lf repo plan`'s actions: what its tracker\nhas yet to confirm (open), and each value the tracker won (lost) until it\nis answered.\nRead-only; these rows never confer execution authority.",
       "properties": {
         "actions": {
           "items": {
@@ -16474,6 +16489,49 @@
           "x-result-example": {
             "issue": "LOO-1",
             "stopped": true
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "`lf task sync <issue> [--keep-theirs | --use-mine] [--action <id>]`:\nexchange the Task with its tracker now, first answering the values it\nlost (or the one `action` names). Answers what the command prints.",
+          "properties": {
+            "action": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "answer": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/LostAnswer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "directory": {
+              "type": "string"
+            },
+            "issue": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "task.sync",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "directory",
+            "issue",
+            "answer",
+            "action"
+          ],
+          "type": "object",
+          "x-result": {
+            "type": "string"
           }
         },
         {

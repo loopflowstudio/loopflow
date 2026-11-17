@@ -81,7 +81,7 @@ pub fn change(repo: &Path, issue: &str, change: OwnershipChange) -> OpsResult<Ta
 /// the assignee is left alone; ownership is already saved.
 pub(crate) async fn assert_assignee(store: &SqliteStore, repository: &Path, task: &TaskId) {
     if crate::ops::tracker::queued_tracker(repository)
-        != Some(loopflow_storage::provider::Provider::Linear)
+        != Some(loopflow_storage::planning_sync::TrackerKind::Linear)
     {
         return;
     }

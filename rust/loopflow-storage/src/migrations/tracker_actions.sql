@@ -1,8 +1,9 @@
 -- One outbound queue for every tracker, in the store's words. Each row
 -- addresses one owner (a Wave, Project or Task) on the tracker named by
--- `provider`; `seq` is the send order. `value_json` is a WorkValue (a `create`
+-- `tracker`; `seq` is the send order. `value_json` is a WorkValue (a `create`
 -- holds its creation baseline, an `order` the desired Task ids), never
--- provider input. Rows that left the queue (`confirmed`, `conflicted`, `retired`) stay as history.
+-- provider input. A `conflicted` row is a value that lost, shown until it is
+-- answered; `confirmed` and `retired` rows are history.
 CREATE TABLE tracker_actions (
     seq INTEGER PRIMARY KEY AUTOINCREMENT,
     id TEXT NOT NULL UNIQUE,
@@ -15,7 +16,7 @@ CREATE TABLE tracker_actions (
     base_json TEXT CHECK(base_json IS NULL OR json_valid(base_json)),
     conflict_json TEXT CHECK(conflict_json IS NULL OR json_valid(conflict_json)),
     phase TEXT NOT NULL CHECK(phase IN ('queued','sent','confirmed','conflicted','retired')),
-    provider TEXT NOT NULL CHECK(provider IN ('linear','asana')),
+    tracker TEXT NOT NULL CHECK(tracker IN ('linear','asana')),
     remote_id TEXT,
     confirmed_revision TEXT,
     error TEXT,
@@ -39,7 +40,7 @@ WHEN NEW.seq IS NOT OLD.seq OR NEW.id IS NOT OLD.id OR
     NEW.task_id IS NOT OLD.task_id OR NEW.subject IS NOT OLD.subject OR
     NEW.kind IS NOT OLD.kind OR NEW.value_json IS NOT OLD.value_json OR
     NEW.base_json IS NOT OLD.base_json OR NEW.conflict_json IS NOT OLD.conflict_json OR
-    NEW.phase IS NOT OLD.phase OR NEW.provider IS NOT OLD.provider OR
+    NEW.phase IS NOT OLD.phase OR NEW.tracker IS NOT OLD.tracker OR
     NEW.remote_id IS NOT OLD.remote_id OR
     NEW.confirmed_revision IS NOT OLD.confirmed_revision OR
     NEW.error IS NOT OLD.error OR NEW.sent_at IS NOT OLD.sent_at OR
@@ -139,17 +140,17 @@ SELECT CASE WHEN path='$.value.value' AND json_extract(doc,'$.value.field') IN (
 END;
 
 -- Carry every unsent or unconfirmed receipt across, owners' creations first so they head
--- their owner. Released rows predate `provider`; every released tracker row was
+-- their owner. Released rows predate `tracker`; every released tracker row was
 -- written as Linear. A creation never prepared (`export_json IS NULL`) is left
 -- to the drain's connect-time enqueue.
-INSERT INTO tracker_actions(id,project_id,kind,value_json,phase,provider,error,looked_at)
+INSERT INTO tracker_actions(id,project_id,kind,value_json,phase,tracker,error,looked_at)
 SELECT lower(hex(randomblob(16))),c.successor_id,'create',json_extract(c.export_json,'$.baseline'),
     CASE WHEN c.export_attempted=1 THEN 'sent' ELSE 'queued' END,'linear',c.export_error,
     c.export_observed_at
 FROM project_transitions c JOIN projects p ON p.id=c.successor_id AND p.wave_id=c.wave_id
 WHERE p.external_project_id IS NULL AND c.local_plan_json IS NOT NULL
     AND json_type(c.export_json,'$.baseline')='array';
-INSERT INTO tracker_actions(id,project_id,subject,kind,value_json,phase,provider)
+INSERT INTO tracker_actions(id,project_id,subject,kind,value_json,phase,tracker)
 SELECT lower(hex(randomblob(16))),c.successor_id,'initiative','link',
     json_object('field','project_initiatives','value',json_array(json_extract(c.export_json,'$.initiative'))),
     CASE WHEN c.export_link_attempted=1 THEN 'sent' ELSE 'queued' END,'linear'
@@ -157,7 +158,7 @@ FROM project_transitions c JOIN projects p ON p.id=c.successor_id AND p.wave_id=
 WHERE p.external_project_id IS NULL AND c.local_plan_json IS NOT NULL
     AND json_type(c.export_json,'$.baseline')='array'
     AND json_extract(c.export_json,'$.initiative') IS NOT NULL;
-INSERT INTO tracker_actions(id,task_id,kind,value_json,phase,provider,error,looked_at)
+INSERT INTO tracker_actions(id,task_id,kind,value_json,phase,tracker,error,looked_at)
 SELECT lower(hex(randomblob(16))),c.task_id,'create',json_extract(c.export_json,'$.baseline'),
     CASE WHEN c.export_attempted=1 THEN 'sent' ELSE 'queued' END,'linear',c.export_error,
     c.export_observed_at
@@ -168,7 +169,7 @@ WHERE t.external_issue_id IS NULL AND (t.planning_deleted_at IS NULL OR c.export
 -- Field edits and deletions: each attempted one (for its lost-reply look) and
 -- the newest unsent one per field. An owner neither bound nor creating has
 -- nothing to send; its creation will carry its current values.
-INSERT INTO tracker_actions(id,task_id,subject,kind,value_json,base_json,phase,provider,error,confirmed_revision)
+INSERT INTO tracker_actions(id,task_id,subject,kind,value_json,base_json,phase,tracker,error,confirmed_revision)
 SELECT c.id,c.task_id,CASE WHEN c.field='deleted' THEN NULL ELSE c.field END,
     CASE WHEN c.field='deleted' THEN 'delete' ELSE 'field' END,c.value_json,c.base_json,
     CASE WHEN c.attempted=1 THEN 'sent' ELSE 'queued' END,'linear',c.error,c.acknowledged_revision
@@ -177,7 +178,7 @@ WHERE c.acknowledged=0 AND c.conflict_json IS NULL
     AND (c.attempted=1 OR c.seq=(SELECT max(seq) FROM task_changes WHERE task_id=c.task_id AND field=c.field))
     AND (t.external_issue_id IS NOT NULL OR EXISTS(SELECT 1 FROM tracker_actions e WHERE e.task_id=c.task_id AND e.kind='create'))
 ORDER BY c.seq;
-INSERT INTO tracker_actions(id,project_id,subject,kind,value_json,base_json,phase,provider,error,confirmed_revision)
+INSERT INTO tracker_actions(id,project_id,subject,kind,value_json,base_json,phase,tracker,error,confirmed_revision)
 SELECT c.id,c.project_id,CASE WHEN c.field='task_order' THEN NULL ELSE c.field END,
     CASE WHEN c.field='task_order' THEN 'order' ELSE 'field' END,c.value_json,c.base_json,
     CASE WHEN c.attempted=1 THEN 'sent' ELSE 'queued' END,'linear',c.error,c.acknowledged_revision
@@ -188,7 +189,7 @@ WHERE c.acknowledged=0 AND c.conflict_json IS NULL
 ORDER BY c.seq;
 
 -- State: the target as a Disposition, against the state last observed.
-INSERT INTO tracker_actions(id,task_id,kind,value_json,base_json,phase,provider,error)
+INSERT INTO tracker_actions(id,task_id,kind,value_json,base_json,phase,tracker,error)
 SELECT d.id,d.task_id,'state',
     json_object('field','disposition','value',json_object('planning_state',d.target,
         'planning_completed',json(CASE WHEN d.target='completed' THEN 'true' ELSE 'false' END),
@@ -207,7 +208,7 @@ ORDER BY d.seq;
 
 -- Comments carry no attempt flag; each is treated as sent with its reply
 -- unknown, which a Linear resend (same id) or an Asana text match confirms.
-INSERT INTO tracker_actions(id,task_id,subject,kind,value_json,phase,provider,error)
+INSERT INTO tracker_actions(id,task_id,subject,kind,value_json,phase,tracker,error)
 SELECT lower(hex(randomblob(16))),c.task_id,d.comment_id,'comment',
     json_object('field','comment_content','value',json_object('body',json_extract(d.comment_json,'$.body'),
         'author',json(json_extract(d.comment_json,'$.author')),'created_at',json_extract(d.comment_json,'$.created_at'))),
@@ -221,7 +222,7 @@ ORDER BY d.rowid;
 -- on the source Task under the relation's own id, held until both Tasks have
 -- tracker objects. An older lf still looks before it relates, so it cannot
 -- relate them twice.
-INSERT OR IGNORE INTO tracker_actions(id,task_id,subject,kind,value_json,phase,provider)
+INSERT OR IGNORE INTO tracker_actions(id,task_id,subject,kind,value_json,phase,tracker)
 SELECT lower(json_extract(e.kind_json,'$.intent.relation_id')),source.id,
     'relation:'||lower(json_extract(e.kind_json,'$.intent.relation_id')),'link',
     json_object('target',min(target.id)),'queued','linear'

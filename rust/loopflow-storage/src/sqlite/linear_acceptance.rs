@@ -15,9 +15,9 @@ pub fn accept_linear_project_in(
     initiative: &str,
     project: &TrackerProject,
     observed_at: i64,
-    provider: crate::provider::Provider,
+    tracker: crate::planning_sync::TrackerKind,
 ) -> StoreResult<()> {
-    let provider = provider.as_str();
+    let provider = tracker.as_str();
     let mut conn = store.conn.lock().expect("store mutex poisoned");
     let repo: String = conn.query_row(
         "SELECT repo FROM waves WHERE id=?1",
@@ -115,9 +115,9 @@ pub fn accept_linear_issue_in(
     project: Option<&TrackerProject>,
     observed_at: i64,
     confirmed_wave: Option<(&WaveId, &str)>,
-    provider: crate::provider::Provider,
+    tracker: crate::planning_sync::TrackerKind,
 ) -> StoreResult<()> {
-    let provider = provider.as_str();
+    let provider = tracker.as_str();
     let mut conn = store.conn.lock().expect("store mutex poisoned");
     if let Some(project) = project {
         validate_project_membership(&conn, repo, project, provider)?;
@@ -762,7 +762,7 @@ fn record_adoptions(
                     &crate::work::task::TaskEventKind::Progress {
                         summary: format!(
                             "Adopted {} state {}; local intention {} remains in action {}. Local Workflow unchanged.",
-                            action.provider.display_name(),
+                            action.tracker.display_name(),
                             state(&remote["value"]),
                             state(&action.value),
                             action.id

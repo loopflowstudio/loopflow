@@ -1,13 +1,20 @@
 import Foundation
 
 /// A Task's or Project's slice of `lf repo plan`'s actions: what its tracker
-/// has yet to confirm, and each value the tracker won until it is saved again.
+/// has yet to confirm (open), and each value the tracker won (lost) until it
+/// is answered.
 public struct TrackerSync: Decodable, Sendable, Hashable {
     public let actions: [TrackerActionStatus]
 }
 
 public enum TrackerActionPhase: String, Decodable, Sendable, Hashable {
     case queued, sent, confirmed, conflicted, retired
+}
+
+/// How a person answers a lost value: `lf task sync --keep-theirs` or `--use-mine`.
+public enum LostAnswer: String, Encodable, Sendable, Hashable {
+    case keepTheirs = "keep_theirs"
+    case useMine = "use_mine"
 }
 
 /// What a tracker action addresses.
@@ -18,6 +25,14 @@ public enum TrackerActionOwnerKind: String, Decodable, Sendable, Hashable {
 /// Where a planning change goes: Git's journal, or a queued tracker.
 public enum TrackerKind: String, Decodable, Sendable, Hashable {
     case git, linear, asana
+
+    public var displayName: String {
+        switch self {
+        case .git: "Git"
+        case .linear: "Linear"
+        case .asana: "Asana"
+        }
+    }
 }
 
 public struct TrackerActionStatus: Decodable, Sendable, Hashable, Identifiable {

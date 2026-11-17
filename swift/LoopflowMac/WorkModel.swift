@@ -2636,6 +2636,14 @@ final class WorkModel {
         }
     }
 
+    /// Answer a value the Task's tracker kept over a local one.
+    func answerLost(_ task: RoadmapTask, action: TrackerActionStatus, answer: LostAnswer) async {
+        await performTaskAction(task.id) {
+            try await query.answerLost(issue: task.task.identifier, answer: answer, action: action.id,
+                                       cwd: WaveOrigin.resolve(task.task.repo))
+        }
+    }
+
     func moveTask(_ task: RoadmapTask, toWave wave: String?) async {
         await performTaskAction(task.id) {
             try await query.moveTask(issue: task.task.identifier, wave: wave,

@@ -185,6 +185,23 @@ writes! {
     TaskHold { directory: PathBuf, issue: String } => task::Hold;
     { issue, .. } => task::hold(directory, issue, None)?,
 
+    /// `lf task sync <issue> [--keep-theirs | --use-mine] [--action <id>]`:
+    /// exchange the Task with its tracker now, first answering the values it
+    /// lost (or the one `action` names). Answers what the command prints.
+    #[serde(rename = "task.sync")]
+    TaskSync {
+        directory: PathBuf,
+        issue: String,
+        answer: Option<loopflow_execution::store::planning_sync::LostAnswer>,
+        action: Option<String>,
+    } => String;
+    { issue, answer, action, .. } => loopflow_execution::ops::task::task_sync(
+        &task_repo(issue)?,
+        issue,
+        *answer,
+        action.as_deref(),
+    )?,
+
     /// `lf steer <issue> <message> --json`: direction for the Task's
     /// runs, whoever writes it.
     #[serde(rename = "task.steer")]
@@ -1135,6 +1152,7 @@ impl Write {
             | Self::TaskRun { directory, .. }
             | Self::TaskShip { directory, .. }
             | Self::TaskHold { directory, .. }
+            | Self::TaskSync { directory, .. }
             | Self::TaskSteer { directory, .. }
             | Self::TaskReport { directory, .. }
             | Self::TaskInterrupt { directory, .. }

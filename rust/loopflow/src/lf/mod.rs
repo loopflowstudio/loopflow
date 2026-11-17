@@ -2157,7 +2157,21 @@ pub enum TaskCommand {
     },
 
     /// Exchange a Task with its tracker now: look for what was sent, resend what it lacks
-    Sync { issue: String },
+    #[command(after_help = "A lost line is a value the tracker kept over yours. \
+--keep-theirs closes it; --use-mine saves yours again and sends it.")]
+    #[command(group(clap::ArgGroup::new("answer").args(["keep_theirs", "use_mine"])))]
+    Sync {
+        issue: String,
+        /// Keep the tracker's value for each lost line
+        #[arg(long)]
+        keep_theirs: bool,
+        /// Save each lost value again, which sends it
+        #[arg(long)]
+        use_mine: bool,
+        /// Answer only this lost line (its action id in `lf task show --json`)
+        #[arg(long, value_name = "ID", requires = "answer")]
+        action: Option<String>,
+    },
     /// Ensure tracked Task Work and its worktree without launching a Graph
     Checkout {
         issue: Option<String>,

@@ -21,8 +21,8 @@ required in the type; a fifth harness is one file.
 LOO-913 (#1953, which removes account routing) is on main at 4a0691a9a0 and
 merged into this branch. Add no account selection back.
 
-Main is merged through f38dbf4223 (#1959, #1961, #1962; they touch only
-`graph/`, not harness, transport or agent code). #1955 (528ccd8eda) is merged into this checkout. `native_exit::record_exit`
+Main is merged through 4852348e5c (#1959, #1961, #1962, #1963; they touch
+only Graph code and builtin skills, not harness, transport or agent code). #1955 (528ccd8eda) is merged into this checkout. `native_exit::record_exit`
 uses main's `Result<()>` body with `&Admitted`; native interruption no longer
 reads a stored AgentProcess outcome. Main also supplies `PromptBuild::skill_version`.
 Earlier merge analysis is in b9542ecef5:scratch/harness-launch-type.md.
@@ -385,23 +385,15 @@ supplied runtime stays caller-owned. Both optional launch fields, `open_owner` a
 the unattached-launch test are deleted. `admit_for_test(home)` returns `Admitted`.
 
 Remaining work:
-3. **Finish moving holder into `Launch`.** Mode comes from
-   `Delegation::Here { mode }` and reaches `PromptBuild` as a required argument;
-   previews use `LaunchInput::mode` without delegation. `transport::holder`
-   consumes the caller's Work fact and is the only `Holder::of` caller. Place
-   still reads named Work independently; inherited `LF_AS` stays here + Server.
-   Slice 3b is implemented: `execute_command` and `run::resume` no longer take
-   `Mode`; no `Mode::Headless` literal remains in `bin/lf.rs`. `dispatch_here`
-   retains the shared preparation and invokes either the ordinary command or
-   the launch continuation; only the latter captures the delegated mode.
-   Inline prompts dispatch beside skill and default-agent launches.
-   Headless resume names `Mode::Headless` where it builds its turn.
-   Still remove `AgentConfig::holder` and `Holder: Default` with slice 4 so
-   reporting ownership travels on `Launch`, through native commands and drivers.
+3. **Mode and holder resolved once: done (3a, 3b).** Mode comes from
+   `Delegation::Here { mode }` and reaches `PromptBuild` as a required
+   argument; previews call `LaunchInput::mode`; `execute_command` and
+   `run::resume` take no `Mode`, and `bin/lf.rs` has no `Mode::Headless`
+   literal. `transport::holder` is the only `Holder::of` caller. Place reads
+   named Work; inherited `LF_AS` stays here + Server. `AgentConfig::holder`
+   and `Holder: Default` go in slice 4, when ownership travels on `Launch`.
    Focused: `--lib transport::launch_mode_tests::` and
-   `--lib lf::commands::run::launch_policy_tests::`. Shared `Launch` and the
-   per-harness `open`/`Driver` cut (slices 4–5) remain required before this
-   Task meets acceptance.
+   `--lib lf::commands::run::launch_policy_tests::`.
 4. **`Harness` + `Driver` + per-harness `open`.** Move the table rows above;
    one `harness::launch`; shared `native::run`. `claude.rs`'s private
    `Launch { config, owner }` is the driver-side half of this and goes when

@@ -492,17 +492,10 @@ fn execute_target(
                         && !loopflow_execution::journal::has_caller()
                         && loopflow_execution::repo::discover_repo_root(&repo_root)?.is_some()
                     {
-                        let options = loopflow_execution::ops::CommitOptions {
-                            add: true,
-                            message: Some(format!("lf commit: {name}")),
-                            ..loopflow_execution::ops::CommitOptions::for_task(name)
-                        };
-                        loopflow_execution::ops::commit_workflow(
-                            &repo_root,
-                            &options,
-                            &loopflow_execution::ops::NullProgress,
-                            &|_| {},
-                        )?;
+                        // Best-effort: the skill ran whether or not its edits commit.
+                        if loopflow_execution::ops::step_commit_pending(&repo_root) {
+                            commit_skill_step(&repo_root, name, cli.agent.as_deref());
+                        }
                     }
                     Ok(())
                 })
@@ -516,6 +509,28 @@ fn execute_target(
                 loopflow::lf::commands::graph::run(&graph, message, cli, &repo_root, binding)
             })
         }
+    }
+}
+
+/// A child `lf commit --step`, as a Graph runs after each skill step, so the
+/// message-writing agent is a Process of its own. The run's `-a` writes the
+/// message only when `commit-message` has no agent of its own.
+fn commit_skill_step(repo_root: &Path, skill: &str, agent: Option<&str>) {
+    let committed = loopflow_execution::os_process::resolve_lf_binary()
+        .map_err(|error| error.to_string())
+        .and_then(|lf| {
+            std::process::Command::new(lf)
+                .args(["commit", "--step", skill])
+                .args(agent.map(|agent| ["--agent", agent]).into_iter().flatten())
+                .current_dir(repo_root)
+                .stdin(std::process::Stdio::null())
+                .status()
+                .map_err(|error| error.to_string())
+        });
+    match committed {
+        Ok(status) if status.success() => {}
+        Ok(status) => tracing::warn!(skill, %status, "could not commit the skill's edits"),
+        Err(error) => tracing::warn!(skill, %error, "could not commit the skill's edits"),
     }
 }
 
@@ -1794,10 +1809,6 @@ fn run() -> anyhow::Result<()> {
                     cmd: loopflow::lf::ConfigCommand::Settings { .. }
                 } | Commands::Open(_)
                     | Commands::Workspace(_)
-                    | Commands::Account {
-                        cmd: Some(loopflow::lf::AccountCommand::Next { .. }),
-                        ..
-                    }
             )
         )
     {
@@ -2076,19 +2087,6 @@ fn run() -> anyhow::Result<()> {
     }
 
     {
-        let account_selection =
-            loopflow_execution::provider_account::selection::AccountSelection::from_flags(
-                &cli.account,
-                &cli.only_account,
-            )?;
-        let _account_selection = if !account_selection.is_default() {
-            Some(EnvGuard::set(
-                loopflow_execution::provider_account::selection::ACCOUNT_SELECTION_ENV,
-                account_selection.env_value()?,
-            ))
-        } else {
-            None
-        };
         debug!(batch = cli.batch, "parsed CLI arguments");
 
         dispatch(cli, &args)
@@ -2440,14 +2438,8 @@ fn task_run_open_args(cli: &Cli) -> Option<TaskRunOpen> {
     if let Some(agent) = &cli.agent {
         args.extend(["--agent".into(), agent.clone()]);
     }
-    for (flag, values) in [
-        ("--account", &cli.account),
-        ("--only-account", &cli.only_account),
-        ("--setting", &cli.settings),
-    ] {
-        for value in values {
-            args.extend([flag.to_owned(), value.clone()]);
-        }
+    for value in &cli.settings {
+        args.extend(["--setting".to_owned(), value.clone()]);
     }
     Some(TaskRunOpen {
         args,
@@ -3070,20 +3062,6 @@ fn execute_command(
             }),
         },
         Some(Commands::ContextBlock {
-            moment: ContextMoment::Limit,
-            ..
-        }) => {
-            loopflow_execution::provider_account::observe_native_limit();
-            Ok(())
-        }
-        Some(Commands::ContextBlock {
-            moment: ContextMoment::RecordLimit,
-            ..
-        }) => {
-            loopflow_execution::provider_account::record_limit();
-            Ok(())
-        }
-        Some(Commands::ContextBlock {
             delivery, moment, ..
         }) => loopflow::lf::commands::context::emit_block(delivery.as_deref(), *moment),
         Some(Commands::Holder { .. }) => unreachable!("the holder dispatches before any store"),
@@ -3101,18 +3079,9 @@ fn execute_command(
                 loopflow::lf::commands::doctor::run(*json)
             }
         }
-        Some(Commands::Account {
-            cmd,
-            target,
-            cached,
-            json,
-        }) => loopflow::lf::commands::account::run(
-            cmd.as_ref(),
-            target.as_deref(),
-            *cached,
-            *json,
-            cli.agent.as_deref(),
-        ),
+        Some(Commands::Account { cmd, target, json }) => {
+            loopflow::lf::commands::account::run(cmd.as_ref(), target.as_deref(), *json)
+        }
         Some(Commands::Server { cmd }) => loopflow::lf::commands::server::run(cmd),
         Some(Commands::Machine { cmd }) => loopflow::lf::commands::machine::run(cmd, cli.batch),
         Some(Commands::Pr { cmd }) => in_repo_runtime(args, |_| {
@@ -3122,11 +3091,17 @@ fn execute_command(
             in_repo_runtime(args, |_| loopflow::lf::commands::ops::run_wt(cmd))
         }
         Some(Commands::Commit {
+            step: Some(step), ..
+        }) => in_repo_runtime(args, |_| {
+            loopflow::lf::commands::ops::run_step_commit(step, cli.agent.as_deref())
+        }),
+        Some(Commands::Commit {
             message,
             push,
             no_add,
             paths,
             json,
+            step: None,
         }) => in_repo_runtime(args, |_| {
             loopflow::lf::commands::ops::run_commit(
                 message.as_deref(),
@@ -3406,8 +3381,6 @@ mod tests {
             "/checkout",
             "--agent",
             "claude",
-            "--account",
-            "personal",
             "task",
             "run",
             "LOO-42",
@@ -3430,7 +3403,6 @@ mod tests {
         assert!(opened.wt.is_none());
         assert!(opened.cwd.is_none());
         assert_eq!(opened.agent, cli.agent);
-        assert_eq!(opened.account, cli.account);
     }
 
     #[test]
@@ -3603,7 +3575,7 @@ mod tests {
         for invocation in [
             vec!["--task", "LOO-438", "skill", "task/session"],
             vec!["--wt", "feature", "skill", "debug"],
-            vec!["-b", "-c", "--account", "fixture", "graph", "ship-api"],
+            vec!["-b", "-c", "--setting", "chrome=false", "graph", "ship-api"],
             vec!["task", "run", "LOO-438", "pursue"],
             vec!["pr", "publish"],
             vec!["pr", "open"],
@@ -3613,7 +3585,7 @@ mod tests {
                 for position in 0..=invocation.len() {
                     // Do not split another option from its value.
                     if position > 0
-                        && matches!(invocation[position - 1], "--task" | "--wt" | "--account")
+                        && matches!(invocation[position - 1], "--task" | "--wt" | "--setting")
                     {
                         continue;
                     }
@@ -3735,32 +3707,6 @@ mod tests {
         ];
         let result = reorder_args(args);
         assert_eq!(result, vec!["lf", "-a", "codex", "debug"]);
-    }
-
-    #[test]
-    fn reorder_args_repeatable_account_flags_after_skill() {
-        let args = [
-            "lf",
-            "implement",
-            "--account",
-            "claude=personal",
-            "--account",
-            "codex=reserve",
-        ]
-        .map(String::from)
-        .to_vec();
-
-        assert_eq!(
-            reorder_args(args),
-            vec![
-                "lf",
-                "--account",
-                "claude=personal",
-                "--account",
-                "codex=reserve",
-                "implement"
-            ]
-        );
     }
 
     #[test]

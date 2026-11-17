@@ -6,7 +6,7 @@ is a parse error or an explicit null.
 
 `task_detail.json` pins `lf task status --json`: one Task row (each fact once:
 state, reason, Workflow stage, PR, next command) with its Sessions, Graph
-processes and comments. `lf task list`, `lf wave show` and `lf wave status`
+processes, comments and, once it has ended, the summary of its run. `lf task list`, `lf wave show` and `lf wave status`
 print the same row. Rust round-trips it; Desktop reads `lf desktop` instead.
 
 `task_status.json` pins `lf task show --json`: the planning/execution envelope

@@ -20,7 +20,6 @@ pub fn parse_artifact_key(
 }
 
 pub const CAPTURE_KEY_ENV: &str = "LF_CAPTURE_KEY";
-pub const PROVIDER_ACCOUNT_ID_ENV: &str = "LF_PROVIDER_ACCOUNT_ID";
 pub const SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -174,6 +173,8 @@ pub struct SessionHistory {
     pub work_source: Option<crate::session::WorkSource>,
     pub wave_name: Option<String>,
     pub skill: Option<String>,
+    /// SHA-256 of the resolved skill text the run launched with; `null` when unrecorded.
+    pub skill_version: Option<String>,
     pub observed_at: i64,
     pub first_provider_attempt_at: Option<i64>,
     pub recorded_outcome: Option<String>,

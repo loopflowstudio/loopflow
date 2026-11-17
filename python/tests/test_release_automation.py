@@ -266,7 +266,6 @@ def _cron_host(
         f"""case "$1 $2" in
   "machine id") echo {LOCAL_MACHINE} ;;
   "wave status") cat "$HOME/wave-status.json" ;;
-  "account --json") echo '{{"accounts":[{{"scope":"managed","verification":"accepted"}}]}}' ;;
   "--wave infrastructure") echo "$@" >> "$HOME/ran" ;;
 esac
 """,

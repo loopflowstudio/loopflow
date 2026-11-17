@@ -692,7 +692,6 @@ fn available(cli: &crate::lf::Cli) -> Result<(Vec<Resolved>, Vec<String>)> {
     let records = runtime.block_on(loopflow_execution::ops::human_session::list(
         &store,
         &loopflow_execution::session::SessionFilter {
-            blocked: false,
             on: None,
             orphan: false,
             repo: if scoped {

@@ -6,7 +6,6 @@ use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use base64::prelude::*;
 use loopflow::id::WaveId;
 use loopflow::linear::{LinearIssueId, LinearProjectId};
 use loopflow::store::{StorageConfig, Store};
@@ -271,58 +270,6 @@ fi
     )
 }
 
-#[allow(dead_code)] // Shared synthetic account for provider-backed CLI proofs.
-pub fn register_codex_account(home: &Path) {
-    register_codex_login(home, "fixture");
-}
-
-/// A connected synthetic Codex login `<name>@example.com`, account id `<name>`.
-#[allow(dead_code)]
-pub fn register_codex_login(home: &Path, name: &str) {
-    let account_home = home.join("accounts/codex").join(name);
-    fs::create_dir_all(&account_home).unwrap();
-    let email = format!("{name}@example.com");
-    let email = email.as_str();
-    let claims =
-        BASE64_URL_SAFE_NO_PAD.encode(serde_json::json!({"email": email, "sub": name}).to_string());
-    fs::write(
-        account_home.join("auth.json"),
-        serde_json::json!({"tokens": {
-            "access_token": "synthetic-fixture-token",
-            "id_token": format!("h.{claims}.s")
-        }})
-        .to_string(),
-    )
-    .unwrap();
-    seed_store(home);
-    let store = loopflow::store::open_sqlite(&home.join("loopflow.db")).unwrap();
-    let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    loopflow::provider_account::catalog::upsert_provider_account(
-        &store,
-        &loopflow::store::ProviderAccount {
-            provider: "codex".into(),
-            account_id: loopflow::store::ProviderAccountId::parse(name).unwrap(),
-            home: Some(account_home),
-            login_email: Some(loopflow::profile::EmailAddress::parse(email).unwrap()),
-            observed_email: None,
-            observed_subject: None,
-            observed_credential_digest: None,
-            observed_plan: None,
-            credential_state: loopflow::store::CredentialState::Connected,
-            routing_state: loopflow::store::RoutingState::Automatic,
-            plan: None,
-            paid_through: None,
-            utilization_percent: None,
-            cooldown_until: None,
-            cooldown_reason: None,
-            last_selected_at: None,
-            created_at: now,
-            updated_at: now,
-        },
-    )
-    .unwrap();
-}
-
 /// A launch routes by the process directory: the checkout it runs in, never
 /// the developer's, whose private route belongs to their Machine.
 #[allow(dead_code)] // Shared helper compiled into multiple test crates.
@@ -341,52 +288,6 @@ impl Drop for InDirectory {
     fn drop(&mut self) {
         env::set_current_dir(&self.0).unwrap();
     }
-}
-
-/// A connected synthetic Claude login `<name>@example.com`, account id `<name>`.
-/// Its token is `<name>-token`, so a stand-in Keychain shows who is signed in.
-/// Signing in on macOS needs `FAKE_SECURITY` first on PATH and `USER` set.
-#[allow(dead_code)]
-pub fn register_claude_login(home: &Path, name: &str) {
-    let account_home = home.join("accounts/claude").join(name);
-    fs::create_dir_all(&account_home).unwrap();
-    let credential = serde_json::json!({"claudeAiOauth": {
-        "accessToken": format!("{name}-token"),
-        "expiresAt": 4102444800000i64
-    }})
-    .to_string();
-    fs::write(account_home.join(".credentials.json"), &credential).unwrap();
-    let email = format!("{name}@example.com");
-    seed_store(home);
-    let store = loopflow::store::open_sqlite(&home.join("loopflow.db")).unwrap();
-    let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    loopflow::provider_account::catalog::upsert_provider_account(
-        &store,
-        &loopflow::store::ProviderAccount {
-            provider: "claude".into(),
-            account_id: loopflow::store::ProviderAccountId::parse(name).unwrap(),
-            home: Some(account_home),
-            login_email: Some(loopflow::profile::EmailAddress::parse(&email).unwrap()),
-            observed_email: Some(email),
-            observed_subject: Some(name.into()),
-            observed_credential_digest: Some({
-                use sha2::Digest;
-                format!("{:x}", sha2::Sha256::digest(credential.as_bytes()))
-            }),
-            observed_plan: None,
-            credential_state: loopflow::store::CredentialState::Connected,
-            routing_state: loopflow::store::RoutingState::Automatic,
-            plan: None,
-            paid_through: None,
-            utilization_percent: None,
-            cooldown_until: None,
-            cooldown_reason: None,
-            last_selected_at: None,
-            created_at: now,
-            updated_at: now,
-        },
-    )
-    .unwrap();
 }
 
 pub struct EnvGuard {
@@ -454,8 +355,7 @@ impl EnvGuard {
         } else {
             env::set_var("LF_HOME", lf_home.path());
         }
-        // A shared launch signs its provider's native home in as the routed
-        // account; that home must never be the developer's own.
+        // Native provider homes must never reach the developer's own credentials.
         env::set_var("CODEX_HOME", lf_home.path().join("native-codex"));
         env::set_var("CLAUDE_CONFIG_DIR", lf_home.path().join("native-claude"));
         Self {
@@ -535,7 +435,18 @@ pub fn select_wave_graph(
         .unwrap_or_default();
     config.insert("graph".into(), name.into());
     fs::create_dir_all(path.parent().unwrap()).unwrap();
-    fs::write(path, serde_yaml_ng::to_string(&config).unwrap()).unwrap();
+    fs::write(&path, serde_yaml_ng::to_string(&config).unwrap()).unwrap();
+    for args in [
+        vec!["add", "--", path.to_str().unwrap()],
+        vec!["commit", "--quiet", "-m", "Select the Wave's graph"],
+    ] {
+        let status = std::process::Command::new("git")
+            .current_dir(repo)
+            .args(args)
+            .status()
+            .unwrap();
+        assert!(status.success(), "git could not commit the Wave's graph");
+    }
 }
 
 #[allow(dead_code)] // Shared helper compiled into integration tests that do not need Task state.
@@ -920,65 +831,8 @@ pub fn recorded_graphs(home: &Path) -> Vec<(Option<String>, Vec<serde_json::Valu
         .collect()
 }
 
-/// Managed skill execution in a Task checkout needs a connected agent account.
-#[allow(dead_code)] // Shared fixture compiled into multiple test crates.
-pub fn managed_codex_account(home: &Path) {
-    let account_home = home.join("fixture-codex");
-    std::fs::create_dir(&account_home).unwrap();
-    let claims =
-        BASE64_URL_SAFE_NO_PAD.encode(r#"{"email":"fixture@example.com","sub":"fixture"}"#);
-    std::fs::write(
-        account_home.join("auth.json"),
-        serde_json::json!({"tokens":{"access_token":"fixture","id_token":format!("h.{claims}.s")}})
-            .to_string(),
-    )
-    .unwrap();
-    seed_store(home);
-    let store = loopflow::store::open_sqlite(&home.join("loopflow.db")).unwrap();
-    let account_id = loopflow::store::ProviderAccountId::parse("fixture").unwrap();
-    loopflow::provider_account::catalog::upsert_provider_account(
-        &store,
-        &loopflow::store::ProviderAccount {
-            provider: "codex".into(),
-            account_id: account_id.clone(),
-            home: Some(account_home),
-            login_email: Some(
-                loopflow::profile::EmailAddress::parse("fixture@example.com").unwrap(),
-            ),
-            observed_email: None,
-            observed_subject: None,
-            observed_credential_digest: None,
-            observed_plan: None,
-            credential_state: loopflow::store::CredentialState::Connected,
-            routing_state: loopflow::store::RoutingState::Automatic,
-            plan: None,
-            paid_through: None,
-            utilization_percent: None,
-            cooldown_until: None,
-            cooldown_reason: None,
-            last_selected_at: None,
-            created_at: 1,
-            updated_at: 1,
-        },
-    )
-    .unwrap();
-    loopflow::provider_account::catalog::set_provider_route(
-        &store,
-        &loopflow::profile::ProviderRoute {
-            scope: loopflow::profile::RouteScope::Default,
-            provider: loopflow::provider_auth::Provider::Codex,
-            accounts: vec![account_id],
-            created_at: 1,
-            updated_at: 1,
-        },
-    )
-    .unwrap();
-}
-
 pub mod human_session;
 
-pub mod identity;
 pub mod planning_tasks;
-pub mod subscription;
 
 pub mod task_graph;

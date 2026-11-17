@@ -180,8 +180,8 @@ fn open_graph_execution_from_facts(
     None
 }
 
-/// Ends a recorded limit reason when the step moved to another agent rather
-/// than another account; the agent follows.
+/// Ends a recorded limit reason when the step moved to another agent; the
+/// agent follows.
 pub const MOVED_TO: &str = "; continuing on ";
 
 /// Ends a recorded limit reason when a provider refused the step and no
@@ -218,12 +218,9 @@ fn apply_limit_recovery(
             );
         }
         (TaskExecutionState::Running, None) => {
-            snapshot.reason = match reason.rsplit_once(MOVED_TO) {
-                Some((reason, agent)) => format!("{label} went on under {agent} after: {reason}"),
-                None => {
-                    format!("{label} went on under another {provider} account after: {reason}")
-                }
-            };
+            if let Some((reason, agent)) = reason.rsplit_once(MOVED_TO) {
+                snapshot.reason = format!("{label} went on under {agent} after: {reason}");
+            }
         }
         (TaskExecutionState::Blocked, Some(retry_at)) => {
             snapshot.state = TaskExecutionState::Waiting;
@@ -405,10 +402,11 @@ mod tests {
         assert_eq!(waiting.state, TaskExecutionState::Waiting);
         assert!(waiting.reason.contains("waiting for claude capacity until"));
 
-        let mut retrying = snapshot(TaskExecutionState::Running);
-        apply_limit_recovery(&mut retrying, &recovery(None), "LOO-1", || true);
-        assert_eq!(retrying.state, TaskExecutionState::Running);
-        assert!(retrying.reason.contains("another claude account"));
+        // A running step whose recovery names no move keeps its own reason.
+        let mut running = snapshot(TaskExecutionState::Running);
+        apply_limit_recovery(&mut running, &recovery(None), "LOO-1", || true);
+        assert_eq!(running.state, TaskExecutionState::Running);
+        assert_eq!(running.reason, "implement: provider_rate_limited");
 
         let mut moved = snapshot(TaskExecutionState::Running);
         let codex = AgentLimitRecovery {
@@ -425,7 +423,7 @@ mod tests {
             "implement went on under claude after: codex_error: You've hit your usage limit"
         );
 
-        // A step that moved accounts and then failed for its own reasons failed.
+        // A step that recovered and then failed for its own reasons failed.
         let mut failed = snapshot(TaskExecutionState::Blocked);
         apply_limit_recovery(&mut failed, &recovery(None), "LOO-1", || true);
         assert_eq!(failed.state, TaskExecutionState::Blocked);

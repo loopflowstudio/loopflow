@@ -307,17 +307,13 @@ pub struct SessionFilter {
     pub limit: usize,
     /// Present for stable-ID pages; empty starts the first page.
     pub after: Option<String>,
-    /// Only Sessions whose next message would fail: their login cannot take
-    /// their model now.
-    pub blocked: bool,
-    /// Only Sessions using this login (`work@`, `claude=work@`) or on `harness[:model]`.
+    /// Only Sessions on `harness[:model]`.
     pub on: Option<String>,
 }
 
 impl Default for SessionFilter {
     fn default() -> Self {
         Self {
-            blocked: false,
             on: None,
             orphan: false,
             repo: None,
@@ -372,7 +368,7 @@ pub struct SessionSummary {
     pub cwd: std::path::PathBuf,
     pub skill: Option<String>,
     pub provider: Option<String>,
-    /// The login its current conversation last ran on.
+    /// Historical attribution: the saved login its conversation last recorded; never the current native login.
     pub account: Option<crate::ProviderAccountId>,
     pub model: Option<String>,
     pub node: Option<u32>,
@@ -434,6 +430,8 @@ pub struct HistoryCapture {
     pub cwd: std::path::PathBuf,
     pub repo: Option<String>,
     pub skill: Option<String>,
+    /// SHA-256 of the skill text this input launched with; absent for another input's.
+    pub skill_version: Option<String>,
     pub provider: Option<String>,
     pub model: Option<String>,
     pub interactive: bool,

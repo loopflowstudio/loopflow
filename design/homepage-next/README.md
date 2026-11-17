@@ -11,6 +11,9 @@ homepage. Its editable source (`website/home.html`, `website/static/style.css`,
 `website/content.yaml`) is on the `homepage-differentiators` branch, served
 with `cd website && uv run python dev.py serve`.
 
+Subscription balancing and account quota bars are removed from this snapshot.
+Native clients own authentication; provider-reported usage remains.
+
 Several claims are not true yet. To ship the draft, each needs to be true
 first.
 
@@ -37,8 +40,8 @@ first.
 
 5. **`lf task status` with no ID.** The hero shows a board: each Task, its title,
    step bars, and "design · you" when the step is yours.
-6. **The big `lf` card.** It shows `lf usage --wt`, `lf --machine mini monitor`,
-   and `lf account` with usage bars. Check each against Clap and real output.
+6. **The big `lf` card.** It shows `lf usage --wt` with provider-reported usage
+   and `lf --machine mini monitor`. Check each against Clap and real output.
 7. **The agent in the hero.** One request becomes three `lf task create … --run`
    calls, then a report of which Tasks want you. Check that the `loopflow`
    skill does this, and record a real run to replace the drawing.

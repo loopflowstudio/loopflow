@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use crate::harness::agent_process::AttachmentOwner;
 use crate::process::SessionAttachment;
 use crate::session_record::CaptureHandoff;
-use crate::store::{ProviderAccountId, StoreError};
+use crate::store::StoreError;
 use loopflow_storage::sqlite::SqliteStore;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -28,9 +28,6 @@ pub struct NativeExit {
     pub cwd: PathBuf,
     /// The capture whose settlement the launcher's caller owned.
     pub capture: Option<CaptureHandoff>,
-    /// The input whose provider session names the conversation to pin.
-    pub capture_key: Option<String>,
-    pub account: Option<ProviderAccountId>,
     /// The launcher's diagnostics log and its size before the provider ran.
     pub diagnostics: (PathBuf, u64),
 }
@@ -69,23 +66,21 @@ pub fn settle(exit: &NativeExit, status: ExitStatus) -> Settled {
             false
         })
     };
-    let interrupted = owner.as_ref().is_some_and(|owner| {
-        !exit.client && judged("the provider's exit record", record_exit(owner))
-    });
+    if let (Some(owner), false) = (&owner, exit.client) {
+        if let Err(error) = record_exit(owner) {
+            tracing::warn!(%error, session = %exit.session, "cannot record the provider's exit");
+        }
+    }
+    // A mover that stopped this provider also took its attachment.
     let lost = owner.as_ref().is_some_and(|owner| {
         judged(
             "this launch's Session attachment",
             attachment_lost(owner).map_err(Into::into),
         )
     });
-    if let (Some((store, ..)), Some(account), Some(key), false) =
-        (&owner, &exit.account, &exit.capture_key, lost)
-    {
-        pin_account(store, &exit.provider, account, key);
-    }
     let command = crate::harness::native_session::SessionCommandOutcome {
         status,
-        interrupted: interrupted || lost,
+        interrupted: lost,
         moved: lost.then(|| owner.as_ref().and_then(departure)).flatten(),
     };
     let outcome = command.capture_outcome();
@@ -169,20 +164,15 @@ fn open_store() -> Result<SqliteStore> {
     )?)
 }
 
-/// Record the provider's exit under its attachment; whether an interrupt ended it.
-pub(crate) fn record_exit(owner: &AttachmentOwner) -> Result<bool> {
+/// Record the provider's exit under its attachment.
+pub(crate) fn record_exit(owner: &AttachmentOwner) -> Result<()> {
     let (store, session, attachment) = owner;
     match store.with_session_attachment(session, attachment, || {
         store.record_agent_process_exit(session, attachment, true)
     }) {
-        Ok(()) | Err(StoreError::InvalidAuthority(_)) => {}
-        Err(error) => return Err(error.into()),
+        Ok(()) | Err(StoreError::InvalidAuthority(_)) => Ok(()),
+        Err(error) => Err(error.into()),
     }
-    Ok(store
-        .agent_process(&attachment.agent_process_id)?
-        .is_some_and(|process| {
-            process.completed_at.is_some() && process.outcome.as_deref() == Some("interrupted")
-        }))
 }
 
 /// Whether a mover ended this launch's attachment.
@@ -206,30 +196,6 @@ pub fn departure((store, session, attachment): &AttachmentOwner) -> Option<Strin
         tracing::warn!(%error, "cannot read where this conversation moved");
         None
     })
-}
-
-/// Record the account the provider session ran on, now that it has: the
-/// conversation lives in the shared home from here on.
-fn pin_account(
-    store: &SqliteStore,
-    provider: &str,
-    account: &ProviderAccountId,
-    capture_key: &str,
-) {
-    let pinned = (|| -> Result<()> {
-        let Ok(provider) = provider.parse::<crate::provider_auth::Provider>() else {
-            return Ok(());
-        };
-        let dir = crate::session_record::capture_dir(capture_key)?;
-        let Some(session) = crate::session_record::read_provider_session(&dir)? else {
-            return Ok(());
-        };
-        store.pin_provider_session_route(provider, &session.agent_session, account)?;
-        Ok(())
-    })();
-    if let Err(error) = pinned {
-        tracing::warn!(%error, "failed to record the provider session's account");
-    }
 }
 
 #[cfg(test)]
@@ -281,9 +247,8 @@ mod tests {
                 provider: "codex".into(),
                 client: false,
                 cwd: home.into(),
-                capture: Some(capture.hand_off(None, false, None)),
-                capture_key: Some(capture.artifact_key()),
-                account: None,
+                capture: Some(capture.hand_off()),
+
                 diagnostics: (home.join("absent.log"), 0),
             };
             // The store this build knows is gone by the time the provider quits.
@@ -354,9 +319,8 @@ mod tests {
                     provider: "claude".into(),
                     client: false,
                     cwd: home.into(),
-                    capture: Some(capture.hand_off(None, false, None)),
-                    capture_key: Some(capture.artifact_key()),
-                    account: None,
+                    capture: Some(capture.hand_off()),
+
                     diagnostics: (home.join("absent.log"), 0),
                 };
                 let settled = settle(&exit, ExitStatus::from_raw(status));
@@ -419,9 +383,8 @@ mod tests {
                 provider: "claude".into(),
                 client: false,
                 cwd: home.into(),
-                capture: Some(capture.hand_off(None, false, None)),
-                capture_key: Some(capture.artifact_key()),
-                account: None,
+                capture: Some(capture.hand_off()),
+
                 diagnostics: (home.join("absent.log"), 0),
             };
             attachment::finish_session_attachment(
@@ -464,7 +427,6 @@ mod tests {
                 .unwrap()
                 .unwrap();
             assert_eq!(after.completed_at, before.completed_at);
-            assert_eq!(after.outcome, before.outcome);
             let launcher = store.lf_process(&launcher).unwrap().unwrap();
             assert_eq!(launcher.exit_code, Some(0));
             assert_eq!(launcher.outcome.as_deref(), Some("succeeded"));

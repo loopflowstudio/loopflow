@@ -1333,7 +1333,7 @@ async fn operate(
             }
             effect(target, id, instance, trace_id, measured, move || {
                 let _held = reservation;
-                loopflow_execution::provider_account::operations::served(|| {
+                loopflow_execution::provider_auth::operations::served(|| {
                     Ok(serde_json::to_value(change.run()?)?)
                 })
             })

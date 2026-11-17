@@ -390,9 +390,7 @@ context:
 
 ```bash
 lf --wave billing set machine mini                        # your Machine for its Tasks
-lf --wave billing set account.claude work@example.com     # the login that pays
 lf --wave billing set agent codex                         # your agent here; the team's stays claude
-lf set account.claude me@example.com --global             # every repository
 lf wave status billing                                    # each setting and its source
 ```
 
@@ -409,7 +407,7 @@ Task worktrees. `--wave` selects a Wave within that file; `--global` edits
 The same values can be edited by hand or through Desktop. `lf unset <key>` removes
 your declaration and reveals the next applicable value.
 
-Machine choices and ordered accounts are personal file settings too. Credentials,
+Machine choices are personal file settings too. Credentials,
 observed availability and existing work placement remain runtime state. Agent choices
 beat all `default_agent` fallbacks; within each class, personal settings beat shared
 settings. [Configuration](config.md) owns the complete source/scope/target rules and

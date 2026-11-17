@@ -5,12 +5,8 @@ use std::io::Read;
 
 pub(super) async fn receive(cmd: &MachineCredentialCommand) -> anyhow::Result<()> {
     match cmd {
-        MachineCredentialCommand::Inspect {
-            provider,
-            login,
-            full,
-        } => {
-            println!("{}", credentials::inspect(*provider, login, *full).await?);
+        MachineCredentialCommand::Inspect { provider, login } => {
+            println!("{}", credentials::inspect(*provider, login).await?);
         }
         MachineCredentialCommand::Receive => {
             let mut bytes = Vec::new();
@@ -19,7 +15,6 @@ pub(super) async fn receive(cmd: &MachineCredentialCommand) -> anyhow::Result<()
                 .read_to_end(&mut bytes)?;
             credentials::receive(&bytes).await?;
         }
-        MachineCredentialCommand::Renew => credentials::renew().await?,
     }
     Ok(())
 }

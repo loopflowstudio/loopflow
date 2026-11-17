@@ -82,12 +82,6 @@ const REQUESTS: &[&str] = &[
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/account_connect.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/account_disconnect.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/account_list.json"),
-    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/account_redeem_reset.json"),
-    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/account_next_request.json"),
-    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/account_set.json"),
-    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/account_use.json"),
-    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/account_pause.json"),
-    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/account_unpause.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/attach.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/session_start.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/checkout_commit.json"),
@@ -142,19 +136,9 @@ const RESPONSES: &[(&str, &str, &str)] = &[
         include_str!("../../../loopflow-execution/tests/fixtures/dto/server/account.json"),
     ),
     (
-        "account_redeemed",
-        "account.redeem_reset",
-        include_str!("../../../loopflow-execution/tests/fixtures/dto/server/account_redeemed.json"),
-    ),
-    (
         "account_report",
         "account.list",
         include_str!("../../../loopflow-execution/tests/fixtures/dto/server/account_report.json"),
-    ),
-    (
-        "account_next",
-        "account.next",
-        include_str!("../../../loopflow-execution/tests/fixtures/dto/server/account_next.json"),
     ),
     (
         "checkout_committed",

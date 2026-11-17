@@ -22,7 +22,7 @@ struct WorkObservationTransportTests {
         await server.stop()
         let path = try #require(try JSONSerialization.jsonObject(with: Data(printed.utf8)) as? [String: String])["path"]!
         let graph = try String(contentsOfFile: path, encoding: .utf8)
-        #expect(graph.contains("implement"))
+        #expect(graph.contains("graph: build"))
     }
 
     @Test("The server serves a read and ends it on cancel")

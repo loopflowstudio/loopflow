@@ -125,8 +125,8 @@ fn inspection_is_identical_across_spellings_and_has_no_launch_side_effects() {
             vec!["install", "advance-switch", "--help"],
         ],
         vec![
-            vec!["help", "account", "next"],
-            vec!["account", "next", "--help"],
+            vec!["help", "account", "connect"],
+            vec!["account", "connect", "--help"],
         ],
         vec![
             vec!["help", "paired"],
@@ -319,13 +319,7 @@ fn removed_options_and_aliases_report_usage_errors_without_effects() {
             "--repo",
             "a/b",
         ],
-        &[
-            "account",
-            "--cached",
-            "connect",
-            "codex",
-            "work@example.com",
-        ],
+        &["account", "--json", "connect", "codex", "work@example.com"],
         &["account", "route", "--json", "set", "codex", "work@"],
         &["wt", "rm", "unused"],
         &["-M", "unused", "skill", "solo"],
@@ -522,8 +516,8 @@ fn shorthand_stops_at_leaf_and_passthrough_boundaries() {
     let normalized =
         |args: &[&str]| normalize_args(args.iter().map(|arg| arg.to_string()).collect()).unwrap();
     assert_eq!(
-        normalized(&["lf", "account", "nex"]),
-        ["lf", "account", "next"]
+        normalized(&["lf", "account", "connec"]),
+        ["lf", "account", "connect"]
     );
     assert_eq!(
         normalized(&["lf", "land", "--wait-and-fix"]),
@@ -548,28 +542,31 @@ fn help_for_a_provider_stops_at_the_provider_as_execution_does() {
     let normalized =
         |args: &[&str]| normalize_args(args.iter().map(|arg| arg.to_string()).collect()).unwrap();
     assert_eq!(
-        normalized(&["lf", "account", "codex", "--cached"]),
-        ["lf", "account", "codex", "--cached"]
+        normalized(&["lf", "account", "linear", "--json"]),
+        ["lf", "account", "linear", "--json"]
     );
     assert_eq!(
-        normalized(&["lf", "account", "codex", "use", "a@example.com"]),
-        ["lf", "account", "codex", "use", "a@example.com"]
+        normalized(&["lf", "account", "linear", "use", "a@example.com"]),
+        ["lf", "account", "linear", "use", "a@example.com"]
     );
     let tree = loopflow::lf::navigation::command_tree();
-    let help = normalized(&["lf", "account", "codex", "--help"]);
-    assert_eq!(help, ["lf", "help", "account", "codex"]);
+    let help = normalized(&["lf", "account", "linear", "--help"]);
+    assert_eq!(help, ["lf", "help", "account", "linear"]);
     let (_, canonical) = loopflow::lf::navigation::resolve_path(&tree, &help[2..]).unwrap();
     assert_eq!(canonical, ["account"]);
 
-    let verb = normalized(&["lf", "account", "codex", "use", "--help"]);
+    let verb = normalized(&["lf", "account", "linear", "use", "--help"]);
     let error = loopflow::lf::navigation::resolve_path(&tree, &verb[2..]).unwrap_err();
     assert!(
         error
             .to_string()
-            .contains("unknown command: lf account codex use"),
+            .contains("unknown command: lf account linear use"),
         "{error}"
     );
-    for path in [["account", "codex", "use"], ["account", "codex", "nosuch"]] {
+    for path in [
+        ["account", "linear", "use"],
+        ["account", "linear", "nosuch"],
+    ] {
         let path = path.map(String::from);
         assert!(loopflow::lf::navigation::resolve_path(&tree, &path).is_err());
     }
@@ -1111,8 +1108,6 @@ fn remote_selection_preserves_command_arguments_and_literal_boundaries() {
     use loopflow::lf::navigation::machine_invocation;
     let args = [
         "lf",
-        "--account",
-        "personal@",
         "--machine=mini",
         "--forward-agent",
         "--task",
@@ -1125,13 +1120,10 @@ fn remote_selection_preserves_command_arguments_and_literal_boundaries() {
     .map(String::from);
     let (cli, command) = machine_invocation(&args).unwrap().unwrap();
     assert_eq!(cli.machine.as_deref(), Some("mini"));
-    assert!(cli.account.is_empty());
     assert!(cli.forward_agent);
     assert_eq!(
         command,
         [
-            "--account",
-            "personal@",
             "--task",
             "LOO-123",
             "implement",

@@ -365,39 +365,15 @@ checks on both ends; LOO-913's fallback and wait rules.
 
 ## Built: one set of providers that reach other Machines (concept review)
 
-Built as below. Taught: `resolve_target` asks the Machine's lf version over
-SSH, so the check inside `login::login` came too late for "nothing reaches
-SSH"; `login::require_reach` also runs on each named Machine before the CLI
-resolves it. Tests: `machine_commands::services_that_sign_in_here_only_never_reach_another_machine`
-and `rental::tests::a_rental_signs_in_once_to_each_provider_that_reaches_it_github_first`.
-
-### As planned
-
-`lf machine login <provider> <machine>` parses eight providers, but only
-Claude, Codex, GitHub, Linear and OpenCode reach another Machine; Asana,
-Notion and Doppler end in `credentials::connect`'s
-`bail!("machine login supports github, opencode and linear")`. Rental
-prepare's default ("every provider `logins` shows signed in here") includes
-them, so a rental from a template without `--logins` fails before its clone
-whenever this Machine is signed in to Asana, Notion or Doppler. **Made for
-review:** name the set once and read it everywhere; passed over: building
-remote transfers for those three (more behavior, its own Task if a rental
-needs one).
-
-- `login::reaches_other_machines(provider) -> bool` in `machine/login.rs`:
-  Claude, Codex, GitHub, Linear, OpenCode.
-- `login::login` checks it before dispatch for a Machine that is not here:
-  "<Provider> signs in on this Machine only; run `lf machine login <provider>`
-  on <machine>". `credentials::connect`'s catch-all becomes unreachable;
-  replace it with that same error or make the match exhaustive over the
-  transferable three.
-- Rental `prepare`'s default list filters by it; `lf ondemand add --logins`
-  rejects a provider outside it (at add, not at rent).
-- `lf machine login`'s `machines` help says which providers it takes.
-- Test: `machine_commands` — `lf machine login asana <fixture>` fails naming
-  "this Machine only" and nothing reaches the fixture SSH; `ondemand add
-  --logins doppler` fails. Prepare's default filter has no fixture (none
-  reaches prepare); a unit test on the list function it uses is enough.
+`login::reaches_other_machines` (Claude, Codex, GitHub, Linear, OpenCode) is
+the one set: `login::require_reach` refuses the others before any SSH (the CLI
+calls it per named Machine before `resolve_target`, which already asks the
+Machine's lf version over SSH; `login::login` calls it again), rental
+`prepare`'s default goes through `rental::sign_in_order`, `ondemand add
+--logins` rejects the rest, and `credentials::connect`'s catch-all is
+`unreachable!`. Asana, Notion and Doppler sign in on each Machine itself.
+Tests: `machine_commands::services_that_sign_in_here_only_never_reach_another_machine`,
+`rental::tests::a_rental_signs_in_once_to_each_provider_that_reaches_it_github_first`.
 
 ## Remaining (gate)
 

@@ -981,25 +981,45 @@ impl TaskMachine {
     }
 }
 
-/// `lf task status <issue> --json` for a Task another Machine runs, as that
-/// Machine's server reads it; `None` when it runs here.
-pub fn remote_task_detail(repo: &Path, issue: &str) -> Result<Option<serde_json::Value>> {
+/// `task.status` for a Task another Machine runs, as that Machine's server
+/// reads it; `None` when it runs here.
+pub(crate) fn remote_task_detail(repo: &Path, issue: &str) -> Result<Option<serde_json::Value>> {
     task_machine(repo, issue)?
         .map(TaskMachine::status)
         .transpose()
 }
 
-/// `lf task status <issue>` for a Task another Machine runs, drawn from that
-/// Machine's reading. `false` when it runs here.
-pub fn print_remote_task_status(repo: &Path, issue: &str) -> Result<bool> {
+/// `lf task status <issue>` (`--json`, `--subscribe`) for a Task another
+/// Machine runs, from that Machine's server. `false` when it runs here.
+pub fn print_remote_task_status(
+    repo: &Path,
+    issue: &str,
+    json: bool,
+    subscribe: bool,
+) -> Result<bool> {
     let Some(machine) = task_machine(repo, issue)? else {
         return Ok(false);
     };
-    let name = machine.name.clone();
-    let detail: TaskDetail = serde_json::from_value(machine.status()?)?;
+    if subscribe {
+        print_remote_readings(machine)?;
+    } else if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&loopflow_execution::read_stream::selected_answer(
+                &machine.status()?
+            )?)?
+        );
+    } else {
+        let name = machine.name.clone();
+        print_remote_detail(&name, &serde_json::from_value(machine.status()?)?)?;
+    }
+    Ok(true)
+}
+
+fn print_remote_detail(machine: &str, detail: &TaskDetail) -> Result<()> {
     let task = &detail.task;
     println!("{} · {}", task.title, task.identifier);
-    println!("Runs on {name}; read from its server.");
+    println!("Runs on {machine}; read from its server.");
     println!(
         "State: {} · {}",
         serde_json::to_value(task.state)?
@@ -1031,22 +1051,18 @@ pub fn print_remote_task_status(repo: &Path, issue: &str) -> Result<bool> {
     if let Some(next) = &task.next {
         println!("Next: {next}");
     }
-    Ok(true)
+    Ok(())
 }
 
-/// `lf task status <issue> --subscribe` for a Task another Machine runs: the
-/// readings of that Machine's server, over SSH. `false` when it runs here.
-pub fn subscribe_remote_task_status(repo: &Path, issue: &str) -> Result<bool> {
+/// The `--subscribe` readings of the Machine's server, one JSON line each.
+fn print_remote_readings(machine: TaskMachine) -> Result<()> {
     use std::io::Write as _;
     use std::sync::atomic::Ordering;
-    let Some(TaskMachine {
+    let TaskMachine {
         mut connection,
         read,
         ..
-    }) = task_machine(repo, issue)?
-    else {
-        return Ok(false);
-    };
+    } = machine;
     let id = connection.subscribe(read, loopflow_execution::read_stream::selected())?;
     // As here, the subscription ends when stdin closes, after its first
     // reading; closing this end of the pipe ends it on the other Machine too.
@@ -1077,7 +1093,7 @@ pub fn subscribe_remote_task_status(repo: &Path, issue: &str) -> Result<bool> {
             break;
         }
     }
-    Ok(true)
+    Ok(())
 }
 
 /// `lf task show <issue> --subscribe`: `lf task show --json` now and each time it

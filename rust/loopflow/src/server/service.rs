@@ -1426,17 +1426,13 @@ async fn served(
         | Operation::Measured(super::wire::MeasuredOperation::Read { query }) => {
             tokio::task::spawn_blocking(move || {
                 let _held = reservation;
-                let here = matches!(origin, Origin::Machine(_));
                 let query = origin.place(query)?;
                 measured_result(measured, || {
                     loopflow_execution::journal::request::isolate(|| {
                         loopflow_execution::observe::Cache::shared()
-                            .capture(|| {
-                                if here {
-                                    query.read_here()
-                                } else {
-                                    query.read()
-                                }
+                            .capture(|| match origin {
+                                Origin::Local => query.read(),
+                                Origin::Machine(_) => query.read_here(),
                             })
                             .0
                     })

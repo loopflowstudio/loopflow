@@ -273,7 +273,7 @@ crash, unreachable and unstartable errors, and "What the server must learn":
   for the plain-command launch in `lf/commands/ssh.rs`.
 - `Read::TaskStatus` (`task.status`); `lf task status <issue> --subscribe`
   for a Task another Machine runs subscribes there
-  (`waves::subscribe_remote_task_status`).
+  (`waves::print_remote_task_status`, the one CLI entry for one-shot, `--json` and `--subscribe`).
 - A request over SSH waits 120 s (`client::ANSWER`, a timed pipe reader),
   then fails `outcome_unknown` naming the Machine and `ssh <route> lf server
   status`; the SSH handshake shares that bound.
@@ -364,6 +364,9 @@ Not done here:
   lf::commands::read::` 98 pass. clippy `-p loopflow -p loopflow-execution
   --all-targets` clean (also fixed `transport_tests`' two `subscribe` calls
   missing `select`). Swift suites and loopback sshd: gate/CI.
+
+- Compress (after `982722fa51`): one CLI entry for a remote `task status`;
+  the server picks `read`/`read_here` by `Origin`. The 5 `machine_commands::a_status_ a_served_` tests and clippy `-p loopflow --all-targets`: pass.
 
 ## Done when (PR 1)
 

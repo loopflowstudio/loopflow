@@ -97,10 +97,14 @@ form and changes no behavior. Do them in this order; 1–3 unlock each other.
    `supports_execution_boundary` and `classifies_failures` are yes/no
    capabilities answered as trait methods beside `Capabilities`. Move them in.
 6. **Sweep the last kind tables.** `transcript/watch.rs::watch` lists four
-   homes and their subdirectories beside `Harness::transcript_root` (Pi is
-   `sessions` there and the trait default is `projects`: find which is read
-   before merging). `provider_conversation.rs::find` maps `Provider` back to a
-   kind with `_ => Claude`, the inverse of `Harness::provider()`. A fifth
+   homes and their subdirectories beside `Harness::transcript_root`. Pi
+   inherits the trait's `projects` root, but that root is never read for Pi:
+   Pi's `transcript_id` is the default `None`, so `transcript::{transcript,scan}`
+   match nothing, and Pi's files are found under `sessions` by
+   `transcript/raw.rs` and `pi.rs`. Merging means Pi's root becomes `sessions`
+   and `watch` asks each harness. `ops/human_session/provider_conversation.rs`
+   (line ~263) maps `Provider` back to a kind with `_ => Claude`, the inverse
+   of `Harness::provider()`. A fifth
    harness must not need a line in either.
 
 The launch matrix and conformance tests are the check: same 16 cells, same

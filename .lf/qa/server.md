@@ -19,6 +19,18 @@ Stop every server and holder launched for the walkthrough: a private home's
 children. For input and resize checks without a provider login, hold a real
 shell with `lf desktop shell <task> --checkout <path> --id <id> --create` in a PTY.
 
+A private home keeps three SQLite files: `loopflow.db` (state, inputs as
+`captured` `session_events`), `history.db` (`session_history`, observations)
+and `usage.db` (`turns`, one row per turn with Task, skill, Graph, step, model
+and token columns). Read them with `?mode=ro` while a writer may be open:
+`immutable=1` skips the WAL and shows a stale file. For an upgrade check, record
+turns with the installed `lf` (`lf session resume --prepare --json`, then
+`lf -b session resume <id> --message …`), copy the home, then open it with the
+branch: `lf session history <id>` is empty until `lf process prune` or the
+branch server's start-up pass moves the old rows. To make a journal write fail,
+hold `BEGIN EXCLUSIVE` on `history.db` and `usage.db` from Python; each journal
+write then waits 2 s before it records a gap.
+
 # Loopflow's local server
 
 Build `cargo build -p loopflow --bin lf` and use that binary for branch QA.

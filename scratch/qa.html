@@ -58,7 +58,7 @@ clippy on the fix: gate (the Machine's disk was full; see below)</pre>
 
 <h2>Still wrong (worst first)</h2>
 <ol>
-<li class="open">One-shot reads of mini's Task read the laptop's copy. Within the same second <code>lf task status b2d979</code> and <code>--json</code> said "Held on mini, renamed" while <code>--subscribe</code> said "Renamed twice". Served <code>task.status</code> requests on the laptop's socket also answer locally (no ssh). The concept-review answer 5 puts reads in this PR; noted in the plan's Open.</li>
+<li>Fixed after QA in <code>e10a00c4cc</code> (one-shot reads go to mini's server). One-shot reads of mini's Task read the laptop's copy. Within the same second <code>lf task status b2d979</code> and <code>--json</code> said "Held on mini, renamed" while <code>--subscribe</code> said "Renamed twice". Served <code>task.status</code> requests on the laptop's socket also answer locally (no ssh). The concept-review answer 5 puts reads in this PR; noted in the plan's Open.</li>
 <li class="open">The remote <code>--subscribe</code> ignores stdin checkpoints (<code>{"id":n}</code>), which the local one answers.</li>
 <li><code>selection.profile</code> still carries the laptop's paths (<code>global_path</code>, <code>repository_path</code>) to mini.</li>
 <li>After the move, the laptop says "Owner: QA on mini" and mini says "QA on Jacks-MacBook-Pro-2" (both homes share a host name; the stand-in's artifact in part).</li>

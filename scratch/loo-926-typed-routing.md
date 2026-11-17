@@ -350,7 +350,8 @@ Not done here:
 - QA (2026-11-17, `scratch/qa.html`): the remote `--subscribe` now keeps
   `--select` and ends when stdin closes;
   `--test integration a_status_subscription_for_a_task_mini_runs_reads_minis_server`
-  checks both (passed). Clippy on that fix: gate.
+  checks both (passed). Clippy on that fix ran clean with the one-shot
+  reads below.
 
 - One-shot reads (2026-11-17): `lf task status <issue>` (human, from the
   served `task.status` body, plus "Runs on <machine>") and `--json`, and a

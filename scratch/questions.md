@@ -181,9 +181,9 @@ This reverses the headless choice above ("The write another Machine sends is a n
 - QA (2026-11-17): one-shot `lf task status <issue>` and `--json`, and served
   `task.status` requests, still read this Machine's copy of a Task another
   Machine runs; only `--subscribe` reads there. Answer 5 ("Reads and
-  `--subscribe` … in this PR") covers them; left for the next implement pass,
-  since the human output is built from the local `TaskStatus`, not the
-  served `task.status` body.
+  `--subscribe` … in this PR") covers them. Built in `e10a00c4cc`: they go
+  to that Machine's server, and the human output is drawn from its
+  `task.status` body.
 
 ## Sync onto main #1960 (2026-11-17)
 

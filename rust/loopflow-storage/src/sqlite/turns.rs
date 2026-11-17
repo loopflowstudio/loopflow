@@ -818,9 +818,9 @@ mod tests {
             |tokens| store.record_turn_usage("conversation", &thread, "turn", 1, &reading(tokens));
         assert!(write(5));
         assert!(!write(5));
-        assert!(!store.history.gap_open());
+        assert_eq!(store.history.gap(), None);
         assert!(!write(9));
-        assert!(store.history.gap_open());
+        assert!(store.history.gap().is_some());
         let kept = store.session_turns("conversation").unwrap()[0]
             .usage
             .clone()
@@ -875,7 +875,7 @@ mod tests {
             3,
             &json!({"status":"completed"}),
         );
-        assert!(store.history.gap_open());
+        assert!(store.history.gap().is_some());
         // The input's row keeps the turn's end while history is locked.
         let captured = store
             .session("conversation")
@@ -908,7 +908,7 @@ mod tests {
         held.rollback().unwrap();
 
         store.record_turn_start("conversation", &thread, "after", 4);
-        assert!(!store.history.gap_open());
+        assert_eq!(store.history.gap(), None);
         let turns: Vec<String> = store
             .session_turns("conversation")
             .unwrap()

@@ -1,55 +1,57 @@
-<!doctype html><meta charset="utf-8"><title>LOO-936 QA, second pass</title>
-<style>body{font:15px/1.5 -apple-system,sans-serif;max-width:900px;margin:2em auto;padding:0 1em}pre{background:#f5f5f5;padding:.8em;overflow:auto;font-size:13px}table{border-collapse:collapse}td,th{border:1px solid #ddd;padding:.3em .6em;vertical-align:top;text-align:left}</style>
-<h1>LOO-936 QA, second pass: the two QA fixes on real turns</h1>
-<p>Branch build 7eb57512a plus this pass's fix. Private <code>LF_HOME</code> under <code>/tmp/lf-qa-936b</code>, real <code>HOME</code> for Claude's login, disposable Git repository. One Session, ten real Claude turns (<code>lf -b -a claude session resume &lt;id&gt; --message …</code>). The first pass (slices 1–5, upgrade, Graph routing, subscriptions, heartbeat) is in git at <code>cf50b7e904</code>.</p>
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>LOO-936 QA, third pass</title>
+<style>
+body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:60rem;margin:2rem auto;padding:0 1rem;color:#222}
+table{border-collapse:collapse;width:100%}td,th{border:1px solid #ccc;padding:.35rem .5rem;vertical-align:top;text-align:left}
+pre{background:#f5f5f2;padding:.6rem;overflow-x:auto;font-size:12.5px}code{font-size:13px}
+.ok{color:#176117}.fix{color:#8a4b00}
+</style></head><body>
+<h1>LOO-936 QA, third pass: one history file, turn state on the input row</h1>
+<p>Branch <code>9e4a71f8fb</code> plus this pass's fix; installed <code>lf 0.16.0+e66b21801</code> (this branch's base) for the upgrade.
+Private <code>LF_HOME</code> under <code>/tmp/lf-qa-936c</code>, real <code>HOME</code> for Claude's login, disposable Git repository.
+Every turn is a real Claude reply. Earlier passes are in git at <code>cf50b7e904</code> and <code>8328b64c20</code>.</p>
 
 <h2>Results</h2>
 <table>
 <tr><th>Scenario</th><th>Result</th></tr>
-<tr><td>Unlocked turn</td><td>6–8 s, answer printed, turn row with skill, model and tokens</td></tr>
-<tr><td>Both journals held by <code>BEGIN EXCLUSIVE</code> for a whole turn, at 7eb57512a</td><td>29.7 s (first pass: 71 s). One process, 7 gap lines</td></tr>
-<tr><td>Same, after this pass's fix</td><td>15.9–18.6 s: about 5 s at capture (history) and 5 s at turn origin (usage), nothing else waits</td></tr>
-<tr><td><code>lf session history show &lt;id&gt; --final</code> while still locked</td><td>Prints <code>QA_B_LOCKED3</code>, read from the transcript (first pass: "not settled")</td></tr>
-<tr><td>Next unlocked turn</td><td>Records normally; <code>loopflow.db</code> holds only 10 <code>captured</code> rows</td></tr>
-<tr><td>Gapped turns afterwards</td><td>All 7 have a <code>usage.turns</code> row with model and output tokens, written later from the transcript; no <code>captured_event</code>, skill or start time</td></tr>
+<tr><td>Upgrade: 2 turns by the installed lf, then the branch</td><td class="ok">Migration applied; captured rows backfilled (<code>turn_id</code>, <code>turn_status=completed</code>, <code>turn_thread</code>). Before prune, <code>lf session history</code> is empty (accepted skew). <code>lf machine prune</code>: moved 6 observations, converted 2 turns, forgot 12 history rows; second run all zeros. Main then holds <code>captured</code> plus the 2 old <code>output</code> rows, which retention drops by age.</td></tr>
+<tr><td>Resume after upgrade</td><td class="ok">Same provider thread <code>8f8f6fdd…</code>; Claude answered "QA_OLD_B QA_NEW_C" from the old turns.</td></tr>
+<tr><td>Ordinary branch turn</td><td class="ok">Main gains one <code>captured</code> row with its turn state; history gains <code>manifest</code>, <code>terminal</code>, <code>transition</code>, and no attempt or completed-conversation rows. <code>turns</code> has tokens, skill and <code>final_message</code>; the transcript pass also filled <code>final_message</code> on the converted turns.</td></tr>
+<tr><td><code>history.db</code> held by <code>BEGIN EXCLUSIVE</code> for a turn</td><td class="ok">8.9 s (unlocked: 5–7 s). Answer printed; the input row reads <code>completed</code>; <code>--final</code> answers from the transcript. <span class="fix">One gap line after the fix (16 before).</span> Turns made while locked were filled in from the transcript by the next turn, without skill or captured event.</td></tr>
+<tr><td><code>history.db</code> deleted</td><td class="ok"><code>lf session list --json</code> identical to the copy with history; <code>--final</code> still answers; <code>lf session history</code> empty. The next turn recreated the file, and the transcript pass rebuilt 8 turn rows.</td></tr>
+<tr><td>Graph routing: <code>loop: [qa-say, loop-or-next]</code>, then <code>cmd: help</code></td><td class="ok">The decider's <code>advance</code> moved the Graph to <code>help</code>; exit 0; both turns carry <code>graph</code> and <code>step</code>.</td></tr>
+<tr><td>Failed step: <code>-a claude:qa-no-such-model</code></td><td class="ok">Graph fails, naming Claude's error. Input row: <code>turn_status=failed</code>, <code>turn_error=claude_result: There's an issue with the selected model…</code>. History keeps the failed attempt start/finish and the failed conversation record, as designed.</td></tr>
+<tr><td><code>session.list</code> over the socket during a turn</td><td class="ok">Readings at closed → unknown → active → active (new transition) → closed, the last 0.5 s after the reply.</td></tr>
+<tr><td><code>lf machine doctor</code>, <code>lf process prune</code></td><td class="ok"><code>history.db 0.1 MB; Session history oldest 2026-11-17; turns oldest 2026-11-17</code>. Process prune reports receipts and process groups only.</td></tr>
 </table>
 
-<h2>What was still slow, and the fix</h2>
-<p>The fix in 425f79950d skipped the busy wait while a gap is open, but the gap lived on each <code>SqliteStore</code>'s own <code>JournalFile</code>. <code>lf</code> opens the store several times per turn, so each new store waited again. <code>JournalFile::beside</code> now hands every store in a process the one writer for that file, keyed by its canonical directory so <code>/tmp</code> and <code>/private/tmp</code> share it. The unit test opens the store a second time while the gap is open and checks the second store sees it (this replaces the elapsed-time assertion, which failed once under the full suite's load: 1164 s run). Breaking the sharing fails that test.</p>
-<p>Where the remaining 5 s goes, sampled on the branch <code>lf</code>: one <code>BEGIN IMMEDIATE</code> in <code>JournalFile::write</code> from <code>retain_session_observation</code>. The same wait from Python's sqlite3 (3.50) against a held WAL file:</p>
-<pre>busy timeout 0    → 0.00 s
-busy timeout 0.5  → 1.66 s
-busy timeout 1    → 3.04 s
-busy timeout 2    → 4.91 s</pre>
-<p>A lock that is never released costs about 2.5× the timeout, because SQLite's WAL path retries the busy handler. <code>BUSY</code> stays 2 s; its comment now says about 5 s per file per process.</p>
-
-<h2>Transcripts</h2>
-<pre>$ lf -b … --message 'Reply only with QA_B_LOCKED7'   (journals locked)
-WARN recording gap: session history: sqlite error: database is locked; …
-DEBUG published Session capture elapsed_ms=5293
-WARN recording gap: provider transition: …   turn origin: …   turn completion: …
-DEBUG agent finished elapsed_ms=10448
-QA_B_LOCKED7
-real 18.56</pre>
-<pre>$ sqlite3 usage.db "select provider_turn, captured_event, started_at is not null, skill, model, output_tokens from turns"
-0f080301|1|1|repo-session|claude-fable-5-2|10
-3dee0bdd|4|1|repo-session|claude-fable-5-2|14
-44b8310c||0||claude-fable-5-2|12      ← a gapped turn
-…
-02d41f3c|10|1|repo-session|claude-fable-5-2|11</pre>
-
 <h2>Fixed</h2>
-<ul>
-<li>A held journal lock now costs a process one wait per file, not one per store open (<code>journals.rs</code>, <code>sqlite.rs</code>).</li>
-<li>QA notes (<code>.lf/qa/server.md</code>): the lock recipe says ~5 s per file, and to sample the branch <code>lf</code>'s own PID (the shell's <code>lf</code> is a wrapper function).</li>
-</ul>
+<p><b>A locked <code>history.db</code> wrote 16 WARN lines for one turn.</b> <code>RecordingGap</code> warns again when the gap's text changes, and the text was the write's label plus the error. The transcript pass writes "turn final message" and "turn usage" turn by turn, so each write warned again:</p>
+<pre>WARN recording gap: session history: sqlite error: database is locked; …
+WARN recording gap: provider transition: …
+WARN recording gap: turn origin: …   turn completion: …
+WARN recording gap: turn final message: …   turn usage: …   (×5, alternating)
+WARN recording gap: turn completion: …   session history: …</pre>
+<p>The gap is now the file's (<code>history.rs</code> <code>HistoryFile::write</code> notes <code>history.db</code>; each missed write goes to debug), so the same turn logs:</p>
+<pre>WARN recording gap: history.db: sqlite error: database is locked; the conversation goes on without lf's records</pre>
+<p>The history test now writes a second kind of row into the open gap and checks it is the same gap; putting the label back fails it. <code>cargo test -p loopflow-storage --lib -- history:: turns::</code>: 12 passed; clippy clean for the crate.</p>
+<p>QA notes (<code>.lf/qa/server.md</code>): one gap line per file, and set <code>LF_BIN</code> for every branch turn.</p>
+
+<h2>Seen, not a branch bug</h2>
+<p>The first branch turn ran with <code>LF_BIN</code> unset. Hook settings are keyed by content, and the content names the installed <code>lf</code>, so its SessionStart hook (the released build) wrote a <code>provider_transition</code> into <code>loopflow.db</code>. This is the upgrade skew the plan accepts; <code>lf machine prune</code> moved it into history (<code>moved 1 observations</code>). With <code>LF_BIN</code> set, no further row reached main.</p>
 
 <h2>Still wrong or worth a look, worst first</h2>
 <ul>
-<li>A held lock still adds about 10 s to a turn (5 s per file). Lowering <code>BUSY</code> to 0.5 s would make it about 3 s and still cover a 0.7 s prune batch; left at 2 s, noted in <code>scratch/questions.md</code>.</li>
-<li>Gapped turns lose their grouping: no skill, Task or start time, so they fall out of "tokens by skill".</li>
-<li>Headless Claude turns still record no duration (<code>started_at = ended_at</code>), as in the first pass and the released build.</li>
+<li>Turns made while <code>history.db</code> was locked get rows later from the transcript, without skill, Task or captured event, so they drop out of "tokens by skill".</li>
+<li>Headless Claude turns record no duration (<code>started_at = ended_at</code>), as in earlier passes and the released build.</li>
+<li>The session list reads <code>unknown</code> for about a second while a resume starts. Not compared with the base build.</li>
+<li>A failed step prints Claude's error three times (agent output, agent exit, step). Unchanged by this branch.</li>
 </ul>
 
 <h2>Not reached</h2>
-<p>Desktop windows (headless run). Codex, Pi and OpenCode turns. Interactive <code>-i</code> turns. Two processes contending for the lock at once (each now pays one wait).</p>
+<ul>
+<li>Viewer heartbeat: not repeated. The trigger and <code>transport.rs</code> have not changed since pass 1, which held a viewed shell for 70 s with the <code>processes</code> revision constant.</li>
+<li>Size and rate measurements on a <code>.backup</code> of the Machine's store, for one file with the restating rows dropped: left to gate and the PR body.</li>
+<li>Desktop windows (headless run); Codex, Pi and OpenCode turns; interactive <code>-i</code> turns.</li>
+</ul>
+</body></html>

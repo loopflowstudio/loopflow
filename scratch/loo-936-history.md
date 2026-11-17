@@ -3,7 +3,7 @@
 Status: 2026-11-17, the five changes from the concept review of the built
 change are built (see "Shape after the concept review"), with the three
 repairs from the review of `f326e99cbb` and the six items of "Everything
-orchestration reads is in `loopflow.db`". Remaining: QA, then gate.
+orchestration reads is in `loopflow.db`". QA third pass done (`scratch/qa.html`; one fix: a locked `history.db` logs one gap line). Remaining: gate.
 Process rows are LOO-953 ("Remove Process rows: liveness on Sessions and
 Graph runs", its own worktree); nothing here moves them.
 
@@ -234,6 +234,7 @@ carrying `last_agent_message`.
 - loopflow lib `lf::tests|doctor|top|maintenance|graph|task_view|activity|boundary|subscription_measurement|session::tests`: 89 passed; `documented_commands::` 4 passed; `public_history_discovers_unlinked_native_receipts…` passed; `cargo clippy --all-targets -D warnings` clean.
 - Turn error repairs: storage `turns::` 6 passed, execution `session_record` 34 passed, clippy (storage, execution) clean.
 - Compress and the six items (load ~140): storage lib 374 passed; execution `transcript|fact_writer|agent_process|store|session_record|human_session::tests` passed but 13 load failures that pass as a set (46 passed) and `task_work_lifecycle_tests` updated for item 1; app `integration -- dto_fixtures session_cli_tests` 75 passed, one "provider never started" that passed alone; `historical_sessions_are_not_live_availability` passed; `cargo clippy --all-targets -D warnings` clean; `server_schema.json` regenerated. Swift (`readySummary` removed) builds in gate/CI.
+- QA third pass: upgrade, resume, locked and deleted `history.db`, Graph routing, failed step, `session.list` over the socket, on real Claude turns; `history.rs` gap keyed on the file, storage `history:: turns::` 12 passed, clippy (storage) clean.
 - Gate: `test(graph::)` and `test(task_graph_launch_tests::)` (failed-step read now from the input row), `test(world_recipes::)`, `binary(served_reads)`, `test(session_cli_tests::)`, `binary(session_lifecycle_tests)`, `test(store::query_plans::tests::)`; rerun the locked-history QA scenario.
 
 ## Follow-ups, not this PR

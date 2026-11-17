@@ -273,7 +273,8 @@ impl HistoryFile {
 
     /// Run `write` in one transaction on `history.db`, with the store
     /// attached read-only as `store`. Returns what it committed; a failure is
-    /// noted as a recording gap for `what`.
+    /// a recording gap of the file, logged once however many kinds of write
+    /// meet it, with `what` each missed at debug.
     pub(crate) fn write<T>(
         &self,
         what: &str,
@@ -281,10 +282,10 @@ impl HistoryFile {
     ) -> Option<T> {
         let mut state = self.state.lock().expect("history mutex poisoned");
         let Some(store) = &self.store else {
-            state.gap.note(
-                what,
-                &"the store has no file beside which to keep history.db",
-            );
+            tracing::debug!("history write missed: {what}");
+            state
+                .gap
+                .note(FILE, &"the store has no file beside which to keep it");
             return None;
         };
         let busy = if state.gap.span().is_some() {
@@ -301,15 +302,21 @@ impl HistoryFile {
             Err(error) => {
                 // A connection that failed mid-write is reopened next time.
                 state.conn = None;
-                state.gap.note(what, &error);
+                tracing::debug!("history write missed: {what}");
+                state.gap.note(FILE, &error);
                 None
             }
         }
     }
 
     #[cfg(test)]
-    pub(crate) fn gap_open(&self) -> bool {
-        self.state.lock().unwrap().gap.span().is_some()
+    pub(crate) fn gap(&self) -> Option<String> {
+        self.state
+            .lock()
+            .unwrap()
+            .gap
+            .span()
+            .map(|span| span.what.clone())
     }
 }
 
@@ -476,12 +483,17 @@ mod tests {
             .transaction_with_behavior(rusqlite::TransactionBehavior::Exclusive)
             .unwrap();
         assert_eq!(append(&store, "missed"), None);
-        assert!(store.history.gap_open());
+        let gap = store.history.gap().unwrap();
+        assert!(gap.starts_with("history.db: "), "{gap}");
         // The gap belongs to the file, not the store: a store opened again
         // sees it open, so its writes skip the busy wait too.
         let again = crate::test_fixture::open(&path).unwrap();
-        assert!(again.history.gap_open());
+        assert_eq!(again.history.gap(), Some(gap.clone()));
         assert_eq!(append(&again, "missed again"), None);
+        // Another kind of write meeting the same lock is the same gap, so
+        // lf.log warns once.
+        assert_eq!(again.write_history("turn usage", |_| Ok(())), None);
+        assert_eq!(again.history.gap(), Some(gap));
         // The store itself keeps answering writes while history is gapped.
         store
             .conn
@@ -492,7 +504,7 @@ mod tests {
         held.rollback().unwrap();
 
         assert!(append(&store, "after").is_some());
-        assert!(!store.history.gap_open());
+        assert_eq!(store.history.gap(), None);
     }
 
     #[test]

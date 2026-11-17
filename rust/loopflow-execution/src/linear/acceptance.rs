@@ -160,7 +160,6 @@ mod tests {
         use crate::store::migrations::{apply_before_migration, upgrade_from_migration};
         use loopflow_storage::work::project::ProjectId;
         use loopflow_storage::work::task::TaskId;
-        use std::sync::{Arc, Mutex};
 
         let cases = [
             ("", PlanningState::Available),
@@ -213,11 +212,8 @@ mod tests {
                 .collect::<Result<_, _>>()
                 .unwrap();
             upgrade_from_migration(&conn, "planning_peers");
-            let store = SqliteStore {
-                token_key: crate::store::token_key::encryption_key,
-                conn: Arc::new(Mutex::new(conn)),
-                history: Default::default(),
-            };
+            let store =
+                SqliteStore::from_fixture_connection(conn, crate::store::token_key::encryption_key);
             let saved = store.task(&task).unwrap().unwrap();
             assert_eq!(saved.title, "Saved Task");
             assert_eq!(saved.description, "Saved brief");

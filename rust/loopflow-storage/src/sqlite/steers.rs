@@ -134,11 +134,16 @@ impl SqliteStore {
                 NativeBoundary::Select { source } | NativeBoundary::Activate { source } => source,
                 _ => "observed",
             };
-            super::provider_transitions::observe_in(&tx, &adapter.session, thread, source)?;
+            let mut history = Vec::from_iter(super::provider_transitions::observe_in(
+                &tx,
+                &adapter.session,
+                thread,
+                source,
+            )?);
             if let Some((session, input, reference)) =
                 resume.filter(|(_, _, reference)| reference.agent_session.as_str() != thread)
             {
-                super::sessions::retain_history_in(
+                history.extend(super::sessions::retain_history_in(
                     &tx,
                     &session,
                     &[crate::session_record::provider_session_observation(
@@ -147,13 +152,15 @@ impl SqliteStore {
                         &thread.into(),
                         reference.account_id,
                     )],
-                )?;
+                )?);
             }
             tx.execute(
                 "UPDATE steer_adapters SET activated_at=COALESCE(activated_at,unixepoch()) WHERE agent_process_id=?1",
                 [&adapter.agent_process_id],
             )?;
             tx.commit()?;
+            drop(conn);
+            self.append_history("provider transition", &history);
         }
         write()
     }

@@ -1156,7 +1156,7 @@ mod tests {
             };
             for message in messages {
                 hear(&mut decoder, &mut writer_for(&first), message);
-                assert_eq!(sql.query_row("SELECT count(*) FROM session_events WHERE kind='started' AND captured_event=?1", [next.captured], |row| row.get::<_,i64>(0)).unwrap(),0);
+                assert_eq!(store.conn.lock().unwrap().query_row("SELECT count(*) FROM history.session_history WHERE kind='started' AND captured_event=?1", [next.captured], |row| row.get::<_,i64>(0)).unwrap(),0);
             }
             let before = store.session_history("conversation", 0, 0).unwrap();
             for message in [json!({"id":2,"result":{"turn":{"id":"late"}}}), start] {
@@ -1337,9 +1337,12 @@ mod tests {
         for _ in 0..2 {
             writer.record(&decoder.messages(&messages).decoded).unwrap();
         }
-        let completion: String = sql
+        let completion: String = store
+            .conn
+            .lock()
+            .unwrap()
             .query_row(
-                "SELECT payload FROM session_events WHERE kind='completed' AND provider_turn=?1",
+                "SELECT payload FROM history.session_history WHERE kind='completed' AND provider_turn=?1",
                 [&request],
                 |row| row.get(0),
             )

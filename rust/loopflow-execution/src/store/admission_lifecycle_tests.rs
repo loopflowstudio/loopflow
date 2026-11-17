@@ -682,17 +682,8 @@ fn bind_preserves_prior_work_and_usage_while_assigning_future_work() {
         .session_inputs("orphan")
         .unwrap()
         .contains(first.input_key().unwrap()));
-    let history = store.session_history("orphan", 0, 0).unwrap();
-    assert_eq!(&history[..events.len()], events);
-    assert_eq!(history.len(), events.len() + 1);
-    assert_eq!(
-        history.last().unwrap().kind,
-        crate::session::SessionEventKind::Captured
-    );
-    assert_eq!(
-        history.last().unwrap().task_id.as_deref(),
-        Some(task_id.as_str())
-    );
+    // A new input is Session state, not history.
+    assert_eq!(store.session_history("orphan", 0, 0).unwrap(), events);
     let refused =
         crate::store::sessions::bind_session(&store, "elsewhere", elsewhere.captured, &task_id)
             .unwrap_err();

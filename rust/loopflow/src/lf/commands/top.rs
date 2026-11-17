@@ -574,8 +574,7 @@ fn render_prune_report(report: &ProcessPruneReport) -> String {
     }
     if let Some(store) = &report.store {
         output.push_str(&format!(
-            "store: compacted {} usage rows · closed {} dead Processes · forgot {} finished{}\n",
-            store.usage_rows,
+            "store: closed {} dead Processes · forgot {} finished{}\n",
             store.closed_processes,
             store.forgotten_processes,
             if store.vacuumed { " · vacuumed" } else { "" },

@@ -370,7 +370,7 @@ mod tests {
                     .lock()
                     .unwrap()
                     .query_row(
-                        "SELECT json_extract(payload,'$.evidence.outcome') FROM session_events
+                        "SELECT json_extract(payload,'$.evidence.outcome') FROM history.session_history
                          WHERE session_id=?1 AND json_extract(payload,'$.source')='terminal.json'",
                         [session.id.as_str()],
                         |r| r.get(0),

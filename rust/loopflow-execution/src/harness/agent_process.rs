@@ -869,13 +869,18 @@ mod tests {
         let store = crate::store::opening::open_ephemeral(&database).unwrap();
         let sql = rusqlite::Connection::open(&database).unwrap();
         let (session, ghost, agent) = unrecorded_ancestry_fixture(&store, &sql, "ladder");
-        let events = |sql: &rusqlite::Connection| -> i64 {
-            sql.query_row(
-                "SELECT count(*) FROM session_events WHERE session_id=?1",
-                [&session],
-                |row| row.get(0),
-            )
-            .unwrap()
+        let events = |_: &rusqlite::Connection| -> i64 {
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .query_row(
+                    "SELECT (SELECT count(*) FROM session_events WHERE session_id=?1)
+                        +(SELECT count(*) FROM history.session_history WHERE session_id=?1)",
+                    [&session],
+                    |row| row.get(0),
+                )
+                .unwrap()
         };
         let before = events(&sql);
         let resumer = store.test_lf_process();

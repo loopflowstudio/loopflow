@@ -58,7 +58,7 @@ fn history_and_other_writers_progress_during_stalled_dispatch() {
 
 async fn stalled_dispatch() {
     let home = tempfile::tempdir().unwrap();
-    let path = home.path().join("history.db");
+    let path = home.path().join("store.db");
     let store = crate::store::opening::open_ephemeral(&path).unwrap();
     let sql = rusqlite::Connection::open(&path).unwrap();
     sql.busy_timeout(Duration::from_millis(100)).unwrap();

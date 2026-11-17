@@ -177,7 +177,7 @@ const TURN_LIVE: &str = "EXISTS(SELECT 1 FROM session_activity act
                 WHERE json_extract(r.value,'$.state') IN ('idle','blocked','done')))))";
 
 const SESSION_SELECT: &str = concat!("SELECT s.id,c.receipt_key AS artifact_key,s.title,s.title_source,
-    (SELECT json_extract(feedback.payload,'$.summary') FROM session_events feedback WHERE feedback.session_id=s.id AND feedback.kind='observed' AND feedback.receipt_key='legacy_review_feedback') AS feedback_summary,s.completed_at,s.created_at,s.request,s.interactive,s.repo,
+    (SELECT json_extract(feedback.payload,'$.summary') FROM history.session_history feedback WHERE feedback.session_id=s.id AND feedback.kind='observed' AND feedback.receipt_key='legacy_review_feedback') AS feedback_summary,s.completed_at,s.created_at,s.request,s.interactive,s.repo,
     s.task_id,s.wave_id,", session_graph!(), " AS graph_lf_process_id,s.work_source,s.bound_at,
     s.input_published,s.cwd,s.skill,s.provider,s.model,", session_step!("node"), " AS node,", session_step!("iterations"), " AS iterations,json_extract(c.payload,'$.caller_key') AS caller_artifact_key,s.current_capture FROM agent_sessions s LEFT JOIN session_events c ON c.seq=s.current_capture");
 
@@ -355,11 +355,9 @@ fn inventory_query(
 // Preserve the existing filters/order. Materialize only the selected metadata
 // before joining Graph/Work labels; no request or historical payload is selected.
 const SUMMARY_SELECT: &str = concat!("SELECT s.id,c.receipt_key AS artifact_key,s.title,s.title_source,
-    (SELECT json_extract(feedback.payload,'$.summary') FROM session_events feedback WHERE feedback.session_id=s.id AND feedback.kind='observed' AND feedback.receipt_key='legacy_review_feedback') AS feedback_summary,s.completed_at,s.interactive,s.task_id,s.wave_id,
+    (SELECT json_extract(feedback.payload,'$.summary') FROM history.session_history feedback WHERE feedback.session_id=s.id AND feedback.kind='observed' AND feedback.receipt_key='legacy_review_feedback') AS feedback_summary,s.completed_at,s.interactive,s.task_id,s.wave_id,
     ", session_graph!(), " AS graph_lf_process_id,s.cwd,s.skill,s.provider,s.model,", session_step!("node"), " AS node,", session_step!("iterations"), " AS iterations,s.current_capture
     FROM agent_sessions s LEFT JOIN session_events c ON c.seq=s.current_capture");
-
-const MEMBERSHIP_KIND: &str = "CASE WHEN json_valid(payload) THEN CASE WHEN json_extract(payload,'$.source')='manifest.json' AND json_extract(payload,'$.evidence.schema_version')=1 AND json_extract(payload,'$.evidence.artifact_key')=json_extract(payload,'$.input_id') AND receipt_key=json_extract(payload,'$.input_id')||':manifest.json' THEN json_extract(payload,'$.evidence.flow.kind') END END";
 
 fn summary_query(page: &str, by_id: bool, now: i64) -> String {
     let available = available_sql("a", now);
@@ -369,9 +367,7 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
         SELECT s.id,s.artifact_key,s.title,s.title_source,s.feedback_summary,s.completed_at,s.interactive,s.task_id,s.wave_id,s.graph_lf_process_id,s.cwd,s.skill,s.provider,s.model,s.node,s.iterations,s.current_capture,graph_process.id,graph.graph,graph_process.outcome,graph_process.completed_at,step.started_at,
         (gs.seq=(SELECT MAX(later.seq) FROM graph_process_steps later WHERE later.graph_lf_process_id=gs.graph_lf_process_id)),
         w.slug,
-        ((SELECT {MEMBERSHIP_KIND} FROM session_events INDEXED BY session_input_membership
-         WHERE session_id=s.id AND captured_event=s.current_capture
-         AND kind='observed' AND substr(receipt_key,-14)=':manifest.json')='independent'),
+        COALESCE(captured.independent=1,0),
         (SELECT json_group_array(id) FROM ({})),
         a.primary_scope,
         {available},
@@ -383,14 +379,7 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
          AND act.attachment_token=p.attachment_token AND p.attached_lf_process_id IS NOT NULL AND a.completed_at IS NULL),
         COALESCE((SELECT t.viewed IS NOT 1 FROM held_terminals t WHERE t.id=a.held_terminal_id AND t.ended_at IS NULL),0),
         (SELECT pin.account_id FROM provider_session_accounts pin WHERE pin.provider=s.provider AND pin.provider_session_id=a.provider_thread),
-        EXISTS(
-            SELECT 1 FROM session_events history
-            WHERE history.session_id=s.id AND history.captured_event=s.current_capture
-            AND history.kind='observed'
-            AND CASE WHEN json_valid(history.payload) THEN
-                instr(history.receipt_key,':provider-session:')>0
-            AND json_extract(history.payload,'$.evidence.schema_version')=1
-            AND length(json_extract(history.payload,'$.evidence.provider_session_id'))>0 END),
+        COALESCE(captured.provider_thread IS NOT NULL,0),
         EXISTS(SELECT 1 FROM held_terminals t WHERE t.id=a.held_terminal_id AND t.ended_at IS NULL)
         FROM page s JOIN agent_sessions a ON a.id=s.id
         LEFT JOIN processes p ON p.id=a.agent_process_id
@@ -813,8 +802,8 @@ impl SqliteStore {
             .query_row(
                 "SELECT agent_session_id FROM processes
                      WHERE kind='agent' AND attached_lf_process_id=?1 AND agent_session_id IS NOT NULL
-                 UNION ALL SELECT session_id FROM session_events INDEXED BY session_process_membership
-                     WHERE lf_process_id=?1
+                 UNION ALL SELECT session_id FROM session_events WHERE lf_process_id=?1
+                 UNION ALL SELECT session_id FROM history.session_history WHERE lf_process_id=?1
                  LIMIT 1",
                 [process],
                 |row| row.get(0),
@@ -1036,14 +1025,10 @@ impl SqliteStore {
     /// Sessions that recorded `thread` as their provider's own conversation id.
     pub fn sessions_for_agent_session(&self, thread: &AgentSessionId) -> StoreResult<Vec<String>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        // Only `provider-session:` observations carry the id. The expression
-        // matches `session_events_provider_session` exactly so it is searched.
+        // An input's captured row names the conversation that resumes it.
         let mut query = conn.prepare(
             "SELECT id FROM agent_sessions WHERE provider_thread=?1
-             UNION SELECT session_id FROM session_events WHERE kind='observed'
-                AND instr(receipt_key,':provider-session:')>0
-                AND CASE WHEN json_valid(payload)
-                    THEN json_extract(payload,'$.evidence.provider_session_id') END=?1
+             UNION SELECT session_id FROM session_events WHERE kind='captured' AND provider_thread=?1
              ORDER BY 1",
         )?;
         let ids = query
@@ -1106,30 +1091,32 @@ impl SqliteStore {
             // which it would get by scanning the whole index instead of the range.
             let mut query = conn.prepare("WITH windowed(seq) AS (
                 SELECT seq FROM session_events WHERE kind='captured' AND receipt_key=?7
-                UNION SELECT CASE kind WHEN 'captured' THEN seq ELSE captured_event END FROM session_events
-                    WHERE ?7 IS NULL AND task_id=?3 AND kind IN ('captured','observed','started')
+                UNION SELECT seq FROM session_events WHERE ?7 IS NULL AND task_id=?3 AND kind='captured'
+                UNION SELECT captured_event FROM history.session_history
+                    WHERE ?7 IS NULL AND task_id=?3 AND kind IN ('observed','started')
                 UNION SELECT +seq FROM session_events WHERE ?7 IS NULL AND ?3 IS NULL AND kind='captured' AND observed_at>=?5
-                UNION SELECT +c.seq FROM session_events o CROSS JOIN session_events c ON c.kind='captured'
+                UNION SELECT +c.seq FROM history.session_history o CROSS JOIN session_events c ON c.kind='captured'
                     AND c.receipt_key=substr(o.receipt_key,1,length(o.receipt_key)-14)
                     WHERE ?7 IS NULL AND ?3 IS NULL AND ?5>0 AND o.kind='observed' AND substr(o.receipt_key,-14) IN (':manifest.json',':terminal.json')
                     AND o.observed_at>=?5 AND (?6 OR substr(o.receipt_key,-14)=':manifest.json')
-                UNION SELECT origin.captured_event FROM session_events completion CROSS JOIN session_events origin
+                UNION SELECT origin.captured_event FROM history.session_history completion CROSS JOIN history.session_history origin
                     ON origin.session_id=completion.session_id AND origin.provider_thread=completion.provider_thread
                     AND origin.provider_turn=completion.provider_turn AND origin.kind='started'
                     WHERE ?7 IS NULL AND ?3 IS NULL AND ?5>0 AND ?6 AND completion.kind IN ('started','usage','completed','output')
                     AND completion.kind='completed' AND completion.observed_at>=?5 AND +origin.captured_event IS NOT NULL
-                UNION SELECT CASE ran.kind WHEN 'captured' THEN ran.seq ELSE ran.captured_event END
-                    FROM processes exited CROSS JOIN session_events ran ON ran.lf_process_id=exited.id
-                    WHERE ?7 IS NULL AND ?3 IS NULL AND ?5>0 AND ?6 AND exited.completed_at>=?5 AND ran.kind IN ('captured','started')),
+                UNION SELECT +ran.seq FROM processes exited CROSS JOIN session_events ran ON ran.lf_process_id=exited.id
+                    WHERE ?7 IS NULL AND ?3 IS NULL AND ?5>0 AND ?6 AND exited.completed_at>=?5 AND ran.kind='captured'
+                UNION SELECT +ran.captured_event FROM processes exited CROSS JOIN history.session_history ran ON ran.lf_process_id=exited.id
+                    WHERE ?7 IS NULL AND ?3 IS NULL AND ?5>0 AND ?6 AND exited.completed_at>=?5 AND ran.kind='started'),
             -- A native turn starts in the window only if all its events fall in it;
             -- one its Process completed in the window may have started earlier.
             turns(session_id,provider_thread,provider_turn) AS (
-                SELECT +session_id,+provider_thread,+provider_turn FROM session_events
+                SELECT +session_id,+provider_thread,+provider_turn FROM history.session_history
                     WHERE ?7 IS NULL AND ?3 IS NULL AND kind IN ('started','usage','completed','output') AND observed_at>=?5
                 UNION SELECT +ran.session_id,+ran.provider_thread,+ran.provider_turn
-                    FROM processes exited CROSS JOIN session_events ran ON ran.lf_process_id=exited.id
+                    FROM processes exited CROSS JOIN history.session_history ran ON ran.lf_process_id=exited.id
                     WHERE ?7 IS NULL AND ?3 IS NULL AND ?5>0 AND ?6 AND exited.completed_at>=?5 AND ran.kind='started' AND ran.captured_event IS NULL
-                UNION SELECT +session_id,+provider_thread,+provider_turn FROM session_events
+                UNION SELECT +session_id,+provider_thread,+provider_turn FROM history.session_history
                     WHERE ?7 IS NULL AND task_id=?3 AND kind='started' AND captured_event IS NULL),
             inputs AS (
                 SELECT i.seq AS captured,i.receipt_key AS input_id,i.session_id,json_extract(i.payload,'$.caller_key') AS caller_input_id,
@@ -1142,32 +1129,32 @@ impl SqliteStore {
                         COALESCE(json_type(terminal.payload,'$.evidence.outcome')='text',0)
                         AND unixepoch(json_extract(terminal.payload,'$.evidence.ended_at')) IS NOT NULL ELSE 0 END
                     ) THEN NULL WHEN EXISTS (
-                        SELECT 1 FROM session_events origin WHERE origin.session_id=s.id
+                        SELECT 1 FROM history.session_history origin WHERE origin.session_id=s.id
                         AND origin.captured_event=i.seq AND origin.kind='started' AND NOT EXISTS (
-                            SELECT 1 FROM session_events done WHERE done.session_id=origin.session_id
+                            SELECT 1 FROM history.session_history done WHERE done.session_id=origin.session_id
                             AND done.provider_thread=origin.provider_thread AND done.provider_turn=origin.provider_turn
                             AND done.kind='completed')
                         ) THEN NULL ELSE
                         COALESCE(terminal.observed_at,(
-                            SELECT MAX(done.observed_at) FROM session_events origin JOIN session_events done
+                            SELECT MAX(done.observed_at) FROM history.session_history origin JOIN history.session_history done
                             ON done.session_id=origin.session_id AND done.provider_thread=origin.provider_thread
                             AND done.provider_turn=origin.provider_turn AND done.kind='completed'
                             WHERE origin.session_id=s.id AND origin.captured_event=i.seq AND origin.kind='started')) END AS ended, NULL AS thread, NULL AS turn,
                     MAX(i.observed_at,COALESCE(m.observed_at,0),
-                        COALESCE((SELECT MAX(o.observed_at) FROM session_events o WHERE o.captured_event=i.seq),0),
-                        COALESCE((SELECT MAX(d.observed_at) FROM session_events origin JOIN session_events d
+                        COALESCE((SELECT MAX(o.observed_at) FROM history.session_history o WHERE o.captured_event=i.seq),0),
+                        COALESCE((SELECT MAX(d.observed_at) FROM history.session_history origin JOIN history.session_history d
                             ON d.session_id=origin.session_id AND d.provider_thread=origin.provider_thread
                             AND d.provider_turn=origin.provider_turn
                             WHERE origin.session_id=s.id AND origin.captured_event=i.seq AND origin.kind='started'),0)) AS latest
                 FROM windowed CROSS JOIN session_events i ON i.seq=windowed.seq JOIN agent_sessions s ON s.id=i.session_id
-                LEFT JOIN session_events latest_turn ON latest_turn.seq=(
-                    SELECT origin.seq FROM session_events origin WHERE origin.session_id=i.session_id
+                LEFT JOIN history.session_history latest_turn ON latest_turn.seq=(
+                    SELECT origin.seq FROM history.session_history origin WHERE origin.session_id=i.session_id
                     AND origin.captured_event=i.seq AND origin.kind='started' ORDER BY origin.seq DESC LIMIT 1)
                 LEFT JOIN processes attached ON attached.id=CASE WHEN latest_turn.seq IS NULL
                     THEN i.lf_process_id ELSE latest_turn.lf_process_id END
-                LEFT JOIN session_events m ON m.session_id=s.id AND m.kind='observed'
+                LEFT JOIN history.session_history m ON m.session_id=s.id AND m.kind='observed'
                     AND m.receipt_key=i.receipt_key||':manifest.json'
-                LEFT JOIN session_events terminal ON terminal.session_id=s.id AND terminal.kind='observed'
+                LEFT JOIN history.session_history terminal ON terminal.session_id=s.id AND terminal.kind='observed'
                     AND terminal.receipt_key=i.receipt_key||':terminal.json'
                 WHERE i.kind='captured'
                     -- `eligible` keeps only these when finished inputs are excluded;
@@ -1175,7 +1162,7 @@ impl SqliteStore {
                     AND (?6 OR COALESCE(m.observed_at,i.observed_at)>=?5) AND
                     (?7 IS NOT NULL OR m.seq IS NOT NULL
                     OR (i.receipt_key=(SELECT receipt_key FROM session_events WHERE seq=s.current_capture) AND s.input_published=1)
-                    OR EXISTS(SELECT 1 FROM session_events origin WHERE origin.session_id=i.session_id
+                    OR EXISTS(SELECT 1 FROM history.session_history origin WHERE origin.session_id=i.session_id
                         AND origin.captured_event=i.seq AND origin.kind='started'))
                 UNION ALL
                 SELECT NULL,NULL,e.session_id,NULL,e.started,origin.task_id,origin.wave_id,
@@ -1184,11 +1171,11 @@ impl SqliteStore {
                         MIN(observed_at) AS started,
                         MAX(CASE WHEN kind='completed' THEN observed_at END) AS completed,
                         MAX(observed_at) AS latest
-                    FROM turns CROSS JOIN session_events turn_event USING (session_id,provider_thread,provider_turn)
+                    FROM turns CROSS JOIN history.session_history turn_event USING (session_id,provider_thread,provider_turn)
                     WHERE turn_event.kind IN ('started','usage','completed','output') AND turn_event.captured_event IS NULL
                     GROUP BY turn_event.session_id,turn_event.provider_thread,turn_event.provider_turn
                     HAVING ?6 OR MIN(observed_at)>=?5) e
-                LEFT JOIN session_events origin
+                LEFT JOIN history.session_history origin
                     ON origin.session_id=e.session_id AND origin.provider_thread=e.provider_thread
                     AND origin.provider_turn=e.provider_turn AND origin.kind='started'
                 LEFT JOIN processes attached ON attached.id=origin.lf_process_id
@@ -1200,17 +1187,17 @@ impl SqliteStore {
                     COUNT(*) OVER () AS total
                 FROM inputs
                 WHERE (?1 IS NULL OR wave_id IN (SELECT id FROM wave_addresses WHERE id=?9 OR slug=?1)
-                    OR EXISTS (SELECT 1 FROM session_events origin WHERE origin.session_id=inputs.session_id
+                    OR EXISTS (SELECT 1 FROM history.session_history origin WHERE origin.session_id=inputs.session_id
                         AND inputs.captured IS NOT NULL AND origin.captured_event=inputs.captured AND origin.kind='started'
                         AND origin.wave_id IN (SELECT id FROM wave_addresses WHERE id=?9 OR slug=?1)))
                 AND (?2 IS NULL OR task_id IN (SELECT t.id FROM projects p CROSS JOIN tasks t ON t.project_id=p.id
                     WHERE p.id=?10 OR p.project_slug=?2 OR p.external_project_id=?11)
-                    OR EXISTS (SELECT 1 FROM session_events origin WHERE origin.session_id=inputs.session_id
+                    OR EXISTS (SELECT 1 FROM history.session_history origin WHERE origin.session_id=inputs.session_id
                         AND inputs.captured IS NOT NULL AND origin.captured_event=inputs.captured AND origin.kind='started'
                         AND origin.task_id IN (SELECT t.id FROM projects p CROSS JOIN tasks t ON t.project_id=p.id
                             WHERE p.id=?10 OR p.project_slug=?2 OR p.external_project_id=?11)))
                 AND (?3 IS NULL OR task_id=?3
-                    OR EXISTS (SELECT 1 FROM session_events origin WHERE origin.session_id=inputs.session_id
+                    OR EXISTS (SELECT 1 FROM history.session_history origin WHERE origin.session_id=inputs.session_id
                         AND inputs.captured IS NOT NULL AND origin.captured_event=inputs.captured AND origin.kind='started'
                         AND origin.task_id=?3))
                 AND (?4 IS NULL OR caller_input_id=?4 OR caller_input_id IN (SELECT receipt_key FROM session_events WHERE kind='captured' AND session_id=?12))
@@ -1817,13 +1804,17 @@ pub(super) fn repair_task_titles_in(
     Ok(())
 }
 
+/// Keep `observations` of `session`'s inputs. A resume reference and an
+/// independent launch are state of their input, kept on its captured row;
+/// every other observation is history, returned for the caller to append
+/// once this transaction commits.
 pub(super) fn retain_history_in(
     conn: &Connection,
     session: &LfSession,
-    history: &[crate::session::SessionObservation],
-) -> StoreResult<bool> {
-    let mut changed = false;
-    for observation in history {
+    observations: &[crate::session::SessionObservation],
+) -> StoreResult<Vec<crate::history::Row>> {
+    let mut history = Vec::new();
+    for observation in observations {
         let captured: Option<(i64,String)> = conn.query_row(
             "SELECT seq,session_id FROM session_events WHERE kind='captured' AND receipt_key=?1",
             [&observation.artifact_key], |row| Ok((row.get(0)?,row.get(1)?))).optional()?;
@@ -1831,32 +1822,53 @@ pub(super) fn retain_history_in(
         if owner != session.id.as_str() {
             return Err(invalid("artifact belongs to another conversation"));
         }
-        if Some(captured) == session.captured {
-            if let Some(thread) = observation.payload["evidence"]["provider_session_id"].as_str() {
-                super::provider_transitions::observe_in(conn, &session.id, thread, "observed")?;
+        let evidence = &observation.payload["evidence"];
+        if observation.source.starts_with("provider-session:") {
+            let reference: crate::session_record::ProviderSessionRef =
+                serde_json::from_value(evidence.clone())?;
+            reference.validate().map_err(invalid)?;
+            if Some(captured) == session.captured {
+                history.extend(super::provider_transitions::observe_in(
+                    conn,
+                    &session.id,
+                    reference.agent_session.as_str(),
+                    "observed",
+                )?);
             }
+            conn.execute(
+                "UPDATE session_events SET provider_thread=?2,provider_account=?3 WHERE seq=?1",
+                params![
+                    captured,
+                    reference.agent_session,
+                    reference.account_id.as_ref().map(|id| id.as_str())
+                ],
+            )?;
+            continue;
         }
-        let key = format!("{}:{}", observation.artifact_key, observation.source);
-        let payload = serde_json::to_string(&observation.payload)?;
-        let saved: Option<String> = conn.query_row(
-            "SELECT payload FROM session_events WHERE session_id=?1 AND kind='observed' AND receipt_key=?2",
-            params![session.id,key], |row| row.get(0)).optional()?;
-        if let Some(saved) = saved {
-            if saved == payload {
-                continue;
-            }
-            return Err(invalid(format!(
-                "input {} has conflicting {} evidence",
-                observation.artifact_key, observation.source
-            )));
+        if observation.source == "manifest.json" && evidence["flow"]["kind"] == "independent" {
+            conn.execute(
+                "UPDATE session_events SET independent=1 WHERE seq=?1",
+                [captured],
+            )?;
         }
-        conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,task_id,wave_id,observed_at,payload,captured_event)
-            VALUES(?1,'observed',?2,?3,?4,?5,?6,?7)",
-            params![session.id,key,observation.task_id.as_ref().map(TaskId::as_str),
-                observation.wave_id.as_ref().map(loopflow_model::id::WaveId::as_str),observation.observed_at,payload,captured])?;
-        changed = true;
+        let mut row = crate::history::Row::observed(
+            &session.id,
+            format!("{}:{}", observation.artifact_key, observation.source),
+            Some(captured),
+            observation.observed_at,
+            serde_json::to_string(&observation.payload)?,
+        );
+        row.task_id = observation
+            .task_id
+            .as_ref()
+            .map(|id| id.as_str().to_owned());
+        row.wave_id = observation
+            .wave_id
+            .as_ref()
+            .map(|id| id.as_str().to_owned());
+        history.push(row);
     }
-    Ok(changed)
+    Ok(history)
 }
 
 /// Resolve ancestry on the conversation's admission transaction.
@@ -2027,14 +2039,6 @@ fn insert_session_in(
         "UPDATE agent_sessions SET current_capture=?2 WHERE id=?1",
         params![session.id, session.captured],
     )?;
-    if let Some(summary) = &session.ready_summary {
-        conn.execute(
-            "INSERT INTO session_events(session_id,kind,receipt_key,task_id,wave_id,observed_at,payload,captured_event)
-             VALUES(?1,'observed','legacy_review_feedback',?2,?3,?4,?5,?6)",
-            params![session.id,session.task_id.as_ref().map(TaskId::as_str),session.wave_id.as_ref().map(loopflow_model::id::WaveId::as_str),crate::rows::now_unix(),
-                serde_json::to_string(&serde_json::json!({"type":"legacy_review_feedback","summary":summary}))?,session.captured],
-        )?;
-    }
     Ok(())
 }
 

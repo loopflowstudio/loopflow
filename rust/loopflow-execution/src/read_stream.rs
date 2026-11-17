@@ -105,7 +105,7 @@ pub fn require_store(store: Option<SharedStore>) -> Result<SharedStore> {
 
 /// Whether a commit that moved revisions from `old` to `new` can change a result.
 fn changed(old: StoreRevisions, new: StoreRevisions) -> bool {
-    StoreRevisions { usage: 0, ..old } != StoreRevisions { usage: 0, ..new }
+    StoreRevisions { history: 0, ..old } != StoreRevisions { history: 0, ..new }
 }
 
 #[derive(Debug)]
@@ -1037,15 +1037,15 @@ mod tests {
     }
 
     #[test]
-    fn usage_alone_is_not_a_change() {
+    fn history_alone_is_not_a_change() {
         let old = StoreRevisions {
             planning: 1,
             sessions: 1,
             graphs: 1,
             processes: 1,
-            usage: 1,
+            history: 1,
         };
-        assert!(!changed(old, StoreRevisions { usage: 9, ..old }));
+        assert!(!changed(old, StoreRevisions { history: 9, ..old }));
         assert!(changed(
             old,
             StoreRevisions {

@@ -186,19 +186,29 @@ impl SessionTransfer<'_> {
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
         // Only a departure has a reader: the next attachment asks where the
         // conversation went. An exit without one is the Process's own outcome.
-        if let Some(departure) = departure {
-            let payload = serde_json::json!({
-                "type": "attachment_exit", "outcome": outcome, "attachment_token": expected.token,
-                "departure": serde_json::to_value(departure)
-                    .map_err(|error| StoreError::InvalidData(error.to_string()))?,
-            });
-            tx.execute(
-                "INSERT INTO session_events(session_id,kind,receipt_key,lf_process_id,observed_at,payload,captured_event)
-                 SELECT id,'observed',?2,?3,?4,?5,current_capture FROM agent_sessions WHERE id=?1",
-                params![session, format!("attachment:{}:exit", expected.token), expected.lf_process_id,
-                    now, payload.to_string()],
-            )?;
-        }
+        let exit = departure
+            .map(|departure| -> StoreResult<crate::history::Row> {
+                let payload = serde_json::json!({
+                    "type": "attachment_exit", "outcome": outcome, "attachment_token": expected.token,
+                    "departure": serde_json::to_value(departure)
+                        .map_err(|error| StoreError::InvalidData(error.to_string()))?,
+                });
+                let captured: Option<i64> = tx.query_row(
+                    "SELECT current_capture FROM agent_sessions WHERE id=?1",
+                    [session],
+                    |row| row.get(0),
+                )?;
+                let mut row = crate::history::Row::observed(
+                    session,
+                    format!("attachment:{}:exit", expected.token),
+                    captured,
+                    now,
+                    payload.to_string(),
+                );
+                row.lf_process_id = expected.lf_process_id.as_ref().map(ToString::to_string);
+                Ok(row)
+            })
+            .transpose()?;
         // A departure continues the Session elsewhere; only an exit without a
         // destination completes it. A headless run is history once it stops
         // working, whatever Work or Graph it served; attaching a later turn
@@ -232,6 +242,9 @@ impl SessionTransfer<'_> {
             ],
         )?;
         tx.commit()?;
+        drop(conn);
+        self.store
+            .append_history("attachment exit", &Vec::from_iter(exit));
         Ok(())
     }
 
@@ -314,6 +327,7 @@ pub(super) const FORGETTABLE: &str = "p.kind='lf' AND p.completed_at IS NOT NULL
     AND NOT EXISTS(SELECT 1 FROM processes c WHERE c.parent_lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM processes a WHERE a.kind='agent' AND a.attached_lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM session_events WHERE lf_process_id=p.id)
+    AND NOT EXISTS(SELECT 1 FROM history.session_history WHERE lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM graph_processes WHERE lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM graph_process_steps WHERE lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM graph_process_steps WHERE graph_lf_process_id=p.id)
@@ -479,7 +493,7 @@ fn process_query(
         // another Process's command context establishes performed work.
         sql.push_str(&format!(
             " AND e.id IN (
-            SELECT lf_process_id FROM session_events
+            SELECT lf_process_id FROM history.session_history
             WHERE kind='started' AND {column}={value} AND lf_process_id IS NOT NULL
             UNION
             SELECT op.id FROM graph_process_steps gs JOIN processes op ON op.id=gs.lf_process_id
@@ -1181,12 +1195,15 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         require_attachment_in(&tx, session, expected)?;
-        super::provider_transitions::observe_in(&tx, session, thread.as_str(), "observed")?;
+        let transition =
+            super::provider_transitions::observe_in(&tx, session, thread.as_str(), "observed")?;
         tx.execute(
             "UPDATE agent_sessions SET provider_thread=?2 WHERE id=?1",
             params![session, thread],
         )?;
         tx.commit()?;
+        drop(conn);
+        self.append_history("provider transition", &Vec::from_iter(transition));
         Ok(())
     }
 
@@ -1233,12 +1250,15 @@ impl SqliteStore {
             "UPDATE processes SET endpoint=?2 WHERE id=?1",
             params![expected.agent_process_id, endpoint],
         )?;
-        super::provider_transitions::observe_in(&tx, session, thread.as_str(), "observed")?;
+        let transition =
+            super::provider_transitions::observe_in(&tx, session, thread.as_str(), "observed")?;
         tx.execute(
             "UPDATE agent_sessions SET provider_thread=?2 WHERE id=?1",
             params![session, thread],
         )?;
         tx.commit()?;
+        drop(conn);
+        self.append_history("provider transition", &Vec::from_iter(transition));
         Ok(())
     }
 
@@ -1623,7 +1643,7 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let payload = conn
             .query_row(
-                "SELECT payload FROM session_events WHERE session_id=?1 AND kind='observed'
+                "SELECT payload FROM history.session_history WHERE session_id=?1 AND kind='observed'
                  AND receipt_key=?2",
                 params![
                     canonical.as_str(),
@@ -2024,18 +2044,18 @@ mod discovery_tests {
                     &format!("session-{index}"),
                     &format!("run_{index:032x}"),
                 );
-                conn.execute("INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,lf_process_id,task_id,wave_id,observed_at,payload)
+                store.execute_history("INSERT INTO session_history(session_id,provider_thread,provider_turn,kind,receipt_key,lf_process_id,task_id,wave_id,observed_at,payload)
                     VALUES(?1,'thread','work','started','',?2,?3,?4,1,'unreadable payload')",
                     params![format!("session-{index}"),shared,task.as_str(),wave]).unwrap();
             }
             // Same Process drove both Tasks, two turns and a mechanical boundary.
-            conn.execute("INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,lf_process_id,task_id,wave_id,observed_at,payload)
+            store.execute_history("INSERT INTO session_history(session_id,provider_thread,provider_turn,kind,receipt_key,lf_process_id,task_id,wave_id,observed_at,payload)
                 VALUES('session-0','thread','retry','started','',?1,?2,?3,2,'{}')",params![shared,first.as_str(),wave]).unwrap();
             // Session is bound now; the earlier turn remains unassigned.
-            conn.execute("INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,lf_process_id,observed_at,payload)
+            store.execute_history("INSERT INTO session_history(session_id,provider_thread,provider_turn,kind,receipt_key,lf_process_id,observed_at,payload)
                 VALUES('session-0','thread','before-bind','started','',?1,1,'{}')",[&unbound]).unwrap();
             // Known Task, unknown original process: neither current attachment nor observer is its owner.
-            conn.execute("INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,task_id,wave_id,observed_at,payload)
+            store.execute_history("INSERT INTO session_history(session_id,provider_thread,provider_turn,kind,receipt_key,task_id,wave_id,observed_at,payload)
                 VALUES('session-0','thread','unmapped','started','',?1,?2,1,'{}')",params![first.as_str(),wave]).unwrap();
 
             conn.execute(

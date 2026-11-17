@@ -431,7 +431,7 @@ pub fn import_saved(
     Ok(())
 }
 
-pub fn record_captured_start(store: &SqliteStore, session: &str, turn: &str) -> i64 {
+pub fn record_captured_start(store: &SqliteStore, session: &str, turn: &str) {
     let attachment = store
         .session_attachment(session)
         .unwrap()
@@ -463,7 +463,7 @@ pub fn record_captured_start(store: &SqliteStore, session: &str, turn: &str) -> 
     let origin = store.session_turn_origin(session, &attachment).unwrap();
     store
         .record_session_turn_origin(&"thread".into(), turn, &origin)
-        .unwrap()
+        .unwrap();
 }
 
 pub fn retirement() -> (

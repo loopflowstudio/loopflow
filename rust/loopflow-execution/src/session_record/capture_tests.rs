@@ -1337,13 +1337,31 @@ fn recording_failure_cannot_forget_the_thread_or_account_used_by_retry() {
                 "UPDATE agent_sessions SET provider_thread='previous-thread' WHERE id=?1",
                 [&session],
             )?;
-            sql.execute_batch(&format!(
-                "CREATE TRIGGER reject_observation BEFORE INSERT ON session_events
-                 WHEN NEW.kind='observed' AND json_extract(NEW.payload,'$.source') LIKE '{source}'
-                 BEGIN SELECT RAISE(FAIL, 'observation unavailable'); END;"
+            // A resume reference is state on the input's captured row; every
+            // other provider fact is history in the history file.
+            let history = rusqlite::Connection::open(loopflow_storage::history::history_path(
+                &crate::session_record::row_database(&capture.artifact_dir())?,
             ))?;
+            let (target, trigger) = if source.starts_with("provider-session") {
+                (
+                    &sql,
+                    "CREATE TRIGGER reject_observation BEFORE UPDATE OF provider_thread ON session_events
+                     BEGIN SELECT RAISE(FAIL, 'observation unavailable'); END;"
+                        .to_owned(),
+                )
+            } else {
+                (
+                    &history,
+                    format!(
+                        "CREATE TRIGGER reject_observation BEFORE INSERT ON session_history
+                         WHEN NEW.kind='observed' AND json_extract(NEW.payload,'$.source') LIKE '{source}'
+                         BEGIN SELECT RAISE(FAIL, 'observation unavailable'); END;"
+                    ),
+                )
+            };
+            target.execute_batch(&trigger)?;
             capture.observe_provider(Some(thread.clone()), Some(primary.clone()));
-            sql.execute_batch("DROP TRIGGER reject_observation")?;
+            target.execute_batch("DROP TRIGGER reject_observation")?;
             let store = crate::session_record::row_store(&capture.artifact_dir())?;
             store.record_agent_process_exit(&session, &original, false)?;
 
@@ -1380,8 +1398,7 @@ fn provider_observation_recovers_then_stops_repeating() {
     let sql =
         rusqlite::Connection::open(crate::session_record::row_database(&dir).unwrap()).unwrap();
     sql.execute_batch(
-        "CREATE TRIGGER reject_observation BEFORE INSERT ON session_events
-         WHEN NEW.kind='observed'
+        "CREATE TRIGGER reject_observation BEFORE UPDATE OF provider_thread ON session_events
          BEGIN SELECT RAISE(FAIL, 'observation unavailable'); END;",
     )
     .unwrap();

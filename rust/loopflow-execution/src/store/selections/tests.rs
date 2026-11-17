@@ -1271,13 +1271,10 @@ fn released_work_upgrades_to_saved_intent_without_rewriting_work() {
     )
     .unwrap();
     drop(conn);
-    let store = SqliteStore {
-        token_key: crate::store::token_key::encryption_key,
-        conn: std::sync::Arc::new(std::sync::Mutex::new(
-            rusqlite::Connection::open(&path).unwrap(),
-        )),
-        history: Default::default(),
-    };
+    let store = SqliteStore::from_fixture_connection(
+        rusqlite::Connection::open(&path).unwrap(),
+        crate::store::token_key::encryption_key,
+    );
     let repo = RepositoryId::parse("repo_11111111111111111111111111111111").unwrap();
     let selection = selection();
     let result = selections::resolve_selection(&store, &repo, &selection).unwrap();

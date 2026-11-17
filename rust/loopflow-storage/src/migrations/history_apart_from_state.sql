@@ -47,3 +47,59 @@ UPDATE agent_sessions SET opened_at=(
     WHERE session_id=agent_sessions.id AND kind='observed'
       AND json_valid(payload) AND json_extract(payload,'$.type')='interactive_opened')
 WHERE interactive=1;
+
+-- What resumes an input and how it was launched are state of that input, so
+-- they live on its `captured` row: the provider conversation and account its
+-- newest `provider-session:*` observation named, and whether its manifest ran
+-- independently of any Graph. A captured row stays immutable otherwise.
+ALTER TABLE session_events ADD COLUMN provider_account TEXT;
+ALTER TABLE session_events ADD COLUMN independent INTEGER;
+DROP TRIGGER preserve_capture_update;
+CREATE TRIGGER preserve_capture_update BEFORE UPDATE ON session_events WHEN OLD.kind='captured'
+    AND (NEW.seq IS NOT OLD.seq OR NEW.session_id IS NOT OLD.session_id OR NEW.kind IS NOT OLD.kind
+    OR NEW.provider_turn IS NOT OLD.provider_turn OR NEW.receipt_key IS NOT OLD.receipt_key
+    OR NEW.provider_generation IS NOT OLD.provider_generation OR NEW.lf_process_id IS NOT OLD.lf_process_id
+    OR NEW.task_id IS NOT OLD.task_id OR NEW.wave_id IS NOT OLD.wave_id
+    OR NEW.observed_at IS NOT OLD.observed_at OR NEW.payload IS NOT OLD.payload
+    OR NEW.captured_event IS NOT OLD.captured_event OR NEW.agent_process_id IS NOT OLD.agent_process_id)
+BEGIN SELECT RAISE(ABORT,'Captured Session evidence is immutable'); END;
+UPDATE session_events AS c SET
+    provider_thread=json_extract(pref.payload,'$.evidence.provider_session_id'),
+    provider_account=json_extract(pref.payload,'$.evidence.account_id')
+FROM (SELECT o.session_id,substr(o.receipt_key,1,instr(o.receipt_key,':provider-session:')-1) AS input,
+        o.payload,ROW_NUMBER() OVER (PARTITION BY o.session_id,
+            substr(o.receipt_key,1,instr(o.receipt_key,':provider-session:')-1) ORDER BY o.seq DESC) AS newest
+    FROM session_events o WHERE o.kind='observed' AND instr(o.receipt_key,':provider-session:')>0
+      AND json_valid(o.payload) AND json_extract(o.payload,'$.evidence.schema_version')=1
+      AND length(json_extract(o.payload,'$.evidence.provider_session_id'))>0) AS pref
+WHERE c.kind='captured' AND c.session_id=pref.session_id AND c.receipt_key=pref.input AND pref.newest=1;
+UPDATE session_events AS c SET independent=1
+FROM session_events m
+WHERE c.kind='captured' AND m.session_id=c.session_id AND m.kind='observed'
+  AND m.receipt_key=c.receipt_key||':manifest.json' AND json_valid(m.payload)
+  AND json_extract(m.payload,'$.evidence.flow.kind')='independent';
+
+-- A Session's latest provider transition is state its summary shows; the list
+-- of every transition is history.
+ALTER TABLE agent_sessions ADD COLUMN transition TEXT;
+UPDATE agent_sessions AS s SET transition=CASE
+    WHEN json_extract(t.payload,'$.type')='provider_transition' THEN json_extract(t.payload,'$.transition')
+    ELSE json_object('kind',CASE WHEN json_extract(t.payload,'$.source')='fork' THEN 'forked' ELSE 'started' END,
+        'from_provider_session',json_extract(t.payload,'$.provider_thread'),
+        'to_provider_session',json_extract(t.payload,'$.next_provider_thread'),
+        'from_agent_process',CASE WHEN json_extract(t.payload,'$.provider_thread') IS NOT NULL
+            THEN json_extract(t.payload,'$.agent_process_id') END,
+        'to_agent_process',json_extract(t.payload,'$.agent_process_id'),
+        'original_running',NULL,
+        'seed',CASE WHEN json_extract(t.payload,'$.source')='fork' THEN 'native' END,
+        'observed_at',t.observed_at) END
+FROM (SELECT session_id,payload,observed_at,ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY seq DESC) AS newest
+    FROM session_events WHERE kind='observed'
+      AND (receipt_key GLOB 'provider-transition:*' OR receipt_key GLOB 'agent-session:*')
+      AND json_valid(payload)) AS t
+WHERE t.session_id=s.id AND t.newest=1;
+CREATE INDEX session_capture_provider_thread ON session_events(provider_thread)
+    WHERE kind='captured' AND provider_thread IS NOT NULL;
+
+-- Usage rows live in history.db, whose own revision row counts them.
+DROP TRIGGER store_revision_usage_insert;

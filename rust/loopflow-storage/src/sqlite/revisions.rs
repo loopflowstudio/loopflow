@@ -35,8 +35,9 @@ pub struct StoreRevisions {
     pub sessions: i64,
     pub graphs: i64,
     pub processes: i64,
-    /// Token counts. Moves every few seconds while agents work.
-    pub usage: i64,
+    /// Session and Process history in `history.db`. Moves with every turn;
+    /// only a read that names `history.*` waits on it.
+    pub history: i64,
 }
 
 impl SqliteStore {
@@ -73,7 +74,7 @@ impl SqliteStore {
             sessions: 0,
             graphs: 0,
             processes: 0,
-            usage: 0,
+            history: 0,
         };
         let mut query = conn.prepare("SELECT domain,revision FROM store_revisions")?;
         let mut rows = query.query([])?;
@@ -84,10 +85,13 @@ impl SqliteStore {
                 "sessions" => revisions.sessions = revision,
                 "graphs" => revisions.graphs = revision,
                 "processes" => revisions.processes = revision,
-                "usage" => revisions.usage = revision,
                 _ => {}
             }
         }
+        revisions.history =
+            conn.query_row("SELECT revision FROM history.history_revision", [], |row| {
+                row.get(0)
+            })?;
         Ok(revisions)
     }
 }
@@ -156,15 +160,6 @@ mod tests {
     fn session(store: &SqliteStore, id: &str) {
         let conn = store.conn.lock().unwrap();
         conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd) VALUES(?1,?1,'human',1,0,'/repo')", [id]).unwrap();
-    }
-
-    fn event(store: &SqliteStore, session: &str, kind: &str, receipt: &str, payload: &str) {
-        let conn = store.conn.lock().unwrap();
-        conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES(?1,?2,?3,1,?4)", params![session, kind, receipt, payload]).unwrap();
-    }
-
-    fn evidence(kind: &str) -> String {
-        format!(r#"{{"evidence":{{"schema_version":1,"type":"{kind}"}}}}"#)
     }
 
     #[test]
@@ -487,45 +482,33 @@ mod tests {
     }
 
     #[test]
-    fn usage_moves_only_its_own_revision_and_every_fact_moves_sessions() {
+    fn history_moves_only_its_own_revision() {
         let (_dir, store) = store();
         session(&store, "conversation");
         let before = store.revisions().unwrap();
-        event(&store, "conversation", "usage", "turn", "{}");
+        for kind in ["usage", "started", "completed", "observed"] {
+            store
+                .record_session_event(
+                    "conversation",
+                    &"thread".into(),
+                    kind,
+                    match kind {
+                        "usage" => crate::session::SessionEventKind::Usage,
+                        "started" => crate::session::SessionEventKind::Started,
+                        "completed" => crate::session::SessionEventKind::Completed,
+                        _ => crate::session::SessionEventKind::Observed,
+                    },
+                    &serde_json::json!({}),
+                )
+                .unwrap();
+        }
+        let after = store.revisions().unwrap();
         assert_eq!(
-            store.revisions().unwrap(),
+            after,
             StoreRevisions {
-                usage: before.usage + 1,
+                history: before.history + 4,
                 ..before
             }
         );
-        // Facts share the `observed` kind and receipt keys; unreadable evidence counts.
-        for (kind, receipt, payload) in [
-            ("observed", "input:manifest.json", "{}".to_owned()),
-            ("observed", "input:terminal.json", "{}".to_owned()),
-            ("observed", "attachment:0:exit", "{}".to_owned()),
-            ("started", "turn", "{}".to_owned()),
-            ("completed", "turn", "{}".to_owned()),
-            (
-                "observed",
-                "input:events.jsonl:20",
-                evidence("provider_session_observed"),
-            ),
-            (
-                "observed",
-                "input:events.jsonl:21",
-                evidence("provider_attempt_finished"),
-            ),
-            ("observed", "input:events.jsonl:22", "{".to_owned()),
-            ("observed", "input:silence:23", "{}".to_owned()),
-        ] {
-            let sessions = store.revisions().unwrap().sessions;
-            event(&store, "conversation", kind, receipt, &payload);
-            assert_eq!(
-                store.revisions().unwrap().sessions,
-                sessions + 1,
-                "{kind} {receipt}"
-            );
-        }
     }
 }

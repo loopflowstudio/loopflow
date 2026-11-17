@@ -139,8 +139,8 @@ fn history_limits_precede_payload_reads_and_keep_unfinished_work_and_exact_calle
     );
     // Corrupt body evidence outside the selected budget cannot break a list;
     // exact detail still reports that real error instead of hiding it.
-    store.conn.lock().unwrap().execute(
-            "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
+    store.execute_history(
+            "INSERT INTO session_history(session_id,kind,receipt_key,observed_at,payload,captured_event)
              SELECT session_id,'observed',receipt_key||':events.jsonl:1',10,'{',seq FROM session_events
              WHERE kind='captured' AND session_id='conversation-10'", []).unwrap();
     assert_eq!(
@@ -160,7 +160,7 @@ fn history_limits_precede_payload_reads_and_keep_unfinished_work_and_exact_calle
             .lock()
             .unwrap()
             .execute(
-                "UPDATE processes SET completed_at=100 WHERE id IN (SELECT lf_process_id FROM session_events WHERE session_id='conversation-1' AND kind='started')",
+                "UPDATE processes SET completed_at=100 WHERE id IN (SELECT lf_process_id FROM history.session_history WHERE session_id='conversation-1' AND kind='started')",
                 [],
             )
             .unwrap();
@@ -212,8 +212,8 @@ fn process_completion_ends_inputs_without_exit_events() {
             let conn = store.conn.lock().unwrap();
             conn.execute("UPDATE agent_sessions SET input_published=?1", [captured])
                 .unwrap();
-            conn.execute(
-                    "INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,observed_at,payload,captured_event,lf_process_id)
+            store.execute_history(
+"INSERT INTO session_history(session_id,provider_thread,provider_turn,kind,receipt_key,observed_at,payload,captured_event,lf_process_id)
                      SELECT id,'thread','turn','started','',10,'{}',CASE WHEN ?1 THEN current_capture END,?2 FROM agent_sessions WHERE id='conversation'",
                     rusqlite::params![captured,process],
                 ).unwrap();
@@ -224,22 +224,19 @@ fn process_completion_ends_inputs_without_exit_events() {
         };
         assert!(completed_since().is_empty());
         // A turn with unknown ownership must not fall back to its ended creator.
-        store.conn.lock().unwrap().execute(
-                "UPDATE session_events SET lf_process_id=NULL WHERE session_id='conversation' AND kind='started'",
+        store.execute_history(
+"UPDATE session_history SET lf_process_id=NULL WHERE session_id='conversation' AND kind='started'",
                 [],
             ).unwrap();
         assert!(completed_since().is_empty());
-        store.conn.lock().unwrap().execute(
-                "UPDATE session_events SET lf_process_id=?1 WHERE session_id='conversation' AND kind='started'",
+        store.execute_history(
+"UPDATE session_history SET lf_process_id=?1 WHERE session_id='conversation' AND kind='started'",
                 [&process],
             ).unwrap();
         // An unrelated attachment's exit cannot finish this input.
         store
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload)
+            .execute_history(
+                "INSERT INTO session_history(session_id,kind,receipt_key,observed_at,payload)
                  VALUES('conversation','observed','attachment:other:exit',30,'{}')",
                 [],
             )
@@ -291,11 +288,8 @@ fn aggregate_history_discovers_unattributed_native_receipts_without_a_capture() 
             .unwrap();
         // Simulated observation times exercise the public reader's window.
         store
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                "UPDATE session_events SET observed_at=?1 WHERE provider_turn=?2",
+            .execute_history(
+                "UPDATE session_history SET observed_at=?1 WHERE provider_turn=?2",
                 (at, turn),
             )
             .unwrap();
@@ -362,8 +356,8 @@ fn aggregate_history_discovers_unattributed_native_receipts_without_a_capture() 
     .unwrap();
     // Imported native history can establish Work without a capture. That
     // turn cannot lend its attribution to another unlinked receipt.
-    store.conn.lock().unwrap().execute(
-            "INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,wave_id,observed_at,payload)
+    store.execute_history(
+"INSERT INTO session_history(session_id,provider_thread,provider_turn,kind,receipt_key,wave_id,observed_at,payload)
              VALUES('conversation','thread','owned','started','',?1,110,'{}')", [wave.as_str()],
         ).unwrap();
     let scoped = crate::store::sessions::conversation_history(
@@ -401,11 +395,8 @@ fn no_decoded_time_follows_its_inputs_bound() {
     // Captures are immutable and stamped now; later facts follow them.
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
     store
-        .conn
-        .lock()
-        .unwrap()
-        .execute(
-            "UPDATE session_events SET observed_at=?1 WHERE session_id='new' AND kind='started'",
+        .execute_history(
+            "UPDATE session_history SET observed_at=?1 WHERE session_id='new' AND kind='started'",
             [now + 100],
         )
         .unwrap();
@@ -544,8 +535,8 @@ fn history_windows_find_inputs_by_each_start_and_end() {
                 ("terminal.json", terminal, terminal_payload),
             ] {
                 let Some(observed) = observed else { continue };
-                conn.execute(
-                        "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
+                store.execute_history(
+"INSERT INTO session_history(session_id,kind,receipt_key,observed_at,payload,captured_event)
                          VALUES(?1,'observed',?2,?3,?4,?5)",
                         params![id, format!("{input}:{file}"), observed, payload.to_string(), captured_event],
                     )
@@ -635,16 +626,16 @@ fn task_history_reads_every_row_naming_the_task() {
             if let Some(task) = manifest {
                 let payload = json!({"input_id":input,"source":"manifest.json",
                         "evidence":{"artifact_key":input,"schema_version":1}});
-                conn.execute(
-                        "INSERT INTO session_events(session_id,kind,receipt_key,task_id,observed_at,payload,captured_event)
+                store.execute_history(
+"INSERT INTO session_history(session_id,kind,receipt_key,task_id,observed_at,payload,captured_event)
                          VALUES(?1,'observed',?2,?3,10,?4,?5)",
                         params![id, format!("{input}:manifest.json"), task.as_str(), payload.to_string(), captured],
                     )
                     .unwrap();
             }
             if let Some(task) = origin {
-                conn.execute(
-                        "INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,
+                store.execute_history(
+"INSERT INTO session_history(session_id,provider_thread,provider_turn,kind,receipt_key,
                          task_id,observed_at,payload,captured_event) VALUES(?1,'thread','turn','started','',?2,10,'{}',?3)",
                         params![id, task.as_str(), captured],
                     )
@@ -657,8 +648,8 @@ fn task_history_reads_every_row_naming_the_task() {
                 [],
             )
             .unwrap();
-        conn.execute(
-                "INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,
+        store.execute_history(
+"INSERT INTO session_history(session_id,provider_thread,provider_turn,kind,receipt_key,
                  task_id,observed_at,payload) VALUES('native','thread','turn','started','',?1,10,'{}')",
                 [task.as_str()],
             )

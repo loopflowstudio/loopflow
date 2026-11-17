@@ -4,7 +4,7 @@ use loopflow_storage::session::SessionEventKind;
 use serde_json::json;
 
 #[test]
-fn delayed_origin_preserves_pre_bind_assignment_and_rejects_conflicting_repeat() {
+fn delayed_origin_preserves_pre_bind_assignment_through_a_conflicting_repeat() {
     let home = tempfile::tempdir().unwrap();
     let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
     let session = store.test_session(
@@ -36,20 +36,18 @@ fn delayed_origin_preserves_pre_bind_assignment_and_rejects_conflicting_repeat()
     let before = store.session_turn_origin(&session.id, &attachment).unwrap();
     crate::store::sessions::bind_session(&store, &session.id, session.captured, &task).unwrap();
     let after = store.session_turn_origin(&session.id, &attachment).unwrap();
-    let seq = store
+    store
         .record_session_turn_origin(&"thread".into(), "late", &before)
         .unwrap();
     let revisions = store.revisions().unwrap();
-    assert_eq!(
-        store
-            .record_session_turn_origin(&"thread".into(), "late", &before)
-            .unwrap(),
-        seq
-    );
+    store
+        .record_session_turn_origin(&"thread".into(), "late", &before)
+        .unwrap();
     assert_eq!(store.revisions().unwrap(), revisions);
-    assert!(store
+    // A conflicting repeat is a recording gap; the turn keeps its origin.
+    store
         .record_session_turn_origin(&"thread".into(), "late", &after)
-        .is_err());
+        .unwrap();
     store
         .record_session_turn_origin(&"thread".into(), "new", &after)
         .unwrap();
@@ -407,41 +405,26 @@ fn stopped_turn_and_stale_attachment_cannot_retire_a_resumed_conversation() {
 }
 
 #[test]
-fn recovered_completion_keeps_missing_start_and_usage_and_rejects_conflicts() {
+fn recovered_completion_keeps_missing_start_and_usage_and_its_first_answer() {
     let home = tempfile::tempdir().unwrap();
     let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
     store.test_session("conversation", "run_00000000000000000000000000000001");
     let completed = json!({"status":"completed", "error":null, "started_at":10, "completed_at":20, "duration_ms":10000});
-    let seq = store
-        .record_session_event(
-            "conversation",
-            &"thread".into(),
-            "turn",
-            SessionEventKind::Completed,
-            &completed,
-        )
-        .unwrap();
-    assert_eq!(
+    let record = |payload: &serde_json::Value| {
         store
             .record_session_event(
                 "conversation",
                 &"thread".into(),
                 "turn",
                 SessionEventKind::Completed,
-                &completed
+                payload,
             )
-            .unwrap(),
-        seq
-    );
-    assert!(store
-        .record_session_event(
-            "conversation",
-            &"thread".into(),
-            "turn",
-            SessionEventKind::Completed,
-            &json!({"status":"failed"})
-        )
-        .is_err());
+            .unwrap()
+    };
+    record(&completed);
+    record(&completed);
+    // A conflicting receipt is a recording gap; the first answer stays.
+    record(&json!({"status":"failed"}));
     let history: Vec<_> = store
         .session_history("conversation", 0, 100)
         .unwrap()
@@ -456,6 +439,7 @@ fn recovered_completion_keeps_missing_start_and_usage_and_rejects_conflicts() {
     assert_eq!(history[0].payload, completed);
     assert_eq!(history[0].agent_process_id, None);
     assert_eq!(history[0].lf_process_id, None);
+    let seq = history[0].seq;
     assert!(store
         .session_history("conversation", seq, 100)
         .unwrap()

@@ -38,3 +38,20 @@
   input's resume reference (`recovery_refresh_recognizes_imported_history_before_attachment`).
   Settled in the design: the per-input thread becomes a column on the
   `captured` row in main, so it never reads the history file.
+- The two "Revised direction" questions (attachment placement; Task state
+  reading the history file). Jack Heart, 2026-11-16: "(1) on the session (2)
+  scond": the attachment token and attached Process move to `agent_sessions`;
+  Graph and ship records carry their own `ended_at`, outcome and error, and
+  the liveness check stamps them for a Process that dies without exiting.
+- Process rows in the history file. Jack Heart, 2026-11-16, on the `outcome`
+  column: "i just wanted to flag to you as somethign that needs a better
+  design" and "and like maybe lf processes and agent processes shouldnt be in
+  the same table?" Direction (steer): one table per kind (LfProcess,
+  AgentProcess), only the columns its kind fills and a reader uses, no
+  `outcome` column (derive from exit_code and error, also on Graph and ship
+  records), and say how an agent Process records how it ended. Table
+  definitions and each column's reader go in the plan before slice 4. Another
+  branch stops writing `processes.outcome` for agent rows; whichever lands
+  second reconciles. Also to design before shipping: what a live Session on
+  the released lf sees after install, while it still reads and writes
+  `processes` and the attachment token in `loopflow.db`.

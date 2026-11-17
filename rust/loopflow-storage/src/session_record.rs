@@ -33,6 +33,17 @@ pub struct ProviderSessionRef {
 }
 
 impl ProviderSessionRef {
+    pub fn new(
+        agent_session: AgentSessionId,
+        account_id: Option<crate::ProviderAccountId>,
+    ) -> Self {
+        Self {
+            schema_version: SCHEMA_VERSION,
+            agent_session,
+            account_id,
+        }
+    }
+
     pub fn validate(&self) -> std::io::Result<()> {
         if self.schema_version != SCHEMA_VERSION || self.agent_session.as_str().is_empty() {
             return Err(std::io::Error::new(
@@ -274,15 +285,6 @@ impl SessionHistory {
 
 /// A gap between consecutive provider events long enough to count as a silence.
 pub const SILENCE_SECONDS: i64 = 600;
-
-/// The key of a native usage receipt within its turn. OpenCode reports one
-/// counter per assistant message; every other provider one per turn.
-pub fn native_usage_key(payload: &serde_json::Value) -> String {
-    match payload["provider"].as_str() {
-        Some("opencode") => payload["message"]["id"].as_str().unwrap_or_default().into(),
-        _ => String::new(),
-    }
-}
 
 /// Codex counters before the turn's first request.
 pub fn native_baseline(receipt: &serde_json::Value) -> serde_json::Value {
@@ -631,28 +633,6 @@ pub fn project_provider_history(
     }
     records.sort_by_key(|record| record.started_at.or(record.completed_at));
     Ok(records)
-}
-
-/// Read the current conversation’s published provider identity: the newest
-/// `provider-session:*` reference among the input's observations.
-pub fn provider_session_from_history(
-    history: impl IntoIterator<Item = serde_json::Value>,
-) -> std::io::Result<Option<ProviderSessionRef>> {
-    let Some(reference) = history
-        .into_iter()
-        .filter(|observation| {
-            observation["source"]
-                .as_str()
-                .is_some_and(|source| source.starts_with("provider-session:"))
-        })
-        .last()
-    else {
-        return Ok(None);
-    };
-    let reference: ProviderSessionRef =
-        serde_json::from_value(reference["evidence"].clone()).map_err(std::io::Error::other)?;
-    reference.validate()?;
-    Ok(Some(reference))
 }
 
 /// The resume reference: the newest one names the native conversation and

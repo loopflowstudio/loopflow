@@ -1,21 +1,17 @@
 //! Retention: the store keeps facts, and streams stay in files.
 //!
-//! Captures write only Session facts, and native usage keeps one row per
-//! turn; this prune merges native usage an earlier lf recorded per receipt.
-//! It closes Processes whose OS process is gone without recording its exit,
+//! This prune closes Processes whose OS process is gone without recording its exit,
 //! then forgets finished Processes nothing needs, as exit does. Each step is
 //! one short transaction on its own connection, so live writers wait well
 //! under their busy timeout.
 
-use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::Duration;
 
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 
-use crate::session_record::{native_baseline, native_peak, native_usage_key};
-use crate::{StoreError, StoreResult};
+use crate::StoreResult;
 
 const PROCESS_BATCH: i64 = 10_000;
 /// Every live writer waits this long; each prune transaction stays well under.
@@ -23,15 +19,12 @@ const BUSY_TIMEOUT: Duration = Duration::from_secs(15);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RetentionReport {
-    pub usage_rows: u64,
     pub closed_processes: u64,
     pub forgotten_processes: u64,
     pub vacuumed: bool,
 }
 
-/// Prune `database` once. Cursor files beside it hold the last row each pass
-/// visited, so a pass after the first reads only new rows and a draft-build
-/// copy keeps its own.
+/// Prune `database` once.
 ///
 /// # Errors
 /// When the store cannot be opened or a prune transaction fails.
@@ -44,207 +37,13 @@ pub fn prune(
     // Nothing references the rows deleted here (see each predicate), and
     // per-row foreign-key probes would scan session_events for each delete.
     conn.execute_batch("PRAGMA foreign_keys = OFF;")?;
-    // The capture pass this cursor followed ended when migration converted
-    // every capture to facts.
-    let _ = std::fs::remove_file(Cursor::beside(database, "retention").0);
-    let usage_rows = compact_usage(&conn, &Cursor::beside(database, "usage"))?;
+    crate::history::attach(&conn, database);
     let closed_processes = close_dead_processes(&conn, dead)?;
     Ok(RetentionReport {
-        usage_rows,
         closed_processes,
         forgotten_processes: forget_processes(&conn)?,
         vacuumed: reclaim(&conn)?,
     })
-}
-
-/// The last row a pass visited, in a file beside the database, so a later pass
-/// reads only newer rows and a draft-build copy keeps its own.
-struct Cursor(std::path::PathBuf);
-
-impl Cursor {
-    fn beside(database: &Path, name: &str) -> Self {
-        let mut path = database.as_os_str().to_owned();
-        path.push(format!(".{name}-cursor"));
-        Self(path.into())
-    }
-
-    fn read(&self) -> i64 {
-        std::fs::read_to_string(&self.0)
-            .ok()
-            .and_then(|text| text.trim().parse().ok())
-            .unwrap_or(0)
-    }
-
-    fn write(&self, seq: i64) -> StoreResult<()> {
-        std::fs::write(&self.0, seq.to_string())
-            .map_err(|error| StoreError::InvalidData(error.to_string()))
-    }
-}
-
-/// Merge native usage recorded as one row per receipt into one row per turn,
-/// as the store now writes it. Returns the rows removed.
-fn compact_usage(conn: &Connection, cursor: &Cursor) -> StoreResult<u64> {
-    let after = cursor.read();
-    let last: Option<i64> =
-        conn.query_row("SELECT max(seq) FROM session_events", [], |row| row.get(0))?;
-    let Some(last) = last.filter(|last| *last > after) else {
-        return Ok(0);
-    };
-    let turns = conn
-        .prepare(
-            "SELECT DISTINCT session_id,provider_thread,provider_turn FROM session_events
-             WHERE seq>?1 AND seq<=?2 AND kind='usage'",
-        )?
-        .query_map([after, last], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-            ))
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
-    let mut removed = 0;
-    for (session, thread, turn) in turns {
-        removed += compact_native_turn(conn, &session, &thread, &turn)?;
-    }
-    cursor.write(last)?;
-    Ok(removed)
-}
-
-/// One row per native usage key in the turn, at its latest receipt's position.
-/// One usage key's receipts merged into its last row; the earlier rows go.
-struct UsageMerge {
-    removed: Vec<i64>,
-    kept: i64,
-    key: String,
-    payload: String,
-}
-
-fn compact_native_turn(
-    conn: &Connection,
-    session: &str,
-    thread: &str,
-    turn: &str,
-) -> StoreResult<u64> {
-    if native_turn_merges(conn, session, thread, turn)?.is_empty() {
-        return Ok(0);
-    }
-    // A deferred transaction that has read cannot wait for the write lock:
-    // SQLite returns busy at once if any live writer holds it. Take the lock
-    // first, then plan again under it.
-    let tx = rusqlite::Transaction::new_unchecked(conn, TransactionBehavior::Immediate)?;
-    let mut removed = 0;
-    for merge in native_turn_merges(&tx, session, thread, turn)? {
-        for seq in &merge.removed {
-            removed += tx.execute("DELETE FROM session_events WHERE seq=?1", [seq])? as u64;
-        }
-        tx.execute(
-            "UPDATE session_events SET receipt_key=?2,payload=?3 WHERE seq=?1",
-            params![merge.kept, merge.key, merge.payload],
-        )?;
-    }
-    tx.commit()?;
-    Ok(removed)
-}
-
-fn native_turn_merges(
-    conn: &Connection,
-    session: &str,
-    thread: &str,
-    turn: &str,
-) -> StoreResult<Vec<UsageMerge>> {
-    let rows = conn
-        .prepare(
-            "SELECT seq,receipt_key,payload FROM session_events
-             WHERE session_id=?1 AND provider_thread=?2 AND provider_turn=?3 AND kind='usage' ORDER BY seq",
-        )?
-        .query_map([session, thread, turn], |row| {
-            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
-    let starts = conn
-        .prepare(
-            "SELECT seq FROM session_events WHERE session_id=?1 AND provider_thread=?2
-             AND provider_turn!=?3 AND kind='started' ORDER BY seq",
-        )?
-        .query_map([session, thread, turn], |row| row.get::<_, i64>(0))?
-        .collect::<Result<Vec<_>, _>>()?;
-    let mut turn_rows = BTreeMap::<String, i64>::new();
-    let mut keys = BTreeMap::<String, Vec<(i64, String, serde_json::Value)>>::new();
-    for (seq, receipt, payload) in rows {
-        let Ok(payload) = serde_json::from_str::<serde_json::Value>(&payload) else {
-            continue;
-        };
-        let base = native_usage_key(&payload);
-        let started = starts.iter().rev().find(|start| **start < seq).copied();
-        let key = match (turn_rows.get(&base), started) {
-            (Some(last), Some(started)) if started > *last => late_usage_key(&base, started),
-            _ => {
-                turn_rows.insert(base.clone(), seq);
-                base
-            }
-        };
-        keys.entry(key).or_default().push((seq, receipt, payload));
-    }
-    let mut merges = Vec::new();
-    for (key, receipts) in keys {
-        if let [(_, receipt, _)] = receipts.as_slice() {
-            if *receipt == key {
-                continue;
-            }
-        }
-        let merged = receipts
-            .iter()
-            .map(|(_, _, payload)| payload.clone())
-            .reduce(|saved, later| merge_native_usage(&saved, &later))
-            .expect("a key has a receipt");
-        let (last, earlier) = receipts.split_last().expect("a key has a receipt");
-        merges.push(UsageMerge {
-            removed: earlier.iter().map(|(seq, ..)| *seq).collect(),
-            kept: last.0,
-            key,
-            payload: serde_json::to_string(&merged)?,
-        });
-    }
-    Ok(merges)
-}
-
-/// The key of native usage receipts that arrived after the thread's next turn
-/// began at `started`.
-fn late_usage_key(key: &str, started: i64) -> String {
-    format!("{key}:after:{started}")
-}
-
-/// Merge a later native usage receipt into the retained one. Codex reports
-/// thread-cumulative `total` and the latest request as `last`: the turn keeps
-/// its first receipt's baseline (`total - last`), the largest total of each
-/// counter, whether any counter ever went backwards, and its largest request.
-/// Other providers report the turn's or message's own cumulative counter.
-fn merge_native_usage(saved: &serde_json::Value, later: &serde_json::Value) -> serde_json::Value {
-    let mut merged = later.clone();
-    if later.get("total").is_some() {
-        merged["baseline"] = native_baseline(saved);
-        merged["peakInputTokens"] = native_peak(saved).max(native_peak(later)).into();
-        let mut regressed = saved["regressed"] == true;
-        if let Some(totals) = merged["total"].as_object_mut() {
-            for (key, total) in totals {
-                if let Some(saved) = saved["total"][key.as_str()].as_u64() {
-                    regressed |= total.as_u64().is_some_and(|later| later < saved);
-                    *total = total
-                        .as_u64()
-                        .map_or(saved, |later| later.max(saved))
-                        .into();
-                }
-            }
-        }
-        if regressed {
-            merged["regressed"] = true.into();
-        }
-    }
-    if saved["final"] == true {
-        merged["final"] = true.into();
-    }
-    merged
 }
 
 /// Saved identities and locators for observation before pruning.
@@ -373,57 +172,10 @@ mod tests {
     use super::prune;
 
     #[test]
-    fn prune_merges_per_receipt_usage_while_a_live_writer_holds_the_lock() {
-        let home = tempfile::tempdir().unwrap();
-        let path = home.path().join("store.db");
-        let store = crate::test_fixture::open(&path).unwrap();
-        store.test_session("conversation", &crate::session_record::new_artifact_key());
-        let conn = Connection::open(&path).unwrap();
-        for (receipt, total) in [("r1", 10), ("r2", 20)] {
-            let counts = serde_json::json!({"inputTokens":total,"outputTokens":0});
-            conn.execute(
-                "INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,observed_at,payload)
-                 VALUES('conversation','thread','a','usage',?1,0,?2)",
-                rusqlite::params![receipt, serde_json::json!({"total":counts,"last":counts}).to_string()],
-            )
-            .unwrap();
-        }
-
-        let (locked, held) = std::sync::mpsc::channel();
-        let writer = {
-            let path = path.clone();
-            std::thread::spawn(move || {
-                let conn = Connection::open(path).unwrap();
-                conn.execute_batch("BEGIN IMMEDIATE").unwrap();
-                locked.send(()).unwrap();
-                std::thread::sleep(std::time::Duration::from_millis(300));
-                conn.execute_batch("COMMIT").unwrap();
-            })
-        };
-        held.recv().unwrap();
-        assert_eq!(prune(&path, &[]).unwrap().usage_rows, 1);
-        writer.join().unwrap();
-
-        let rows: Vec<(String, String)> = conn
-            .prepare("SELECT receipt_key,payload FROM session_events WHERE kind='usage'")
-            .unwrap()
-            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
-            .unwrap()
-            .collect::<Result<_, _>>()
-            .unwrap();
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].0, "");
-        assert!(rows[0].1.contains("20"));
-        assert!(home.path().join("store.db.usage-cursor").exists());
-    }
-
-    #[test]
-    fn prune_forgets_unneeded_processes_and_retires_the_capture_cursor() {
+    fn prune_forgets_unneeded_processes() {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("store.db");
         crate::test_fixture::open(&path).unwrap();
-        let cursor = home.path().join("store.db.retention-cursor");
-        std::fs::write(&cursor, "7").unwrap();
 
         let now = time::OffsetDateTime::now_utc().unix_timestamp() + 2 * 86_400;
         let conn = Connection::open(&path).unwrap();
@@ -454,7 +206,6 @@ mod tests {
         process(5, None, true, true);
 
         assert_eq!(prune(&path, &[]).unwrap().forgotten_processes, 3);
-        assert!(!cursor.exists());
 
         let left: Vec<String> = conn
             .prepare("SELECT id FROM processes ORDER BY id")

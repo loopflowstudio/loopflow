@@ -224,7 +224,7 @@ impl SqliteStore {
         self.conn
             .lock()
             .expect("store mutex poisoned")
-            .execute_batch("PRAGMA analysis_limit=400; PRAGMA optimize=0x10002;")?;
+            .execute_batch("PRAGMA analysis_limit=400; PRAGMA main.optimize=0x10002;")?;
         Ok(())
     }
 
@@ -233,21 +233,60 @@ impl SqliteStore {
         home_dir_in(&conn)
     }
 
+    /// A store over a fixture's own connection, with its history attached as
+    /// an opened store's is.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn from_fixture_connection(
+        conn: Connection,
+        token_key: token_crypto::TokenKeySource,
+    ) -> Self {
+        let path = conn
+            .path()
+            .filter(|path| !path.is_empty())
+            .map(PathBuf::from);
+        match &path {
+            Some(path) => crate::history::attach(&conn, path),
+            None => crate::history::attach_empty(&conn),
+        }
+        Self {
+            conn: Arc::new(Mutex::new(conn)),
+            token_key,
+            history: Arc::new(path.map_or_else(Default::default, |path| {
+                crate::history::HistoryFile::beside(&path)
+            })),
+        }
+    }
+
     /// Run `write` on this store's `history.db`, never under the store's write
     /// lock. A failure is a recording gap for `what`, and `None`.
-    // Session history kinds move onto this writer later in LOO-936's PR.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn write_history<T>(
         &self,
         what: &str,
         write: impl FnOnce(&rusqlite::Transaction<'_>) -> StoreResult<T>,
     ) -> Option<T> {
-        let Some(path) = self.path() else {
-            crate::RecordingGap::default()
-                .note(what, &"the store has no file beside which to keep history");
-            return None;
-        };
-        self.history.write(&path, what, write)
+        self.history.write(what, write)
+    }
+
+    /// Run `sql` on this store's history file, with the store attached as
+    /// `store`, for fixtures that seed history rows directly.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn execute_history(&self, sql: &str, params: impl rusqlite::Params) -> StoreResult<usize> {
+        self.write_history("fixture", |tx| Ok(tx.execute(sql, params)?))
+            .ok_or_else(|| StoreError::InvalidData("fixture history write failed".into()))
+    }
+
+    /// Append `rows` to Session history in one transaction, after the state
+    /// they describe has committed; a failure is a recording gap.
+    pub(crate) fn append_history(&self, what: &str, rows: &[crate::history::Row]) {
+        if rows.is_empty() {
+            return;
+        }
+        self.write_history(what, |tx| {
+            for row in rows {
+                crate::history::append_in(tx, row)?;
+            }
+            Ok(())
+        });
     }
 }
 
@@ -311,7 +350,9 @@ fn copy_test_store(path: &Path) -> StoreResult<()> {
 fn open_unmigrated(path: &Path) -> StoreResult<Connection> {
     let conn = Connection::open_with_flags(
         path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+            | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
+            | rusqlite::OpenFlags::SQLITE_OPEN_URI,
     )?;
     crate::instrumentation::observe_sqlite(&conn);
     conn.execute_batch("PRAGMA query_only = ON; PRAGMA busy_timeout = 5000;")?;
@@ -659,11 +700,11 @@ impl SqliteStore {
         crate::instrumentation::observe_sqlite(&conn);
         configure_write_connection(&mut conn, path, SQLITE_WRITE_BUSY_TIMEOUT)?;
         super::migration_runner::apply_sqlite(build, &conn, observers)?;
-        crate::history::attach(&conn, path, true);
+        crate::history::attach(&conn, path);
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
             token_key,
-            history: Default::default(),
+            history: Arc::new(crate::history::HistoryFile::beside(path)),
         })
     }
 
@@ -732,12 +773,12 @@ impl SqliteStore {
         if may_apply_migrations {
             migrate_plaintext_provider_tokens(&mut conn, token_key)?;
         }
-        crate::history::attach(&conn, path, true);
+        crate::history::attach(&conn, path);
 
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
             token_key,
-            history: Default::default(),
+            history: Arc::new(crate::history::HistoryFile::beside(path)),
         })
     }
 
@@ -764,7 +805,9 @@ impl SqliteStore {
     ) -> StoreResult<Self> {
         let conn = Connection::open_with_flags(
             path,
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
+                | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
+                | rusqlite::OpenFlags::SQLITE_OPEN_URI,
         )?;
         crate::instrumentation::observe_sqlite(&conn);
         conn.busy_timeout(wait.min(Duration::from_secs(5)))?;
@@ -774,11 +817,11 @@ impl SqliteStore {
         conn.prepare(
             "SELECT id, trace_id, parent_lf_process_id, started_at, completed_at, outcome, exit_code, pid FROM processes LIMIT 0",
         )?;
-        crate::history::attach(&conn, path, false);
+        crate::history::attach(&conn, path);
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
             token_key,
-            history: Default::default(),
+            history: Arc::new(crate::history::HistoryFile::beside(path)),
         })
     }
 
@@ -788,15 +831,17 @@ impl SqliteStore {
     ) -> StoreResult<Self> {
         let conn = Connection::open_with_flags(
             path,
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+                | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
+                | rusqlite::OpenFlags::SQLITE_OPEN_URI,
         )?;
         crate::instrumentation::observe_sqlite(&conn);
         conn.execute_batch("PRAGMA query_only = ON; PRAGMA busy_timeout = 5000;")?;
-        crate::history::attach(&conn, path, false);
+        crate::history::attach(&conn, path);
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
             token_key,
-            history: Default::default(),
+            history: Arc::new(crate::history::HistoryFile::beside(path)),
         })
     }
 

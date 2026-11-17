@@ -7,17 +7,19 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
 
-use rusqlite::{Connection, Transaction, TransactionBehavior};
+use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior};
 
 use crate::{RecordingGap, StoreResult};
 
 const HISTORY_FILE: &str = "history.db";
 
 /// The history file's schema, applied once per `user_version`. History is a
-/// journal: a new version adds to it, and nothing migrates old rows.
+/// journal: a new version adds to it, and nothing migrates old rows. `{p}`
+/// names the schema the objects go in: empty for the file itself, `history.`
+/// for the empty stand-in a store attaches when it cannot reach the file.
 const SCHEMA_VERSION: i64 = 1;
 const SCHEMA: &str = "
-CREATE TABLE IF NOT EXISTS session_history (
+CREATE TABLE IF NOT EXISTS {p}session_history (
     seq INTEGER PRIMARY KEY,
     session_id TEXT NOT NULL,
     provider_thread TEXT,
@@ -32,52 +34,130 @@ CREATE TABLE IF NOT EXISTS session_history (
     observed_at INTEGER NOT NULL,
     payload TEXT NOT NULL
 );
-CREATE UNIQUE INDEX IF NOT EXISTS session_history_receipt ON session_history(
+CREATE UNIQUE INDEX IF NOT EXISTS {p}session_history_receipt ON session_history(
     session_id, COALESCE(provider_thread,''), COALESCE(provider_turn,''), kind, receipt_key);
-CREATE INDEX IF NOT EXISTS session_history_order ON session_history(session_id, seq);
-CREATE INDEX IF NOT EXISTS session_history_input ON session_history(session_id, captured_event);
-CREATE INDEX IF NOT EXISTS session_history_window ON session_history(observed_at);
-CREATE INDEX IF NOT EXISTS session_history_process ON session_history(lf_process_id)
+CREATE INDEX IF NOT EXISTS {p}session_history_order ON session_history(session_id, seq);
+CREATE INDEX IF NOT EXISTS {p}session_history_turn ON session_history(
+    session_id, provider_thread, provider_turn, kind, observed_at);
+CREATE INDEX IF NOT EXISTS {p}session_history_observation ON session_history(session_id, receipt_key)
+    WHERE kind='observed';
+CREATE INDEX IF NOT EXISTS {p}session_history_input ON session_history(captured_event)
+    WHERE captured_event IS NOT NULL;
+CREATE INDEX IF NOT EXISTS {p}session_history_outcome_window ON session_history(observed_at)
+    WHERE kind='observed' AND substr(receipt_key,-14) IN (':manifest.json',':terminal.json');
+CREATE INDEX IF NOT EXISTS {p}session_history_turn_window ON session_history(
+    observed_at, kind, session_id, provider_thread, provider_turn)
+    WHERE kind IN ('started','usage','completed','output');
+CREATE INDEX IF NOT EXISTS {p}session_history_window ON session_history(observed_at);
+CREATE INDEX IF NOT EXISTS {p}session_history_process ON session_history(lf_process_id, session_id)
     WHERE lf_process_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS {p}session_history_task ON session_history(task_id)
+    WHERE task_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS {p}session_history_transitions ON session_history(session_id, seq)
+    WHERE kind='observed' AND receipt_key GLOB 'provider-transition:*';
 
-CREATE TABLE IF NOT EXISTS process_history (
-    id TEXT PRIMARY KEY,
-    trace_id TEXT NOT NULL,
-    parent_lf_process_id TEXT,
-    via_agent INTEGER,
-    caller_session_id TEXT,
-    caller_agent_process_id TEXT,
-    kind TEXT NOT NULL,
-    command TEXT,
-    repo TEXT,
-    cwd TEXT,
-    started_at INTEGER NOT NULL,
-    completed_at INTEGER,
-    outcome TEXT,
-    exit_code INTEGER,
-    signal TEXT,
-    error TEXT
-);
-CREATE INDEX IF NOT EXISTS process_history_recent ON process_history(started_at DESC, id);
-CREATE INDEX IF NOT EXISTS process_history_parent ON process_history(parent_lf_process_id, started_at, id);
-CREATE INDEX IF NOT EXISTS process_history_caller ON process_history(caller_session_id, started_at)
-    WHERE caller_session_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS process_history_finished ON process_history(completed_at);
-
-CREATE TABLE IF NOT EXISTS history_revision (
+CREATE TABLE IF NOT EXISTS {p}history_revision (
     id INTEGER PRIMARY KEY CHECK(id = 1),
     revision INTEGER NOT NULL
 );
-INSERT OR IGNORE INTO history_revision(id, revision) VALUES(1, 0);
-CREATE TRIGGER IF NOT EXISTS history_revision_session_insert AFTER INSERT ON session_history
+INSERT OR IGNORE INTO {p}history_revision(id, revision) VALUES(1, 0);
+CREATE TRIGGER IF NOT EXISTS {p}history_revision_session_insert AFTER INSERT ON session_history
 BEGIN UPDATE history_revision SET revision = revision + 1; END;
-CREATE TRIGGER IF NOT EXISTS history_revision_session_delete AFTER DELETE ON session_history
-BEGIN UPDATE history_revision SET revision = revision + 1; END;
-CREATE TRIGGER IF NOT EXISTS history_revision_process_insert AFTER INSERT ON process_history
-BEGIN UPDATE history_revision SET revision = revision + 1; END;
-CREATE TRIGGER IF NOT EXISTS history_revision_process_delete AFTER DELETE ON process_history
+CREATE TRIGGER IF NOT EXISTS {p}history_revision_session_delete AFTER DELETE ON session_history
 BEGIN UPDATE history_revision SET revision = revision + 1; END;
 ";
+
+fn schema(prefix: &str) -> String {
+    SCHEMA.replace("{p}", prefix)
+}
+
+/// One row of `history.session_history`.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Row {
+    pub session_id: String,
+    pub provider_thread: Option<String>,
+    pub provider_turn: Option<String>,
+    pub kind: &'static str,
+    pub receipt_key: String,
+    pub lf_process_id: Option<String>,
+    pub agent_process_id: Option<String>,
+    pub task_id: Option<String>,
+    pub wave_id: Option<String>,
+    pub captured_event: Option<i64>,
+    pub observed_at: i64,
+    pub payload: String,
+}
+
+impl Row {
+    /// An observation of `session` keyed `receipt_key`, belonging to input
+    /// `captured_event`.
+    pub fn observed(
+        session: &str,
+        receipt_key: String,
+        captured_event: Option<i64>,
+        observed_at: i64,
+        payload: String,
+    ) -> Self {
+        Self {
+            session_id: session.into(),
+            kind: "observed",
+            receipt_key,
+            captured_event,
+            observed_at,
+            payload,
+            ..Self::default()
+        }
+    }
+}
+
+/// Append `row` and return its sequence; a receipt already kept answers with
+/// its own, and one kept with another payload is conflicting evidence.
+pub(crate) fn append_in(tx: &Connection, row: &Row) -> StoreResult<i64> {
+    let kept: Option<(i64, String)> = tx
+        .query_row(
+            "SELECT seq,payload FROM session_history WHERE session_id=?1
+             AND COALESCE(provider_thread,'')=COALESCE(?2,'') AND COALESCE(provider_turn,'')=COALESCE(?3,'')
+             AND kind=?4 AND receipt_key=?5",
+            rusqlite::params![
+                row.session_id,
+                row.provider_thread,
+                row.provider_turn,
+                row.kind,
+                row.receipt_key
+            ],
+            |found| Ok((found.get(0)?, found.get(1)?)),
+        )
+        .optional()?;
+    if let Some((seq, payload)) = kept {
+        if payload == row.payload {
+            return Ok(seq);
+        }
+        return Err(crate::StoreError::InvalidData(format!(
+            "conflicting {} {} receipt for Session {}",
+            row.kind, row.receipt_key, row.session_id
+        )));
+    }
+    tx.execute(
+        "INSERT INTO session_history(session_id,provider_thread,provider_turn,kind,receipt_key,
+            lf_process_id,agent_process_id,task_id,wave_id,captured_event,observed_at,payload)
+         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+        rusqlite::params![
+            row.session_id,
+            row.provider_thread,
+            row.provider_turn,
+            row.kind,
+            row.receipt_key,
+            row.lf_process_id,
+            row.agent_process_id,
+            row.task_id,
+            row.wave_id,
+            row.captured_event,
+            row.observed_at,
+            row.payload
+        ],
+    )?;
+    Ok(tx.last_insert_rowid())
+}
 
 /// A history write waits this long for another history writer, then becomes a
 /// gap: a turn boundary does not queue behind history.
@@ -92,9 +172,11 @@ pub fn history_path(store: &Path) -> PathBuf {
 }
 
 /// The history writer of one store connection: opened at its first write, and
-/// reopened after a failure.
+/// reopened after a failure. `store` is the store beside which history lives;
+/// a store without a file keeps none.
 #[derive(Debug, Default)]
 pub struct HistoryFile {
+    store: Option<PathBuf>,
     state: Mutex<WriterState>,
 }
 
@@ -105,16 +187,29 @@ struct WriterState {
 }
 
 impl HistoryFile {
-    /// Run `write` in one transaction on the history file of the store at
-    /// `store`, with the store attached read-only as `store`. Returns whether
-    /// it committed; a failure is noted as a recording gap for `what`.
+    /// The writer of the history kept beside the store at `store`.
+    pub(crate) fn beside(store: &Path) -> Self {
+        Self {
+            store: Some(store.to_path_buf()),
+            state: Mutex::default(),
+        }
+    }
+
+    /// Run `write` in one transaction on the history file, with the store
+    /// attached read-only as `store`. Returns what it committed; a failure is
+    /// noted as a recording gap for `what`.
     pub(crate) fn write<T>(
         &self,
-        store: &Path,
         what: &str,
         write: impl FnOnce(&Transaction<'_>) -> StoreResult<T>,
     ) -> Option<T> {
         let mut state = self.state.lock().expect("history mutex poisoned");
+        let Some(store) = &self.store else {
+            state
+                .gap
+                .note(what, &"the store has no file beside which to keep history");
+            return None;
+        };
         let result = commit(&mut state.conn, store, write);
         match result {
             Ok(value) => {
@@ -152,28 +247,46 @@ fn commit<T>(
 }
 
 /// Attach the history file of the store at `store` to `conn` read-only as
-/// `history`, so readers name `history.session_history`. `create` makes the
-/// file and its schema first; otherwise a missing file stays unattached.
-/// History a store cannot reach is a recording gap, never a failed open.
-pub(crate) fn attach(conn: &Connection, store: &Path, create: bool) {
+/// `history`, so readers name `history.session_history`, making the file and
+/// its schema first when it is missing. History a store cannot reach is a
+/// recording gap, never a failed open: readers then see an empty history.
+pub(crate) fn attach(conn: &Connection, store: &Path) {
     let path = history_path(store);
-    if create {
-        if let Err(error) = open_writer(store) {
-            RecordingGap::default().note("history file", &error);
-            return;
+    let attached = (|| -> StoreResult<()> {
+        if !path.exists() {
+            open_writer(store)?;
         }
-    } else if !path.exists() {
-        return;
-    }
-    if let Err(error) = conn.execute("ATTACH ?1 AS history", [read_only_uri(&path)]) {
+        conn.execute("ATTACH ?1 AS history", [read_only_uri(&path)])?;
+        Ok(())
+    })();
+    if let Err(error) = attached {
         RecordingGap::default().note("history file", &error);
+        attach_empty(conn);
+    }
+}
+
+/// An empty in-memory history, for a store without a reachable history file.
+pub(crate) fn attach_empty(conn: &Connection) {
+    // A read-only store connection is `query_only`; its empty history is not
+    // a write to anything the person keeps.
+    let attached = (|| -> StoreResult<()> {
+        let query_only: bool = conn.pragma_query_value(None, "query_only", |row| row.get(0))?;
+        conn.execute_batch(&format!(
+            "PRAGMA query_only=OFF; ATTACH ':memory:' AS history; {} PRAGMA query_only={};",
+            schema("history."),
+            if query_only { "ON" } else { "OFF" }
+        ))?;
+        Ok(())
+    })();
+    if let Err(error) = attached {
+        RecordingGap::default().note("empty history", &error);
     }
 }
 
 /// A connection whose main database is `history.db`, so `BEGIN IMMEDIATE`
 /// locks only history. The store is attached read-only for the attachment
 /// fences history rows check; a read-only attachment never takes its lock.
-fn open_writer(store: &Path) -> StoreResult<Connection> {
+pub(crate) fn open_writer(store: &Path) -> StoreResult<Connection> {
     let conn = Connection::open(history_path(store))?;
     crate::instrumentation::observe_sqlite(&conn);
     conn.busy_timeout(BUSY)?;
@@ -188,7 +301,8 @@ fn open_writer(store: &Path) -> StoreResult<Connection> {
     let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
     if version < SCHEMA_VERSION {
         conn.execute_batch(&format!(
-            "BEGIN IMMEDIATE; {SCHEMA} PRAGMA user_version = {SCHEMA_VERSION}; COMMIT;"
+            "BEGIN IMMEDIATE; {} PRAGMA user_version = {SCHEMA_VERSION}; COMMIT;",
+            schema("")
         ))?;
     }
     conn.execute("ATTACH ?1 AS store", [read_only_uri(store)])?;

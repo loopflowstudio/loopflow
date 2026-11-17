@@ -291,12 +291,8 @@ mod tests {
                 .record_session_event(id, &thread.into(), "turn-1", kind, &payload)
                 .unwrap();
         }
-        store
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                "UPDATE session_events SET observed_at=?2 WHERE session_id=?1 AND kind<>'captured'",
+        store.execute_history(
+"UPDATE session_history SET observed_at=?2 WHERE session_id=?1 AND kind<>'captured'",
                 rusqlite::params![id, at],
             )
             .unwrap();

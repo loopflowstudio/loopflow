@@ -238,6 +238,39 @@ struct WorkDestinationTests {
         await CreationRecovery.shared.presented([submitted[3]])
     }
 
+    @Test("After the answer, a failure opening the conversation is the Task's, with no second Start")
+    func newTaskOpeningFailureAfterTheAnswerBelongsToTheTask() async throws {
+        let planning = try fixture()
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(planning.utf8))
+        let task = try #require(snapshot.tasks.items.first)
+        let record = try renameFixtureRecord("primary", title: "Task conversation", work: .task(id: #require(task.runtime?.workId)))
+        let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
+        let receipt = """
+        {"task": {"id": "\(task.task.id)", "identifier": "\(task.task.identifier)", "title": "\(task.task.name)"},
+         "graph": "code", "session_id": "\(record.id)", "milestone": "admitted",
+         "session": \(encoded), "overview": {"sessions": [], "graph_processes": [], "graph": null}}
+        """
+        let requests = OSAllocatedUnfairLock<[[String]]>(initialState: [])
+        let query = RegistryQuery { args, _ in
+            requests.withLock { $0.append(args) }
+            if args.starts(with: ["task", "create"]) { return receipt }
+            throw RegistryQueryError("Machine unavailable")
+        }
+        // No Machine identity: installing the answer's conversation fails.
+        let model = WorkModel(query: query, repoPath: task.task.repo)
+        let registry = SessionsWorkspaceRegistry(localMachineId: nil)
+        model.bindWorkspaces(registry, repository: "repo")
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [], fixed: true)
+        model.navigation.palette = .newTask
+        try await model.createTask(request: "fix the flaky retry test", wave: nil, graph: nil)
+        #expect(model.navigation.startingTask == nil)
+        #expect(model.selection == .task(id: task.id))
+        let workspace = try #require(registry.retained(model.workspaceKey(for: model.selection, repository: "repo")))
+        #expect(workspace.conversationError != nil)
+        #expect(requests.withLock { $0 }.filter { $0.starts(with: ["task", "create"]) }.count == 1)
+        await CreationRecovery.shared.presented(requests.withLock { $0 }.filter { $0.starts(with: ["task", "create"]) }.map { $0[3] })
+    }
+
     enum CreationDeparture: CaseIterable {
         case newerTaskSheet, newerSheetSameDestination, newerRepositorySheet
         case navigationAway, navigationRoundTrip, repositoryRoundTrip

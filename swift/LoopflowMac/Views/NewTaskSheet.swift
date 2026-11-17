@@ -314,10 +314,12 @@ struct StartingTaskView: View {
                 Text(error).font(Typography.body(12)).foregroundStyle(palette.warning)
                     .textSelection(.enabled).accessibilityIdentifier("new-task-error")
                 HStack {
-                    Button("Try again") {
-                        Self.start(model: model, request: starting.request, wave: starting.wave, graph: starting.graph)
+                    if !starting.filed {
+                        Button("Try again") {
+                            Self.start(model: model, request: starting.request, wave: starting.wave, graph: starting.graph)
+                        }
                     }
-                    Button("Discard") { model.navigation.startingTask = nil }
+                    Button(starting.filed ? "Close" : "Discard") { model.navigation.startingTask = nil }
                 }
             }
             Spacer(minLength: 0)

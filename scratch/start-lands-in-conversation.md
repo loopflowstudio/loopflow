@@ -272,27 +272,19 @@ Start's log is `task.create` alone and the opening names the answer's Session
 Concept review of 4d6ec717da: the phone model holds (`MobileTask` is the one
 value both Start and the Task list open; recovery alone reads `task:<id>`).
 
+After the answer, no Try again: `createTask` throws only before filing; an
+opening failure lands on the selected Task's `conversationError`. If planning
+never shows the filed Task, the words stay with the error and Close
+(`StartingTask.filed`), no Try again. Phone: `MobileTaskCreation.starting`
+covers only the first send ("Starting…"); recovery reads "Checking your Task…".
+
 Remaining, in order:
-1. **Desktop: after the answer, no Try again** (from the review of
-   149dbbfae3, still unbuilt: `WorkModel.swift:2582`'s generic `catch` sets
-   `startingTask.error` for a throw from `openCreatedTask`). Split `createTask`'s `do`:
-   `query.createTask` failures (before filing) keep `startingTask.error` and
-   Try again; once `created` exists, clear `startingTask`, select the Task
-   (`openTaskDestination`) and put the error on its workspace
-   (`conversationError`). Test in `WorkDestinationTests`: answer arrives,
-   `installConversation`'s prepare fails → `startingTask` nil, selection is the
-   Task, workspace `conversationError` set, one `task.create` in the log.
-   Phone, same pass: the first send's spinner reads "Checking your Task…"
-   (`MobileNewTaskView.swift:140`); it is starting one. Show "Starting…" while
-   `submit` is on its first send (a lost answer's recheck can also have no
-   outcome, so key it on the send, not on `draft.outcome`), "Checking your
-   Task…" for recovery.
-2. `Perf.retarget(.startTask, from: "new-task", …)`: key by request ID from the
+1. `Perf.retarget(.startTask, from: "new-task", …)`: key by request ID from the
    click (slice 5).
-3. Slice 3, including checkout without network for a new branch:
+2. Slice 3, including checkout without network for a new branch:
    `fetch_task_refs`, the base fetch and `assert_assignee` still run inside
    setup (off the answer path, on the typing path).
-4. Slices 4–5.
+3. Slices 4–5.
 
 ## Slices
 
@@ -321,8 +313,8 @@ Remaining, in order:
 ## Checks
 
 - `cargo test -p loopflow --test integration task_create_` — slices 1, 3, 4; gate.
-- `swift test --package-path swift --filter 'WorkDestinationTests|NewTaskTests|MobileTaskCreationTests'` — 73 passed (Mac).
-- `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/MobileTaskCreationTests` — 20 passed; full iOS suite at gate.
+- `swift test --package-path swift --filter 'WorkDestinationTests|NewTaskTests|MobileTaskCreationTests'` — 74 passed (Mac).
+- `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/MobileTaskCreationTests` — 21 passed; full iOS suite at gate.
 - `uv run pytest python/tests/test_desktop_timings.py` — slice 5; gate.
 - Live Start → typing, local and remote Machine — qa (remote needs a rented or
   tailnet Machine; not a gate requirement).

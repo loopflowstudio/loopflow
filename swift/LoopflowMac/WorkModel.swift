@@ -97,6 +97,8 @@ struct StartingTask: Equatable {
     let wave: WaveSnapshot?
     let graph: String?
     var error: String?
+    /// The answer arrived: the Task exists, so starting again would file another.
+    var filed = false
 }
 
 /// One resolved opening: its companion must never outlive or drift from the Session.
@@ -2553,8 +2555,10 @@ final class WorkModel {
     /// New Task: one `lf task create REQUEST --run` files it in `wave` (nil: the
     /// repository) with its conversation admitted. The sheet closes in the click
     /// and the words stand in until the answer's Session is installed; nothing
-    /// else is read or prepared for it. A submitted request whose answer is lost
-    /// hands uncertainty to recovery.
+    /// else is read or prepared for it. A failure before filing keeps the words
+    /// and Try again; after the answer, the Task exists, so a failure opening it
+    /// belongs to its workspace. A submitted request whose answer is lost hands
+    /// uncertainty to recovery.
     func createTask(request: String, wave: WaveSnapshot?, graph: String?) async throws {
         let requestID = InteractionTrace.current?.id.uuidString ?? UUID().uuidString
         let owner = navigation
@@ -2563,31 +2567,45 @@ final class WorkModel {
         if owner.palette == .newTask { owner.palette = nil }
         let presentation = owner.paletteGeneration
         let destination = destinationGeneration
+        let created: TaskCreated
         do {
-            let created = try await query.createTask(request: request, wave: wave?.name, graph: graph, cwd: repoPath, requestID: requestID)
-            let receipt = created.receipt
-            Perf.retarget(.startTask, from: "new-task", to: receipt.sessionId ?? receipt.task.id,
-                          owner: owner.performanceOwner)
-            CreationRecovery.shared.awaitingPresentation(requestID, of: .task(receipt.task.id))
-            if owner.startingTask?.id == requestID, owner.paletteGeneration == presentation,
-               navigation === owner, destinationGeneration == destination {
-                try await openCreatedTask(created, generation: destination)
-            }
-            if owner.startingTask?.id == requestID { owner.startingTask = nil }
+            created = try await query.createTask(request: request, wave: wave?.name, graph: graph, cwd: repoPath, requestID: requestID)
         } catch is SubmittedCreationError {
             Perf.finish(.startTask, id: "new-task", owner: owner.performanceOwner, outcome: .unmeasured)
             // The saved submission owns recovery. Keeping a submit button here
             // would turn a lost answer into another creation identity.
             if owner.startingTask?.id == requestID { owner.startingTask = nil }
+            return
         } catch {
             if owner.startingTask?.id == requestID { owner.startingTask?.error = error.localizedDescription }
             throw error
         }
+        let receipt = created.receipt
+        Perf.retarget(.startTask, from: "new-task", to: receipt.sessionId ?? receipt.task.id,
+                      owner: owner.performanceOwner)
+        CreationRecovery.shared.awaitingPresentation(requestID, of: .task(receipt.task.id))
+        if owner.startingTask?.id == requestID, owner.paletteGeneration == presentation,
+           navigation === owner, destinationGeneration == destination {
+            do {
+                try await openCreatedTask(created, generation: destination)
+            } catch {
+                // Planning never showed the filed Task: no workspace to carry the
+                // failure, and Try again would file a second one.
+                if owner.startingTask?.id == requestID {
+                    owner.startingTask?.filed = true
+                    owner.startingTask?.error = error.localizedDescription
+                }
+                throw error
+            }
+        }
+        if owner.startingTask?.id == requestID { owner.startingTask = nil }
     }
 
     /// Install a created Task's conversation from the answer: its overview seeds
     /// the Task's reading and its Session opens as prepared. Nothing saved can
     /// exist for a new Task, so its layout starts empty instead of being read.
+    /// Throws only while the Task is missing from planning; once it is selected,
+    /// an opening failure is its workspace's `conversationError`.
     private func openCreatedTask(_ created: TaskCreated, generation: Int) async throws {
         let id = created.receipt.task.id
         if task(id: id) == nil {
@@ -2614,12 +2632,20 @@ final class WorkModel {
         let records = [record] + (sessions.value ?? []).filter { $0.id != record.id }
         sessions = sessions.errorMessage.map { .unavailable(lastGood: records, reason: $0) } ?? .available(records)
         let link = TaskLink(issue: found.task.task.identifier, repo: found.task.task.repo, conversation: true)
-        taskOpening = DesktopOpening(revision: UUID().uuidString, url: link.address, status: .opening, reason: nil)
+        let opening = DesktopOpening(revision: UUID().uuidString, url: link.address, status: .opening, reason: nil)
+        taskOpening = opening
         openTaskDestination(wave: found.wave, task: found.task, preservingOpening: true)
         navigation.content = .terminals
         let destination = LinkedSession(generation: destinationGeneration, record: record, task: found.task,
                                         showsChanges: false, location: nil, preparedIntent: .start)
-        try await installConversation(destination, repository: found.task.task.repo)
+        do {
+            try await installConversation(destination, repository: found.task.task.repo)
+        } catch {
+            if destinationGeneration == destination.generation, workspace.conversationRequest == request {
+                workspace.conversationError = error.localizedDescription
+            }
+            if taskOpening?.revision == opening.revision { taskOpening = nil }
+        }
     }
 
     /// Ship the Task, then confirm its subscription update; it moves to Shipping

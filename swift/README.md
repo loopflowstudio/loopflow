@@ -89,7 +89,9 @@ The checkout branches from the default branch as of Loopflow's last background
 fetch; the Task's first sync catches up. A setup step that fails prints its error
 in the pane, and the agent still starts once the checkout exists. Reopening the
 conversation continues setup from the step that stopped; it never starts a
-second Graph.
+second Graph. If the Machine refuses before filing, your words stay with the
+error and **Try again**; once it has answered, the Task exists, so a failure to
+open its conversation shows in the Task's pane with Retry, never a second Start.
 
 Click a row to select its retained workspace. The title-bar **Repo › Wave › Task**
 path follows hierarchy: click a name to go there, or the **›** after it to list and

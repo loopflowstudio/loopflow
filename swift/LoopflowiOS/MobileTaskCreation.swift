@@ -175,6 +175,8 @@ final class MobileTaskCreation: Identifiable {
     private var savedDraft = MobileTaskDraft()
     private(set) var context: MobileCreationContext?
     private(set) var busy = false
+    /// A first Start is on its one send; recovery and opening are other work.
+    private(set) var starting = false
     private(set) var error: String?
     private(set) var storageUnavailable = false
     /// Tasks a first Start's answer named, by submission; opening one reads nothing.
@@ -296,6 +298,8 @@ final class MobileTaskCreation: Identifiable {
         do {
             let outcome: MobileTaskOutcome
             if first {
+                starting = true
+                defer { starting = false }
                 let start = try await client.startTask(submission)
                 answered[submission.id] = start.task
                 outcome = start.outcome

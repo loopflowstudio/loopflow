@@ -93,6 +93,33 @@ final class MobileTaskCreationTests: XCTestCase {
         XCTAssertNil(try store.load().submission)
     }
 
+    func testFirstSendIsStartingAndRecoveryIsNot() async throws {
+        let client = try await CreationClient()
+        let store = temporaryStore()
+        defer { try? FileManager.default.removeItem(at: store.url.deletingLastPathComponent()) }
+        let model = MobileTaskCreation(client: client, store: store)
+        await model.prepare()
+        model.editText("Start this")
+        client.delayReply = true
+        client.loseReply = true
+        let first = Task { await model.submit() }
+        for _ in 0..<200 where client.reply == nil { await Task.yield() }
+        XCTAssertTrue(model.starting, "The first send is starting a Task")
+        client.reply?.resume()
+        client.reply = nil
+        await first.value
+        XCTAssertFalse(model.starting)
+        XCTAssertNil(model.draft.outcome, "A lost answer leaves no outcome")
+        client.delayReply = true
+        let recovery = Task { await model.submit() }
+        for _ in 0..<200 where client.reply == nil { await Task.yield() }
+        XCTAssertTrue(model.busy)
+        XCTAssertFalse(model.starting, "Rechecking the same request is not starting one")
+        client.reply?.resume()
+        await recovery.value
+        XCTAssertEqual(client.log, ["task.create", "creation.get"])
+    }
+
     func testLateAndRepeatedPresentationPreserveANewerDraft() async throws {
         let client = try await CreationClient()
         let store = temporaryStore()

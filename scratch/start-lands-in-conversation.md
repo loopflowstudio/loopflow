@@ -390,9 +390,10 @@ to the provider's environment (`process/runtime.rs`), so the launch matches it.
 Moving Work declaration off process env is its own change, not this Task's.
 `LaunchLock` is a shared take-once slot only because `Cli` derives `Clone`.
 
-Next implement: delete the leftover `LF_HUMAN_SESSION` names, which nothing
-sets or reads now (`rust/loopflow/tests/session_cli_tests.rs:24,152`,
-`rust/loopflow-execution/tests/support/ambient.rs:20`).
+Leftover `LF_HUMAN_SESSION`/`LF_HUMAN_SESSION_RUN` strips (fixtures,
+`os_process/detached.rs`, Swift `ProcessEnvironment`) and the definition test
+that set the old token are deleted (120175ea3e); docs/dev/environment.md lists
+both as removed.
 
 Remaining: slice 5's remote sample (qa).
 
@@ -414,9 +415,10 @@ Remaining: slice 5's remote sample (qa).
 3. **Ready checkout.** Make, take, replace; check cleanup leaves it alone.
    Test: second Start in a fixture repo moves the ready worktree into place
    (same inode), no `worktree add` on the request, a new `.ready` appears.
-4. **Provider in-process.** Drop the exec (shape in Status). Test: the stub
-   provider's parent is the held `session resume`, on a creation Start and on
-   a plain resume of a prepared Session; the `-a` fixture stays green.
+4. **Provider in-process.** Drop the exec (shape in Status). Test: a creation
+   Start's provider has one `lf` LfProcess, the held `session resume`; an
+   unheld plain resume's provider is that resume's child; the `-a` fixture
+   stays green.
 5. **Journal.** Spans in the report, Machine kind split; record Start → typing
    on the live Machine and on a remote Machine.
 
@@ -429,6 +431,7 @@ Remaining: slice 5's remote sample (qa).
 - `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/MobileTaskCreationTests` — 21 passed; full iOS suite at gate.
 - `uv run pytest python/tests/test_desktop_timings.py` — 16 passed (nesting and Machine split).
 - `cargo test -p loopflow --test integration task_create_` — 9 passed after the sync, `-a` and timing assertions; no launchd server left behind. Swift Mac filter (with `InteractionTests`) 153 passed; clippy clean.
+- 120175ea3e: `loopflow-execution --lib definition::` 2 passed; clippy (`loopflow`, `loopflow-execution`) clean. Swift build after the `ProcessEnvironment` edit — gate.
 - Live Start → typing, local and remote Machine — qa (remote needs a rented or
   tailnet Machine; not a gate requirement).
 

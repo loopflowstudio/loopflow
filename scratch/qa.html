@@ -1,120 +1,120 @@
-<!doctype html>
-<html><head><meta charset="utf-8"><title>LOO-925 QA</title>
+<!doctype html><meta charset="utf-8"><title>LOO-925 QA</title>
 <style>body{font:15px/1.5 -apple-system,sans-serif;max-width:60rem;margin:2rem auto;padding:0 1rem;color:#222}
-pre{background:#f5f5f3;padding:.8rem;overflow-x:auto;font-size:12.5px}h2{margin-top:2.2rem}</style></head><body>
-<h1>LOO-925 QA: the tracker mirrors the store</h1>
-<p>Third pass, on 247d2917fd: what changed since the second pass (2a2b47cc93) — one tracker-action view
-(<code>task.sync</code> is its Task's slice of <code>lf repo plan</code>), Git conflicts as <code>conflicted</code>,
-<code>lf task sync</code> on Git, no <code>--retry-updates</code>, and a tracker block decided before the send.
-The earlier passes' walkthroughs (offline Linear, switching to Asana, delete before send, abandon behind a create, the
-migration on this Machine's store copy) are in git history for this file.</p>
-<p>Setup: branch <code>lf</code> copied to <code>/tmp/lfqa925c/lf-bin</code>; three private <code>HOME</code>/<code>LF_HOME</code>
-pairs (peers A, B, C); <code>LF_*</code>/<code>REX_*</code> unset; stdin closed; disposable repositories with local bare
-origins. No server, holder or provider was started by the walkthrough; none were left running.</p>
+pre{background:#f5f5f3;padding:.8rem;overflow-x:auto;font-size:12.5px}h2{margin-top:2.2rem}</style>
+<h1>LOO-925 QA: answering a lost line</h1>
+<p>Fourth pass, on b8c7c7b1af: what changed since the third pass (247d2917fd) — a lost value is answered, not
+open; <code>lf repo plan answer &lt;id&gt; --keep-theirs | --use-mine</code> for any owner (Task or Project);
+<code>lf task sync &lt;task&gt; --keep-theirs | --use-mine</code> as the bulk answer; served <code>plan.answer</code>.
+Earlier passes (offline Linear, Asana, Git peers, fresh clone, migration on a store copy) are in git history for this file.</p>
+<p>Setup: branch <code>lf</code> copied to <code>/tmp/lfqa925d/lf</code>; two private HOME/LF_HOME peers (A, B)
+with <code>planning: {provider: git, shared: team}</code> and a local bare origin; <code>LF_*</code>/<code>REX_*</code>
+unset; stdin closed. Conflicts are made by moving the origin aside while both peers edit. One private
+<code>lf server run</code> on peer A, stopped afterwards; no holder or provider was started.</p>
 
-<h2>1. Linear, signed out: one view in three places</h2>
-<pre>$ lf task create --title "Mirror demo"
-Saved locally; pending Linear sync. Retry with `lf task sync 4e11f5`.
-$ lf task edit 4e11f5 --title 'Mirror demo, renamed'
-create · queued · No Linear credential found. Run `doppler run -- lf account connect linear`.
-title · queued · No Linear credential found. …
-$ lf steer 4e11f5 'first comment'; lf comment 4e11f5 'second comment'; lf task complete 4e11f5
-$ lf repo plan
-Planning: Linear. 5 open actions.
-  4e11f5  create · queued · No Linear credential found. …
-  4e11f5  title · queued · …
-  4e11f5  comment · queued · …
-  4e11f5  comment · queued · …
-  4e11f5  complete · queued · …
-$ lf task sync 4e11f5
-Error: Task publication to Linear remains pending: No Linear credential found. …
-$ lf task sync 4e11f5 --retry-updates
-error: unexpected argument '--retry-updates' found</pre>
-<p>Works. <code>lf repo plan --json .actions</code> and <code>lf task show --json .sync.actions</code> are the same five
-rows (same ids, seq 1–5, <code>tracker: linear</code>, <code>local_value</code>/<code>tracker_value</code>);
-<code>sync.connected</code> and the old <code>changes</code>/<code>state: pending</code> shape are gone.</p>
+<h2>1. A Task's lost title, answered with <code>--use-mine</code></h2>
+<pre>A$ lf task edit 6dbe58 --title "Title from A"      # origin away
+B$ lf task edit 6dbe58 --title "Title from B"
+# origin back; A, B, A sync
+A$ lf repo plan
+Tracker: git. 1 lost.
+  6dbe58  d076387b  title · conflicted · lost: "Title from A" · git: "Title from B"
+Answer a lost line: lf repo plan answer &lt;id&gt; --keep-theirs, or --use-mine.
+A$ lf repo plan answer d076 --use-mine
+Saved your title again.
+A$ lf repo plan answer d076387b --use-mine
+Error: d076387b is not a lost line in /private/tmp/lfqa925d/A/repo; `lf repo plan` lists them
+B$ lf task sync 6dbe58
+6dbe58: synchronized
+A: 6dbe58 · — · Title from A
+B: 6dbe58 · — · Title from A</pre>
+<p>Works: a 4-character prefix resolves, the answered line is gone on both peers, the second answer refuses.</p>
 
-<h2>2. A Wave with no Initiative on Linear</h2>
-<pre>$ lf wave create infra
-$ lf task create --title "Wave task" --wave infra
-$ lf repo plan
-  …
-  infra   create · queued · No Linear credential found. …
-  ce413f  create · queued · No Linear credential found. …</pre>
-<p>The Project and its Task queue in order. Signed out, the credential error comes first, so the block's own reason
-(<em>its Projects stay local</em>) cannot show from a private home: the block needs a Linear client, and a client needs a
-stored OAuth grant. Covered by <code>ops::tracker::drain::tests::a_blocked_creation_costs_the_pass_nothing</code>.</p>
+<h2>2. The bulk answer, and wrong input</h2>
+<pre>A$ lf repo plan answer 0 --keep-theirs
+Error: 0 is not a lost line in …
+A$ lf repo plan answer x
+error: the following required arguments were not provided: &lt;--keep-theirs|--use-mine&gt;
+A$ lf repo plan answer x --keep-theirs --use-mine
+error: the argument '--keep-theirs' cannot be used with '--use-mine'
+A$ lf task sync 6dbe58 --keep-theirs
+6dbe58: synchronized
+A: 6dbe58 · — · Round2 B          B: 6dbe58 · — · Round2 B, no lost lines</pre>
 
-<h2>3. Git: three peers, a conflict, a fresh clone</h2>
-<pre># A creates 17aad6; B clones; origin moved away; both rename offline
-A$ lf task edit 17aad6 --title "Title from A"
-Saved locally; planning synchronization pending. See `lf repo plan`.
-B$ lf task edit 17aad6 --title "Title from B"
-# origin back
-A$ lf task sync 17aad6
-17aad6: synchronized
-B$ lf task sync 17aad6
-17aad6: title · conflicted · lost here: "Title from A" · git: "Title from B"     &lt;- before the fix
-A$ lf task sync 17aad6
-17aad6: title · conflicted · lost here: "Title from A" · git: "Title from B"</pre>
-<p>Both peers converge on "Title from B", and both <code>sync.actions</code> hold one <code>conflicted</code> row
-(<code>tracker: git</code>, <code>seq: null</code>). Two things were wrong:</p>
-<ul>
-<li><b>"lost here" was false on B.</b> A Git conflict's losing value is any head other than the winner, whoever wrote it
-(the journal does not say whose); B never held "Title from A". <b>Fixed:</b> the line says <code>lost:</code> for every
-tracker, in Rust (<code>TrackerActionStatus::line</code>), Swift (<code>TrackerActionStatus.text</code>), tests and
-<code>docs/work.md</code>.</li>
-<li><b>A peer could not sync a Task it had not fetched.</b> On B before any save, <code>lf task sync 17aad6</code>
-answered <code>Task 17aad6 is unavailable</code>; the Task arrived only after B saved something. <b>Fixed:</b> a
-missed lookup exchanges the current repository's planning and looks again (<code>planning_sync::find_task</code>, the
-same path <code>lf task checkout</code> uses). New test <code>two_people::a_peer_syncs_a_task_it_has_never_fetched</code>;
-it fails with "Task … is unavailable" when the lookup is reverted.</li>
-</ul>
-<p>After the fixes, on a third peer C that had never exchanged:</p>
-<pre>C$ lf task list --json | jq length
-0
-C$ lf task sync 17aad6
-17aad6: title · conflicted · lost: "Title from A" · git: "Title from B"
-C$ lf task sync 999999
-Error: Task 999999 is unavailable
-C$ lf task list --json | jq length
-3
-B$ lf task edit 17aad6 --title "Title agreed"; lf task sync 17aad6
-17aad6: synchronized
-A$ lf task sync 17aad6
-17aad6: synchronized          # title "Title agreed", sync.actions []
-# Linear repository, unknown id:
-$ lf task sync abcdef0
-Error: Task abcdef0 is unavailable</pre>
-<p>Works: a save naming the competing heads clears the conflict on every peer.</p>
+<h2>3. A Project's lost name and summary (the gap concept review 3 closed)</h2>
+<pre>A$ lf wave edit-plan infra --name "Infra from A" --summary "Sum A"   # origin away
+B$ lf wave edit-plan infra --name "Infra from B" --summary "Sum B"
+A$ lf repo plan
+Tracker: git. 2 lost.
+  Infra from B  1107e008  name · conflicted · lost: "Infra from A" · git: "Infra from B"
+  Infra from B  df8605e8  summary · conflicted · lost: "Sum A" · git: "Sum B"
+A$ lf wave sync infra
+  chapter   Infra from B (proj_e795…) · current · started
+    name · conflicted · lost: "Infra from A" · git: "Infra from B"
+    summary · conflicted · lost: "Sum A" · git: "Sum B"
+B$ lf repo plan answer 1107e008 --use-mine
+Saved your name again.
+B$ lf repo plan answer df86 --keep-theirs --json
+{"id":"df8605e8-…","owner_kind":"project",…,"phase":"conflicted","tracker":"git","local_value":"Sum A","tracker_value":"Sum B"}
+A$ lf wave sync infra
+  chapter   Infra from A (proj_e795…) · current · started      # no lost lines on A or B</pre>
+<p>Works. <code>--json</code> returns the line as it stood when answered (documented on <code>plan.answer</code>).</p>
 
-<h2>Checks</h2>
-<ul>
-<li><code>cargo nextest run -p loopflow-execution -p loopflow-storage --lib -E 'test(store::planning_sync_tests::) | test(task_sync)'</code> → 5 pass.</li>
-<li><code>cargo nextest run -p loopflow --test integration -E 'test(dto_fixtures::)'</code> → 52 pass.</li>
-<li><code>cargo nextest run -p loopflow --test two_people -E 'test(a_peer_syncs)'</code> → pass; with the lookup reverted → fails.</li>
-<li><code>scripts/test_desktop.sh --filter DTOFixtureTests</code> → 57 pass.</li>
-<li><code>cargo fmt</code> (also reformatted <code>ops/tracker/drain.rs</code> from the last compress), clippy on storage, execution and loopflow <code>--all-targets -D warnings</code> → clean.</li>
-</ul>
+<h2>4. Desktop's write over the private server</h2>
+<pre>→ {"type":"request","id":"ok","operation":{"kind":"plan.answer","directory":"/private/tmp/lfqa925d/A/repo",
+   "action":"401ec279-…","answer":"keep_theirs"},…}
+← {"type":"response","id":"ok","result":{"change":"title",…,"phase":"conflicted","tracker":"git",
+   "local_value":"Served A","tracker_value":"Served B"}}
+→ same request again
+← {"type":"error","id":"again","code":"outcome_unknown","message":"401ec279-… is not a lost line in …;
+   inspect the affected work before retrying"}
+A, B: 6dbe58 · — · Served B</pre>
+<p>Works with the full id, as Desktop sends it. The request's fields match Swift's <code>ServedWrite.planAnswer</code>
+encoding (<code>directory</code>, <code>action</code>, <code>answer</code>).</p>
+
+<h2>5. Linear, signed out</h2>
+<pre>$ lf repo plan
+Tracker: linear. 1 open · 0 lost.
+  031e1d            create · queued · .lf/config.yaml has no `repo.plan.team`. …
+$ lf repo plan answer f156b7f4 --keep-theirs
+Error: f156b7f4 is not a lost line in /private/tmp/lfqa925d/lin; `lf repo plan` lists them</pre>
+<p>An open line cannot be answered; the short id appears only on lost lines.</p>
+
+<h2>6. Returning store: the edited migration on this Machine's data</h2>
+<p><code>tracker_actions.sql</code> changed since the last pass (<code>provider</code> → <code>tracker</code>).
+<code>sqlite3 -readonly ~/.lf/loopflow.db ".backup"</code> (1 GB) to a copy, then the branch's migration SQL alone
+(never opened with <code>lf</code>):</p>
+<pre>$ sqlite3 copy.db &lt; rust/loopflow-storage/src/migrations/tracker_actions.sql      # 0.15 s, no error
+$ sqlite3 copy.db "select tracker, kind, phase, count(*) from tracker_actions group by 1,2,3"
+linear|comment|sent|17     linear|create|sent|8     linear|delete|queued|1
+linear|field|queued|8      linear|field|sent|31     linear|link|queued|2
+linear|state|queued|7      linear|state|sent|6</pre>
+<p>80 actions (77 on 2026-11-16), every one <code>linear</code>. The copy was deleted afterwards.</p>
+
+<h2>Fixed</h2>
+<p>Nothing: no scenario broke.</p>
 
 <h2>What works now</h2>
-<p>The one action view in <code>lf repo plan</code>, <code>lf task show</code>, <code>lf wave plan</code> and save output;
-Git conflicts converge and clear; <code>lf task sync</code> on Git from any peer, fetched or not.</p>
+<p>Answering a lost Task or Project line from <code>lf repo plan answer</code> (prefix or full id), from
+<code>lf task sync --keep-theirs | --use-mine</code>, and over served <code>plan.answer</code>; both peers converge
+on the answered value and the line closes everywhere.</p>
 
 <h2>Could not reach</h2>
-<ul>
-<li>A real Linear or Asana send, confirm, lost reply, tracker conflict, the 20-request bound, and the Initiative block's
-own message: the binary has no stand-in endpoint and credentials come only from a stored OAuth grant, which needs a
-person's sign-in. Covered by the fake-tracker suites.</li>
-<li>Desktop window: DTO decoding and the line text are checked headless; no mounted view was walked.</li>
-</ul>
+<p>A real Linear or Asana lost line (needs a coworker edit in a live tracker; the binary has no stand-in endpoint and
+credentials come from a person's OAuth sign-in). Covered by <code>a_project_name_linear_won_is_answered_from_its_line</code>
+and the fake-tracker suites.</p>
+<p>Desktop's Keep / Use mine buttons in a mounted window: no live window was walked. The headless
+<code>DesktopHeadlessTests</code> case "A lost line, a Task's or a Project's, offers Keep theirs and Use mine" and
+<code>RegistryQueryTests</code> passed at this commit in compress 4.</p>
 
 <h2>Still wrong, worst first</h2>
 <ul>
-<li>A Git conflict's JSON calls the losing head <code>local_value</code> even when a peer wrote it (noted in
-<code>questions.md</code>); the text no longer claims it was local.</li>
-<li><code>pm_writeback</code> reads <code>{"state":"current"}</code> with five actions queued (same at base). LOO-942.</li>
-<li>Tracker errors tell people to run <code>doppler run -- lf account connect linear</code>; Doppler is this Machine's setup.</li>
-<li><code>lf task show</code> and <code>lf wave plan</code> print JSON without <code>--json</code>; same on the installed 0.16.0.</li>
+<li>Every failed served write answers <code>outcome_unknown</code> with "inspect the affected work before retrying",
+including a refusal that changed nothing ("not a lost line", and <code>task.steer</code> on an unknown Task alike).
+Desktop can't tell a refusal from a lost reply. Server-wide, not this branch.</li>
+<li>On Git, <code>--use-mine</code> on the peer that did not write the losing value says "Saved your name again."
+and saves the other peer's value: Git's loser is any head other than the winner (the journal does not say whose).
+Same root as the <code>local_value</code> note in <code>questions.md</code>.</li>
+<li><code>lf wave sync</code> lists a Project's lost lines without their ids; answering needs <code>lf repo plan</code> first.</li>
+<li><code>lf repo plan</code> on Git with no lines prints no <code>Tracker:</code> line; Linear prints "1 open · 0 lost".</li>
+<li><code>lf task edit</code> has no <code>--description</code>; <code>lf wave plan</code> prints JSON without <code>--json</code> (unchanged from earlier passes).</li>
 </ul>
-</body></html>

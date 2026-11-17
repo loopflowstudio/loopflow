@@ -577,7 +577,10 @@ pub async fn list(
         selection.limit = 0;
     }
     let on = match &filter.on {
-        Some(raw) => Some(SessionOn::resolve(raw)?),
+        Some(raw) => Some(
+            crate::config::Agent::parse(raw)
+                .map_err(|_| anyhow!("--on requires a harness or harness:model"))?,
+        ),
         None => None,
     };
     let mut sessions = Vec::new();
@@ -613,8 +616,9 @@ pub async fn list(
                 || workspaces.in_task_checkout(Path::new(&session.cwd), &wave_tasks))
     };
     if association_filter {
-        sessions
-            .retain(|session| in_work(session) && on.as_ref().is_none_or(|on| on.selects(session)));
+        sessions.retain(|session| {
+            in_work(session) && on.as_ref().is_none_or(|on| runs_on(on, session))
+        });
         sessions = sessions
             .into_iter()
             .take(if filter.limit == 0 {
@@ -677,25 +681,10 @@ pub fn listed(store: &SharedStore, id: &str) -> Result<Option<SessionRecord>> {
     Ok(Some(session))
 }
 
-/// A native harness, optionally narrowed to one model.
-struct SessionOn {
-    harness: crate::harness::HarnessKind,
-    model: Option<String>,
-}
-
-impl SessionOn {
-    fn resolve(raw: &str) -> Result<Self> {
-        let (harness, model) = crate::config::parse_agent(raw);
-        let harness = crate::harness::HarnessKind::parse(&harness)
-            .ok_or_else(|| anyhow!("--on requires a harness or harness:model"))?;
-        Ok(Self { harness, model })
-    }
-
-    fn selects(&self, session: &SessionRecord) -> bool {
-        let Self { harness, model } = self;
-        session.provider.as_deref() == Some(harness.as_str())
-            && (model.is_none() || *model == session.model)
-    }
+/// Whether `session` ran on the `--on` harness, and on its model when one is named.
+fn runs_on(on: &crate::config::Agent, session: &SessionRecord) -> bool {
+    session.provider.as_deref() == Some(on.harness.as_str())
+        && (on.model.is_none() || on.model == session.model)
 }
 
 /// Passive listing reads record metadata and exact local client receipts only.

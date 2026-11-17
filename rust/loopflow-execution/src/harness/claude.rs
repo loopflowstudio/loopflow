@@ -1565,13 +1565,21 @@ impl super::Harness for Claude {
     }
     fn capabilities(&self) -> super::Capabilities {
         super::Capabilities {
-            thread: super::ThreadNaming { bare: super::ThreadName::Assigned, managed: super::ThreadName::Assigned },
+            thread: super::ThreadNaming {
+                bare: super::ThreadName::Assigned,
+                managed: super::ThreadName::Assigned,
+            },
             initial_prompt_on_resume: false,
             supports_execution_boundary: true,
             classifies_failures: true,
             native_skills: Some(crate::skills::catalog::SkillDialect::Claude),
-            turn_limit: true, output_schema: true, respawns_after_crash: true,
-            install_hint: "Install it with `npm install -g @anthropic-ai/claude-code`, then open `claude` to sign in.",
+            turn_limit: true,
+            output_schema: true,
+            respawns_after_crash: true,
+            install_hint: concat!(
+                "Install it with `npm install -g @anthropic-ai/claude-code`, ",
+                "then open `claude` to sign in.",
+            ),
         }
     }
     fn driver(

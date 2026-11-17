@@ -1384,13 +1384,21 @@ impl super::Harness for OpenCode {
     }
     fn capabilities(&self) -> super::Capabilities {
         super::Capabilities {
-            thread: super::ThreadNaming { bare: super::ThreadName::Reported, managed: super::ThreadName::Reported },
+            thread: super::ThreadNaming {
+                bare: super::ThreadName::Reported,
+                managed: super::ThreadName::Reported,
+            },
             initial_prompt_on_resume: false,
             supports_execution_boundary: false,
             classifies_failures: false,
             native_skills: None,
-            turn_limit: false, output_schema: false, respawns_after_crash: false,
-            install_hint: "Install OpenCode 2 or later with `npm install -g @opencode/cli`; the `opencode-ai` package stops at 1.x.",
+            turn_limit: false,
+            output_schema: false,
+            respawns_after_crash: false,
+            install_hint: concat!(
+                "Install OpenCode 2 or later with `npm install -g @opencode/cli`; ",
+                "the `opencode-ai` package stops at 1.x.",
+            ),
         }
     }
     fn driver(

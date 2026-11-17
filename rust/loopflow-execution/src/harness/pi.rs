@@ -709,13 +709,22 @@ impl super::Harness for Pi {
     }
     fn capabilities(&self) -> super::Capabilities {
         super::Capabilities {
-            thread: super::ThreadNaming { bare: super::ThreadName::Assigned, managed: super::ThreadName::Reported },
+            thread: super::ThreadNaming {
+                bare: super::ThreadName::Assigned,
+                managed: super::ThreadName::Reported,
+            },
             initial_prompt_on_resume: false,
             supports_execution_boundary: true,
             classifies_failures: false,
             native_skills: None,
-            turn_limit: false, output_schema: false, respawns_after_crash: false,
-            install_hint: "Install Pi 1.3 or later with `npm install -g --ignore-scripts @earendil-works/pi-coding-agent`. Configure its model and credentials in Pi.",
+            turn_limit: false,
+            output_schema: false,
+            respawns_after_crash: false,
+            install_hint: concat!(
+                "Install Pi 1.3 or later with ",
+                "`npm install -g --ignore-scripts @earendil-works/pi-coding-agent`. ",
+                "Configure its model and credentials in Pi.",
+            ),
         }
     }
     fn driver(

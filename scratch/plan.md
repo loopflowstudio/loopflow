@@ -360,6 +360,20 @@ checks on both ends; LOO-913's fallback and wait rules.
    `ServerProtocolTests` (CI); a real `lf machine login claude mini` and
    `codex mini` (a person at gate).
 
+## Remaining (gate)
+
+All four slices are built on the `match` (#1966 still open). Left:
+
+- Gate's headless acceptance fixture (below); its parts exist as
+  `machine_commands::command_approvers_sign_machines_in_to_codex_and_claude_without_a_terminal`
+  and `session_launch_contract::a_signed_out_machine_refuses_the_launch_with_the_command_that_signs_it_in`.
+- Rental prepare's sign-in loop has no end-to-end test (no rental fixture
+  reaches prepare); note it in the PR.
+- Swift `ServerProtocolTests` — CI.
+- A real `lf machine login claude mini` and `codex mini` — a person at gate.
+- Open in `scratch/questions.md`: whether a usage-limit refusal should count
+  for `--refused`.
+
 ## Done when
 
 On a fresh owned Machine and on a fresh rental, an agent run on each provider
@@ -392,7 +406,7 @@ Machines and rentals"; "Choose who approves", "Rentals", "Per-run secrets",
 `docs/ops.md`, `docs/config.md` ("Sign-in approvers"), `docs/work.md`,
 `docs/dev/codebase.md`, `docs/dev/reference.md`, `README.md`, builtin
 `init.md` and `repo_operate.md`. `server/README.md` and `security.md`'s service
-transfer text untouched until slice 4.
+transfer text, updated in slice 4.
 
 Settled while writing: `logins` is `lf ondemand add … --logins
 claude,github`, a field of the `ondemands.<name>` config template (slice 3

@@ -4,7 +4,7 @@ use std::path::Path;
 
 use crate::agent::{AgentConfig, ProcessConfig};
 use crate::harness::Run;
-use crate::harness::{Admitted, HarnessKind, Launch, Mode, Start};
+use crate::harness::{HarnessKind, Launch, Mode, Recording, Start};
 use crate::process::LfProcessRuntime;
 use crate::session_record::{SessionCaptureSpec, SessionGraphMembership, SessionRecorder};
 
@@ -129,7 +129,7 @@ fn every_harness_runs_bare_managed_and_worker() {
                     )
                     .map(LfProcessRuntime::new)?;
                     capture.claim_session_attachment()?;
-                    let admitted = Admitted::from_runtime(&capture)?;
+                    let recording = Recording::from_runtime(&capture)?;
                     let mut config = AgentConfig {
                         agent: crate::config::Agent::parse(kind.as_str()).unwrap(),
                         cwd: Some(cwd.into()),
@@ -160,7 +160,7 @@ fn every_harness_runs_bare_managed_and_worker() {
                         config: &config,
                         harness: kind.harness(),
                         run,
-                        admitted: &admitted,
+                        recording: &recording,
                         start: Start::New,
                         context_file: None,
                     };
@@ -288,10 +288,10 @@ fn held_codex_with_a_saved_empty_thread_sends_its_first_prompt() {
             )
             .map(LfProcessRuntime::new)?;
             capture.claim_session_attachment()?;
-            let admitted = Admitted::from_runtime(&capture)?;
-            admitted.store.record_session_agent_session(
-                &admitted.session,
-                &admitted.attachment,
+            let recording = Recording::from_runtime(&capture)?;
+            recording.store.record_session_agent_session(
+                &recording.session,
+                &recording.attachment,
                 &"saved-empty-thread".into(),
             )?;
             let config = AgentConfig {
@@ -306,7 +306,7 @@ fn held_codex_with_a_saved_empty_thread_sends_its_first_prompt() {
                 harness: HarnessKind::Codex.harness(),
                 config: &config,
                 run: Run::Managed,
-                admitted: &admitted,
+                recording: &recording,
                 start: Start::New,
                 context_file: None,
             };
@@ -319,7 +319,7 @@ fn held_codex_with_a_saved_empty_thread_sends_its_first_prompt() {
                 "the first prompt must reach the saved thread"
             );
             assert_eq!(
-                admitted.store.session_thread(&admitted.session)?,
+                recording.store.session_thread(&recording.session)?,
                 Some("saved-empty-thread".into())
             );
             capture.finish("completed")?;
@@ -332,7 +332,7 @@ fn held_codex_with_a_saved_empty_thread_sends_its_first_prompt() {
 #[test]
 fn native_limits_and_schemas_require_a_headless_run() {
     let home = tempfile::tempdir().unwrap();
-    let admitted = super::admit_for_test(home.path());
+    let recording = super::admit_for_test(home.path());
     for kind in HarnessKind::ALL {
         for (max_turns, output_schema) in [
             (Some(7), None),
@@ -348,7 +348,7 @@ fn native_limits_and_schemas_require_a_headless_run() {
                 config: &config,
                 harness: kind.harness(),
                 run: Run::Bare(crate::harness::Mode::Headless),
-                admitted: &admitted,
+                recording: &recording,
                 start: Start::New,
                 context_file: None,
             };

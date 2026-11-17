@@ -53,12 +53,7 @@ pub(crate) fn configure_agent_env(command: &mut tokio::process::Command, config:
     if let Some(path) = &config.directive_relay {
         command.env("LOOPFLOW_DIRECTIVE_FILE", path);
     }
-    let program = command
-        .as_std()
-        .get_program()
-        .to_string_lossy()
-        .into_owned();
-    crate::provider_auth::apply_provider_env_to_command(&program, command.as_std_mut());
+    crate::provider_auth::apply_provider_env_to_command(config.agent.harness, command.as_std_mut());
 }
 
 pub(crate) fn conversation_environment(
@@ -277,7 +272,8 @@ pub enum Mode {
     Headless,
 }
 
-/// Who keeps the provider running, independently of Task attribution.
+/// Bare or managed execution and its mode, independently of Task attribution.
+/// `Worker` is managed and headless; `Managed` is managed and interactive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Run {
     Bare(Mode),
@@ -299,15 +295,15 @@ impl Run {
     }
 }
 
-/// The Session and frozen attachment an invocation launches and records under.
+/// The store, Session and attachment this launch records under.
 #[derive(Debug, Clone)]
-pub struct Admitted {
+pub struct Recording {
     pub store: loopflow_storage::sqlite::SqliteStore,
     pub session: String,
     pub attachment: crate::process::SessionAttachment,
 }
 
-impl Admitted {
+impl Recording {
     pub fn assigned_thread(&self) -> Result<AgentSessionId> {
         let session = self
             .store
@@ -322,7 +318,7 @@ impl Admitted {
 
     pub fn from_runtime(runtime: &crate::process::LfProcessRuntime) -> Result<Self> {
         runtime
-            .admitted()
+            .recording()
             .ok_or_else(|| anyhow::anyhow!("invocation has not claimed its Session attachment"))
     }
 }
@@ -343,6 +339,15 @@ impl HarnessKind {
             "claude" => Some(Self::Claude),
             "opencode" => Some(Self::OpenCode),
             "pi" => Some(Self::Pi),
+            _ => None,
+        }
+    }
+
+    /// Native CLI for a provider; API-only services have no corresponding harness.
+    pub fn from_provider(provider: crate::provider_auth::Provider) -> Option<Self> {
+        match provider {
+            crate::provider_auth::Provider::Claude => Some(Self::Claude),
+            crate::provider_auth::Provider::Codex => Some(Self::Codex),
             _ => None,
         }
     }
@@ -431,7 +436,7 @@ pub struct Launch<'a> {
     pub config: &'a AgentConfig,
     pub harness: &'static dyn Harness,
     pub run: Run,
-    pub admitted: &'a Admitted,
+    pub recording: &'a Recording,
     pub start: Start<'a>,
     pub context_file: Option<&'a std::path::Path>,
 }
@@ -441,7 +446,7 @@ impl Launch<'_> {
         let naming = self.harness.capabilities().thread;
         match self.start.thread() {
             None if naming.for_run(self.run) == ThreadName::Assigned => {
-                self.admitted.assigned_thread().map(Some)
+                self.recording.assigned_thread().map(Some)
             }
             thread => Ok(thread),
         }
@@ -642,11 +647,11 @@ pub trait Harness: Sync + std::fmt::Debug {
 pub fn launch_for_test<'a>(
     kind: HarnessKind,
     config: &'a AgentConfig,
-    admitted: &'a Admitted,
+    recording: &'a Recording,
 ) -> Launch<'a> {
     Launch {
         config,
-        admitted,
+        recording,
         harness: kind.harness(),
         run: Run::Bare(Mode::Headless),
         start: Start::from_thread(config.resume_token.as_ref()),
@@ -657,7 +662,7 @@ pub fn launch_for_test<'a>(
 /// Admit a fixture launch: a private ledger with one Session attached to one
 /// recorded lf invocation. Keep the guard for the life of the harness.
 #[cfg(any(test, feature = "test-support"))]
-pub fn admit_for_test(home: &std::path::Path) -> Admitted {
+pub fn admit_for_test(home: &std::path::Path) -> Recording {
     let database = home.join("loopflow.db");
     let store = crate::store::opening::open_ephemeral(&database).unwrap();
     let process = loopflow_model::id::LfProcessId::new();
@@ -673,7 +678,7 @@ pub fn admit_for_test(home: &std::path::Path) -> Admitted {
         &store, "fixture", None, &process, true,
     )
     .unwrap();
-    Admitted {
+    Recording {
         store,
         session: "fixture".into(),
         attachment,
@@ -682,8 +687,10 @@ pub fn admit_for_test(home: &std::path::Path) -> Admitted {
 
 #[cfg(test)]
 mod tests {
+    use tokio::sync::mpsc;
 
-    use super::*;
+    use super::{admit_for_test, launch_for_test, ApprovalPolicy, HarnessKind, SendCurrentOutcome};
+    use crate::agent::AgentConfig;
 
     #[test]
     fn parsing_normalizes_case_and_whitespace() {
@@ -718,8 +725,8 @@ mod tests {
                 ..AgentConfig::default()
             };
             let home = tempfile::tempdir().unwrap();
-            let admitted = admit_for_test(home.path());
-            let launch = launch_for_test(kind, &config, &admitted);
+            let recording = admit_for_test(home.path());
+            let launch = launch_for_test(kind, &config, &recording);
             let mut harness =
                 launch
                     .harness

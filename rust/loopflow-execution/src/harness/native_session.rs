@@ -11,7 +11,7 @@ use super::{Launch, Start};
 use crate::agent::missing_agent_message;
 use crate::agent::AgentConfig;
 use crate::harness::native_exit::{attachment_lost, departure};
-use crate::harness::Admitted;
+use crate::harness::Recording;
 use crate::process::LfProcessRuntime;
 use loopflow_model::id::AgentSessionId;
 use loopflow_storage::sqlite::SqliteStore;
@@ -72,10 +72,13 @@ impl NativeClient {
             .current_dir(cwd)
             .env_remove("LOOPFLOW_DIRECTIVE_FILE")
             .envs(&launch.config.env);
-        crate::provider_auth::apply_provider_env_to_command(program, &mut process);
+        crate::provider_auth::apply_provider_env_to_command(
+            launch.config.agent.harness,
+            &mut process,
+        );
         let title = crate::terminal_title::TerminalTitle::prepare(
             &launch.config.env,
-            program,
+            launch.config.agent.harness,
             &mut process,
         );
         process.env_remove(crate::context_block::CONTEXT_DELIVERY_ENV);
@@ -105,10 +108,10 @@ pub fn launch_session(
         .unwrap_or_else(std::env::current_dir)?;
     crate::journal::with_runtime(&cwd, &std::env::args().collect::<Vec<_>>(), || {
         let mut environment = config.env.clone();
-        let (admitted, created) = match capture {
+        let (recording, created) = match capture {
             Some(capture) => {
                 environment.extend(capture.environment());
-                (Admitted::from_runtime(capture)?, None)
+                (Recording::from_runtime(capture)?, None)
             }
             None => admit(&config.agent, &cwd, &mut environment)?,
         };
@@ -120,7 +123,7 @@ pub fn launch_session(
                     config: &config,
                     harness,
                     run,
-                    admitted: &admitted,
+                    recording: &recording,
                     start: Start::New,
                     context_file,
                 },
@@ -129,7 +132,7 @@ pub fn launch_session(
             )
         };
         if capture.is_none() {
-            finish_admission(&admitted, created, &result);
+            finish_admission(&recording, created, &result);
         }
         result
     })
@@ -192,7 +195,7 @@ pub fn resume_session_with_env(
         .expect("resolved session config has a working directory");
     crate::journal::with_runtime(cwd, &std::env::args().collect::<Vec<_>>(), || {
         let mut environment = config.env.clone();
-        let (admitted, capture) = admit(&config.agent, cwd, &mut environment)?;
+        let (recording, capture) = admit(&config.agent, cwd, &mut environment)?;
         let mut config = config.clone();
         config.env = environment;
         let result = self::run(
@@ -200,14 +203,14 @@ pub fn resume_session_with_env(
                 config: &config,
                 harness,
                 run,
-                admitted: &admitted,
+                recording: &recording,
                 start: Start::from_thread(provider_session.map(|provider| &provider.agent_session)),
                 context_file: context_file.as_deref(),
             },
             launch_lock,
             capture.as_ref(),
         );
-        finish_admission(&admitted, capture, &result);
+        finish_admission(&recording, capture, &result);
         result?.result(harness.kind(), provider_session.is_some(), run)
     })
 }
@@ -356,11 +359,11 @@ fn record_interactive_opened(environment: &BTreeMap<String, String>) -> Result<(
 }
 
 fn validate_launch(launch: &Launch<'_>) -> Result<()> {
-    let Admitted {
+    let Recording {
         store,
         session,
         attachment,
-    } = launch.admitted;
+    } = launch.recording;
     let caller = launch
         .config
         .env
@@ -381,12 +384,12 @@ fn validate_launch(launch: &Launch<'_>) -> Result<()> {
 fn native_provider_attachment(
     launch: &Launch<'_>,
     remote: Option<&Path>,
-) -> Result<crate::harness::Admitted> {
-    let Admitted {
+) -> Result<crate::harness::Recording> {
+    let Recording {
         store,
         session,
         attachment,
-    } = launch.admitted;
+    } = launch.recording;
     let process = crate::journal::current_lf_process_id()
         .ok_or_else(|| anyhow!("Native launch has no admitted invocation"))?;
     store.with_session_attachment(session, attachment, || {
@@ -410,7 +413,7 @@ fn native_provider_attachment(
         }
         Ok(())
     })?;
-    Ok(launch.admitted.clone())
+    Ok(launch.recording.clone())
 }
 
 /// Admit a native invocation before constructing its provider command.
@@ -418,7 +421,7 @@ pub fn admit(
     agent: &crate::config::Agent,
     cwd: &Path,
     environment: &mut BTreeMap<String, String>,
-) -> Result<(Admitted, Option<LfProcessRuntime>)> {
+) -> Result<(Recording, Option<LfProcessRuntime>)> {
     let mut capture = None;
     if !environment.contains_key(crate::session_record::CAPTURE_KEY_ENV) {
         let context = crate::trace::PreparedTurnContext::from_prompts("", "");
@@ -466,7 +469,7 @@ pub fn admit(
         attachment.clone(),
     );
     Ok((
-        Admitted {
+        Recording {
             store,
             session: session.id.to_string(),
             attachment,
@@ -476,18 +479,18 @@ pub fn admit(
 }
 
 fn finish_admission(
-    admitted: &Admitted,
+    recording: &Recording,
     capture: Option<LfProcessRuntime>,
     result: &Result<NativeOutcome>,
 ) {
     let outcome = result
         .as_ref()
         .map_or("failed", NativeOutcome::capture_outcome);
-    let Admitted {
+    let Recording {
         store,
         session,
         attachment,
-    } = admitted;
+    } = recording;
     match crate::process::finish_session_attachment(store, session, attachment, outcome) {
         Ok(()) | Err(crate::store::StoreError::InvalidAuthority(_)) => {}
         Err(error) => {
@@ -509,8 +512,8 @@ fn finish_admission(
 /// Claude's folder-trust question is the provider asking a person, before any
 /// hook can say so; a hidden pane would otherwise hold it unseen. The provider's
 /// first reading after an answer replaces this one.
-pub(crate) fn report_folder_trust_dialog(attachment: &crate::harness::Admitted) {
-    let Admitted {
+pub(crate) fn report_folder_trust_dialog(attachment: &crate::harness::Recording) {
+    let Recording {
         store,
         session,
         attachment: expected,
@@ -544,7 +547,7 @@ pub fn run(
     let mut progress = crate::startup::Startup::new(format!("Preparing {program}"));
     // Admission and Task checks precede provider setup, including private servers
     // and Claude's folder-trust write.
-    let owner = launch.admitted;
+    let owner = launch.recording;
     validate_launch(launch)?;
     if let Some(key) = launch
         .config
@@ -682,7 +685,7 @@ fn run_client(
             launch.run,
         ),
         None => {
-            let Admitted {
+            let Recording {
                 store,
                 session,
                 attachment: expected,
@@ -787,7 +790,7 @@ const CLIENT_ATTACHMENT_CHECK: std::time::Duration = std::time::Duration::from_s
 /// commands outside lf. Leaving ends the invocation and its AgentProcess on
 /// every harness; only detaching keeps it.
 fn native_return(
-    Admitted { store, session, .. }: &Admitted,
+    Recording { store, session, .. }: &Recording,
 ) -> Option<crate::transport::NativeClient> {
     let name = store
         .session(session)
@@ -808,7 +811,7 @@ fn native_return(
 
 #[cfg(test)]
 mod tests {
-    use crate::harness::Admitted;
+    use crate::harness::Recording;
     use crate::process::attachment;
 
     use super::{departure_notice, launch_session, resume_session_with_env};
@@ -942,12 +945,12 @@ mod tests {
     ) -> anyhow::Result<super::NativeOutcome> {
         crate::journal::with_runtime(cwd, &["lf".into(), "fixture".into()], || {
             let mut environment = environment.clone();
-            let (admitted, capture) = super::admit(
+            let (recording, capture) = super::admit(
                 &crate::config::Agent::parse("claude")?,
                 cwd,
                 &mut environment,
             )?;
-            let admitted = admitted.clone();
+            let recording = recording.clone();
             let config = AgentConfig {
                 agent: crate::config::Agent::parse("claude").unwrap(),
                 cwd: Some(cwd.into()),
@@ -958,7 +961,7 @@ mod tests {
                 config: &config,
                 harness: super::super::HarnessKind::Claude.harness(),
                 run: Run::Bare(crate::harness::Mode::Headless),
-                admitted: &admitted,
+                recording: &recording,
                 start: Start::New,
                 context_file: None,
             };
@@ -977,7 +980,7 @@ mod tests {
                 capture.as_ref(),
                 &mut crate::startup::Startup::new("fixture"),
             );
-            super::finish_admission(&admitted, capture, &result);
+            super::finish_admission(&recording, capture, &result);
             result
         })
     }
@@ -1349,7 +1352,7 @@ mod tests {
             command.env_clear().arg("60");
             let mut provider = crate::harness::agent_process::spawn_native(
                 command,
-                &crate::harness::Admitted {
+                &crate::harness::Recording {
                     store: store.clone(),
                     session: session.id.to_string(),
                     attachment: original.clone(),
@@ -1375,7 +1378,7 @@ mod tests {
                 serde_json::to_string(&attached.caller(session.id.clone()))?,
             )]);
             let before = store.agent_process(&attached.agent_process_id)?.unwrap();
-            let admitted = Admitted {
+            let recording = Recording {
                 store: store.clone(),
                 session: session.id.to_string(),
                 attachment: attached.clone(),
@@ -1390,7 +1393,7 @@ mod tests {
                 config: &config,
                 harness: super::super::HarnessKind::Claude.harness(),
                 run: Run::Bare(crate::harness::Mode::Headless),
-                admitted: &admitted,
+                recording: &recording,
                 start: Start::New,
                 context_file: None,
             };
@@ -1425,7 +1428,7 @@ mod tests {
             );
             crate::harness::agent_process::stop_native(
                 &mut provider,
-                Some(&crate::harness::Admitted {
+                Some(&crate::harness::Recording {
                     store,
                     session: session.id.to_string(),
                     attachment: attached,
@@ -1483,7 +1486,7 @@ mod tests {
                 },
             )?;
             let environment = capture.environment();
-            let admitted = Admitted::from_runtime(&capture)?;
+            let recording = Recording::from_runtime(&capture)?;
             let config = AgentConfig {
                 agent: crate::config::Agent::parse("claude").unwrap(),
                 cwd: Some(home.into()),
@@ -1494,7 +1497,7 @@ mod tests {
                 config: &config,
                 harness: super::super::HarnessKind::Claude.harness(),
                 run: Run::Bare(crate::harness::Mode::Headless),
-                admitted: &admitted,
+                recording: &recording,
                 start: Start::New,
                 context_file: None,
             };
@@ -1633,7 +1636,10 @@ mod tests {
             .await
             .unwrap();
         let mut command = Command::new(&codex);
-        crate::provider_auth::apply_provider_env_to_command("codex", &mut command);
+        crate::provider_auth::apply_provider_env_to_command(
+            crate::harness::HarnessKind::Codex,
+            &mut command,
+        );
         assert!(command.status().unwrap().success());
     }
 }

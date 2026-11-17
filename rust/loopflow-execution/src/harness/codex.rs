@@ -13,7 +13,7 @@
 //! - `turn/interrupt {threadId, turnId}` -> `{}`; the turn then ends with
 //!   `turn/completed` status "interrupted" (probed live).
 
-use crate::harness::Admitted;
+use crate::harness::Recording;
 use crate::harness::Run;
 use crate::process::attachment;
 use crate::transcript::json_lines;
@@ -289,7 +289,7 @@ pub struct Driver {
     child_group: Option<u32>,
     agent_directory: Option<tempfile::TempDir>,
     native_start: Option<(std::path::PathBuf, Value)>,
-    owner: Admitted,
+    owner: Recording,
     run: Run,
 }
 
@@ -328,7 +328,7 @@ impl Driver {
             child_group: None,
             agent_directory: None,
             native_start: None,
-            owner: launch.admitted.clone(),
+            owner: launch.recording.clone(),
             run: launch.run,
         }
     }
@@ -448,8 +448,8 @@ impl StreamDriver for Driver {
     async fn start(&mut self) -> Result<()> {
         let config = self.launch.clone();
         let config = &config;
-        let admitted = self.owner.clone();
-        let admitted = &admitted;
+        let recording = self.owner.clone();
+        let recording = &recording;
         if self.outbound_tx.is_some() {
             return Ok(());
         }
@@ -467,7 +467,7 @@ impl StreamDriver for Driver {
             .lock()
             .expect("codex turn id lock poisoned") = None;
 
-        let start_result = self.start_inner(config, admitted).await;
+        let start_result = self.start_inner(config, recording).await;
         if let Err(err) = start_result {
             let _ = self.stop().await;
             return Err(err);
@@ -615,7 +615,7 @@ impl StreamDriver for Driver {
             }
             Ok(())
         };
-        let Admitted {
+        let Recording {
             store,
             session,
             attachment: expected,
@@ -712,9 +712,9 @@ impl Driver {
         Ok(config)
     }
 
-    async fn start_inner(&mut self, launch: &AgentConfig, admitted: &Admitted) -> Result<()> {
-        let owner = admitted.clone();
-        let Admitted {
+    async fn start_inner(&mut self, launch: &AgentConfig, recording: &Recording) -> Result<()> {
+        let owner = recording.clone();
+        let Recording {
             store,
             session,
             attachment: _,
@@ -920,7 +920,7 @@ impl Driver {
                     break;
                 }
                 let message = Message::Text(payload.to_string().into());
-                let Admitted {
+                let Recording {
                     store,
                     session,
                     attachment: expected,
@@ -972,7 +972,7 @@ impl Driver {
                 let Ok(value) = serde_json::from_str::<Value>(&line) else {
                     continue;
                 };
-                let Admitted {
+                let Recording {
                     store,
                     session,
                     attachment: _,
@@ -1168,7 +1168,7 @@ impl Driver {
         self.send_notification("initialized").await?;
 
         if self.approval == ApprovalPolicy::NativeClient {
-            let Admitted {
+            let Recording {
                 store,
                 session,
                 attachment,
@@ -1194,7 +1194,7 @@ impl Driver {
         // returning None rather than failing startup.
         match tokio::time::timeout(Duration::from_secs(10), thread_id_rx).await {
             Ok(Ok(thread_id)) => {
-                let Admitted {
+                let Recording {
                     store,
                     session,
                     attachment,
@@ -1372,7 +1372,7 @@ mod tests {
         let error = runtime
             .block_on(harness.start_inner(
                 &config,
-                &Admitted {
+                &Recording {
                     store: store.clone(),
                     session: "saved".into(),
                     attachment: attachment.clone(),
@@ -1392,7 +1392,7 @@ mod tests {
         let error = runtime
             .block_on(harness.start_inner(
                 &config,
-                &Admitted {
+                &Recording {
                     store: store.clone(),
                     session: "saved".into(),
                     attachment: retry,
@@ -1877,11 +1877,11 @@ struct OpenedCodex {
 async fn open_native(launch: &super::Launch<'_>) -> Result<OpenedCodex> {
     use crate::harness::{codex_connection, ApprovalPolicy};
 
-    let Admitted {
+    let Recording {
         store,
         session,
         attachment,
-    } = launch.admitted;
+    } = launch.recording;
     let saved = launch.start.thread().or(store.session_thread(session)?);
     let (events, _events) = tokio::sync::mpsc::unbounded_channel();
     let launch_value = super::Launch {

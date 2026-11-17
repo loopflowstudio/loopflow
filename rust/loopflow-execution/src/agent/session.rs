@@ -101,8 +101,12 @@ pub fn resolve_session_config(
     let mut needs_execution_boundary = false;
     if let Some(request) = request {
         if !importing
-            && crate::harness::HarnessKind::parse(provider)
-                .is_some_and(|kind| kind.harness().capabilities().initial_prompt_on_resume)
+            && config
+                .agent
+                .harness
+                .harness()
+                .capabilities()
+                .initial_prompt_on_resume
         {
             config.task_prompt = request.codex_initial_input();
         }

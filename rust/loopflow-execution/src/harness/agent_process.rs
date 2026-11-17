@@ -14,16 +14,16 @@ use loopflow_model::id::LfProcessId;
 use loopflow_storage::sqlite::SqliteStore;
 use std::collections::{HashMap, HashSet};
 
-use crate::harness::Admitted;
+use crate::harness::Recording;
 
 /// The pre-exec recorder both launch paths share: the child's PID and birth
 /// reach its record under the owner's attachment before the provider runs.
 fn record_identity(
-    Admitted {
+    Recording {
         store,
         session,
         attachment,
-    }: &Admitted,
+    }: &Recording,
 ) -> impl FnOnce(u32) -> std::io::Result<()> + Send + '_ {
     move |pid| {
         let started_at = process_started_at(pid)?
@@ -40,10 +40,10 @@ fn record_identity(
 pub fn spawn(
     mut command: tokio::process::Command,
     lifeline: Option<&std::path::Path>,
-    owner: &Admitted,
+    owner: &Recording,
     run: Run,
 ) -> Result<tokio::process::Child> {
-    let Admitted {
+    let Recording {
         store,
         session,
         attachment,
@@ -74,10 +74,10 @@ pub fn spawn(
 /// pre-exec recording as headless launches.
 pub(crate) fn spawn_native(
     mut command: std::process::Command,
-    owner: &Admitted,
+    owner: &Recording,
     run: Run,
 ) -> Result<std::process::Child> {
-    let Admitted {
+    let Recording {
         store,
         session,
         attachment,
@@ -141,10 +141,10 @@ pub(crate) fn require_server() -> Result<()> {
 /// its hook presents the capability to the store.
 fn context_environment(
     command: &mut std::process::Command,
-    owner: &Admitted,
+    owner: &Recording,
     run: Run,
 ) -> Result<()> {
-    let Admitted {
+    let Recording {
         store,
         session,
         attachment,
@@ -192,12 +192,12 @@ fn context_environment(
 /// the launch recorded as never spawned.
 pub(crate) fn exec_native(
     mut command: std::process::Command,
-    owner: &Admitted,
+    owner: &Recording,
     run: Run,
     launch_lock: Option<std::fs::File>,
 ) -> std::io::Error {
     use std::os::unix::process::CommandExt;
-    let Admitted {
+    let Recording {
         store,
         session,
         attachment,
@@ -248,7 +248,10 @@ pub(crate) fn exec_client(
 /// Failed terminal setup still owns an admitted child. Serialize its cleanup
 /// with takeover and record only an exact successful wait. A remote client has
 /// no provider attachment; ending it must not settle the surviving provider.
-pub(crate) fn stop_native(child: &mut std::process::Child, owner: Option<&Admitted>) -> Result<()> {
+pub(crate) fn stop_native(
+    child: &mut std::process::Child,
+    owner: Option<&Recording>,
+) -> Result<()> {
     let mut stop = || {
         let mut wait = || -> std::io::Result<()> {
             if child.try_wait()?.is_none() {
@@ -258,7 +261,7 @@ pub(crate) fn stop_native(child: &mut std::process::Child, owner: Option<&Admitt
             Ok(())
         };
         wait().map_err(|error| StoreError::InvalidData(error.to_string()))?;
-        if let Some(Admitted {
+        if let Some(Recording {
             store,
             session,
             attachment,
@@ -269,7 +272,7 @@ pub(crate) fn stop_native(child: &mut std::process::Child, owner: Option<&Admitt
         Ok(())
     };
     match owner {
-        Some(Admitted {
+        Some(Recording {
             store,
             session,
             attachment,
@@ -376,11 +379,11 @@ pub(crate) fn stop_session_agent(
 /// Stop a harness's provider without settling its invocation. Group death and
 /// the exit receipt remain under the same frozen attachment fence.
 pub fn stop(
-    Admitted {
+    Recording {
         store,
         session,
         attachment,
-    }: &Admitted,
+    }: &Recording,
 ) -> Result<()> {
     super::dispatch::off_reactor(|| {
         store.with_session_attachment(session, attachment, || {
@@ -1001,7 +1004,7 @@ mod tests {
         command.env_clear();
         let mut child = super::spawn_native(
             command,
-            &crate::harness::Admitted {
+            &crate::harness::Recording {
                 store: store.clone(),
                 session: session.id.to_string(),
                 attachment: attachment.clone(),
@@ -1108,7 +1111,7 @@ mod tests {
             command.env_clear().arg("60");
             let mut child = super::spawn_native(
                 command,
-                &crate::harness::Admitted {
+                &crate::harness::Recording {
                     store: store.clone(),
                     session: session.id.to_string(),
                     attachment: attachment.clone(),
@@ -1176,7 +1179,7 @@ mod tests {
         command.env_clear().arg("60");
         let mut child = super::spawn_native(
             command,
-            &crate::harness::Admitted {
+            &crate::harness::Recording {
                 store: store.clone(),
                 session: session.id.to_string(),
                 attachment: attachment.clone(),
@@ -1353,7 +1356,7 @@ mod tests {
             command.env_clear();
             let mut child = super::spawn_native(
                 command,
-                &crate::harness::Admitted {
+                &crate::harness::Recording {
                     store: store.clone(),
                     session: session.id.to_string(),
                     attachment: attachment.clone(),
@@ -1396,7 +1399,7 @@ mod tests {
         let parent = store.test_lf_process();
         let first =
             attachment::claim_session_attachment(&store, &session.id, None, &parent, true).unwrap();
-        let first_owner = crate::harness::Admitted {
+        let first_owner = crate::harness::Recording {
             store: store.clone(),
             session: session.id.to_string(),
             attachment: first.clone(),
@@ -1423,7 +1426,7 @@ mod tests {
         assert!(exited.completed_at.is_some());
 
         let next = attachment::prepare_session_agent_process(&store, &session.id, &first).unwrap();
-        let next_owner = crate::harness::Admitted {
+        let next_owner = crate::harness::Recording {
             store: store.clone(),
             session: session.id.to_string(),
             attachment: next.clone(),
@@ -1491,7 +1494,7 @@ mod tests {
             true,
         )
         .unwrap();
-        let first_owner = crate::harness::Admitted {
+        let first_owner = crate::harness::Recording {
             store: store.clone(),
             session: session.id.to_string(),
             attachment: first.clone(),
@@ -1520,7 +1523,7 @@ mod tests {
             .unwrap();
         super::stop_native(
             &mut child,
-            Some(&crate::harness::Admitted {
+            Some(&crate::harness::Recording {
                 store: store.clone(),
                 session: session.id.to_string(),
                 attachment: next.clone(),
@@ -1545,7 +1548,7 @@ mod tests {
             true,
         )
         .unwrap();
-        let owner = crate::harness::Admitted {
+        let owner = crate::harness::Recording {
             store: store.clone(),
             session: session.id.to_string(),
             attachment: attachment.clone(),
@@ -1578,7 +1581,7 @@ mod tests {
         let parent = store.test_lf_process();
         let first =
             attachment::claim_session_attachment(&store, &session.id, None, &parent, true).unwrap();
-        let owner = |attachment| crate::harness::Admitted {
+        let owner = |attachment| crate::harness::Recording {
             store: store.clone(),
             session: session.id.to_string(),
             attachment,
@@ -1687,7 +1690,7 @@ mod tests {
                     seen.display()
                 ),
             ]);
-            let owner = crate::harness::Admitted {
+            let owner = crate::harness::Recording {
                 store: store.clone(),
                 session: session.id.to_string(),
                 attachment,
@@ -1713,7 +1716,7 @@ mod tests {
         let parent = store.test_lf_process();
         let first =
             attachment::claim_session_attachment(&store, &session.id, None, &parent, true).unwrap();
-        let owner = crate::harness::Admitted {
+        let owner = crate::harness::Recording {
             store: store.clone(),
             session: session.id.to_string(),
             attachment: first.clone(),
@@ -1748,7 +1751,7 @@ mod tests {
             store.session_attachment(&session.id).unwrap(),
             Some(next.clone())
         );
-        let owner = crate::harness::Admitted {
+        let owner = crate::harness::Recording {
             store: store.clone(),
             session: session.id.to_string(),
             attachment: next.clone(),

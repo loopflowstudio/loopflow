@@ -33,6 +33,7 @@ use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
+use crate::harness::HarnessKind;
 use crate::provider_auth::credential_socket::{
     AuthStartResponse, CredentialSocketClient, CredentialSocketError,
 };
@@ -2375,23 +2376,12 @@ fn summarize_command_output(output: &std::process::Output) -> String {
     format!("exit status {}", output.status)
 }
 
-fn normalize_program_name(program: &str) -> String {
-    std::path::Path::new(program)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or(program)
-        .trim()
-        .to_ascii_lowercase()
-}
-
 fn normalize_env_name(name: &str) -> String {
     name.trim().to_ascii_uppercase()
 }
 
-pub fn provider_env_allowed_for_program(program: &str, env_name: &str) -> bool {
-    env_name == "GH_TOKEN"
-        || crate::harness::HarnessKind::parse(&normalize_program_name(program))
-            .is_some_and(|kind| kind.harness().provider_env().contains(&env_name))
+pub(crate) fn provider_env_allowed(harness: HarnessKind, env_name: &str) -> bool {
+    env_name == "GH_TOKEN" || harness.harness().provider_env().contains(&env_name)
 }
 
 const API_KEY_ENV_NAMES: &[&str] = &[
@@ -2408,15 +2398,14 @@ pub fn is_api_key_env_name(name: &str) -> bool {
     API_KEY_ENV_NAMES.iter().any(|item| *item == normalized)
 }
 
-pub fn api_key_env_allowed_for_program(program: &str, env_name: &str) -> bool {
+pub(crate) fn api_key_env_allowed(harness: HarnessKind, env_name: &str) -> bool {
     let env_name = normalize_env_name(env_name);
     if !is_api_key_env_name(&env_name) {
         return true;
     }
     // An exported API key would bill Claude and Codex per token instead of
     // their native login; only harnesses that take one see it.
-    crate::harness::HarnessKind::parse(&normalize_program_name(program))
-        .is_some_and(|kind| kind.harness().api_key_env().contains(&env_name.as_str()))
+    harness.harness().api_key_env().contains(&env_name.as_str())
 }
 
 pub fn api_key_env_names() -> &'static [&'static str] {
@@ -2453,18 +2442,20 @@ pub async fn provider_env_vars(store: &crate::store::Store) -> Vec<(String, Stri
     vars
 }
 
-/// Apply stored provider credentials that are valid for this executable.
+/// Apply stored provider credentials allowed for the selected harness.
 ///
 /// Agent launch is synchronous, while the credential store is async. Keep the
 /// runtime on a short-lived worker so callers remain safe inside Tokio too.
-pub(crate) fn apply_provider_env_to_command(program: &str, command: &mut std::process::Command) {
+pub(crate) fn apply_provider_env_to_command(
+    harness: HarnessKind,
+    command: &mut std::process::Command,
+) {
     for env_name in api_key_env_names() {
-        if !api_key_env_allowed_for_program(program, env_name) {
+        if !api_key_env_allowed(harness, env_name) {
             command.env_remove(env_name);
         }
     }
 
-    let program = program.to_string();
     let worker = match std::thread::Builder::new()
         .name("lf-provider-env".to_string())
         .spawn(move || {
@@ -2504,7 +2495,7 @@ pub(crate) fn apply_provider_env_to_command(program: &str, command: &mut std::pr
         }
     };
     for (name, value) in env_vars {
-        if provider_env_allowed_for_program(&program, &name) {
+        if provider_env_allowed(harness, &name) {
             command.env(name, value);
         }
     }
@@ -2524,28 +2515,25 @@ mod tests {
 
     #[test]
     fn api_key_env_filter_is_harness_specific() {
-        assert!(api_key_env_allowed_for_program(
-            "opencode",
+        assert!(api_key_env_allowed(
+            HarnessKind::OpenCode,
             "OPENCODE_API_KEY"
         ));
-        assert!(api_key_env_allowed_for_program(
-            "/usr/local/bin/opencode",
+        assert!(api_key_env_allowed(
+            HarnessKind::OpenCode,
             "MOONSHOT_API_KEY"
         ));
-        assert!(api_key_env_allowed_for_program("pi", "ANTHROPIC_API_KEY"));
-        assert!(!api_key_env_allowed_for_program(
-            "opencode",
+        assert!(api_key_env_allowed(HarnessKind::Pi, "ANTHROPIC_API_KEY"));
+        assert!(!api_key_env_allowed(
+            HarnessKind::OpenCode,
             "ANTHROPIC_API_KEY"
         ));
         // Claude and Codex bill to their native login, never an exported key.
         for name in API_KEY_ENV_NAMES {
-            assert!(!api_key_env_allowed_for_program("claude", name), "{name}");
-            assert!(
-                !api_key_env_allowed_for_program("/opt/bin/codex", name),
-                "{name}"
-            );
+            assert!(!api_key_env_allowed(HarnessKind::Claude, name), "{name}");
+            assert!(!api_key_env_allowed(HarnessKind::Codex, name), "{name}");
         }
-        assert!(api_key_env_allowed_for_program("claude", "GH_TOKEN"));
+        assert!(api_key_env_allowed(HarnessKind::Claude, "GH_TOKEN"));
     }
 
     #[derive(Debug)]

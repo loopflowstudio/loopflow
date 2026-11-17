@@ -18,7 +18,7 @@ use crate::harness::common::TurnInProgressGuard;
 use crate::harness::fact::Decoded;
 use crate::harness::fact_writer::FactWriter;
 use crate::harness::opencode_decode::{OpenCodeDecoder, ReaderState, Snapshot};
-use crate::harness::Admitted;
+use crate::harness::Recording;
 use crate::harness::{ApprovalPolicy, Driver as StreamDriver, HarnessError, SendCurrentOutcome};
 use loopflow_model::chat::types::{ConversationEvent, FailureEvidence};
 use loopflow_model::id::AgentSessionId;
@@ -31,7 +31,7 @@ pub struct Driver {
     password: String,
     authorization: reqwest::header::HeaderValue,
     interactive: bool,
-    owner: Admitted,
+    owner: Recording,
     run: Run,
     stream: Option<Arc<tokio::sync::Mutex<OpenCodeStream>>>,
     config: AgentConfig,
@@ -79,7 +79,7 @@ impl Driver {
             password: String::new(),
             authorization: reqwest::header::HeaderValue::from_static(""),
             interactive: false,
-            owner: launch.admitted.clone(),
+            owner: launch.recording.clone(),
             run: launch.run,
             stream: None,
             config: launch.config.clone(),
@@ -112,8 +112,8 @@ impl Driver {
         ))
     }
 
-    async fn start_inner(&mut self, config: &AgentConfig, admitted: &Admitted) -> Result<()> {
-        let owner = admitted.clone();
+    async fn start_inner(&mut self, config: &AgentConfig, recording: &Recording) -> Result<()> {
+        let owner = recording.clone();
         let mut config = config.clone();
         if let Some(context) = &mut config.conversation_context {
             context.identify(&owner.store, &owner.session)?;
@@ -202,7 +202,7 @@ impl Driver {
         let agent_session =
             open_agent_session(&self.client, &base_url, self.agent_session.as_ref(), config)
                 .await?;
-        let Admitted {
+        let Recording {
             store,
             session,
             attachment,
@@ -419,8 +419,8 @@ impl StreamDriver for Driver {
     async fn start(&mut self) -> Result<()> {
         let config = self.config.clone();
         let config = &config;
-        let admitted = self.owner.clone();
-        let admitted = &admitted;
+        let recording = self.owner.clone();
+        let recording = &recording;
         if self.child.is_some() {
             return Ok(());
         }
@@ -428,7 +428,7 @@ impl StreamDriver for Driver {
         self.shutdown_requested.store(false, Ordering::SeqCst);
         self.should_seed_prompt = true;
 
-        let start_result = self.start_inner(config, admitted).await;
+        let start_result = self.start_inner(config, recording).await;
         if let Err(err) = start_result {
             let _ = self.stop().await;
             return Err(err);
@@ -754,13 +754,13 @@ async fn read_messages(
 
 // Freeze dispatch under the attachment fence. Uncertain requests are never replayed.
 async fn post(
-    owner: Admitted,
+    owner: Recording,
     authorization: reqwest::header::HeaderValue,
     url: String,
     payload: Value,
 ) -> Result<bool> {
     tokio::task::spawn_blocking(move || {
-        let Admitted {
+        let Recording {
             store,
             session,
             attachment,
@@ -939,7 +939,7 @@ mod tests {
         .unwrap();
         let first =
             attachment::claim_session_attachment(&store, "stop", None, &process, true).unwrap();
-        let owner = crate::harness::Admitted {
+        let owner = crate::harness::Recording {
             store: store.clone(),
             session: "stop".to_string(),
             attachment: first.clone(),
@@ -973,7 +973,7 @@ mod tests {
                 .unwrap();
         assert!(harness.stop().await.is_err());
         assert!(!crate::journal::OsProcess::group(pid).unwrap().is_empty());
-        harness.owner = crate::harness::Admitted {
+        harness.owner = crate::harness::Recording {
             store,
             session: "stop".into(),
             attachment: current,
@@ -1183,12 +1183,12 @@ mod tests {
 
         let config = live_config();
         let _ledger = crate::journal::TestLedgerGuard::new();
-        let admitted = super::super::admit_for_test(_ledger.home());
+        let recording = super::super::admit_for_test(_ledger.home());
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
                 crate::harness::HarnessKind::OpenCode,
                 &config,
-                &admitted,
+                &recording,
             ),
             tx,
             ApprovalPolicy::AutoApprove,
@@ -1213,12 +1213,12 @@ mod tests {
 
         let config = live_config();
         let _ledger = crate::journal::TestLedgerGuard::new();
-        let admitted = super::super::admit_for_test(_ledger.home());
+        let recording = super::super::admit_for_test(_ledger.home());
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
                 crate::harness::HarnessKind::OpenCode,
                 &config,
-                &admitted,
+                &recording,
             ),
             tx,
             ApprovalPolicy::AutoApprove,

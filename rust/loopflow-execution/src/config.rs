@@ -598,7 +598,9 @@ pub fn parse_agent(agent: &str) -> (String, Option<String>) {
     match agent.split_once(':') {
         Some((harness, model)) => (
             harness.to_string(),
-            Some(model.trim()).filter(|model| !model.is_empty()).map(str::to_string),
+            Some(model.trim())
+                .filter(|model| !model.is_empty())
+                .map(str::to_string),
         ),
         None => (agent.to_string(), None),
     }

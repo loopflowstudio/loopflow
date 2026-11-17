@@ -182,7 +182,7 @@ fn a_settled_runtime_cannot_launch_another_native_provider() {
             .arg(&marker);
         let result = crate::harness::agent_process::spawn_native(
             command,
-            &crate::harness::Admitted {
+            &crate::harness::Recording {
                 store,
                 session,
                 attachment,
@@ -254,7 +254,7 @@ fn a_failed_terminal_receipt_still_closes_only_the_owned_provider() {
             assert!(capture.finish("failed").is_err());
             assert!(crate::harness::agent_process::spawn_native(
                 std::process::Command::new("/bin/true"),
-                &crate::harness::Admitted {
+                &crate::harness::Recording {
                     store: store.clone(),
                     session: session.clone(),
                     attachment: attachment.clone()

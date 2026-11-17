@@ -18,7 +18,7 @@ use tokio::task::JoinHandle;
 use super::fact::{Decoded, ProviderFact, ProviderTurn};
 use super::fact_writer::FactWriter;
 use super::pi_decode::Turn;
-use super::Admitted;
+use super::Recording;
 use super::{Driver as StreamDriver, HarnessError, SendCurrentOutcome};
 use crate::agent::AgentConfig;
 use crate::steer::NativeBoundary;
@@ -63,7 +63,7 @@ pub struct Driver {
     events: mpsc::UnboundedSender<ConversationEvent>,
     state: Arc<Mutex<State>>,
     config: AgentConfig,
-    owner: Admitted,
+    owner: Recording,
     run: Run,
     session: Option<AgentSessionId>,
     child: Option<Child>,
@@ -160,7 +160,7 @@ impl Driver {
             events,
             state: Arc::default(),
             config: launch.config.clone(),
-            owner: launch.admitted.clone(),
+            owner: launch.recording.clone(),
             run: launch.run,
             session: launch.start.thread(),
             child: None,
@@ -172,7 +172,7 @@ impl Driver {
     }
 
     async fn write(&mut self, value: &Value) -> Result<()> {
-        let Admitted {
+        let Recording {
             store,
             session,
             attachment,
@@ -261,7 +261,7 @@ impl Driver {
             .stderr(Stdio::piped());
         let mut child = super::agent_process::spawn(command, None, &owner, self.run)
             .with_context(|| crate::agent::missing_agent_message(super::HarnessKind::Pi))?;
-        let Admitted {
+        let Recording {
             store,
             session,
             attachment,

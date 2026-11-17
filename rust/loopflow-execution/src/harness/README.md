@@ -11,7 +11,7 @@ let launch = Launch {
     config: &config,
     harness,            // resolved once from the selected agent
     run,                // Bare(mode), Managed or Worker, from delegation
-    admitted: &admitted, // required before opening the provider
+    recording: &recording, // store, Session and attachment; required before opening
     start: Start::Resume { thread: &thread },
     context_file: Some(&context),
 };
@@ -22,14 +22,22 @@ Native and headless launches share `Launch` and the same per-harness `Harness`.
 one headless provider turn. Native results retain the provider's OS exit status;
 headless results retain answer text and typed turn failures for retry policy.
 
-Transport selects `Run` once before `delegate` carries it out. `Bare(Mode)`
-follows its caller; `Managed` is an interactive conversation in a held terminal.
-`Worker` is a headless run lf starts for a Task or Wave, which nobody views and whose turns the
-server records: `lf task run` steps, the `ci-fix` run landing starts, and each
-Discord answer for a Wave. In-process callers such as commit messages, PR text
-and replay use `Bare(Headless)`. Task attribution never changes this choice.
-Resume reads the Session's binding and primary scope before delegation: Bare
-conversations reopen Bare; bound and primary conversations reopen Managed.
+The [glossary](../../../../docs/glossary.md#loopflows-words) defines managed,
+bare, work session, worker, chat and batch. Their launch values are:
+
+| | Interactive | Headless |
+|---|---|---|
+| Managed | work session: `Run::Managed` | worker: `Run::Worker` |
+| Bare | chat: `Run::Bare(Interactive)` | batch: `Run::Bare(Headless)` |
+
+Work sessions and workers report turns to the Machine server. Chats and
+batches read their steers directly and report no turn boundaries.
+Transport selects `Run` once before `delegate` carries it out. Workers run
+`lf task run` steps, the `ci-fix` run landing starts, and Discord answers for a
+Wave. In-process callers such as commit messages, PR text and replay are
+batches. Task attribution never changes this choice. Resume reads the
+Session's binding and primary scope before delegation: a chat reopens as a
+chat; a bound or primary conversation reopens as a work session.
 `admit` creates the capture and claims its attachment before a native launch;
 headless admission claims the runtime's attachment before constructing `Launch`.
 
@@ -53,15 +61,14 @@ may `exec` into a held terminal.
 | harness | interactive client | names the thread |
 |---|---|---|
 | Claude | native TUI, prompt on stdin | lf (`--session-id`) |
-| Pi, Bare | native TUI | lf (`--session-id`) |
-| Pi, Managed | native TUI with the lf extension | provider |
-| Codex, Bare | `codex`, prompt in argv | provider (start hook) |
-| Codex, Managed | `codex --remote` after lf opens the app-server thread | provider |
+| Pi chat | native TUI | lf (`--session-id`) |
+| Pi work session | native TUI with the lf extension | provider |
+| Codex chat | `codex`, prompt in argv | provider (start hook) |
+| Codex work session | `codex --remote` after lf opens the app-server thread | provider |
 | OpenCode | `opencode --server … --session` beside a private server; waits | provider |
 
 `cargo test -p loopflow-execution --lib harness::launch_matrix -- --nocapture`
-runs every harness with bare/managed interactive and bare/worker headless
-launches against stand-in provider scripts, and prints each cell's argv, hook ownership, wait mechanism and recorded thread.
+runs every harness as a chat, work session, batch and worker against stand-in provider scripts, and prints each cell's argv, hook ownership, wait mechanism and recorded thread.
 Headless matrix runs wait here; held-terminal exec handoff is covered by the
 transport fixtures.
 
@@ -106,7 +113,7 @@ for the ownership model.
 The start and compact context blocks name the Loopflow Session and its Task
 identifier and title when it has exactly one. Launch captures those in the
 existing delivery file; managed start/compact boundaries refresh that file
-through the Machine server. Bare headless runs read the launch snapshot without
+through the Machine server. Batches read the launch snapshot without
 opening a store or connecting to the server. Fixed provider instructions carry no
 Session or Task identity.
 
@@ -123,7 +130,7 @@ Every lf invocation at a turn or tool boundary is best-effort. Every launch's
 hook reads the Session's unread steers, Task updates among them, from the store, in
 its own process, and at a tool boundary only when a steer may be waiting
 ([Every launch reads its own steers](../../../loopflow/src/server/README.md#every-launch-reads-its-own-steers)).
-A bare launch no owner holds
+A chat or batch
 ([which launches are managed](../../../loopflow/src/server/README.md#turn-and-tool-boundaries))
 does nothing else: it reports no boundary and asks no server. A held launch's
 hook first sends one `session.boundary` request to the Machine server at
@@ -162,7 +169,7 @@ at the next turn end or launch.
 ## Task updates
 
 Keep several Task conversations open while a Graph finishes and a teammate adds
-a comment. Each managed conversation hears what changed on its Tasks: a Graph
+a comment. Each work session hears what changed on its Tasks: a Graph
 run or step that settled, its Graph position, a comment from anyone else. A
 comment with direction is a steer (source `comment:<id>`) and arrives only as
 one.

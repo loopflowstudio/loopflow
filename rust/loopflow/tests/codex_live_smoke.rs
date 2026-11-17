@@ -81,7 +81,7 @@ async fn codex_live_one_turn_smoke() {
         &loopflow_execution::harness::launch_for_test(
             loopflow_execution::harness::HarnessKind::Codex,
             &config,
-            &loopflow_execution::harness::Admitted {
+            &loopflow_execution::harness::Recording {
                 store,
                 session: "smoke".into(),
                 attachment,

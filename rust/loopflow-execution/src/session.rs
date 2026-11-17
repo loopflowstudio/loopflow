@@ -15,7 +15,6 @@ pub fn conversation(
         &crate::config::PersonalSettings::read(Some(cwd), wave.as_deref()),
         Some(&skill),
     )?;
-    let (provider, model) = crate::config::parse_agent(&agent);
     Ok(LfSession {
         captured: None,
         id: uuid::Uuid::new_v4().simple().to_string().into(),
@@ -24,8 +23,8 @@ pub fn conversation(
         input_published: false,
         cwd: cwd.to_path_buf(),
         skill: Some(skill.name),
-        provider: Some(provider),
-        model,
+        provider: Some(agent.harness.as_str().to_owned()),
+        model: agent.model,
         node: None,
         iterations: None,
         task_id: None,

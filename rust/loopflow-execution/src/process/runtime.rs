@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use crate::harness::agent_process::close_session_agent_process;
-use crate::harness::Admitted;
+use crate::harness::Recording;
 use crate::process::SessionAttachment;
 use crate::session_record::{
     new_artifact_key, record_error, row_store, AgentProcessRequest, CaptureHandoff,
@@ -119,7 +119,7 @@ impl LfProcessRuntime {
                     .0
                     .lock()
                     .expect("Process runtime mutex poisoned")
-                    .owner = Some(crate::harness::Admitted {
+                    .owner = Some(crate::harness::Recording {
                     store: store.clone(),
                     session: session.to_string(),
                     attachment,
@@ -188,7 +188,7 @@ impl LfProcessRuntime {
         if let Some(terminal) = crate::transport::current() {
             store.bind_session_terminal(&session.id, &attachment, terminal)?;
         }
-        runtime.owner = Some(crate::harness::Admitted {
+        runtime.owner = Some(crate::harness::Recording {
             store,
             session: session.id.to_string(),
             attachment,
@@ -214,7 +214,7 @@ impl LfProcessRuntime {
 
     pub(crate) fn conversation_resume_token(&self) -> StoreResult<Option<AgentSessionId>> {
         let runtime = self.0.lock().expect("Process runtime mutex poisoned");
-        if let Some(Admitted { store, session, .. }) = &runtime.owner {
+        if let Some(Recording { store, session, .. }) = &runtime.owner {
             return store.session_thread(session);
         }
         let store = row_store(&runtime.recorder.dir)?;
@@ -225,7 +225,7 @@ impl LfProcessRuntime {
         store.session_thread(&session.id)
     }
 
-    pub fn admitted(&self) -> Option<Admitted> {
+    pub fn recording(&self) -> Option<Recording> {
         self.0
             .lock()
             .expect("Process runtime mutex poisoned")
@@ -240,7 +240,7 @@ impl LfProcessRuntime {
             .owner
             .as_ref()
             .map(
-                |Admitted {
+                |Recording {
                      session,
                      attachment,
                      ..
@@ -250,7 +250,7 @@ impl LfProcessRuntime {
 
     pub fn attachment_replaced(&self) -> StoreResult<bool> {
         let runtime = self.0.lock().expect("Process runtime mutex poisoned");
-        let Some(Admitted {
+        let Some(Recording {
             store,
             session,
             attachment: expected,
@@ -270,7 +270,7 @@ impl LfProcessRuntime {
     ) -> StoreResult<crate::process::SessionAttachment> {
         let mut runtime = self.0.lock().expect("Process runtime mutex poisoned");
         let settled = runtime.settled_outcome.is_some();
-        let Admitted {
+        let Recording {
             store,
             session: id,
             attachment,
@@ -278,7 +278,7 @@ impl LfProcessRuntime {
             .owner
             .as_mut()
             .filter(
-                |Admitted {
+                |Recording {
                      session: id,
                      attachment,
                      ..
@@ -299,7 +299,7 @@ impl LfProcessRuntime {
         if let Ok(declaration) = std::env::var(crate::ops::WORK_DECLARATION_ENV) {
             environment.insert(crate::ops::WORK_DECLARATION_ENV.to_string(), declaration);
         }
-        if let Some(Admitted {
+        if let Some(Recording {
             session,
             attachment,
             ..
@@ -332,7 +332,7 @@ impl LfProcessRuntime {
         if runtime.settled_outcome.is_some() {
             anyhow::bail!("Process runtime already settled");
         }
-        let Admitted {
+        let Recording {
             store,
             session,
             attachment: expected,
@@ -356,7 +356,7 @@ impl LfProcessRuntime {
             resume_thread,
             || close_session_agent_process(store, session),
         )?;
-        runtime.owner = Some(crate::harness::Admitted {
+        runtime.owner = Some(crate::harness::Recording {
             store: store.clone(),
             session: session.clone(),
             attachment: next,
@@ -415,7 +415,7 @@ impl Drop for RuntimeState {
 
 #[derive(Debug)]
 struct RuntimeState {
-    owner: Option<Admitted>,
+    owner: Option<Recording>,
     provider: String,
     model: Option<String>,
     agent_session: Option<AgentSessionId>,
@@ -482,7 +482,7 @@ impl RuntimeState {
         }
         // Ending the invocation cannot depend on writing its receipt. A retry
         // may record the same outcome, but cannot reopen or relabel this owner.
-        if let Some(Admitted {
+        if let Some(Recording {
             store,
             session,
             attachment,
@@ -522,7 +522,7 @@ impl LfProcessRuntime {
         self.record_best_effort(|runtime| {
             let now = time::OffsetDateTime::now_utc();
             let quiet_since = runtime.recorder.activity.observe(now, body_pid, processes);
-            let Some(Admitted {
+            let Some(Recording {
                 store,
                 session,
                 attachment,
@@ -792,7 +792,7 @@ mod tests {
         let mut child = Child(
             crate::harness::agent_process::spawn_native(
                 command,
-                &crate::harness::Admitted {
+                &crate::harness::Recording {
                     store: store.clone(),
                     session: "resume".into(),
                     attachment: attached.clone(),

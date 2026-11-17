@@ -68,7 +68,7 @@ impl LiveSessionFixture {
         RunningAgent(
             crate::harness::agent_process::spawn_native(
                 command,
-                &crate::harness::Admitted {
+                &crate::harness::Recording {
                     store: self.store.sqlite.clone(),
                     session: session.id.to_string(),
                     attachment,
@@ -129,7 +129,7 @@ fn resume_refuses_a_run_and_leaves_its_provider_running() {
             let mut provider = crate::harness::agent_process::spawn(
                 command,
                 None,
-                &crate::harness::Admitted { store: store.sqlite.clone(), session: session.id.to_string(), attachment: first.clone() },
+                &crate::harness::Recording { store: store.sqlite.clone(), session: session.id.to_string(), attachment: first.clone() },
                 crate::harness::Run::Bare(crate::harness::Mode::Headless),
             )?;
             let opened = super::open(&store, home, &session.id, false, true, false).await;

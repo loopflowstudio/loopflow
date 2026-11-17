@@ -1,4 +1,4 @@
-# LOO-924 follow-through: three launch states and a parsed agent choice
+# LOO-924: bare or managed launches and a parsed agent choice
 
 Direction from concept review of PR #1966
 (`cd0977a62f:scratch/concept-review.html`; the working file now reviews Session commands).
@@ -6,7 +6,7 @@ Jack, 2026-11-17, quoting the review: "Two product ideas still lack one owner in
 the code: whether a launch is managed, and which agent was chosen." / "this
 seems worth fixing". Both go in this PR.
 
-## 1. Three launch states, one belonging fact
+## 1. Bare or managed, interactive or headless
 
 Design note with prior art and every quote: `scratch/launch-states.html`.
 Jack, 2026-11-17:
@@ -36,13 +36,14 @@ delete `WorkSource::is_managed`, and delete the variants too if nothing else
 reads them.
 
 **Who keeps it running?** Transport reads the command before delegation and
-returns one value:
+returns one value. Bare and managed are the two states; Worker names managed
+and headless execution:
 
 ```rust
 enum Run { Bare(Mode), Managed, Worker }   // replaces Holder x Place x Mode
 ```
 
-| command | state | mode | lives until |
+| command | Run | mode | lives until |
 |---|---|---|---|
 | `lf`, `lf <skill>`, `lf graph <g>`, `lf -b ...`, with or without `--task`/`LF_AS`, in any checkout | Bare | interactive or headless | its terminal closes or its caller exits |
 | a Task, Wave or repository conversation: `lf resume --task/--wave`, `lf resume ID` of a Session bound with `lf session bind` or of a primary conversation | Managed | interactive | someone quits it; survives its viewer |
@@ -50,10 +51,10 @@ enum Run { Bare(Mode), Managed, Worker }   // replaces Holder x Place x Mode
 
 Names chosen for review: `Worker`, not "detached", because lf already shows
 `"state": "detached"` on an interactive Session nobody is viewing. One word
-for the middle state in code and docs: `Managed` (rename `Place::Held` uses
+for launches whose turns the server records: managed (rename `Place::Held` uses
 that mean this state; "held terminal" stays as the name of the terminal).
 
-### What each state does
+### What each Run variant does
 
 | | counts toward its Task | gets Task steers | reports turns to the Machine server | terminal |
 |---|---|---|---|---|
@@ -63,8 +64,8 @@ that mean this state; "held terminal" stays as the name of the terminal).
 
 Worker keeps today's turn reports. The server records Codex turns and
 refreshes planning from them, and nothing here has shown that is safe to drop.
-Reliability first: Worker differs from Managed in having no held terminal and
-no viewer, not in what is recorded.
+The `Worker` variant is managed and headless, with no held terminal or viewer;
+the `Managed` variant is managed and interactive. Both report turns.
 
 ### Behavior that changes on purpose
 
@@ -154,36 +155,17 @@ with Task attribution. WorkSource remains for context provenance and primary
 selection, with no launch-lifetime authority. Fresh resume carries invocation
 settings and a literal inline-prompt delimiter across exec.
 
-Earlier build, launch matrix, agent fallback, steering, native launch/resume and
-lint results: `6797c65b41:scratch/plan.md` (also links prior checks).
-
-- `cargo nextest run -p loopflow -p loopflow-execution --lib --test integration --test session_launch_contract -E 'test(transport::launch_mode_tests::) | test(lf::tests::) | test(a_prepared_task_resume_opens_managed_and_fails_naming_a_missing_server) | test(a_task_pane_reopened_by_session_id_fails_naming_a_missing_server) | test(session_cli_uses_one_truthful_resolution_contract) | test(contextual_resume_uses_scope_and_recovers_unassociated_checkouts) | test(documented_commands::)'`: 51 passed, 2026-11-17, inherited `LF_*` cleared; macOS libtest linking warned and succeeded.
-- `cargo fmt --check`, `git diff --check` and `cargo clippy --all-targets -- -D warnings`: passed, 2026-11-17, inherited `LF_*` cleared for Clippy.
-
-## Resume classifies the Session it reopens
-
-`delegate_session(id, json, preview, replace)` classifies the resumed
-Session's own row through `session_run(id)`; `preview` only chooses whether a
-last screen is shown (interactive Sessions). Previously the preview ID did
-both, so a headless-recorded Session (`lf -b research` in a plain checkout)
-resumed at a terminal opened Managed. `launch_mode_tests` now has that row:
-headless, unbound, not primary, expecting `Bare(Interactive)`.
-
-- `cargo nextest run -p loopflow-execution --lib -E 'test(transport::launch_mode_tests::)'`: 5 passed, 2026-11-17, `LF_*` cleared.
-- `cargo fmt` and `cargo clippy -p loopflow-execution --all-targets -- -D warnings`: passed, 2026-11-17. Gate runs workspace Clippy and the suites.
-- Still read from the code, not run: `cfg!(test)` returns before real delegation, so a live `lf -b research` → `lf resume <ID>` belongs to demo.
-
-Compress, 2026-11-17, `LF_*` cleared: `cargo clippy -p loopflow -p loopflow-execution --all-targets -- -D warnings` passed;
-`cargo nextest run -p loopflow -p loopflow-execution --lib --test integration -E 'test(transport::launch_mode_tests::) | test(commands::run::) | test(a_prepared_task_resume_opens_managed_and_fails_naming_a_missing_server)'`: 22 passed;
-`cargo nextest run -p loopflow --test agent_tests`: 14 passed.
-
-The Session command review's six open questions remain outside this PR
-(`scratch/concept-review.html`).
-
-Gate owns broader transport, configuration and Task performance checks;
-demo owns live steering and terminal lifetime checks.
+Earlier implementation and check results: `2a414ca0f3:scratch/plan.md`.
+Gate owns broader transport, configuration and Task performance checks; demo
+owns live steering and terminal lifetime checks. The older batch → interactive
+resume demo is not available: `run_refusal` rejects headless Sessions before
+transport classification (see `scratch/questions.md`, 2026-11-17).
 
 ## Delete — do not maintain
+
+- Credential filters `provider_env_allowed_for_program`, `api_key_env_allowed_for_program`
+  and `normalize_program_name`: typed harness launch options own credential policy;
+  preserve exported-key filtering and stored GitHub/provider env behavior.
 
 - `SessionConnectionArgs::work_flag` and prepared-command work flag forwarding; the selected Session ID owns resume identity.
 - Resume row classification inside `delegate`; both resume entry points use `session_run` before delegation.
@@ -200,20 +182,25 @@ demo owns live steering and terminal lifetime checks.
   per-harness `Transcripts` impl, Jack said "no opinion in this one". One
   trait keeps the change smaller, and it is still one file per provider.
 
-## Review answers, 2026-11-17 (remaining for implement)
+## Review answers, 2026-11-17
 
 Jack answered `scratch/concept-review.html` with "1c 2b 3c -- give info to the
 "remove process rows" task which delete lf s 4) a 5)a".
 
-- **1c. Two states, not three.** "Drop the third name: bare and managed, where
-  managed is a conversation or a step." `Worker` goes from the type, the docs
-  and `AGENTS.md`. A managed launch is a conversation (interactive, held
-  terminal) or a Graph step (headless, runs detached); both report turns, as
-  built. Shape the type so only the two real questions exist (managed or
-  bare; interactive or headless) and no arm reads `Managed | Worker`.
-  `LF_GRAPH_STEP=worker` and the `worker` argument become "a Task's Graph
-  step", named for what they are. Update `transport/README.md`,
-  `harness/README.md`, `server/README.md` and `docs/sessions.md`.
+- **1. Worker is a name for managed and headless.** Jack first answered 1c
+  ("Drop the third name"), then "wait im not sure about 1c", then: "i guess
+  wohat i would say is WOrker = (Manage & Headless)". So the word stays and
+  it is a definition, not a third behavior:
+  - bare: the server is not told about its turns; interactive or headless.
+  - managed: the server is told about each turn. A managed launch that is
+    interactive is a conversation in a held terminal; one that is headless
+    is a worker and runs detached.
+  Keep `Run { Bare(Mode), Managed, Worker }` as built, or make `Worker` a
+  named constructor over managed + headless if that reads truer; either way
+  no code may give Worker a behavior that "managed and headless" doesn't
+  explain. Say the definition once in `harness/README.md` and use it in
+  `transport/README.md`, `server/README.md`, `docs/sessions.md` and
+  `AGENTS.md`; the docs should not describe three independent states.
 - **2b. `harness::Run` keeps its name.** LOO-953 chooses other names for its
   `Run`/`GraphRun`; it has been told.
 - **3c. No state column** in `lf session list` or `lf ps` (LOO-953 deletes
@@ -225,3 +212,61 @@ Jack answered `scratch/concept-review.html` with "1c 2b 3c -- give info to the
 - **5a. Rename `Admitted` to `Recording`** (`Launch.recording`), with a
   one-line doc comment saying it holds the store, the Session and its
   attachment that this launch records under.
+
+## The four names (2026-11-17)
+
+Jack: "my suggestions: work session, worker / chat, run", then, after `run`
+was shown to clash with `harness::Run`, the Graph run and `lf task run`:
+"ok, batch is fine for bare headless".
+
+| | someone typing | headless |
+|---|---|---|
+| managed | work session | worker |
+| bare | chat | batch |
+
+Two states, managed and bare; each name is one cell and says both axes. Use
+these four words in `harness/README.md` (linking `docs/glossary.md`), `transport/README.md`,
+`server/README.md`, `docs/sessions.md` and `AGENTS.md`, replacing "bare
+conversation", "managed conversation", "bare headless run" and similar. In
+code, name constructors or variants after the cells where it reads truer
+(`Run::Worker` stays); no cell gets a behavior its two axes don't explain.
+Prior art checked (T3 Code, Orchestrator, Paseo, HumanLayer): all are always
+daemon-backed and name none of the cells; Orchestrator says "worker session".
+
+## Glossary (this PR)
+
+Asked "is there a task for having a GLOSSARY.md", then "if not we can do it
+here". There is no Task; `docs/glossary.md` exists (61 lines, "Loopflow's
+words"). Put the launch vocabulary there, as the one definition the READMEs
+link to:
+
+- Add **Managed** and **Bare** (who keeps a launch alive; whether the server
+  is told each turn), and the four cells: **Work session**, **Worker**,
+  **Chat**, **Batch**, each one line saying both axes and the command that
+  makes it (`lf resume --task`, `lf task run`, `lf <skill>`, `lf -b <skill>`).
+- Rewrite the rows that say the same thing in older words: **Headless
+  Session**, **AgentProcess** ("An `lf <skill>` run's is the foreground
+  program…"), **Server**, **Holder**. One idea, one row.
+- Say that belonging to a Task (checkout, `--task`, `LF_AS`) is separate from
+  managed or bare.
+- `harness/README.md` then links the glossary rather than defining the words
+  a second time.
+
+## Implementation checks, 2026-11-17
+
+The review changes and glossary vocabulary are implemented. `Run` keeps its
+existing variants; `Recording` replaces the launch attachment type. The
+production parsing audit and its retained call sites are in [PR #1966](https://github.com/loopflowstudio/loopflow/pull/1966).
+Broader configuration/transport/performance checks remain with gate; live
+steering and viewer lifetime remain with demo.
+
+All commands cleared inherited `LF_*`; application and credential checks used
+the prepared fixture CLI. The initial matrix built its fixture CLI inside the
+tests, accounting for its two slow results.
+
+- `cargo test -p loopflow-execution --lib --no-run`: passed.
+- `cargo nextest run -p loopflow-execution --lib -E 'test(harness::launch_matrix::) | test(transport::launch_mode_tests::)'`: all eight checks passed in the focused execution run.
+- `cargo nextest run -p loopflow -p loopflow-execution --lib --test integration -E 'test(run::launch_policy_tests::) | test(transcript::tests::old_account_transcripts_resume_with_native_auth_without_copying_credentials) | test(documented_commands::)'`: 11 passed; macOS linking warned about unwind-table size and succeeded.
+- `cargo nextest run -p loopflow-execution --lib -E 'test(provider_auth::tests::api_key_env_filter_is_harness_specific) | test(harness::native_session::tests::session_launch_tui_preserves_native_oauth_and_routes_stored_api_keys)'`: 2 passed.
+- `target/debug/deps/integration-e149becb33146c3a --exact documented_commands::documented_invocations_have_no_ambiguous_command_shorthand`: passed against the final documentation edits.
+- `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check`: passed.

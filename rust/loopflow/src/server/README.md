@@ -19,11 +19,11 @@ existing terminal attachment. It links no embedded Loopflow library. Desktop's U
 On macOS the signed selected app bundles `com.loopflow.server.plist` and
 registers it with SMAppService. Explicit development Machines use separately
 named launchd jobs. Linux uses a user systemd service. Closing Desktop does not
-stop the service. Managed Sessions and Desktop shells run in a holder the service starts with
-`setsid` and controls ([Held terminals](../transport/README.md#held-terminals));
+stop the service. Work sessions and Desktop shells run in a holder the service starts with
+`setsid` and controls ([Held terminals](../../../loopflow-execution/src/transport/README.md#held-terminals));
 stopping or replacing the service leaves holders and their agents running.
 This service holds no PTY itself and hosts no Graphs: those run as
-[plain detached processes](../transport/README.md#headless-work). Logout/reboot do not
+[plain detached processes](../../../loopflow-execution/src/transport/README.md#headless-work). Logout/reboot do not
 preserve live processes. Disabled Background Items remain disabled. Upgrade
 retires the previous
 `com.loopflow.machine` registration before starting `com.loopflow.server`.
@@ -516,20 +516,22 @@ reported, never started by an attachment attempt.
 
 ## Turn and tool boundaries
 
-`transport::delegate` returns one launch state in `Launch::run`:
-`Bare(Mode)` for direct skill and Graph commands and `lf resume <ID> 'message'`
-(except a Graph's correction turn in a Task run, which is the step's Worker),
-`Managed` for interactive Task, Wave, repository and bound conversations, and
-`Worker` for headless runs lf starts for a Task or Wave: `lf task run` steps,
-the `ci-fix` run landing starts, and Discord answers for a Wave. The command decides this state. The checkout, `--task` and
+`Launch::run` carries whether a launch is bare or managed and its mode.
+[Work sessions, workers, chats and batches are defined here](../../../../docs/glossary.md#loopflows-words).
+`transport::delegate` selects chats or batches for direct skill and Graph
+commands, and a batch for `lf -b resume <ID> --message TEXT`. A Graph's correction
+turn in a Task run remains a worker. Interactive Task, Wave, repository and
+bound conversations are work sessions. Workers run `lf task run` steps,
+the `ci-fix` run landing starts, and Discord answers for a Wave. The command
+chooses the launch. The checkout, `--task` and
 `LF_AS` only decide Task membership: accounting and Task steers always travel
-together. Resume retains a Session's Bare or Managed lifetime, reading its
+together. Resume retains a Session's bare or managed lifetime, reading its
 binding and primary scope once before delegation; attribution alone leaves it
-Bare. Every launch [reads its own steers from the store](#every-launch-reads-its-own-steers).
-Bare launches report no boundaries. Managed conversations and Workers report
-the same turn boundaries to the Machine server.
+bare. Every launch [reads its own steers from the store](#every-launch-reads-its-own-steers).
+Chats and batches report no boundaries. Work sessions and workers
+report turn boundaries to the Machine server.
 
-For a Managed conversation or Worker, Claude and Codex hooks run `lf __context-block --moment <moment>` at session start,
+For a work session or worker, Claude and Codex hooks run `lf __context-block --moment <moment>` at session start,
 compaction, each prompt and each turn end. That process first makes one
 `session.boundary` request on `machine.sock`, for the server to record. The
 OpenCode plugin and the Pi extension send the same request from inside the
@@ -597,9 +599,8 @@ be lost. `lf session steers <session>` shows each steer `delivered` or
 line in `logs/lf.log`; the tool goes on and the next boundary asks again.
 
 The launch carries its capability as `LF_PROVIDER_CONTEXT` when the server
-records its boundaries and as `LF_BARE_STEER` when no one does; a bare
-launch's tool and prompt hooks run only `--moment steer`, which reports
-nothing. Nothing wakes a bare launch: a conversation idle at its prompt reads a
+records its boundaries and as `LF_BARE_STEER` when no one does. For chats and
+batches, tool and prompt hooks run only `--moment steer`, which reports nothing. Nothing wakes a chat or batch: a chat idle at its prompt reads a
 steer when its person next types.
 
 Every tool hook first compares files and starts `lf` only when a steer may be
@@ -609,13 +610,13 @@ Wave's or repository's. A launch names its Session's marker and its Task's
 (`LF_STEER_SESSION`, `LF_STEER_TASK`); its hook exits while `LF_STEER_SEEN`,
 touched at each check, is newer than all three. So a comment on one Task
 starts `lf` only in that Task's conversations. A held launch's prompt hook
-always runs, which reaches a Session bound to a Task after launch; a bare
-launch's prompt hook is gated like its tool hook.
+always runs, which reaches a Session bound to a Task after launch. For chats
+and batches, prompt hooks are gated like tool hooks.
 
 ### Waking an idle conversation
 
 The server keeps no list of conversations (`wake.rs`); it reads them from the
-store. A managed Session is idle when its last recorded native turn yielded
+store. A work session is idle when its last recorded native turn yielded
 (`session_activity`) and its AgentProcess is live, and reachable through its
 Codex app-server (`processes.endpoint`) or the Claude inbox key its first
 managed boundary saved (`processes.inbox`); `sessions/<pid>.json` beside that
@@ -639,7 +640,7 @@ that lapses for the next boundary:
 
 A server that restarts reads the same conversations again. An unreachable
 Claude inbox leaves its news unclaimed. After a failed send the steers arrive
-again. Bare Sessions are never woken. No
+again. Chats and batches are never woken. No
 process or clock runs per Session: the watcher's only clock is the change
 signal's 60 s fallback for a missed checkpoint or a Machine's sleep.
 
@@ -652,14 +653,13 @@ Still nothing, and the launch fails before the agent starts:
 Loopflow server is not running, and Task and Wave work needs it (…); run `lf install server`, then `lf server status`
 ```
 
-A bare launch, here or through `lf --machine`, runs without a server. At a
-terminal or headless (`-b`, a Graph step, a run an agent starts), it prints
-the context block from checkout files at session start and compaction. Those
+A chat or batch, here or through `lf --machine`, runs without a server.
+It prints the context block from checkout files at session start and compaction. Those
 two callbacks make no request and log no gap, and the run reports no turn
 boundary; whoever started it reads its output. Its steer check reads the
 store directly. On Pi the extension still guards bash tools, which ends a
-tool's process group with its provider. A bare conversation held in a
-Desktop pane has the same hooks.
+tool's process group with its provider. A chat in a Desktop shell has the
+same hooks.
 
 The hook resolves the server at its fixed path on every call; no address is
 put in the agent's environment. Connecting, `hello` and the answer share a
@@ -724,9 +724,9 @@ one `recording gap` line to its log (`logs/pi-extension.log` for Pi,
 conversation. The next boundary connects as every boundary does, sends the
 open gap, and logs one line when it is answered. A
 server restart, an upgrade and a stopped server all look like this; the
-conversation needs no relaunch. A bare headless run opens no connection: Pi
+conversation needs no relaunch. A batch opens no connection: Pi
 keeps its context block, steers and bash guard, OpenCode its context block and
-steers, and so does a bare conversation. A launch with no context delivery file has no
+steers, and so does a chat. A launch with no context delivery file has no
 `delivery` to send and opens none either.
 
 A store the server cannot write, or a callback whose conversation the Session

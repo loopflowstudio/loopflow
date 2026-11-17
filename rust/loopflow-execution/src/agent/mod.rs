@@ -1395,7 +1395,7 @@ fn _run_harness_once(
         // dispatch/history operations never refresh theirs from the runtime.
         config.env.extend(runtime.environment());
     }
-    let admitted = crate::harness::Admitted::from_runtime(
+    let recording = crate::harness::Recording::from_runtime(
         runtime.expect("run_admitted_agent supplies a runtime before retrying"),
     )
     .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
@@ -1403,7 +1403,7 @@ fn _run_harness_once(
         config: &config,
         harness: launch.agent.harness.harness(),
         run,
-        admitted: &admitted,
+        recording: &recording,
         start: crate::harness::Start::from_thread(launch.resume_token.as_ref()),
         context_file: None,
     };

@@ -182,7 +182,7 @@ pub async fn select(
             .await?
             .and_then(|account| account.home)
             .ok_or_else(|| anyhow!("{provider} account {account} has no home"))?;
-        let harness = HarnessKind::parse(provider.as_str())
+        let harness = HarnessKind::from_provider(provider)
             .expect("conversations are found only for agent providers");
         crate::transcript::copy_between(harness, id, &home, &native_home(provider))?;
         store

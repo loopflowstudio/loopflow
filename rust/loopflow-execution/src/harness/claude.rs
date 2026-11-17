@@ -20,7 +20,7 @@ use crate::harness::claude_decode::ClaudeDecoder;
 use crate::harness::common::TurnInProgressGuard;
 use crate::harness::fact::{Decoded, ProviderFact};
 use crate::harness::fact_writer::{FactWriter, RequestOrigins};
-use crate::harness::Admitted;
+use crate::harness::Recording;
 use crate::harness::{Driver as StreamDriver, HarnessError, SendCurrentOutcome};
 use crate::provider_auth::Provider;
 use loopflow_model::chat::types::{ConversationEvent, Lifecycle, TurnUsage};
@@ -54,7 +54,7 @@ pub(crate) fn usage(value: &serde_json::Value) -> TurnUsage {
 pub struct Driver {
     events: mpsc::UnboundedSender<ConversationEvent>,
     config: AgentConfig,
-    owner: Admitted,
+    owner: Recording,
     run: Run,
     runtime: Option<crate::process::LfProcessRuntime>,
     should_seed_task_prompt: bool,
@@ -104,7 +104,7 @@ impl Driver {
         Self {
             events,
             config: launch.config.clone(),
-            owner: launch.admitted.clone(),
+            owner: launch.recording.clone(),
             run: launch.run,
             runtime: None,
             should_seed_task_prompt: true,
@@ -136,7 +136,7 @@ impl Driver {
     }
 
     fn turn_origin(&self) -> Result<crate::session::SessionTurnOrigin> {
-        let Admitted {
+        let Recording {
             store,
             session,
             attachment,
@@ -152,7 +152,7 @@ impl Driver {
         }
         let config = &mut self.config;
         if let Some(runtime) = &self.runtime {
-            let Admitted {
+            let Recording {
                 store: _,
                 session,
                 attachment,
@@ -209,7 +209,7 @@ impl Driver {
             .take()
             .ok_or_else(|| anyhow!("failed to capture claude stderr"))?;
 
-        let Admitted {
+        let Recording {
             store,
             session,
             attachment,
@@ -414,7 +414,7 @@ impl Driver {
             .stdin
             .take()
             .ok_or_else(|| anyhow!("claude stdin not available"))?;
-        let Admitted {
+        let Recording {
             store,
             session,
             attachment,
@@ -709,9 +709,9 @@ mod tests {
             let (tx, _rx) = mpsc::unbounded_channel();
 
             let config = live_config();
-            let (config, admitted) = (
+            let (config, recording) = (
                 config,
-                Admitted {
+                Recording {
                     store: store.clone(),
                     session: id.into(),
                     attachment: attachment.clone(),
@@ -721,7 +721,7 @@ mod tests {
                 &crate::harness::launch_for_test(
                     crate::harness::HarnessKind::Claude,
                     &config,
-                    &admitted,
+                    &recording,
                 ),
                 tx,
             );
@@ -824,7 +824,7 @@ mod tests {
             runtime.block_on(async {
                 let (tx, _rx) = mpsc::unbounded_channel();
 
-                let (config, admitted) = (
+                let (config, recording) = (
                     AgentConfig {
                         agent: crate::config::Agent::parse(settings.agent().unwrap()).unwrap(),
                         chrome: settings.chrome,
@@ -832,7 +832,7 @@ mod tests {
                         cwd: Some(home.into()),
                         ..crate::agent::AgentConfig::default()
                     },
-                    Admitted {
+                    Recording {
                         store: store.clone(),
                         session: session.clone(),
                         attachment: first.clone(),
@@ -842,7 +842,7 @@ mod tests {
                     &crate::harness::launch_for_test(
                         crate::harness::HarnessKind::Claude,
                         &config,
-                        &admitted,
+                        &recording,
                     ),
                     tx,
                 );
@@ -958,16 +958,16 @@ mod tests {
             ..crate::agent::AgentConfig::default()
         };
         let ledger = crate::journal::TestLedgerGuard::new();
-        let admitted = super::super::admit_for_test(ledger.home());
+        let recording = super::super::admit_for_test(ledger.home());
         let _env = crate::test_ambient::EnvGuard::clear(&["PATH", "LF_BIN"]);
         std::env::set_var("PATH", ledger.home());
         std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
-        let (config, admitted) = (config, admitted);
+        let (config, recording) = (config, recording);
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
                 crate::harness::HarnessKind::Claude,
                 &config,
-                &admitted,
+                &recording,
             ),
             tx,
         );
@@ -1064,7 +1064,7 @@ mod tests {
         }
 
         /// Config for a fresh headless Session the stand-in attaches to.
-        fn attach(&self, id: &str) -> (AgentConfig, Admitted) {
+        fn attach(&self, id: &str) -> (AgentConfig, Recording) {
             self.store
                 .test_session(id, &crate::session_record::new_artifact_key());
             rusqlite::Connection::open(&self.database)
@@ -1081,7 +1081,7 @@ mod tests {
             config.cwd = Some(self.home.path().to_path_buf());
             (
                 config,
-                Admitted {
+                Recording {
                     store: self.store.clone(),
                     session: id.into(),
                     attachment,
@@ -1129,12 +1129,12 @@ done
         // provider-owned AgentSession.
         let (tx, mut rx) = mpsc::unbounded_channel();
 
-        let (config, admitted) = claude.attach("first");
+        let (config, recording) = claude.attach("first");
         let mut first = Driver::new(
             &crate::harness::launch_for_test(
                 crate::harness::HarnessKind::Claude,
                 &config,
-                &admitted,
+                &recording,
             ),
             tx,
         );
@@ -1149,7 +1149,7 @@ done
 
         let (tx, mut rx) = mpsc::unbounded_channel();
 
-        let (config, admitted) = claude.attach("second");
+        let (config, recording) = claude.attach("second");
         let launch = crate::harness::Launch {
             start: crate::harness::Start::Resume {
                 thread: &agent_session,
@@ -1157,7 +1157,7 @@ done
             ..crate::harness::launch_for_test(
                 crate::harness::HarnessKind::Claude,
                 &config,
-                &admitted,
+                &recording,
             )
         };
         let mut resumed = Driver::new(&launch, tx);
@@ -1308,12 +1308,12 @@ cat > /dev/null
 
         let config = live_config();
         let _ledger = crate::journal::TestLedgerGuard::new();
-        let admitted = super::super::admit_for_test(_ledger.home());
+        let recording = super::super::admit_for_test(_ledger.home());
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
                 crate::harness::HarnessKind::Claude,
                 &config,
-                &admitted,
+                &recording,
             ),
             tx,
         );
@@ -1352,12 +1352,12 @@ cat > /dev/null
 
         let config = live_config();
         let _ledger = crate::journal::TestLedgerGuard::new();
-        let admitted = super::super::admit_for_test(_ledger.home());
+        let recording = super::super::admit_for_test(_ledger.home());
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
                 crate::harness::HarnessKind::Claude,
                 &config,
-                &admitted,
+                &recording,
             ),
             tx,
         );
@@ -1628,7 +1628,7 @@ impl super::Harness for Claude {
         }
         super::claude_trust::accept_created_worktree(&client.process);
         if super::claude_trust::awaits_dialog(&client.process) {
-            super::native_session::report_folder_trust_dialog(launch.admitted);
+            super::native_session::report_folder_trust_dialog(launch.recording);
         }
         Ok(client)
     }

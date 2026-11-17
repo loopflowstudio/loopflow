@@ -19,18 +19,26 @@ first, then the engineering words it borrows.
 | **KR** | Key result. A result you can check, stated before the work starts. |
 | **Memory** | A text file, `MEMORY.md`, where a Wave writes down what it learned. |
 | **LfSession**, **Session** | One continuable agent conversation, interactive or headless, with identity, feedback and native history. |
-| **Headless Session** | A Session that runs without an interactive conversation view, such as `lf -b implement` or a Graph step. |
+| **Managed** | A launch that outlives its initiating command or viewer and reports each turn to the Machine server: a work session or worker. |
+| **Bare** | A launch that follows its caller or terminal and reports no turns to the Machine server: a chat or batch. |
+| **Work session** | A managed, interactive Session in a held terminal, opened with `lf resume --task LOO-12` (or a Wave, repository or bound Session). |
+| **Worker** | A managed, headless Session, such as a step of `lf task run LOO-12`, with no terminal or viewer. |
+| **Chat** | A bare, interactive Session, started with `lf <skill>` or plain `lf`, that ends with its terminal. |
+| **Batch** | A bare, headless Session, started with `lf -b <skill>`, that follows its caller and returns its answer. |
 | **Available** | A conversation you can work with now: it asked a question, handed its turn back, or went quiet with no tool call outstanding. Availability needs no pending question or review, and owes nothing; a Task's checks or dependencies neither add nor remove it. |
 | **LfProcess**, **Process** | One actual lf process: durable `id`, optional Unix `pid`, causal parent and observed command outcome. |
-| **AgentProcess** | The provider's OS process Loopflow started for a Session. An `lf <skill>` run's is the foreground program of your terminal; a Task, Wave or repository conversation's is kept by a holder and keeps running when its views close. |
+| **AgentProcess** | The provider's OS process Loopflow started for a Session: a chat uses its terminal, a batch follows its caller, a work session uses a holder, and a worker runs without a terminal. |
 | **Machine** | One OS user’s Loopflow authority in one data directory, used as an execution destination; two users on one host have separate identities. |
-| **Server** | The client access process on a Machine; it connects Desktop to Work and existing Sessions, independently of the app window, and starts Task and Wave conversations in a holder. |
-| **Holder** | The process beside the server that keeps the terminals and agents of Task and Wave conversations. One per build; an install never restarts it. |
+| **Server** | The client access process on a Machine; it connects Desktop to Work and existing Sessions, starts work sessions in a holder, and records work session and worker turns. |
+| **Holder** | The process beside the server that keeps work session terminals and agents, plus Desktop shells; one per build, and an install never restarts it. |
 | **Installation** | The selected Loopflow build and its registration, updated with `lf install`, including the client server. |
 | **Data directory** | Local Loopflow state in `~/.lf` by default; explicit `LF_HOME` selects a disposable experiment. |
 | **Steer** | A message you send to work that is already running, to change its direction. |
 | **Harness**, **provider** | The AI coding tool Loopflow drives: Claude Code, Codex, OpenCode, or Pi. |
 | **Scratch** | The `scratch/` folder, for working notes. `lf scratch clear` removes added files; existing files and edits remain. |
+
+Task membership is separate from managed or bare: the checkout, `--task` and
+`LF_AS` choose which Task receives the launch's usage and supplies its steers.
 
 Historical capture paths and immutable receipts retain their encoding; see
 [cutover status](dev/reference-cutover.md#cutover-status). They are not a fourth

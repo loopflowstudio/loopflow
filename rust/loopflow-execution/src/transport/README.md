@@ -21,15 +21,16 @@ holder to start the agent on a PTY and keeps everything else: the terminal
 registry, one libghostty-vt terminal per held terminal, views, viewing
 records, queued input, the child's control requests and exit settlement.
 
-Transport selects `Run` before `delegate` carries it out:
+Transport selects `Run` before `delegate` carries it out. Launches are bare or
+managed, with [four launch names](../../../../docs/glossary.md#loopflows-words):
 
-| Command | Run | Lifetime |
+| Command | Launch | Lifetime |
 |---|---|---|
-| `lf`, a skill or a Graph, with or without `--task`, `--wave` or `LF_AS` | `Bare(Mode)` | its caller or terminal |
-| `lf resume <ID> 'message'` | `Bare(Headless)`; a Graph's correction turn inside a Task run is a `Worker` | one turn, then exits |
-| Resume a Bare Session with no message | `Bare(Interactive)` | its terminal |
-| Resume a bound or primary Session, or open a Task, Wave or repository conversation | `Managed` | held interactive terminal, independent of its viewer |
-| `lf task run` steps, the `ci-fix` run landing starts, a Discord answer for a Wave | `Worker` | headless until its run ends; nobody views it, the server records its turns |
+| `lf`, a skill or a Graph, with or without `--task`, `--wave` or `LF_AS` | chat or batch | its caller or terminal |
+| `lf -b resume <ID> --message TEXT` | batch; a Graph's correction turn inside a Task run is a worker | one turn, then exits |
+| Resume a chat with no message | chat | its terminal |
+| Resume a bound or primary Session, or open a Task, Wave or repository conversation | work session | held interactive terminal, independent of its viewer |
+| `lf task run` steps, the `ci-fix` run landing starts, a Discord answer for a Wave | worker | headless until its run ends; nobody views it, the server records its turns |
 | Desktop Task shells | held shell | independent of its viewer, no hooks |
 
 A held launch calls `session.start` and becomes a view of the returned
@@ -47,23 +48,22 @@ resume.
 
 A command chooses the state; the checkout, `--task` and `LF_AS` choose which
 Task it belongs to. Every launch belonging to a Task counts toward its usage
-and receives its steers. Managed conversations and Workers report turn
-boundaries to the Machine server; Bare launches read their steers directly.
+and receives its steers. Work sessions and workers report turn
+boundaries to the Machine server; chats and batches read their steers directly.
 
-`delegate` returns either a completed delegation or `Here { run }`. Only Bare
-launches choose a mode: `--batch` selects headless; otherwise `--interactive`,
-a terminal or no prompt selects interactive. Managed conversations always run
-interactive, Workers headless. Reopening a Session with no message reads its
-binding and primary scope once before `delegate`: Bare stays Bare; bound and primary
-conversations reopen Managed. An unreadable store keeps the Managed fallback
-and logs a recording gap.
+`delegate` returns either a completed delegation or `Here { run }`. Direct
+launches choose between a chat and a batch: `--batch` selects a batch;
+otherwise `--interactive`, a terminal or no prompt selects a chat. Reopening a Session with no message
+reads its binding and primary scope once before `delegate`: chats reopen as
+chats; bound and primary conversations reopen as work sessions.
+An unreadable store falls back to a work session and logs a recording gap.
 
-### Bare conversations at a terminal
+### Chats at a terminal
 
-Bare `lf` and skill launches run as the terminal's foreground process-group
+Chats started with `lf` or a skill run as the terminal's foreground process-group
 leader. Closing the terminal ends them. `os_process::foreground` hands over
 the terminal before exec and takes it back after; Ctrl+Z stops lf with its
-provider and `fg` continues both. `lf resume` reopens a Bare conversation in
+provider and `fg` continues both. `lf resume` reopens a chat in
 its terminal too.
 
 ### Identity
@@ -498,8 +498,8 @@ ps -axo ppid,command | grep 'graph run'
 # 1 lf --agent claude --task task_… graph run
 ```
 
-Nothing hosts headless work (`os_process::detached`). Bare headless skills
-and direct Graphs run with their caller. Task Graph workers, landing watchers
+Nothing hosts headless work (`os_process::detached`). Batches and direct
+headless Graphs run with their caller. Task Graph workers, landing watchers
 and delivery controllers that must outlive the command use `setsid`, stdin
 from `/dev/null` and closed inherited descriptors except release locks and
 worktree leases. Task steps themselves wait inside their Graph's process tree.
@@ -543,7 +543,7 @@ reopens provider history without starting a turn.
 
 Desktop creates a shell once, on the Task's recorded Machine, in a terminal
 that Machine's holder keeps. The shell is plain: no hooks, no steers, and an
-`lf` typed in it is bare. Its private runtime in `desktop::shells` owns
+`lf` typed in it starts a chat. Its private runtime in `desktop::shells` owns
 execution receipts, startup, reconnect and Close. A Linux Machine runs the
 same server and holder under systemd; no Desktop app is needed there. Machine
 routing carries the same view protocol across SSH. There is no Task shell

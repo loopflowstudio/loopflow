@@ -185,7 +185,7 @@ pub(crate) fn adopt_native(provider: Provider, id: &AgentSessionId) -> Result<()
     if from.as_deref() == Some(to.as_path()) {
         return Ok(());
     }
-    let harness = HarnessKind::parse(provider.as_str()).expect("native provider has a harness");
+    let harness = HarnessKind::from_provider(provider).expect("native provider has a harness");
     if transcript(harness, &to, id.as_str()).is_none() {
         let copied = from
             .as_ref()

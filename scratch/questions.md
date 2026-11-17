@@ -71,3 +71,9 @@ order, both env variables, dev-only skew accepted).
 - A new runner spawning an older installed lf (branch build in development):
   the old child ignores `LF_RUN_ID`, so the step row has only the spawner's
   exit code and no error, and its Session input is not found under the step id.
+
+## Sync checks (2026-11-16)
+
+- `cargo test -p loopflow --lib graph_tests::authored_graph_records_each_skill_as_one_session -- --exact`: passed; initial compile exposed main's Task summary reference to `graph.process`, repaired to `graph.run`. Gate/CI run suites.
+- `cargo test -p loopflow-storage --lib sqlite::task_summaries::tests::an_abandoned_task_keeps_one_summary_of_its_run -- --exact`: passed with the owner-record fixture; gate/CI run suites.
+- `cargo fmt` and `cargo clippy --all-targets -- -D warnings`: passed.

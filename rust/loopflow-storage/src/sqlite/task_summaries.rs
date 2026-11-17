@@ -75,7 +75,7 @@ pub(super) fn write_in(conn: &Connection, task: &TaskId, ended: TaskEnd) -> Stor
     let graphs = super::graph_inventory::graphs_in(conn, "g.task_id=?1", &[&task.as_str()])?;
     let ended_at = crate::rows::now_unix();
     let started_at = match graphs.first() {
-        Some(graph) => graph.process.started_at,
+        Some(graph) => graph.run.started_at,
         None => conn.query_row(
             "SELECT created_at FROM tasks WHERE id=?1",
             [task.as_str()],
@@ -175,21 +175,15 @@ mod tests {
     #[test]
     fn an_abandoned_task_keeps_one_summary_of_its_run() {
         let (_dir, store, task) = crate::test_fixture::store_with_task();
-        let process = |parent: Option<&LfProcessId>| {
-            let id = LfProcessId::new();
-            store
-                .conn
-                .lock()
-                .unwrap()
-                .execute(
-                    "INSERT INTO processes(id,trace_id,parent_lf_process_id,started_at) VALUES(?1,?2,?3,1)",
-                    rusqlite::params![id, loopflow_model::id::TraceId::new(), parent],
-                )
-                .unwrap();
-            id
+        let start = crate::graph_process::RunStart {
+            started_at: 1,
+            pid: None,
+            os_started_at: None,
+            repo: None,
+            cwd: None,
         };
         // One Graph whose only step sent its loop around twice before going on.
-        let graph = process(None);
+        let graph = LfProcessId::new();
         let compiled = crate::graph::CompiledGraph {
             name: "polish".into(),
             steps: vec![crate::graph::GraphNode {
@@ -204,11 +198,11 @@ mod tests {
             }],
         };
         store
-            .record_graph_process(&graph, &compiled, Some(&task))
+            .record_graph_process(&graph, &compiled, Some(&task), &start)
             .unwrap();
         for pass in 0..=2 {
             store
-                .record_graph_step(&graph, &process(Some(&graph)), 0, &[vec![pass]])
+                .record_graph_step(&graph, &LfProcessId::new(), 0, &[vec![pass]], &start)
                 .unwrap();
         }
         store

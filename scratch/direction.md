@@ -18,3 +18,4 @@ one Session wakes.
 Review page with the full table and six questions: `scratch/session-commands-review.html`.
 Questions 3 to 5 there (open vs resume, fresh-thread verb, selectors) have no answer yet.
 - On waking only for a steer that names one Session: "ok, eakign only directly named steers is fine"
+- On Task steers: "if you steer a task the task conversation should ~always be awake anyway and it can continue from there". So a Task steer needs no wake rule: the Task's conversation is managed, the server already wakes it when idle, and it decides what to do next, including steering a worker by name.

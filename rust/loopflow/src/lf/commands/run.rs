@@ -1,6 +1,6 @@
 use crate::lf::commands::context::preview::PromptPreview;
 use crate::lf::Cli;
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, Result};
 use loopflow_execution::agent::check_cli_available;
 use loopflow_execution::agent::missing_agent_message;
 use loopflow_execution::agent::run_agent;
@@ -105,38 +105,34 @@ pub(crate) fn preview_prompt(
     })
 }
 
-/// `lf -b resume ID --message TEXT`: one more headless turn of a conversation,
-/// using `message` and the provider's own history without re-executing its skill.
-pub fn resume(
-    id: &str,
-    message: &str,
-    cli: &Cli,
-    run: loopflow_execution::harness::Run,
-) -> Result<()> {
-    let store = loopflow_execution::store::open_sqlite(
-        &loopflow_execution::store::database_path_from_env()?,
-    )?;
-    let session = store
-        .session(id)?
-        .ok_or_else(|| anyhow!("session {id:?} was not found"))?;
-    // A Graph corrects its own step's answer in that step's Run; nobody else
-    // continues a Run.
+/// Whether this process is the Graph that ran `session` as its step: a Graph
+/// corrects its own step's answer in that step's Run, and nobody else
+/// continues a Run.
+pub(crate) fn continues_own_step(
+    store: &loopflow_execution::store::sqlite::SqliteStore,
+    session: &loopflow_execution::session::LfSession,
+) -> Result<bool> {
     let caller_graph = loopflow_execution::journal::current_lf_process_id()
         .map(|process| store.lf_process(&process))
         .transpose()?
         .flatten()
         .and_then(|process| process.parent_lf_process_id);
-    let own_step = caller_graph
-        .is_some_and(|graph| session.graph_lf_process_id.as_deref() == Some(graph.as_str()));
-    if !own_step {
-        if let Some(refusal) =
-            loopflow_execution::ops::human_session::run_refusal(&store, &session)?
-        {
-            bail!(refusal);
-        }
-    }
+    Ok(caller_graph
+        .is_some_and(|graph| session.graph_lf_process_id.as_deref() == Some(graph.as_str())))
+}
+
+/// `lf -b steer SESSION TEXT`: one more headless turn of a conversation,
+/// with `message` as its prompt and the provider's own history, without
+/// re-executing its skill.
+pub fn resume(
+    store: &loopflow_execution::store::sqlite::SqliteStore,
+    session: &loopflow_execution::session::LfSession,
+    message: &str,
+    cli: &Cli,
+    run: loopflow_execution::harness::Run,
+) -> Result<()> {
     let mut resolved = loopflow_execution::agent::resolve_session_config(
-        &session,
+        session,
         cli.setting_values()?,
         cli.output_schema.as_ref(),
         cli.batch,
@@ -146,9 +142,8 @@ pub fn resume(
     let message = if session.captured.is_some()
         && session.provider.as_deref() != Some(resolved.agent.harness.as_str())
     {
-        let request = loopflow_execution::ops::human_session::conversation_log::continuation(
-            &store, &session,
-        )?;
+        let request =
+            loopflow_execution::ops::human_session::conversation_log::continuation(store, session)?;
         format!("{request}\n\n{message}")
     } else {
         message.to_owned()

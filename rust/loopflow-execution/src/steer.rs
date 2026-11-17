@@ -128,6 +128,22 @@ fn render(
     Ok(text)
 }
 
+/// Steers a turn of its own reads as its prompt: each one's attribution and
+/// complete text, unlike the excerpts a hook prints between tool calls.
+pub fn render_complete(steers: &[Steer]) -> String {
+    let mut text = String::from("<lf:steers>\n");
+    for steer in steers {
+        text.push_str(&format!(
+            "Steer {}; author {}:\n{}\n",
+            steer.id,
+            steer.author,
+            steer.text.trim_end()
+        ));
+    }
+    text.push_str("</lf:steers>\n");
+    text
+}
+
 /// Only confirmed live, managed conversations can be woken.
 pub fn idle_conversations(
     store: &loopflow_storage::sqlite::SqliteStore,

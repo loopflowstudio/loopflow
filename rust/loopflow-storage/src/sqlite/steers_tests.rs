@@ -193,6 +193,24 @@ fn a_read_steer_is_not_replayed() {
     assert!(read(&store, &adapter, "native").is_empty());
 }
 
+/// A foreground turn takes its own steer with every earlier unread one, and
+/// its hooks find nothing left to print.
+#[test]
+fn a_turn_takes_its_steer_with_the_unread_ones_before_it() {
+    let (_home, store, adapter) = fixture();
+    let earlier = store
+        .save_session_steer("session", "Author", "First")
+        .unwrap();
+    let (steer, taken) = store
+        .take_session_steers("session", "Graph", "Second")
+        .unwrap();
+    assert_eq!(taken, vec![earlier, steer]);
+    let page = store.session_steers("session", 0, 32).unwrap();
+    assert_eq!(page.pending, 0);
+    assert!(page.items.iter().all(|row| row.delivered_at.is_some()));
+    assert!(read(&store, &adapter, "native").is_empty());
+}
+
 /// A hook that claims and never prints: the claim hides the steer from a hook
 /// beside it, then lapses, and the steer is claimed again.
 #[test]

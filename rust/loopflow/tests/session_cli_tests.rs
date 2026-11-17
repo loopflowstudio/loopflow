@@ -524,7 +524,7 @@ fn prepare_conversation(
 
 #[cfg(unix)]
 #[test]
-fn headless_resume_preserves_a_held_owners_capture_on_both_harnesses() {
+fn a_headless_steer_preserves_a_held_owners_capture_on_both_harnesses() {
     use std::os::unix::fs::PermissionsExt;
 
     for harness in ["claude", "codex"] {
@@ -562,14 +562,7 @@ fn headless_resume_preserves_a_held_owners_capture_on_both_harnesses() {
         ));
         let output = command(
             home.path(),
-            &[
-                "--batch",
-                "session",
-                "resume",
-                &id,
-                "--message",
-                "another instruction",
-            ],
+            &["--batch", "steer", &id, "another instruction"],
         )
         .current_dir(&cwd)
         .env("PATH", std::env::join_paths(paths).unwrap())
@@ -597,7 +590,7 @@ fn headless_resume_preserves_a_held_owners_capture_on_both_harnesses() {
 
 #[cfg(unix)]
 #[test]
-fn headless_resume_reads_the_saved_workspace_and_retains_process_provenance() {
+fn a_headless_steer_reads_the_saved_workspace_and_retains_process_provenance() {
     use std::os::unix::fs::PermissionsExt;
 
     let home = tempfile::tempdir().unwrap();
@@ -670,18 +663,22 @@ for line in sys.stdin:
         &std::env::var_os("PATH").unwrap_or_default(),
     )))
     .unwrap();
-    let output = command(
-        home.path(),
-        &["-b", "session", "resume", &id, "--message", "Continue here"],
-    )
-    .current_dir(&caller)
-    .env("PATH", path)
-    .env("HOME", home.path())
-    .env("LF_TEST_RESUME_PROOF", home.path().join("proof"))
-    // A calling agent's Wave must not supply a different conversation's context.
-    .env("LF_WAVE_ID", wave.id().as_str())
-    .output()
-    .unwrap();
+    // A steer saved while the Session was stopped is read in the next turn.
+    let earlier = command(home.path(), &["steer", &id, "Earlier direction"])
+        .current_dir(&caller)
+        .env("HOME", home.path())
+        .output()
+        .unwrap();
+    assert!(earlier.status.success(), "{earlier:?}");
+    let output = command(home.path(), &["-b", "steer", &id, "Continue here"])
+        .current_dir(&caller)
+        .env("PATH", path)
+        .env("HOME", home.path())
+        .env("LF_TEST_RESUME_PROOF", home.path().join("proof"))
+        // A calling agent's Wave must not supply a different conversation's context.
+        .env("LF_WAVE_ID", wave.id().as_str())
+        .output()
+        .unwrap();
     assert!(
         output.status.success(),
         "{}",
@@ -691,6 +688,12 @@ for line in sys.stdin:
     assert!(sent.contains("SAVED_CONTEXT"), "{sent}");
     let sent_input = std::fs::read_to_string(home.path().join("proof.input")).unwrap();
     assert!(sent_input.contains("Continue here"), "{sent_input}");
+    assert!(
+        sent_input.contains("Earlier direction")
+            && sent_input.find("Earlier direction") < sent_input.find("Continue here"),
+        "{sent_input}"
+    );
+    assert_eq!(store.session_steers(&id, 0, 32).unwrap().pending, 0);
     assert!(!sent.contains("CALLER_CONTEXT"), "{sent}");
     assert!(!sent.contains("CALLER_WAVE_CONTEXT"), "{sent}");
     assert!(!sent.contains("missing-original-skill"), "{sent}");

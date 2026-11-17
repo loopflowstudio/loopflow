@@ -702,6 +702,42 @@ impl SqliteStore {
         Ok((steers, remaining as usize))
     }
 
+    /// Save `text` as a steer for `session` and take every steer it has not
+    /// read, oldest first and the new one last, as read by the caller's own
+    /// turn. One write, so no hook or wake sees them as news in between.
+    pub fn take_session_steers(
+        &self,
+        session: &str,
+        author: &str,
+        text: &str,
+    ) -> StoreResult<(Steer, Vec<Steer>)> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let steer = save_in(
+            &tx,
+            ("session", session),
+            &uuid::Uuid::new_v4().to_string(),
+            "1",
+            &loopflow_model::durable::Author::Named(author.into()),
+            text,
+        )?;
+        let steers = tx
+            .prepare(&format!("{} ORDER BY p.seq", unread()))?
+            .query_map([session], read_steer)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        for read in &steers {
+            tx.execute(
+                "INSERT INTO steer_delivered(session_id,steer_id,claimed_at,delivered_at)
+                VALUES(?1,?2,unixepoch(),unixepoch())
+                ON CONFLICT(session_id,steer_id) DO UPDATE
+                SET claimed_at=unixepoch(),delivered_at=unixepoch()",
+                params![session, read.id],
+            )?;
+        }
+        tx.commit()?;
+        Ok((steer, steers))
+    }
+
     /// The caller printed these claimed steers: the Session has read them.
     pub fn deliver_session_steers(
         &self,

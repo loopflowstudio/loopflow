@@ -1325,6 +1325,19 @@ async fn open_prepared(store: &SharedStore, id: &str, json: bool) -> Result<()> 
     Ok(())
 }
 
+/// Whether the Session's agent is running, so it reads a steer at its next
+/// boundary.
+pub fn agent_running(store: &SqliteStore, session: &LfSession) -> Result<bool> {
+    let summary = session_projection::session_summary(
+        store,
+        &session.id,
+        loopflow_storage::rows::now_unix(),
+    )?
+    .ok_or_else(|| session_not_found(&session.id))?;
+    Ok(summary.completed_at.is_none()
+        && summary.agent_process_evidence == crate::journal::ProcessIdentityEvidence::Live)
+}
+
 /// Why `lf resume` refuses a Run (a headless conversation, alone or a Graph
 /// step), running or finished: it takes only Sessions. None for a Session.
 pub fn run_refusal(store: &SqliteStore, session: &LfSession) -> Result<Option<String>> {
@@ -1337,8 +1350,7 @@ pub fn run_refusal(store: &SqliteStore, session: &LfSession) -> Result<Option<St
         loopflow_storage::rows::now_unix(),
     )?
     .ok_or_else(|| session_not_found(&session.id))?;
-    let running = summary.completed_at.is_none()
-        && summary.agent_process_evidence == crate::journal::ProcessIdentityEvidence::Live;
+    let running = agent_running(store, session)?;
     let mut what: Vec<&str> = Vec::new();
     what.extend(summary.task_identifier.as_deref());
     what.extend(summary.graph.as_ref().map(|graph| graph.name.as_str()));

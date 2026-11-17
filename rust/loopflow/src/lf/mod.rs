@@ -148,7 +148,7 @@ pub struct Cli {
     #[arg(long, value_name = "PATH", conflicts_with = "wt")]
     pub cwd: Option<PathBuf>,
 
-    /// The conversation `lf -b resume ID --message TEXT` continues.
+    /// The conversation `lf -b steer SESSION TEXT` continues.
     #[arg(skip)]
     pub resume: Option<String>,
 }
@@ -448,12 +448,13 @@ pub enum Commands {
     /// Direct running agents: a Session, a Task's Sessions, or with `--wave` or `--repo` every Session there
     ///
     /// The steer is saved; each Session it applies to reads it after its next
-    /// tool call, or when it is next woken or prompted. No turn starts. A Task
+    /// tool call, or when it is next woken or prompted. With `-b`, a stopped
+    /// Session it names reads it in one turn here, and the reply prints. A Task
     /// steer also joins the Task's thread. `lf session steers SESSION` shows
     /// what a Session has read.
     #[command(
         allow_missing_positional = true,
-        after_help = "lf steer SESSION 'skip the vendored code'\nlf steer LOO-12 'keep the public API'\nlf --wave parser steer 'prioritize the tokenizer'\nlf --repo . steer 'hold merges until the release is cut'"
+        after_help = "lf steer SESSION 'skip the vendored code'\nlf -b steer SESSION 'what changed?'\nlf steer LOO-12 'keep the public API'\nlf --wave parser steer 'prioritize the tokenizer'\nlf --repo . steer 'hold merges until the release is cut'"
     )]
     Steer {
         /// A Session or Task ID; omit it with `--wave` or `--repo`
@@ -1591,24 +1592,21 @@ pub enum GraphCommand {
     External(Vec<String>),
 }
 
-/// Shared selection, preparation and next-turn options for `resume` and `session new`.
+/// Shared selection and preparation options for `resume` and `session new`.
 #[derive(Args, Debug)]
 pub struct SessionConnectionArgs {
     /// Reveal existing history without replacing another terminal or starting a turn
-    #[arg(long, hide = true, conflicts_with = "message")]
+    #[arg(long, hide = true)]
     pub reveal_existing: bool,
     /// Start or continue without replacing another terminal's input
-    #[arg(long, hide = true, conflicts_with_all = ["message", "reveal_existing"])]
+    #[arg(long, hide = true, conflicts_with = "reveal_existing")]
     pub start_if_free: bool,
     #[arg(long, conflicts_with = "wave")]
     pub task: Option<String>,
     #[arg(long)]
     pub wave: Option<String>,
-    /// With `-b`: send the conversation its next turn
-    #[arg(long)]
-    pub message: Option<String>,
     /// Return connection data without starting the provider
-    #[arg(long, conflicts_with = "message")]
+    #[arg(long)]
     pub prepare: bool,
     #[arg(long)]
     pub json: bool,
@@ -1813,7 +1811,7 @@ pub enum SessionCommand {
         #[command(flatten)]
         connection: SessionConnectionArgs,
         /// Leave the other client running; continue in a new conversation forked from it
-        #[arg(long, conflicts_with = "message")]
+        #[arg(long)]
         fork: bool,
     },
     /// Restart this scope's conversation on a fresh provider thread, seeded with

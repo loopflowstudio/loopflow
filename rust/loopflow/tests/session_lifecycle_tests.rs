@@ -382,14 +382,7 @@ fn task_conversation_starts_at_launch_not_creation() {
         // Allocating the checkout is the work reservation that claims the Task.
         assert_eq!(claims(), ["claim"]);
         let opened = if headless {
-            fixture.run(&[
-                "-b",
-                "session",
-                "resume",
-                &session,
-                "--message",
-                "Start the Task conversation",
-            ])
+            fixture.run(&["-b", "steer", &session, "Start the Task conversation"])
         } else {
             fixture.run(&["session", "resume", &session])
         };
@@ -1120,33 +1113,6 @@ fn public_history_discovers_unlinked_native_receipts_without_borrowing_a_later_b
         assert!(fixture.json(&filtered).as_array().unwrap().is_empty());
     }
     assert_eq!(fixture.count("agent_sessions"), captures);
-}
-
-#[test]
-fn preparation_rejects_messages_without_admitting_or_launching_a_conversation() {
-    let fixture = Fixture::new(false);
-    let primary = fixture.json(&["resume", "--prepare", "--json"]);
-    let before = fixture.count("agent_sessions");
-    let output = fixture.run(&[
-        "-b",
-        "resume",
-        "--prepare",
-        "--message",
-        "Do not submit",
-        "--json",
-    ]);
-    assert!(!output.status.success(), "{output:?}");
-    let error = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        error.contains("--prepare") && error.contains("--message"),
-        "{error}"
-    );
-    assert_eq!(fixture.count("agent_sessions"), before);
-    assert!(fixture.launches().is_empty());
-    assert_eq!(
-        fixture.json(&["resume", "--prepare", "--json"])["id"],
-        primary["id"]
-    );
 }
 
 #[test]
@@ -2078,7 +2044,7 @@ fn taskless_structured_output_correction_is_bounded_and_preserves_the_conversati
             .as_str()
             .unwrap()
             .contains("Return the final answer as the declared JSON value"));
-        // Every correction resumes the conversation that gave the answer.
+        // Every correction steers the conversation that gave the answer.
         let conversation: String = fixture
             .db()
             .query_row(
@@ -2097,7 +2063,7 @@ fn taskless_structured_output_correction_is_bounded_and_preserves_the_conversati
                 schema["properties"]["decision"]["enum"],
                 serde_json::json!(["advance", "iterate", "blocked"])
             );
-            assert_eq!(args[3..6], ["session", "resume", conversation.as_str()]);
+            assert_eq!(args[3..5], ["steer", conversation.as_str()]);
             assert_eq!(correction["key"], decision["key"]);
             assert_eq!(correction["iterations"], decision["iterations"]);
         }

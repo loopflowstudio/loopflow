@@ -187,6 +187,22 @@ is saved. `lf -b steer` exits with the turn's failure.
    or kills: claim-at-save composes with the turn's own hooks (no second
    injection); the correction still reads its answer from the step capture;
    the AgentProcess is recorded inside the launch lock.
+   *Built.* `steer_turn` (`lf/commands/session.rs`) delegates first, then
+   holds the Session's launch lock for the whole turn; a running Session or
+   someone else's finished Run only saves. `take_session_steers` saves the
+   steer and marks every unread one delivered in one write, so hooks inside
+   the turn print nothing twice (the claim-lapse question disappears).
+   `steer::render_complete` carries full text. Graph correction spawns
+   `--batch --output-schema S steer CONV TEXT` and its test passes reading
+   the same step capture. `--message` is gone from `SessionConnectionArgs`,
+   ssh dispatch, `session new` and `-b resume` (an error naming `lf -b
+   steer`). `run::resume` takes the store and Session; `continues_own_step`
+   and `agent_running` replace its inline checks.
+   *Taught:* holding the lock to the end sidesteps "is the AgentProcess
+   recorded inside the lock": a concurrent `lf resume` waits (30 s, then
+   "launch is still busy"). Slice 2's held start will meet the same wait.
+   *Not yet tested:* `-b steer` to a running Session saves and returns
+   (needs a Live AgentProcess fixture); gate or slice 2's server tests.
 2. **The server starts stopped Sessions.** The watcher's stopped case through
    `continuing`; the per-steer start column and its migration; Task steers
    naming the primary conversation (and a running worker) as wake targets;

@@ -17,3 +17,9 @@
 - `lf steer` exits 0 once saved. `lf -b steer` exits with the turn's failure.
 - A foreground turn's prompt carries each steer's full text, not the hook's
   400-byte excerpt.
+- `lf -b steer` marks the steers delivered when it builds the prompt, before
+  the provider starts; a launch that then fails leaves them read. Passed
+  over: claim at save, deliver after launch (a claim lapses in 15 s and a
+  slow start would print them again through the turn's hooks).
+- `lf -b steer` holds the Session's launch lock for the whole turn, so a
+  `lf resume` of the same Session meanwhile waits 30 s and fails as busy.

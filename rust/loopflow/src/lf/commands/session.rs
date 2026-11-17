@@ -72,6 +72,9 @@ pub fn steer(
         };
         anyhow::Ok((store, session))
     })?;
+    if let (Some(session), true) = (session.clone(), cli.batch) {
+        return steer_turn(cli, &runtime, &store, session, &directory, message, json);
+    }
     let scope = match (&session, target, cli.wave.as_deref()) {
         (Some(session), _, _) => SteerScope::Session(&session.id),
         (None, Some(issue), wave) => {
@@ -111,6 +114,63 @@ pub fn steer(
         println!("Saved {}", steer.id);
     }
     Ok(())
+}
+
+/// `lf -b steer SESSION TEXT`: a Session whose agent is stopped reads its
+/// unread steers, this one last, in one headless turn here, and the reply
+/// prints. A running Session reads it at its next boundary, and a finished Run
+/// only when its own Graph continues it, so for those it is only saved.
+fn steer_turn(
+    cli: &crate::lf::Cli,
+    runtime: &tokio::runtime::Runtime,
+    store: &Arc<Store>,
+    session: loopflow_execution::session::LfSession,
+    directory: &Path,
+    message: &str,
+    json: bool,
+) -> anyhow::Result<()> {
+    use loopflow_execution::ops::human_session as human;
+    use loopflow_execution::transport::{delegate_current, Delegation, LaunchInput};
+    let input = LaunchInput {
+        batch: true,
+        interactive: false,
+        has_prompt: true,
+    };
+    let run = match delegate_current(input, false)? {
+        Delegation::Delegated => return Ok(()),
+        Delegation::Here { run } => run,
+    };
+    // One process per Session: this turn holds the launch lock to its end.
+    let _launch = human::lock_session_process(&session.id)?;
+    let sqlite = &store.sqlite;
+    let reader = if human::agent_running(sqlite, &session)? {
+        Some("reads it at its next boundary")
+    } else if !super::run::continues_own_step(sqlite, &session)?
+        && human::run_refusal(sqlite, &session)?.is_some()
+    {
+        Some("is a finished Run; nothing reads it until its Graph continues it")
+    } else {
+        None
+    };
+    if let Some(reader) = reader {
+        let steer = runtime.block_on(loopflow_execution::engine::session::steer(
+            store,
+            directory,
+            loopflow_execution::engine::session::SteerScope::Session(&session.id),
+            message,
+        ))?;
+        match json {
+            true => println!("{}", serde_json::to_string(&steer)?),
+            false => println!("Saved {}; {} {reader}", steer.id, session.id),
+        }
+        return Ok(());
+    }
+    let session = runtime.block_on(human::admit_workspace(store, session))?;
+    let author = loopflow_execution::config::participant_name_in(directory)?
+        .unwrap_or_else(|| "attribution unresolved".into());
+    let (_, steers) = sqlite.take_session_steers(&session.id, &author, message)?;
+    let prompt = loopflow_execution::steer::render_complete(&steers);
+    super::run::resume(sqlite, &session, &prompt, cli, run)
 }
 
 async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()> {
@@ -777,52 +837,14 @@ async fn resume(
     fork: bool,
 ) -> anyhow::Result<()> {
     // Prepared connections have already returned through shared mutation dispatch.
-    let message = &connection.message;
     anyhow::ensure!(
-        message.is_none() || cli.batch,
-        "a next-turn message requires -b"
-    );
-    anyhow::ensure!(
-        !cli.batch || message.is_some(),
-        "a headless connection requires --message TEXT"
-    );
-    anyhow::ensure!(
-        cli.batch || cli.output_schema.is_none(),
-        "response schemas require a headless Run (-b)"
+        !cli.batch && cli.output_schema.is_none(),
+        "`lf resume` connects; `lf -b steer SESSION TEXT` runs one more turn here"
     );
     let progress = loopflow_execution::startup::Startup::new("Finding conversation");
     let store = open_shared_store().await?;
     let cwd = std::env::current_dir()?;
     drop(progress);
-    if let Some(message) = message {
-        let id = select(&store, &cwd, target).await?;
-        let session = loopflow_execution::ops::human_session::session_by_id(&store, &id)
-            .await?
-            .context("Session not found")?;
-        let lock_id = session.id.to_string();
-        let launch = tokio::task::spawn_blocking(move || {
-            loopflow_execution::ops::human_session::lock_session_process(&lock_id)
-        })
-        .await??;
-        let session =
-            loopflow_execution::ops::human_session::admit_workspace(&store, session).await?;
-        drop(launch);
-        let id = session.id;
-        return tokio::task::block_in_place(|| {
-            let run = match loopflow_execution::transport::delegate_current(
-                loopflow_execution::transport::LaunchInput {
-                    batch: true,
-                    interactive: false,
-                    has_prompt: true,
-                },
-                false,
-            )? {
-                loopflow_execution::transport::Delegation::Delegated => return Ok(()),
-                loopflow_execution::transport::Delegation::Here { run } => run,
-            };
-            crate::lf::commands::run::resume(&id, message, cli, run)
-        });
-    }
     let session = reopen(
         &store,
         &cwd,
@@ -949,10 +971,6 @@ async fn new_thread(
     target: loopflow_execution::ops::human_session::SessionTarget<'_>,
     request_id: Option<&str>,
 ) -> anyhow::Result<()> {
-    anyhow::ensure!(
-        connection.message.is_none(),
-        "`lf session new` starts an interactive thread; continue it with `lf -b resume --message`"
-    );
     let store = open_shared_store().await?;
     let record = restarted(
         &store,
@@ -1104,10 +1122,6 @@ pub(super) fn mutate(
     if let SessionCommand::Resume { connection, .. } | SessionCommand::New { connection, .. } =
         command
     {
-        anyhow::ensure!(
-            connection.message.is_none(),
-            "prepared Sessions do not accept a message"
-        );
         let session = prepared(cli, directory)?;
         if connection.json || cli.json {
             writeln!(io.output, "{}", serde_json::to_string_pretty(&session)?)?;

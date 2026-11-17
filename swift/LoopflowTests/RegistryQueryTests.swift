@@ -59,7 +59,7 @@ struct RegistryQueryTests {
             }
             let body = "{\"overview\":\(overview),\"graph_processes\":[\(detail)],\"comments\":{\"identifier\":\"task\",\"comments\":[],\"pending_sync\":[],\"conflicts\":{},\"refresh_error\":null},\"execution\":null,\"row\":null}"
             let lines = AsyncThrowingStream<Data, any Error> { continuation in
-                continuation.yield(Data("{\"answers\":null,\"unavailable\":null,\"body\":\(body)}".utf8))
+                continuation.yield(Data("{\"answers\":null,\"unavailable\":null,\"body\":\(body),\"read_at\":{\"planning\":7}}".utf8))
                 continuation.finish()
             }
             return LineSubscription(lines: lines, send: { _ in }, cancel: {})
@@ -69,6 +69,7 @@ struct RegistryQueryTests {
         let line = try #require(await iterator.next())
         let frame = try WorkFrame.decode(part: .task,
             scope: WorkScope(repo: nil, headless: false, task: "task", activity: nil, taskListWave: nil), sequence: 0, line: line)
+        #expect(frame.readAt == Revisions(["planning": 7]))
         guard case .task(let reading?) = frame.content else { Issue.record("Missing Task reading"); return }
         #expect(reading.graphProcesses == [expected])
         #expect(reading.work.graph?.position == .at(step: "demo"))

@@ -9,37 +9,18 @@ struct WorkSurfaceView: View {
     @Bindable var model: WorkModel
     var onOpenSession: (SessionRecord) -> Void = { _ in }
     /// Starts an independent Task-context conversation in the Task's checkout.
-    var onNewSession: ((String) async throws -> Void)?
+    var onNewSession: (@MainActor (String) async throws -> Void)?
 
     @Environment(\.palette) private var palette
-    @State private var controlError: String?
     @State private var editingTask: RoadmapTask?
 
     private var snapshot: RoadmapSnapshot? { model.roadmap.value }
-    private var queryError: String? { model.roadmap.errorMessage }
     private var visibleWaves: [WaveRoadmap] { model.visibleRoadmaps }
 
     var body: some View {
-        VStack(spacing: 0) {
-            if let queryError {
-                evidenceBanner(
-                    title: snapshot == nil
-                        ? "Roadmap unavailable"
-                        : "Refresh failed — showing the last roadmap",
-                    detail: queryError
-                )
-            }
-            if let controlError {
-                evidenceBanner(title: "Control failed", detail: controlError)
-            }
-            if let selection = model.selection, selection.kind == .task,
-               let error = model.navigation.taskSessionErrors[selection.id] {
-                evidenceBanner(title: "New session failed", detail: error)
-            }
-            content
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-        .background(palette.background)
+        content
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(palette.background)
         .sheet(item: $editingTask) { task in
             TaskDirectiveEditor(model: model, task: task)
         }
@@ -52,17 +33,12 @@ struct WorkSurfaceView: View {
         if let selection = model.selection, selection.kind == .task,
            model.navigation.selectedTaskEvidence?.task.id == selection.id {
             taskDetail
-        } else if snapshot == nil, queryError == nil {
+        } else if snapshot == nil, model.roadmap.isLoading {
             ProgressView()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .accessibilityIdentifier("loopflow-work-loading")
         } else if snapshot == nil {
-            ContentUnavailableView(
-                "Work unavailable",
-                systemImage: "exclamationmark.triangle",
-                description: Text("Couldn't read the latest work. Refresh to try again.")
-            )
-            .accessibilityIdentifier("loopflow-work-unavailable")
+            Color.clear
         } else if visibleWaves.isEmpty, model.visibleWaves.isEmpty, model.visibleTasks.isEmpty {
             ContentUnavailableView(
                 model.repoPath == nil ? "No planned Work yet" : "No planned Work in this repository",
@@ -122,22 +98,7 @@ struct WorkSurfaceView: View {
                         Spacer(minLength: Spacing.sm)
                         if let onNewSession {
                             Button {
-                                let navigation = model.navigation
-                                guard navigation.startingTaskSessions.insert(task.id).inserted else { return }
-                                navigation.taskSessionErrors[task.id] = nil
-                                Perf.userAction(.newConversation, scenario: "new_session_to_typing", id: task.id,
-                                                repository: model.repoPath, liveSessions: model.liveSessionCount,
-                                                owner: navigation.performanceOwner) {
-                                    Perf.acknowledged(.newConversation, id: task.id, owner: navigation.performanceOwner)
-                                    Task {
-                                        defer { navigation.startingTaskSessions.remove(task.id) }
-                                        do { try await onNewSession(task.id) }
-                                        catch {
-                                            Perf.finish(.newConversation, id: task.id, owner: navigation.performanceOwner, outcome: .failed)
-                                            navigation.taskSessionErrors[task.id] = error.localizedDescription
-                                        }
-                                    }
-                                }
+                                model.newTaskSession(task.id, open: onNewSession)
                             } label: {
                                 Label("New session", systemImage: "plus.bubble")
                             }
@@ -154,7 +115,7 @@ struct WorkSurfaceView: View {
                             .accessibilityLabel(taskConditionAccessibilityLabel(task))
                         Spacer()
                         if let workspace = task.reference.workspace {
-                            Button("Worktree") { openWorktree(workspace) }
+                            Button("Worktree") { model.openWorktree(workspace) }
                                 .buttonStyle(WorkPlainButtonStyle())
                                 .font(Typography.body(12.5))
                         }
@@ -265,21 +226,6 @@ struct WorkSurfaceView: View {
         .padding(.horizontal, Spacing.xl)
         .padding(.vertical, Spacing.sm)
         .background(palette.warning.opacity(0.12))
-    }
-
-    // MARK: - Controls
-
-    private func openWorktree(_ workspace: TaskWorktreeSnapshot) {
-        var components = URLComponents()
-        components.scheme = "warp"
-        components.host = "action"
-        components.path = "/new_window"
-        components.queryItems = [URLQueryItem(name: "path", value: workspace.worktree)]
-        guard let url = components.url, NSWorkspace.shared.open(url) else {
-            controlError = "Warp could not open \(workspace.worktree)."
-            return
-        }
-        controlError = nil
     }
 }
 

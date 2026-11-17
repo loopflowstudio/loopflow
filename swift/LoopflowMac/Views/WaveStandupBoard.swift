@@ -157,7 +157,6 @@ struct WaveStandupBoard: View {
             if let roadmap {
                 header(roadmap)
                 chapter(roadmap)
-                ForEach(roadmap.unavailableTasks, id: \.taskId) { WavePlanningNotice(model: model, task: $0) }
             } else if view == .repository {
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
                     Text(model.repositoryName).font(Typography.strong(24))
@@ -165,10 +164,6 @@ struct WaveStandupBoard: View {
                     Spacer(minLength: 0)
                     ShowHiddenMenu(model: model, view: view)
                 }
-            }
-            if let error = model.roadmap.errorMessage {
-                Text("Refresh failed · \(error)").foregroundStyle(palette.warning)
-                    .accessibilityIdentifier("wave-refresh-failed")
             }
             switch model.standupTasks(view) {
             case .unavailable(let reason):
@@ -376,52 +371,6 @@ struct WaveDoneRange: View {
         if filter.validationMessage == nil { days = filter.days }
         message = filter.validationMessage
         editing = false
-    }
-}
-
-/// One quiet line names a Task outside the current plan; Details discloses reason and recovery.
-struct WavePlanningNotice: View {
-    let model: WorkModel
-    let task: UnavailableTaskEvidence
-    @Environment(\.palette) private var palette
-
-    var body: some View {
-        let open = model.navigation.expandedNotices.contains(task.taskId)
-        return VStack(alignment: .leading, spacing: Spacing.xs) {
-            HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
-                Image(systemName: "exclamationmark.circle")
-                    .foregroundStyle(palette.warning)
-                Text("\(task.taskIdentifier) is outside the current plan.")
-                    .foregroundStyle(WorkTone.warning.text(in: palette))
-                Spacer(minLength: Spacing.sm)
-                Button(open ? "Hide details" : "Details") {
-                    if open { model.navigation.expandedNotices.remove(task.taskId) } else { model.navigation.expandedNotices.insert(task.taskId) }
-                }
-                .buttonStyle(WorkPlainButtonStyle())
-                .foregroundStyle(palette.actionInk)
-                .accessibilityIdentifier("wave-notice-details-\(task.taskId)")
-            }
-            if open {
-                VStack(alignment: .leading, spacing: Spacing.xs) {
-                    Text("\(task.taskIdentifier): \(task.reason)").textSelection(.enabled)
-                    Text("Recover with").font(Typography.caption(11)).foregroundStyle(palette.textTertiary)
-                    Text(task.recovery)
-                        .font(Typography.code(11.5))
-                        .textSelection(.enabled)
-                        .padding(Spacing.sm)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(palette.surface, in: RoundedRectangle(cornerRadius: 6))
-                        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(palette.border))
-                }
-                .foregroundStyle(palette.text)
-                .padding(.leading, 22)
-            }
-        }
-        .font(Typography.body(12.5))
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(WorkTone.warning.fill(in: palette).opacity(0.55), in: RoundedRectangle(cornerRadius: 10))
-        .accessibilityIdentifier("wave-notice-\(task.taskId)")
     }
 }
 

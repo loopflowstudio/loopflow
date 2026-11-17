@@ -23,6 +23,13 @@ enum ServerClient {
         String(decoding: try await request(.command(change), location: location).bytes, as: UTF8.self)
     }
 
+    /// A change under its request ID; a repeat after a lost answer runs nothing.
+    static func change(_ change: ServedWrite, requestID: String, location: ServerLocation = .shared) async throws -> Revisions? {
+        try Task.checkCancellation()
+        let link = try await links.link(for: location)
+        return try await link.write(change, requestID: requestID).revisions
+    }
+
     static func submittedCreation(_ payload: Data) async throws -> String {
         let value = try JSONDecoder().decode(JSONValue.self, from: payload)
         return String(decoding: try await request(.submittedCreation(value), location: .shared).bytes, as: UTF8.self)

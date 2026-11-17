@@ -311,10 +311,12 @@ Not done here:
 
 ## Open
 
-- One-shot reads of a Task another Machine runs (`lf task status <issue>`,
-  `--json`, served `task.status` requests) still read this Machine's copy;
-  only `--subscribe` goes there. QA showed the two disagreeing on the title.
-  Answer 5 in `scratch/questions.md` puts them in PR 1.
+- The remote `--subscribe` ignores stdin `{"id":n}` checkpoints, and
+  `Selection::capture` still sends the laptop's `profile` paths (QA,
+  lower priority).
+- A served `task.status` *subscription* from a local client (Desktop) for a
+  Task another Machine runs still reads here; one-shot requests route. PR 4
+  (Desktop's live updates over the local server's `Connection`).
 
 - No CI suite has run on this branch. #1956 carries `scratch/`, so
   `scratch-clear` defers the matrix (`.github/CI.md`, "Scratch, cancellation
@@ -345,6 +347,18 @@ Not done here:
   `--test integration a_status_subscription_for_a_task_mini_runs_reads_minis_server`
   checks both (passed). Clippy on that fix: gate.
 
+- One-shot reads (2026-11-17): `lf task status <issue>` (human, from the
+  served `task.status` body, plus "Runs on <machine>") and `--json`, and a
+  local client's served `task.status`, go to the running Machine's server
+  (`waves::task_machine`; `Read::read` routes, `Read::read_here` runs a
+  Machine's request). `--test integration machine_commands::a_status_
+  machine_commands::a_served_`: 5 pass, including
+  `a_status_read_for_a_task_mini_runs_shows_a_rename_made_there` and
+  `a_served_status_for_a_task_mini_runs_is_minis_answer`. `--lib server::
+  lf::commands::read::` 98 pass. clippy `-p loopflow -p loopflow-execution
+  --all-targets` clean (also fixed `transport_tests`' two `subscribe` calls
+  missing `select`). Swift suites and loopback sshd: gate/CI.
+
 ## Done when (PR 1)
 
 - A Task or Session write for another Machine travels as a typed request on
@@ -354,8 +368,8 @@ Not done here:
 - `rg 'prepare_launch|fn run_remote|fn remote_on|ssh::call|\.cli\(\)' rust/*/src`
   finds nothing (`fn cli(` also matches unrelated cmux and Rex helpers).
 - An older destination fails with its version and the update command.
-- `lf task status <issue> --subscribe` for a Task another Machine runs prints
-  that Machine's live lines.
+- `lf task status <issue>` (one-shot, `--json`, `--subscribe`) for a Task
+  another Machine runs prints that Machine's reading.
 - A destination that accepts SSH and never answers fails within the bound,
   naming the Machine.
 - `rg '\bmachine\.write\b|MachineOperation|\bin_checkout|forward::take' rust/*/src`

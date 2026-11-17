@@ -941,14 +941,12 @@ pub fn subscribe_task_status(
     })
 }
 
-/// `lf task status <issue> --subscribe` for a Task another Machine runs: the
-/// readings of that Machine's server, over SSH. `false` when it runs here.
-pub fn subscribe_remote_task_status(repo: &Path, issue: &str) -> Result<bool> {
+/// A connection to the server of the Machine that runs the Task `issue`
+/// names, and the `task.status` read to send it; `None` when it runs here.
+fn task_machine(repo: &Path, issue: &str) -> Result<Option<TaskMachine>> {
     use loopflow_execution::machine::wire::{Secrets, Selection, Sender};
-    use std::io::Write as _;
-    use std::sync::atomic::Ordering;
     let Some(route) = loopflow_execution::machine::task::remote_task(issue)? else {
-        return Ok(false);
+        return Ok(None);
     };
     let machine = super::write::find_machine(route.machine_id.as_str())?;
     let sender = Sender {
@@ -956,15 +954,100 @@ pub fn subscribe_remote_task_status(repo: &Path, issue: &str) -> Result<bool> {
         selection: Selection::capture(repo, None)?,
         secrets: Secrets::default(),
     };
-    let mut connection =
-        loopflow_execution::machine::client::Connection::open_on(&machine, sender)?;
-    let id = connection.subscribe(
-        super::read::Read::TaskStatus {
-            directory: repo.to_owned(),
-            issue: route.task_id.to_string(),
-        },
-        loopflow_execution::read_stream::selected(),
-    )?;
+    let connection = loopflow_execution::machine::client::Connection::open_on(&machine, sender)?;
+    let read = super::read::Read::TaskStatus {
+        directory: repo.to_owned(),
+        issue: route.task_id.to_string(),
+    };
+    Ok(Some(TaskMachine {
+        name: machine.name(),
+        connection,
+        read,
+    }))
+}
+
+struct TaskMachine {
+    name: String,
+    connection: loopflow_execution::machine::client::Connection,
+    read: super::read::Read,
+}
+
+impl TaskMachine {
+    fn status(mut self) -> Result<serde_json::Value> {
+        let answer = self
+            .connection
+            .request(crate::server::wire::Operation::Read(self.read))?;
+        Ok(answer.result)
+    }
+}
+
+/// `lf task status <issue> --json` for a Task another Machine runs, as that
+/// Machine's server reads it; `None` when it runs here.
+pub fn remote_task_detail(repo: &Path, issue: &str) -> Result<Option<serde_json::Value>> {
+    task_machine(repo, issue)?
+        .map(TaskMachine::status)
+        .transpose()
+}
+
+/// `lf task status <issue>` for a Task another Machine runs, drawn from that
+/// Machine's reading. `false` when it runs here.
+pub fn print_remote_task_status(repo: &Path, issue: &str) -> Result<bool> {
+    let Some(machine) = task_machine(repo, issue)? else {
+        return Ok(false);
+    };
+    let name = machine.name.clone();
+    let detail: TaskDetail = serde_json::from_value(machine.status()?)?;
+    let task = &detail.task;
+    println!("{} · {}", task.title, task.identifier);
+    println!("Runs on {name}; read from its server.");
+    println!(
+        "State: {} · {}",
+        serde_json::to_value(task.state)?
+            .as_str()
+            .expect("a Task state is a string"),
+        task.reason
+    );
+    if let Some(graph) = &task.graph {
+        match &graph.step {
+            Some(step) => println!("Graph: {} · {step}", graph.name),
+            None => println!("Graph: {}", graph.name),
+        }
+    }
+    if let Some(pr) = &task.pr {
+        println!("PR #{}: {}", pr.number, pr.url);
+    }
+    for process in &detail.graph_processes {
+        println!(
+            "Graph process {} · {}{}",
+            process.id,
+            process.name,
+            process
+                .step
+                .as_deref()
+                .map(|step| format!(" · {step}"))
+                .unwrap_or_default()
+        );
+    }
+    if let Some(next) = &task.next {
+        println!("Next: {next}");
+    }
+    Ok(true)
+}
+
+/// `lf task status <issue> --subscribe` for a Task another Machine runs: the
+/// readings of that Machine's server, over SSH. `false` when it runs here.
+pub fn subscribe_remote_task_status(repo: &Path, issue: &str) -> Result<bool> {
+    use std::io::Write as _;
+    use std::sync::atomic::Ordering;
+    let Some(TaskMachine {
+        mut connection,
+        read,
+        ..
+    }) = task_machine(repo, issue)?
+    else {
+        return Ok(false);
+    };
+    let id = connection.subscribe(read, loopflow_execution::read_stream::selected())?;
     // As here, the subscription ends when stdin closes, after its first
     // reading; closing this end of the pipe ends it on the other Machine too.
     let printed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));

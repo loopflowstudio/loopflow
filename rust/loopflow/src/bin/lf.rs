@@ -1101,17 +1101,38 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             ..
         } => {
             let status = loopflow_execution::ops::task::task_status(repo, issue.as_deref())?;
+            // A Task another Machine runs is read where it runs.
+            if let Some(task) = &status.task {
+                let remote = if *subscribe {
+                    loopflow::lf::commands::waves::subscribe_remote_task_status(
+                        repo,
+                        &task.identifier,
+                    )?
+                } else if *json {
+                    match loopflow::lf::commands::waves::remote_task_detail(repo, &task.identifier)?
+                    {
+                        Some(detail) => {
+                            println!(
+                                "{}",
+                                serde_json::to_string_pretty(
+                                    &loopflow_execution::read_stream::selected_answer(&detail)?
+                                )?
+                            );
+                            true
+                        }
+                        None => false,
+                    }
+                } else {
+                    loopflow::lf::commands::waves::print_remote_task_status(repo, &task.identifier)?
+                };
+                if remote {
+                    return Ok(());
+                }
+            }
             if *subscribe {
                 let task = status
                     .task
                     .context("only a registered Task can be subscribed")?;
-                // A Task another Machine runs is read where it runs.
-                if loopflow::lf::commands::waves::subscribe_remote_task_status(
-                    repo,
-                    &task.identifier,
-                )? {
-                    return Ok(());
-                }
                 return loopflow::lf::commands::waves::subscribe_task_status(
                     repo,
                     task.identifier,

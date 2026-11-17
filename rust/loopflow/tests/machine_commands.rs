@@ -4126,6 +4126,116 @@ exec env -i HOME='{remote}' PATH=/usr/bin:/bin bash -c "$remote_command"
     assert!(!commands.contains("status"), "{commands}");
 }
 
+/// A one-shot `lf task status` for a Task mini runs is mini's reading: a
+/// rename there shows before the laptop's planning copy hears of it.
+#[test]
+fn a_status_read_for_a_task_mini_runs_shows_a_rename_made_there() {
+    let fixture = preview_machines();
+    let (plan, task) = task_on_mini(&fixture);
+    let current = plan.remote.task(&task).unwrap().unwrap();
+    plan.remote
+        .edit_task(
+            &task,
+            current.revision,
+            &loopflow_execution::work::task::TaskUpdate {
+                title: Some("Renamed on mini".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let _mini = served_mini(&fixture);
+    let remote = fixture.root.path().join("remote");
+    let record = fixture.root.path().join("ssh-record");
+    fs::create_dir_all(&record).unwrap();
+    executable(
+        &fixture.root.path().join("bin/ssh"),
+        &format!(
+            r#"#!/bin/sh
+for arg in "$@"; do remote_command="$arg"; done
+printf '%s\n' "$remote_command" >> '{record}/commands'
+cd '{remote}' || exit 1
+exec env -i HOME='{remote}' PATH=/usr/bin:/bin bash -c "$remote_command"
+"#,
+            record = record.display(),
+            remote = remote.display(),
+        ),
+    );
+    let status = |args: &[&str]| {
+        let mut argv = vec!["task", "status", task.as_str()];
+        argv.extend(args);
+        let output = fixture
+            .command(&argv)
+            .current_dir(&plan.local_path)
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).unwrap()
+    };
+
+    let json: Value = serde_json::from_str(&status(&["--json", "--select", "task.title"])).unwrap();
+    assert_eq!(
+        json,
+        serde_json::json!({"task": {"title": "Renamed on mini"}})
+    );
+    let human = status(&[]);
+    assert!(human.starts_with("Renamed on mini · "), "{human}");
+    assert!(human.contains("Runs on mini"), "{human}");
+
+    let commands = fs::read_to_string(record.join("commands")).unwrap();
+    assert_eq!(
+        commands
+            .lines()
+            .filter(|line| *line == "exec 'lf' 'server' 'connect'")
+            .count(),
+        2,
+        "{commands}"
+    );
+    assert_eq!(
+        plan.local.task(&task).unwrap().unwrap().title,
+        "Ownership demo"
+    );
+}
+
+/// A served `task.status` for a Task mini runs, asked on the laptop's socket,
+/// is mini's answer.
+#[test]
+fn a_served_status_for_a_task_mini_runs_is_minis_answer() {
+    use loopflow::lf::commands::read::Read;
+    use loopflow::server::wire::Operation;
+    use loopflow_execution::machine::client::Connection;
+
+    let fixture = preview_machines();
+    let (plan, task) = task_on_mini(&fixture);
+    let answer = serde_json::json!({"task": {"title": "Renamed on mini"}});
+    let record = fixture.root.path().join("entry");
+    fs::create_dir_all(&record).unwrap();
+    answering_entry(&fixture, &record, &answer);
+
+    let (server, socket) = served(&fixture);
+    let mut connection = Connection::open_at(Path::new(&socket)).unwrap();
+    connection
+        .set_read_timeout(Some(std::time::Duration::from_secs(20)))
+        .unwrap();
+    let read = connection
+        .request(Operation::Read(Read::TaskStatus {
+            directory: plan.local_path.clone(),
+            issue: task.to_string(),
+        }))
+        .unwrap()
+        .result;
+    drop(server);
+
+    assert_eq!(read, answer);
+    let (_, request) = entry_input(&record);
+    assert_eq!(request["operation"]["kind"], "task.status");
+    assert_eq!(request["sender"]["repository"], plan.repository.as_str());
+}
+
 /// A served `task.run` for a Task mini runs is mini's `task.run`: the laptop
 /// starts nothing and returns mini's answer.
 #[test]

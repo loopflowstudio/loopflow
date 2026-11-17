@@ -2279,6 +2279,7 @@ fn server_task_watch_replaces_readings_across_repositories() {
     let tasks = watch
         .subscribe(
             serde_json::from_value::<loopflow::lf::commands::read::Read>(query.clone()).unwrap(),
+            None,
         )
         .unwrap();
     let first = watch.reading(&tasks).unwrap().expect("a reading");
@@ -2586,6 +2587,7 @@ fn server_mobile_changes_preserve_local_connections_and_saved_disable() {
     let watched = watch
         .subscribe(
             serde_json::from_value::<loopflow::lf::commands::read::Read>(roadmap.clone()).unwrap(),
+            None,
         )
         .unwrap();
     let initial = watch.reading(&watched).unwrap().expect("a reading");

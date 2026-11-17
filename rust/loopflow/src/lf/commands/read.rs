@@ -635,8 +635,20 @@ impl Read {
     }
 
     /// What `lf <argv>` prints, as a JSON value, read on the caller's thread.
-    /// A command that prints bare text (`config repo --path`) is a string.
+    /// A Task another Machine runs is read by that Machine's server.
     pub fn read(&self) -> anyhow::Result<serde_json::Value> {
+        if let Self::TaskStatus { directory, issue } = self {
+            if let Some(detail) = super::waves::remote_task_detail(directory, issue)? {
+                return Ok(detail);
+            }
+        }
+        self.read_here()
+    }
+
+    /// `read` on this Machine, never sent on: what a request another Machine
+    /// sent runs. A command that prints bare text (`config repo --path`) is a
+    /// string.
+    pub fn read_here(&self) -> anyhow::Result<serde_json::Value> {
         match self {
             Self::ProcessHistory { id } => value(&super::history::render(
                 id,

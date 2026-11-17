@@ -36,9 +36,11 @@ Each harness file answers the rest:
 | `open(&Launch)` | native interactive client: argv, hook and title flags; starts private servers and returns any observer companion |
 | `driver(&Launch, events, approval)` | headless stream `Driver`: start, input, interrupt, stop |
 
-`HarnessKind::harness()` is the only dispatch, and `HarnessKind::parse` and
-`as_str` are the only places a harness name appears outside its own file.
-Core code reads capabilities or asks the harness for its command and transcript policy.
+`HarnessKind::harness()` is the only harness dispatch. Core launch and transcript
+code reads capabilities or asks the harness for policy.
+That policy includes input recency, live process ownership and saved-turn detail.
+A harness whose server may host other conversations validates it before the
+shared AgentProcess close path signals the recorded process group.
 
 An interactive client with a companion waits in this process; any other client
 may `exec` into a held terminal.

@@ -382,7 +382,7 @@ impl StreamDriver for Driver {
         let config = self.config.clone();
         let config = &config;
         self.seed = Some(match &config.skill_invocation {
-            Some(skill) => skill.terminal_input("pi", config)?.1,
+            Some(skill) => skill.terminal_input(&Pi, config)?.1,
             None => config.task_prompt.clone(),
         });
         if let Err(error) = self.start_process(config).await {
@@ -731,7 +731,7 @@ impl super::Harness for Pi {
 
     fn open(&self, launch: &super::Launch<'_>) -> Result<super::native_session::NativeClient> {
         let mut client = super::native_session::NativeClient::new("pi", launch)?;
-        let (mut args, input) = launch.terminal_input("pi")?;
+        let (mut args, input) = launch.terminal_input()?;
         args.extend(options(launch.config, launch.context_file)?);
         match launch.start {
             super::Start::Resume { thread } => args.extend(resume_args(thread)?),

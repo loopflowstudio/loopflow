@@ -70,37 +70,23 @@ Pi's transcript root is `sessions`, OpenCode watches its home for store hints.
 The detailed slice direction and earlier check results are at
 6b51cfc07c:scratch/harness-launch-type.md.
 
-## Next implement direction: slice 7, the last names outside `HarnessKind`
+## Slice 7 (implemented, 2026-11-16)
 
-Concept review of slice 6 (2026-11-16): the launch facts each have one form
-now. The Task outcome also says "`HarnessKind` is the only place a harness
-name is compared", and five production sites in execution still decide by
-name or variant outside a harness file. A fifth harness with a shared server,
-a skill dialect or its own input history would need a line in each. Each move
-changes no behavior.
+The five remaining production launch/transcript decisions now belong to the
+harness:
 
-1. `harness/agent_process.rs:441` — `agent.provider == Some("codex")` before
-   closing an AgentProcess whose server may host other conversations. The
-   owning harness answers the close check (default: nothing to check); Codex's
-   calls `codex_connection::validate_agent_process_close`.
-2. `ops/human_session/provider_conversation.rs::human_input_times` — maps
-   `session.provider` strings to `Provider` (the inverse of
-   `HarnessKind::provider()`), then branches Codex `history.jsonl` against
-   Claude's transcript. Parse the kind once and ask the harness for input
-   times of the wanted threads under a home; `codex_input_times` and
-   `claude_input_time` move to their files. Keep the per-home batching: Codex
-   reads one history file for many Sessions.
-3. `skills/invocation.rs::{translated_input, ported_text}` take a harness
-   `&str` and pick the tool-name note by `(dialect, "codex" | "claude")`. The
-   target is already resolved as `Capabilities::native_skills` in
-   `terminal_input`; key the note on `(source dialect, target dialect)` and
-   keep the name only for the warning text.
-4. `transcript/facts.rs:159` — `harness == HarnessKind::Claude` selects the
-   retained turn-detail keys. It joins the transcript policy the harness
-   already answers (reader, layout, retention).
-5. `transcript/raw.rs:101` — `claude_owners(home(Claude), …)` runs ahead of
-   the per-harness loop. Ask each harness for the conversations its live
-   processes own (default: none).
+- Codex validates a shared AgentProcess server before the common close path.
+- Human input recency groups wanted threads by kind and home; Codex reads one
+  history file per home, Claude reads each distinct transcript once.
+- Skill portability keys tool-name notes on source and target dialect. Terminal
+  input receives the resolved harness rather than parsing its name again.
+- Saved-turn completion detail uses the harness's transcript policy.
+- Raw discovery asks each harness for live process ownership once per sample,
+  then resolves named transcripts through that harness's layout.
+
+Existing recency and ownership tests now exercise the owning harness methods;
+the history fixture includes two wanted threads. Portability checks cover both
+translation directions and a target without native skills.
 
 These stay, with the reason:
 
@@ -113,6 +99,7 @@ These stay, with the reason:
 - `machine/credentials.rs` filters `opencode auth export` entries by
   `integrationID == HarnessKind::OpenCode.as_str()`: that compares OpenCode's
   own JSON field inside OpenCode credential reading, not a harness decision.
+- Skill invocation names in warning text remain; they do not select policy.
 - A harness file comparing its own name (`codex.rs::resolve_model`, process
   recognition) is the owner answering.
 
@@ -169,6 +156,9 @@ The surviving paths replace these; their coverage belongs on Harness/Launch:
 - `Launch::mode`, `Launch::harness()`, `Driver::set_agent_session`, driver
   config resume copies, separate boolean capability methods, watch-root table
   and provider-to-kind fallback;
+- close-by-provider branch, human-input provider table and shared history parsers,
+  skill translation target-name match, Claude completion-detail branch and raw
+  Claude ownership reader;
 - saved-transcript reader, layout and retention dispatch, and KNOWN_AGENTS.
   The final deletion sweep found these remaining HarnessKind authorities;
   they now ask the same harness for transcript policy and use ALL for discovery.
@@ -178,9 +168,15 @@ Do not remove store `Provider`, Clap `SessionCommand`, transcript's parsed
 
 ## Remaining gate and demo checks
 
-Slices 1–6 are implemented; slice 7 above is not. Local checks cover the 16-cell native/headless ×
+Slices 1–7 are implemented. Local checks cover the 16-cell native/headless ×
 Caller/Server matrix, command policy, recorded threads, OpenCode diagnostics,
 mode/holder decisions, bare native resume and saved-transcript policy.
+
+Concept review of slice 7 (2026-11-16): the sweep prints only the "stay"
+lines; no launch or transcript decision is made by name outside a harness
+file. One gate cleanup: `claude.rs::conversation_owners` writes the pid-reuse
+tolerance as a literal `60` beside `transcript/raw.rs::START_SLACK`; use the
+one constant.
 
 Gate/CI still owns held-terminal exec, `documented_commands`, the session CLI
 resolution contract, application launch/resume and attachment completion suites.
@@ -189,11 +185,12 @@ matrix prints waited rows; it does not claim held-terminal exec coverage.
 
 ## Checks
 
-- `cargo nextest run -p loopflow-execution --lib -E 'test(harness::launch_matrix::) | test(harness::conformance_tests::) | test(harness::native_session::tests::bare_codex_resume_does_not_resend_its_first_turn) | test(harness::claude::tests::agent_session_resumes_on_a_fresh_process) | test(harness::pi_tests::pi_turns_resume_the_exact_conversation_and_capture_tools_usage) | test(transcript::watch::tests::) | test(transcript::raw::tests::a_pi_process_takes_the_newest_session_file_of_its_directory) | test(ops::human_session::provider_conversation::tests::)'` — 24 passed, including the 16 launch cells and saved empty-thread first prompt (2026-11-16).
-- `cargo test -p loopflow-execution --lib --no-run` and `cargo build -p loopflow --bin lf` — passed; the built CLI reports its version.
-- `cargo nextest run -p loopflow --lib -E 'test(lf::commands::run::launch_policy_tests::)'` — 6 passed; macOS linker warned that the test binary's unwind section exceeds 16 MB.
+- `cargo nextest run -p loopflow-execution --lib -E 'test(harness::launch_matrix::) | test(harness::conformance_tests::) | test(harness::native_session::tests::bare_codex_resume_does_not_resend_its_first_turn) | test(harness::claude::tests::agent_session_resumes_on_a_fresh_process) | test(harness::pi_tests::pi_turns_resume_the_exact_conversation_and_capture_tools_usage) | test(transcript::watch::tests::) | test(transcript::raw::tests::) | test(ops::human_session::provider_conversation::tests::) | test(skills::invocation::) | test(transcript::facts::) | test(harness::agent_process::)'` — final tree: 62 passed, including all 16 launch cells (2026-11-16). The two slow launch fixtures acquired the updated CLI before running.
+- Fixture `cargo build --offline -p loopflow --bin lf --message-format=json` and `target/debug/lf --version` — passed.
 - `cargo clippy --all-targets -- -D warnings` — passed.
 - `cargo fmt --all -- --check` and `git diff --check` — passed.
+- Slice 7 deletion sweep — only retained named settings, credential JSON and warning-label lines; removed symbols absent.
 
-Gate/CI owns broader suites. Earlier checks:
-6b51cfc07c:scratch/harness-launch-type.md.
+Unchanged mode/holder decision checks reuse the six passing launch-policy rows
+recorded at 012c4d2f4f:scratch/harness-launch-type.md. Gate/CI owns broader
+suites. Earlier checks: 6b51cfc07c:scratch/harness-launch-type.md.

@@ -427,7 +427,7 @@ impl Launch<'_> {
         }
     }
 
-    pub(crate) fn terminal_input(&self, name: &str) -> Result<(Vec<String>, Option<String>)> {
+    pub(crate) fn terminal_input(&self) -> Result<(Vec<String>, Option<String>)> {
         anyhow::ensure!(
             self.config.max_turns.is_none() && self.config.output_schema.is_none(),
             "turn limits and response schemas require a headless Run (-b)"
@@ -435,7 +435,7 @@ impl Launch<'_> {
         match self.start {
             Start::New => {
                 let (flags, prompt) = match &self.config.skill_invocation {
-                    Some(skill) => skill.terminal_input(name, self.config)?,
+                    Some(skill) => skill.terminal_input(self.harness, self.config)?,
                     None => (Vec::new(), self.config.task_prompt.clone()),
                 };
                 Ok((flags, Some(prompt)))
@@ -467,6 +467,35 @@ pub trait Harness: Sync + std::fmt::Debug {
         approval: ApprovalPolicy,
     ) -> Box<dyn Driver>;
 
+    fn validate_agent_process_close(
+        &self,
+        _store: &loopflow_storage::sqlite::SqliteStore,
+        _session: &str,
+        _process: &loopflow_model::id::AgentProcessId,
+    ) -> crate::store::StoreResult<()> {
+        Ok(())
+    }
+    fn human_input_times(
+        &self,
+        _home: &std::path::Path,
+        _wanted: &std::collections::BTreeSet<&str>,
+    ) -> std::collections::BTreeMap<String, i64> {
+        std::collections::BTreeMap::new()
+    }
+    fn conversation_owners(
+        &self,
+        _home: &std::path::Path,
+        _processes: &std::collections::HashMap<u32, &crate::journal::OsProcess>,
+    ) -> std::collections::HashMap<u32, String> {
+        std::collections::HashMap::new()
+    }
+    fn transcript_completion_detail(
+        &self,
+        _turn: &crate::transcript::Turn,
+        detail: &mut serde_json::Value,
+    ) {
+        detail["error"] = serde_json::Value::Null;
+    }
     fn provider(&self) -> Option<crate::provider_auth::Provider> {
         None
     }

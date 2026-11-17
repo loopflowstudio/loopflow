@@ -1,5 +1,9 @@
+use crate::journal::OsProcess;
 use crate::session::Holder;
-use std::collections::{HashMap, VecDeque};
+use crate::transcript::is_user_input;
+use crate::transcript::json_lines;
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -1390,10 +1394,86 @@ cat > /dev/null
     }
 }
 
+fn claude_input_time(path: &Path, id: &str) -> Option<i64> {
+    json_lines(path)
+        .filter_map(|row| {
+            if row["sessionId"].as_str() != Some(id) || !is_user_input(&row) {
+                return None;
+            }
+            let at = time::OffsetDateTime::parse(
+                row["timestamp"].as_str()?,
+                &time::format_description::well_known::Rfc3339,
+            )
+            .ok()?;
+            i64::try_from(at.unix_timestamp_nanos() / 1_000_000).ok()
+        })
+        .max()
+}
+
+/// The conversation each live Claude process has open, from the
+/// `sessions/<pid>.json` Claude keeps in its home and rewrites when `/clear`
+/// or `/resume` changes it. Claude versions before 2.1.318 may keep none.
+fn conversation_owners(home: &Path, by_pid: &HashMap<u32, &OsProcess>) -> HashMap<u32, String> {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Owner {
+        pid: u32,
+        session_id: String,
+        /// Milliseconds.
+        started_at: i64,
+    }
+    std::fs::read_dir(home.join("sessions"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            if path.extension()? != "json" {
+                return None;
+            }
+            let owner: Owner = serde_json::from_slice(&std::fs::read(&path).ok()?).ok()?;
+            let process = by_pid.get(&owner.pid)?;
+            // A file left by an exited process names whoever reused its pid.
+            ((owner.started_at / 1000 - process.started_at).abs() <= 60)
+                .then_some((owner.pid, owner.session_id))
+        })
+        .collect()
+}
+
 #[derive(Debug)]
 pub struct Claude;
 
 impl super::Harness for Claude {
+    fn human_input_times(&self, home: &Path, wanted: &BTreeSet<&str>) -> BTreeMap<String, i64> {
+        wanted
+            .iter()
+            .filter_map(|id| {
+                let path = crate::transcript::transcript(self.kind(), home, id)?;
+                Some(((*id).to_owned(), claude_input_time(&path, id)?))
+            })
+            .collect()
+    }
+    fn conversation_owners(
+        &self,
+        home: &Path,
+        processes: &HashMap<u32, &OsProcess>,
+    ) -> HashMap<u32, String> {
+        conversation_owners(home, processes)
+    }
+    fn transcript_completion_detail(
+        &self,
+        turn: &crate::transcript::Turn,
+        detail: &mut serde_json::Value,
+    ) {
+        detail["result_id"] = serde_json::Value::Null;
+        detail["subtype"] = serde_json::Value::Null;
+        detail["errors"] = if turn.receipt.errors.is_empty() {
+            serde_json::Value::Null
+        } else {
+            turn.receipt.errors.clone().into()
+        };
+    }
+
     fn recognizes(&self, process: &crate::journal::OsProcess) -> bool {
         if process.command == "claude" {
             return true;
@@ -1509,7 +1589,7 @@ impl super::Harness for Claude {
 
     fn open(&self, launch: &super::Launch<'_>) -> Result<super::native_session::NativeClient> {
         let mut client = super::native_session::NativeClient::new("claude", launch)?;
-        let (mut args, input) = launch.terminal_input("claude")?;
+        let (mut args, input) = launch.terminal_input()?;
         let (_, model) = crate::config::parse_agent(&launch.config.resolved_agent()?);
         args.extend(crate::agent::claude_options(
             launch.config,

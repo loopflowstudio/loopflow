@@ -98,11 +98,21 @@ pub fn discover() -> Vec<RawDirectory> {
         .iter()
         .map(|process| (process.pid, process))
         .collect::<HashMap<_, _>>();
-    let owners = claude_owners(&super::home(HarnessKind::Claude), &by_pid);
-    let owned = owners.values().map(String::as_str).collect::<HashSet<_>>();
+    let owners = HarnessKind::ALL
+        .into_iter()
+        .map(|kind| {
+            (
+                kind,
+                kind.harness()
+                    .conversation_owners(&super::home(kind), &by_pid),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
     let mut found = Vec::new();
     for ((harness, cwd), open) in open(&processes, &by_pid) {
         let home = super::home(harness);
+        let owners = &owners[&harness];
+        let owned = owners.values().map(String::as_str).collect::<HashSet<_>>();
         let mut named = Vec::new();
         let mut unnamed = Vec::new();
         for (pid, started) in open {
@@ -110,9 +120,11 @@ pub fn discover() -> Vec<RawDirectory> {
                 unnamed.push(started);
                 continue;
             };
-            let transcript = super::live::claude_project(&home, &cwd).join(format!("{id}.jsonl"));
-            // Claude writes no transcript before the first message.
-            if transcript.is_file() {
+            if let Some(transcript) = harness
+                .harness()
+                .direct_transcript(&home, &cwd, id)
+                .filter(|path| path.is_file())
+            {
                 named.push((id.clone(), Source::File(transcript)));
             }
         }
@@ -153,36 +165,6 @@ fn open(
             .push((process.pid, process.started_at));
     }
     open
-}
-
-/// The conversation each live Claude process has open, from the
-/// `sessions/<pid>.json` Claude keeps in its home and rewrites when `/clear`
-/// or `/resume` changes it. Claude versions before 2.1.318 may keep none.
-fn claude_owners(home: &Path, by_pid: &HashMap<u32, &OsProcess>) -> HashMap<u32, String> {
-    #[derive(serde::Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct Owner {
-        pid: u32,
-        session_id: String,
-        /// Milliseconds.
-        started_at: i64,
-    }
-    std::fs::read_dir(home.join("sessions"))
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter_map(|entry| {
-            let path = entry.path();
-            if path.extension()? != "json" {
-                return None;
-            }
-            let owner: Owner = serde_json::from_slice(&std::fs::read(&path).ok()?).ok()?;
-            let process = by_pid.get(&owner.pid)?;
-            // A file left by an exited process names whoever reused its pid.
-            ((owner.started_at / 1000 - process.started_at).abs() <= START_SLACK)
-                .then_some((owner.pid, owner.session_id))
-        })
-        .collect()
 }
 
 /// The provider a process runs. Claude's installer links `claude` to
@@ -481,7 +463,9 @@ mod tests {
         reused.started_at = 1_794_393_000;
         let by_pid = HashMap::from([(7, &live), (8, &reused)]);
         assert_eq!(
-            claude_owners(home.path(), &by_pid),
+            HarnessKind::Claude
+                .harness()
+                .conversation_owners(home.path(), &by_pid),
             HashMap::from([(7, "b307f698".to_owned())])
         );
     }

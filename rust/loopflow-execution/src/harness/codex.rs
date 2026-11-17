@@ -16,8 +16,10 @@
 use crate::harness::Admitted;
 use crate::process::attachment;
 use crate::session::Holder;
+use crate::transcript::json_lines;
 use loopflow_model::id::AgentSessionId;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -1698,10 +1700,51 @@ mod tests {
     }
 }
 
+fn codex_input_times(path: &Path, wanted: &BTreeSet<&str>) -> BTreeMap<String, i64> {
+    let mut times = BTreeMap::<String, i64>::new();
+    for row in json_lines(path) {
+        let Some(id) = row["session_id"].as_str().filter(|id| wanted.contains(id)) else {
+            continue;
+        };
+        let Some(at) = row["ts"]
+            .as_i64()
+            .filter(|at| *at >= 0)
+            .and_then(|at| at.checked_mul(1000))
+        else {
+            continue;
+        };
+        times
+            .entry(id.to_string())
+            .and_modify(|saved| *saved = (*saved).max(at))
+            .or_insert(at);
+    }
+    times
+}
+
 #[derive(Debug)]
 pub struct Codex;
 
 impl super::Harness for Codex {
+    fn validate_agent_process_close(
+        &self,
+        store: &loopflow_storage::sqlite::SqliteStore,
+        session: &str,
+        process: &loopflow_model::id::AgentProcessId,
+    ) -> crate::store::StoreResult<()> {
+        // The server may host conversations outside this AgentProcess.
+        let endpoint = store.agent_endpoint(process)?.ok_or_else(|| {
+            crate::store::StoreError::InvalidAuthority(
+                "Codex AgentProcess connection is unavailable".into(),
+            )
+        })?;
+        let thread = store.session_thread(session)?;
+        super::codex_connection::validate_agent_process_close(&endpoint, thread.as_ref())
+            .map_err(|error| crate::store::StoreError::InvalidAuthority(error.to_string()))
+    }
+    fn human_input_times(&self, home: &Path, wanted: &BTreeSet<&str>) -> BTreeMap<String, i64> {
+        codex_input_times(&home.join("history.jsonl"), wanted)
+    }
+
     fn sign_in_advice(&self) -> &'static str {
         "run `codex login`"
     }
@@ -1766,7 +1809,7 @@ impl super::Harness for Codex {
         vec!["-c".into(), "tui.terminal_title=[]".into()]
     }
     fn open(&self, launch: &super::Launch<'_>) -> Result<super::native_session::NativeClient> {
-        let (mut args, input) = launch.terminal_input("codex")?;
+        let (mut args, input) = launch.terminal_input()?;
         let mut client = super::native_session::NativeClient::new("codex", launch)?;
         if launch.holder == Holder::Caller {
             args.extend(crate::agent::codex_terminal_options(

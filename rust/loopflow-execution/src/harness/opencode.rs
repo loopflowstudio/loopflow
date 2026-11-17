@@ -1415,7 +1415,7 @@ impl super::Harness for OpenCode {
 }
 
 fn open_native(launch: &super::Launch<'_>) -> Result<super::native_session::NativeClient> {
-    let (_, input) = launch.terminal_input("opencode")?;
+    let (_, input) = launch.terminal_input()?;
     let prompt = input.unwrap_or_default();
     crate::agent::validate_terminal_turn(&prompt)?;
     let mut config = launch.config.clone();

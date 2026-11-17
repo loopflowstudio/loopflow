@@ -339,6 +339,8 @@ on execution: clean. Gate runs the session_cli truthful-resolution test.
 Concept review after it (2026-11-17): nothing further; a View whose terminal
 is gone by the query falls through to resume under the same lock.
 
+Compress (2026-11-17): `invocation_intent` reads `resume_intent` only past the NewThread return; `nextest -p loopflow-execution --lib ops::human_session::` (48): pass.
+
 Then gate.
 
 Not this Task: what `lf open` itself does. Jack Heart: "lets start with maknig

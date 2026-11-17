@@ -1028,11 +1028,10 @@ pub(super) fn invocation_intent(
     fork: bool,
     prepare_only: bool,
 ) -> SessionResumeIntent {
-    let intent = resume_intent(summary);
     if !fork && !prepare_only && summary.has_provider_history && handoff_agent(session).is_some() {
         return SessionResumeIntent::NewThread;
     }
-    match intent {
+    match resume_intent(summary) {
         SessionResumeIntent::View | SessionResumeIntent::TakeOver if prepare_only => {
             if summary.has_provider_history {
                 SessionResumeIntent::Resume

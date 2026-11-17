@@ -129,16 +129,25 @@ pub struct Response {
 enum Carrier {
     /// This Machine's server, at its socket.
     Socket(PathBuf),
-    /// Another Machine's server, through `lf server connect` there.
-    Ssh(Machine),
+    /// Another Machine's server, through `lf server connect` there, which
+    /// runs every request with what `sender` says this `lf` runs with.
+    Ssh(Machine, Box<Sender>),
 }
 
 impl Carrier {
+    /// What each request says of the `lf` that sent it; null on this Machine.
+    fn sender(&self) -> Option<Sender> {
+        match self {
+            Self::Socket(_) => None,
+            Self::Ssh(_, sender) => Some(Sender::clone(sender)),
+        }
+    }
+
     /// A fresh connection that reads at most `capacity` bytes ahead.
     fn open(&self, capacity: usize) -> Result<Socket> {
         match self {
             Self::Socket(path) => Socket::local(connect(path)?, capacity),
-            Self::Ssh(machine) => {
+            Self::Ssh(machine, _) => {
                 let (pipe, output, input) = super::ssh::Pipe::open(machine)?;
                 let output = Timed::new(output);
                 Ok(Socket {
@@ -177,10 +186,11 @@ impl Connection {
     }
 
     /// `machine`'s server, over SSH. Its `lf server connect` starts the
-    /// server when none is running. Every operation sent here runs there.
-    pub fn open_on(machine: &Machine) -> Result<Self> {
+    /// server when none is running. Every operation sent here runs there,
+    /// with what `sender` says this `lf` runs with.
+    pub fn open_on(machine: &Machine, sender: Sender) -> Result<Self> {
         let connection = Self::start(
-            Carrier::Ssh(machine.clone()),
+            Carrier::Ssh(machine.clone(), Box::new(sender)),
             identity(super::wire::MACHINE_CLIENT, "lf"),
             // The entry may start the server first.
             ANSWER,
@@ -200,7 +210,7 @@ impl Connection {
             client,
         }))?;
         let answer = socket.receive().map_err(|error| match &carrier {
-            Carrier::Ssh(machine) => unanswered(error, machine, within, ErrorCode::Unavailable),
+            Carrier::Ssh(machine, _) => unanswered(error, machine, within, ErrorCode::Unavailable),
             Carrier::Socket(_) => stalled(error, "welcome the connection", within),
         })?;
         match answer.map(accepted).transpose()? {
@@ -239,20 +249,12 @@ impl Connection {
     /// [`Self::request`] or [`Self::reading`]. A request over the control limit
     /// travels on a ticketed connection and is answered here like any other.
     pub fn send(&mut self, operation: impl serde::Serialize) -> Result<String> {
-        self.send_from(operation, None)
-    }
-
-    fn send_from(
-        &mut self,
-        operation: impl serde::Serialize,
-        sender: Option<&Sender>,
-    ) -> Result<String> {
         let id = uuid::Uuid::new_v4().to_string();
         let line = Socket::line(&ClientMessage::Request {
             id: id.clone(),
             operation: serde_json::to_value(operation)?,
             select: None,
-            sender: sender.cloned(),
+            sender: self.carrier.sender(),
             request_id: None,
         })?;
         if line.len() <= MAX_MESSAGE {
@@ -293,27 +295,9 @@ impl Connection {
 
     /// One request and its answer; other ids' messages wait in `pending`.
     pub fn request(&mut self, operation: impl serde::Serialize) -> Result<Response> {
-        self.request_with(operation, None)
-    }
-
-    /// [`Self::request`] for another Machine's server, which runs `operation`
-    /// with what `sender` says this `lf` runs with.
-    pub fn request_from(
-        &mut self,
-        operation: impl serde::Serialize,
-        sender: &Sender,
-    ) -> Result<Response> {
-        self.request_with(operation, Some(sender))
-    }
-
-    fn request_with(
-        &mut self,
-        operation: impl serde::Serialize,
-        sender: Option<&Sender>,
-    ) -> Result<Response> {
-        let id = self.send_from(operation, sender)?;
+        let id = self.send(operation)?;
         let answer = match &self.carrier {
-            Carrier::Ssh(machine) => {
+            Carrier::Ssh(machine, _) => {
                 let machine = machine.clone();
                 self.set_read_timeout(Some(ANSWER))?;
                 let answer = self.wait(|message| answers(message, &id)).map_err(|error| {
@@ -345,31 +329,13 @@ impl Connection {
 
     /// Start a subscription and return its id once the server confirms it.
     pub fn subscribe(&mut self, operation: impl serde::Serialize) -> Result<String> {
-        self.subscribe_with(operation, None)
-    }
-
-    /// [`Self::subscribe`] on another Machine's server, as for
-    /// [`Self::request_from`].
-    pub fn subscribe_from(
-        &mut self,
-        operation: impl serde::Serialize,
-        sender: &Sender,
-    ) -> Result<String> {
-        self.subscribe_with(operation, Some(sender))
-    }
-
-    fn subscribe_with(
-        &mut self,
-        operation: impl serde::Serialize,
-        sender: Option<&Sender>,
-    ) -> Result<String> {
         let id = uuid::Uuid::new_v4().to_string();
         self.socket.send(&ClientMessage::Subscribe {
             id: id.clone(),
             operation: serde_json::to_value(operation)?,
             select: None,
             resume: None,
-            sender: sender.cloned(),
+            sender: self.carrier.sender(),
         })?;
         match self.wait(|message| answers(message, &id))? {
             ServerMessage::Response { .. } => Ok(id),

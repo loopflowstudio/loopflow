@@ -1378,12 +1378,12 @@ impl Remote {
 
     /// The answer of the destination's server; nothing runs here instead.
     pub(super) fn call<T: DeserializeOwned>(&self) -> anyhow::Result<T> {
-        let mut connection =
-            loopflow_execution::machine::client::Connection::open_on(&self.machine)?;
-        let answer = connection.request_from(
-            crate::server::wire::Operation::Write(self.change.clone()),
-            &self.sender,
+        let mut connection = loopflow_execution::machine::client::Connection::open_on(
+            &self.machine,
+            self.sender.clone(),
         )?;
+        let answer =
+            connection.request(crate::server::wire::Operation::Write(self.change.clone()))?;
         Ok(serde_json::from_value(answer.result)?)
     }
 }

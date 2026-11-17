@@ -147,8 +147,12 @@ pub fn deliver(
         input.extend_from_slice(bytes);
     }
     let env_file = (!forwarded.env.is_empty()).then(|| {
-        let block = exports(&forwarded.env);
-        let file = format!("{FORWARD_DIRECTORY}/{}", uuid::Uuid::new_v4().simple());
+        let block: String = forwarded
+            .env
+            .iter()
+            .map(|(name, value)| format!("export {name}={}\n", sh_quote(value.expose_secret())))
+            .collect();
+        let file = format!(".lf/forward/{}", uuid::Uuid::new_v4().simple());
         script.push(format!(
             "[ -d \"$HOME/.lf/forward\" ] || mkdir -p \"$HOME/.lf/forward\"; \
              dd bs=1 count={} of={} 2>/dev/null",
@@ -195,21 +199,12 @@ pub fn deliver(
     Ok(env_file)
 }
 
-/// Where delivered environment files wait under the home.
-const FORWARD_DIRECTORY: &str = ".lf/forward";
-
 /// `preamble`, after reading the delivered environment and removing its file.
 pub fn sourced(env_file: &str, preamble: &str) -> String {
     format!(
         "f={}; . \"$f\"; rm -f \"$f\"\n{preamble}",
         remote_path(env_file)
     )
-}
-
-fn exports(env: &[(String, SecretString)]) -> String {
-    env.iter()
-        .map(|(name, value)| format!("export {name}={}\n", sh_quote(value.expose_secret())))
-        .collect()
 }
 
 fn remote_path(relative: &str) -> String {

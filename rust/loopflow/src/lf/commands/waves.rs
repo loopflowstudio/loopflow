@@ -955,14 +955,12 @@ pub fn subscribe_remote_task_status(repo: &Path, issue: &str) -> Result<bool> {
         selection: Selection::capture(repo, None)?,
         secrets: Secrets::default(),
     };
-    let mut connection = loopflow_execution::machine::client::Connection::open_on(&machine)?;
-    let id = connection.subscribe_from(
-        super::read::Read::TaskStatus {
-            directory: repo.to_owned(),
-            issue: route.task_id.to_string(),
-        },
-        &sender,
-    )?;
+    let mut connection =
+        loopflow_execution::machine::client::Connection::open_on(&machine, sender)?;
+    let id = connection.subscribe(super::read::Read::TaskStatus {
+        directory: repo.to_owned(),
+        issue: route.task_id.to_string(),
+    })?;
     let mut stdout = std::io::stdout().lock();
     while let Some(frame) = connection.reading(&id)? {
         serde_json::to_writer(&mut stdout, &frame)?;

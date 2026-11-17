@@ -112,7 +112,8 @@ today. It becomes generic over its carrier's two byte streams:
 
 ```rust
 Connection::open()              // machine.sock, as today
-Connection::open_on(&machine)   // child `ssh … lf server connect`, piped
+Connection::open_on(&machine, sender)  // child `ssh … lf server connect`, piped;
+                                      // every request carries `sender`
 ```
 
 `request`, `subscribe`, `receive` and `checkpoint` are unchanged. #1956's
@@ -290,6 +291,11 @@ Built at `beade14bd0`, finishing PR 1's concept review of `4be26c7113`:
   and out of `logs/lf.log` for a served Machine request
   (`a_machine_request_writes_its_secrets_nowhere_in_lf_log`).
 
+Compress (after `ca1ffd4985`): the SSH carrier holds the `Sender`
+(`Carrier::Ssh(Machine, Box<Sender>)`), so every request on it carries one,
+`request.upload` included (it went out null and was `invalid`);
+`request_from`/`subscribe_from` are gone.
+
 Checks: `cargo test -p loopflow --lib server::` passed (94). Swift
 `scripts/test_desktop.sh --filter 'DTOFixtureTests|ServerClientTests'` passed (74).
 
@@ -324,6 +330,7 @@ Not done here:
 - `--test integration` the six SSH-entry/served tests, `an_unreachable_destination_names_the_ssh_check_not_its_server`, `a_status_subscription_for_a_task_mini_runs_reads_minis_server`, `documented_commands::`: pass.
 - `--test served_reads server_operations_match_their_lf_commands` (covers `task.status`): pass.
 - clippy `-p loopflow -p loopflow-execution --all-targets -D warnings`: clean.
+- After compress: `--lib machine::` 16, `--lib server::` 94, the six `machine_commands::` SSH-route tests, clippy: pass.
 - The 120 s answer bound: unit test of the timed pipe reader only; a silent destination end to end is QA.
 - A stopped destination server started by the entry: QA (`ensure` registers a supervisor job); `scratch/qa.html` from before the `sender` rework.
 - Swift `ServerProtocolTests`/`RegistryQueryTests` (`sender: null`, `task.hold` `reason`): gate/CI.

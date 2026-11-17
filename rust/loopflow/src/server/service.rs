@@ -858,7 +858,7 @@ pub(super) async fn session<C: Carrier>(
                         .await
                         .map_err(unavailable)
                         .and_then(|placed| placed),
-                    origin => origin.place(query),
+                    Origin::Local => Ok(query),
                 };
                 let query = match placed {
                     Ok(query) => query,

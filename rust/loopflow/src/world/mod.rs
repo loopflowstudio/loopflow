@@ -762,11 +762,7 @@ impl World {
             }
         }
         let start = |process: &loopflow_storage::process::LfProcess| {
-            loopflow_storage::graph_process::RunStart {
-                started_at: process.started_at,
-                pid: None,
-                os_started_at: None,
-            }
+            loopflow_storage::graph_process::RunStart::reserved(process.started_at)
         };
         let finish = |process: &loopflow_storage::process::LfProcess| {
             store.sqlite.finish_run(

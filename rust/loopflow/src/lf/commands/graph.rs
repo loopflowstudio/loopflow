@@ -219,19 +219,19 @@ pub fn run_task_graph_for(
         let status = spawn_task_child(&args, checkout, sink, Some(cursor), &graph_run, |child| {
             let registered = registration(store, &graph_run, child)?;
             match (registered, log.take()) {
-                (Some(registered), Some(mut log)) => {
-                    log.settle(&registered)?;
+                (true, Some(mut log)) => {
+                    log.settle(&graph_run)?;
                     if !released {
-                        announce(&registered, Some(&log.path))?;
+                        announce(&graph_run, Some(&log.path))?;
                         release_launcher(&log.file)?;
                         released = true;
                     }
                 }
-                (Some(registered), None) if !released => {
-                    announce(&registered, None)?;
+                (true, None) if !released => {
+                    announce(&graph_run, None)?;
                     released = true;
                 }
-                (None, Some(log)) => log.replay(),
+                (false, Some(log)) => log.replay(),
                 _ => {}
             }
             Ok(())
@@ -251,21 +251,17 @@ pub fn run_task_graph_for(
             return Err(loopflow_execution::process::CommandExit(130).into());
         }
         // Only a Graph process that failed is started again.
-        let graph = match status.code() {
-            Some(1) => store
-                .graph_run_recorded(&graph_run)?
-                .then(|| graph_run.clone()),
-            _ => None,
-        };
-        let failed = graph.is_some();
-        if let Some(graph) = &graph {
+        let failed = status.code() == Some(1) && store.graph_run_recorded(&graph_run)?;
+        if failed {
             if let Some(stash) = loopflow_execution::ops::checkout::retained_edits(checkout)? {
                 eprintln!(
                     "The run of {run} failed with the checkout's edits retained in stash {stash}; this Task run stops here. Restore them with `git stash apply --index {stash}`."
                 );
                 return Err(loopflow_execution::process::CommandExit(1).into());
             }
-            let cause = store.graph_failure_cause(graph)?.map(|(_, cause)| cause);
+            let cause = store
+                .graph_failure_cause(&graph_run)?
+                .map(|(_, cause)| cause);
             repeated = cause.filter(|cause| attempt == 1 || repeated.as_ref() == Some(cause));
             if let Some((step, recovery)) =
                 loopflow_execution::ops::task::limit_recovery::ended_step_recovery(store, &task.id)?
@@ -429,20 +425,20 @@ fn spawn_task_child(
     status.context("could not wait for the Task's step")
 }
 
-/// Where a Task run that let its launcher go keeps its Graph process's output.
-/// Wait until the attempt records its Graph run or ends first. No deadline:
-/// the child's own exit bounds it.
+/// Whether the attempt recorded its Graph run before it ended, so a Task run
+/// that lets its launcher go can settle its output. No deadline: the child's
+/// own exit bounds the wait.
 fn registration(
     store: &SqliteStore,
     graph_run: &LfProcessId,
     child: &mut std::process::Child,
-) -> Result<Option<LfProcessId>> {
+) -> Result<bool> {
     loop {
         if store.graph_run_recorded(graph_run)? {
-            return Ok(Some(graph_run.clone()));
+            return Ok(true);
         }
         if child.try_wait()?.is_some() {
-            return Ok(None);
+            return Ok(false);
         }
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
@@ -796,11 +792,8 @@ impl RunningGraph<'_> {
     /// step finds its row however fast it ends.
     fn reserve_step(&self, step: &LfProcessId) -> Result<()> {
         let (key, iterations) = self.location();
-        let start = loopflow_storage::graph_process::RunStart {
-            started_at: loopflow_storage::rows::now_unix(),
-            pid: None,
-            os_started_at: None,
-        };
+        let start =
+            loopflow_storage::graph_process::RunStart::reserved(loopflow_storage::rows::now_unix());
         self.store
             .sqlite
             .record_graph_step(&self.process, step, key, &iterations, &start)?;

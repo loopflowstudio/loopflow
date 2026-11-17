@@ -1584,11 +1584,7 @@ mod tests {
             steps: vec![],
         };
         for (id, cwd, owner) in &graphs {
-            let start = crate::graph_process::RunStart {
-                started_at: 1,
-                pid: None,
-                os_started_at: None,
-            };
+            let start = crate::graph_process::RunStart::reserved(1);
             store
                 .record_graph(id, &graph, *owner, &start, None, Some(cwd))
                 .unwrap();

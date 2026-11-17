@@ -26,7 +26,9 @@ inventory. Quotes and the OS-scan measurement: `questions.md`.
   `LF_RUN_ID`; the journal adopts it as the child's own id. The step row is
   written at spawn with pid; the child writes its end in `ledger_insert`; the
   spawner writes `status.code()` if the child left none. Deleted:
-  `process_mark`, `child_process_after`, `graph_child_after`.
+  `process_mark`, `child_process_after`, `graph_child_after`. A spawner's
+  reservation is `RunStart::reserved(at)`; the Task-run loop's
+  `registration` answers a bool, since the loop already holds the id.
 - `graph_failure_cause` (last failed step's error, else the run's) replaces
   the Process walk for Task-run retry; `journal::run_evidence` replaces
   `lf_evidence`/receipts for Graph runs and steps (Task execution, interrupt,

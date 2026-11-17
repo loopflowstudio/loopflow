@@ -437,11 +437,7 @@ mod tests {
                 rusqlite::params![step, run, serde_json::json!(["lf", label]).to_string()],
             )
             .unwrap();
-        let start = loopflow_storage::graph_process::RunStart {
-            started_at: 21,
-            pid: None,
-            os_started_at: None,
-        };
+        let start = loopflow_storage::graph_process::RunStart::reserved(21);
         store
             .record_graph_step(run, &step, key, &[vec![]], &start)
             .unwrap();

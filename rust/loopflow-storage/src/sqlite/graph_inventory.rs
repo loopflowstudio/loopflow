@@ -1,6 +1,6 @@
-//! GraphRun: what a Graph run recorded, read back with its Processes. Only a
-//! Graph run writes it, and only by appending. Reading selects nothing and grants
-//! neither attachment nor process authority.
+//! GraphRun: what a Graph run and its steps recorded of themselves. What each
+//! launched with is immutable; only its end moves. Reading selects nothing and
+//! grants neither attachment nor process authority.
 
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroU32;
@@ -648,11 +648,7 @@ impl SqliteStore {
     ) -> LfProcessId {
         let graph_process = LfProcessId::new();
         let now = crate::rows::now_unix();
-        let start = RunStart {
-            started_at: now,
-            pid: None,
-            os_started_at: None,
-        };
+        let start = RunStart::reserved(now);
         // The journal still records each run as a Process beside its Graph record.
         let process = |id: &LfProcessId, parent: Option<&LfProcessId>, outcome: Option<&str>| {
             let conn = self.conn.lock().expect("store mutex poisoned");

@@ -175,11 +175,7 @@ mod tests {
     #[test]
     fn an_abandoned_task_keeps_one_summary_of_its_run() {
         let (_dir, store, task) = crate::test_fixture::store_with_task();
-        let start = crate::graph_process::RunStart {
-            started_at: 1,
-            pid: None,
-            os_started_at: None,
-        };
+        let start = crate::graph_process::RunStart::reserved(1);
         // One Graph whose only step sent its loop around twice before going on.
         let graph = LfProcessId::new();
         let compiled = crate::graph::CompiledGraph {

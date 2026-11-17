@@ -59,6 +59,17 @@ pub struct RunStart {
     pub os_started_at: Option<i64>,
 }
 
+impl RunStart {
+    /// A run its spawner records before it has an OS process.
+    pub fn reserved(started_at: i64) -> Self {
+        Self {
+            started_at,
+            pid: None,
+            os_started_at: None,
+        }
+    }
+}
+
 impl Run {
     pub fn result(&self) -> RunResult {
         RunResult::of(self.ended_at, self.exit_code, self.error.as_deref())

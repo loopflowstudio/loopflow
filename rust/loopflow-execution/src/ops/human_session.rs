@@ -1036,7 +1036,7 @@ pub async fn open(
         session
     };
     drop(progress);
-    let mut run = crate::harness::Run::Batch;
+    let mut kind = crate::harness::LaunchKind::Batch;
     if resume {
         if session.interactive {
             // A held terminal is attached while its child runs, answering or
@@ -1069,16 +1069,16 @@ pub async fn open(
                 }
             }
         }
-        run =
+        kind =
             match crate::transport::delegate_session(&session.id, json, session.interactive, true)?
             {
                 crate::transport::Delegation::Delegated => return surface(store, session).await,
-                crate::transport::Delegation::Here { run } => run,
+                crate::transport::Delegation::Here { kind } => kind,
             };
     }
     if session.captured.is_none() {
         if resume {
-            open_waiting(store, &session.id, run).await?;
+            open_waiting(store, &session.id, kind).await?;
         }
         return surface(store, session).await;
     }
@@ -1089,7 +1089,7 @@ pub async fn open(
     let Some(provider_session) = provider_session else {
         let surface = surface(store, session).await?;
         if resume {
-            open_waiting(store, &session.id, run).await?;
+            open_waiting(store, &session.id, kind).await?;
         }
         return Ok(surface);
     };
@@ -1111,7 +1111,7 @@ pub async fn open(
         crate::harness::native_session::resume_session(
             session.input_key()?,
             &provider_session,
-            run,
+            kind,
         )?;
     }
     Ok(result)
@@ -1210,9 +1210,9 @@ pub async fn open_without_replacing(
     } else {
         Some(lock)
     };
-    let run = match crate::transport::delegate_session(id, json, true, false)? {
+    let kind = match crate::transport::delegate_session(id, json, true, false)? {
         crate::transport::Delegation::Delegated => return Ok(record),
-        crate::transport::Delegation::Here { run } => run,
+        crate::transport::Delegation::Here { kind } => kind,
     };
     let lock = match lock {
         Some(lock) => lock,
@@ -1223,7 +1223,7 @@ pub async fn open_without_replacing(
     };
     let Some(native) = native else {
         // Keep the ownership read and first-thread admission under one lock.
-        return open_waiting_locked(store, session, lock, run)
+        return open_waiting_locked(store, session, lock, kind)
             .await
             .map(|()| record);
     };
@@ -1236,7 +1236,7 @@ pub async fn open_without_replacing(
         Some(&native),
         &environment,
         Some(lock),
-        run,
+        kind,
     )?;
     Ok(record)
 }
@@ -1304,10 +1304,10 @@ async fn fork(
 /// crosses to the launch; opening it reacquires the lock and reads current state.
 /// Its new thread has no native history, so it launches with the Session's Work.
 async fn open_prepared(store: &SharedStore, id: &str, json: bool) -> Result<()> {
-    if let crate::transport::Delegation::Here { run } =
+    if let crate::transport::Delegation::Here { kind } =
         crate::transport::delegate_prepared_session(id, json)?
     {
-        open_waiting(store, id, run).await?;
+        open_waiting(store, id, kind).await?;
     }
     Ok(())
 }
@@ -1356,7 +1356,11 @@ fn departure_here() -> crate::process::Departure {
 
 /// Open a conversation: resume its native history, else
 /// launch its prepared input, else append another attempt to the Session.
-async fn open_waiting(store: &SharedStore, id: &str, run: crate::harness::Run) -> Result<()> {
+async fn open_waiting(
+    store: &SharedStore,
+    id: &str,
+    kind: crate::harness::LaunchKind,
+) -> Result<()> {
     crate::agent_input_timing::record("launch_lock_begin", id);
     let lock_id = id.to_string();
     let launch_lock =
@@ -1368,14 +1372,14 @@ async fn open_waiting(store: &SharedStore, id: &str, run: crate::harness::Run) -
         .session(id)
         .await?
         .ok_or_else(|| session_not_found(id))?;
-    open_waiting_locked(store, session, launch_lock, run).await
+    open_waiting_locked(store, session, launch_lock, kind).await
 }
 
 async fn open_waiting_locked(
     store: &SharedStore,
     session: LfSession,
     launch_lock: File,
-    run: crate::harness::Run,
+    kind: crate::harness::LaunchKind,
 ) -> Result<()> {
     let id = session.id.clone();
     let session = primary::admit_workspace(store, session).await?;
@@ -1390,7 +1394,7 @@ async fn open_waiting_locked(
     // selected here appends its own instead of reopening native history.
     let handoff = handoff_agent(&session).is_some();
     if !handoff
-        && resume_native_session(store, session.input_key()?, &token, &mut launch_lock, run)?
+        && resume_native_session(store, session.input_key()?, &token, &mut launch_lock, kind)?
     {
         return Ok(());
     }
@@ -1894,7 +1898,7 @@ pub(crate) fn resume_native_session(
     artifact_key: &String,
     token: &HumanSessionToken,
     launch_lock: &mut Option<File>,
-    run: crate::harness::Run,
+    kind: crate::harness::LaunchKind,
 ) -> Result<bool> {
     let Some(session) = store.sqlite.session_for_artifact(artifact_key)? else {
         return Ok(false);
@@ -1932,7 +1936,7 @@ pub(crate) fn resume_native_session(
         provider_session.as_ref(),
         &environment,
         launch_lock.take(),
-        run,
+        kind,
     )?;
     Ok(true)
 }

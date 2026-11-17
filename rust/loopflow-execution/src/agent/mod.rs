@@ -813,7 +813,7 @@ pub fn build_codex_thread_start_params(
 /// context hooks. Nothing else of lf's configuration rides along.
 pub(crate) fn codex_terminal_options(
     launch: &AgentConfig,
-    run: crate::harness::Run,
+    kind: crate::harness::LaunchKind,
 ) -> anyhow::Result<Vec<String>> {
     let params = build_codex_thread_start_params(launch, false);
     let mut args = Vec::new();
@@ -844,7 +844,7 @@ pub(crate) fn codex_terminal_options(
     if let Some(context) = &launch.conversation_context {
         config.insert(
             "hooks".into(),
-            crate::harness::context::codex_hooks(context, None, run)?,
+            crate::harness::context::codex_hooks(context, None, kind)?,
         );
     }
     args.extend(crate::harness::codex::config_overrides(&config.into())?);
@@ -907,7 +907,7 @@ pub(crate) fn validate_terminal_turn(prompt: &str) -> Result<(), CoreError> {
 pub fn run_agent(
     launch: &AgentConfig,
     process: &ProcessConfig,
-    run: crate::harness::Run,
+    kind: crate::harness::LaunchKind,
 ) -> Result<AgentProcessResult, CoreError> {
     let cwd = match &launch.cwd {
         Some(cwd) => cwd.clone(),
@@ -915,7 +915,7 @@ pub fn run_agent(
     };
     let command = std::env::args().collect::<Vec<_>>();
     crate::journal::with_runtime(&cwd, &command, || {
-        run_admitted_agent(launch, process, run).map_err(Into::into)
+        run_admitted_agent(launch, process, kind).map_err(Into::into)
     })
     .map_err(|error| {
         error
@@ -927,7 +927,7 @@ pub fn run_agent(
 fn run_admitted_agent(
     launch: &AgentConfig,
     process: &ProcessConfig,
-    run: crate::harness::Run,
+    kind: crate::harness::LaunchKind,
 ) -> Result<AgentProcessResult, CoreError> {
     let mut launch = launch.clone();
     let capabilities = launch.agent.harness.harness().capabilities();
@@ -982,7 +982,7 @@ fn run_admitted_agent(
         &launch,
         &process,
         &TRANSIENT_RETRY_DELAYS,
-        |attempt, retry| _run_harness_once(attempt, &process, run, retry),
+        |attempt, retry| _run_harness_once(attempt, &process, kind, retry),
         _sleep_wall_clock,
     );
     if let Err(error) = crate::ops::planning_sync::check_directory(&directory) {
@@ -1361,7 +1361,7 @@ fn _begin_process_runtime(
 fn _run_harness_once(
     launch: &AgentConfig,
     process: &ProcessConfig,
-    run: crate::harness::Run,
+    kind: crate::harness::LaunchKind,
     retry: bool,
 ) -> Result<AgentProcessResult, CoreError> {
     if tokio::runtime::Handle::try_current().is_ok() {
@@ -1369,7 +1369,7 @@ fn _run_harness_once(
         let process = process.clone();
         return std::thread::Builder::new()
             .name("lf-native-harness".to_string())
-            .spawn(move || _run_harness_once(&launch, &process, run, retry))
+            .spawn(move || _run_harness_once(&launch, &process, kind, retry))
             .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?
             .join()
             .map_err(|_| {
@@ -1402,7 +1402,7 @@ fn _run_harness_once(
     let value = crate::harness::Launch {
         config: &config,
         harness: launch.agent.harness.harness(),
-        run,
+        kind,
         recording: &recording,
         start: crate::harness::Start::from_thread(launch.resume_token.as_ref()),
         context_file: None,

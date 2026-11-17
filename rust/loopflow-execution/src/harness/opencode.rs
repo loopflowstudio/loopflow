@@ -1,4 +1,4 @@
-use crate::harness::Run;
+use crate::harness::LaunchKind;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -32,7 +32,7 @@ pub struct Driver {
     authorization: reqwest::header::HeaderValue,
     interactive: bool,
     owner: Recording,
-    run: Run,
+    kind: LaunchKind,
     stream: Option<Arc<tokio::sync::Mutex<OpenCodeStream>>>,
     config: AgentConfig,
     should_seed_prompt: bool,
@@ -80,7 +80,7 @@ impl Driver {
             authorization: reqwest::header::HeaderValue::from_static(""),
             interactive: false,
             owner: launch.recording.clone(),
-            run: launch.run,
+            kind: launch.kind,
             stream: None,
             config: launch.config.clone(),
             should_seed_prompt: true,
@@ -143,7 +143,7 @@ impl Driver {
             command.current_dir(cwd);
         }
         super::configure_agent_env(&mut command, config);
-        command.envs(environment(config, None, self.run)?);
+        command.envs(environment(config, None, self.kind)?);
         command.env("OPENCODE_PASSWORD", &self.password);
         super::configure_vendor_std_env(command.as_std_mut())?;
         let diagnostic_path = config
@@ -166,7 +166,7 @@ impl Driver {
         };
         command.stderr(diagnostics.try_clone()?);
         self.child = Some(super::agent_process::spawn(
-            command, None, &owner, self.run,
+            command, None, &owner, self.kind,
         )?);
         let child = self.child.as_mut().expect("server was spawned");
         let mut endpoint = String::new();
@@ -897,7 +897,7 @@ fn parse_data_frame(frame: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use crate::harness::Run;
+    use crate::harness::LaunchKind;
     use crate::process::attachment;
 
     use super::{
@@ -946,7 +946,8 @@ mod tests {
         };
         let mut command = Command::new("/bin/sleep");
         command.env_clear().arg("60");
-        let child = super::super::agent_process::spawn(command, None, &owner, Run::Batch).unwrap();
+        let child =
+            super::super::agent_process::spawn(command, None, &owner, LaunchKind::Batch).unwrap();
         let pid = child.id().unwrap();
         let birth = crate::journal::process_started_at(pid).unwrap().unwrap();
         let (tx, _rx) = mpsc::unbounded_channel();
@@ -1254,7 +1255,7 @@ mod tests {
 fn environment(
     config: &AgentConfig,
     context_file: Option<&std::path::Path>,
-    run: Run,
+    kind: LaunchKind,
 ) -> Result<std::collections::BTreeMap<String, String>> {
     let mut environment = config.env.clone();
     {
@@ -1299,7 +1300,7 @@ fn environment(
                 &mut settings,
                 context,
                 &crate::agent::system_prompt_with_structured_replies(config),
-                run,
+                kind,
             )?;
         }
         environment.insert("OPENCODE_CONFIG_CONTENT".into(), settings.to_string());

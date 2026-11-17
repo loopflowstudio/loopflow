@@ -21,10 +21,10 @@ first, then the engineering words it borrows.
 | **LfSession**, **Session** | One continuable agent conversation, interactive or headless, with identity, feedback and native history. |
 | **Managed** | A work session or worker that reports each turn to the Machine server. |
 | **Bare** | A chat or batch with no turn reports to the Machine server. |
-| **Work session** | A managed, interactive Session in a held terminal that survives its viewer. Examples include `lf resume --task LOO-12` and conversations opened in a held terminal through a Desktop pane or framed `lf --machine` view. |
-| **Worker** | A managed, headless Session with no terminal or viewer. Most workers run under a Graph started by `lf task run` or `lf ship`. A Discord Wave answer runs in its caller and returns its answer there. |
-| **Chat** | A bare, interactive Session, started with `lf <skill>` or plain `lf`, that ends with its terminal. |
-| **Batch** | A bare, headless Session, started with `lf -b <skill>`, that follows its caller and returns its answer. |
+| **Work session** | The conversation of a Task, Wave or repository, such as `lf resume --task LOO-12`. The server keeps it running when its window closes and tells it about steers while it is idle. A managed, interactive launch in a held terminal. |
+| **Worker** | A headless step of a Task's Graph, or a Discord Wave answer, that the server follows turn by turn. A managed, headless launch. |
+| **Chat** | A conversation in your terminal, started with `lf <skill>` or plain `lf`, that ends with it. A bare, interactive launch. |
+| **Batch** | One headless answer, started with `lf -b <skill>`, returned to its caller. A bare, headless launch. |
 | **Available** | A conversation you can work with now: it asked a question, handed its turn back, or went quiet with no tool call outstanding. Availability needs no pending question or review, and owes nothing; a Task's checks or dependencies neither add nor remove it. |
 | **LfProcess**, **Process** | One actual lf process: durable `id`, optional Unix `pid`, causal parent and observed command outcome. |
 | **AgentProcess** | The provider's OS process Loopflow started for a Session: a chat uses its terminal, a batch follows its caller, a work session uses a holder, and a worker runs without a terminal. |
@@ -36,6 +36,9 @@ first, then the engineering words it borrows.
 | **Steer** | A message you send to work that is already running, to change its direction. |
 | **Harness**, **provider** | The AI coding tool Loopflow drives: Claude Code, Codex, OpenCode, or Pi. |
 | **Scratch** | The `scratch/` folder, for working notes. `lf scratch clear` removes added files; existing files and edits remain. |
+
+Work session, worker, chat and batch are kinds of launch. A Session can change
+kind between launches: a chat bound to a Task reopens as a work session.
 
 Task membership is separate from managed or bare: the checkout, `--task` and
 `LF_AS` choose which Task receives the launch's usage and supplies its steers.

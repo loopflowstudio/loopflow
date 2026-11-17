@@ -13,8 +13,8 @@
 //! - `turn/interrupt {threadId, turnId}` -> `{}`; the turn then ends with
 //!   `turn/completed` status "interrupted" (probed live).
 
+use crate::harness::LaunchKind;
 use crate::harness::Recording;
-use crate::harness::Run;
 use crate::process::attachment;
 use crate::transcript::json_lines;
 use loopflow_model::id::AgentSessionId;
@@ -290,7 +290,7 @@ pub struct Driver {
     agent_directory: Option<tempfile::TempDir>,
     native_start: Option<(std::path::PathBuf, Value)>,
     owner: Recording,
-    run: Run,
+    kind: LaunchKind,
 }
 
 impl std::fmt::Debug for Driver {
@@ -329,7 +329,7 @@ impl Driver {
             agent_directory: None,
             native_start: None,
             owner: launch.recording.clone(),
-            run: launch.run,
+            kind: launch.kind,
         }
     }
 
@@ -707,7 +707,7 @@ impl Driver {
                         .find(|layer| layer["name"]["type"] == "sessionFlags")
                 })
                 .and_then(|layer| layer["config"].get("hooks"));
-            config["hooks"] = super::context::codex_hooks(context, session_hooks, self.run)?;
+            config["hooks"] = super::context::codex_hooks(context, session_hooks, self.kind)?;
         }
         Ok(config)
     }
@@ -824,7 +824,7 @@ impl Driver {
                 command,
                 Some(&lifeline),
                 &owner,
-                self.run,
+                self.kind,
             )?)
         } else {
             None
@@ -1813,10 +1813,10 @@ impl super::Harness for Codex {
     fn open(&self, launch: &super::Launch<'_>) -> Result<super::native_session::NativeClient> {
         let (mut args, input) = launch.terminal_input()?;
         let mut client = super::native_session::NativeClient::new(launch)?;
-        if !launch.run.is_managed() {
+        if !launch.kind.is_managed() {
             args.extend(crate::agent::codex_terminal_options(
                 launch.config,
-                launch.run,
+                launch.kind,
             )?);
             if let super::Start::Resume { thread } = launch.start {
                 args.extend(["resume".into(), "--".into(), thread.to_string()]);

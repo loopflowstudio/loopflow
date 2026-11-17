@@ -3,7 +3,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 use crate::agent::{AgentConfig, ProcessConfig};
-use crate::harness::Run;
+use crate::harness::LaunchKind;
 use crate::harness::{HarnessKind, Launch, Mode, Recording, Start};
 use crate::process::LfProcessRuntime;
 use crate::session_record::{SessionCaptureSpec, SessionGraphMembership, SessionRecorder};
@@ -93,22 +93,22 @@ fn every_harness_runs_all_four_launch_kinds() {
     );
     let _server = loopflow_test_support::MachineServer::start(binary, home);
 
-    for kind in HarnessKind::ALL {
-        for (run, mode, reports) in [
-            (Run::Chat, Mode::Interactive, false),
-            (Run::Batch, Mode::Headless, false),
-            (Run::WorkSession, Mode::Interactive, true),
-            (Run::Worker, Mode::Headless, true),
+    for harness in HarnessKind::ALL {
+        for (kind, mode, reports) in [
+            (LaunchKind::Chat, Mode::Interactive, false),
+            (LaunchKind::Batch, Mode::Headless, false),
+            (LaunchKind::WorkSession, Mode::Interactive, true),
+            (LaunchKind::Worker, Mode::Headless, true),
         ] {
-            assert_eq!(run.mode(), mode, "{run:?}");
-            let row = format!("{kind:?} {run:?}");
+            assert_eq!(kind.mode(), mode, "{kind:?}");
+            let row = format!("{harness:?} {kind:?}");
             let directory = tempfile::tempdir_in(home).unwrap();
             let cwd = directory.path();
             crate::journal::with_runtime(home, &["lf".into(), "matrix".into()], || {
                 let capture = SessionRecorder::begin_at(
                     home,
                     SessionCaptureSpec {
-                        harness: kind.as_str().into(),
+                        harness: harness.as_str().into(),
                         model: None,
                         surface: if mode == Mode::Interactive {
                             "tui"
@@ -129,12 +129,12 @@ fn every_harness_runs_all_four_launch_kinds() {
                 capture.claim_session_attachment()?;
                 let recording = Recording::from_runtime(&capture)?;
                 let mut config = AgentConfig {
-                    agent: crate::config::Agent::parse(kind.as_str()).unwrap(),
+                    agent: crate::config::Agent::parse(harness.as_str()).unwrap(),
                     cwd: Some(cwd.into()),
                     system_prompt: "fixed instructions".into(),
                     chrome: Some(true),
                     skip_permissions: true,
-                    write_scope: if kind == HarnessKind::Pi {
+                    write_scope: if harness == HarnessKind::Pi {
                         crate::agent::AgentWriteScope::Configured
                     } else {
                         crate::agent::AgentWriteScope::Worktree
@@ -156,8 +156,8 @@ fn every_harness_runs_all_four_launch_kinds() {
                 config.env.insert("LF_BIN".into(), binary.into());
                 let launch = Launch {
                     config: &config,
-                    harness: kind.harness(),
-                    run,
+                    harness: harness.harness(),
+                    kind,
                     recording: &recording,
                     start: Start::New,
                     context_file: None,
@@ -170,7 +170,7 @@ fn every_harness_runs_all_four_launch_kinds() {
                     Mode::Interactive => {
                         let outcome = super::native_session::run(&launch, None, Some(&capture))?;
                         anyhow::ensure!(!outcome.failed(), "{row}: {:?}", outcome.status);
-                        if kind == HarnessKind::OpenCode {
+                        if harness == HarnessKind::OpenCode {
                             let log = std::fs::read_to_string(
                                 capture.artifact_dir().join("opencode.stderr.log"),
                             )?;
@@ -211,7 +211,7 @@ fn every_harness_runs_all_four_launch_kinds() {
                     })
                 };
                 anyhow::ensure!(
-                    flag("--chrome") == (kind == HarnessKind::Claude),
+                    flag("--chrome") == (harness == HarnessKind::Claude),
                     "{row}: Chrome flag ownership"
                 );
                 anyhow::ensure!(
@@ -219,7 +219,7 @@ fn every_harness_runs_all_four_launch_kinds() {
                         && !flag("--dangerously-bypass-approvals-and-sandbox"),
                     "{row}: yolo escaped worktree policy"
                 );
-                if kind == HarnessKind::OpenCode {
+                if harness == HarnessKind::OpenCode {
                     let settings = commands
                         .iter()
                         .find_map(|command| command["opencode"].as_str())
@@ -301,7 +301,7 @@ fn held_codex_with_a_saved_empty_thread_sends_its_first_prompt() {
             let launch = Launch {
                 harness: HarnessKind::Codex.harness(),
                 config: &config,
-                run: Run::WorkSession,
+                kind: LaunchKind::WorkSession,
                 recording: &recording,
                 start: Start::New,
                 context_file: None,
@@ -329,29 +329,29 @@ fn held_codex_with_a_saved_empty_thread_sends_its_first_prompt() {
 fn native_limits_and_schemas_require_a_headless_run() {
     let home = tempfile::tempdir().unwrap();
     let recording = super::admit_for_test(home.path());
-    for kind in HarnessKind::ALL {
+    for harness in HarnessKind::ALL {
         for (max_turns, output_schema) in [
             (Some(7), None),
             (None, Some(serde_json::json!({"type":"object"}))),
         ] {
             let config = AgentConfig {
-                agent: crate::config::Agent::parse(kind.as_str()).unwrap(),
+                agent: crate::config::Agent::parse(harness.as_str()).unwrap(),
                 max_turns,
                 output_schema,
                 ..crate::agent::AgentConfig::default()
             };
             let launch = Launch {
                 config: &config,
-                harness: kind.harness(),
-                run: Run::Batch,
+                harness: harness.harness(),
+                kind: LaunchKind::Batch,
                 recording: &recording,
                 start: Start::New,
                 context_file: None,
             };
-            let error = kind.harness().open(&launch).unwrap_err();
+            let error = harness.harness().open(&launch).unwrap_err();
             assert!(
                 error.to_string().contains("require a headless Run"),
-                "{kind:?}: {error}"
+                "{harness:?}: {error}"
             );
         }
     }

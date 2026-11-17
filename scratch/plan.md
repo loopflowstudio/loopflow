@@ -17,15 +17,17 @@ Headless)" and "the worker run should definitely get the task steers".
 
 | | Interactive | Headless |
 |---|---|---|
-| Managed, reports turns | `Run::WorkSession` | `Run::Worker` |
-| Bare, no turn reports | `Run::Chat` | `Run::Batch` |
+| Managed, reports turns | `LaunchKind::WorkSession` | `LaunchKind::Worker` |
+| Bare, no turn reports | `LaunchKind::Chat` | `LaunchKind::Batch` |
 
-Transport selects `Run` before delegation. A held child takes up a work session.
+Transport selects `LaunchKind` before delegation. Only a work session goes to
+the holder; `lf task run` detaching from its terminal is
+`transport::detach_current`, not a launch kind. A held child takes up a work session.
 A direct launch in the caller's terminal or pipe is a chat or batch, including
 with `--task`, `--wave` or `LF_AS`. Managed launches report turns to the Machine
 server, including the headless steps of Task Graphs and landing's `ci-fix`.
 Discord Wave answers report turns as workers while the bridge waits for their
-answer. Commit messages, PR text and replay use batches. `Run` stays in the
+answer. Commit messages, PR text and replay use batches. `LaunchKind` stays in the
 launch path, with no persisted launch type or process-list column.
 
 Task membership supplies both usage attribution and steers regardless of launch
@@ -63,13 +65,15 @@ store, Session and attachment.
 
 - `Holder`, `Place`, `transport::holder`, `WorkSource::is_managed`, the
   `named_work` delegation argument, `Launch.holder` and independent Work reads.
-  `Run` owns launch classification and `Delegation::Here` carries it.
-- `Run::Bare(Mode)`, `Run::Managed` and `Run::reports_turns`. The four launch
-  names are the variants, and `Run::is_managed` supplies hook, thread naming
-  and steering policy.
+  `LaunchKind` owns launch classification and `Delegation::Here` carries it.
+- `Run::Bare(Mode)`, `Run::Managed`, `Run::reports_turns` and the name
+  `harness::Run`. The four launch names are `LaunchKind`'s variants, and
+  `LaunchKind::is_managed` supplies hook, thread naming and steering policy.
+- `delegate_current`'s `worker` argument and the `Worker && graph_step()` test
+  in `delegate`.
 - Resume classification inside `delegate`, `SessionConnectionArgs::work_flag`
   and prepared-command work-flag forwarding. Both resume entry points use
-  `session_run` before delegation and the selected Session ID owns identity.
+  `session_kind` before delegation and the selected Session ID owns identity.
 - `provider_env_allowed_for_program`, `api_key_env_allowed_for_program` and
   `normalize_program_name`. Typed harness options own credential policy. Keep
   exported-key filtering and stored GitHub and provider environment behavior.
@@ -81,7 +85,7 @@ store, Session and attachment.
 
 ## Launch-name wording
 
-Done. `Run` has the four variants, the delete list is gone from `rust/` and
+Done. `LaunchKind` has the four variants, the delete list is gone from `rust/` and
 `docs/`, and the glossary, `docs/dev/index.md`, `docs/dev/machines.md`,
 `docs/sessions.md`, the transport README and the `transport.rs` resume comments
 name launch kinds rather than places or lifetimes.
@@ -101,6 +105,8 @@ exercises all four harnesses against stand-in providers.
 
 ## Local checks, 2026-11-17
 
+- After the second-review build: `cargo clippy --all-targets -- -D warnings` clean; `cargo nextest run -p loopflow -p loopflow-execution --lib --test integration -E 'test(transport::tests::) | test(harness::launch_matrix) | test(harness::context::) | test(context_block::) | test(run::launch_policy_tests::) | test(documented_commands::) | test(harness::native_session::) | test(human_session::)'` passed 105/105. No local test drives `lf task run`'s detach; gate's Task run fixtures cover it.
+
 - `cargo build -p loopflow --bin lf` and `cargo fmt --all --check` passed.
 - Focused `cargo nextest run -p loopflow -p loopflow-execution --lib --test integration` with the launch matrix, transport classification, launch policy, Claude and Pi hooks, credential and transcript checks, and documented commands passed all 23 tests. macOS linked with the previously observed compact-unwind warning.
 - `uv run python scripts/check_architecture.py` and `uv run --extra test pytest -q tests/test_portable_architecture.py` from `website/` passed. The portable HTML was regenerated.
@@ -114,27 +120,11 @@ Jack: "1a 2 --d ont really care but dont be biased by my previous answers. just
 do whatevers cleanest 3b. thats landing soon tho so tell them asap 4a 5n".
 "5n" is read as 5b (hand to LOO-958); n sits beside b.
 
-To build, with no behavior change:
-
-1. **Worker is only managed and headless.** `lf task run` detaching from its
-   terminal is that command's own fact, not a launch kind. Give it its own
-   call before any launch; drop the `worker: bool` argument of
-   `delegate_current` and the `run == Worker && graph_step()` test in
-   `delegate`, so a Worker always runs `Here` and only a work session is
-   handed to the holder. Keep `lf -b task run` waiting for the Graph as it
-   does today. Steps of a Task's Graph (`LF_GRAPH_STEP=worker`) and Discord
-   Wave answers stay workers.
-2. **Rename `harness::Run` to `LaunchKind`** (fields and variables `kind`).
-   The docs already say "launch kind"; "Run" also means a Graph's execution
-   (LOO-953) and a headless Session in the `lf resume` refusal.
-3. **Glossary rows lead with what a person sees**, mechanism second. Work
-   session: the conversation of a Task, Wave or repository; the server keeps
-   it running when its window closes and tells it about steers while idle.
-   Chat: a conversation in your terminal that ends with it. Worker: a headless
-   step of a Task's Graph (or a Discord Wave answer) the server follows turn by
-   turn. Batch: one headless answer returned to its caller. Turn reports stay
-   in the Managed and Bare rows. Say these are kinds of launch, and that a
-   Session can change kind (a chat bound to a Task reopens as a work session).
+Built 2026-11-17, no behavior change: `lf task run` detaches through
+`transport::detach_current` before any launch, so `delegate` hands only a work
+session to the holder; `harness::Run` is `LaunchKind` (fields and variables
+`kind`, `transport::session_kind`); the glossary rows lead with what a person
+sees and say a Session can change kind.
 
 Not in this PR, handed to LOO-958: the refusal text "`ID is a Run (…); lf
 resume takes only Sessions`", and checking whether a work session that is

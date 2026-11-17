@@ -21,8 +21,10 @@ holder to start the agent on a PTY and keeps everything else: the terminal
 registry, one libghostty-vt terminal per held terminal, views, viewing
 records, queued input, the child's control requests and exit settlement.
 
-Transport selects `Run` before `delegate` carries it out. Launches are bare or
-managed, with [four launch names](../../../../docs/glossary.md#loopflows-words):
+Transport selects a `LaunchKind` before `delegate` carries it out. Launches
+are bare or managed, with [four launch names](../../../../docs/glossary.md#loopflows-words).
+Only a work session goes to a held terminal; every other kind runs in its
+caller's process.
 
 | Command | Launch | Lifetime |
 |---|---|---|
@@ -34,6 +36,10 @@ managed, with [four launch names](../../../../docs/glossary.md#loopflows-words):
 | Headless steps of `lf task run` or `lf ship`, and the `ci-fix` run landing starts | worker | headless until the step or repair ends |
 | A Discord answer for a Wave | worker | returns the answer to the bridge |
 | Desktop Task shells | held shell | independent of its viewer, no hooks |
+
+`lf task run` starts no agent itself. `transport::detach_current` reruns it
+detached from its terminal so the Graph outlives the caller; `lf -b task run`
+waits for it.
 
 To open a work session from the CLI, `lf` calls `session.start` and becomes
 a view of the returned terminal. With the server unreachable it fails with

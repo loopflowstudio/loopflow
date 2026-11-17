@@ -106,7 +106,11 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
         context_file: context_file.as_ref().map(|file| file.path().to_path_buf()),
         ..ProcessConfig::default()
     };
-    let result = run_agent(&config, &process, loopflow_execution::harness::Run::Batch);
+    let result = run_agent(
+        &config,
+        &process,
+        loopflow_execution::harness::LaunchKind::Batch,
+    );
     let outcome = match &result {
         Ok(result) if result.exit_code == 0 => "completed",
         Ok(_) | Err(_) => "failed",

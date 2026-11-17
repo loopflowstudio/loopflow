@@ -22,11 +22,11 @@ Native and headless launches share `Launch` and the same per-harness `Harness`.
 one headless provider turn. Native results retain the provider's OS exit status;
 headless results retain answer text and typed turn failures for retry policy.
 
-The four `Run` variants match the [glossary's launch names](../../../../docs/glossary.md#loopflows-words).
+The four `LaunchKind` variants match the [glossary's launch names](../../../../docs/glossary.md#loopflows-words).
 
 Work sessions and workers report turns to the Machine server. Chats and
 batches read their steers directly and report no turn boundaries.
-Transport selects `Run` once before `delegate` carries it out. Workers run
+Transport selects `LaunchKind` once before `delegate` carries it out. Workers run
 `lf task run` steps, the `ci-fix` run landing starts, and Discord answers for a
 Wave. In-process callers such as commit messages, PR text and replay are
 batches. Task attribution never changes this choice. Resume reads the

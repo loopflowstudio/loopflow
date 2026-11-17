@@ -1,5 +1,5 @@
 //! Pi 1.3 RPC transport. Pi owns models, credentials and its JSONL conversation.
-use crate::harness::Run;
+use crate::harness::LaunchKind;
 use std::collections::HashMap;
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
@@ -64,7 +64,7 @@ pub struct Driver {
     state: Arc<Mutex<State>>,
     config: AgentConfig,
     owner: Recording,
-    run: Run,
+    kind: LaunchKind,
     session: Option<AgentSessionId>,
     child: Option<Child>,
     stdin: Option<ChildStdin>,
@@ -161,7 +161,7 @@ impl Driver {
             state: Arc::default(),
             config: launch.config.clone(),
             owner: launch.recording.clone(),
-            run: launch.run,
+            kind: launch.kind,
             session: launch.start.thread(),
             child: None,
             stdin: None,
@@ -245,7 +245,7 @@ impl Driver {
         command.args(super::context::pi_args(
             config.conversation_context.as_ref(),
             false,
-            self.run,
+            self.kind,
         )?);
         super::configure_agent_env(&mut command, config);
         if let Some(context) = &config.conversation_context {
@@ -259,7 +259,7 @@ impl Driver {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        let mut child = super::agent_process::spawn(command, None, &owner, self.run)
+        let mut child = super::agent_process::spawn(command, None, &owner, self.kind)
             .with_context(|| crate::agent::missing_agent_message(super::HarnessKind::Pi))?;
         let Recording {
             store,
@@ -760,7 +760,7 @@ impl super::Harness for Pi {
             .args(super::context::pi_args(
                 launch.config.conversation_context.as_ref(),
                 true,
-                launch.run,
+                launch.kind,
             )?)
             .args(args);
         Ok(client)

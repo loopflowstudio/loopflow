@@ -533,7 +533,7 @@ reported, never started by an attachment attempt.
 
 ## Turn and tool boundaries
 
-`Launch::run` carries whether a launch is bare or managed and its mode.
+`Launch::kind` carries whether a launch is bare or managed and its mode.
 [Work sessions, workers, chats and batches are defined here](../../../../docs/glossary.md#loopflows-words).
 `transport::delegate_current` selects chats or batches for skill and Graph
 commands launched in the caller's terminal or pipe. `lf -b resume <ID> --message TEXT`

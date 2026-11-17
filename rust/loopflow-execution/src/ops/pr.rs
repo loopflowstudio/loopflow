@@ -548,7 +548,7 @@ pub fn generate_pr_copy(
         ..Default::default()
     };
 
-    let result = run_agent(&launch, &process, crate::harness::Run::Batch)
+    let result = run_agent(&launch, &process, crate::harness::LaunchKind::Batch)
         .map_err(|err| OpsError::Message(format!("failed to generate PR copy: {err}")))?;
     if result.exit_code != 0 {
         return Err(OpsError::Message(format!(

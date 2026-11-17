@@ -379,7 +379,7 @@ fn process_skill_agent(
         ..Default::default()
     };
 
-    let result = run_agent(&launch, &process, crate::harness::Run::Batch);
+    let result = run_agent(&launch, &process, crate::harness::LaunchKind::Batch);
     let outcome = match &result {
         Ok(result) if result.exit_code == 0 => "completed",
         Ok(_) | Err(_) => "failed",

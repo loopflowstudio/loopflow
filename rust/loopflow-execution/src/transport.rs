@@ -222,7 +222,7 @@ pub fn current() -> Option<&'static TerminalId> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Delegation {
     Delegated,
-    Here { run: crate::harness::Run },
+    Here { kind: crate::harness::LaunchKind },
 }
 
 /// Inputs that select the native client or stream driver before delegation.
@@ -248,16 +248,49 @@ impl LaunchInput {
     }
 }
 
+/// `lf task run` leaves its terminal: the Graph it starts outlives the caller,
+/// and `lf -b task run` waits for it. Returns whether a detached child ran the
+/// command; in a held terminal, an already detached process or a Graph step it
+/// runs here.
+pub fn detach_current() -> Result<bool> {
+    if cfg!(test)
+        || current().is_some()
+        || crate::os_process::detached::launched()
+        || crate::journal::graph_step()
+    {
+        return Ok(false);
+    }
+    let cwd = std::env::current_dir()?;
+    let mut argv: Vec<String> = std::env::args().collect();
+    crate::journal::admit_process(&cwd, &argv);
+    crate::journal::current_lf_process_id().context(
+        "Execution requires an admitted invocation; check the process ledger and caller provenance",
+    )?;
+    argv[0] = std::env::current_exe()?.to_string_lossy().into_owned();
+    let code = crate::os_process::detached::run(&argv, &cwd, false, &|command| {
+        // No terminal shows detached work; it claims none.
+        command
+            .env_remove(STREAM_ENV)
+            .env_remove("LF_TERMINAL_ID")
+            .env_remove("LF_TERMINAL_TTY")
+            .env_remove(crate::ops::human_session::LAUNCH_LOCK_ENV);
+    })?;
+    if code != 0 {
+        return Err(crate::process::CommandExit(code).into());
+    }
+    Ok(true)
+}
+
 /// Delegate a direct command; Task attribution never changes its lifetime.
-pub fn delegate_current(input: LaunchInput, worker: bool) -> Result<Delegation> {
+pub fn delegate_current(input: LaunchInput) -> Result<Delegation> {
     let argv: Vec<String> = std::env::args().collect();
     delegate(
-        if worker || crate::journal::worker_step() {
-            crate::harness::Run::Worker
+        if crate::journal::worker_step() {
+            crate::harness::LaunchKind::Worker
         } else if current().is_some() {
-            crate::harness::Run::WorkSession
+            crate::harness::LaunchKind::WorkSession
         } else {
-            crate::harness::Run::bare(input.mode())
+            crate::harness::LaunchKind::bare(input.mode())
         },
         None,
         None,
@@ -280,7 +313,7 @@ pub(crate) fn delegate_session(
         argv.retain(|arg| arg != "--json");
     }
     delegate(
-        session_run(id),
+        session_kind(id),
         json.then_some(id),
         preview.then_some(id),
         argv,
@@ -292,7 +325,7 @@ pub(crate) fn delegate_session(
 /// repeating the command that prepared it.
 pub(crate) fn delegate_prepared_session(id: &str, json: bool) -> Result<Delegation> {
     delegate(
-        session_run(id),
+        session_kind(id),
         json.then_some(id),
         Some(id),
         vec![String::new(), "session".into(), "resume".into(), id.into()],
@@ -302,11 +335,11 @@ pub(crate) fn delegate_prepared_session(id: &str, json: bool) -> Result<Delegati
 
 /// Chats reopen as chats; bound and primary Sessions as work sessions. A held
 /// child keeps its parent's choice.
-fn session_run(id: &str) -> crate::harness::Run {
-    use crate::harness::Run;
+fn session_kind(id: &str) -> crate::harness::LaunchKind {
+    use crate::harness::LaunchKind;
 
     if current().is_some() {
-        return Run::WorkSession;
+        return LaunchKind::WorkSession;
     }
     static GAP: LazyLock<Mutex<crate::store::RecordingGap>> = LazyLock::new(Default::default);
     let bare = crate::journal::process_ledger().and_then(|store| {
@@ -321,17 +354,16 @@ fn session_run(id: &str) -> crate::harness::Run {
         Err(error) => gap.note("resume lifetime", error),
     }
     if matches!(bare, Ok(Some(true))) {
-        Run::Chat
+        LaunchKind::Chat
     } else {
-        Run::WorkSession
+        LaunchKind::WorkSession
     }
 }
 
-/// Carry out the selected lifetime before admission or provider effects.
-/// Conversations use held terminals; direct commands keep their caller and
-/// Graphs use workers.
+/// Carry out the selected launch kind before admission or provider effects.
+/// A work session runs in a held terminal; every other kind runs here.
 fn delegate(
-    run: crate::harness::Run,
+    kind: crate::harness::LaunchKind,
     json_session: Option<&str>,
     preview_session: Option<&str>,
     mut argv: Vec<String>,
@@ -340,10 +372,9 @@ fn delegate(
     if cfg!(test)
         || current().is_some()
         || crate::os_process::detached::launched()
-        || !run.is_managed()
-        || (run == crate::harness::Run::Worker && crate::journal::graph_step())
+        || kind != crate::harness::LaunchKind::WorkSession
     {
-        return Ok(Delegation::Here { run });
+        return Ok(Delegation::Here { kind });
     }
     let cwd = std::env::current_dir()?;
     crate::journal::admit_process(&cwd, &std::env::args().collect::<Vec<_>>());
@@ -351,20 +382,6 @@ fn delegate(
         "Execution requires an admitted invocation; check the process ledger and caller provenance",
     )?;
     argv[0] = std::env::current_exe()?.to_string_lossy().into_owned();
-    if run == crate::harness::Run::Worker {
-        let code = crate::os_process::detached::run(&argv, &cwd, false, &|command| {
-            // No terminal shows detached work; it claims none.
-            command
-                .env_remove(STREAM_ENV)
-                .env_remove("LF_TERMINAL_ID")
-                .env_remove("LF_TERMINAL_TTY")
-                .env_remove(crate::ops::human_session::LAUNCH_LOCK_ENV);
-        })?;
-        if code != 0 {
-            return Err(crate::process::CommandExit(code).into());
-        }
-        return Ok(Delegation::Delegated);
-    }
     let preview = if std::env::var_os(STREAM_ENV).is_some() {
         if let Some(screen) = preview_session.and_then(snapshot::last_screen) {
             io::stdout().write_all(&wire::frame(Tag::Snapshot, &screen))?;
@@ -2831,7 +2848,7 @@ mod tests {
 #[cfg(test)]
 mod launch_mode_tests {
     use super::LaunchInput;
-    use crate::harness::{Mode, Run};
+    use crate::harness::{LaunchKind, Mode};
 
     #[test]
     fn mode_keeps_batch_interactive_tty_and_empty_prompt_semantics() {
@@ -2854,21 +2871,15 @@ mod launch_mode_tests {
 
     #[test]
     fn direct_commands_keep_their_mode_and_caller() {
-        for (batch, run) in [(true, Run::Batch), (false, Run::Chat)] {
+        for (batch, kind) in [(true, LaunchKind::Batch), (false, LaunchKind::Chat)] {
             let input = LaunchInput {
                 batch,
                 interactive: true,
                 has_prompt: true,
             };
             assert_eq!(
-                super::delegate_current(input, false).unwrap(),
-                super::Delegation::Here { run }
-            );
-            assert_eq!(
-                super::delegate_current(input, true).unwrap(),
-                super::Delegation::Here {
-                    run: crate::harness::Run::Worker
-                }
+                super::delegate_current(input).unwrap(),
+                super::Delegation::Here { kind }
             );
         }
     }
@@ -2878,15 +2889,15 @@ mod launch_mode_tests {
         let _lock = crate::journal::test_env_lock();
         let _env = crate::test_ambient::EnvGuard::new();
         std::env::set_var(crate::ops::WORK_DECLARATION_ENV, "task:inherited");
-        for (batch, run) in [(false, Run::Chat), (true, Run::Batch)] {
+        for (batch, kind) in [(false, LaunchKind::Chat), (true, LaunchKind::Batch)] {
             let input = LaunchInput {
                 batch,
                 interactive: true,
                 has_prompt: true,
             };
             assert_eq!(
-                super::delegate_current(input, false).unwrap(),
-                super::Delegation::Here { run }
+                super::delegate_current(input).unwrap(),
+                super::Delegation::Here { kind }
             );
         }
     }
@@ -2903,42 +2914,42 @@ mod launch_mode_tests {
             // Attribution selects a launch kind independently of the stored
             // surface. Resume eligibility is checked before delegation.
             for (surface, source, bound, primary, expected) in [
-                ("headless", None, false, false, Run::Chat),
-                ("interactive", None, false, false, Run::Chat),
+                ("headless", None, false, false, LaunchKind::Chat),
+                ("interactive", None, false, false, LaunchKind::Chat),
                 (
                     "interactive",
                     Some(WorkSource::Checkout),
                     false,
                     false,
-                    Run::Chat,
+                    LaunchKind::Chat,
                 ),
                 (
                     "interactive",
                     Some(WorkSource::Declared),
                     false,
                     false,
-                    Run::Chat,
+                    LaunchKind::Chat,
                 ),
                 (
                     "interactive",
                     Some(WorkSource::Inherited),
                     false,
                     false,
-                    Run::Chat,
+                    LaunchKind::Chat,
                 ),
                 (
                     "interactive",
                     Some(WorkSource::Bound),
                     true,
                     false,
-                    Run::WorkSession,
+                    LaunchKind::WorkSession,
                 ),
                 (
                     "interactive",
                     Some(WorkSource::Declared),
                     false,
                     true,
-                    Run::WorkSession,
+                    LaunchKind::WorkSession,
                 ),
             ] {
                 let capture = SessionRecorder::begin_at(
@@ -2982,12 +2993,12 @@ mod launch_mode_tests {
                 assert_eq!(
                     super::delegate_session(&session.id, false, surface == "interactive", true)
                         .unwrap(),
-                    super::Delegation::Here { run: expected },
+                    super::Delegation::Here { kind: expected },
                     "surface={surface}, source={source:?}, bound={bound}, primary={primary}",
                 );
                 assert_eq!(
                     super::delegate_prepared_session(session.id.as_str(), false).unwrap(),
-                    super::Delegation::Here { run: expected },
+                    super::Delegation::Here { kind: expected },
                     "prepared: source={source:?}, bound={bound}, primary={primary}",
                 );
                 assert_eq!(
@@ -3009,7 +3020,7 @@ mod launch_mode_tests {
         assert_eq!(
             super::delegate_prepared_session("unreadable-session", false).unwrap(),
             super::Delegation::Here {
-                run: crate::harness::Run::WorkSession
+                kind: crate::harness::LaunchKind::WorkSession
             }
         );
     }

@@ -1,4 +1,4 @@
-use crate::harness::Run;
+use crate::harness::LaunchKind;
 use crate::journal::OsProcess;
 use crate::transcript::is_user_input;
 use crate::transcript::json_lines;
@@ -55,7 +55,7 @@ pub struct Driver {
     events: mpsc::UnboundedSender<ConversationEvent>,
     config: AgentConfig,
     owner: Recording,
-    run: Run,
+    kind: LaunchKind,
     runtime: Option<crate::process::LfProcessRuntime>,
     should_seed_task_prompt: bool,
     skill_input: Option<String>,
@@ -105,7 +105,7 @@ impl Driver {
             events,
             config: launch.config.clone(),
             owner: launch.recording.clone(),
-            run: launch.run,
+            kind: launch.kind,
             runtime: None,
             should_seed_task_prompt: true,
             skill_input: None,
@@ -178,7 +178,7 @@ impl Driver {
         let mut cmd = Command::new("claude");
         cmd.args(&args);
         if let Some(context) = &config.conversation_context {
-            cmd.args(super::context::claude_args(context, self.run)?);
+            cmd.args(super::context::claude_args(context, self.kind)?);
         }
         super::configure_agent_env(&mut cmd, config);
         if let Some(context) = &config.conversation_context {
@@ -190,12 +190,11 @@ impl Driver {
         if let Some(cwd) = &config.cwd {
             cmd.current_dir(cwd);
         }
-        let run = self.run;
         super::configure_vendor_std_env(cmd.as_std_mut())?;
         self.shutdown_requested.store(false, Ordering::SeqCst);
 
         let owner = self.owner.clone();
-        let mut child = super::agent_process::spawn(cmd, None, &owner, run)?;
+        let mut child = super::agent_process::spawn(cmd, None, &owner, self.kind)?;
         let stdin = child
             .stdin
             .take()
@@ -1625,7 +1624,7 @@ impl super::Harness for Claude {
                     .config
                     .conversation_context
                     .as_ref()
-                    .map(|context| super::context::claude_args(context, launch.run))
+                    .map(|context| super::context::claude_args(context, launch.kind))
                     .transpose()?
                     .unwrap_or_default(),
             )

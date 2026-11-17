@@ -274,14 +274,14 @@ pub enum Mode {
 
 /// Launch kind, independently of Task attribution.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Run {
+pub enum LaunchKind {
     Chat,
     Batch,
     WorkSession,
     Worker,
 }
 
-impl Run {
+impl LaunchKind {
     pub fn bare(mode: Mode) -> Self {
         match mode {
             Mode::Interactive => Self::Chat,
@@ -398,8 +398,8 @@ pub struct ThreadNaming {
 }
 
 impl ThreadNaming {
-    pub fn for_run(self, run: Run) -> ThreadName {
-        if run.is_managed() {
+    pub fn for_kind(self, kind: LaunchKind) -> ThreadName {
+        if kind.is_managed() {
             self.managed
         } else {
             self.bare
@@ -443,7 +443,7 @@ impl<'a> Start<'a> {
 pub struct Launch<'a> {
     pub config: &'a AgentConfig,
     pub harness: &'static dyn Harness,
-    pub run: Run,
+    pub kind: LaunchKind,
     pub recording: &'a Recording,
     pub start: Start<'a>,
     pub context_file: Option<&'a std::path::Path>,
@@ -453,7 +453,7 @@ impl Launch<'_> {
     pub fn thread(&self) -> Result<Option<AgentSessionId>> {
         let naming = self.harness.capabilities().thread;
         match self.start.thread() {
-            None if naming.for_run(self.run) == ThreadName::Assigned => {
+            None if naming.for_kind(self.kind) == ThreadName::Assigned => {
                 self.recording.assigned_thread().map(Some)
             }
             thread => Ok(thread),
@@ -661,7 +661,7 @@ pub fn launch_for_test<'a>(
         config,
         recording,
         harness: kind.harness(),
-        run: Run::Batch,
+        kind: LaunchKind::Batch,
         start: Start::from_thread(config.resume_token.as_ref()),
         context_file: None,
     }

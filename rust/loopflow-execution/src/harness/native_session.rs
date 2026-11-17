@@ -1,6 +1,6 @@
 //! Native provider launch and continuation of a recorded conversation.
 
-use crate::harness::Run;
+use crate::harness::LaunchKind;
 use anyhow::{anyhow, bail, Result};
 use std::collections::BTreeMap;
 use std::fs::File;
@@ -96,7 +96,7 @@ impl NativeClient {
 
 pub fn launch_session(
     config: &AgentConfig,
-    run: Run,
+    kind: LaunchKind,
     context_file: Option<&Path>,
     capture: Option<&LfProcessRuntime>,
 ) -> Result<NativeOutcome> {
@@ -122,7 +122,7 @@ pub fn launch_session(
                 &Launch {
                     config: &config,
                     harness,
-                    run,
+                    kind,
                     recording: &recording,
                     start: Start::New,
                     context_file,
@@ -141,14 +141,14 @@ pub fn launch_session(
 pub(crate) fn resume_session(
     artifact_key: &String,
     provider_session: &crate::session_record::ProviderSessionRef,
-    run: Run,
+    kind: LaunchKind,
 ) -> Result<()> {
     resume_session_with_env(
         artifact_key,
         Some(provider_session),
         &BTreeMap::new(),
         None,
-        run,
+        kind,
     )
 }
 
@@ -158,7 +158,7 @@ pub fn resume_session_with_env(
     provider_session: Option<&crate::session_record::ProviderSessionRef>,
     extra_environment: &BTreeMap<String, String>,
     launch_lock: Option<File>,
-    run: Run,
+    kind: LaunchKind,
 ) -> Result<()> {
     let store = crate::store::open_sqlite(&crate::store::database_path_from_env()?)?;
     let session = store
@@ -175,7 +175,7 @@ pub fn resume_session_with_env(
     );
     // A held Codex sends its first turn only to a thread with none; any other
     // resumed thread already has it.
-    let sends_first_turn = harness.capabilities().initial_prompt_on_resume && run.is_managed();
+    let sends_first_turn = harness.capabilities().initial_prompt_on_resume && kind.is_managed();
     if provider_session.is_some() && !sends_first_turn {
         config.task_prompt.clear();
     }
@@ -202,7 +202,7 @@ pub fn resume_session_with_env(
             &Launch {
                 config: &config,
                 harness,
-                run,
+                kind,
                 recording: &recording,
                 start: Start::from_thread(provider_session.map(|provider| &provider.agent_session)),
                 context_file: context_file.as_deref(),
@@ -211,7 +211,7 @@ pub fn resume_session_with_env(
             capture.as_ref(),
         );
         finish_admission(&recording, capture, &result);
-        result?.result(harness.kind(), provider_session.is_some(), run)
+        result?.result(harness.kind(), provider_session.is_some(), kind)
     })
 }
 
@@ -309,10 +309,15 @@ impl NativeOutcome {
     /// A bare launch ends as its provider would alone, with the provider's
     /// own status, unless a mover took its conversation; only a held
     /// conversation can have another client.
-    pub fn result(&self, kind: super::HarnessKind, resuming: bool, run: Run) -> Result<()> {
-        let program = kind.as_str();
-        if !run.is_managed() && self.moved.is_none() {
-            match self.bare_exit_code(kind) {
+    pub fn result(
+        &self,
+        harness: super::HarnessKind,
+        resuming: bool,
+        kind: LaunchKind,
+    ) -> Result<()> {
+        let program = harness.as_str();
+        if !kind.is_managed() && self.moved.is_none() {
+            match self.bare_exit_code(harness) {
                 0 => Ok(()),
                 code => Err(crate::process::CommandExit(code).into()),
             }
@@ -614,7 +619,7 @@ fn run_client(
     // starts it fresh instead of resuming one that never ran. A Session's
     // first launch (`lf resume` starting a repository conversation) names no
     // Work on its command line; its recorded Session does.
-    if launch.run.is_managed() {
+    if launch.kind.is_managed() {
         crate::harness::agent_process::require_server()?;
     }
     if let (Some(capture_dir), Some(agent_session)) = (capture_dir.as_deref(), agent_session) {
@@ -652,7 +657,7 @@ fn run_client(
                     Some(owner) => crate::harness::agent_process::exec_native(
                         std::mem::replace(process, Command::new(program)),
                         owner,
-                        launch.run,
+                        launch.kind,
                         launch_lock,
                     ),
                     None => {
@@ -682,7 +687,7 @@ fn run_client(
         Some(owner) => crate::harness::agent_process::spawn_native(
             std::mem::replace(process, Command::new(program)),
             owner,
-            launch.run,
+            launch.kind,
         ),
         None => {
             let Recording {
@@ -817,7 +822,7 @@ mod tests {
     use super::{departure_notice, launch_session, resume_session_with_env};
     use super::{Launch, NativeClient, Start};
     use crate::agent::AgentConfig;
-    use crate::harness::Run;
+    use crate::harness::LaunchKind;
     use crate::provider_auth::Provider;
     use crate::store::{CredentialType, ProviderToken, StorageConfig};
     use std::collections::BTreeMap;
@@ -960,7 +965,7 @@ mod tests {
             let launch = Launch {
                 config: &config,
                 harness: super::super::HarnessKind::Claude.harness(),
-                run: Run::Batch,
+                kind: LaunchKind::Batch,
                 recording: &recording,
                 start: Start::New,
                 context_file: None,
@@ -1016,7 +1021,13 @@ mod tests {
             temp.path(),
             &capture.environment(),
         )
-        .and_then(|outcome| outcome.result(crate::harness::HarnessKind::Claude, false, Run::Batch))
+        .and_then(|outcome| {
+            outcome.result(
+                crate::harness::HarnessKind::Claude,
+                false,
+                LaunchKind::Batch,
+            )
+        })
         .expect_err("a failed provider fails its launch")
     }
 
@@ -1110,7 +1121,7 @@ mod tests {
                     Some(&session),
                     &BTreeMap::new(),
                     None,
-                    Run::Batch,
+                    LaunchKind::Batch,
                 )
             };
             if index % 2 == 0 {
@@ -1218,7 +1229,7 @@ mod tests {
             Some(&session),
             &BTreeMap::new(),
             None,
-            Run::Batch,
+            LaunchKind::Batch,
         )
         .unwrap();
 
@@ -1258,7 +1269,11 @@ mod tests {
         });
         let result = native_fixture("/bin/sleep", vec!["10".into()], home, &BTreeMap::new())
             .and_then(|outcome| {
-                outcome.result(crate::harness::HarnessKind::Claude, false, Run::Batch)
+                outcome.result(
+                    crate::harness::HarnessKind::Claude,
+                    false,
+                    LaunchKind::Batch,
+                )
             });
         stop.join().unwrap().unwrap();
         result.unwrap();
@@ -1347,7 +1362,7 @@ mod tests {
                     session: session.id.to_string(),
                     attachment: original.clone(),
                 },
-                Run::Batch,
+                LaunchKind::Batch,
             )?;
             let endpoint = home.join("provider.sock");
             store.record_session_connection(
@@ -1382,7 +1397,7 @@ mod tests {
             let launch = Launch {
                 config: &config,
                 harness: super::super::HarnessKind::Claude.harness(),
-                run: Run::Batch,
+                kind: LaunchKind::Batch,
                 recording: &recording,
                 start: Start::New,
                 context_file: None,
@@ -1486,7 +1501,7 @@ mod tests {
             let launch = Launch {
                 config: &config,
                 harness: super::super::HarnessKind::Claude.harness(),
-                run: Run::Batch,
+                kind: LaunchKind::Batch,
                 recording: &recording,
                 start: Start::New,
                 context_file: None,
@@ -1594,7 +1609,7 @@ mod tests {
                 env: BTreeMap::new(),
                 ..crate::agent::AgentConfig::default()
             },
-            Run::Batch,
+            LaunchKind::Batch,
             None,
             None,
         )

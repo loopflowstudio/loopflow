@@ -1082,7 +1082,7 @@ mod tests {
                     crate::harness::native_session::resume_session(
                         &capture.artifact_key(),
                         &history,
-                        crate::harness::Run::Batch,
+                        crate::harness::LaunchKind::Batch,
                     )
                 },
             );

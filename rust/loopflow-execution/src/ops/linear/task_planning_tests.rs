@@ -902,10 +902,10 @@ fn assert_native_runner_is_quiet_until_its_turn_ends(agent: &str, task_bound: bo
                 fixture.directory.path(),
             )
         });
-        let run = if agent == "codex" {
-            crate::harness::Run::WorkSession
+        let kind = if agent == "codex" {
+            crate::harness::LaunchKind::WorkSession
         } else {
-            crate::harness::Run::Batch
+            crate::harness::LaunchKind::Batch
         };
         let launch = crate::agent::AgentConfig {
             agent: crate::config::Agent::parse(agent).unwrap(),
@@ -923,7 +923,7 @@ fn assert_native_runner_is_quiet_until_its_turn_ends(agent: &str, task_bound: bo
             let running = tokio::task::spawn_blocking(move || {
                 crate::journal::with_test_ledger(database, || {
                     LINEAR_TEST_CONTEXT
-                        .sync_scope(context, || crate::agent::run_agent(&launch, &process, run))
+                        .sync_scope(context, || crate::agent::run_agent(&launch, &process, kind))
                 })
             });
             let observed = tokio::time::timeout(std::time::Duration::from_secs(70), async {

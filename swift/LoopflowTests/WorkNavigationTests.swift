@@ -671,7 +671,7 @@ struct WorkNavigationTests {
         #expect(workspace.multiplexer.layout == layout)
     }
 
-    @Test("Failed reads keep last-good work and exact Sessions with a visible error")
+    @Test("Failed reads keep last-good work and exact Sessions; the Notice says why")
     func unavailableIsNotEmpty() async throws {
         let source = try ReadingSource(roadmap: roadmapJSON(), sessions: sessionsJSON())
         let model = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
@@ -685,7 +685,8 @@ struct WorkNavigationTests {
         #expect(model.projection.waves[0].tasks.map(\.id) == keys)
         #expect(model.projection.subject(for: "human") == model.selection)
         let view = WorkNavigator(model: model, onOpenSession: { _ in })
-        #expect(throws: Never.self) { try view.inspect().find(text: "Couldn't update: offline") }
+        #expect(throws: (any Error).self) { try view.inspect().find(text: "Couldn't update: offline") }
+        #expect(model.navigation.notices.current?.text.hasSuffix("couldn't be read: offline") == true)
     }
 
     @Test("Returning to a repository retains its last-good Sessions when refresh fails")
@@ -956,7 +957,7 @@ struct WorkNavigationTests {
         #expect(workspace.multiplexer.focusedPaneId == pane)
     }
 
-    @Test("Workflow loading, unavailable and absent readings remain distinct")
+    @Test("Workflow loading, absent and failed readings: a failure shows the last good one or nothing")
     func workflowReadingStates() async throws {
         let model = try model()
         await model.refresh()
@@ -966,14 +967,14 @@ struct WorkNavigationTests {
         #expect(try loading.inspect().find(text: "Reading workflow…").string() == "Reading workflow…")
         #expect(throws: (any Error).self) { try loading.inspect().find(text: "No workflow selected") }
         let missing = TaskWorkflowHeader(model: model, task: found.task, work: .unavailable(lastGood: nil, reason: "Offline"))
-        #expect(try missing.inspect().find(text: "Workflow could not be read: Offline").string() == "Workflow could not be read: Offline")
+        #expect(throws: (any Error).self) { try missing.inspect().find(text: "Reading workflow…") }
+        #expect(throws: (any Error).self) { try missing.inspect().find(text: "No workflow selected") }
         let absent = TaskWorkflowHeader(model: model, task: found.task, work: .available(empty))
         let selection = found.task.graphName.map { "\($0) · \(found.task.graphSource ?? "")" } ?? "No workflow selected"
         #expect(try absent.inspect().find(text: selection).string() == selection)
         let stale = TaskWorkflowHeader(model: model, task: found.task, work: .unavailable(lastGood: empty, reason: "Offline"))
-        #expect(try stale.inspect().find(text: "Workflow could not be read: Offline").string() == "Workflow could not be read: Offline")
-        #expect(throws: (any Error).self) { try stale.inspect().find(text: "No workflow selected") }
-        #expect(throws: (any Error).self) { try stale.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-start") }
+        #expect(try stale.inspect().find(text: selection).string() == selection)
+        #expect(throws: (any Error).self) { try stale.inspect().find(text: "Workflow could not be read: Offline") }
     }
 
     @Test("Session rename is scoped to its draft without a second breadcrumb")
@@ -1284,6 +1285,10 @@ private actor ReadingSource {
         case "session" where args.dropFirst().first == "list": return #"{"entries":\#(sessions),"next":null}"#
         case "wave" where args.dropFirst().first == "list": return "[]"
         case "session" where args.dropFirst().first == "history": return #"{"truncated":false,"items":[]}"#
+        case "repo" where args.dropFirst().first == "plan": return #"{"destinations":[]}"#
+        case "desktop" where args.dropFirst().prefix(2) == ["view", "show"]:
+            return String(decoding: try JSONEncoder().encode(fixtureViewPlan(
+                owner: .init(repository: "repo", kind: .repository, id: "repo"), members: [])), as: UTF8.self)
         default: throw RegistryQueryError("unexpected command")
         }
     }

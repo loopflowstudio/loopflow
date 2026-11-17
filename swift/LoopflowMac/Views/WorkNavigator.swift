@@ -32,14 +32,14 @@ struct WorkNavigator: View {
         return filter == .working ? scope : "\(scope) · \(filter.rawValue)"
     }
 
-    /// Nil while the list loads: the work status above already says so, and an empty list is not yet known.
+    /// Nil until the list is read: the work status above says it is loading, and
+    /// a failed read is the Notice's.
     private var emptyListText: String? {
         switch model.navigation.sidebarScope {
         case .dashboard(let id):
             return model.dashboard(id) == nil ? "This Dashboard is no longer available." : "No Tasks in this Dashboard"
         case .repository, .wave:
-            if model.taskListReading.isLoading { return nil }
-            if model.taskListReading.failure != nil { return "Task list unavailable" }
+            if model.taskListReading.value == nil { return nil }
             if case .wave = model.navigation.sidebarScope { return "No working Tasks in this Wave" }
             return "No working Tasks in this list"
         }
@@ -60,13 +60,8 @@ struct WorkNavigator: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if let status = model.workStatus.message {
-                WorkReadStatus(model: model, status: status)
-            }
-            if let error = model.selectionPlans.failure,
-               ![model.roadmap.failure, model.taskListReading.failure, model.sessions.failure]
-                .compactMap({ $0 }).contains(error) {
-                Text(error).font(Typography.body(11)).foregroundStyle(palette.warning).padding(10)
+            if let status = model.workStatus.progress {
+                WorkReadStatus(status: status)
             }
             // The repository tops the sidebar; a selected Wave moves up under it.
             VStack(alignment: .leading, spacing: 5) {
@@ -924,15 +919,8 @@ struct WorkTaskIdentity: View {
 }
 
 struct WorkReadStatus: View {
-    let model: WorkModel
     let status: String
     var body: some View {
-        HStack {
-            Text(status)
-            if case .failed = model.workStatus {
-                Button("Retry") { Task { await model.refresh() } }
-                    .accessibilityIdentifier("work-retry")
-            }
-        }.font(Typography.body(11)).padding(10).accessibilityIdentifier("work-status")
+        Text(status).font(Typography.body(11)).padding(10).accessibilityIdentifier("work-status")
     }
 }

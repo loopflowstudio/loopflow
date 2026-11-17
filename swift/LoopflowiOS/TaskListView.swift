@@ -19,7 +19,12 @@ extension TaskList {
 @Observable
 final class TaskFeed {
     /// The last reading; while reads fail it keeps what the list showed and the Notice says why.
-    private(set) var tasks: Reading<[RepositoryTasks]> = .loading
+    private(set) var tasks: Reading<[RepositoryTasks]> = .loading {
+        didSet {
+            notices.read("tasks", "Tasks", from: oldValue.failure, to: tasks.failure, link: pendingChanges.link,
+                         action: Notice.Action("Try again") { [weak self] in Task { await self?.start() } })
+        }
+    }
     private(set) var waves: [Wave] = []
     /// This Machine's changes shown before the reading that shows them.
     let pendingChanges: PendingChanges
@@ -90,12 +95,9 @@ final class TaskFeed {
         repositories.first { $0.tasks.contains { $0.work == task.work } }?.path
     }
 
-    /// A read failed: the list keeps what it showed. Away says so once instead.
+    /// A read failed: the list keeps what it showed.
     private func failed(_ message: String) {
         tasks = tasks.failed(message)
-        guard pendingChanges.acceptsChanges else { return }
-        notices.post(Notice("Tasks couldn't be updated: \(message)", key: "tasks",
-                            action: Notice.Action("Try again") { [weak self] in Task { await self?.start() } }))
     }
 
     private var subscription: String { "tasks-\(filter.rawValue)\(wave.map { "-\($0)" } ?? "")" }
@@ -135,7 +137,6 @@ final class TaskFeed {
                         continue
                     }
                     guard self.tasks.yields(to: update) else { continue }
-                    if self.failed { self.notices.clear(key: "tasks") }
                     if update != self.tasks { self.tasks = update }
                     Perf.launch("tasks_current")
                     self.reading += 1

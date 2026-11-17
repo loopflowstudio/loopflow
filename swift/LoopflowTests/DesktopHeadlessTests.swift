@@ -276,7 +276,7 @@ struct DesktopHeadlessTests {
         ])
         feed.send(WorkFrame(sequence: 8, answers: 3, unavailable: "offline", content: .task(nil), wire: nil))
         try await eventually { model.taskWork[task.id].failure == "offline" }
-        _ = try log.inspect().find(text: "Graph processes could not be read: offline")
+        #expect(model.navigation.notices.current?.text == "The Task couldn't be read: offline")
         _ = try log.inspect().find(viewWithAccessibilityIdentifier: "task-work-44444444-4444-4444-8444-444444444444")
     }
 
@@ -308,7 +308,8 @@ struct DesktopHeadlessTests {
         #expect(model.paletteIsStale)
         #expect(model.navigation.palette == .workflow("feature"))
         let view = WorkflowCatalogInspector(entry: retained?.first, model: model)
-        _ = try view.inspect().find(text: "catalog unreadable")
+        #expect(model.navigation.notices.current?.text == "Graphs couldn't be read: catalog unreadable")
+        #expect(throws: (any Error).self) { try view.inspect().find(text: "catalog unreadable") }
         _ = try view.inspect().find(button: "Refresh")
     }
 
@@ -572,7 +573,7 @@ struct DesktopHeadlessTests {
         #expect(try session("run").statusLabel == "Session")
     }
 
-    @Test("Loading, unavailable, empty and selected Work have distinct content")
+    @Test("Loading, unread, empty and selected Work have distinct content")
     func workStates() async throws {
         let query = RegistryQuery { _, _ in throw RegistryQueryError("Unexpected external read") }
         let model = WorkModel(query: query)
@@ -582,7 +583,10 @@ struct DesktopHeadlessTests {
         model.applyFixture(roadmap: .unavailable(lastGood: nil, reason: "offline"),
                            waves: .available([]),
                            workActivity: .loading, repos: [])
-        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-work-unavailable")
+        // A failed first read stays empty: the Notice says why.
+        #expect(throws: (any Error).self) {
+            try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-work-loading")
+        }
         #expect(throws: (any Error).self) {
             try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-work-empty")
         }

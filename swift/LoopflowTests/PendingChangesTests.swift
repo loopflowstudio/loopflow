@@ -2,36 +2,40 @@ import Foundation
 @testable import Loopflow
 import Testing
 
-/// A Machine whose replies the test hands out one at a time.
+/// A Machine whose replies the test hands out one at a time, each to the
+/// next write sent, waiting for that write to arrive.
 @MainActor
 final class HeldMachine {
     private(set) var sent: [String] = []
     private var replies: [CheckedContinuation<Revisions?, any Error>] = []
+    private var waiting: [CheckedContinuation<Void, Never>] = []
 
     func send(_ write: ServedWrite, _ requestID: String) async throws -> Revisions? {
         sent.append(requestID)
-        return try await withCheckedThrowingContinuation { replies.append($0) }
+        return try await withCheckedThrowingContinuation { reply in
+            replies.append(reply)
+            if !waiting.isEmpty { waiting.removeFirst().resume() }
+        }
     }
 
     func answer(_ revisions: Revisions?) async {
-        await until { !self.replies.isEmpty }
-        replies.removeFirst().resume(returning: revisions)
+        await nextReply().resume(returning: revisions)
         await settle()
     }
 
     func fail(_ error: any Error) async {
-        await until { !self.replies.isEmpty }
-        replies.removeFirst().resume(throwing: error)
+        await nextReply().resume(throwing: error)
         await settle()
+    }
+
+    private func nextReply() async -> CheckedContinuation<Revisions?, any Error> {
+        if replies.isEmpty { await withCheckedContinuation { waiting.append($0) } }
+        return replies.removeFirst()
     }
 
     /// Lets the change's task run to its next suspension.
     func settle() async {
         for _ in 0..<50 { await Task.yield() }
-    }
-
-    func until(_ condition: () -> Bool) async {
-        for _ in 0..<10_000 where !condition() { await Task.yield() }
     }
 }
 
@@ -212,8 +216,9 @@ struct PendingChangesTests {
         await machine.fail(RegistryQueryError(ServerLink.disconnected))
         #expect(changes.link == .blip)
         #expect(changes.acceptsChanges)
-        await machine.until { self.machine.sent.count == 2 }
+        // The answer goes to the second send, under the first one's request ID.
         await machine.answer(Revisions(["planning": 5]))
+        #expect(machine.sent.count == 2)
         #expect(Set(machine.sent).count == 1)
         #expect(changes.link == .connected)
         #expect(changes.changes.first?.answer == Revisions(["planning": 5]))
@@ -250,6 +255,19 @@ struct PendingChangesTests {
         center.post(Notice("Tasks couldn't be read: offline", key: "task_list"))
         #expect(center.posted == posted + 1)
         center.clear(key: "task_list")
+        #expect(center.current == nil)
+    }
+
+    @Test func aReadPostsOnlyWhenItTurnsIntoAFailureOverALiveLink() {
+        let center = NoticeCenter()
+        center.read("sessions", "Sessions", from: nil, to: "offline", link: .blip)
+        #expect(center.current == nil)
+        center.read("sessions", "Sessions", from: nil, to: "offline", link: .connected)
+        #expect(center.current?.text == "Sessions couldn't be read: offline")
+        let posted = center.posted
+        center.read("sessions", "Sessions", from: "offline", to: "still offline", link: .connected)
+        #expect(center.posted == posted)
+        center.read("sessions", "Sessions", from: "still offline", to: nil, link: .connected)
         #expect(center.current == nil)
     }
 

@@ -165,10 +165,6 @@ struct WaveStandupBoard: View {
                     ShowHiddenMenu(model: model, view: view)
                 }
             }
-            if let error = model.roadmap.failure {
-                Text("Refresh failed · \(error)").foregroundStyle(palette.warning)
-                    .accessibilityIdentifier("wave-refresh-failed")
-            }
             switch model.standupTasks(view) {
             case .unavailable(let reason):
                 Text("\(scope) planning unavailable · \(reason)").font(Typography.body(15))

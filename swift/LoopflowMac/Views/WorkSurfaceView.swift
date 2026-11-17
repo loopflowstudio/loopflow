@@ -16,19 +16,10 @@ struct WorkSurfaceView: View {
     @State private var editingTask: RoadmapTask?
 
     private var snapshot: RoadmapSnapshot? { model.roadmap.value }
-    private var queryError: String? { model.roadmap.failure }
     private var visibleWaves: [WaveRoadmap] { model.visibleRoadmaps }
 
     var body: some View {
         VStack(spacing: 0) {
-            if let queryError {
-                evidenceBanner(
-                    title: snapshot == nil
-                        ? "Roadmap unavailable"
-                        : "Refresh failed — showing the last roadmap",
-                    detail: queryError
-                )
-            }
             if let controlError {
                 evidenceBanner(title: "Control failed", detail: controlError)
             }
@@ -52,17 +43,12 @@ struct WorkSurfaceView: View {
         if let selection = model.selection, selection.kind == .task,
            model.navigation.selectedTaskEvidence?.task.id == selection.id {
             taskDetail
-        } else if snapshot == nil, queryError == nil {
+        } else if snapshot == nil, model.roadmap.isLoading {
             ProgressView()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .accessibilityIdentifier("loopflow-work-loading")
         } else if snapshot == nil {
-            ContentUnavailableView(
-                "Work unavailable",
-                systemImage: "exclamationmark.triangle",
-                description: Text("Couldn't read the latest work. Refresh to try again.")
-            )
-            .accessibilityIdentifier("loopflow-work-unavailable")
+            Color.clear
         } else if visibleWaves.isEmpty, model.visibleWaves.isEmpty, model.visibleTasks.isEmpty {
             ContentUnavailableView(
                 model.repoPath == nil ? "No planned Work yet" : "No planned Work in this repository",

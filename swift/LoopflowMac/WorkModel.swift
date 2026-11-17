@@ -44,6 +44,12 @@ enum WorkReadingStatus: Equatable {
         case .failed(let reason): reason
         }
     }
+
+    /// What the sidebar says while reads finish; a failure is the Notice's.
+    var progress: String? {
+        if case .failed = self { return nil }
+        return message
+    }
 }
 
 /// Readings keyed by planning Task id, so a late response can only settle
@@ -105,14 +111,21 @@ final class WorkModel {
     let pendingChanges: PendingChanges
     private(set) var dashboardSaving = false
 
-    private var selectionReadings: [RepositoryReadingKey: Reading<[WorkViewPlan]>] = [:]
+    private var selectionReadings: [RepositoryReadingKey: Reading<[WorkViewPlan]>] = [:] {
+        didSet { reported(WorkPart.selections.rawValue, "Views", from: oldValue, to: selectionReadings) }
+    }
     private(set) var selectionPlans: Reading<[WorkViewPlan]> {
         get { selectionReadings[repositoryReadingKey(repoPath ?? "")] ?? .loading }
         set { selectionReadings[repositoryReadingKey(repoPath ?? "")] = newValue }
     }
 
     /// The sidebar's started Tasks for the Wave it was read for: the list the phone shows.
-    private var taskListReadings: [RepositoryReadingKey: (wave: String?, reading: Reading<WorkViewPlan>)] = [:]
+    private var taskListReadings: [RepositoryReadingKey: (wave: String?, reading: Reading<WorkViewPlan>)] = [:] {
+        didSet {
+            reported(WorkPart.taskList.rawValue, "Tasks", from: oldValue.mapValues(\.reading),
+                     to: taskListReadings.mapValues(\.reading))
+        }
+    }
     private var taskListGeneration = 0
 
     func applyTaskList(_ plan: WorkViewPlan?, wave: String?, reason: String, readAt: Revisions? = nil) {
@@ -333,7 +346,9 @@ final class WorkModel {
     @ObservationIgnored var openRepository: ((String, LinkedWork?) -> Void)?
 
     private(set) var taskLink: TaskLink?
-    private(set) var taskLinkReading: Reading<RoadmapSnapshot> = .loading
+    private(set) var taskLinkReading: Reading<RoadmapSnapshot> = .loading {
+        didSet { reported("task-link", "The linked Task", from: oldValue, to: taskLinkReading) }
+    }
     var showsTaskLink = false
     private(set) var linkedTaskPage: LinkedTaskPage?
     private(set) var taskOpening: DesktopOpening?
@@ -1226,6 +1241,7 @@ final class WorkModel {
 
     private(set) var roadmap: Reading<RoadmapSnapshot> = .loading {
         didSet {
+            reported(WorkPart.planning.rawValue, "The plan", from: oldValue, to: roadmap)
             taskIndexCache = nil
             // Retain the latest observed Task across temporary chapter membership
             // gaps, including selections saved in another repository.
@@ -1242,10 +1258,15 @@ final class WorkModel {
         }
     }
     /// The latest row from a Task's own subscription, current after the Task leaves
-    /// the plan (completed, canceled).
-    private var subscribedTaskRow: Reading<RoadmapTask> = .loading
+    /// the plan (completed, canceled). It reports the `task` part's failures for its
+    /// work, comments and runs, which arrive in the same frame.
+    private var subscribedTaskRow: Reading<RoadmapTask> = .loading {
+        didSet { reported(WorkPart.task.rawValue, "The Task", from: oldValue, to: subscribedTaskRow) }
+    }
     private(set) var waves: Reading<[Wave]> = .loading
-    private(set) var processActivity: Reading<ActivitySnapshot> = .loading
+    private(set) var processActivity: Reading<ActivitySnapshot> = .loading {
+        didSet { reported(WorkPart.activity.rawValue, "Processes", from: oldValue, to: processActivity) }
+    }
     private struct RepositoryReadingKey: Hashable {
         let machineId: String?
         let repository: String
@@ -1253,10 +1274,14 @@ final class WorkModel {
     private func repositoryReadingKey(_ repo: String) -> RepositoryReadingKey {
         RepositoryReadingKey(machineId: workMachine ?? savedMachineId, repository: repo)
     }
-    private var sessionReadings: [RepositoryReadingKey: Reading<[SessionRecord]>] = [:]
+    private var sessionReadings: [RepositoryReadingKey: Reading<[SessionRecord]>] = [:] {
+        didSet { reported(WorkPart.sessions.rawValue, "Sessions", from: oldValue, to: sessionReadings) }
+    }
     /// The Sessions as the Machine last read them.
     private var sessionsRead: Reading<[SessionRecord]> { sessionReadings[repositoryReadingKey(repoPath ?? "")] ?? .loading }
-    private var peerPlanningReadings: [RepositoryReadingKey: Reading<[PeerPlanningStatus]>] = [:]
+    private var peerPlanningReadings: [RepositoryReadingKey: Reading<[PeerPlanningStatus]>] = [:] {
+        didSet { reported(WorkPart.peerPlanning.rawValue, "Planning", from: oldValue, to: peerPlanningReadings) }
+    }
     private(set) var peerPlanning: Reading<[PeerPlanningStatus]> {
         get { peerPlanningReadings[repositoryReadingKey(repoPath ?? "")] ?? .loading }
         set { peerPlanningReadings[repositoryReadingKey(repoPath ?? "")] = newValue }
@@ -1276,9 +1301,13 @@ final class WorkModel {
             navigation.liveSessionCount = liveSessionCount
         }
     }
-    private(set) var workActivity: Reading<WorkActivitySnapshot> = .loading
+    private(set) var workActivity: Reading<WorkActivitySnapshot> = .loading {
+        didSet { reported(WorkPart.workActivity.rawValue, "Activity", from: oldValue, to: workActivity) }
+    }
     /// Selectable Graphs per repository, read once on demand; never per repaint.
-    private var graphCatalogReadings: [String: Reading<[GraphCatalogEntry]>] = [:]
+    private var graphCatalogReadings: [String: Reading<[GraphCatalogEntry]>] = [:] {
+        didSet { reported("graphs", "Graphs", from: oldValue, to: graphCatalogReadings) }
+    }
     @ObservationIgnored private var definitionRevision = 0
     @ObservationIgnored private var graphCatalogRevisions: [String: Int] = [:]
     @ObservationIgnored private var graphCatalogRequests: [String: UUID] = [:]
@@ -1299,8 +1328,12 @@ final class WorkModel {
     /// That Task's Graph processes keyed by Graph process, from the same part.
     private(set) var graphProcesses: [String: GraphProcessDetail] = [:]
     /// Conversation history, read only on disclosure.
-    private(set) var sessionHistory = TaskReadings<[SessionHistory]>()
-    private(set) var taskContext = TaskReadings<ContextReport>()
+    private(set) var sessionHistory = TaskReadings<[SessionHistory]>() {
+        didSet { reported("session-history", "Session history", from: oldValue.values, to: sessionHistory.values) }
+    }
+    private(set) var taskContext = TaskReadings<ContextReport>() {
+        didSet { reported("task-context", "The Task's context", from: oldValue.values, to: taskContext.values) }
+    }
     private(set) var workActivityScope = WorkActivityScope(
         wave: nil,
         project: nil,
@@ -2534,7 +2567,9 @@ final class WorkModel {
 
     /// The graph a new Task in each scope would take up, keyed by repository and
     /// Wave. Rust resolves it; the New Task sheet only shows it.
-    private(set) var graphDefaults: [String: Reading<WaveGraph>] = [:]
+    private(set) var graphDefaults: [String: Reading<WaveGraph>] = [:] {
+        didSet { reported("graph-defaults", "Graph defaults", from: oldValue, to: graphDefaults) }
+    }
 
     func graphDefaultKey(wave: WaveSnapshot?) -> String { "\(repoPath ?? ""):\(wave?.id ?? "")" }
 
@@ -2701,6 +2736,24 @@ final class WorkModel {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(recovery, forType: .string)
         }, kind: .condition))
+    }
+
+    // MARK: Read failures
+
+    /// Every reading a window shows arrives through here, for `NoticeCenter.read`'s
+    /// rule; views show the last good value or nothing.
+    private func reported<Value>(_ part: String, _ what: String, from previous: Reading<Value>?, to next: Reading<Value>?) {
+        reported(part, what, from: previous?.failure, to: next?.failure)
+    }
+
+    /// A read a view makes itself, by its failure: another Machine's Task, a step's history.
+    func reported(_ part: String, _ what: String, from previous: String?, to next: String?) {
+        navigation.notices.read(part, what, from: previous, to: next, link: pendingChanges.link)
+    }
+
+    private func reported<Key, Value>(_ part: String, _ what: String, from previous: [Key: Reading<Value>],
+                                      to next: [Key: Reading<Value>]) {
+        for (key, reading) in next { reported(part, what, from: previous[key], to: reading) }
     }
 
     // MARK: Changes in the click

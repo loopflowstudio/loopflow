@@ -486,7 +486,7 @@ struct WorkModelStreamTests {
         #expect(!model.showsSavedPlanning)
     }
 
-    @Test("Task Workflow survives planning failure and becomes stale when its reader disconnects")
+    @Test("Task Workflow survives a planning failure, which the Notice reports, and its reader's disconnect")
     func workflowSurvivesPlanningFailure() async throws {
         let fixture = try WorkTestFixture.load()
         let feed = WorkFeed()
@@ -516,7 +516,9 @@ struct WorkModelStreamTests {
         #expect(model.taskWork[found.task.id].value?.graph == workflow)
         let header = TaskWorkflowHeader(model: model, task: found.task, work: model.taskWork[found.task.id])
         #expect(throws: (any Error).self) { try header.inspect().find(text: "No workflow yet") }
-        #expect(try header.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-move").isDisabled())
+        // Changes still show at once: a failed read is no reason to refuse one.
+        #expect(try !header.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-move").isDisabled())
+        #expect(model.navigation.notices.current?.text == "The plan couldn't be read: sqlite: no such column: t.paused")
         await feed.fail(RegistryQueryError("reader exited"))
         try await eventually { model.taskWork[found.task.id].failure == "reader exited" }
         #expect(model.taskWork[found.task.id].value?.graph == workflow)
@@ -1444,7 +1446,7 @@ struct TaskPlanningReadabilityTests {
         #expect(try shortcut.inspect().find(text: "⌘1").string() == "⌘1")
     }
 
-    @Test("The sidebar distinguishes a pending list, a failed list and a successful empty list")
+    @Test("The sidebar claims no empty list until one is read; a failed read is the Notice's")
     func emptyListStates() throws {
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("No side effects") }, repoPath: "/src/loopflow")
         let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
@@ -1452,7 +1454,8 @@ struct TaskPlanningReadabilityTests {
         #expect(try navigator.inspect().find(text: "Loading work…").string() == "Loading work…")
         #expect(throws: (any Error).self) { try navigator.inspect().find(text: "No working Tasks in this list") }
         model.applyTaskList(nil, wave: nil, reason: "Offline")
-        #expect(try navigator.inspect().find(text: "Task list unavailable").string() == "Task list unavailable")
+        #expect(throws: (any Error).self) { try navigator.inspect().find(text: "No working Tasks in this list") }
+        #expect(model.navigation.notices.current?.text == "Tasks couldn't be read: Offline")
         model.applyTaskList(fixtureViewPlan(owner: key, members: []), wave: nil, reason: "")
         #expect(try navigator.inspect().find(text: "No working Tasks in this list").string() == "No working Tasks in this list")
     }
@@ -1584,8 +1587,8 @@ struct TaskPlanningReadabilityTests {
         #expect(model.taskListReading.value?.contents.first?.title == (replaced ? "Newer list" : nil))
     }
 
-    @Test("The production Retry action requests a new live reading and clears a list-only error")
-    func retryLiveList() async throws {
+    @Test("A failed list read posts one Notice keyed by its part, and a good read clears it")
+    func listFailurePostsOneNotice() async throws {
         let fixture = try WorkTestFixture.load()
         let feed = WorkFeed()
         let model = WorkModel(query: fixture.streaming(feed), repoPath: "/src/loopflow")
@@ -1595,14 +1598,16 @@ struct TaskPlanningReadabilityTests {
         let scope = try await feed.request(1)
         await feed.send(WorkFrame(sequence: 1, answers: scope.id, unavailable: "List offline", content: .taskList(nil), wire: nil))
         try await eventually { model.taskListReading.failure != nil }
-        let notice = WorkReadStatus(model: model, status: try #require(model.workStatus.message))
-        try notice.inspect().find(button: "Retry").tap()
-        let request = try await feed.request(2)
-        await feed.send(WorkFrame(sequence: 2, answers: request.id, unavailable: nil, content: .taskList(plan()), wire: nil))
-        await feed.send(try fixture.planningFrame(sequence: 1, answers: request.id))
-        try await eventually { model.taskListReading.failure == nil && model.roadmap.value != nil }
-        #expect(model.workspaceTitle(key) == "Readable local Task")
-        #expect(model.workStatus.message?.contains("List offline") != true)
+        let notices = model.navigation.notices
+        #expect(notices.current?.text == "Tasks couldn't be read: List offline")
+        #expect(model.workStatus.progress == nil)
+        let posted = notices.posted
+        await feed.send(WorkFrame(sequence: 2, answers: scope.id, unavailable: "List offline", content: .taskList(nil), wire: nil))
+        await feed.send(WorkFrame(sequence: 3, answers: scope.id, unavailable: nil, content: .taskList(plan()), wire: nil))
+        try await eventually { model.taskListReading.failure == nil }
+        // Failing again posted nothing new; the good read put the Notice away.
+        #expect(notices.posted == posted)
+        #expect(notices.current == nil)
         keeping.cancel()
         await keeping.value
     }

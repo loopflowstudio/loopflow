@@ -75,7 +75,6 @@ struct RoadmapView: View {
 
     private var repoPath: String? { model.repoPath }
     private var snapshot: RoadmapSnapshot? { model.roadmap.value }
-    private var queryError: String? { model.roadmap.failure }
     private var isRefreshing: Bool { model.isRefreshing }
 
     private var visibleWaves: [WaveRoadmap] {
@@ -91,12 +90,6 @@ struct RoadmapView: View {
                     .padding(.bottom, Spacing.sm)
             }
             Divider()
-            if let queryError {
-                evidenceBanner(
-                    title: snapshot == nil ? "Roadmap unavailable" : "Refresh failed — showing the last roadmap",
-                    detail: queryError
-                )
-            }
             if let controlError {
                 evidenceBanner(title: "Control failed", detail: controlError)
             }
@@ -146,17 +139,12 @@ struct RoadmapView: View {
 
     @ViewBuilder
     private var content: some View {
-        if snapshot == nil, queryError == nil {
+        if snapshot == nil, model.roadmap.isLoading {
             ProgressView(WorkReadingStatus.loading.message ?? "")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .accessibilityIdentifier("loopflow-work-loading")
         } else if snapshot == nil {
-            ContentUnavailableView(
-                "Work unavailable",
-                systemImage: "exclamationmark.triangle",
-                description: Text("Couldn't read the latest work. Refresh to try again.")
-            )
-            .accessibilityIdentifier("loopflow-work-unavailable")
+            Color.clear
         } else if visibleWaves.isEmpty {
             ContentUnavailableView(
                 repoPath == nil ? "No planned Work yet" : "No planned Work in this repository",

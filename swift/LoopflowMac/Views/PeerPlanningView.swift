@@ -10,10 +10,6 @@ struct PeerPlanningView: View {
     var body: some View {
         DisclosureGroup("Git planning") {
             VStack(alignment: .leading, spacing: Spacing.sm) {
-                if let error = reading.failure {
-                    Text("Sync status unavailable: \(error)")
-                    if reading.value != nil { Text("Showing the last sync status") }
-                }
                 if let destinations = reading.value {
                     if !destinations.contains(where: \.active) {
                         Text("No active Git planning destination")

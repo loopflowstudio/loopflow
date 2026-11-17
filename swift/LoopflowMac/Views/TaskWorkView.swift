@@ -57,7 +57,7 @@ struct TaskWorkflowHeader: View {
                     .help(unavailable ?? "lf task run \(task.task.identifier) --from <step>")
                     .accessibilityIdentifier("task-workflow-move")
 
-                } else if work.value != nil, work.failure == nil {
+                } else if work.value != nil {
                     // The shared resolver reports the first-run default and its owner.
                     Text(task.graphName.map { "\($0) · \(task.graphSource ?? "")" } ?? "No workflow selected")
                         .foregroundStyle(palette.textSecondary)
@@ -73,9 +73,9 @@ struct TaskWorkflowHeader: View {
                         .accessibilityIdentifier("task-workflow-start")
                     Spacer()
                 } else {
-                    Text(work.failure.map { "Workflow could not be read: \($0)" }
-                         ?? "Reading workflow…")
-                        .foregroundStyle(palette.textSecondary)
+                    if work.isLoading {
+                        Text("Reading workflow…").foregroundStyle(palette.textSecondary)
+                    }
                     Spacer()
                 }
                 if task.isCompleted {
@@ -106,12 +106,6 @@ struct TaskWorkflowHeader: View {
         VStack(alignment: .leading, spacing: 6) {
             ScrollView(.horizontal) { controls }
                 .scrollIndicators(.visible)
-            if work.value?.graph != nil, let error = work.failure {
-                Text("Workflow refresh failed: \(error)")
-                    .foregroundStyle(palette.failure)
-                    .textSelection(.enabled)
-                    .accessibilityIdentifier("task-workflow-refresh-error")
-            }
             DisclosureGroup("Overview", isExpanded: Binding(
                 get: { expandedTasks.contains(task.id) },
                 set: { if $0 { expandedTasks.insert(task.id) } else { expandedTasks.remove(task.id) } }
@@ -224,7 +218,6 @@ struct TaskWorkflowHeader: View {
 
     private var readingUnavailable: String? {
         if !model.pendingChanges.acceptsChanges { return PendingChanges.awayText }
-        if let error = work.failure ?? model.roadmap.failure { return error }
         if model.showsSavedPlanning { return WorkCache.savedReason }
         return nil
     }
@@ -242,7 +235,6 @@ struct TaskShipControl: View {
 
     private var readingUnavailable: String? {
         if !model.pendingChanges.acceptsChanges { return PendingChanges.awayText }
-        if let error = model.roadmap.failure { return error }
         if model.showsSavedPlanning { return WorkCache.savedReason }
         return nil
     }
@@ -421,8 +413,7 @@ struct TaskWorkflowBar: View {
 
     private var position: String {
         guard let workflow = work.value?.graph else {
-            if let error = work.failure { return "Workflow could not be read: \(error)" }
-            if work.value == nil { return "Reading workflow…" }
+            if work.value == nil { return work.isLoading ? "Reading workflow…" : "" }
             return task.graphName.map { "Takes up \($0) when it starts" } ?? "No workflow selected"
         }
         switch workflow.position {
@@ -491,7 +482,6 @@ struct TaskStartOffer: View {
 
     private var unavailable: String? {
         if !model.pendingChanges.acceptsChanges { return PendingChanges.awayText }
-        if let error = model.roadmap.failure { return error }
         if model.showsSavedPlanning { return WorkCache.savedReason }
         return task.runControl.unavailable
     }
@@ -523,7 +513,7 @@ struct TaskActionItems: View {
     @State private var copied: String?
 
     private var unavailable: Bool {
-        model.roadmap.failure != nil || model.showsSavedPlanning || !model.pendingChanges.acceptsChanges
+        model.showsSavedPlanning || !model.pendingChanges.acceptsChanges
     }
 
     var body: some View {
@@ -634,9 +624,6 @@ struct GraphProcessLog: View {
                 if !readsWindow {
                     Button("Refresh") { refresh += 1 }
                 }
-                if let readError {
-                    Text("Graph processes could not be read: \(readError)").padding(.vertical, 6)
-                }
                 if let graphs {
                     if let graph = graphs.last {
                         GraphProcessView(model: model, graph: graph,
@@ -672,6 +659,7 @@ struct GraphProcessLog: View {
         .background(palette.background)
         .environment(\.colorScheme, .light)
         .accessibilityIdentifier("task-graph-processes")
+        .onChange(of: error) { old, new in model.reported("graph-processes", "Graph processes", from: old, to: new) }
         .task(id: refresh) {
             guard !readsWindow else { return }
             do {
@@ -755,10 +743,6 @@ struct TaskWorkView: View {
                 if work.sessions.isEmpty && work.processes.isEmpty {
                     Text("No recorded work.")
                 }
-            }
-            if let error = model.taskExecution[task.id].failure {
-                Text("Work could not be read: \(error)")
-                Button("Retry") { model.rescanWork() }
             }
         }
         .font(Typography.body(12))

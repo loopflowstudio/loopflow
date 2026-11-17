@@ -76,6 +76,23 @@ public final class NoticeCenter {
         if event?.key == key { event = nil }
     }
 
+    /// Every reading an app shows reports here, by its failure. One turning into a
+    /// failure posts one event keyed by its part, and its return clears it. A lost
+    /// link posts nothing: the away condition says it once.
+    public func read(_ part: String, _ what: String, from previous: String?, to next: String?,
+                     link: PendingChanges.Link, action: Notice.Action? = nil) {
+        let key = "read-\(part)"
+        switch (previous, next) {
+        case (nil, let reason?):
+            guard link == .connected else { return }
+            post(Notice("\(what) couldn't be read: \(reason)", key: key, action: action))
+        case (_?, nil):
+            clear(key: key)
+        default:
+            break
+        }
+    }
+
     /// Put away what is shown: the event, else the newest condition.
     public func dismiss() {
         if event != nil {

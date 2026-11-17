@@ -74,6 +74,37 @@ QA run: `scratch/qa.html`.
   coworker's value over an edit that exists only in `tracker_actions`; the
   new drain then sees the base moved and conflicts, keeping the losing value.
 
+## Next implement: a refusal is decided before the attempt
+
+Concept review of 37f38c3537. `Sent::Refused` comes back from `send`, after
+`Drain::send` has taken a budget slot and `attempt_tracker_action` has set
+`phase='sent'`, `sent_at`, `error=NULL`. `reject_tracker_action` then puts it
+back. On every pass, each refused Project (manabot `infrastructure` today)
+costs two store writes and two `store_revisions` bumps, its row flips
+`queued → sent → queued` with its error cleared in between (`lf repo plan`
+and Desktop can read `sent` with no error), and a process that exits between
+the two writes leaves a creation the tracker never saw in `sent`, which the
+lost-reply rule then looks for with a real request. The refund
+(`used.fetch_sub`) is there only because the slot was taken too early.
+`project_scope` also maps "Project is missing" and store read errors to
+`Refused`, so they stay queued for free forever. Before this commit they
+were `Err`.
+
+Direction:
+- `Tracker::blocked(store, repo, action) -> Option<String>`: why this action
+  cannot be sent yet, with no request. Linear answers it for a Project
+  `create` with no Initiative; Asana and Fake return `None` (Fake keeps its
+  `refuse` hook here). `Drain::send` checks it before `take()` and
+  `attempt_tracker_action`. When it is `Some`, call `tracker_action_error`
+  (which writes only when the error changes) and return `Step::Wait`.
+- Delete `Sent::Refused`, its drain arm and the `fetch_sub` refund. `Rejected`
+  no longer needs a near-synonym beside it.
+- `create_project` keeps `project_scope`'s `?`. Only the Initiative check
+  moves into `blocked`. A missing Project or Wave is an error again.
+- Test: keep `a_creation_refused_before_any_request_costs_the_pass_nothing`.
+  Add an assertion that a second pass makes no store write for the refused
+  rows: `sent_at` stays NULL and the `tracker_actions` revision does not move.
+
 ## Remaining work, filed
 
 - LOO-941: contract migration ≥ 30 days after merge — drop `task_changes`,

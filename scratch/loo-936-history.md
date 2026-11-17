@@ -1,8 +1,8 @@
 # LOO-936: record only what the product reads, history apart from state
 
 Status: 2026-11-17, the five changes from the concept review of the built
-change are built (see "Shape after the concept review"). Remaining: the
-three repairs in "Next implement direction", then gate.
+change are built (see "Shape after the concept review"), with the three
+repairs from the review of `f326e99cbb`. Remaining: gate.
 Process rows are LOO-953 ("Remove Process rows: liveness on Sessions and
 Graph runs", its own worktree); nothing here moves them.
 
@@ -100,28 +100,14 @@ Session list sees.
 5. **`lf machine prune`** is store retention (the server's hourly pass);
    `lf process prune` keeps receipts and orphaned providers only.
 
-## Next implement direction (concept review of `f326e99cbb`, 2026-11-17)
+## Turn error rule (review of `f326e99cbb`, built)
 
-The message row's `turn_*` columns are the one place routing, the Session
-list and a failed step read; three things keep them from being exact.
-
-1. **`turn_error` belongs to the newest ended turn.** Two writers fill it:
-   the recorder on a stream `error` (`record_input_error`) and `FactWriter`
-   at turn end (`record_input_turn_end`), in no fixed order, and the turn end
-   writes `turn_error=?6` unconditionally, so a failed turn whose provider
-   detail carries no error erases the error lf saw and the Graph reports
-   "process exited with N" (the old reader scanned every event, so it never
-   lost one). Rule: a turn end writes its own error; without one, a
-   non-`completed` end keeps the row's error; a `completed` end clears it.
-   Test: stream error, then a `failed` end with no detail error → the failed
-   step names the stream error; stream error, then a `completed` retry →
-   no error.
-2. **The recorder's two writes are independent.** `record_conversation`
-   returns on a failed `record_input_error` before keeping the history row;
-   keep the history row first, and a failed main write is the recorder's
-   usual telemetry warning, not a lost history row.
-3. **Name the recorder's store for what it is.** `SessionRecorder.history`
-   now writes the input row in `loopflow.db` too; call it `store`.
+A turn end writes its own error; without one, a non-`completed` end keeps
+the row's error (the recorder's stream error, written in either order); a
+`completed` end clears it (`record_input_turn_end`; test
+`a_failed_turn_keeps_the_stream_error_and_a_completed_retry_clears_it`).
+The recorder keeps the history row before the main write, and a failed main
+write is its telemetry warning; its store field is `store`.
 
 ## Acceptance at gate (headless, private `LF_HOME`)
 
@@ -202,6 +188,7 @@ carrying `last_agent_message`.
 - storage `history|turns|retention|session_events|revisions|query_plans|provider_transitions|sessions|processes|task_work`: 72 passed.
 - execution `transcript|read_stream|store|session_record|harness::{fact_writer,dispatch_tests,conformance_tests}|human_session|native_exit`: 385 passed after fixes; `canonical_ids_commands_read_the_upgraded_work_and_native_history` timed out at 300 s in the run and passed alone in 249 s at load ~55 (CI).
 - loopflow lib `lf::tests|doctor|top|maintenance|graph|task_view|activity|boundary|subscription_measurement|session::tests`: 89 passed; `documented_commands::` 4 passed; `public_history_discovers_unlinked_native_receipts…` passed; `cargo clippy --all-targets -D warnings` clean.
+- Turn error repairs: storage `turns::` 6 passed, execution `session_record` 34 passed, clippy (storage, execution) clean.
 - Gate: `test(graph::)` and `test(task_graph_launch_tests::)` (failed-step read now from the input row), `test(world_recipes::)`, `binary(served_reads)`, `test(session_cli_tests::)`, `binary(session_lifecycle_tests)`, `test(store::query_plans::tests::)`; rerun the locked-history QA scenario.
 
 ## Follow-ups, not this PR

@@ -180,7 +180,9 @@ impl SqliteStore {
 
     /// Record that `turn` of `thread` ended at `at` with `status` as the
     /// newest ended turn of input `captured`. A turn that ended earlier than
-    /// the one kept leaves it.
+    /// the one kept leaves it. The turn's own error replaces the row's; a
+    /// turn that ended without one keeps the error lf saw on the stream,
+    /// unless it completed.
     pub fn record_input_turn_end(
         &self,
         captured: i64,
@@ -193,7 +195,8 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
             "UPDATE session_events SET turn_thread=?2,turn_id=?3,turn_ended_at=?4,turn_status=?5,
-                turn_error=?6
+                turn_error=CASE WHEN ?6 IS NOT NULL THEN ?6
+                                WHEN ?5='completed' THEN NULL ELSE turn_error END
              WHERE seq=?1 AND kind='captured' AND (turn_ended_at IS NULL OR turn_ended_at<=?4)",
             params![captured, thread, turn, at, status, error],
         )?;

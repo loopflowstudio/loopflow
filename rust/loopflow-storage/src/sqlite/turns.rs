@@ -875,6 +875,33 @@ mod tests {
     }
 
     #[test]
+    fn a_failed_turn_keeps_the_stream_error_and_a_completed_retry_clears_it() {
+        let home = tempfile::tempdir().unwrap();
+        let store = crate::test_fixture::open(&home.path().join("loopflow.db")).unwrap();
+        let input = crate::session_record::new_artifact_key();
+        let captured = store.test_session("conversation", &input).captured.unwrap();
+        let thread = "thread".into();
+        let end = |turn, at, detail: serde_json::Value| {
+            store
+                .record_answered_turn_end(captured, &thread, turn, at, &detail)
+                .unwrap();
+            store.input_turn_end(&input).unwrap().unwrap().error
+        };
+        store
+            .record_input_error(&input, "overloaded: try again")
+            .unwrap();
+        assert_eq!(
+            end("first", 1, json!({"status":"failed"})),
+            Some("overloaded: try again".into())
+        );
+        assert_eq!(
+            end("second", 2, json!({"status":"failed","error":"quota"})),
+            Some("quota".into())
+        );
+        assert_eq!(end("third", 3, json!({"status":"completed"})), None);
+    }
+
+    #[test]
     fn a_locked_history_file_is_a_gap_and_the_turn_end_stays_exact() {
         let (home, store) = store();
         let thread = "thread".into();

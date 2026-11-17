@@ -272,8 +272,9 @@ pub struct SessionRecorder {
     /// row in history already says when it ran.
     attempt_start: Option<(u64, OffsetDateTime, CaptureFact)>,
     event_seq: u64,
-    /// Where facts are kept; none for a mechanical command's capture.
-    history: Option<(
+    /// The store the input's row and its history are kept in; none for a
+    /// mechanical command's capture.
+    store: Option<(
         loopflow_storage::sqlite::SqliteStore,
         crate::session::LfSession,
     )>,
@@ -286,7 +287,7 @@ pub struct SessionRecorder {
 
 impl SessionRecorder {
     fn from_manifest(manifest: SessionCaptureManifest, dir: PathBuf) -> Self {
-        let history = if manifest.harness == "loopflow" {
+        let store = if manifest.harness == "loopflow" {
             Ok(None)
         } else {
             row_store(&dir).and_then(|store| {
@@ -294,11 +295,11 @@ impl SessionRecorder {
                 Ok(session.map(|session| (store, session)))
             })
         };
-        let history = history.unwrap_or_else(|error| {
+        let store = store.unwrap_or_else(|error| {
             tracing::warn!(%error, "Session history unavailable");
             None
         });
-        if let Some((store, session)) = &history {
+        if let Some((store, session)) = &store {
             // Replay reads the prompt from the capture's own manifest file.
             let retained = SessionCaptureManifest {
                 process: None,
@@ -327,7 +328,7 @@ impl SessionRecorder {
             attempt_started: false,
             attempt_start: None,
             event_seq: 0,
-            history,
+            store,
             previous_event: None,
             telemetry_warned: false,
             terminal_recorded: false,
@@ -434,19 +435,22 @@ impl SessionRecorder {
                 message,
                 evidence,
             } => {
-                if let Some((store, _)) = &self.history {
-                    store
-                        .record_input_error(
-                            &self.manifest.artifact_key,
-                            &format!("{code}: {message}"),
-                        )
-                        .map_err(std::io::Error::other)?;
+                let error = format!("{code}: {message}");
+                let kept = self.record_fact(CaptureFact::Conversation {
+                    event: TurnEnd::Error {
+                        code,
+                        message,
+                        evidence: evidence.map(Box::new),
+                    },
+                });
+                if let Some((store, _)) = &self.store {
+                    if let Err(error) =
+                        store.record_input_error(&self.manifest.artifact_key, &error)
+                    {
+                        self.warn_telemetry(std::io::Error::other(error));
+                    }
                 }
-                TurnEnd::Error {
-                    code,
-                    message,
-                    evidence: evidence.map(Box::new),
-                }
+                return kept;
             }
             _ => return self.next_position().map(drop),
         };
@@ -479,7 +483,7 @@ impl SessionRecorder {
     }
 
     fn keep_fact(&self, seq: u64, at: OffsetDateTime, fact: &CaptureFact) -> std::io::Result<()> {
-        let Some((store, session)) = &self.history else {
+        let Some((store, session)) = &self.store else {
             return Ok(());
         };
         store

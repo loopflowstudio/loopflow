@@ -278,6 +278,30 @@ never shows the filed Task, the words stay with the error and Close
 (`StartingTask.filed`), no Try again. Phone: `MobileTaskCreation.starting`
 covers only the first send ("Starting…"); recovery reads "Checking your Task…".
 
+Concept review of 1f8eb5476e: the split holds (Try again only before filing;
+after the answer the failure is the workspace's). One state is left that the
+answer can remove: `StartingTask.filed`, words plus Close for a Task that
+exists but this window cannot show. It exists because Desktop selects from a
+planning row the answer lacks, so `openCreatedTask` waits on a Work checkpoint
+(up to 10 s, on the typing path whenever the answer beats the subscription)
+and throws "planning does not show it yet". Next implement:
+- `task.create`'s answer carries the Task's planning row, the same shape the
+  Work projection emits for it (Swift `RoadmapTask`, wave by ID). DTO rule:
+  required key, fixture `task_create_receipt.json` and each language's
+  fixture test.
+- `openCreatedTask` selects from that row at once: it joins `taskRecords` as
+  retained evidence ("Updating…" until the subscription's row replaces it),
+  no `confirmWorkUpdate`. `openCreatedTask` no longer throws; delete
+  `StartingTask.filed`, the Close label and the "planning does not show it"
+  error. `StartingTaskView` goes back to one failure: before filing.
+- Test: the existing after-answer test with planning that never lists the
+  Task → selection is the Task, `startingTask` nil, log is `task.create`
+  alone (no checkpoint wait).
+- Phone: `MobileTask` already comes from the answer; nothing to change.
+- Still open from 149dbbfae3: the palette closes twice (`StartingTaskView.start`
+  inside the click, `createTask` a turn later). Keep `start`'s; drop
+  `createTask`'s.
+
 Remaining, in order:
 1. `Perf.retarget(.startTask, from: "new-task", …)`: key by request ID from the
    click (slice 5).

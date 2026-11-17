@@ -112,3 +112,8 @@ Built (glossary in `docs/dev/planning.md` "Words"; renames in
   them. `ops/tracker_observe.rs` became `ops/tracker_events.rs`.
 - Rename scope is lines this PR added; older prose ("settled", "pending
   effects", observation/acquisition) is LOO-955.
+
+- QA 2: a Project `create` the tracker rejects before any request (Wave with
+  no Linear Initiative) still takes one of the pass's 20 requests, every pass.
+  One such Project on this Machine (manabot `infrastructure`). Charge only
+  requests that leave, or leave it?

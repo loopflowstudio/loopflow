@@ -1,137 +1,234 @@
-<!doctype html>
-<html><head><meta charset="utf-8"><title>LOO-925 QA: the tracker mirrors the store</title>
-<style>
-body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:880px;margin:2em auto;padding:0 1em;color:#222}
-pre{background:#f6f6f4;padding:.8em;overflow-x:auto;font-size:13px}
-h2{margin-top:2em;border-bottom:1px solid #ddd}
-.fixed{color:#0a6b2a;font-weight:600}.wrong{color:#a3261b;font-weight:600}
-td,th{padding:.3em .6em;border-bottom:1px solid #eee;text-align:left;vertical-align:top}
-</style></head><body>
+<!doctype html><meta charset=utf-8><title>LOO-925 QA</title>
+<style>body{font:15px/1.5 -apple-system,sans-serif;max-width:60rem;margin:2rem auto;padding:0 1rem;color:#222}
+pre{background:#f5f5f3;padding:.8rem;overflow-x:auto;font-size:12.5px}h2{margin-top:2.2rem}td,th{padding:.2rem .6rem;text-align:left;vertical-align:top}</style>
 <h1>LOO-925 QA: the tracker mirrors the store</h1>
-<p>Branch <code>lf</code> (0.16.0+6d627420e, then rebuilt with the fixes below), private <code>HOME</code>/<code>LF_HOME</code> under
-<code>/tmp/lfqa925</code>, <code>LF_*</code>/<code>REX_*</code> unset, stdin closed, disposable repositories with local bare origins.
-The shipped binary has no Linear or Asana stand-in endpoint and the private home has no tracker login, so every
-scenario below is the <em>offline / signed-out</em> path: commands save, the queue fills, every pass records why it did
-not send. Real sends are covered only by the fake-bridge tests (listed at the end).</p>
+<p>Second pass, on <code>7ad23b2a01</code> (after the vocabulary pass, the merge of main and compress). The first pass ran on
+<code>d298a6c957</code> and fixed five things (the <code>Last attempt:</code> line, <code>lf task sync</code> naming its cause,
+a done-before-connect Task arriving open, wrong-tracker actions never retiring while signed out, and delete-before-send creating an
+issue only to trash it); this pass checks that each still holds under the new names.</p>
+<p>Setup: branch <code>lf</code> copied to <code>/tmp/lfqa925b/lf-bin</code>; private <code>HOME</code> and <code>LF_HOME</code>;
+<code>LF_*</code>/<code>REX_*</code> unset; stdin closed; disposable repositories with local bare origins. The binary has no Linear
+or Asana stand-in endpoint and tracker credentials come only from the store's OAuth grant, so every send below stops at
+"No … credential found". No server, holder or provider was started; none were left running.</p>
 
 <h2>1. Demo on a Linear repository</h2>
-<p><code>planning: {provider: linear, team: QA}</code>. Create, rename, steer, comment, complete.</p>
-<pre>$ lf task create --title "Mirror demo" --json
-Saved locally; pending Linear sync. Retry with `lf task sync e7839b`.
-$ lf task edit e7839b --title 'Mirror demo, renamed'
-Saved locally; pending planning sync · creation · No Linear credential found. …
-Saved locally; pending planning sync · task_title · No Linear credential found. …
-$ lf steer e7839b 'first comment';  lf comment e7839b 'second comment';  lf task complete e7839b
+<p><code>planning: {provider: linear, team: QA}</code>. Create, rename, steer, comment, complete, then read the queue three ways.</p>
+<pre>$ lf task edit 15f41f --title &quot;Mirror demo, renamed&quot;
+task_15f41f2279204ce2a30ec1dae457672f: updated
+Saved locally; pending planning sync · creation · No Linear credential found. Run `doppler run -- lf account connect linear`.
+Saved locally; pending planning sync · task_title · No Linear credential found. Run `doppler run -- lf account connect linear`.
+$ lf steer 15f41f &quot;first comment&quot;
+Saved 1d20e6ee-0f9c-43e9-bb42-c8154f11f2ce
+$ lf comment 15f41f &quot;second comment&quot;
+Saved 04e30a87-ab8d-4d09-959e-5d8c8ccf1b18
+$ lf task complete 15f41f
+15f41f: completed
 $ lf repo plan
 Planning: Linear. 5 changes waiting to send.
-  e7839b  create    pending
-  e7839b  title     pending
-  e7839b  comment   pending
-  e7839b  comment   pending
-  e7839b  complete  pending
-Last attempt: No Linear credential found. Run `doppler run -- lf account connect linear`.</pre>
-<p><code>lf repo plan --json</code> lists the same five rows with <code>seq</code> 1–5, <code>kind</code>, <code>phase</code>,
-<code>provider: linear</code> and the error. <code>lf task show --json | .sync</code> shows the same five changes with
-<code>local_value</code>. Works.</p>
-<p class="fixed">Fixed: the text view said "pending" with no reason; the error was only in JSON. It now ends with one
-<code>Last attempt:</code> line per distinct error (docs/work.md says so).</p>
-<p class="fixed">Fixed: <code>lf task sync e7839b</code> answered only "Task publication to Linear remains pending".
-It now names the cause: "… remains pending: No Linear credential found. Run …". (Also dropped a duplicate Task read.)</p>
+  15f41f  create    queued
+  15f41f  title     queued
+  15f41f  comment   queued
+  15f41f  comment   queued
+  15f41f  complete  queued
+Last attempt: No Linear credential found. Run `doppler run -- lf account connect linear`.
+$ lf repo plan --json
+{&quot;actions&quot;:[{&quot;change&quot;:&quot;create&quot;,&quot;error&quot;:&quot;No Linear credential found. Run `doppler run -- lf account connect linear`.&quot;,&quot;kind&quot;:&quot;create&quot;,&quot;owner&quot;:&quot;15f41f&quot;,&quot;owner_id&quot;:&quot;task_15f41f2279204ce2a30ec1dae457672f&quot;,&quot;owner_kind&quot;:&quot;task&quot;,&quot;phase&quot;:&quot;queued&quot;,&quot;provider&quot;:&quot;linear&quot;,&quot;seq&quot;:1,&quot;subject&quot;:null},{&quot;change&quot;:&quot;title&quot;,&quot;error&quot;:&quot;No Linear credential found. Run `doppler run -- lf account connect linear`.&quot;,&quot;kind&quot;:&quot;field&quot;,&quot;owner&quot;:&quot;15f41f&quot;,&quot;owner_id&quot;:&quot;task_15f41f2279204ce2a30ec1dae457672f&quot;,&quot;owner_kind&quot;:&quot;task&quot;,&quot;phase&quot;:&quot;queued&quot;,&quot;provider&quot;:&quot;linear&quot;,&quot;seq&quot;:2,&quot;subject&quot;:&quot;task_title&quot;},{&quot;change&quot;:&quot;comment&quot;,&quot;error&quot;:&quot;No Linear credential found. Run `doppler run -- lf account connect linear`.&quot;,&quot;kind&quot;:&quot;comment&quot;,&quot;owner&quot;:&quot;15f41f&quot;,&quot;owner_id&quot;:&quot;task_15f41f2279204ce2a30ec1dae457672f&quot;,&quot;owner_kind&quot;:&quot;task&quot;,&quot;phase&quot;:&quot;queued&quot;,&quot;provider&quot;:&quot;linear&quot;,&quot;seq&quot;:3,&quot;subject&quot;:&quot;37781d24-e601-4179-b2cd-9a4744e938d5&quot;},{&quot;change&quot;:&quot;comment&quot;,&quot;error&quot;:&quot;No Linear credential found. Run `doppler run -- lf account connect linear`.&quot;,&quot;kind&quot;:&quot;comment&quot;,&quot;owner&quot;:&quot;15f41f&quot;,&quot;owner_id&quot;:&quot;task_15f41f2279204ce2a30ec1dae457672f&quot;,&quot;owner_kind&quot;:&quot;task&quot;,&quot;phase&quot;:&quot;queued&quot;,&quot;provider&quot;:&quot;linear&quot;,&quot;seq&quot;:4,&quot;subject&quot;:&quot;22825db9-5a2d-4f8a-b59d-d06eac6a7ec9&quot;},{&quot;change&quot;:&quot;complete&quot;,&quot;error&quot;:&quot;No Linear credential found. Run `doppler run -- lf account connect linear`.&quot;,&quot;kind&quot;:&quot;state&quot;,&quot;owner&quot;:&quot;15f41f&quot;,&quot;owner_id&quot;:&quot;task_15f41f2279204ce2a30ec1dae457672f&quot;,&quot;owner_kind&quot;:&quot;task&quot;,&quot;phase&quot;:&quot;queued&quot;,&quot;provider&quot;:&quot;linear&quot;,&quot;seq&quot;:5,&quot;subject&quot;:null}],&quot;destinations&quot;:[],&quot;transport&quot;:&quot;linear&quot;}
+$ lf task show 15f41f --json | jq .sync
+{
+  &quot;changes&quot;: [
+    {
+      &quot;error&quot;: &quot;No Linear credential found. Run `doppler run -- lf account connect linear`.&quot;,
+      &quot;field&quot;: &quot;creation&quot;,
+      &quot;id&quot;: &quot;acd6e2a1-462f-41f4-ae74-2d2c9b9c16d7&quot;,
+      &quot;linear_value&quot;: null,
+      &quot;local_value&quot;: [
+        {
+          &quot;field&quot;: &quot;task_title&quot;,
+          &quot;value&quot;: &quot;Mirror demo&quot;
+        },
+        {
+          &quot;field&quot;: &quot;task_description&quot;,
+          &quot;value&quot;: &quot;Mirror demo&quot;
+        },
+        {
+          &quot;field&quot;: &quot;task_assignee&quot;,
+          &quot;value&quot;: null
+        },
+        {
+          &quot;field&quot;: &quot;task_due_date&quot;,
+          &quot;value&quot;: null
+        },
+        {
+          &quot;field&quot;: &quot;task_project&quot;,
+          &quot;value&quot;: null
+        }
+      ],
+      &quot;state&quot;: &quot;pending&quot;
+    },
+    {
+      &quot;error&quot;: &quot;No Linear credential found. Run `doppler run -- lf account connect linear`.&quot;,
+      &quot;field&quot;: &quot;task_title&quot;,
+      &quot;id&quot;: &quot;1589043f-214c-4121-ae98-434b5a7cc0ab&quot;,
+      &quot;linear_value&quot;: null,
+      &quot;local_value&quot;: &quot;Mirror demo, renamed&quot;,
+      &quot;state&quot;: &quot;pending&quot;
+    },
+    {
+      &quot;error&quot;: &quot;No Linear credential found. Run `doppler run -- lf account connect linear`.&quot;,
+      &quot;field&quot;: &quot;comment&quot;,
+      &quot;id&quot;: &quot;801c29f6-8db3-4b03-9c40-20d8fd386f94&quot;,
+      &quot;linear_value&quot;: null,
+      &quot;local_value&quot;: {
+        &quot;author&quot;: {
+          &quot;kind&quot;: &quot;person&quot;,
+          &quot;name&quot;: &quot;QA&quot;
+        },
+        &quot;body&quot;: &quot;first comment\n\n&lt;!-- loopflow-requester:\&quot;QA\&quot; --&gt;\n\n&lt;!-- loopflow-steer:37781d24-e601-4179-b2cd-9a4744e938d5 --&gt;&quot;,
+        &quot;created_at&quot;: &quot;2026-11-17T07:48:50.924287Z&quot;
+      },
+      &quot;state&quot;: &quot;pending&quot;
+    },
+    {
+      &quot;error&quot;: &quot;No Linear credential found. Run `doppler run -- lf account connect linear`.&quot;,
+      &quot;field&quot;: &quot;comment&quot;,
+      &quot;id&quot;: &quot;ff266338-12fd-4b85-a867-db268a4d976f&quot;,
+      &quot;linear_value&quot;: null,
+      &quot;local_value&quot;: {
+        &quot;author&quot;: {
+          &quot;kind&quot;: &quot;person&quot;,
+     
+…</pre>
+<p><b>Works.</b> One queue, seq 1–5, the new phase word <code>queued</code> in text and JSON (<code>actions</code>, <code>phase</code>,
+<code>provider</code>), and the cause on the <code>Last attempt:</code> line and in <code>lf task sync</code>. <code>docs/work.md</code>'s example
+matches the output. <code>lf task show .sync</code> still says <code>state: pending</code> and <code>linear_value</code>: that is the
+wire DTO Swift decodes (<code>PlanningSync.swift</code>), left for LOO-942.</p>
 
 <h2>2. Git-only repository, then connecting Linear</h2>
-<pre>$ lf task create --title "Git only one"; lf task create --title "Git only two"
-$ lf repo plan --json | .effects      →  []
-# switch .lf/config.yaml to provider: linear
+<pre>$ lf task create --title &quot;Git only one&quot;
+Git only one · dd5716
+$ lf task create --title &quot;Git only two&quot;
+Git only two · 9c1255
+$ lf task create --title &quot;Done before connect&quot;
+Done before connect · f75946
+</pre><pre>$ lf task complete f75946
+f75946: completed
+$ lf repo plan --json | jq .actions
+[]
+# .lf/config.yaml → planning: {provider: linear, team: QA}
 $ lf repo plan
-Planning: Linear. Nothing waiting to send.        # reads do not drain: correct
-$ lf task edit 713f21 --title "Git only one, now on Linear"
+Planning: Linear. Nothing waiting to send.
+$ lf task edit dd5716 --title &quot;Git only one, now on Linear&quot;
+task_dd5716efb43c4ddea444c38c27a4f665: updated
+Saved locally; pending planning sync · creation · No Linear credential found. Run `doppler run -- lf account connect linear`.
 $ lf repo plan
-Planning: Linear. 2 changes waiting to send.
-  713f21  create    pending                     # baseline carries the new title
-  9282fd  create    pending</pre>
-<p>Git-only enqueues nothing; the first drain after connecting queues a <code>create</code> per existing Task. Works.</p>
-<p class="fixed">Fixed (regression against base): a Task <em>completed</em> before the tracker was connected was exported
-as <code>create</code> + comments only, so it would arrive open. The base delivered its <code>task_state_deliveries</code>
-row after export. The connect-time enqueue now also queues a <code>state</code> effect when the Task is past
-unstarted. Replayed:</p>
-<pre>Planning: Linear. 3 changes waiting to send.
-  7c2987  create    pending
-  7c2987  complete  pending
-  7c2987  comment   pending</pre>
-<p>This matters on this Machine: the live store copy holds 23 unsettled state deliveries on unbound Tasks that the
-migration leaves to the connect-time enqueue. Test: <code>a_task_done_before_the_tracker_was_connected_arrives_done</code>.</p>
+Planning: Linear. 4 changes waiting to send.
+  dd5716  create    queued
+  9c1255  create    queued
+  f75946  create    queued
+  f75946  complete  queued
+Last attempt: No Linear credential found. Run `doppler run -- lf account connect linear`.
+$ lf task show dd5716 --json | jq &quot;.sync.changes[0].local_value[0]&quot;
+{&quot;field&quot;:&quot;task_title&quot;,&quot;value&quot;:&quot;Git only one, now on Linear&quot;}
+</pre>
+<p><b>Works.</b> Git queues nothing; reads after the switch don't drain; the first save drains one pass that queues a
+<code>create</code> per existing Task, with the edited title in its baseline, and <code>complete</code> for the Task done before connect.</p>
 
-<h2>3. Switching the repository to Asana</h2>
-<pre># config → provider: asana, team: https://app.asana.com/0/team/1209876543210/overview
-$ lf task create --title "Asana demo"
-Saved locally; pending Asana sync. Retry with `lf task sync 97e42e`.</pre>
-<p class="wrong">Seen before the fix: <code>Planning: Asana. 6 changes waiting to send.</code> — the five Linear effects
-stayed pending, stamped "No Asana credential found". The wrong-tracker retirement ran only after a bridge was built,
-so signed out or offline it never ran.</p>
-<p class="fixed">Fixed: <code>queued()</code> retires effects addressed to another tracker before any bridge is built
-(and <code>Tracker::provider()</code> plus the fake's provider field, now unused, are deleted). After:</p>
-<pre>1|create|linear|retired|queued for Linear, but this repository uses Asana
-…5|state|linear|retired|queued for Linear, but this repository uses Asana
-8|create|asana|pending|No Asana credential found. …
+<h2>3. Switching to Asana; delete before send</h2>
+<pre>$ lf task edit 0e2e22 --title &#x27;Asana demo, renamed&#x27;
+task_0e2e22e5f5b54391a51868f5339d70aa: updated
+Saved locally; pending planning sync · creation · No Asana credential found. Run `doppler run -- lf account connect asana`.
+Saved locally; pending planning sync · task_title · No Asana credential found. Run `doppler run -- lf account connect asana`.
+$ lf comment 254dc4 note; lf task delete 254dc4   # &quot;Delete me&quot;, never sent
+Saved 3dff1fab-6db1-4ff4-ae66-7add5a9f6214
+254dc4: removed locally; execution history retained
 $ lf repo plan
-Planning: Asana. 2 changes waiting to send.
-  97e42e  create    pending
-  97e42e  title     pending</pre>
-<p>e7839b was then re-queued for Asana (create + its two comments) by the connect-time enqueue.</p>
+Planning: Asana. 6 changes waiting to send.
+  0e2e22  create    queued
+  15f41f  create    queued
+  15f41f  complete  queued
+  15f41f  comment   queued
+  15f41f  comment   queued
+  0e2e22  title     queued
+Last attempt: No Asana credential found. Run `doppler run -- lf account connect asana`.
+$ sqlite3 -readonly loopflow.db &quot;select seq,kind,provider,phase,error from tracker_actions&quot;
+Error: in prepare, unable to open database file (14)
+</pre>
+<p>Queue rows (read from a copy of the private store):</p><pre>1|create|linear|retired|queued for Linear, but this repository uses Asana
+… 2–5 the same
+6–9 (repo2 creates, complete)|linear|queued|No Linear credential found …
+10|create|asana|queued|No Asana credential found …
+11–14 (15f41f re-queued: create, state, two comments)|asana|queued
+15|create|asana|retired|deleted before it was sent
+16|field|asana|queued   (0e2e22 title)
+17|comment|asana|retired|deleted before it was sent</pre>
+<p><b>Works.</b> Linear actions retire with the reason while still signed out; existing Tasks re-queue for Asana; a Task deleted
+before its creation went out retires its create and comment instead of queuing a delete.</p>
 
-<h2>4. Delete and abandon before anything was sent</h2>
-<p class="wrong">Seen before the fix: <code>lf task delete 9282fd</code> on an unbound Task left
-<code>create pending</code> + <code>delete pending</code>: the drain would make a Linear issue only to trash it. The base
-skipped deleted Tasks whose creation never went out (the migration's own <code>planning_deleted_at IS NULL OR
-export_attempted=1</code> and <code>uncreated()</code> agree).</p>
-<p class="fixed">Fixed: a delete on an owner with no tracker object and only a pending (never attempted) creation retires
-its unsent effects instead of queueing a delete ("deleted before it was sent"). A bound owner, or one whose creation was
-attempted, still queues the delete. <code>lf task delete</code> now prints "Pending Linear sync" only when that Task has
-an unsettled effect. Replayed: delete of a fresh Task with a comment → <code>lf repo plan</code> lists nothing for it.
-Test: <code>deleting_a_task_before_its_creation_is_sent_sends_nothing</code>; the existing
-<code>deletion_saves_offline_and_retains_execution_and_retry_identity</code> caught a first draft that ignored hand-bound
-Tasks.</p>
-<p><code>lf task abandon 713f21</code> queued <code>cancel</code> behind its pending create — correct: the item should
-exist, cancelled.</p>
+<h2>4. Abandon behind a queued create</h2>
+<pre>$ lf task abandon 9c1255
+9c1255: canceled; PRs and branches removed
+$ lf repo plan
+Planning: Linear. 5 changes waiting to send.
+  dd5716  create    queued
+  9c1255  create    queued
+  f75946  create    queued
+  f75946  complete  queued
+  9c1255  cancel    queued
+Last attempt: No Linear credential found. Run `doppler run -- lf account connect linear`.
+</pre>
+<p><b>Works:</b> <code>cancel</code> waits behind <code>create</code>, so the item arrives canceled.</p>
 
-<h2>5. Upgrade: the migration on this Machine's store</h2>
-<p><code>sqlite3 -readonly ~/.lf/loopflow.db ".backup"</code>; <code>schema_migrations</code> differs only by
-<code>tracker_effects</code>; applied the branch's SQL to the copy with <code>sqlite3</code> (never opened with
-<code>lf</code>). 0.17 s.</p>
-<table><tr><th>old receipts still sendable</th><th>before</th><th>after</th></tr>
-<tr><td>task_changes</td><td>117</td><td>0</td></tr><tr><td>task_state_deliveries</td><td>101</td><td>0</td></tr>
-<tr><td>task_comment_deliveries</td><td>110</td><td>0</td></tr><tr><td>unattempted prepared creations</td><td>1</td><td>0</td></tr></table>
-<p>79 effects copied (create 8 attempted; field 31 attempted + 8 pending; state 6 + 6; comment 17; delete 1; link 2).
-The drop from 329 is accounted for: 52 field and 78 state rows superseded by a newer value for the same field; 25 field,
-23 state and ~92 comment rows on unbound Tasks with no prepared creation, which the connect-time enqueue re-derives
-(hence fix 2). Drain select uses <code>tracker_effects_unsettled</code>.</p>
+<h2>5. Git-only <code>lf task sync</code> and <code>lf repo plan</code></h2>
+<pre>Git task · c2d9f5
+$ lf task sync 2c4c89
+Error: Task repository has no remote planning provider
+$ lf repo plan
+b681fe14a1a216b50fee7e3df03c9a7da31582c39d1a775f6e9c0def4a283d73  refs/loopflow/planning/users/ce2810cd-7d8a-4d7d-a220-b96bd4702142 (configured)  2 records
+  Retained import: b6c4492ee8996cbd77b8cf0fc94c7bb06b9f85a0
+  Fetched: b6c4492ee8996cbd77b8cf0fc94c7bb06b9f85a0
+  Publication: confirmed (38593de61192adba56787a8f343a6d7096758094)
+Import retention is not publication; `lf planning journal` lists retained values.
+$ lf repo plan --json
+{&quot;actions&quot;:[],&quot;destinations&quot;:[{&quot;acquisition_error&quot;:null,&quot;active&quot;:true,&quot;conflicts&quot;:[],&quot;fetched_revision&quot;:&quot;b6c4492ee8996cbd77b8cf0fc94c7bb06b9f85a0&quot;,&quot;id&quot;:&quot;b681fe14a1a216b50fee7e3df03c9a7da31582c39d1a775f6e9c0def4a283d73&quot;,&quot;imported_revision&quot;:&quot;b6c4492ee8996cbd77b8cf0fc94c7bb06b9f85a0&quot;,&quot;pending_local&quot;:false,&quot;publication_error&quot;:null,&quot;publication_revision&quot;:&quot;38593de61192adba56787a8f343a6d7096758094&quot;,&quot;publication_state&quot;:&quot;confirmed&quot;,&quot;reference&quot;:&quot;refs/loopflow/planning/users/ce2810cd-7d8a-4d7d-a220-b96bd4702142&quot;,&quot;selected_records&quot;:2}],&quot;transport&quot;:&quot;git&quot;}
+</pre>
+<p><b>Works.</b> Git publishes the journal; <code>actions</code> is empty.</p>
 
-<h2>Checks run</h2>
-<pre id="checks">cargo clippy -p loopflow-storage -p loopflow-execution -p loopflow --all-targets -- -D warnings   clean
-nextest -p loopflow-storage tracker_effects|query_plans|task_history                         25 pass
-nextest -p loopflow-execution ops::tracker|asana_planning|planning_effect|order|comments|…    100 pass
-nextest -p loopflow --lib local_planning|pr_tests|planning_lookup_tests                       62 pass
-nextest -p loopflow --test task_pr_authority_tests                                            12 pass
-cargo test -p loopflow --test integration documented_commands::                              4 pass
-Not run here: binary(two_people), transport::, golden_prompt — gate/CI.</pre>
-<h2>Also fixed</h2>
-<p class="fixed">Four <code>lf task</code> help lines named Linear for tracker-generic behavior (sync
-<code>--retry-updates</code>, unassign, abandon, delete); they now say "the tracker".</p>
+<h2>6. Upgrade: the migration on this Machine's store</h2>
+<p><code>sqlite3 -readonly ~/.lf/loopflow.db ".backup"</code>; <code>schema_migrations</code> differs from the branch only by
+<code>tracker_actions</code>. Applied the branch SQL to the copy with <code>sqlite3</code> (never opened with <code>lf</code>).</p>
+<pre>old receipts still sendable   before  after
+task_changes (unacknowledged)    117      0
+task_state_deliveries            102      0
+task_comment_deliveries          112      0
+
+tracker_actions copied: 80, all provider=linear
+  comment sent 17 · create sent 8 · delete queued 1 · field queued 8 / sent 31
+  link queued 2 · state queued 7 / sent 6
+sqlite3 &lt; tracker_actions.sql: 0.05 s
+drain select: SEARCH tracker_actions USING COVERING INDEX tracker_actions_unconfirmed (phase=?)</pre>
+<p><b>Works.</b> Same shape as the first pass (79 then, 80 now: the live store gained a row).</p>
+<p>Followed the connect-time enqueue on that copy: it would queue 17 creations, 16 on manabot and 1 on etude. The 16 manabot Tasks
+belong to the local Project <code>infrastructure</code>, whose Wave has no Linear Initiative; at base they sat with
+"Wave has no Linear Initiative; export remains pending". On the branch the Project's <code>create</code> is rejected before any
+request ("its Projects stay local") and the Tasks wait behind it (<code>parent_uncreated</code>), so nothing reaches Linear —
+the same hold. It costs one unit of the 20-request budget per pass on manabot, since <code>take()</code> runs before the tracker
+finds it cannot send. Read in code, not run: the private home cannot reach a send.</p>
+
+<h2>What works now</h2>
+<p>Every walkthrough above, on the current commit, with the new vocabulary in the CLI and docs. No fixes were needed in this pass.</p>
 
 <h2>Could not reach</h2>
 <ul>
-<li>A real Linear or Asana send/settle, lost reply, conflict, and the 20-request bound against a provider: the binary has
-no stand-in endpoint and the private home no login. Using the Machine's own store needs identical migrations, and the
-branch adds one. Covered only by fake-bridge tests.</li>
-<li>Desktop and the server's <code>task.get</code> sync frame: unchanged DTO shape; not walked.</li>
+<li>A real Linear or Asana send, confirm, lost reply, conflict, or the 20-request bound against a provider: no stand-in endpoint in the binary, and credentials come only from a stored OAuth grant (seeding one means writing store rows through internals). Covered by <code>ops::tracker::drain::tests</code> and the fake-tracker suites.</li>
+<li>Running the branch on the Machine's real store: its migrations differ by <code>tracker_actions</code>.</li>
+<li>Desktop and the server's <code>task.get</code> sync frame: DTO shape unchanged; not walked.</li>
 </ul>
 
 <h2>Still wrong, worst first</h2>
-<ul>
-<li><code>pm_writeback</code> reads <code>{"state":"current"}</code> while five effects are pending. Nothing in production
-writes <code>Pending</code> (same at base 470da475a1); the field is dead on the wire. Belongs with the wire rename (LOO-942).</li>
-<li><code>sync.connected</code> is <code>true</code> with no credential: it means "a tracker is configured".</li>
-<li>Tracker errors tell people to run <code>doppler run -- lf account connect linear</code>; Doppler is this Machine's
-setup, not a user's.</li>
-</ul>
-</body></html>
+<ol>
+<li>A held Project <code>create</code> (Wave without an Initiative) spends one request of each pass's budget without sending one. Small on this Machine (one Project); grows with held Projects per repository.</li>
+<li><code>pm_writeback</code> reads <code>{"state":"current"}</code> while five actions are queued; nothing writes the other value (same at base). LOO-942.</li>
+<li><code>lf task edit</code> prints "pending planning sync · creation" — the older word, from the wire state Swift mirrors. LOO-942/LOO-955.</li>
+<li><code>sync.connected</code> is true with no credential: it means "a tracker is configured".</li>
+<li>Tracker errors tell people to run <code>doppler run -- lf account connect linear</code>; Doppler is this Machine's setup, not a user's.</li>
+</ol>

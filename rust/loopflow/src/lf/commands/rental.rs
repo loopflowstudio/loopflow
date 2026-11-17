@@ -171,7 +171,11 @@ pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
             hours,
             max,
             max_usd_per_hour,
+            logins,
         } => {
+            for provider in logins {
+                loopflow_execution::machine::login::require_reach(*provider)?;
+            }
             let ondemand = OnDemand {
                 name: name.clone(),
                 provider: *provider,
@@ -185,6 +189,7 @@ pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
                 max_machines: *max,
                 max_usd_per_hour: *max_usd_per_hour,
                 hours: hours.min(rental::MAX_HOURS),
+                logins: logins.clone(),
                 created_at: now(),
             };
             let price = ondemand.usd_per_hour().map_err(|reason| anyhow!(reason))?;
@@ -247,7 +252,6 @@ pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
             max_usd,
             json,
         } => {
-            loopflow_execution::machine::forward::read_for_rental(&std::env::current_dir()?)?;
             let (rental, machine) = rent(&runtime, sqlite, name, *hours, *max_usd, true)?;
             if *json {
                 println!("{}", serde_json::to_string(&rental)?);
@@ -262,7 +266,8 @@ pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
                 );
                 if !batch {
                     println!(
-                        "Next: `lf machine connect {label} github`; launches carry `forward`; \
+                        "Next: `lf machine login <provider> {label}` for each login it needs; \
+                         launches carry `forward`; \
                          `lf machine end {label}` gives it back"
                     );
                 }
@@ -320,8 +325,19 @@ fn print_ondemand(listing: &OndemandListing) {
         |reason| format!("unpriced ({reason})"),
         |usd| usd.to_string(),
     );
+    let logins = match ondemand.logins.as_slice() {
+        [] => String::new(),
+        logins => format!(
+            " · signs in {}",
+            logins
+                .iter()
+                .map(|provider| provider.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    };
     println!(
-        "{} · {shape} · {live}/{} · {price}/h ≤ {}/h · {}h",
+        "{} · {shape} · {live}/{} · {price}/h ≤ {}/h · {}h{logins}",
         ondemand.name, ondemand.max_machines, ondemand.max_usd_per_hour, ondemand.hours
     );
     print_defaults(&listing.defaults);
@@ -620,11 +636,12 @@ pub fn place(
     let (_, task) = runtime.block_on(loopflow_execution::ops::task::resolve_saved_task(
         repo, None, issue,
     ))?;
-    // A rental that could not authenticate its launch is money for nothing.
-    loopflow_execution::machine::forward::read_for_rental(repo)?;
+    // A launch missing a value `forward` names is money for nothing.
+    loopflow_execution::machine::forward::read(repo)?;
+    let logins = require_ondemand(sqlite, name)?.logins;
     let (rental, machine) = rent(&runtime, sqlite, name, None, None, false)?;
     let label = machine.name();
-    if let Err(error) = prepare(&runtime, &label, repo, &task.repository_id, batch) {
+    if let Err(error) = prepare(&runtime, &label, &logins, repo, &task.repository_id, batch) {
         // Nothing ran on it yet, so nothing is lost by giving it back now.
         let cleanup = Sandboxes::from_env(rental.provider)
             .and_then(|api| delete_sandbox(sqlite, &api, &rental));
@@ -720,35 +737,29 @@ fn hand_off(
 fn prepare(
     runtime: &tokio::runtime::Runtime,
     label: &str,
+    logins: &[loopflow_execution::provider_auth::Provider],
     repo: &std::path::Path,
     repository: &RepositoryId,
     batch: bool,
 ) -> anyhow::Result<()> {
-    use loopflow_execution::provider_auth::Provider as Login;
+    use loopflow_execution::machine::login;
+    let logins = if logins.is_empty() {
+        let here = runtime.block_on(loopflow_execution::machine::connection::local_machine())?;
+        sign_in_order(
+            runtime
+                .block_on(login::logins(&here))?
+                .into_iter()
+                .filter(|row| row.state == login::LoginState::SignedIn)
+                .map(|row| row.provider),
+        )
+    } else {
+        sign_in_order(logins.iter().copied())
+    };
     let machine = runtime.block_on(loopflow_execution::machine::connection::resolve_target(
         label, false,
     ))?;
-    runtime.block_on(loopflow_execution::machine::credentials::connect(
-        &machine,
-        Login::GitHub,
-        None,
-        None,
-        batch,
-    ))?;
-    let planning = loopflow_execution::config::load_config(Some(repo))?
-        .unwrap_or_default()
-        .planning_transport();
-    if matches!(
-        planning,
-        loopflow_execution::config::PlanningConfig::Linear { .. }
-    ) {
-        runtime.block_on(loopflow_execution::machine::credentials::connect(
-            &machine,
-            Login::Linear,
-            None,
-            None,
-            batch,
-        ))?;
+    for provider in logins {
+        runtime.block_on(login::login(&machine, provider, None, false, batch))?;
     }
     let (origin, script) = checkout_script(repo, repository)?;
     let status = Command::new("ssh")
@@ -764,6 +775,24 @@ fn prepare(
         return Err(anyhow!("could not clone {origin} on {label}"));
     }
     Ok(())
+}
+
+/// The providers a rental signs in to, once each: those that reach another
+/// Machine, GitHub first because the checkout clones with it.
+fn sign_in_order(
+    providers: impl IntoIterator<Item = loopflow_execution::provider_auth::Provider>,
+) -> Vec<loopflow_execution::provider_auth::Provider> {
+    use loopflow_execution::provider_auth::Provider;
+    let mut order = Vec::new();
+    for provider in providers {
+        if loopflow_execution::machine::login::reaches_other_machines(provider)
+            && !order.contains(&provider)
+        {
+            order.push(provider);
+        }
+    }
+    order.sort_by_key(|provider| *provider != Provider::GitHub);
+    order
 }
 
 /// The origin, and the remote script that clones it and binds `repository`.
@@ -827,7 +856,26 @@ pub fn end(label: &str, force: bool) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::checkout_script;
+    use super::{checkout_script, sign_in_order};
+    use loopflow_execution::provider_auth::Provider;
+
+    #[test]
+    fn a_rental_signs_in_once_to_each_provider_that_reaches_it_github_first() {
+        let signed_in_here = [
+            Provider::Claude,
+            Provider::Asana,
+            Provider::Linear,
+            Provider::Notion,
+            Provider::GitHub,
+            Provider::Doppler,
+            Provider::Claude,
+        ];
+        assert_eq!(
+            sign_in_order(signed_in_here),
+            [Provider::GitHub, Provider::Claude, Provider::Linear]
+        );
+    }
+
     #[test]
     fn a_worktree_checkout_binds_its_tasks_repository_on_a_fresh_home() {
         let _env = loopflow_execution::journal::test_env_lock();

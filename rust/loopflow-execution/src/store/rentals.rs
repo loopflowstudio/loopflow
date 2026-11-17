@@ -119,6 +119,7 @@ pub fn ondemands(store: &SqliteStore) -> StoreResult<Vec<OnDemand>> {
                 max_machines: declaration.max_machines,
                 max_usd_per_hour: declaration.max_usd_per_hour,
                 hours: declaration.hours,
+                logins: declaration.logins,
                 created_at: OffsetDateTime::from_unix_timestamp(created).map_err(invalid)?,
             })
         })
@@ -138,6 +139,7 @@ pub fn add_ondemand(store: &SqliteStore, ondemand: &OnDemand) -> StoreResult<()>
         max_machines: ondemand.max_machines,
         max_usd_per_hour: ondemand.max_usd_per_hour,
         hours: ondemand.hours,
+        logins: ondemand.logins.clone(),
     };
     edit(
         &file,

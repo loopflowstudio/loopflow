@@ -69,39 +69,6 @@ pub fn read(directory: &Path) -> Result<Forwarded> {
     Ok(Forwarded { env, files })
 }
 
-/// What Claude and Codex sign in with: a setup or access token in the
-/// environment, or the login file under the home.
-const AGENT_LOGIN_ENV: [&str; 2] = ["CLAUDE_CODE_OAUTH_TOKEN", "CODEX_ACCESS_TOKEN"];
-const AGENT_LOGIN_FILES: [&str; 2] = [".claude/.credentials.json", ".codex/auth.json"];
-
-impl Forwarded {
-    fn carries_agent_login(&self) -> bool {
-        self.env
-            .iter()
-            .any(|(name, _)| AGENT_LOGIN_ENV.contains(&name.as_str()))
-            || self
-                .files
-                .iter()
-                .any(|(path, _)| AGENT_LOGIN_FILES.iter().any(|file| path == Path::new(file)))
-    }
-}
-
-/// `read` for an on-demand rental, which starts with no login of its own: a
-/// `forward` that carries no Claude or Codex login stops it before anything
-/// is rented.
-pub fn read_for_rental(directory: &Path) -> Result<Forwarded> {
-    let forwarded = read(directory)?;
-    if !forwarded.carries_agent_login() {
-        bail!(
-            "an on-demand rental has no Claude or Codex login, and `forward` names none to carry; \
-             after `claude setup-token`, `doppler secrets set CLAUDE_CODE_OAUTH_TOKEN` and \
-             `lf set --global forward.env '[CLAUDE_CODE_OAUTH_TOKEN]'`, \
-             or `lf set --global forward.files '[~/.codex/auth.json]'`"
-        );
-    }
-    Ok(forwarded)
-}
-
 /// Forwarded environment files older than this were never read by their
 /// launch (its SSH failed); the next delivery removes them.
 const UNREAD_MINUTES: u32 = 10;
@@ -244,30 +211,7 @@ fn doppler_value(name: &str, directory: &Path) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{home_relative, sourced, valid_name, Forwarded};
-    use secrecy::SecretString;
-    use std::path::PathBuf;
-
-    #[test]
-    fn a_rental_needs_a_forwarded_claude_or_codex_login() {
-        let forwarded = |env: &[&str], files: &[&str]| Forwarded {
-            env: env
-                .iter()
-                .map(|name| (name.to_string(), SecretString::new("value".into())))
-                .collect(),
-            files: files
-                .iter()
-                .map(|path| (PathBuf::from(path), Vec::new()))
-                .collect(),
-        };
-        assert!(!forwarded(&[], &[]).carries_agent_login());
-        assert!(
-            !forwarded(&["GH_TOKEN", "ANTHROPIC_API_KEY"], &[".ssh/config"]).carries_agent_login()
-        );
-        assert!(forwarded(&["CLAUDE_CODE_OAUTH_TOKEN"], &[]).carries_agent_login());
-        assert!(forwarded(&[], &[".codex/auth.json"]).carries_agent_login());
-        assert!(forwarded(&[], &[".claude/.credentials.json"]).carries_agent_login());
-    }
+    use super::{home_relative, sourced, valid_name};
 
     #[test]
     fn names_and_paths_are_checked_before_anything_moves() {

@@ -52,10 +52,17 @@ preparation. `--context`/`--explain` skip both, and neither side admits a Proces
 Names and paths resolve at the destination. Missing or changed identity fails without
 initialization, repair or local fallback.
 
-`lf machine connect mini <provider>` installs supported service credentials
-through SSH stdin. Claude and Codex instead use native authentication established
-on the destination. Personal `forward` settings can send named variables and home
-files; native clients interpret them. Launch does not select or refresh logins. See [native authentication](../subscriptions.md#remote-machines-and-rentals).
+`lf machine login <provider> mini` signs a Machine in. For Claude and Codex it
+runs `claude auth login` or `codex login --device-auth` on the destination as
+one SSH exchange with no PTY (`BROWSER=true`, so the destination opens no window
+of its own), reads the approval URL and code from its output, hands them to the
+approver here, writes Claude's pasted code to the login's stdin and then reads
+`claude auth status --json` or `codex login status` there. Nothing else in that
+output is shown or logged. Services install their credentials through SSH stdin
+into `lf machine credentials receive`. `lf machine logins --json` on the
+destination is the one remote read of what is signed in. Personal `forward`
+settings send per-run variables and home files; native clients interpret them.
+See [Sign in on any Machine](../subscriptions.md#sign-in-on-any-machine).
 
 Remove forgets the connection without contacting the remote. Historical machine
 identity and routes remain in SQLite, and ownership entries keep naming the Machine. Previously observed routes

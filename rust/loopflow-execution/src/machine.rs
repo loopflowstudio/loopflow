@@ -15,5 +15,6 @@ pub fn socket_path() -> anyhow::Result<PathBuf> {
 
 pub mod credentials;
 pub mod forward;
+pub mod login;
 
 pub mod task;

@@ -297,9 +297,8 @@ lf --setting context.diff=false design
 
 ## Choose where work runs
 
-Claude and Codex use native authentication on the execution Machine. Use the
-native client's sign-in flow there, or explicitly configure supported credentials
-with [named forwarding](#remote-work) for unattended work.
+Claude and Codex use native authentication on the execution Machine; sign it
+in with `lf machine login <provider> <machine>`.
 
 Once a remote machine is registered, select its durable ID for new Tasks:
 
@@ -462,7 +461,7 @@ and Graph topology still come from the selected or captured definitions.
 Credentials stay on the executor unless you name them: `forward.env` and
 `forward.files` carry named variables and home files from the initiating
 Machine to a remote launch. See
-[Remote Machines and rentals](subscriptions.md#remote-machines-and-rentals).
+[Per-run secrets](subscriptions.md#per-run-secrets).
 
 Forward authored declarations with their scope, target and choice/fallback
 meaning. Do not turn the effective result into command-line overrides or combine
@@ -1037,16 +1036,23 @@ summaries:
     tokens: 5000
 ```
 
-### Native authentication and service profiles
+### Sign-in approvers
 
-Sign in through `claude` or `codex login` on the execution Machine. Loopflow
-honors `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and native API-key configuration.
-See [Native authentication](subscriptions.md) for resume, recovery and supported
-remote setup.
+```yaml
+# personal global configuration
+approvers:
+  claude: {chrome: Work}
+  codex: {command: "my-approver"}
+```
 
-Service authentication still uses commands such as
-`lf account connect linear --chrome-profile Work`. See
-[Security](security.md) for Machine credentials and execution restrictions.
+`approvers.<provider>` says where `lf machine login` sends a provider's
+approval page: unset opens the default browser, `chrome` a Chrome profile,
+`command` a program that approves on its own. It applies to Claude, Codex,
+GitHub, Linear, Asana, Notion and OpenCode, and is personal to this Machine.
+See [Choose who approves](subscriptions.md#choose-who-approves) for the
+command's environment. Loopflow honors `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and
+native API-key configuration; see [Security](security.md) for Machine
+credentials and execution restrictions.
 
 ### Skill sources
 

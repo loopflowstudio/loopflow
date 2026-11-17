@@ -351,15 +351,29 @@ fn _record_stop(provider: &str, reason: &str, advice: &str) {
     );
 }
 
-/// The provider revoked the login: no model of it can go on until someone
-/// signs in again.
+/// The provider has no login here: no model of it can go on until someone
+/// signs in again, with the command that works where the advice is read.
 fn _sign_in_advice(provider: &str) -> String {
-    let sign_in = match provider {
-        "claude" => "run `claude`, then /login",
-        "codex" => "run `codex login`",
-        _ => "sign in with its own client",
-    };
-    format!("The {provider} login was revoked; sign in again on this Machine: {sign_in}")
+    format!("run `{}`", crate::machine::login::sign_in_command(provider))
+}
+
+/// A provider whose client says it has no login is refused before its agent
+/// starts, as a revoked login would be after.
+fn _run_signed_in(
+    launch: &AgentConfig,
+    process: &ProcessConfig,
+    retry: bool,
+) -> Result<AgentProcessResult, CoreError> {
+    let provider = parse_agent(launch.agent()?).0;
+    if crate::machine::login::signed_out_here(&provider, &launch.env) {
+        return Ok(AgentProcessResult {
+            exit_code: 1,
+            stderr: crate::machine::login::no_login(&provider),
+            failure: Some(AgentFailure::CredentialInvalidated),
+            ..Default::default()
+        });
+    }
+    _run_agent_once(launch, process, retry)
 }
 
 /// `rungs` is the whole order the step could walk; it stops after the last.
@@ -1017,7 +1031,7 @@ fn run_admitted_agent(
         &launch,
         &process,
         &TRANSIENT_RETRY_DELAYS,
-        |attempt, retry| _run_agent_once(attempt, &process, retry),
+        |attempt, retry| _run_signed_in(attempt, &process, retry),
         _sleep_wall_clock,
     );
     if let Err(error) = crate::ops::planning_sync::check_directory(&directory) {
@@ -1053,6 +1067,13 @@ fn _run_with_retries(
         let mut result = run(&attempt, launched)?;
         launched = true;
         if !process.auto || matches!(provider.as_str(), "opencode" | "pi") {
+            if result.failure == Some(AgentFailure::CredentialInvalidated) {
+                result.stderr = format!(
+                    "{}; {}",
+                    result.stderr.trim_end_matches('.'),
+                    _sign_in_advice(&provider)
+                );
+            }
             return Ok(result);
         }
         result.failure = result.failure.or_else(|| _classify_agent_failure(&result));
@@ -1114,7 +1135,11 @@ fn _run_with_retries(
                         _limit_stop_advice(&provider, launch, &rungs)
                     };
                     _record_stop(&provider, &reason, &advice);
-                    result.stderr = format!("{reason}\n{advice}");
+                    result.stderr = if revoked {
+                        format!("{}; {advice}", reason.trim_end_matches('.'))
+                    } else {
+                        format!("{reason}\n{advice}")
+                    };
                     return Ok(result);
                 }
             }
@@ -2718,7 +2743,7 @@ trust_level = "trusted"
         assert!(
             result
                 .stderr
-                .ends_with("The claude login was revoked; sign in again on this Machine: run `claude`, then /login"),
+                .ends_with("Please log in again; run `lf machine login claude`"),
             "{}",
             result.stderr
         );

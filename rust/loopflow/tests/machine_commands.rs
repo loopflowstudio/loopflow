@@ -1,8 +1,8 @@
 //! Public commands with isolated stores and a simulated SSH endpoint.
 use crate::support;
 use std::fs;
-use std::io::Write;
-use std::os::fd::FromRawFd;
+use std::io::{self, Write};
+use std::os::fd::{AsRawFd, FromRawFd};
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
@@ -122,12 +122,44 @@ esac
         let mut master = unsafe { fs::File::from_raw_fd(master) };
         // SAFETY: slave is the other fresh owned descriptor from openpty.
         let slave = unsafe { fs::File::from_raw_fd(slave) };
+        // No echo: what the terminal shows is lf's own output, not the answer.
+        // SAFETY: slave is an open terminal descriptor; termios is written by tcgetattr.
+        unsafe {
+            let mut termios = std::mem::zeroed::<libc::termios>();
+            assert_eq!(libc::tcgetattr(slave.as_raw_fd(), &mut termios), 0);
+            termios.c_lflag &= !libc::ECHO;
+            assert_eq!(
+                libc::tcsetattr(slave.as_raw_fd(), libc::TCSANOW, &termios),
+                0
+            );
+        }
         master.write_all(answer.as_bytes()).unwrap();
-        self.command(args)
+        let mut screen = master.try_clone().unwrap();
+        let reader = std::thread::spawn(move || {
+            let mut shown = Vec::new();
+            // Reading ends with EIO once lf and its children close the terminal.
+            let _ = io::Read::read_to_end(&mut screen, &mut shown);
+            shown
+        });
+        let mut command = self.command(args);
+        // SAFETY: setsid and TIOCSCTTY are async-signal-safe; stdin is the pty
+        // slave, which becomes the controlling terminal with lf in its foreground.
+        unsafe {
+            std::os::unix::process::CommandExt::pre_exec(&mut command, || {
+                if libc::setsid() < 0 || libc::ioctl(0, libc::TIOCSCTTY as _, 0) < 0 {
+                    return Err(io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+        let mut output = command
             .stdin(Stdio::from(slave.try_clone().unwrap()))
             .stderr(Stdio::from(slave))
             .output()
-            .unwrap()
+            .unwrap();
+        drop(command);
+        output.stderr = reader.join().unwrap();
+        output
     }
 
     fn missing_remote(&self) {
@@ -169,6 +201,408 @@ fn assert_success(output: &Output) {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+/// A stand-in `claude` that behaves as `claude auth login` does without a TTY.
+fn remote_claude(fixture: &Machines) {
+    executable(
+        &fixture.root.path().join("remote/.local/bin/claude"),
+        r#"#!/bin/sh
+case "$1 $2" in
+"auth login")
+  [ "$BROWSER" = true ] || exit 3
+  echo "If the browser didn't open, visit: https://claude.com/cai/oauth/authorize?code=true&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback"
+  printf 'Paste code here if prompted > '
+  read code
+  printf '%s' "$code" > "$HOME/claude-received"
+  [ "$code" = rejected ] && { echo "Invalid code: $code" >&2; echo 'OAuth error: invalid_grant' >&2; exit 1; }
+  echo '{"loggedIn":true,"email":"jack@example.com","subscriptionType":"max"}' > "$HOME/claude-status"
+  echo 'Login successful.';;
+"auth status")
+  [ -f "$HOME/claude-status" ] && exec cat "$HOME/claude-status"
+  echo '{"loggedIn":false}'; exit 1;;
+*) exit 2;;
+esac
+"#,
+    );
+    for opener in ["open", "xdg-open"] {
+        executable(
+            &fixture.root.path().join("bin").join(opener),
+            &format!(
+                "#!/bin/sh\nprintf '%s' \"$1\" > '{}'\n",
+                fixture.root.path().join("opened").display()
+            ),
+        );
+    }
+}
+
+/// Every file under `dir`, read as bytes, that contains `needle`.
+fn files_containing(dir: &Path, needle: &str) -> Vec<std::path::PathBuf> {
+    let mut found = Vec::new();
+    for entry in fs::read_dir(dir).unwrap().map(Result::unwrap) {
+        let path = entry.path();
+        if path.is_dir() {
+            found.extend(files_containing(&path, needle));
+        } else if fs::read(&path)
+            .unwrap_or_default()
+            .windows(needle.len())
+            .any(|window| window == needle.as_bytes())
+        {
+            found.push(path);
+        }
+    }
+    found
+}
+
+#[test]
+fn claude_login_runs_on_the_machine_and_only_the_pasted_code_crosses() {
+    let fixture = Machines::new();
+    remote_claude(&fixture);
+    assert_success(&fixture.run(&["machine", "add", "mini"]));
+
+    let code = "one-time-code-7Qx";
+    let output = fixture.terminal(
+        &["machine", "login", "claude", "mini"],
+        &format!("{code}\n"),
+    );
+    assert_success(&output);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        "mini: Claude signed in as jack@example.com (max)"
+    );
+    let opened = fs::read_to_string(fixture.root.path().join("opened")).unwrap();
+    assert!(
+        opened.starts_with("https://claude.com/cai/oauth/authorize?"),
+        "{opened}"
+    );
+    let remote = fixture.root.path().join("remote");
+    assert_eq!(
+        fs::read_to_string(remote.join("claude-received")).unwrap(),
+        code
+    );
+    // The code reached mini's `claude` on stdin and nothing here kept it.
+    assert!(!stdout.contains(code));
+    assert_eq!(
+        files_containing(&fixture.root.path().join("local"), code),
+        Vec::<std::path::PathBuf>::new()
+    );
+
+    // A refused code reports the client's error, never quoting the code.
+    fs::remove_file(remote.join("claude-status")).unwrap();
+    let output = fixture.terminal(&["machine", "login", "claude", "mini"], "rejected\n");
+    assert!(!output.status.success());
+    let shown = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        shown.contains("Approve Claude for mini in your browser"),
+        "{shown}"
+    );
+    assert!(
+        shown.contains("Claude's login on mini failed: OAuth error: invalid_grant"),
+        "{shown}"
+    );
+    assert!(
+        !shown.contains("rejected") && !shown.contains("https://"),
+        "{shown}"
+    );
+    assert!(!remote.join("claude-status").exists());
+}
+
+#[test]
+fn claude_login_needs_a_terminal_and_names_a_missing_client() {
+    let fixture = Machines::new();
+    assert_success(&fixture.run(&["machine", "add", "mini"]));
+    let output = fixture.run(&["machine", "login", "claude", "mini"]);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("foreground terminal"));
+
+    let output = fixture.terminal(&["machine", "login", "claude", "mini"], "code\n");
+    assert!(!output.status.success());
+    let shown = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        shown.contains("Claude Code is not installed on mini"),
+        "{shown}"
+    );
+}
+
+/// A stand-in `codex` that behaves as `codex login --device-auth` does: it
+/// prints the page and its code, then polls until someone approves.
+fn fake_codex(path: &Path) {
+    executable(
+        path,
+        r#"#!/bin/sh
+case "$1 $2" in
+"login --device-auth")
+  [ "$BROWSER" = true ] || exit 3
+  printf '\nFollow these steps to sign in with ChatGPT using device code authorization:\n\n'
+  printf '1. Open this link in your browser and sign in to your account\n   \033[94mhttps://auth.openai.com/codex/device\033[0m\n\n'
+  printf '2. Enter this one-time code \033[90m(expires in 15 minutes)\033[0m\n   \033[94mABCD-1234\033[0m\n\n'
+  i=0
+  while [ ! -f "$HOME/codex-approved" ]; do
+    i=$((i+1)); [ $i -gt 300 ] && { echo 'Error: device code expired' >&2; exit 1; }
+    sleep 0.1
+  done
+  echo 'Logged in using ChatGPT' > "$HOME/codex-auth"
+  echo 'Successfully logged in';;
+"login status")
+  [ -f "$HOME/codex-auth" ] && exec cat "$HOME/codex-auth"
+  echo 'Not logged in' >&2; exit 1;;
+"logout ")
+  rm -f "$HOME/codex-auth"; echo 'Successfully logged out';;
+*) exit 2;;
+esac
+"#,
+    );
+}
+
+/// The remote runs this build of `lf` over its own store.
+fn remote_lf(fixture: &Machines) {
+    let remote = fixture.root.path().join("remote");
+    support::seed_store(&remote.join("store"));
+    executable(
+        &remote.join(".local/bin/lf"),
+        &format!(
+            "#!/bin/sh\nexport LF_HOME='{}' LF_BIN='{}'\nexec '{}' \"$@\"\n",
+            remote.join("store").display(),
+            env!("CARGO_BIN_EXE_lf"),
+            env!("CARGO_BIN_EXE_lf"),
+        ),
+    );
+}
+
+fn login_states(fixture: &Machines, args: &[&str]) -> Vec<(String, String, Value)> {
+    fixture
+        .json(args)
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| {
+            (
+                row["provider"].as_str().unwrap().to_string(),
+                row["state"].as_str().unwrap().to_string(),
+                row["account"].clone(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn command_approvers_sign_machines_in_to_codex_and_claude_without_a_terminal() {
+    let fixture = Machines::new();
+    let root = fixture.root.path();
+    let remote = root.join("remote");
+    remote_lf(&fixture);
+    remote_claude(&fixture);
+    fake_codex(&remote.join(".local/bin/codex"));
+    fake_codex(&root.join("bin/codex"));
+    // The approver sees the page in `LF_APPROVE_*` and approves on every
+    // Machine; for Claude it prints the code the page would show.
+    let approve = root.join("approve");
+    executable(
+        &approve,
+        &format!(
+            r#"#!/bin/sh
+printf '%s|%s|%s|%s\n' "$LF_APPROVE_PROVIDER" "$LF_APPROVE_MACHINE" "$LF_APPROVE_URL" "${{LF_APPROVE_CODE-none}}" >> '{seen}'
+touch '{remote}/codex-approved' '{local}/codex-approved'
+[ "$LF_APPROVE_PROVIDER" = claude ] && echo code-from-the-page
+exit 0
+"#,
+            seen = root.join("approvals").display(),
+            remote = remote.display(),
+            local = root.join("local").display(),
+        ),
+    );
+    assert_success(&fixture.run(&["machine", "add", "mini"]));
+    for provider in ["codex", "claude"] {
+        assert_success(&fixture.run(&[
+            "set",
+            "--global",
+            &format!("approvers.{provider}.command"),
+            approve.to_str().unwrap(),
+        ]));
+    }
+
+    let before = login_states(&fixture, &["machine", "logins", "mini", "--json"]);
+    assert_eq!(
+        before[0],
+        ("claude".into(), "signed_out".into(), Value::Null)
+    );
+    assert_eq!(
+        before[1],
+        ("codex".into(), "signed_out".into(), Value::Null)
+    );
+    assert!(before[2..]
+        .iter()
+        .all(|(provider, state, _)| provider != "claude" && state == "signed_out"));
+
+    let codex = fixture.run(&["machine", "login", "codex", "mini"]);
+    assert_success(&codex);
+    assert_eq!(
+        String::from_utf8_lossy(&codex.stdout).trim(),
+        "mini: Codex signed in (ChatGPT)"
+    );
+    let claude = fixture.run(&["machine", "login", "claude", "mini"]);
+    assert_success(&claude);
+    assert_eq!(
+        String::from_utf8_lossy(&claude.stdout).trim(),
+        "mini: Claude signed in as jack@example.com (max)"
+    );
+    assert_eq!(
+        fs::read_to_string(remote.join("claude-received")).unwrap(),
+        "code-from-the-page"
+    );
+    let approvals = fs::read_to_string(root.join("approvals")).unwrap();
+    let approvals: Vec<_> = approvals.lines().collect();
+    assert_eq!(
+        approvals[0],
+        "codex|mini|https://auth.openai.com/codex/device|ABCD-1234"
+    );
+    assert!(
+        approvals[1].starts_with("claude|mini|https://claude.com/cai/oauth/authorize?")
+            && approvals[1].ends_with("|none"),
+        "{}",
+        approvals[1]
+    );
+
+    let after = login_states(&fixture, &["machine", "logins", "mini", "--json"]);
+    assert_eq!(
+        after[0],
+        (
+            "claude".into(),
+            "signed_in".into(),
+            Value::from("jack@example.com (max)")
+        )
+    );
+    assert_eq!(
+        after[1],
+        ("codex".into(), "signed_in".into(), Value::from("ChatGPT"))
+    );
+
+    // With no Machine named, the same login runs here.
+    assert_eq!(
+        login_states(&fixture, &["machine", "logins", "--json"])[1].1,
+        "signed_out"
+    );
+    let here = fixture.run(&["machine", "login", "codex"]);
+    assert_success(&here);
+    assert!(String::from_utf8_lossy(&here.stdout)
+        .trim()
+        .ends_with(": Codex signed in (ChatGPT)"));
+    assert_eq!(
+        login_states(&fixture, &["machine", "logins", "--json"])[1].1,
+        "signed_in"
+    );
+}
+
+#[test]
+fn refused_signs_in_again_only_the_machines_that_signed_out_or_refused_a_launch() {
+    let fixture = Machines::new();
+    let remote = fixture.root.path().join("remote");
+    remote_lf(&fixture);
+    fake_codex(&remote.join(".local/bin/codex"));
+    fs::write(remote.join("codex-auth"), "Logged in using ChatGPT\n").unwrap();
+    fs::write(remote.join("codex-approved"), "").unwrap();
+    assert_success(&fixture.run(&["machine", "add", "mini"]));
+    assert_success(&fixture.run(&["set", "--global", "approvers.codex.command", "exit 0"]));
+    let refused = |fixture: &Machines| {
+        let output = fixture.run(&["machine", "login", "codex", "--refused"]);
+        assert_success(&output);
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    };
+    assert_eq!(refused(&fixture), "No Machine needs a Codex login");
+
+    let logout = fixture.run(&["machine", "logout", "codex", "mini"]);
+    assert_success(&logout);
+    assert_eq!(
+        String::from_utf8_lossy(&logout.stdout).trim(),
+        "mini: Codex signed out"
+    );
+    assert!(!remote.join("codex-auth").exists());
+    assert_eq!(refused(&fixture), "mini: Codex signed in (ChatGPT)");
+
+    // Signed in, but the last Codex launch there was refused with none since.
+    rusqlite::Connection::open(remote.join("store/loopflow.db"))
+        .unwrap()
+        .execute_batch(
+            "INSERT INTO processes(id,trace_id,started_at) VALUES('step','trace',1);
+             INSERT INTO agent_limit_recoveries(lf_process_id,provider,reason,updated_at)
+             VALUES('step','codex','mini has no Codex login',1);",
+        )
+        .unwrap();
+    let rows = fixture.json(&["machine", "logins", "mini", "--json"]);
+    let codex = rows
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["provider"] == "codex")
+        .unwrap();
+    assert_eq!(codex["state"], "signed_in");
+    assert_eq!(codex["refused"]["reason"], "mini has no Codex login");
+    assert_eq!(refused(&fixture), "mini: Codex signed in (ChatGPT)");
+}
+
+#[test]
+fn services_that_sign_in_here_only_never_reach_another_machine() {
+    let fixture = Machines::new();
+    assert_success(&fixture.run(&["machine", "add", "mini"]));
+    let reached = fixture.root.path().join("ssh-reached");
+    executable(
+        &fixture.root.path().join("bin/ssh"),
+        &format!("#!/bin/sh\ntouch '{}'\nexit 1\n", reached.display()),
+    );
+    let output = fixture.run(&["machine", "login", "asana", "mini"]);
+    assert!(!output.status.success());
+    let shown = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        shown.contains("Asana signs in on each Machine itself; run `lf machine login asana` there"),
+        "{shown}"
+    );
+    assert!(!reached.exists());
+
+    let output = fixture.run(&[
+        "ondemand",
+        "add",
+        "quote",
+        "--provider",
+        "daytona",
+        "--vcpus",
+        "4",
+        "--memory-gb",
+        "8",
+        "--max",
+        "1",
+        "--max-usd-per-hour",
+        "1",
+        "--logins",
+        "claude,doppler",
+    ]);
+    assert!(!output.status.success());
+    let shown = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        shown.contains("Doppler signs in on each Machine itself"),
+        "{shown}"
+    );
+    let listed = fixture.run(&["ondemand", "list"]);
+    assert!(
+        !String::from_utf8_lossy(&listed.stdout).contains("quote"),
+        "{listed:?}"
+    );
+}
+
+#[test]
+fn a_refusing_approver_leaves_the_machine_signed_out() {
+    let fixture = Machines::new();
+    fake_codex(&fixture.root.path().join("remote/.local/bin/codex"));
+    assert_success(&fixture.run(&["machine", "add", "mini"]));
+    assert_success(&fixture.run(&["set", "--global", "approvers.codex.command", "exit 7"]));
+    let output = fixture.run(&["machine", "login", "codex", "mini"]);
+    assert!(!output.status.success());
+    let shown = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        shown.contains("the approver for Codex exited with exit status: 7; mini was not signed in"),
+        "{shown}"
+    );
+    assert!(!fixture.root.path().join("remote/codex-auth").exists());
 }
 
 #[test]

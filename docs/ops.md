@@ -339,7 +339,7 @@ access, and [Surfaces](surfaces.md) for app-owned Desktop automation.
 
 ```bash
 lf machine add mini                              # save an SSH destination; offers to install lf
-ssh mini                                        # sign in with the native client on mini
+lf machine login claude mini                     # approve here; mini keeps its own login
 lf --machine mini task list                      # any command, run there
 lf task move LOO-12 --machine mini               # move a Task there with its Session; you stay its person
 lf --wave product set machine mini               # new Tasks in Wave `product` run there
@@ -361,9 +361,12 @@ lf --wave infrastructure set machine.capacity code            # the Wave's new T
 lf machine end code-1                                # give a rented machine back now
 ```
 
-Claude and Codex use the destination's native authentication. For unattended
-rentals, explicitly configure the documented credentials or home files with
-[named forwarding](subscriptions.md#remote-machines-and-rentals).
+A rented machine is signed in as it is prepared, once per provider, to the
+template's `--logins` or every provider signed in here that reaches another
+Machine: Claude, Codex, GitHub, Linear and OpenCode. Asana, Notion and Doppler
+sign in on each Machine itself. With
+[approvers](subscriptions.md#choose-who-approves) set to a command, that needs
+no one present.
 
 Rental providers read their keys from the environment (`doppler run -- lf …`):
 Daytona `DAYTONA_API_KEY`; Modal `MODAL_TOKEN_ID`/`MODAL_TOKEN_SECRET` or
@@ -385,15 +388,15 @@ Unpushed work refuses the give-back unless you pass `--force`.
 ## Authentication
 
 ```bash
-codex login                          # on the Machine that runs Codex
-lf -a codex implement
-lf account connect linear --chrome-profile Work
+lf machine login codex mini          # Codex's own sign-in, on mini
+lf machine login linear --chrome-profile Work
+lf machine logins mini
 ```
 
-Claude and Codex own their native logins. Loopflow does not select subscriptions,
-switch credentials or poll quotas. GitHub, planning services, Doppler and OpenCode
-retain service authentication through `lf account`. See
-[Native authentication](subscriptions.md) for homes, resume and refusal recovery.
+Claude and Codex own their native logins; `lf machine login` runs them where
+they are used. Loopflow does not select subscriptions, switch credentials or
+poll quotas. See [Native authentication](subscriptions.md) for approvers,
+homes, resume and refusal recovery.
 
 ## Reference
 
@@ -409,14 +412,14 @@ retain service authentication through `lf account`. See
 | `lf repo ci [--since 7d]` | Report CI incidents and their repairs |
 | `lf repo release run\|check\|status\|notes\|bump\|tag\|publish` | Release stages, together or one at a time |
 | `lf commit`, `lf sync`, `lf wt create\|switch\|list\|prune\|delete` | Git, with Task and stack awareness |
-| `lf machine add\|list\|status\|use\|connect\|end` | Where work runs |
+| `lf machine add\|list\|status\|use\|end` | Where work runs |
+| `lf machine login\|logins\|logout` | What each Machine is signed in to |
 | `lf pool …`, `lf ondemand …` | Machines you own, machines you rent |
 | `lf server status` | Observe local client access and connection errors |
 | `lf install` | Update Loopflow and its server registration |
-| `lf account` | Service authentication |
 
 Every flag is in the [`lf` reference](lf-reference.md): [`lf pr`](lf-reference.md#lf-pr),
 [`lf repo`](lf-reference.md#lf-repo), [`lf wt`](lf-reference.md#lf-wt),
-[`lf machine`](lf-reference.md#lf-machine), [`lf account`](lf-reference.md#lf-account).
+[`lf machine`](lf-reference.md#lf-machine).
 
 Next: [Surfaces](surfaces.md): see this work in Desktop, cmux, Herdr or tmux.

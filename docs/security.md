@@ -84,19 +84,21 @@ configured publisher workflow and credentials.
 
 ```bash
 lf machine add mini
-lf machine connect mini github
-lf machine connect mini opencode
-lf machine connect mini linear
-ssh mini                         # sign in with the native Claude/Codex client
+lf machine login claude mini
+lf machine login codex mini
+lf machine login github mini
+lf machine login linear mini
 lf --machine mini -a codex implement
 ```
 
-Claude and Codex use destination-native authentication. A Machine can keep its
-own login; unattended work can receive explicitly named environment variables
-or home files through [named forwarding](subscriptions.md#remote-machines-and-rentals).
-Loopflow does not choose a login, interpret those files or refresh them. Existing
-destination files are retained. Missing authentication produces the native
-client's error.
+Claude and Codex sign in on the destination through their own login, run there
+over SSH with no terminal; only the approval page opens here
+([Sign in on any Machine](subscriptions.md#sign-in-on-any-machine)). The login,
+and every refresh of it, stays on the destination. Claude's one-time code, the
+one secret sent, travels on SSH stdin and is useless without the verifier held
+by the destination's `claude` process. Loopflow does not choose a login, store
+a Claude or Codex token or refresh one. A Machine with no login is refused
+before launch with the command that signs it in.
 
 Service credential transfer remains explicit. OpenSSH checks the known host key
 and Loopflow checks the saved Machine identity before transfer. Linear receives a

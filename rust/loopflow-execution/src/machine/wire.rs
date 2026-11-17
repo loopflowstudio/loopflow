@@ -438,8 +438,6 @@ mod tests {
             include_str!("../../tests/fixtures/dto/server/checkout_sync_planned.json"),
             include_str!("../../tests/fixtures/dto/server/checkout_syncing.json"),
             include_str!("../../tests/fixtures/dto/server/checkout_created.json"),
-            include_str!("../../tests/fixtures/dto/server/account_report.json"),
-            include_str!("../../tests/fixtures/dto/server/account.json"),
             include_str!("../../tests/fixtures/dto/server/skill_entries.json"),
             include_str!("../../tests/fixtures/dto/server/pr_published.json"),
             include_str!("../../tests/fixtures/dto/server/pr_prepared.json"),

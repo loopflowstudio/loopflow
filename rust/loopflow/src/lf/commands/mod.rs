@@ -1,4 +1,3 @@
-pub mod account;
 pub mod activity;
 pub mod binaries;
 pub mod bind_attribution;

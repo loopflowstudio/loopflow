@@ -567,20 +567,6 @@ writes! {
         &loopflow_execution::engine::Diagnostics,
     )?,
 
-    /// `lf account disconnect <provider>`: disconnect a service.
-    #[serde(rename = "account.disconnect")]
-    AccountDisconnect { provider: String } => loopflow_execution::engine::account::Account;
-    { provider } => loopflow_execution::engine::account::disconnect(provider)?,
-
-    /// `lf account connect <provider>`: connect a service.
-    #[serde(rename = "account.connect")]
-    AccountConnect {
-        provider: String,
-        chrome_profile: Option<String>,
-        api_key: bool,
-    } => loopflow_execution::engine::account::Account;
-    { provider, chrome_profile, api_key } => loopflow_execution::engine::account::connect(provider, chrome_profile.as_deref(), *api_key)?,
-
     /// `lf -b [--agent <agent>] graph <name> [message]`, started detached: the
     /// Process carrying the Graph.
     #[serde(rename = "graph.run")]
@@ -1180,8 +1166,6 @@ impl Write {
             | Self::DesktopDashboardMove { directory, .. }
             | Self::DesktopLayoutSave { directory, .. } => directory,
             Self::DesktopPortfolioSet { .. }
-            | Self::AccountDisconnect { .. }
-            | Self::AccountConnect { .. }
             | Self::ConfigSet { .. }
             | Self::ConfigUnset { .. }
             | Self::ConfigTheme { .. } => Path::new("/"),
@@ -1290,8 +1274,6 @@ mod tests {
             r#"{"kind":"checkout.commit","directory":"/r","message":"Tidy","push":false,"no_add":false,"paths":[],"agent":null}"#,
             r#"{"kind":"checkout.sync","directory":"/r","onto":null,"preview":true,"manual":false,"continue":false,"abort":false,"adopt":false}"#,
             r#"{"kind":"checkout.create","directory":"/r","name":"spike","preview":false,"persistent":false}"#,
-            r#"{"kind":"account.disconnect","provider":"linear"}"#,
-            r#"{"kind":"account.connect","provider":"linear","chrome_profile":"Profile 1","api_key":false}"#,
             r#"{"kind":"graph.run","directory":"/r","name":"code","message":null,"agent":null}"#,
             r#"{"kind":"skill.run","directory":"/r","name":"debug","message":"the failing test","agent":"claude"}"#,
             r#"{"kind":"pr.publish","directory":"/r","title":null,"body":null,"agent":null}"#,

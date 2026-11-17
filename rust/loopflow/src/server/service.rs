@@ -1328,9 +1328,7 @@ async fn operate(
                 measured,
                 move || {
                     let _held = reservation;
-                    loopflow_execution::provider_auth::operations::served(|| {
-                        Ok(serde_json::to_value(change.run()?)?)
-                    })
+                    Ok(serde_json::to_value(change.run()?)?)
                 },
             )
             .await;

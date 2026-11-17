@@ -1,0 +1,927 @@
+//! `lf machine login`: each provider's own sign-in, run on the Machine that
+//! keeps the login and approved where `approvers.<provider>` says.
+//!
+//! For Claude and Codex the target runs the client's login unmodified
+//! (`claude auth login`, `codex login --device-auth`), locally as a child or
+//! behind one SSH exchange without a PTY. lf reads its approval page, sends it
+//! to the approver and, for Claude, writes the code the page shows to the
+//! login's stdin. That code is useless without the PKCE verifier inside the
+//! `claude` process, and lf stores nothing: each client writes and refreshes
+//! its own login.
+use std::io::{BufRead, BufReader, Read, Write};
+use std::process::{Child, Command, Stdio};
+use std::sync::mpsc;
+use std::time::{Duration, SystemTime};
+
+use anyhow::{anyhow, bail, Context, Result};
+use serde::{Deserialize, Serialize};
+
+use crate::config::placement::Approver;
+use crate::provider_auth::Provider;
+use loopflow_model::durable::Machine;
+
+/// How long a sign-in may wait for its approval: Codex's device code lifetime,
+/// which Claude shares so both fail the same way.
+const APPROVAL_DEADLINE: Duration = Duration::from_secs(15 * 60);
+/// How long the login may take to print its approval page, SSH included.
+const PAGE_DEADLINE: Duration = Duration::from_secs(60);
+/// How long Claude may take to exit after complaining about the code; past
+/// it, the login is waiting for another paste.
+const REJECTION_GRACE: Duration = Duration::from_secs(1);
+
+/// Sign `machine` in to `provider`. A Machine whose route is `local` is this one.
+pub async fn login(
+    machine: &Machine,
+    provider: Provider,
+    chrome_profile: Option<&str>,
+    api_key: bool,
+    batch: bool,
+) -> Result<()> {
+    if here(machine) && !matches!(provider, Provider::Claude | Provider::Codex) {
+        return crate::provider_auth::operations::connect(provider, chrome_profile, api_key).await;
+    }
+    let approver = approver(provider, chrome_profile)?;
+    match provider {
+        Provider::Claude => claude(machine, approver.as_ref(), batch),
+        Provider::Codex => codex(machine, approver.as_ref()),
+        _ => {
+            crate::machine::credentials::connect(machine, provider, approver.as_ref(), batch).await
+        }
+    }
+}
+
+/// Whether `lf machine login` can sign another Machine in to `provider`:
+/// the agents run their own login there, and GitHub, Linear and OpenCode send
+/// a credential. Asana, Notion and Doppler sign in here only.
+pub fn reaches_other_machines(provider: Provider) -> bool {
+    matches!(
+        provider,
+        Provider::Claude
+            | Provider::Codex
+            | Provider::GitHub
+            | Provider::Linear
+            | Provider::OpenCodeZen
+    )
+}
+
+/// Refuses a provider that cannot sign another Machine in, before anything
+/// connects to one.
+pub fn require_reach(provider: Provider) -> Result<()> {
+    if !reaches_other_machines(provider) {
+        bail!(
+            "{} signs in on each Machine itself; run `lf machine login {}` there",
+            provider.display_name(),
+            provider.as_str(),
+        );
+    }
+    Ok(())
+}
+
+fn claude(machine: &Machine, approver: Option<&Approver>, batch: bool) -> Result<()> {
+    let name = name(machine);
+    if !matches!(approver, Some(Approver::Command { .. })) {
+        // A person pastes the code the page shows.
+        crate::machine::credentials::require_foreground(batch)?;
+    }
+    let mut login = Login::start(machine, Provider::Claude, &["claude", "auth", "login"])?;
+    // With `BROWSER=true` the login prints only the paste-code page; the
+    // localhost-callback one goes to `true`.
+    let url = login.next(url_in)?;
+    let page = Page {
+        provider: Provider::Claude,
+        machine: &name,
+        url: &url,
+        code: None,
+    };
+    let code = match send(approver, &page) {
+        Ok(Sent::Opened(place)) => {
+            eprintln!("Approve Claude for {name} {place}, then paste the code it shows:");
+            eprint!("> ");
+            let mut code = String::new();
+            std::io::stdin()
+                .lock()
+                .read_line(&mut code)
+                .context("read the pasted code")?;
+            code
+        }
+        Ok(Sent::Approved(code)) => code,
+        Err(error) => {
+            login.kill();
+            return Err(error);
+        }
+    };
+    let code = code.trim();
+    if code.is_empty() {
+        login.kill();
+        bail!("no code given; {name} was not signed in to Claude");
+    }
+    login.answer(code)?;
+    // A malformed code makes Claude complain on stderr and wait for another.
+    login.finish(code, true)?;
+    match confirm(machine, Provider::Claude, LoginState::SignedIn, "login")? {
+        Some(account) => println!("{name}: Claude signed in as {account}"),
+        None => println!("{name}: Claude signed in"),
+    }
+    Ok(())
+}
+
+/// Device code login: the person, or the approver command, enters the code
+/// Codex prints; Codex polls and writes its own login when it is approved.
+fn codex(machine: &Machine, approver: Option<&Approver>) -> Result<()> {
+    let name = name(machine);
+    let mut login = Login::start(
+        machine,
+        Provider::Codex,
+        &["codex", "login", "--device-auth"],
+    )?;
+    let url = login.next(url_in)?;
+    let code = login.next(device_code_in)?;
+    let page = Page {
+        provider: Provider::Codex,
+        machine: &name,
+        url: &url,
+        code: Some(&code),
+    };
+    match send(approver, &page) {
+        Ok(Sent::Opened(place)) => {
+            eprintln!("Approve Codex for {name} {place} with code {code}")
+        }
+        Ok(Sent::Approved(_)) => {}
+        Err(error) => {
+            login.kill();
+            return Err(error);
+        }
+    }
+    login.finish(&code, false)?;
+    let account = confirm(machine, Provider::Codex, LoginState::SignedIn, "login")?;
+    println!(
+        "{name}: Codex signed in ({})",
+        account.as_deref().unwrap_or("no account named")
+    );
+    Ok(())
+}
+
+/// The client's own answer once its login or logout has run: `want`, with the
+/// account it names, or the error.
+fn confirm(
+    machine: &Machine,
+    provider: Provider,
+    want: LoginState,
+    ran: &str,
+) -> Result<Option<String>> {
+    let row = probe(machine, provider, PROBE_DEADLINE);
+    if row.state == want {
+        return Ok(row.account);
+    }
+    let (display, name) = (provider.display_name(), name(machine));
+    match row.state {
+        LoginState::Unknown => bail!("{display}'s {ran} ran but {name} could not say who it is"),
+        state => bail!(
+            "{display}'s {ran} ran but {name} reports {}",
+            state.as_str()
+        ),
+    }
+}
+
+/// Sign `machine` out of `provider` with the provider's own logout; its client
+/// saying it is signed out afterwards is the result.
+pub async fn logout(machine: &Machine, provider: Provider) -> Result<()> {
+    let name = name(machine);
+    let display = provider.display_name();
+    let Some(argv) = logout_argv(provider) else {
+        if here(machine) {
+            crate::provider_auth::operations::disconnect(provider).await?;
+        } else {
+            crate::machine::credentials::remote_command(
+                machine,
+                &["machine", "logout", provider.as_str()],
+                None,
+            )?;
+        }
+        println!("{name}: {display} signed out");
+        return Ok(());
+    };
+    match crate::os_process::bounded_output(&mut command(machine, argv)?, PROBE_DEADLINE) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Err(not_installed(provider, &name))
+        }
+        Ok(output) if output.status.code() == Some(127) => {
+            return Err(not_installed(provider, &name))
+        }
+        _ => {}
+    }
+    confirm(machine, provider, LoginState::SignedOut, "logout")?;
+    println!("{name}: {display} signed out");
+    Ok(())
+}
+
+fn logout_argv(provider: Provider) -> Option<&'static [&'static str]> {
+    match provider {
+        Provider::Claude => Some(&["claude", "auth", "logout"]),
+        Provider::Codex => Some(&["codex", "logout"]),
+        _ => None,
+    }
+}
+
+/// The added Machines `lf machine login <provider> --refused` signs in: those
+/// whose `provider` login reads signed out, or refused a launch with none
+/// since. A Machine that cannot answer comes back as its error.
+pub async fn refused(provider: Provider) -> Result<Vec<(String, Result<Machine>)>> {
+    let store = crate::provider_auth::operations::local_store().await?;
+    let mut selected = Vec::new();
+    for machine in store.machines().await? {
+        let name = name(&machine);
+        match logins(&machine).await {
+            Ok(rows) => {
+                if rows.iter().any(|row| {
+                    row.provider == provider
+                        && (row.state == LoginState::SignedOut || row.refused.is_some())
+                }) {
+                    selected.push((name, Ok(machine)));
+                }
+            }
+            Err(error) => selected.push((name, Err(error))),
+        }
+    }
+    Ok(selected)
+}
+
+fn url_in(line: &str) -> Option<String> {
+    let start = line.find("https://")?;
+    line[start..].split_whitespace().next().map(str::to_string)
+}
+
+/// Codex's one-time code, alone on its line: `ABCD-1234`.
+fn device_code_in(line: &str) -> Option<String> {
+    let code = line.trim();
+    let (left, right) = code.split_once('-')?;
+    let part = |part: &str| {
+        (4..=8).contains(&part.len())
+            && part
+                .chars()
+                .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
+    };
+    (part(left) && part(right)).then(|| code.to_string())
+}
+
+// ---------------------------------------------------------------------------
+// What a Machine is signed in to
+
+/// One provider's login on a Machine, as its own client or store reports it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LoginRow {
+    pub provider: Provider,
+    pub state: LoginState,
+    /// The account the client names: Claude's email and plan, a service login.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub account: Option<String>,
+    /// The provider's last refusal here, when no launch of it has come since.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub refused: Option<Refusal>,
+}
+
+/// A launch the provider refused: no login, a usage limit, a model it would not run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Refusal {
+    pub reason: String,
+    /// Unix seconds.
+    pub at: i64,
+}
+
+/// `unknown`: the client could not answer. Shown, never refused on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LoginState {
+    SignedIn,
+    SignedOut,
+    Unknown,
+}
+
+impl LoginState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::SignedIn => "signed in",
+            Self::SignedOut => "signed out",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+/// Every provider's login on `machine`. Another Machine answers with its own
+/// `lf machine logins --json`, so its clients and store are the ones asked.
+pub async fn logins(machine: &Machine) -> Result<Vec<LoginRow>> {
+    if !here(machine) {
+        let output = crate::machine::credentials::remote_command(
+            machine,
+            &["machine", "logins", "--json"],
+            None,
+        )?;
+        return serde_json::from_slice(&output)
+            .with_context(|| format!("{}'s logins were unreadable", name(machine)));
+    }
+    let store = crate::provider_auth::operations::local_store().await?;
+    let mut rows = Vec::new();
+    // The agents first, then the services.
+    let agents = [Provider::Claude, Provider::Codex];
+    let services = Provider::all()
+        .into_iter()
+        .filter(|provider| !agents.contains(provider));
+    for provider in agents.into_iter().chain(services) {
+        let mut row = match provider {
+            Provider::Claude | Provider::Codex => probe(machine, provider, PROBE_DEADLINE),
+            service => service_login(&store, service).await?,
+        };
+        row.refused = crate::store::run_sqlite(&store.sqlite, move |store| {
+            store.unanswered_refusal(provider.as_str())
+        })
+        .await?
+        .map(|(reason, at)| Refusal { reason, at });
+        rows.push(row);
+    }
+    Ok(rows)
+}
+
+/// A service's login where its client keeps one (gh's hosts file, OpenCode's
+/// own store), else what this Machine's store saved for it.
+async fn service_login(store: &crate::store::SharedStore, provider: Provider) -> Result<LoginRow> {
+    let installed = match provider {
+        Provider::GitHub => crate::machine::credentials::github_user()?,
+        Provider::OpenCodeZen => crate::machine::credentials::opencode_login(),
+        _ => None,
+    };
+    let (state, account) = match installed {
+        Some(account) => (LoginState::SignedIn, Some(account)),
+        None => match store.provider_auth_snapshot(provider).await? {
+            Some(snapshot) if snapshot.status.as_str() == "active" => {
+                (LoginState::SignedIn, snapshot.status.login())
+            }
+            _ => (LoginState::SignedOut, None),
+        },
+    };
+    Ok(LoginRow {
+        provider,
+        state,
+        account,
+        refused: None,
+    })
+}
+
+pub async fn print_logins(machine: &Machine, json: bool) -> Result<()> {
+    let rows = logins(machine).await?;
+    if json {
+        println!("{}", serde_json::to_string(&rows)?);
+        return Ok(());
+    }
+    for row in rows {
+        let mut line = format!(
+            "{:<12} {:<11}  {}",
+            row.provider.as_str(),
+            row.state.as_str(),
+            row.account.unwrap_or_default()
+        );
+        if let Some(refusal) = row.refused {
+            line.push_str(&format!(
+                "  refused {}",
+                crate::output::format_time(refusal.at)
+            ));
+        }
+        println!("{}", line.trim_end());
+    }
+    Ok(())
+}
+
+/// Asks `provider`'s own client on `machine` who is signed in. A client that
+/// is missing, slower than `deadline` or unreadable answers `unknown`.
+pub fn probe(machine: &Machine, provider: Provider, deadline: Duration) -> LoginRow {
+    let (state, account) = status_argv(provider)
+        .and_then(|argv| command(machine, argv).ok())
+        .map_or((LoginState::Unknown, None), |mut command| {
+            answer(provider, &mut command, deadline)
+        });
+    LoginRow {
+        provider,
+        state,
+        account,
+        refused: None,
+    }
+}
+
+/// The launch check: whether `harness`'s client here, with the launch's
+/// `env`, definitely has no login. Anything short of a definite answer
+/// launches: lf never refuses a working login on its own misreading.
+pub fn signed_out_here(harness: &str, env: &std::collections::BTreeMap<String, String>) -> bool {
+    let Some(provider) = harness.parse::<Provider>().ok() else {
+        return false;
+    };
+    let Some(argv) = status_argv(provider) else {
+        return false;
+    };
+    let mut command = local_command(argv);
+    command.envs(env);
+    let started = std::time::Instant::now();
+    let (state, _) = answer(provider, &mut command, LAUNCH_PROBE_DEADLINE);
+    tracing::debug!(
+        harness,
+        state = state.as_str(),
+        elapsed_ms = started.elapsed().as_millis(),
+        "login probe"
+    );
+    state == LoginState::SignedOut
+}
+
+/// The name the launching Machine gives this one, so the sign-in advice a
+/// launch here prints is the command that works where it is read.
+pub const MACHINE_NAME_ENV: &str = "LF_MACHINE_NAME";
+
+fn launcher_name() -> Option<String> {
+    std::env::var(MACHINE_NAME_ENV)
+        .ok()
+        .filter(|name| !name.is_empty())
+}
+
+/// The command that signs this Machine in to `harness`, as whoever launched
+/// here would type it.
+pub fn sign_in_command(harness: &str) -> String {
+    match launcher_name() {
+        Some(name) => format!("lf machine login {harness} {name}"),
+        None => format!("lf machine login {harness}"),
+    }
+}
+
+/// `mini has no Codex login`, naming this Machine as its launcher does.
+pub fn no_login(harness: &str) -> String {
+    let provider = match harness.parse::<Provider>() {
+        Ok(provider) => provider.display_name(),
+        Err(_) => harness,
+    };
+    let machine = launcher_name().unwrap_or_else(|| "This Machine".to_string());
+    format!("{machine} has no {provider} login")
+}
+
+/// How long `logins` and a finished sign-in wait for a client, SSH included.
+const PROBE_DEADLINE: Duration = Duration::from_secs(30);
+/// How long a launch waits for its login probe before launching anyway.
+/// `claude auth status` took 0.34–0.39 s here (2026-11-17), Codex 0.05 s.
+const LAUNCH_PROBE_DEADLINE: Duration = Duration::from_secs(2);
+
+fn status_argv(provider: Provider) -> Option<&'static [&'static str]> {
+    match provider {
+        Provider::Claude => Some(&["claude", "auth", "status", "--json"]),
+        Provider::Codex => Some(&["codex", "login", "status"]),
+        _ => None,
+    }
+}
+
+/// `claude auth status --json` exits 1 with `loggedIn: false` when signed out;
+/// `codex login status` exits 0 `Logged in using ChatGPT`, 1 `Not logged in`.
+fn answer(
+    provider: Provider,
+    command: &mut Command,
+    deadline: Duration,
+) -> (LoginState, Option<String>) {
+    let Ok(output) = crate::os_process::bounded_output(command, deadline) else {
+        return (LoginState::Unknown, None);
+    };
+    match provider {
+        Provider::Claude => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct Claude {
+                logged_in: bool,
+                email: Option<String>,
+                subscription_type: Option<String>,
+            }
+            match serde_json::from_slice::<Claude>(&output.stdout) {
+                Ok(Claude {
+                    logged_in: true,
+                    email,
+                    subscription_type,
+                }) => (
+                    LoginState::SignedIn,
+                    match (email, subscription_type) {
+                        (Some(email), Some(plan)) => Some(format!("{email} ({plan})")),
+                        (email, plan) => email.or(plan),
+                    },
+                ),
+                Ok(_) => (LoginState::SignedOut, None),
+                Err(_) => (LoginState::Unknown, None),
+            }
+        }
+        Provider::Codex => {
+            let said = format!(
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            match output.status.code() {
+                // An API key login reads `Logged in using an API key - sk-…`; only the method crosses.
+                Some(0) => (
+                    LoginState::SignedIn,
+                    said.lines().find_map(|line| {
+                        let method = line.trim().strip_prefix("Logged in using ")?;
+                        Some(method.split(" - ").next().unwrap_or(method).to_string())
+                    }),
+                ),
+                Some(1) if said.contains("Not logged in") => (LoginState::SignedOut, None),
+                _ => (LoginState::Unknown, None),
+            }
+        }
+        _ => (LoginState::Unknown, None),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The approver
+
+/// `--chrome-profile` for this run, else `approvers.<provider>`; none opens
+/// the default browser.
+pub(crate) fn approver(
+    provider: Provider,
+    chrome_profile: Option<&str>,
+) -> Result<Option<Approver>> {
+    if let Some(profile) = chrome_profile {
+        return Ok(Some(Approver::Chrome {
+            chrome: profile.to_string(),
+        }));
+    }
+    let approvers = crate::config::load_config(None)?
+        .unwrap_or_default()
+        .approvers;
+    Ok(approvers.into_iter().find_map(|(name, approver)| {
+        (name.parse::<Provider>().ok() == Some(provider)).then_some(approver)
+    }))
+}
+
+/// One approval page a sign-in shows.
+pub(crate) struct Page<'a> {
+    pub provider: Provider,
+    pub machine: &'a str,
+    pub url: &'a str,
+    /// The device code the page asks for, when it asks for one.
+    pub code: Option<&'a str>,
+}
+
+pub(crate) enum Sent {
+    /// Opened for a person to approve; says where.
+    Opened(String),
+    /// The approver command approved it; its first output line, if any.
+    Approved(String),
+}
+
+/// Sends `page` to `approver`. A page that could not open is printed instead.
+pub(crate) fn send(approver: Option<&Approver>, page: &Page) -> Result<Sent> {
+    let (opened, place) = match approver {
+        None => (
+            crate::platform::open_url_checked(page.url).map_err(anyhow::Error::from),
+            "in your browser".to_string(),
+        ),
+        Some(Approver::Chrome { chrome: requested }) => {
+            let profile = crate::profile::resolve_local_chrome_profile(requested)
+                .map_err(anyhow::Error::msg)?;
+            (
+                crate::provider_auth::operations::open_chrome_profile(&profile, page.url),
+                format!("in Chrome ({})", profile.name),
+            )
+        }
+        Some(Approver::Command { command }) => {
+            return run_approver(command, page).map(Sent::Approved)
+        }
+    };
+    if let Err(error) = opened {
+        eprintln!(
+            "Could not open the approval page ({error}); open it yourself:\n  {}",
+            page.url
+        );
+        return Ok(Sent::Opened("there".to_string()));
+    }
+    Ok(Sent::Opened(place))
+}
+
+/// `sh -c <command>` with the page in `LF_APPROVE_*`; its stderr is the person's.
+fn run_approver(command: &str, page: &Page) -> Result<String> {
+    let mut approve = Command::new("sh");
+    approve
+        .arg("-c")
+        .arg(command)
+        .env("LF_APPROVE_PROVIDER", page.provider.as_str())
+        .env("LF_APPROVE_URL", page.url)
+        .env("LF_APPROVE_MACHINE", page.machine)
+        .stdin(Stdio::null())
+        .stderr(Stdio::inherit());
+    match page.code {
+        Some(code) => approve.env("LF_APPROVE_CODE", code),
+        None => approve.env_remove("LF_APPROVE_CODE"),
+    };
+    let output = approve
+        .output()
+        .with_context(|| format!("run the approver for {}", page.provider.display_name()))?;
+    if !output.status.success() {
+        bail!(
+            "the approver for {} exited with {}; {} was not signed in",
+            page.provider.display_name(),
+            output.status,
+            page.machine
+        );
+    }
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_string())
+}
+
+// ---------------------------------------------------------------------------
+// One provider login process on the target
+
+struct Login {
+    child: Child,
+    provider: Provider,
+    target: String,
+    /// Each output line, and whether it came from stderr.
+    lines: mpsc::Receiver<(bool, String)>,
+    /// The login's recent stderr, for its error line; never shown as a whole.
+    errors: Vec<String>,
+    started: SystemTime,
+}
+
+impl Login {
+    fn start(machine: &Machine, provider: Provider, argv: &[&str]) -> Result<Self> {
+        let target = name(machine);
+        let tied = [&["sh", "-c", TIED_TO_STDIN, "sh"], argv].concat();
+        let mut child = command(machine, &tied)?
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|error| match error.kind() {
+                std::io::ErrorKind::NotFound => not_installed(provider, &target),
+                _ => anyhow::Error::from(error).context("start the provider's login"),
+            })?;
+        let (sender, lines) = mpsc::channel();
+        for (stderr, stream) in [
+            (
+                false,
+                Box::new(child.stdout.take().expect("piped stdout")) as Box<dyn Read + Send>,
+            ),
+            (true, Box::new(child.stderr.take().expect("piped stderr"))),
+        ] {
+            let sender = sender.clone();
+            std::thread::spawn(move || {
+                for line in BufReader::new(stream).lines().map_while(Result::ok) {
+                    if sender.send((stderr, strip_ansi(&line))).is_err() {
+                        break;
+                    }
+                }
+            });
+        }
+        Ok(Self {
+            child,
+            provider,
+            target,
+            lines,
+            errors: Vec::new(),
+            started: SystemTime::now(),
+        })
+    }
+
+    /// The first output line `find` accepts, as `find` returns it.
+    fn next(&mut self, find: fn(&str) -> Option<String>) -> Result<String> {
+        let deadline = SystemTime::now() + PAGE_DEADLINE;
+        loop {
+            let left = deadline
+                .duration_since(SystemTime::now())
+                .unwrap_or_default();
+            match self.lines.recv_timeout(left) {
+                Ok((stderr, line)) => {
+                    if let Some(found) = find(&line) {
+                        return Ok(found);
+                    }
+                    self.remember((stderr, line));
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    self.kill();
+                    bail!(
+                        "{}'s login on {} printed no approval page",
+                        self.provider.display_name(),
+                        self.target
+                    );
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => return Err(self.exited()),
+            }
+        }
+    }
+
+    /// Writes the code; stdin stays open, since closing it stops the login.
+    fn answer(&mut self, code: &str) -> Result<()> {
+        let stdin = self.child.stdin.as_mut().expect("piped login stdin");
+        stdin
+            .write_all(format!("{code}\n").as_bytes())
+            .and_then(|()| stdin.flush())
+            .with_context(|| format!("send the code to {}", self.target))
+    }
+
+    /// Waits for the login to exit successfully, killing it at the deadline,
+    /// or, when `rejects_on_stderr`, a second after its first stderr line if
+    /// it has not exited by then.
+    fn finish(&mut self, code: &str, rejects_on_stderr: bool) -> Result<()> {
+        let mut rejected: Option<SystemTime> = None;
+        loop {
+            while let Ok(line) = self.lines.try_recv() {
+                if rejects_on_stderr && line.0 && rejected.is_none() {
+                    rejected = Some(SystemTime::now());
+                }
+                self.remember(line);
+            }
+            if rejected.is_some_and(|at| at.elapsed().unwrap_or_default() > REJECTION_GRACE)
+                && matches!(self.child.try_wait(), Ok(None))
+            {
+                self.kill();
+                return Err(self.failure(None, code));
+            }
+            if let Some(status) = self.child.try_wait()? {
+                if status.success() {
+                    return Ok(());
+                }
+                // Lines still in flight carry the error.
+                while let Ok(line) = self.lines.recv_timeout(Duration::from_millis(200)) {
+                    self.remember(line);
+                }
+                return Err(self.failure(status.code(), code));
+            }
+            if self.started.elapsed().unwrap_or_default() > APPROVAL_DEADLINE {
+                self.kill();
+                bail!(
+                    "{} was not approved within 15 minutes; {} was not signed in",
+                    self.provider.display_name(),
+                    self.target
+                );
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    }
+
+    fn exited(&mut self) -> anyhow::Error {
+        match self.child.wait() {
+            Ok(status) => self.failure(status.code(), ""),
+            Err(error) => error.into(),
+        }
+    }
+
+    fn failure(&self, exit: Option<i32>, code: &str) -> anyhow::Error {
+        // `sh: claude: command not found` over SSH.
+        if exit == Some(127) {
+            return not_installed(self.provider, &self.target);
+        }
+        // The last line that quotes neither the page nor the code.
+        let reason = self
+            .errors
+            .iter()
+            .rev()
+            .map(|line| line.trim())
+            .find(|line| {
+                !line.is_empty()
+                    && !line.contains("http")
+                    && (code.is_empty() || !line.contains(code))
+            })
+            .map(|line| format!(": {line}"))
+            .unwrap_or_default();
+        let hint = match self.provider {
+            Provider::Codex => "; device code login must be enabled in ChatGPT security settings",
+            _ => "",
+        };
+        anyhow!(
+            "{}'s login on {} failed{reason}{hint}",
+            self.provider.display_name(),
+            self.target
+        )
+    }
+
+    fn remember(&mut self, (stderr, line): (bool, String)) {
+        if !stderr {
+            return;
+        }
+        if self.errors.len() == 8 {
+            self.errors.remove(0);
+        }
+        self.errors.push(line);
+    }
+
+    fn kill(&mut self) {
+        // Closing stdin stops the login wherever it runs (`TIED_TO_STDIN`).
+        drop(self.child.stdin.take());
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+impl Drop for Login {
+    /// Ctrl-C or an early return never leaves a login waiting on the target.
+    fn drop(&mut self) {
+        if matches!(self.child.try_wait(), Ok(None)) {
+            self.kill();
+        }
+    }
+}
+
+fn not_installed(provider: Provider, target: &str) -> anyhow::Error {
+    let client = match provider {
+        Provider::Claude => "Claude Code",
+        Provider::Codex => "Codex",
+        other => other.display_name(),
+    };
+    anyhow!(
+        "{client} is not installed on {target}; install it there, then run `lf machine login {} {target}` again",
+        provider.as_str()
+    )
+}
+
+// ---------------------------------------------------------------------------
+// Running a client on the target
+
+/// Runs a login (`"$@"`) that stops when its stdin closes: when lf finishes,
+/// is interrupted or loses the connection. Closing an SSH exchange without a
+/// PTY signals nothing remote, and `claude auth login` would keep waiting for
+/// its localhost callback. The login reads stdin through a FIFO; the reader
+/// copying stdin into it kills the login at EOF.
+const TIED_TO_STDIN: &str = r#"d=$(mktemp -d) && mkfifo "$d/in" || exit 1
+"$@" <"$d/in" & login=$!
+exec 3>"$d/in" 4<&0
+rm -rf "$d"
+{ cat <&4 >&3; kill "$login"; } >/dev/null 2>&1 &
+exec 3>&- 4<&-
+wait "$login""#;
+
+/// `argv` on `machine`: a child here, one SSH exchange without a PTY there.
+/// `BROWSER=true` keeps the client from opening a window of its own.
+fn command(machine: &Machine, argv: &[&str]) -> Result<Command> {
+    if here(machine) {
+        return Ok(local_command(argv));
+    }
+    let script = format!(
+        "{}; BROWSER=true exec {}",
+        crate::machine::ssh::REMOTE_PATH,
+        argv.iter()
+            .map(|arg| crate::machine::ssh::sh_quote(arg))
+            .collect::<Vec<_>>()
+            .join(" ")
+    );
+    let mut command = Command::new("ssh");
+    command
+        .args(crate::machine_route::bounded_ssh_args(
+            &machine.route,
+            false,
+        )?)
+        .arg(script);
+    Ok(command)
+}
+
+fn local_command(argv: &[&str]) -> Command {
+    let mut command = Command::new(argv[0]);
+    command.args(&argv[1..]).env("BROWSER", "true");
+    command
+}
+
+fn here(machine: &Machine) -> bool {
+    machine.route == "local"
+}
+
+pub(crate) fn name(machine: &Machine) -> String {
+    match &machine.label {
+        Some(label) => label.clone(),
+        None if here(machine) => crate::store::ownership::local_label(),
+        None => machine.route.clone(),
+    }
+}
+
+fn strip_ansi(line: &str) -> String {
+    static ANSI: once_cell::sync::Lazy<regex::Regex> = once_cell::sync::Lazy::new(|| {
+        // CSI styling, and OSC sequences such as the OSC 8 hyperlink Claude
+        // Code wraps its URL in: `ESC ] 8 ;; <url> BEL <text> ESC ] 8 ;; BEL`.
+        regex::Regex::new("\x1b\\[[0-9;?]*[ -/]*[@-~]|\x1b\\][^\x07\x1b]*(?:\x07|\x1b\\\\)")
+            .expect("valid ANSI pattern")
+    });
+    ANSI.replace_all(line, "").into_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::strip_ansi;
+
+    #[test]
+    fn approval_urls_survive_colored_output() {
+        assert_eq!(
+            strip_ansi("\x1b[1mvisit:\x1b[0m https://claude.com/cai/oauth/authorize?a=1"),
+            "visit: https://claude.com/cai/oauth/authorize?a=1"
+        );
+        // Claude Code 2.1.326 in a terminal that supports hyperlinks.
+        assert_eq!(
+            strip_ansi(
+                "visit: \x1b]8;;https://claude.com/cai/oauth/authorize?a=1\x07https://claude.com/cai/oauth/authorize?a=1\x1b]8;;\x07"
+            ),
+            "visit: https://claude.com/cai/oauth/authorize?a=1"
+        );
+    }
+}

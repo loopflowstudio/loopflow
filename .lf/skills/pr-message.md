@@ -1,14 +1,20 @@
 ---
 extends: builtin
 ---
-## Command changes
+## User interface changes
 
-`lf help --all` prints the public command tree. When the diff adds, removes or
-renames a Clap command, compare that tree before and after the change and list
-each added or removed command under **What changes**: "Adds `lf skill customize`",
-"Removes `lf transport start`". Mention changed arguments only when they change
-what someone types. For an added command, name the Task or design it delivers,
-or say none was recorded. Keep this list even when the change looks minor.
+Under **What changes**, list each thing people use that the diff adds,
+removes or renames, before **Model changes**:
+
+- Commands: `lf help --all` prints the public command tree. Compare it before
+  and after: "Adds `lf skill customize`", "Removes `lf transport start`".
+  Mention changed arguments only when they change what someone types.
+- Views: each Desktop or phone screen, pane, tab, menu item or setting
+  (`swift/`), and what `lf open` shows in Rex, Herdr or cmux.
+
+For each addition, name the Task or design it delivers, or say none was
+recorded. Keep this list even when the change looks minor; write "None" when
+nothing moved.
 
 ## Model changes
 

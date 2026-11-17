@@ -1434,7 +1434,8 @@ fn conversation_owners(home: &Path, by_pid: &HashMap<u32, &OsProcess>) -> HashMa
             let owner: Owner = serde_json::from_slice(&std::fs::read(&path).ok()?).ok()?;
             let process = by_pid.get(&owner.pid)?;
             // A file left by an exited process names whoever reused its pid.
-            ((owner.started_at / 1000 - process.started_at).abs() <= 60)
+            ((owner.started_at / 1000 - process.started_at).abs()
+                <= crate::transcript::raw::START_SLACK)
                 .then_some((owner.pid, owner.session_id))
         })
         .collect()

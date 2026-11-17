@@ -10,9 +10,9 @@ use super::Source;
 use crate::harness::HarnessKind;
 use crate::journal::OsProcess;
 
-/// A transcript written this long before its process started still counts:
+/// A transcript or owner file this far from its process start still counts:
 /// clocks and first writes are coarse.
-const START_SLACK: i64 = 60;
+pub(crate) const START_SLACK: i64 = 60;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RawConversation {

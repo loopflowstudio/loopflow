@@ -174,9 +174,8 @@ mode/holder decisions, bare native resume and saved-transcript policy.
 
 Concept review of slice 7 (2026-11-16): the sweep prints only the "stay"
 lines; no launch or transcript decision is made by name outside a harness
-file. One gate cleanup: `claude.rs::conversation_owners` writes the pid-reuse
-tolerance as a literal `60` beside `transcript/raw.rs::START_SLACK`; use the
-one constant.
+file. `claude.rs::conversation_owners` now uses `transcript::raw::START_SLACK`
+for its pid-reuse tolerance instead of a second literal `60`.
 
 Gate/CI still owns held-terminal exec, `documented_commands`, the session CLI
 resolution contract, application launch/resume and attachment completion suites.
@@ -189,6 +188,7 @@ matrix prints waited rows; it does not claim held-terminal exec coverage.
 - Fixture `cargo build --offline -p loopflow --bin lf --message-format=json` and `target/debug/lf --version` — passed.
 - `cargo clippy --all-targets -- -D warnings` — passed.
 - `cargo fmt --all -- --check` and `git diff --check` — passed.
+- Realign (2026-11-16): `cargo nextest run -p loopflow-execution --lib -E 'test(transcript::raw::tests::) | test(ops::human_session::provider_conversation::tests::) | test(harness::claude::)'` after sharing START_SLACK — 20 passed.
 - Slice 7 deletion sweep — only retained named settings, credential JSON and warning-label lines; removed symbols absent.
 
 Unchanged mode/holder decision checks reuse the six passing launch-policy rows

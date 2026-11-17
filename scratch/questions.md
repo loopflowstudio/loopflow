@@ -110,3 +110,9 @@ Holders are `setsid` processes, one per build, each with its own lock and
   holder, and the pass skips a Session with a live or pending terminal. A
   start in the same instant is not guarded beyond the attachment claim; not
   tested.
+
+## Launch names (steer from LOO-924's Session, 2026-11-17)
+
+Jack: "my suggestions: work session, worker / chat, run", then "ok, batch is
+fine for bare headless". managed+typing = work session, managed+headless =
+worker, bare+typing = chat, bare+headless = batch. Slice 4 docs use them.

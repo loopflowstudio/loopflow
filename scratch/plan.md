@@ -249,7 +249,7 @@ same counter on `task_graphs` (`restarts`), reset by a finished step
 implement; `lf task run LOO-x`".
 
 **Never starts:**
-- bare Sessions (`lf -b`, a person's own terminal);
+- bare Sessions: chats and batches (`lf <skill>` at a terminal, `lf -b`);
 - Graph-step Sessions (the Graph owns them);
 - Wave and repository conversations (decision below);
 - a second provider on one thread;
@@ -394,6 +394,8 @@ Must survive:
    Machine the first pass would start 7 conversations that died earlier (one
    137, five exit 1, one with no end recorded since 2026-10-22).
 
+   After merging base `e66b21801c`, `server::recovery::tests::` still pass (5).
+
    Left from slice 1:
    - `conversation` in `lf task status --json` (moves to slice 4 with the DTOs);
    - acceptance checks 1–3 and 5 as a `MachineServer` fixture;
@@ -421,6 +423,12 @@ Must survive:
      in `lf task status --json`;
    - the Desktop line;
    - PTY headroom in `lf machine doctor`;
+   - docs use the four launch names chosen in LOO-924: managed+typing is a
+     work session, managed+headless a worker, bare+typing a chat,
+     bare+headless a batch. Only work sessions come back on their own; the
+     recovery docs this Task wrote (`docs/sessions.md` "After a kill, a crash
+     or a reboot", `docs/work.md`, `docs/troubleshooting.md`, server README)
+     say so in those words.
    - docs. `docs/sessions.md` says closing from Desktop or `lf task interrupt`
      makes a quit; neither ends a conversation today, so that sentence goes.
      It also says each start waits a minute after a death; the first start is

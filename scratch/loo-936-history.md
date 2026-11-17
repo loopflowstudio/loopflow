@@ -214,10 +214,9 @@ Tables, columns, store size (main, history, usage), public functions in
 section, write-lock note), `docs/telemetry.md` (retention paragraph, prune
 wording), `docs/troubleshooting.md` (what survives, disk, orphaned prune),
 `docs/index.md` (file layout), `docs/dev/environment.md`,
-`docs/dev/machines.md` (`history.db` beside `loopflow.db`). Written when
-Processes were to move too: slice 5 checks them against the code, removes
-Process-in-history claims, adds `usage.db`; the docs also promise `lf doctor`
-reports `history.db` size and oldest row.
+`docs/dev/machines.md` (`history.db` beside `loopflow.db`). Slice 5 checked
+them against the code: no Process move, `usage.db` and the server's hourly
+clock named, `lf doctor` reports both journals' size and oldest row.
 
 ## Slice 3 as built (2026-11-16)
 
@@ -276,7 +275,7 @@ Check results: `cargo nextest run -p loopflow-storage -p loopflow-execution
 `native_runner_is_quiet_until_its_turn_ends_codex_foreground` (sccache
 "cannot find binary path" in this environment; for gate/CI).
 
-## Upgrade skew (to design before ship)
+## Upgrade skew (detect-and-name, settled)
 
 A Process still running the released lf after `lf install` keeps its old
 reads and writes while new Processes use the history file:

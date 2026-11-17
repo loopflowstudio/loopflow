@@ -563,7 +563,8 @@ Must survive:
   `…::a_task_run_whose_carrier_died`, `…::a_killed_graph_…` (40 pass);
   `doctor::tests::` (6); `context_launch_tests::a_killed_task_conversation` (1);
   `documented_commands::` (4); clippy clean.
-- Gate: `scripts/test_desktop.sh --filter 'DTOFixtureTests'` plus every Swift suite with an inline
+- `scripts/test_desktop.sh --filter 'DTOFixtureTests'`: 58 pass (implement).
+- Gate: every Swift suite with an inline
   Session fixture (keys `ended`/`start` added to 13 files), `binary(session_lifecycle_tests)`
   (`work_first_entry.json`), `test(performance_tests::)` (`summary_query` gained one PK join).
 - A real reboot with three Tasks (qa; a person runs it).

@@ -181,7 +181,10 @@ fn pty_usage() -> Option<PtyUsage> {
         .args(["-n", "kern.tty.ptmx_max"])
         .output()
         .ok()?;
-    let max = String::from_utf8_lossy(&output.stdout).trim().parse().ok()?;
+    let max = String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .parse()
+        .ok()?;
     // devfs lists a `ttysNNN` node for each PTY while it is allocated.
     let in_use = std::fs::read_dir("/dev")
         .ok()?

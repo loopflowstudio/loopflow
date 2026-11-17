@@ -600,15 +600,12 @@ pub struct DiedRun {
 }
 
 impl DiedRun {
-    /// When the next start is due, or `None` once [`RUN_RESTARTS`] ran out.
-    /// The first start after a death is immediate; later ones wait the
-    /// landing's repair backoff from the last.
+    /// When the next start is due (0: at once), or `None` once
+    /// [`RUN_RESTARTS`] ran out.
     pub fn next_at(&self) -> Option<i64> {
-        match (self.restarts.count, self.restarts.at) {
-            (count, _) if count >= RUN_RESTARTS => None,
-            (0, _) | (_, None) => Some(0),
-            (count, Some(at)) => Some(at + crate::ops::pr_landing::repair_backoff(count)),
-        }
+        (self.restarts.count < RUN_RESTARTS).then(|| {
+            crate::ops::recovery::next_start_at(self.restarts.count, self.restarts.at).unwrap_or(0)
+        })
     }
 
     /// One line for the Task's run.
@@ -680,7 +677,7 @@ pub(crate) fn restart_runs() -> OpsResult<()> {
             if died.next_at().is_none_or(|due| due > now) {
                 continue;
             }
-            let Some((task, worktree)) = continuable(&store, &id, now).await? else {
+            let Some((task, worktree, _)) = continuable(&store, &id, now).await? else {
                 continue;
             };
             if !store
@@ -701,13 +698,14 @@ pub(crate) fn restart_runs() -> OpsResult<()> {
     })
 }
 
-/// The Task and its checkout, when a run of it may start here now: open,
-/// claimed here, checked out, and not waiting out a usage limit.
+/// The Task, its checkout and the agent a usage limit that reset left it on,
+/// when a run of it may start here now: open, claimed here, checked out, and
+/// not waiting out a limit.
 async fn continuable(
     store: &SharedStore,
     id: &loopflow_storage::work::task::TaskId,
     now: i64,
-) -> OpsResult<Option<(Task, std::path::PathBuf)>> {
+) -> OpsResult<Option<(Task, std::path::PathBuf, Option<String>)>> {
     if store
         .sqlite
         .task_state(id)
@@ -718,7 +716,7 @@ async fn continuable(
         return Ok(None);
     }
     let wait = super::limit_recovery::waiting_on_limit(&store.sqlite, id).map_err(task_error)?;
-    if wait.is_some_and(|wait| wait.retry_at > now) {
+    if wait.as_ref().is_some_and(|wait| wait.retry_at > now) {
         return Ok(None);
     }
     let Some(task) = store.get_task(id).await.map_err(task_error)? else {
@@ -727,7 +725,7 @@ async fn continuable(
     let Some(worktree) = task.worktree.clone().filter(|path| path.is_dir()) else {
         return Ok(None);
     };
-    Ok(Some((task, worktree)))
+    Ok(Some((task, worktree, wait.and_then(|wait| wait.agent))))
 }
 
 /// Start `lf --task ISSUE ship` again when its ship process has exited. After
@@ -757,10 +755,9 @@ async fn restart_ship(
     {
         return Ok(());
     }
-    let Some((task, worktree)) = continuable(store, id, now).await? else {
+    let Some((task, worktree, agent)) = continuable(store, id, now).await? else {
         return Ok(());
     };
-    let wait = super::limit_recovery::waiting_on_limit(&store.sqlite, id).map_err(task_error)?;
     if failure.is_some() {
         let seen = store.sqlite.task_run_restarts(id).map_err(task_error)?;
         if !store
@@ -773,7 +770,7 @@ async fn restart_ship(
     }
     restart_lf_in(
         &worktree,
-        wait.as_ref().and_then(|wait| wait.agent.as_deref()),
+        agent.as_deref(),
         &["--task", &task.identifier, "ship"],
     )?;
     tracing::info!("restarted the ship process for {}", task.identifier);

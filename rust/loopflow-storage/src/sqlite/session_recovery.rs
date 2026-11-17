@@ -29,7 +29,7 @@ pub struct ConversationToStart {
     /// The provider's exit, as its launcher recorded it. `None` when nobody saw
     /// the end: the holder died, or the Machine restarted.
     pub exit_code: Option<i32>,
-    /// The agent's recorded OS identity, read while its row is unfinished.
+    /// The agent's recorded OS identity.
     pub identity: Option<(u32, i64)>,
     pub starts_since_turn: u32,
     pub last_started_at: Option<i64>,
@@ -61,18 +61,13 @@ impl SqliteStore {
             open = super::durable::task_open_sql("t"),
         ))?;
         let rows = statement.query_map([CONVERSATION_STARTS], |row| {
-            let ended_at: Option<i64> = row.get(3)?;
             Ok(ConversationToStart {
                 session: row.get(0)?,
                 task: TaskId::from_raw(row.get::<_, String>(1)?),
                 agent: row.get(2)?,
-                ended_at,
+                ended_at: row.get(3)?,
                 exit_code: row.get(4)?,
-                identity: if ended_at.is_none() {
-                    row.get::<_, Option<u32>>(5)?.zip(row.get(6)?)
-                } else {
-                    None
-                },
+                identity: row.get::<_, Option<u32>>(5)?.zip(row.get(6)?),
                 starts_since_turn: row.get(7)?,
                 last_started_at: row.get(8)?,
                 provider: row.get(9)?,

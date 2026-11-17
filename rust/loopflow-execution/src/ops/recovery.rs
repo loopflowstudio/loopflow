@@ -92,8 +92,9 @@ pub fn due_task_conversations(
     Ok(due)
 }
 
-/// When a Task conversation that died, started `attempts` times since its
-/// last finished turn, last at `last_started_at`, may start again; `None`: at once.
+/// When something that died, started again `attempts` times since it last made
+/// progress, last at `last_started_at`, may start again; `None`: at once. Task
+/// conversations and Task runs share this schedule.
 pub fn next_start_at(attempts: u32, last_started_at: Option<i64>) -> Option<i64> {
     match (attempts, last_started_at) {
         (0, _) | (_, None) => None,

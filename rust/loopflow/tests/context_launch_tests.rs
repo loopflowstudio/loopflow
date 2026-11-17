@@ -1412,7 +1412,11 @@ fn a_killed_task_conversation_comes_back_once_and_a_quit_one_stays_quit() {
     assert_eq!(conversation["state"], "closed", "{conversation}");
     assert_eq!(conversation["ended"]["by"], "person", "{conversation}");
     assert_eq!(conversation["ended"]["exit_code"], 0, "{conversation}");
-    assert_eq!(conversation["start"], serde_json::Value::Null, "{conversation}");
+    assert_eq!(
+        conversation["start"],
+        serde_json::Value::Null,
+        "{conversation}"
+    );
     drop(running);
 }
 

@@ -367,7 +367,6 @@ pub(super) fn ship_stop_in(
 enum ShipEvent {
     Approved,
     Carried,
-    Restarted,
     Stopped,
     Withdrawn,
 }
@@ -377,7 +376,6 @@ impl ShipEvent {
         match self {
             Self::Approved => "approved",
             Self::Carried => "carried",
-            Self::Restarted => "restarted",
             Self::Stopped => "stopped",
             Self::Withdrawn => "withdrawn",
         }
@@ -402,8 +400,10 @@ struct ShipLog {
 /// Read from the latest approval or stop: each starts the log over.
 fn ship_log_in(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<ShipLog> {
     let mut query = conn.prepare_cached(
+        // `restarted` rows are released builds' restart counts;
+        // `task_graphs.restarts` counts them now.
         "SELECT kind,at,lf_process_id,person FROM task_ship_events WHERE task_id=?1
-         AND id>=IFNULL((SELECT max(id) FROM task_ship_events
+         AND kind<>'restarted' AND id>=IFNULL((SELECT max(id) FROM task_ship_events
              WHERE task_id=?1 AND kind IN ('approved','stopped')),0)
          ORDER BY id",
     )?;
@@ -424,9 +424,6 @@ fn ship_log_in(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<ShipLo
                 }
             }
             ShipEvent::Carried => log.carrier = process,
-            // Released builds counted restarts here; `task_graphs.restarts`
-            // counts them now.
-            ShipEvent::Restarted => {}
             ShipEvent::Stopped => {
                 log = ShipLog {
                     stop: Some(ShipStop {

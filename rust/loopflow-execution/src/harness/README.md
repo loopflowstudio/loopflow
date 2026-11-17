@@ -10,7 +10,8 @@ at turn boundaries, interjects through hooks and records what happened.
 let harness = HarnessKind::Codex.harness();
 let outcome = harness::launch(Launch {
     config: &config,
-    placement,          // from transport::delegate
+    mode,               // from transport::delegate
+    holder,             // from transport::delegate
     admitted: &admitted, // from admit(); never optional
     start: Start::Resume { thread: &thread },
     context_file: Some(&context),
@@ -18,10 +19,10 @@ let outcome = harness::launch(Launch {
 ```
 
 Every launch, interactive or headless, bare or held, goes through
-`harness::launch`. `transport::delegate` decides the `Placement` once: `Mode`
-(`Interactive` or `Headless`) and `Holder` (`Caller` or `Server`). In-process
-callers that never delegate, like commit messages and Graph steps, use
-`Placement::HEADLESS_CALLER`. `admit` creates the capture and claims the
+`harness::launch`. `transport::delegate` decides `Mode` (`Interactive` or
+`Headless`) and `Holder` (`Caller` or `Server`) once. In-process callers that
+never delegate, like commit messages and PR text, use `Mode::Headless` and
+`Holder::Caller`; a Graph step for a Task goes through `delegate`. `admit` creates the capture and claims the
 attachment before any harness is chosen, so a launch cannot start unattached.
 
 Each harness file answers the rest:

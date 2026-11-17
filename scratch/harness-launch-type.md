@@ -18,8 +18,8 @@ required in the type; a fifth harness is one file.
 
 ## Risk findings (measured at 470da475a1)
 
-The checkout is stacked on LOO-913 (`jack-heart/cli-prox`, ca4145fd03), which
-removes account routing. Add no account selection back. The original caller
+LOO-913 (#1953, which removes account routing) is on main at 4a0691a9a0 and
+merged into this branch. Add no account selection back. The original caller
 inventory and dependency investigation are in
 `3b735e67d6:scratch/harness-launch-type.md`.
 
@@ -230,8 +230,7 @@ Second pass, against the working diff (runner deletion):
   takes one fact.
 - `Outcome` was undefined; see "One entry point".
 
-No open product choice. The checkout is stacked on #1953 at ca4145fd03;
-see `scratch/questions.md` for the stack decision.
+No open product choice.
 
 ## Delete, do not maintain
 
@@ -343,9 +342,10 @@ behave exactly as before.
 - `rust/loopflow-execution/src/harness/README.md` "One launch type per harness"
 - `docs/dev/codebase.md` "Add a provider"
 
-The README's account paragraphs are left for LOO-913 (#1953) to delete, to avoid a conflict.
+#1953 replaced the README's account paragraphs with "Native clients own
+authentication."
 
 Both describe the finished design, none of which exists yet (no `Launch`,
-`Admitted`, `Mode` or `launch_matrix` in the tree). Both still name
-`Placement`; implement replaces it with `mode` and `holder`. They must not merge
+`Admitted`, `Mode` or `launch_matrix` in the tree). Realign (2026-11-16)
+replaced the README's `Placement` with `mode` and `holder`. They must not merge
 ahead of slice 4; implement corrects them to whatever it actually builds.

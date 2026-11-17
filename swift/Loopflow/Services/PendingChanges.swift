@@ -76,11 +76,11 @@ public final class PendingChanges {
     /// Show `command` on every list now and send `write` under its request ID,
     /// again while the link is lost. The change stays until a reading covers what
     /// the answer advanced; a refusal removes it and the Notice says
-    /// "LOO-4 couldn't be completed: …". `answered` runs after an answer, to ask
-    /// for the readings that show it.
+    /// "LOO-4 couldn't be completed: … · Show", `show` going to the Task.
+    /// `answered` runs after an answer, to ask for the readings that show it.
     @discardableResult
     public func make(_ command: PendingCommand, subject: String, verb: String, write: ServedWrite, notices: NoticeCenter,
-                     answered: @escaping @MainActor () async -> Void = {}) -> String {
+                     show: Notice.Action?, answered: @escaping @MainActor () async -> Void = {}) -> String {
         let requestID = UUID().uuidString
         changes.append(Change(requestID: requestID, command: command, answer: nil))
         Task {
@@ -90,11 +90,11 @@ public final class PendingChanges {
                 await answered()
             case .partlyDone(let revisions, let reason):
                 self.answered(requestID, revisions: revisions)
-                notices.post(Notice("\(subject) was \(verb), but \(reason)", key: requestID))
+                notices.post(Notice("\(subject) was \(verb), but \(reason)", key: requestID, action: show))
                 await answered()
             case .refused(let reason):
                 changes.removeAll { $0.requestID == requestID }
-                notices.post(Notice("\(subject) couldn't be \(verb): \(reason)", key: requestID))
+                notices.post(Notice("\(subject) couldn't be \(verb): \(reason)", key: requestID, action: show))
             }
         }
         return requestID

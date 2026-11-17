@@ -2825,8 +2825,9 @@ final class WorkModel {
     /// Show `command` on every list now; the Machine's answer or refusal arrives through the Notice.
     private func change(_ task: RoadmapTask, _ command: PendingCommand, _ write: ServedWrite, _ verb: String,
                         accepted: (() -> Void)? = nil) {
+        let show = Notice.Action("Show") { [weak self] in self?.select(.task(id: task.id)) }
         pendingChanges.make(command, subject: task.task.identifier, verb: verb, write: write,
-                            notices: navigation.notices) { [weak self] in
+                            notices: navigation.notices, show: show) { [weak self] in
             accepted?()
             try? await self?.confirmWorkUpdate()
         }
@@ -2845,16 +2846,15 @@ final class WorkModel {
         navigation.renaming = SessionRenameDraft(sessionId: record.id, text: record.title)
     }
 
-    /// Submit the current rename. Success publishes Rust's authoritative
-    /// record; rejection keeps the typed name and its error. Either outcome
-    /// settles only the Session and repository that started it.
+    /// Submit the current rename: the new title shows in the click; a refusal
+    /// puts the old one back and the Notice says why.
     func commitSessionRename() {
         guard let repo = repoPath, let draft = navigation.renaming else { return }
         navigation.renaming = nil
         let shown = sessions.value?.first { $0.id == draft.sessionId }?.title ?? draft.sessionId
         pendingChanges.make(.renameSession(session: draft.sessionId, title: draft.text), subject: shown, verb: "renamed",
                             write: .sessionRename(directory: repo, id: draft.sessionId, name: draft.text),
-                            notices: navigation.notices) { [weak self] in
+                            notices: navigation.notices, show: nil) { [weak self] in
             // A read started before the rename must not restore the old name.
             self?.supersedeSessions()
             await self?.refreshSessions()

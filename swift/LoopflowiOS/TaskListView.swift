@@ -71,12 +71,14 @@ final class TaskFeed {
         }
     }
 
-    /// The row leaves the list in the swipe; a refusal brings it back and the Notice says why.
-    func complete(_ task: WorkViewPlan.Content) {
+    /// The row leaves the list in the swipe; a refusal brings it back and the Notice
+    /// says why, its Show running `show` to open the Task.
+    func complete(_ task: WorkViewPlan.Content, show: @escaping @MainActor () -> Void) {
         guard let directory = directory(of: task) else { return }
         let issue = task.identifier ?? task.work.id
         pendingChanges.make(.complete(task: issue), subject: issue, verb: "completed",
-                            write: .taskComplete(directory: directory, issue: issue), notices: notices) { [weak self] in
+                            write: .taskComplete(directory: directory, issue: issue), notices: notices,
+                            show: Notice.Action("Show", perform: show)) { [weak self] in
             try? await self?.observation?.refresh()
         }
     }
@@ -389,7 +391,7 @@ struct TaskListView: View {
         }
             .buttonStyle(.plain)
             .swipeActions(edge: .trailing) {
-                Button("Complete", systemImage: "checkmark") { feed.complete(task) }
+                Button("Complete", systemImage: "checkmark") { feed.complete(task) { selectedTask = task } }
                     .tint(theme.palette.success)
                     .disabled(!feed.pendingChanges.acceptsChanges)
             }

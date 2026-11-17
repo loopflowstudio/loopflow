@@ -852,6 +852,31 @@ struct WorkModelStreamTests {
         #expect(claimed.runtime?.owner?.machine.label == "laptop")
     }
 
+    @Test("A refused Complete returns the row; its Notice's Show selects the Task")
+    func refusalShowsTheTask() async throws {
+        let fixture = try WorkTestFixture.load()
+        let feed = WorkFeed()
+        let query = RegistryQuery(subscribeWork: { await feed.open() }) { args, _ in
+            guard args.starts(with: ["task", "complete"]) else { throw RegistryQueryError("unexpected read: \(args)") }
+            throw RegistryQueryError("its PR #12 is open")
+        }
+        let model = WorkModel(query: query, repoPath: "/src/loopflow")
+        let keeping = Task { await model.keepWorkCurrent() }
+        defer { keeping.cancel() }
+        try await feed.opened(1)
+        await feed.send(try fixture.planningFrame(sequence: 1, answers: nil))
+        try await eventually { model.roadmap.value != nil }
+        let found = try #require(model.task(id: "issue-now"))
+        model.completeTask(found.task)
+        try await eventually { model.pendingChanges.changes.isEmpty }
+        let notice = try #require(model.navigation.notices.current)
+        #expect(notice.text.hasPrefix("\(found.task.task.identifier) couldn't be completed"))
+        #expect(notice.action?.title == "Show")
+        model.select(nil)
+        notice.action?.perform()
+        #expect(model.selection == .task(id: "issue-now"))
+    }
+
     @Test("Only the requested checkpoint confirms a write, including an unchanged result")
     func unchangedConfirmation() async throws {
         let fixture = try WorkTestFixture.load()

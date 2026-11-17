@@ -2491,7 +2491,8 @@ fn claude_deciding_step_records_native_answer_and_advances() {
         );
         write_executable(
             &bin.join("claude"),
-            r#"#!/usr/bin/python3
+            &support::claude_stand_in(
+                r#"#!/usr/bin/python3
 import json, os, sys
 if '--version' in sys.argv:
     print('fixture')
@@ -2517,8 +2518,10 @@ for line in sys.stdin:
         result['structured_output'] = {'decision': 'advance', 'summary': 'Proof observed', 'reason': None}
         if os.environ['CORRECT_FIRST'] == 'false' and '--resume' not in sys.argv:
             result['structured_output']['summary'] = ''
+    keep_claude_turn(message, result["result"], result.get("structured_output"))
     print(json.dumps(result), flush=True)
 "#,
+            ),
         );
         let output = lf_command(
             repo.path(),
@@ -2550,7 +2553,7 @@ for line in sys.stdin:
             &home.path().join("loopflow.db"),
         ))
         .unwrap();
-        for kind in ["started", "output", "completed"] {
+        for kind in ["started", "completed"] {
             let count: i64 = history
                 .query_row(
                     "SELECT count(*) FROM session_history WHERE kind=?1",
@@ -2560,5 +2563,28 @@ for line in sys.stdin:
                 .unwrap();
             assert_eq!(count, if correct_first { 3 } else { 4 }, "{kind}");
         }
+        // The decision is the structured answer Claude kept for its last turn.
+        let decision: String = rusqlite::Connection::open(home.path().join("loopflow.db"))
+            .unwrap()
+            .query_row(
+                "SELECT id FROM agent_sessions WHERE skill='decide-proof'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let answer = lf_command(
+            repo.path(),
+            home.path(),
+            &["history", "show", &decision, "--final"],
+            None,
+        )
+        .env("CLAUDE_CONFIG_DIR", home.path().join(".claude"))
+        .output()
+        .unwrap();
+        assert!(answer.status.success(), "{answer:?}");
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&answer.stdout).unwrap(),
+            serde_json::json!({"decision": "advance", "summary": "Proof observed", "reason": null})
+        );
     }
 }

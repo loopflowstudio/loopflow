@@ -175,6 +175,7 @@ for line in sys.stdin:
     with open(os.environ['LF_TEST_REPLAY_EVIDENCE'], 'w') as evidence:
         json.dump({'capture': os.environ['LF_CAPTURE_KEY'], 'context': context, 'message': message, 'schema': schema}, evidence)
     message['session_id'] = 'replay-thread'
+    keep_claude_turn(message, 'not the answer', {'decision': 'advance'})
     print(json.dumps(message), flush=True)
     print(json.dumps({'type': 'system', 'subtype': 'init', 'session_id': 'replay-thread'}), flush=True)
     print(json.dumps({'type': 'result', 'uuid': 'replay-result', 'session_id': 'replay-thread', 'subtype': 'success', 'is_error': False, 'result': 'not the answer', 'structured_output': {'decision': 'advance'}}), flush=True)
@@ -182,7 +183,12 @@ for line in sys.stdin:
         // Replay can switch providers; both the source and override must use
         // stand-ins, never a provider installed on the test host.
         for (name, source) in [
-            ("claude", claude_source.to_string()),
+            (
+                "claude",
+                crate::test_support::claude_stand_in(claude_source),
+            ),
+            // Signing the shared Claude home in goes through the Keychain on macOS.
+            ("security", crate::test_support::FAKE_SECURITY.to_string()),
             (
                 "opencode",
                 include_str!("../../../../loopflow-execution/tests/support/opencode_server.py")

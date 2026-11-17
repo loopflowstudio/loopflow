@@ -1852,8 +1852,7 @@ fn pi_native_callbacks_retain_identity_final_output_and_usage() {
             .display()
             .to_string()
     );
-    let output: String = db.query_row("SELECT json_extract(payload,'$.text') FROM history.session_history WHERE session_id=?1 AND kind='output'", [&session], |row| row.get(0)).unwrap();
-    assert_eq!(output, "native answer");
+    assert_eq!(pi_final_answer(&fixture, &session), "native answer");
     let tokens: i64 = db.query_row("SELECT json_extract(payload,'$.usage.total_input_tokens') FROM history.session_history WHERE session_id=?1 AND kind='usage' ORDER BY seq DESC LIMIT 1", [&session], |row| row.get(0)).unwrap();
     assert_eq!(tokens, 26);
     let receipts: i64 = db
@@ -1938,12 +1937,16 @@ fn pi_native_failed_start_reopens_without_replacing_the_loopflow_session() {
         )
         .unwrap();
     assert_eq!(sessions, 1);
-    let outputs: i64 = db
-        .query_row(
-            "SELECT count(*) FROM history.session_history WHERE session_id=?1 AND kind='output'",
-            [&id],
-            |row| row.get(0),
-        )
+    assert_eq!(pi_final_answer(&fixture, &id), "native answer");
+}
+
+/// What `lf history show --final` prints for a Session, read from Pi's file.
+fn pi_final_answer(fixture: &Fixture, session: &str) -> String {
+    let output = fixture
+        .command()
+        .args(["history", "show", session, "--final"])
+        .output()
         .unwrap();
-    assert_eq!(outputs, 1);
+    success(&output);
+    String::from_utf8(output.stdout).unwrap().trim().to_owned()
 }

@@ -2176,10 +2176,12 @@ fn failed_taskless_decision_stops_and_keeps_its_history() {
             |row| row.get(0),
         )
         .unwrap();
-    let history = fixture.json(&["session", "history", &session, "--json"]);
+    // The decision that stopped it is the answer its conversation kept.
+    let answer = fixture.run(&["history", "show", &session, "--final"]);
+    assert!(answer.status.success(), "{answer:?}");
     assert!(
-        history.to_string().contains("Release target is missing"),
-        "{history}"
+        String::from_utf8_lossy(&answer.stdout).contains("Release target is missing"),
+        "{answer:?}"
     );
 }
 
@@ -2373,16 +2375,26 @@ fn opencode_disconnect_after_tool_preserves_unknown_native_completion() {
     ]);
     assert!(!output.status.success(), "{output:?}");
     assert!(fixture.home.path().join("tool-effect").exists());
-    let rows: (i64, i64) = fixture
+    let starts: i64 = fixture
         .db()
         .query_row(
-            "SELECT (SELECT count(*) FROM history.session_history WHERE kind='started'),
-                (SELECT count(*) FROM history.session_history WHERE kind='completed')",
+            "SELECT count(*) FROM history.session_history WHERE kind='started'",
             [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(rows, (1, 0));
+    assert_eq!(starts, 1);
+    // The exit read closes the turn OpenCode's store left open; it never
+    // reads as a turn that finished.
+    let endings: Vec<String> = fixture
+        .db()
+        .prepare("SELECT json_extract(payload,'$.status') FROM history.session_history WHERE kind='completed'")
+        .unwrap()
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(endings, ["interrupted"]);
     // The Graph stopped at its first step and launched nothing after it.
     let graphs = support::recorded_graphs(fixture.home.path());
     assert_eq!(graphs.len(), 1);

@@ -1026,7 +1026,7 @@ fn explicit_graph_agent_reaches_composed_routers_and_repeated_steps() {
     );
     repo.create_file(
         ".lf/graphs/inner.yaml",
-        "- step: {name: probe, id: work, agent: codex}\n- loop: work\n",
+        "- loop:\n    - step: {name: probe, id: work, agent: codex}\n    - loop-or-next\n",
     );
     repo.create_file(".lf/graphs/routed.yaml", "- xor:\n    paths:\n      selected:\n        graph: inner\n        description: Run and repeat\n      skipped:\n        description: Skip\n");
     success(command(

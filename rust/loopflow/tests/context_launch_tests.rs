@@ -688,6 +688,8 @@ fn headless_codex_keeps_large_first_turn_separate_from_additive_instructions() {
         "diff: false\ndiff_files: false\npaste: false\n",
     );
     repo.create_file("scratch/thread-context.md", "ONLY_THREAD_FIXTURE_CONTEXT");
+    repo.stage_all();
+    repo.commit("Define the probe skill and its context");
     let provider = bin.join("codex");
     let script = support::codex_socket_script(
         r#"#!/bin/sh
@@ -811,6 +813,8 @@ fn claude_terminal_delivers_large_first_turn_without_prompt_arguments() {
         ".lf/config.yaml",
         "diff: false\ndiff_files: false\npaste: false\n",
     );
+    repo.stage_all();
+    repo.commit("Define the large skill");
     let bin = home.path().join("bin");
     fs::create_dir(&bin).unwrap();
     let provider = bin.join("claude");
@@ -1574,6 +1578,8 @@ fn explicit_documents_match_preview_capture_and_codex_input() {
                     for (file, content) in files {
                         repo.create_file(file, content);
                     }
+                    repo.stage_all();
+                    repo.commit("Define the probe skill and its documents");
                     repo.path().to_path_buf()
                 }
             };

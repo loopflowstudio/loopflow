@@ -426,6 +426,17 @@ Built 2026-11-17 from the concept review answers (questions.md), in order:
   follow that execution (owner Task / Wave, no recommended action) instead of
   Idle's.
 
+Concept review of 321df35cbc: one reading holds, and it found one recovery gap.
+A stopped setup now reads `Blocked`, so next move is the Wave's and the
+recommended action is `NoAction` with the bare error ("Setup stopped: checkout
+failed: …"). Nothing on Desktop or in `lf task status` says how to retry.
+
+Next implement direction: `unrun_execution`'s `Blocked` reason names the
+retry, read-time, not baked into the event: `"{error}. Reopen the conversation
+or run `lf task run <ID>` to retry."` (identifier, not UUID, as other reasons
+use). `task_create_tests::a_stopped_setup_…` asserts the reason ends with that
+line. No owner special case: `Blocked` → Wave stays one rule.
+
 Remaining:
 - Slice 5's remote sample and a windowed Start → typing (qa could not reach
   either: screen locked, no remote Machine).

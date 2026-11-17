@@ -45,3 +45,9 @@ Choices made building them (2026-11-17):
 - 1a: setup runs only for a Task that took up its Graph. A Task with no Graph and no checkout keeps the ordinary `admit_workspace` checkout (with fetch); so does a Task whose Graph has run but whose checkout is gone.
 - 3a: the stop is a resumable `Failed` Task event, not a Session observation: a conversation before its provider has no input key to record an observation against, and an unknown event kind would break released lf reading the row.
 - A 128-test local run (load ≈ 50) failed `task_create_answers_and_its_conversation_checks_out_without_the_network` and `session_cli_tests::a_closed_terminal_finishes_a_bare_launchs_agent`; both pass alone and the creation suite passed together. Left to gate/CI.
+
+- `Starting <graph>` is read from the store alone (Graph taken up, never run,
+  no stopped event); it doesn't check that a setup is live. A Task whose held
+  conversation died before setup wrote anything (Machine restart mid-setup)
+  reads "Starting code" until someone opens its conversation. Kept: "simple
+  code" over "perfect edge/race condition checks right now".

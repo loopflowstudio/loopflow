@@ -297,20 +297,20 @@ detached entry at the ready path, so `wt list`, placement inference and
 the continuation can run before the take (or before the conversation is ever
 opened) and would find the old one still there.
 
-Remaining: slices 4–5.
+Remaining, in order: the `-a` fixture and fix (below); slice 5's local half
+(conversation setup spans, `timings.py` nesting, Machine kind); slice 4; slice
+5's remote sample. origin/main has #1953 (native Claude/Codex logins) and #1955
+since this branch's base; both touch launch code the `-a` fix and slice 4 edit,
+so sync before them.
 
-Concept review of e01c813a0a: the ready checkout holds as one slot per
-repository, but its owner is split. `take_ready_checkout` runs inside
-`restore_task_checkout`, so any new-branch checkout (`lf task run` on a backlog
-Task, a moved Task) takes it, while only conversation setup replaces it; after a
-backlog run the next Start pays `worktree add`. And `prepare_ready_checkout`
-skips only when the path exists, so a hand-deleted ready checkout (docs: safe)
-leaves a missing-but-registered worktree that plain `worktree add` refuses
-(checked: Git 2.x exits 128, `add --force` succeeds), and it never returns.
-Direction: whoever takes it starts the next (the take's success calls
-`prepare_ready_checkout`; setup's call stays for a repository with none), and
-the replacement is `worktree add --force --detach` (one `--force` still
-refuses a locked, mid-checkout registration).
+Concept review of e01c813a0a found the ready checkout's owner split (only
+setup replaced it, so a backlog `lf task run` that took it left none) and a
+hand-deleted one never returning (its registration made plain `worktree add`
+exit 128). Fixed: a successful `take_ready_checkout` calls
+`prepare_ready_checkout`, which runs `worktree add --force --detach` (one
+`--force` still refuses a locked, mid-checkout registration); setup's call
+stays for a repository with none. The ready-checkout fixture deletes it by hand
+and checks the next Start makes another.
 
 Agent choice (steer, Jack Heart: "ok, check it"): `lf -a X task create --run`
 holds `lf session resume <id>` with no agent; `-a` lives in
@@ -367,7 +367,7 @@ LfProcess becoming the launcher's).
 
 ## Checks
 
-- `cargo test -p loopflow --test integration task_create_` — 8 passed after slice 3 (`task_create_takes_the_ready_checkout_and_leaves_another`; the fetch-blocked test now waits for the Graph before releasing fetch). `loopflow-execution --lib git::worktrees::` 22, `ops::task::tests::` 33 passed; clippy clean. Rerun after slice 4; gate.
+- `cargo test -p loopflow --test integration task_create_` — 8 passed after the take-replaces fix. `task_create_request_recovers_lost_replies_without_repeating_start` raced setup (repeat read `started` or `admitted`); it now waits for the receipt's `started` before repeating. `loopflow-execution --lib git::worktrees::` 22, `ops::task::tests::` 33 passed; clippy clean. Rerun after slice 4; gate.
 - `swift test --package-path swift --filter 'WorkDestinationTests|NewTaskTests|MobileTaskCreationTests|DTOFixtureTests|LaunchJournalTests|InteractionTests'` — 152 passed (Mac).
 - `cargo test -p loopflow --test integration dto_fixtures::task_create` and `task_create_tests::task_create_without_recovery_keeps_the_existing_receipt_and_exit_status` (real row is Working) — passed; `cargo test -p loopflow-storage --lib` 365 passed; `loopflow-execution --lib store::tests::` 47 passed; `server::schema::tests::` 8 passed; clippy clean. Gate: `binary(two_people)`, `test(performance_tests::)`, `test(ops::task::tests::)` for the Task state SQL.
 - `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/MobileTaskCreationTests` — 21 passed; full iOS suite at gate.

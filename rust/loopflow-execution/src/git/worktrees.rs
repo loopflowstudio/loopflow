@@ -519,9 +519,10 @@ pub fn ready_checkout(repo: &Path) -> PathBuf {
     dir_for_component(repo, READY)
 }
 
-/// Move the ready checkout to `destination` on a new `branch` at `base`; the
-/// cost is the diff since it was made. False when there is none to take, or it
-/// is still being made, leaving `destination` absent.
+/// Move the ready checkout to `destination` on a new `branch` at `base`, and
+/// start making the next; the cost is the diff since it was made. False when
+/// there is none to take, or it is still being made, leaving `destination`
+/// absent.
 pub(crate) fn take_ready_checkout(
     main: &Path,
     destination: &Path,
@@ -554,6 +555,7 @@ pub(crate) fn take_ready_checkout(
         .as_ref()
         .is_ok_and(|output| output.status.success())
     {
+        prepare_ready_checkout(main);
         return true;
     }
     tracing::warn!(%branch, output = ?switched, "ready checkout did not switch to the Task's branch");
@@ -568,6 +570,7 @@ pub(crate) fn take_ready_checkout(
 
 /// Start making the ready checkout unless one exists, in its own session so it
 /// outlives this process, from `origin/<default>` as the last fetch left it.
+/// `--force` replaces the registration a hand-deleted one leaves behind.
 pub fn prepare_ready_checkout(main: &Path) {
     let ready = ready_checkout(main);
     if ready.symlink_metadata().is_ok() {
@@ -584,7 +587,7 @@ pub fn prepare_ready_checkout(main: &Path) {
     command
         .args([
             "-c",
-            r#"git -C "$1" worktree add --quiet --detach "$2" "$3" >/dev/null 2>&1 &"#,
+            r#"git -C "$1" worktree add --quiet --force --detach "$2" "$3" >/dev/null 2>&1 &"#,
             "sh",
         ])
         .arg(main)

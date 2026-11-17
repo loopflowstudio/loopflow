@@ -332,6 +332,11 @@ fn task_create_takes_the_ready_checkout_and_leaves_another() {
     assert!(ready.join(".git").is_file());
     let listed = task.run(&["wt", "list", "--json"]);
     assert!(!String::from_utf8_lossy(&listed.stdout).contains(".ready"));
+    // Deleting it by hand leaves Git's registration; the next Start replaces it.
+    fs::remove_dir_all(&ready).unwrap();
+    task.start("Third Task");
+    task.wait_for_graphs();
+    task.wait_for_ready(&ready);
 }
 
 impl CreationFixture {
@@ -443,7 +448,7 @@ impl CreationFixture {
     }
 
     /// The background `git worktree add` has made the ready checkout: Git
-    /// lists it and no longer holds its initializing lock.
+    /// lists it, no longer holds its initializing lock, and it is on disk.
     fn wait_for_ready(&self, ready: &std::path::Path) {
         let deadline = Instant::now() + Duration::from_secs(30);
         loop {
@@ -461,7 +466,8 @@ impl CreationFixture {
                     .and_then(|line| line.strip_prefix("worktree "))
                     == Some(ready.to_str().unwrap())
             });
-            if entry.is_some_and(|entry| !entry.contains("locked")) {
+            if entry.is_some_and(|entry| !entry.contains("locked")) && ready.join(".git").is_file()
+            {
                 return;
             }
             assert!(
@@ -535,12 +541,27 @@ fn task_create_request_recovers_lost_replies_without_repeating_start() {
         "{}",
         String::from_utf8_lossy(&first.stderr)
     );
-    let receipt: serde_json::Value = serde_json::from_slice(&first.stdout).unwrap();
-    task.wait_for_graphs();
+    let mut receipt: serde_json::Value = serde_json::from_slice(&first.stdout).unwrap();
     assert_eq!(receipt["milestone"], "admitted");
     assert_eq!(receipt["graph"], "feature");
     assert!(receipt["session_id"].is_string());
+    // Setup records its Graph launch after the answer; a repeat reads it.
     let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while db
+        .query_row(
+            "SELECT milestone FROM creation_receipts WHERE request_id=?1",
+            [&id],
+            |row| row.get::<_, String>(0),
+        )
+        .unwrap()
+        != "started"
+    {
+        assert!(Instant::now() < deadline, "setup recorded no Graph launch");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    task.wait_for_graphs();
+    receipt["milestone"] = "started".into();
     let counts = || -> (i64, i64, i64) {
         db.query_row("SELECT (SELECT count(*) FROM tasks), (SELECT count(*) FROM graph_processes), (SELECT count(*) FROM agent_sessions)", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap()
     };

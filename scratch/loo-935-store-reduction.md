@@ -1,6 +1,6 @@
 # LOO-935: remove what the product no longer uses, and keep it removed
 
-Status (2026-11-17): `lf task view`, `lf open --diff`, the Rex follower and Task widening are gone (6fb8816a4e, 1efd501812); every view of a held terminal types (Rust, Swift, docs, tests done). Next is gate.
+Status (2026-11-17): `lf task view`, `lf open --diff`, the Rex follower and Task widening are gone (6fb8816a4e, 1efd501812); every view of a held terminal types (Rust, Swift, docs, tests done). Concept review left two doc repairs ("Next" below), then gate.
 
 ## Demo
 
@@ -128,27 +128,12 @@ here". Asked what `lf open --wave product` shows, the answer picked:
 "Conversation; overview by flag".
 
 Done: `lf workspace` and `WorkspaceArgs` are gone; `OpenArgs` carries
-`--workspace`, `--available`, `--no-focus` and the hidden follower/remote flags,
-and `run` dispatches overviews to `run_workspace`. Followers and remote Machines
-are invoked as `lf open --workspace …`. `--workspace --task X` widens to the
-Task's Wave or repository (next section). `--here/--tab/--focus/--file` conflict with `--workspace`/`--available`.
+`--workspace`, `--available`, `--no-focus` and the hidden `--local-workspace`,
+and `run` dispatches overviews to `run_workspace`. Remote Machines are invoked
+as `lf open --workspace --local-workspace …`. `--workspace` with a Task is an
+error naming `--wave`/`--repository`. `--here/--tab/--focus/--file` conflict with `--workspace`/`--available`.
 PR body, User interface changes: removed `lf workspace`; added `lf open
 --workspace`, `--available`, `--no-focus`.
-
-## --workspace never holds a Task (concept review, 2026-11-16)
-
-Done: `overview()` (`open.rs`) widens a Task, link or Session to its Wave, else
-its repository, and keeps the Task as `Overview.selected`. Native overviews route
-the selected Task whatever its state, put it first so it takes focus, and send it
-to peers as `--task <id>`, which they widen the same way. Deleted: `explicit`,
-`Presentation`, the `native.here()` join, `place_task`, `open_conversation`, the
-`Work` arms of `scope`/`remote_open`/`container_name`, the Task case of
-`desktop_workspace_url`, and the conversation pane of the old `layout.rs` (overview tabs
-are Task & workflow, plus Changes with `--diff`). `--available` opens each
-conversation through `conversation::open` (`open_available`), so it keeps
-`OpenArgs::conversation`. Single-conversation tests moved to `--tab`;
-`workspace_from_an_unstarted_task_opens_its_repository_overview` and the
-follower test's `--task` assertion cover the widening.
 
 ## lf task view goes; overview tabs hold the Task's Session (2026-11-17)
 
@@ -228,3 +213,18 @@ editable viewers into the same terminal, so you see drafts from A in B", then
 - `nextest -p loopflow-execution --lib transport::` (69; two registry tests time out at load ~128 and pass alone), `-p loopflow --lib` open/lf/schema rows, integration `work_open_tests::` (33; three 2 s host deadlines fail only at `-j 2`, pass alone), `dto_fixtures::`, `cli_discovery::`, `documented_commands::`, `binary(transport_tests)` (40), `cargo clippy --all-targets -- -D warnings`, `check_architecture.py`: pass.
 - Swift: `scripts/test_desktop.sh --filter 'OwnerStreamTests|ServerConnectionTests|ProviderTransitionTests|DTOFixtureTests|WorkDestinationTests'` and `test_ios.py SessionTerminalTests`: pass. `GhosttyTerminalInputTests` needs a display (gate/CI); no test covers focus reports reaching the relay.
 - `lf open` keeps its "already open" report for a Session a native client holds outside a held terminal (and for a Desktop pane in Desktop mode).
+
+## Next (concept review, 2026-11-17)
+
+Prose only; no code changes.
+
+- `docs/dev/server-first.md`: the "Every view types" piece is this PR. Drop its
+  row from Pieces and rewrite "### Every view types" as built: size follows the
+  live view with the latest attach, input or focus (not "most recently
+  opened"); only the sizing view's query answers reach the agent; a native
+  client outside a held terminal still gets **Take back**. Desktop's relay
+  status stream stays (it carries Reconnecting, Session unavailable and Retry),
+  so the row's claim that the handshake goes is not done here; say what
+  remains, or leave it as its own piece.
+- `.lf/qa/desktop.md:44`: drop "or Move here interaction" from the component
+  probe's limits.

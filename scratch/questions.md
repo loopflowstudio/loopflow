@@ -23,8 +23,6 @@
 - **A saved layout keeps every Session it names** (concept review): the
   first-page filter destroyed valid references, and a Mac-local file needs no
   ownership check. Done: `keeping(sessions:)` is deleted.
-- **`--diff` still adds Changes** beside the conversation in Rex/Herdr/cmux; it
-  is an explicit request. A Task without a local checkout shows Task & workflow.
 - **`lf desktop layout` stays as a read of `query:<id>`**; `--save` is gone
   (`lf desktop dashboard slots` writes slots).
 - **Dashboards stay on the Machine** and keep their planning triggers (QA
@@ -42,15 +40,6 @@
   system Python SQLite rejects the released migrations.
 - **SCHEMA.md names Task and marking migration, no date**: a date would change
   at merge and fail `--check` on main.
-- **`lf open --workspace` from a Task** opens the Task's Wave overview when it
-  has a Wave, else its repository's, with the Task selected (concept review);
-  the docs already said "this checkout's Wave or repository". Reversible.
-- **Desktop `--workspace` from a Task** opens the Wave's or repository's
-  `state:working` view without selecting the Task: the `loopflow://open?view=`
-  URL has no selection, and adding one means a Swift change. `lf open --task X`
-  still opens the Task in Desktop.
-- **A link's `?diff` no longer reaches an overview**; `--diff` does. The widened
-  scope has no Task, and `describe` refuses `diff` without one.
 - **`lf open --available`** opens each conversation through the single-
   conversation path on any host, rather than only Desktop, Rex, Herdr and cmux.
 

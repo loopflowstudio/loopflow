@@ -271,9 +271,19 @@ reads "Checking your Task…".
 Concept review of 1f8eb5476e: the split holds (Try again only before filing;
 after the answer the failure is the workspace's).
 
+Concept review of 91a35e2430: the row closes the gap without a new concept.
+`openCreatedTask` reuses `selectedTaskEvidence` (set by `openTaskDestination`,
+kept by `setSelection` through `task(id:)`), so the answer's row is the same
+retained evidence a lookup leaves, replaced when the roadmap lists the Task.
+The row read (`task_create::answer` → `waves::task_row`) runs
+`task_selection_reading` for the whole repository on the answer path, outside
+any `creation_step` span.
+
 Remaining, in order:
-1. `Perf.retarget(.startTask, from: "new-task", …)` (`WorkModel.createTask`):
-   key by request ID from the click (slice 5).
+1. `Perf.retarget(.startTask, from: "new-task", …)` and the `Perf.finish(…,
+   id: "new-task")` beside it (`WorkModel.createTask`): key by the request ID
+   from the click (slice 5). Wrap the row read in a `creation_step` span
+   (`step=row`) so the report shows its share of the 300 ms answer.
 2. Slice 3, including checkout without network for a new branch:
    `fetch_task_refs`, the base fetch and `assert_assignee` still run inside
    setup (off the answer path, on the typing path).

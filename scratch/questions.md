@@ -30,9 +30,9 @@
   `LinearSyncOptions.plan` are gone. Restoring it as Wave `field` effects is
   new behavior for a follow-up Task, not this one.
 
-- **Losing value after a conflict shows in `lf task show`** (`sync.conflict`),
-  the surface the Demo reads; Desktop follows from the DTO. Alternatives were
-  `lf repo plan` or Desktop first.
+- **Losing value after a conflict shows in `lf task show`** as a
+  `conflicted` row in `sync.actions` (see concept review round below);
+  Desktop follows from the DTO.
 - **Effects only for bound owners or a pending create.** Checked: the old
   export drain exports every Task with no `external_issue_id` once a tracker
   is configured, including Tasks made before connect. Slice 3 keeps that with
@@ -58,8 +58,8 @@
   not queued**: the creation reads current values when it is queued.
 - **A historical filing's `create` keeps store words only**; its original
   Team and state ids are not retained.
-- **`lf task sync` looks now; `--retry-updates` also ignores the look window**
-  (`Bound { windows: !retry_updates }`).
+- **`lf task sync` always looks now** and resends what the tracker lacks;
+  `--retry-updates` is gone (concept review 4a).
 - **Linear is idempotent only for comments.** A Linear create with an existing
   id is an error, so a lost creation reply is looked for, never resent.
 - **Order sends one confirmed move at a time** within one send and rebases the

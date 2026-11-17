@@ -19,7 +19,16 @@ required in the type; a fifth harness is one file.
 ## Risk findings (measured at 470da475a1)
 
 LOO-913 (#1953, which removes account routing) is on main at 4a0691a9a0 and
-merged into this branch. Add no account selection back. The original caller
+merged into this branch. Add no account selection back.
+
+**#1955 is on main (528ccd8eda) and not merged here.** It overlaps seven
+branch files. One conflicts: `native_exit::record_exit`. Take main's body
+(returns `Result<()>`; an agent process no longer records an `"interrupted"`
+outcome) with this branch's `&Admitted` destructure. After it, a native
+launch's `interrupted` is exactly "a mover took the attachment", so
+`Outcome` gets that from `attachment_lost`, not from a stored outcome. #1955
+also adds `PromptBuild::skill_version` and drops `work:` from the prompt
+context in `run.rs`; slice 3 builds on those lines. The original caller
 inventory and dependency investigation are in
 `3b735e67d6:scratch/harness-launch-type.md`.
 
@@ -317,6 +326,8 @@ supplied runtime stays caller-owned. Both optional launch fields, `open_owner` a
 the unattached-launch test are deleted. `admit_for_test(home)` returns `Admitted`.
 
 Remaining work:
+0. **Merge main (#1955).** Resolve `record_exit` as above; focused:
+   `cargo test -p loopflow-execution --lib harness::native_exit::`.
 3. **Mode at delegate, holder in `transport`.** `Delegation::Here { mode }`,
    `Mode`, `transport::holder` as the only `Holder::of` caller; delete
    `AgentConfig::holder`, `ProcessConfig::auto` with its dead reads,
@@ -325,7 +336,10 @@ Remaining work:
    `cargo test -p loopflow --lib lf::commands::run::` and
    `--lib transport::`.
 4. **`Harness` + `Driver` + per-harness `open`.** Move the table rows above;
-   one `harness::launch`; shared `native::run`. Focused:
+   one `harness::launch`; shared `native::run`. `claude.rs`'s private
+   `Launch { config, owner }` is the driver-side half of this and goes when
+   `Harness::driver` takes `harness::Launch`. (`transcript::Launch`, a parsed
+   launch turn, is unrelated and keeps its name.) Focused:
    `--lib harness::conformance_tests` plus a new `harness::launch_matrix` test.
 5. **Leftovers.** Claude usage once, replay, raw process recognition, settings
    rule, docs.
@@ -350,7 +364,7 @@ behave exactly as before.
   harnesses. The launch matrix passes and names each cell.
 - This prints only `HarnessKind::parse`/`as_str` and `#[cfg(test)]` code:
   `rg -n --type rust '(==|!=|=>)\s*"(claude|codex|opencode|pi)"|"(claude|codex|opencode|pi)"\s*(==|!=|=>|\|)' rust/*/src -g '!*test*'`
-  (baseline at 470da475a1: 83 non-test comparisons in 21 files).
+  (83 non-test comparisons at 470da475a1; 79 at d49e0e16f9).
 - `rg -n 'fn run_interactive|ProviderInvocation|SessionCommand\b|session_attachment: Option|holder: crate::session::Holder' rust/loopflow-execution/` prints nothing.
   The unrelated Clap `loopflow::lf::SessionCommand` remains.
 - `docs/dev/codebase.md` "Add a provider" says: add `<name>.rs`

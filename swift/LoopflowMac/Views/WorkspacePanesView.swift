@@ -929,11 +929,16 @@ struct SessionPaneView: View {
         if let action = item.record.action(.moveHere) ?? item.record.action(.open) {
             let retry = item.error != nil && item.record.launchRetry == nil
             Button(retry ? "Retry" : action.label) {
-                sessions.beginPaneLoad(item.id)
-                Task { @MainActor in
-                    if retry { await sessions.select(item.id, intent: workspace.conversationIntent) }
-                    else if action.kind == .moveHere { await sessions.moveHere(item.id) }
-                    else { await sessions.start(item.id) }
+                Perf.userAction(.taskWorkspaceReady, scenario: "session", id: item.id,
+                                repository: model.repoPath, liveSessions: model.liveSessionCount,
+                                owner: workspace.performanceOwner) {
+                    sessions.beginPaneLoad(item.id)
+                    Perf.acknowledged(.taskWorkspaceReady, id: item.id, owner: workspace.performanceOwner)
+                    Task { @MainActor in
+                        if retry { await sessions.select(item.id, intent: workspace.conversationIntent) }
+                        else if action.kind == .moveHere { await sessions.moveHere(item.id) }
+                        else { await sessions.start(item.id) }
+                    }
                 }
             }
             .buttonStyle(.bordered)

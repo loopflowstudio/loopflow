@@ -3115,6 +3115,8 @@ fn task_ship_blocked_at_verification_waits_there_without_building_again() {
         ".lf/graphs/verifying.yaml",
         "- graph: proof\n- loop: proof\n  interactive: {name: verify, id: check}\n",
     );
+    task.repo.stage_all();
+    task.repo.commit("Define the verifying Graph");
     let first = task.run(&["-b", "--task", "INF-123", "ship", "--graph", "verifying"]);
     assert!(
         !first.status.success(),

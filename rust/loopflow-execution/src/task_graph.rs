@@ -453,7 +453,7 @@ mod tests {
             .into_iter()
             .map(|step| step.name)
             .collect();
-        assert_eq!(steps, ["explore", "demo", "verify"]);
+        assert_eq!(steps, ["explore", "concept-review", "verify"]);
         let pursue = CapturedGraph::load("pursue", repo.path()).unwrap().unwrap();
         assert!(pursue.interactive_steps().is_empty());
         assert!(CapturedGraph::load("no-such-graph", repo.path())
@@ -469,17 +469,17 @@ mod tests {
             .unwrap();
         let explore = graph.interactive_step("explore").unwrap();
         let next = graph.after(&explore).unwrap();
-        assert_eq!(graph.next_interactive(&next), Some("demo"));
+        assert_eq!(graph.next_interactive(&next), Some("concept-review"));
         // A composed graph's name finds its first step.
-        let pursue = graph.find("pursue").unwrap();
-        assert_eq!(pursue.cursor().index, next.cursor().index);
+        let plan = graph.find("plan").unwrap();
+        assert_eq!(plan.cursor().index, next.cursor().index);
         assert_eq!(
             graph.find("kickoff").unwrap().cursor().index,
             next.cursor().index
         );
         assert_eq!(
             graph.find("write-docs").unwrap().cursor().index,
-            next.cursor().index + 1
+            next.cursor().index + 2
         );
         assert_eq!(graph.find("start").unwrap().cursor().index, 0);
         assert!(graph.find("no-such-step").is_none());
@@ -521,10 +521,13 @@ mod tests {
             position,
         };
         let waiting = at(TaskGraphPosition::At {
-            step: "demo".into(),
+            step: "concept-review".into(),
         });
         let guidance = waiting.guidance("INF-1");
-        assert!(guidance.contains("with the demo skill"), "{guidance}");
+        assert!(
+            guidance.contains("with the concept-review skill"),
+            "{guidance}"
+        );
         assert!(guidance.contains("`lf task run INF-1` continues after it"));
         assert!(guidance.contains("--from <step>"));
         let running = at(TaskGraphPosition::Run {

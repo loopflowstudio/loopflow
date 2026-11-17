@@ -72,17 +72,6 @@ pub fn attributed_context(
             "operate",
         );
     }
-    if let Some(guidance) = tagged_block(system_prompt, "<lf:work-guidance>", "</lf:work-guidance>")
-    {
-        push(
-            guidance,
-            Kind::OperatingInstructions,
-            Scope::Global,
-            "work".to_string(),
-            None,
-            "work",
-        );
-    }
     if let Some(guidance) = tagged_block(
         system_prompt,
         "<lf:structured_replies>",
@@ -270,11 +259,6 @@ pub fn attributed_context(
             Kind::OperatingInstructions if decision.label == "LOOPFLOW.md" => {
                 decision.reason = "default launcher guidance".into();
             }
-            Kind::OperatingInstructions if decision.label == "work" => {
-                if let Some(work) = &components.work {
-                    decision.reason = work.reason();
-                }
-            }
             Kind::SkillInstructions => {
                 decision.reason = format!("selected skill: {}", decision.label);
             }
@@ -306,27 +290,6 @@ pub fn attributed_context(
             "LOOPFLOW.md",
             ContextDecisionKind::Excluded,
             "automatic guidance disabled for this input",
-        );
-        omitted(
-            "work",
-            ContextDecisionKind::Excluded,
-            "automatic guidance disabled for this input",
-        );
-    } else if components.work.is_none() {
-        omitted(
-            "work",
-            ContextDecisionKind::Excluded,
-            "no Task or Wave association",
-        );
-    } else if components
-        .skill
-        .as_ref()
-        .is_some_and(|skill| skill.name == "work")
-    {
-        omitted(
-            "work",
-            ContextDecisionKind::Deduplicated,
-            "the selected work skill supplies this guidance",
         );
     }
     context

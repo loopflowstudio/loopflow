@@ -31,8 +31,6 @@ pub struct ProcessPromptInput {
     /// Exact invocation arguments; captured Work direction stays in `references`.
     pub skill_arguments: String,
     pub no_loopflow: bool,
-    /// Work was selected or resolved from the current checkout/Session.
-    pub work: Option<crate::prompt::WorkContext>,
     pub source_overrides: ContextSourceOverrides,
     pub summary: Option<String>,
     /// Complete captured context, listed separately from the live request.
@@ -81,7 +79,6 @@ fn prepare_prompt(
         message,
         skill_arguments,
         no_loopflow,
-        work,
         source_overrides,
         summary,
         references,
@@ -117,7 +114,6 @@ fn prepare_prompt(
         skill: None,
         message,
         operate: !no_loopflow,
-        work,
         surface,
         docs,
         files: Vec::new(),
@@ -277,100 +273,6 @@ Test skill body.
             .block(crate::context_block::ContextMoment::Start)
             .unwrap()
             .text
-    }
-
-    #[test]
-    fn work_guidance_is_additive_opt_out_and_loadable_as_a_skill() {
-        let _lock = crate::journal::test_env_lock();
-        let home = tempfile::tempdir().unwrap();
-        let _home =
-            crate::config::environment::EnvVarGuard::set("HOME", home.path().to_str().unwrap());
-        let _lf_home = crate::config::environment::EnvVarGuard::set(
-            "LF_HOME",
-            home.path().join(".lf").to_str().unwrap(),
-        );
-        let repo = loopflow_test_support::TestRepo::new();
-        let source = loopflow_definitions::builtins::get_builtin_skill("work").unwrap();
-        let (_, body) = loopflow_definitions::text::split_frontmatter(source).unwrap();
-        for (work, no_loopflow, skill, copies) in [
-            (false, false, None, 0),
-            (true, false, None, 1),
-            (true, true, None, 0),
-            (false, false, Some("work"), 1),
-            (true, false, Some("work"), 1),
-            // Opting out of automatic guidance does not suppress an explicit skill.
-            (true, true, Some("work"), 1),
-        ] {
-            let prepared = prepare_process_prompt(
-                &default_test_config(),
-                ProcessPromptInput {
-                    repo_root: repo.path().to_path_buf(),
-                    work: work.then(|| crate::prompt::WorkContext::Task("TASK-1".into())),
-                    no_loopflow,
-                    skill: skill.map(str::to_owned),
-                    ..Default::default()
-                },
-            )
-            .unwrap();
-            let prompt = format!(
-                "{}\n{}",
-                prepared.config.system_prompt, prepared.config.task_prompt
-            );
-            assert_eq!(
-                prompt.matches(body).count(),
-                copies,
-                "work={work}, no_loopflow={no_loopflow}, skill={skill:?}"
-            );
-            assert_eq!(prompt.contains("<lf:loopflow>"), !no_loopflow);
-            assert!(!prompt.contains("You are this Task's operator"));
-            let context = crate::prompt::attribution::attributed_context(
-                &prepared.components,
-                &prepared.config.system_prompt,
-                &prepared.config.task_prompt,
-                &prepared.deduplication_decisions,
-                None,
-            );
-            let work_decision = context
-                .decisions
-                .iter()
-                .find(|decision| {
-                    decision.kind == crate::trace::ContextAssetKind::OperatingInstructions
-                        && decision.label == "work"
-                })
-                .unwrap();
-            let (decision, reason) = if no_loopflow {
-                (
-                    crate::trace::ContextDecisionKind::Excluded,
-                    "automatic guidance disabled for this input",
-                )
-            } else if !work {
-                (
-                    crate::trace::ContextDecisionKind::Excluded,
-                    "no Task or Wave association",
-                )
-            } else if skill == Some("work") {
-                (
-                    crate::trace::ContextDecisionKind::Deduplicated,
-                    "the selected work skill supplies this guidance",
-                )
-            } else {
-                (
-                    crate::trace::ContextDecisionKind::Included,
-                    "Task association: TASK-1",
-                )
-            };
-            assert_eq!(work_decision.decision, decision);
-            assert_eq!(work_decision.reason, reason);
-            if work && !no_loopflow && skill.is_none() {
-                assert!(context
-                    .system
-                    .as_ref()
-                    .unwrap()
-                    .assets
-                    .iter()
-                    .any(|asset| asset.label == "work"));
-            }
-        }
     }
 
     #[test]
@@ -587,10 +489,9 @@ Test skill body.
         .unwrap();
         let submitted = conversation(&prepared);
         assert!(prepared.config.task_prompt.contains("<lf:skill:implement>"));
-        assert!(prepared
-            .config
-            .task_prompt
-            .contains("Turn the design doc into working code."));
+        let source = loopflow_definitions::builtins::get_builtin_skill("implement").unwrap();
+        let (_, body) = loopflow_definitions::text::split_frontmatter(source).unwrap();
+        assert!(prepared.config.task_prompt.contains(body.trim()));
         assert!(!prepared
             .config
             .system_prompt

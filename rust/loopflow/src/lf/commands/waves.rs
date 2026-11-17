@@ -1051,7 +1051,9 @@ pub(crate) async fn task_detail(
             sessions.push(SessionFacts::of(record));
         }
     }
+    let summary = store.sqlite.task_summary(&task.id)?;
     Ok(TaskDetail {
+        summary,
         task: TaskNames::read(Some(store)).await?.row(row),
         sessions,
         graph_processes: status

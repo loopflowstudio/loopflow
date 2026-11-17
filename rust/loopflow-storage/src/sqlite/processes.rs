@@ -217,15 +217,13 @@ impl SessionTransfer<'_> {
             "UPDATE processes SET attached_lf_process_id=NULL,attachment_token=?3,
                 attachment_exit_seq=?4,endpoint=CASE WHEN ?2 THEN NULL ELSE endpoint END,
                 completed_at=CASE WHEN ?2 THEN COALESCE(completed_at,?5) ELSE completed_at END,
-                spawn_state=CASE WHEN ?2 THEN 'exited' ELSE spawn_state END,
-                outcome=CASE WHEN ?2 AND ?6='interrupted' THEN ?6 ELSE outcome END WHERE id=?1",
+                spawn_state=CASE WHEN ?2 THEN 'exited' ELSE spawn_state END WHERE id=?1",
             params![
                 expected.agent_process_id,
                 closed,
                 AttachmentToken::new(),
                 exit_seq,
-                now,
-                outcome
+                now
             ],
         )?;
         tx.commit()?;
@@ -337,7 +335,6 @@ pub(super) fn read_process(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProcessE
             cwd: row.get(8)?,
             started_at: row.get(9)?,
             completed_at: row.get(10)?,
-            outcome: row.get(11)?,
             exit_code: row.get(12)?,
             signal: row.get(13)?,
             error: row.get(14)?,
@@ -454,10 +451,11 @@ fn process_query(
     }
     if let Some(outcome) = filter.outcome {
         sql.push_str(match outcome {
-            ProcessOutcomeFilter::Succeeded => " AND e.outcome='succeeded'",
-            ProcessOutcomeFilter::Failed => " AND e.outcome='failed'",
-            ProcessOutcomeFilter::Interrupted => " AND e.outcome='interrupted'",
-            ProcessOutcomeFilter::Unknown => " AND e.outcome IS NULL",
+            // Only lf processes record an outcome; a provider process has none.
+            ProcessOutcomeFilter::Succeeded => " AND e.kind='lf' AND e.outcome='succeeded'",
+            ProcessOutcomeFilter::Failed => " AND e.kind='lf' AND e.outcome='failed'",
+            ProcessOutcomeFilter::Interrupted => " AND e.kind='lf' AND e.outcome='interrupted'",
+            ProcessOutcomeFilter::Unknown => " AND (e.kind='agent' OR e.outcome IS NULL)",
         });
     }
     if let Some(work) = &filter.performed_work {
@@ -2713,10 +2711,6 @@ mod attachment_tests {
             Some(r#"["codex","app-server","--listen","unix:///fixture"]"#)
         );
         assert!(row.completed_at.is_some());
-        assert!(
-            row.outcome.is_none(),
-            "failed exec is not an observed provider exit"
-        );
         assert_eq!(store.session_history(&session.id, 0, 0).unwrap(), history);
         assert!(store.agent_processes().unwrap().is_empty());
     }

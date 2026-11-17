@@ -70,9 +70,12 @@ pub fn settle(exit: &NativeExit, status: ExitStatus) -> Settled {
             false
         })
     };
-    let interrupted = owner.as_ref().is_some_and(|owner| {
-        !exit.client && judged("the provider's exit record", record_exit(owner))
-    });
+    if let (Some(owner), false) = (&owner, exit.client) {
+        if let Err(error) = record_exit(owner) {
+            tracing::warn!(%error, session = %exit.session, "cannot record the provider's exit");
+        }
+    }
+    // A mover that stopped this provider also took its attachment.
     let lost = owner.as_ref().is_some_and(|owner| {
         judged(
             "this launch's Session attachment",
@@ -81,7 +84,7 @@ pub fn settle(exit: &NativeExit, status: ExitStatus) -> Settled {
     });
     let command = crate::harness::native_session::SessionCommandOutcome {
         status,
-        interrupted: interrupted || lost,
+        interrupted: lost,
         moved: lost.then(|| owner.as_ref().and_then(departure)).flatten(),
     };
     let outcome = command.capture_outcome();
@@ -173,8 +176,8 @@ fn open_store() -> Result<SqliteStore> {
     )?)
 }
 
-/// Record the provider's exit under its attachment; whether an interrupt ended it.
-pub(crate) fn record_exit(owner: &Admitted) -> Result<bool> {
+/// Record the provider's exit under its attachment.
+pub(crate) fn record_exit(owner: &Admitted) -> Result<()> {
     let Admitted {
         store,
         session,
@@ -183,14 +186,9 @@ pub(crate) fn record_exit(owner: &Admitted) -> Result<bool> {
     match store.with_session_attachment(session, attachment, || {
         store.record_agent_process_exit(session, attachment, true)
     }) {
-        Ok(()) | Err(StoreError::InvalidAuthority(_)) => {}
-        Err(error) => return Err(error.into()),
+        Ok(()) | Err(StoreError::InvalidAuthority(_)) => Ok(()),
+        Err(error) => Err(error.into()),
     }
-    Ok(store
-        .agent_process(&attachment.agent_process_id)?
-        .is_some_and(|process| {
-            process.completed_at.is_some() && process.outcome.as_deref() == Some("interrupted")
-        }))
 }
 
 /// Whether a mover ended this launch's attachment.
@@ -455,7 +453,6 @@ mod tests {
                 .unwrap()
                 .unwrap();
             assert_eq!(after.completed_at, before.completed_at);
-            assert_eq!(after.outcome, before.outcome);
             let launcher = store.lf_process(&launcher).unwrap().unwrap();
             assert_eq!(launcher.exit_code, Some(0));
             assert_eq!(launcher.outcome.as_deref(), Some("succeeded"));

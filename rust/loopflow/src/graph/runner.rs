@@ -776,6 +776,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn no_progress_decision_stops_after_a_repeat_and_keeps_partial_results() {
+        let items = vec![
+            step("work", None),
+            step("decide", Some(1)),
+            step("publish", None),
+        ];
+        let reason = "Baseline retained; candidate untested. Required service remains unavailable; retry after admission succeeds.";
+        let blocked = crate::graph::output::GraphOutput::Decision
+            .decode(&serde_json::json!({
+                "decision": "blocked",
+                "summary": null,
+                "reason": reason
+            }))
+            .unwrap();
+        let executor = RecordingExecutor::new(PathBuf::new()).with_outcomes(
+            "decide",
+            vec![
+                decision(GraphDecision::Iterate, "test the candidate"),
+                blocked,
+            ],
+        );
+        let mut cursor = ExecutionCursor::default();
+        assert_eq!(
+            GraphRunner::new(executor.clone())
+                .run_with_cursor(&items, &mut cursor)
+                .await
+                .unwrap(),
+            GraphOutcome::Blocked(reason.to_owned())
+        );
+        assert_eq!(executor.calls(), ["work", "decide", "work", "decide"]);
+        assert_eq!(cursor.index, 1);
+        assert_eq!(cursor.progress.repeats["1"], 1);
+        assert_eq!(cursor.progress.verdict.as_ref().unwrap().summary, reason);
+        assert_eq!(executor.saved_cursor(), cursor);
+    }
+
+    #[tokio::test]
     async fn saved_decision_recovers_once_without_rerunning_the_deciding_skill() {
         let repo = fixture_repo().unwrap();
         let items = vec![

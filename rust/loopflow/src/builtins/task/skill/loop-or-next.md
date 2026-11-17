@@ -14,8 +14,9 @@ open findings. Open the files they point to when those may have changed.
 Accepted changes stand; a newer proposal doesn't override an accepted
 requirement. A process exiting is not the work being done.
 
-A check that can't run here, or needs a person, is never a reason for Blocked.
-Use a headless equivalent or leave it to gate or CI and continue. Before gate,
+A check assigned to a later gate, CI or review does not block this step.
+Use a headless equivalent or leave it to that later step. If the result is
+required here and no useful action can obtain it, stop with Blocked. Before gate,
 a build and focused tests are enough. Real failures and missing behavior still
 need work. Never claim a deferred check passed or skip an authored review.
 
@@ -24,11 +25,13 @@ need work. Never claim a deferred check passed or skip an authored review.
 - **Iterate** when the last pass made real progress and specific work remains
   that the backward edge can do. Give the next action and the result it should
   produce, within the accepted scope. Ruling out a hypothesis or narrowing the
-  problem counts as progress; activity doesn't.
+  problem counts as progress when it changes the next useful action. Another
+  observation of an unchanged obstacle is not progress.
 - **Blocked** when the last pass made no real progress, repeated the same
   failure with nothing new learned, or needs an input or judgment you can't
-  supply. Say what needs resolving. Don't spend another pass on unchanged
-  direction. If results are missing, say so; missing results don't prove there
+  supply. A person need not be available. Report partial results, what remains
+  unverified and what must change before another attempt. Don't spend another
+  pass on unchanged direction. If results are missing, say so; missing results don't prove there
   was no progress.
 
 Before deciding, answer separately: which obligations are met, what changed or

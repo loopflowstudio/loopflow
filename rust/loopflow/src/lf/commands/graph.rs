@@ -1027,7 +1027,7 @@ impl RunningGraph<'_> {
 }
 
 /// What a headless agent reads at an interactive step. With a loop behind the
-/// step it answers advance or iterate; blocked repeats with the blocker.
+/// step it answers advance, iterate or blocked; blocked stops the Graph.
 fn stand_in_message(step: &str, repeats: bool) -> String {
     let person = crate::config::participant_name()
         .ok()
@@ -1037,7 +1037,7 @@ fn stand_in_message(step: &str, repeats: bool) -> String {
         "\n\nNo one is available. You are standing in for {person} at {step}. Decide as they would, record why in your final message, and continue."
     );
     if repeats {
-        message.push_str(" Advance when the work before this step holds; iterate only for a concrete, repairable gap, naming it; there is no one to hand a blocker to.");
+        message.push_str(" Advance when the work before this step holds; iterate only for a concrete, repairable gap, naming it; return blocked when no useful repair can run, reporting partial results and what must change before another attempt.");
     }
     message
 }
@@ -1082,7 +1082,7 @@ impl SkillExecutor for &RunningGraph<'_> {
                 Some(ConcreteStep::Skill(target)) => target.skill.name.as_str(),
                 _ => "an earlier step",
             };
-            message.push_str(&format!("\n\nDecision pass {}. The backward edge returns to {target}. Compare the preceding pass's intended progress with its observed results; new evidence counts as progress. Missing prior evidence is an evidence gap, not proof of no progress.", u64::from(traversals.copied().unwrap_or(0)) + 1));
+            message.push_str(&format!("\n\nDecision pass {}. The backward edge returns to {target}. Compare the preceding pass's intended progress with its observed results. New evidence counts as progress only when it changes the next useful action; another observation of an unchanged obstacle is not progress. Missing prior evidence is an evidence gap, not proof of no progress.", u64::from(traversals.copied().unwrap_or(0)) + 1));
         }
         if let Some(direction) = &ctx.direction {
             message.push_str(&format!(

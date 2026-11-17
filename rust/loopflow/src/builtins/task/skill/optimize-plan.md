@@ -20,9 +20,12 @@ Write the hypothesis in the working design, so the next step can act on it.
 When the caller gives you a decision protocol:
 
 - **Iterate** with the next hypothesis when one has a credible path to moving
-  the number.
+  the number and the next pass can test it. Repeating an unavailable test or
+  restoring the same untested candidate is not a new hypothesis.
 - **Advance** when the request's target is met, or when no clear way forward
   remains. Running out of worthwhile ideas is how this finishes. Say what you
   ruled out and the best idea left.
-- **Blocked** only when the harness or the workload has failed and no result can
-  be trusted.
+- **Blocked** when the harness or workload cannot produce a trustworthy result,
+  or a required input is unavailable and no useful experiment can run. Report
+  the best measured result, what remains untested and what must change before
+  another attempt. Another observation of the same obstacle is not progress.

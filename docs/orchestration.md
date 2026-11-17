@@ -118,8 +118,11 @@ documentation impact leave the docs alone.
 
 At each `loop:`, the deciding step reads the work and the plan and returns
 advance, iterate (back to the target, with direction) or blocked (with the
-question). There is no pass limit; iterate repeats as long as there's useful
-work. Name your own decider with `step:`:
+reason). An unchanged obstacle is a reason to stop even when no person is
+available.
+Return partial results, unverified work and what must change before another
+attempt. Reobserving the same obstacle is not progress. There is no pass limit;
+iterate repeats as long as there's useful work. Name your own decider with `step:`:
 
 ```yaml
 - step: {name: implement, id: first}

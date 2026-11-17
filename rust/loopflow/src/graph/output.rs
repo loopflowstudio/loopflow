@@ -15,7 +15,7 @@ pub enum GraphOutput {
 
 impl GraphOutput {
     pub fn instructions(&self) -> String {
-        format!("\n\nReturn the final answer as the declared JSON value: {}. This output contract supersedes saved instructions to run Graph decision or router commands. The selected successful completion supplies the decision. Return blocked with a reason when a person must resolve the question. That stops the Graph at this position; explain the missing input in the reason.", self.schema())
+        format!("\n\nReturn the final answer as the declared JSON value: {}. This output contract supersedes saved instructions to run Graph decision or router commands. The selected successful completion supplies the decision. For a decision, return blocked when no useful next action is available, an unchanged obstacle prevents progress, or required input is missing. A person need not be available. That stops the Graph at this position; report partial results, what remains unverified and what must change before another attempt.", self.schema())
     }
 
     pub fn for_step(step: &ConcreteStep) -> Option<Self> {
@@ -52,7 +52,7 @@ impl GraphOutput {
                     },
                     "reason": {
                         "type": ["string", "null"],
-                        "description": "Nonempty question and evidence for blocked; null for advance/iterate."
+                        "description": "Nonempty stopping reason, partial results and condition for another attempt; null for advance/iterate."
                     }
                 },
                 "required": ["decision", "summary", "reason"],

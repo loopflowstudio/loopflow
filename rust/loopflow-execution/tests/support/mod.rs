@@ -435,7 +435,18 @@ pub fn select_wave_graph(
         .unwrap_or_default();
     config.insert("graph".into(), name.into());
     fs::create_dir_all(path.parent().unwrap()).unwrap();
-    fs::write(path, serde_yaml_ng::to_string(&config).unwrap()).unwrap();
+    fs::write(&path, serde_yaml_ng::to_string(&config).unwrap()).unwrap();
+    for args in [
+        vec!["add", "--", path.to_str().unwrap()],
+        vec!["commit", "--quiet", "-m", "Select the Wave's graph"],
+    ] {
+        let status = std::process::Command::new("git")
+            .current_dir(repo)
+            .args(args)
+            .status()
+            .unwrap();
+        assert!(status.success(), "git could not commit the Wave's graph");
+    }
 }
 
 #[allow(dead_code)] // Shared helper compiled into integration tests that do not need Task state.

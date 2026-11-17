@@ -1756,12 +1756,12 @@ mod tests {
                 layer(
                     ConfigSource::Repository,
                     SettingScope::Repository,
-                    "docs: [a.md]\ncontext_budgets: {scratch_tokens: 100, scratch_bytes: 200}",
+                    "docs: [a.md]\ncontext_budgets: {memory_tokens: 100, memory_bytes: 200}",
                 ),
                 layer(
                     ConfigSource::Personal,
                     SettingScope::Global,
-                    "docs: [b.md]\ncontext_budgets: {scratch_tokens: 50}",
+                    "docs: [b.md]\ncontext_budgets: {memory_tokens: 50}",
                 ),
             ],
             None,
@@ -1769,11 +1769,11 @@ mod tests {
         .unwrap();
         assert_eq!(resolved.config.context.docs, ["a.md", "b.md"]);
         assert_eq!(
-            resolved.settings["context.budgets.scratch_tokens"].value,
+            resolved.settings["context.budgets.memory_tokens"].value,
             Value::from(50)
         );
         assert_eq!(
-            resolved.settings["context.budgets.scratch_bytes"].value,
+            resolved.settings["context.budgets.memory_bytes"].value,
             Value::from(200)
         );
         let mut layers = resolved.config.setting_layers.unwrap();
@@ -1807,7 +1807,7 @@ mod tests {
             ("agent", "Explore"),
             ("default_agent", "Explore"),
             ("missing", "false"),
-            ("context.budgets.scratch_tokens", "0"),
+            ("context.budgets.memory_tokens", "0"),
             ("session", "{unknown: true}"),
         ] {
             assert!(super::parse_value(key, value).is_err(), "{key}");

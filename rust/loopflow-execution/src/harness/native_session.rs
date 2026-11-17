@@ -673,17 +673,14 @@ fn run_native_session(
             return Err(error.into());
         }
     };
-    let interrupted = match owned {
-        Some(owner) => crate::harness::native_exit::record_exit(owner).unwrap_or_else(|error| {
+    if let Some(owner) = owned {
+        if let Err(error) = crate::harness::native_exit::record_exit(owner) {
             tracing::warn!(%error, "cannot record the provider's exit");
-            false
-        }),
-        None => false,
-    };
-    let interrupted = interrupted
-        || foreground
-            .as_ref()
-            .is_some_and(|foreground| foreground.interrupted(&status));
+        }
+    }
+    let interrupted = foreground
+        .as_ref()
+        .is_some_and(|foreground| foreground.interrupted(&status));
     // A mover ended this attachment; the conversation's home is now its business.
     let lost = attachment_lost(&attachment).unwrap_or_else(|error| {
         tracing::warn!(%error, "cannot read this launch's Session attachment");

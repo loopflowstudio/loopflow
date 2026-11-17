@@ -492,17 +492,10 @@ fn execute_target(
                         && !loopflow_execution::journal::has_caller()
                         && loopflow_execution::repo::discover_repo_root(&repo_root)?.is_some()
                     {
-                        let options = loopflow_execution::ops::CommitOptions {
-                            add: true,
-                            message: Some(format!("lf commit: {name}")),
-                            ..loopflow_execution::ops::CommitOptions::for_task(name)
-                        };
-                        loopflow_execution::ops::commit_workflow(
-                            &repo_root,
-                            &options,
-                            &loopflow_execution::ops::NullProgress,
-                            &|_| {},
-                        )?;
+                        // Best-effort: the skill ran whether or not its edits commit.
+                        if loopflow_execution::ops::step_commit_pending(&repo_root) {
+                            commit_skill_step(&repo_root, name, cli.agent.as_deref());
+                        }
                     }
                     Ok(())
                 })
@@ -516,6 +509,28 @@ fn execute_target(
                 loopflow::lf::commands::graph::run(&graph, message, cli, &repo_root, binding)
             })
         }
+    }
+}
+
+/// A child `lf commit --step`, as a Graph runs after each skill step, so the
+/// message-writing agent is a Process of its own. The run's `-a` writes the
+/// message only when `commit-message` has no agent of its own.
+fn commit_skill_step(repo_root: &Path, skill: &str, agent: Option<&str>) {
+    let committed = loopflow_execution::os_process::resolve_lf_binary()
+        .map_err(|error| error.to_string())
+        .and_then(|lf| {
+            std::process::Command::new(lf)
+                .args(["commit", "--step", skill])
+                .args(agent.map(|agent| ["--agent", agent]).into_iter().flatten())
+                .current_dir(repo_root)
+                .stdin(std::process::Stdio::null())
+                .status()
+                .map_err(|error| error.to_string())
+        });
+    match committed {
+        Ok(status) if status.success() => {}
+        Ok(status) => tracing::warn!(skill, %status, "could not commit the skill's edits"),
+        Err(error) => tracing::warn!(skill, %error, "could not commit the skill's edits"),
     }
 }
 
@@ -3074,11 +3089,17 @@ fn execute_command(
             in_repo_runtime(args, |_| loopflow::lf::commands::ops::run_wt(cmd))
         }
         Some(Commands::Commit {
+            step: Some(step), ..
+        }) => in_repo_runtime(args, |_| {
+            loopflow::lf::commands::ops::run_step_commit(step, cli.agent.as_deref())
+        }),
+        Some(Commands::Commit {
             message,
             push,
             no_add,
             paths,
             json,
+            step: None,
         }) => in_repo_runtime(args, |_| {
             loopflow::lf::commands::ops::run_commit(
                 message.as_deref(),

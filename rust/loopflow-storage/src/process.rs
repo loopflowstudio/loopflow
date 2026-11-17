@@ -47,7 +47,6 @@ pub struct AgentProcess {
     pub cwd: Option<String>,
     pub started_at: i64,
     pub completed_at: Option<i64>,
-    pub outcome: Option<String>,
     pub exit_code: Option<i32>,
     pub signal: Option<String>,
     pub error: Option<String>,
@@ -132,10 +131,12 @@ impl ProcessEntry {
         }
     }
 
+    /// How an lf process ended. A provider process records its exit code and
+    /// signal, and no outcome.
     pub fn outcome(&self) -> Option<&str> {
         match self {
             Self::Lf(process) => process.outcome.as_deref(),
-            Self::Agent(process) => process.outcome.as_deref(),
+            Self::Agent(_) => None,
         }
     }
 

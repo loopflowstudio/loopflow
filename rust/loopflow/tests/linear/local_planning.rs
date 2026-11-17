@@ -3463,12 +3463,12 @@ fn waveless_task_lifecycle() {
 fn unconfigured_repository_runs_tasks_on_the_builtin_code_graph() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
-    // Stand in for pursue's agent steps, keeping the `implement` that code's
-    // loops return to; the Task's graph stays the builtin.
-    repo.create_file(".lf/graphs/pursue.yaml", "- graph: implement\n");
-    repo.create_file(".lf/graphs/implement.yaml", "- cmd: graph show pursue\n");
+    // Stand in for the agent steps of plan and build; the Task's graph stays
+    // the builtin.
+    repo.create_file(".lf/graphs/plan.yaml", "- cmd: graph show plan\n");
+    repo.create_file(".lf/graphs/build.yaml", "- cmd: graph show build\n");
     repo.stage_all();
-    repo.commit("Stand in for pursue");
+    repo.commit("Stand in for plan and build");
     repo.push();
     let created = lf(
         repo.path(),
@@ -3481,7 +3481,7 @@ fn unconfigured_repository_runs_tasks_on_the_builtin_code_graph() {
     assert_eq!(listed[0]["graph_name"], "code");
     let shown = run_until_waiting(repo.path(), home.path(), &["task", "run", id], id);
     assert_eq!(shown["name"], "code");
-    assert_eq!(shown["position"]["step"], "demo");
+    assert_eq!(shown["position"]["step"], "concept-review");
 }
 
 #[test]

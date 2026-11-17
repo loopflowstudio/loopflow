@@ -577,6 +577,8 @@ fn headless_launch_and_graph_keep_current_options() {
         .repo
         .create_file(".lf/skills/probe.md", "INITIAL_SKILL_ONLY");
     fixture.settings("claude:sonnet", true, true);
+    fixture.repo.stage_all();
+    fixture.repo.commit("Define the probe skill");
     fixture.create_wave();
     let first = fixture.run(&["-b", "--wave", "fixture", "probe", "first turn"]);
     pair(&first, "--input-format", "stream-json");
@@ -585,6 +587,8 @@ fn headless_launch_and_graph_keep_current_options() {
     fixture
         .repo
         .create_file(".lf/graphs/launch-probe.yaml", "- probe\n");
+    fixture.repo.stage_all();
+    fixture.repo.commit("Define the probe Graph");
     let flowed = fixture.run(&["--yolo", "--chrome", "on", "graph", "launch-probe"]);
     bypass(&flowed, "claude", true);
     assert!(args(&flowed).contains(&"--chrome"));
@@ -1688,6 +1692,8 @@ say({'type': 'result', 'session_id': 'context-fixture', 'subtype': 'success', 'r
     .unwrap();
     fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
     fixture.repo.create_file(".lf/skills/probe.md", "Probe.");
+    fixture.repo.stage_all();
+    fixture.repo.commit("Define the probe skill");
 
     success(
         &fixture
@@ -1744,6 +1750,13 @@ fn pi_public_headless_skill_delivers_context() {
         fixture
             .repo
             .create_file("scratch/pi-context.md", "Pi context sentinel.");
+        // Pi keeps its conversation under its own home; the stand-in writes
+        // it in the checkout, which is no edit of the skill's.
+        fixture
+            .repo
+            .create_file(".gitignore", "pi-conversation.jsonl\n");
+        fixture.repo.stage_all();
+        fixture.repo.commit("Define the Pi skill and its context");
         let output = fixture
             .command()
             .env(

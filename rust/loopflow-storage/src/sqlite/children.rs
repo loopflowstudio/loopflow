@@ -496,6 +496,11 @@ impl SqliteStore {
                 summary: "Task completed".into(),
             },
         )?;
+        super::task_summaries::write_in(
+            &transaction,
+            &task.id,
+            super::task_summaries::TaskEnd::Done,
+        )?;
         transaction.commit()?;
         Ok(true)
     }

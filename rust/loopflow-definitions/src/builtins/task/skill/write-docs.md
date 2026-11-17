@@ -4,47 +4,35 @@ requires: a chosen direction
 produces: user docs edited in place, with their paths shared and shown in an attached Desktop
 action_style: procedural
 ---
-Write the docs people will use when the change ships.
+Write the docs people will use when the change ships, before it is built.
 
-1. **Start from the chosen direction.** Read the request, settled decisions,
-   prototypes and existing docs. Don't reopen exploration or plan the
+Docs written first are the cheapest prototype: an awkward explanation or a
+surprising prerequisite is design feedback.
+
+1. **Start from the chosen direction.** Don't reopen exploration or plan the
    implementation. If the change has no user-facing docs, say so and finish.
 
-2. **Write the docs in place.** Edit the README, guide or reference files that
-   will ship, following the project's structure. Lead with a realistic example
-   and its result: a call site for a library, commands and output for a CLI,
-   actions and what appears for an app. Cover the concepts, prerequisites,
-   options, defaults, failures and recovery this experience needs, and nothing
-   else. Publishable docs, not a press release, architecture plan or list of
-   things to document later. One revised paragraph can be enough.
+2. **Write in place.** Edit the README, guide or reference that will ship,
+   following the project's structure. Lead with a realistic example and its
+   result: a call site for a library, commands and output for a CLI, actions
+   and what appears for an app. Cover what this experience needs and nothing
+   else. One revised paragraph can be enough. These are publishable docs, not
+   a press release or a list of things to document later, and `scratch/` never
+   holds a second copy.
 
-   These docs describe intended behavior; don't say it's built or released.
-   Track that status in the plan and conversation, or follow the repo's
-   unreleased-docs convention. Keep saved edits and settled choices, and reuse
-   docs that are already good enough. `scratch/` holds design notes, never a
-   second copy of the docs.
+   They describe intended behavior; don't say it is built or released. Keep
+   edits people have saved, and reuse docs that are already good.
 
 3. **Read it as a user.** Can someone follow the example without knowing the
-   implementation? Awkward explanations and surprising prerequisites are design
-   feedback. Settle details the chosen direction implies. If writing exposes a
-   real open product choice, write the exact question into the working design
-   and report it. Don't write an answer into the design as settled unless
-   someone said so; quote what they said.
+   implementation? Settle details the direction implies. If writing exposes a
+   real product choice, write the exact question into the plan and
+   report it.
 
-4. **Show it in an attached Desktop.** Run `lf open --host desktop --file <path>`
-   for the docs; repeat `--file` for several. It uses an existing Loopflow
-   Desktop Files view and never launches Desktop. If there is none, report the
-   paths and continue. Never fall back to a terminal editor, browser or the
-   conversation, including from Rex, Herdr, tmux or cmux, unless that editor was
-   asked for. No scratch wrapper. Record the changed doc paths in the existing
-   implementation plan so the next step reads them from this checkout.
+4. **Show it.** Run `lf open --host desktop --file <path>`, repeating `--file`
+   for several. It uses an open Loopflow Desktop and never launches one; with
+   none, report the paths and continue. Record the changed paths in the plan so
+   the next step reads them.
 
-   In the conversation, link the files with a short invitation: “This is what's
-   being built. Edit these docs or discuss changes while work continues.” Keep
-   that line out of the docs. If presenting fails, say so; the docs stay at
-   their paths.
-
-Finish with the paths and any open product question. Writing docs adds no
-approval stop and launches no implementation. Don't wait for optional review,
-and silence is not approval. If a review before building was asked for, honor
-it; an open choice stays open.
+Finish with the paths and any open question, and an invitation to edit the
+docs or discuss them while work continues. Don't wait for a review nobody
+asked for; silence is not approval.

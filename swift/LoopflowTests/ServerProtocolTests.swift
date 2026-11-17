@@ -342,7 +342,13 @@ struct ServerProtocolTests {
         guard case .response(_, _, .array(let entries)) = try answer("skill_entries") else {
             Issue.record("Missing skill.list result"); return
         }
-        #expect(entries.count == 2)
+        #expect(entries.count == 3)
+        // A repository skill that extends its builtin says so; the others carry no mark.
+        let marks = entries.map { entry -> JSONValue? in
+            if case .object(let fields) = entry { return fields["builtin"] }
+            return nil
+        }
+        #expect(marks == [.null, .string("extends"), .null])
         #expect(ServedWrite.accountDisconnect(provider: "linear").cwd == "/")
         let accounts = ServerClientMessage.request(id: "accounts-1",
             operation: .read(.accountList(target: "linear")), select: nil)

@@ -544,6 +544,9 @@ pub enum Commands {
         /// Print what the commit left
         #[arg(long)]
         json: bool,
+        /// Commit everything a finished skill step left, titled `lf <SKILL>: …`, and push
+        #[arg(long, value_name = "SKILL", conflicts_with_all = ["message", "no_add", "push", "paths", "json"])]
+        step: Option<String>,
     },
     /// Merge upstream into the current branch (default: main or stack parent)
     Sync(SyncArgs),
@@ -618,7 +621,7 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Show memory and scratch size targets, their sources, and current usage
+    /// Show Wave memory size targets, their sources, and current usage
     Context {
         #[arg(long)]
         json: bool,
@@ -1500,9 +1503,14 @@ pub struct DesktopWindowArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum SkillCommand {
-    /// Print the repository file that defines a skill, creating
-    /// it from the builtin when the repository has none
-    Customize { name: String },
+    /// Print the repository file that defines a skill. When the repository
+    /// has none, write one that extends the builtin with its own section
+    Customize {
+        name: String,
+        /// Write the builtin's whole text instead, replacing it here
+        #[arg(long)]
+        full: bool,
+    },
     #[command(external_subcommand)]
     External(Vec<String>),
 }

@@ -14,7 +14,6 @@ uv run python scripts/check_architecture.py            # architecture owners and
 uv run python scripts/due_removals.py                  # leaving store members and their drop dates
 uv run python scripts/test.py --list                   # affected-suite plan
 uv run python scripts/test.py --reuse-passing          # affected suites once per exact tree
-uv run pytest python/tests/test_lifecycle_scorecard.py # scorecard behavior
 uv run python scripts/desktop_performance.py run --cli target/debug/lf --output /tmp/desktop-check --samples 1  # needs lf-world built beside lf
 lf telemetry-daily                                     # maintainer report
 ```
@@ -229,23 +228,6 @@ sustained macOS `syspolicyd`/`trustd`/`amfid`/`taskgated` pressure is reported a
 host-security pressure with the product result explicitly unproven. Remaining
 suites stay unstarted and recorded as `not_run`; rerun after the pressure clears.
 An ordinary product failure still allows independent suites to run.
-
-Read the same gate evidence through the daily operator graph:
-
-```bash
-lf telemetry-daily
-```
-
-The scorecard joins recorded Session usage and duration with Task PR landing and pre-land phase records. It
-prints aggregate values and coverage only—never commands, prompts, output, or
-task ids. Missing evidence is `UNKNOWN`, reported zero remains measured, and
-small samples stay `COLLECTING` until 20 observations support p95.
-
-“Recorded agent attempt → merge” includes earlier and unfinished captured inputs attributed
-to the exact PR. It is a lower bound on implementation time: unrecorded or
-standalone work is outside that cohort. Compare equivalent cohorts before
-attributing changes to an optimization. `scripts/performance-budgets.json`
-owns thresholds; complete samples without a threshold are `UNBUDGETED`.
 
 Path → suite mapping:
 

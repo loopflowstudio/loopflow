@@ -402,10 +402,10 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
                 )?;
             }
             Commands::Skill {
-                cmd: SkillCommand::Customize { name },
+                cmd: SkillCommand::Customize { name, full },
             } => println!(
                 "{}",
-                loopflow_execution::skills::customize(name, &repo)?.display()
+                loopflow_execution::skills::customize(name, &repo, *full)?.display()
             ),
             _ => unreachable!("inspection command selected above"),
         }
@@ -636,7 +636,7 @@ fn definition_help(
 ) -> Result<String> {
     let target = resolve_definition(repo, name, kind)?;
     let (name, kind, description, source) = match &target {
-        Target::Command(_) | Target::Xor(_) => {
+        Target::Command(_) | Target::Xor(_) | Target::Loop(_) => {
             anyhow::bail!("{name} is not a named skill or graph")
         }
         Target::Skill(skill) => (

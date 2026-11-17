@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>LOO-957 concept review: signing Machines in</title>
+<style>
+  :root { --bg:#fbfaf7; --fg:#1d1d1b; --muted:#5d5b55; --line:#dedad1; --card:#fff;
+          --yes:#1f7a45; --no:#b3261e; --prop:#2456a6; --propbg:#eaf0fb; --oldbg:#f6ecea; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#161614; --fg:#e9e6df; --muted:#a29e95; --line:#34322d; --card:#1f1e1b;
+            --yes:#5fc28a; --no:#f08a80; --prop:#8fb2f0; --propbg:#1c2638; --oldbg:#33201d; }
+  }
+  body { background:var(--bg); color:var(--fg); font:16px/1.55 ui-sans-serif, -apple-system, "Segoe UI", sans-serif;
+         max-width:980px; margin:2.5rem auto; padding:0 1.25rem; }
+  h1 { font-size:1.7rem; margin-bottom:.2rem } h2 { margin-top:2.4rem; border-bottom:1px solid var(--line); padding-bottom:.3rem }
+  p.lede { color:var(--muted); margin-top:0 }
+  code { font:0.88em ui-monospace, SFMono-Regular, Menlo, monospace; }
+  pre { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:.8rem 1rem; overflow-x:auto; font-size:.86rem; line-height:1.45 }
+  table { border-collapse:collapse; width:100%; margin:.8rem 0; font-size:.93rem }
+  th, td { border-bottom:1px solid var(--line); padding:.45rem .5rem; text-align:left; vertical-align:top }
+  th { font-weight:600 }
+  .yes { color:var(--yes); font-weight:700 } .no { color:var(--no); font-weight:700 }
+  .prop { border-left:4px solid var(--prop); background:var(--propbg); padding:.6rem 1rem; border-radius:0 8px 8px 0; margin:.8rem 0 }
+  .old  { border-left:4px solid var(--no); background:var(--oldbg); padding:.6rem 1rem; border-radius:0 8px 8px 0; margin:.8rem 0 }
+  .tag { display:inline-block; font-size:.8rem; padding:0 .45rem; border-radius:4px; border:1px solid currentColor }
+  .tag.p { color:var(--prop) } .tag.e { color:var(--muted) }
+  .cols { display:grid; grid-template-columns:1fr 1fr; gap:1rem } @media (max-width:760px){ .cols{grid-template-columns:1fr} }
+  ol.q > li { margin-bottom:.9rem } ol.q ol { list-style:lower-alpha; margin-top:.3rem }
+</style>
+</head>
+<body>
+
+<h1>Signing Machines in: do the concepts line up?</h1>
+<p class="lede">LOO-957, reviewed before anything is built (plan at <code>9e3edfaf85</code>). Area taken: everything a person touches to get an agent on any Machine signed in to Claude, Codex and the services: the sign-in command, the approver setting, the per-Machine provider list, the launch check, the view and the retry. It is wider than the plan's first slice because the names chosen there become every later slice's surface.</p>
+
+<p><span class="tag e">existing</span> is code on <code>main</code>; <span class="tag p">proposed</span> is the plan or this review's change to it.</p>
+
+<h2>The interaction, walked once</h2>
+<p>A fresh Mac mini, an agent step headed for it on Codex.</p>
+<ol>
+  <li><code>lf --machine mini -a codex implement</code>. On mini the harness asks <code>codex login status</code>: exit 1. The step skips Codex, finds no other provider, stops: <em>mini has no Codex login</em>.</li>
+  <li>The person runs the sign-in. lf SSHes to mini, starts <code>codex login --device-auth</code>, reads the URL and code, opens them in the Chrome profile <code>approvers.codex</code> names.</li>
+  <li>The person approves in that browser. Whatever account that profile is signed in to now owns mini's Codex login. Codex writes <code>~/.codex/auth.json</code> on mini itself.</li>
+  <li>Failure: the approval page says device code is off for this account. Codex exits non-zero; lf prints Codex's error and where to enable it. Nothing was written.</li>
+  <li>Recovery: they enable it and run the same command again. The next launch reads the new login from mini; nothing was fixed at an earlier launch.</li>
+</ol>
+<p>The mechanism holds up. Every awkward spot in that walk is a <strong>name or a setting left over from the model this plan replaced</strong>: lf used to copy logins onto Machines, so the brief had words for "share" and "own". Now each provider's client creates the login on the Machine, so for Claude and Codex every login is that Machine's own.</p>
+
+<h2>Product concepts against code concepts</h2>
+<table>
+<tr><th>What a person knows</th><th>What the plan puts in code</th><th>Line up?</th><th>What's wrong</th></tr>
+<tr><td>Machine: this one, an added one, a rental</td><td><code>machines.&lt;name&gt;</code>, <code>pools</code>, <code>ondemands</code>, the rentals table <span class="tag e">existing</span></td><td class="yes">yes</td><td></td></tr>
+<tr><td>Provider: Claude, Codex, GitHub, Linear…</td><td><code>loopflow_storage::provider::Provider</code> <span class="tag e">existing</span></td><td class="yes">yes</td><td>A second <code>Provider</code> in <code>storage/rental.rs</code> means RunPod/Daytona, and <code>ondemands.&lt;name&gt;.provider</code> already holds it. A <code>logins:</code> list beside it reads fine; code that types both should import one under its module name.</td></tr>
+<tr><td><strong>A login</strong>: Machine M is signed in to P, as some account</td><td>no record; read live from the client (<code>claude auth status --json</code>, <code>codex login status</code>) <span class="tag p">proposed</span></td><td class="yes">yes</td><td>The best part of the plan: a fact the provider owns stays with the provider.</td></tr>
+<tr><td><strong>Sign in</strong> M to P</td><td><code>lf machine connect [&lt;machine&gt;] &lt;provider&gt;</code>, <code>machine::sign_in</code> <span class="tag p">proposed</span></td><td class="no">no</td><td>One idea under two words: the plan's prose, its errors ("has no Codex login"), its list (<code>logins</code>), each provider's command (<code>claude auth login</code>, <code>codex login</code>) all say <em>login</em>; the verb says <em>connect</em>. And in <code>lf machine</code>, "connection" already means the SSH destination (<code>connection.rs</code>, <code>remove</code>: "Forget a connection"). <code>[&lt;machine&gt;] &lt;provider&gt;</code> also can't parse <code>connect claude</code> without guessing which positional it is.</td></tr>
+<tr><td>Sign out</td><td><code>lf machine disconnect</code> <span class="tag p">proposed</span></td><td class="no">no</td><td>Same split: it runs <code>claude auth logout</code>, <code>codex logout</code>.</td></tr>
+<tr><td>See what a Machine is signed in to</td><td><code>lf machine logins</code> <span class="tag p">proposed</span> and <code>lf machine credentials inspect</code> <span class="tag e">existing</span></td><td class="no">no</td><td>Two readers for one fact. The plan keeps <code>inspect</code> as the remote end, extends it with the probe, and also runs <code>lf machine logins --json</code> on the target. One should go.</td></tr>
+<tr><td>Where I approve: a Chrome profile or a script</td><td><code>approvers.&lt;provider&gt;</code>: <code>Chrome(String) | Command(String)</code> <span class="tag p">proposed</span></td><td class="yes">yes</td><td>The plan says it replaces <code>auth_browsers</code>, which today also picks the browser for GitHub/Linear/Asana/Notion OAuth, but it doesn't say whether <code>approvers</code> covers those. It must; otherwise service sign-in loses its browser choice.</td></tr>
+<tr><td>Which providers a rental gets at prepare</td><td><code>logins: Vec&lt;Provider&gt;</code> on <code>machines</code>, <code>pools</code> <em>and</em> <code>ondemands</code> <span class="tag p">proposed</span></td><td class="no">no</td><td>Three homes, one consumer. Only rental prepare signs in a list; an owned Machine is signed in when someone runs the command for it, and nothing reads <code>machines.mini.logins</code> or <code>pools.x.logins</code>. A setting without a reader.</td></tr>
+<tr><td>"This Machine keeps its own logins"</td><td><code>own_logins: true | [providers]</code> on the target, an <code>own</code> status in the view <span class="tag p">proposed</span></td><td class="no">no</td><td>A guard against pushing a copy over a Machine's own login, but nothing is pushed any more. For Claude/Codex lf can't even tell an "own" login from one it started: the client made both. Services already refuse to replace a different account on receive (<code>credentials.rs</code>: "a different Linear account is already installed; left unchanged"). The setting refuses an explicit request and protects nothing.</td></tr>
+<tr><td>"Launch refused: no login", with the fix</td><td>harness probe → <code>AgentFailure::CredentialInvalidated</code> → <code>_sign_in_advice</code> <span class="tag p">proposed</span> on <span class="tag e">existing</span></td><td class="yes">yes</td><td>One gap: the advice is written on the target, which doesn't know the laptop calls it <code>mini</code>. The target reports "Codex signed out"; the launching side, which knows the name, writes the command.</td></tr>
+<tr><td>Retry the Machines that were refused</td><td><code>--refused</code>: "last launch refused <em>after its last sign-in</em>" <span class="tag p">proposed</span></td><td class="no">no</td><td>An action with no owner: "last sign-in" is a time lf decided not to store. Derive it instead: refused and not run successfully since, from the limit-recovery records the target already keeps, or probe says signed out.</td></tr>
+</table>
+
+<h2>The biggest mismatch: "share" and "own" survived the redesign</h2>
+<div class="cols">
+<div class="old">
+<strong>Plan as written</strong>
+<pre>machines:
+  mini:  {logins: [claude, codex]}
+pools:
+  home:  {logins: [claude]}
+ondemands:
+  code:  {provider: runpod,
+          logins: [claude, codex, github]}
+# on mini itself
+own_logins: [codex]
+
+lf machine connect mini codex
+#  mini keeps its own Codex login; skipped
+lf machine logins mini
+#  codex  own</pre>
+<p>Five places answer "who signs mini in to Codex?", and the answer that wins is "nobody, though you asked".</p>
+</div>
+<div class="prop">
+<strong>Proposed</strong>
+<pre>ondemands:
+  code:  {provider: runpod,
+          logins: [claude, codex, github]}
+# unset: every provider signed in here
+
+lf machine login codex mini
+#  Approve Codex for mini in Chrome (Work)
+#    with code ABCD-1234
+#  mini: Codex signed in (ChatGPT)
+lf machine logins mini
+#  codex  signed in  ChatGPT</pre>
+<p>One list, where its only reader is. An owned Machine is signed in to what someone signed it in to, and the view says so live.</p>
+</div>
+</div>
+<p>Why it's right: under the copy model, "share with mini" was a standing policy that ran without asking, so it needed a list per Machine and an opt-out. Under the provider-flow model a sign-in is a person (or a rental's prepare) asking for one, so the list belongs to prepare and the opt-out is not running the command. What survives: the default of "every provider signed in here" for rentals, and the services' existing refusal to replace a different account on receive. What it passes over: the brief's direction that "each Machine has its own list" and "a Machine can assert its own logins", which were written for the copy model. This is reversible; if an owned-Machine list earns a reader later (say, <code>lf machine logins</code> marking a wanted provider as missing), it can return on <code>machines.&lt;name&gt;</code> alone.</p>
+
+<h2>The rest of the recommendation</h2>
+<table>
+<tr><th>Before</th><th>After <span class="tag p">proposed</span></th></tr>
+<tr><td><code>lf machine connect [&lt;machine&gt;] &lt;provider&gt;</code></td><td><code>lf machine login &lt;provider&gt; [&lt;machine&gt;…]</code>: provider first, so one positional always parses; several Machines at once is the bulk retry with names</td></tr>
+<tr><td><code>lf machine connect --refused [&lt;provider&gt;]</code></td><td><code>lf machine login &lt;provider&gt; --refused</code>: every added Machine whose probe says signed out or whose last launch of it was refused and nothing has run since</td></tr>
+<tr><td><code>lf machine disconnect [&lt;machine&gt;] &lt;provider&gt;</code></td><td><code>lf machine logout &lt;provider&gt; [&lt;machine&gt;…]</code></td></tr>
+<tr><td><code>lf machine logins</code> + <code>lf machine credentials inspect</code></td><td><code>lf machine logins [&lt;machine&gt;] [--json]</code>, and the target's <code>logins --json</code> is the remote end; <code>credentials inspect</code> goes, <code>credentials receive</code> stays for service transfers</td></tr>
+<tr><td>statuses <code>signed in | none | own</code></td><td><code>signed in | signed out | unknown</code>: unknown is the probe failing, shown, never refused on</td></tr>
+<tr><td><code>approvers.&lt;provider&gt;</code> for Claude/Codex</td><td>the same setting for every provider whose sign-in opens a browser, services included</td></tr>
+<tr><td>target prints <code>run lf machine connect mini codex</code></td><td>target reports the provider signed out; the launching side names the command with the Machine as it knows it</td></tr>
+</table>
+<p>Slice 1 stays the right first slice: Claude over SSH with a pasted code is still the step most likely to prove the plan wrong, and it now lands under its final name.</p>
+
+<h2>Questions</h2>
+<ol class="q">
+  <li>Owned Machines and the provider list:
+    <ol><li>only on-demand templates carry <code>logins</code> (chosen);</li><li>owned Machines carry one too, and <code>lf machine logins</code> marks a listed provider that's signed out;</li><li>back to the plan: machines, pools and on-demands.</li></ol></li>
+  <li><code>own_logins</code>:
+    <ol><li>gone; not running the command is the opt-out (chosen);</li><li>kept for rental prepare only;</li><li>kept as planned.</li></ol></li>
+  <li>The verb:
+    <ol><li><code>lf machine login</code> / <code>logout</code> / <code>logins</code> (chosen);</li><li><code>lf machine connect</code> / <code>disconnect</code> as planned;</li><li><code>lf machine sign-in</code>.</li></ol></li>
+  <li>Argument order:
+    <ol><li><code>login &lt;provider&gt; [&lt;machine&gt;…]</code> (chosen);</li><li><code>login [&lt;machine&gt;] &lt;provider&gt;</code> with disambiguation by known names.</li></ol></li>
+  <li>Retry set for <code>--refused</code>:
+    <ol><li>probe signed out, or refused with no run since (chosen);</li><li>probe signed out only; usage-limit Machines are named by hand;</li><li>record a sign-in time per Machine, as planned.</li></ol></li>
+  <li>Should a usage-limit refusal count as "refused" at all, given that signing in again only helps if the approving browser now holds a different account?
+    <ol><li>yes, that's the point of the retry;</li><li>no, only signed-out logins.</li></ol></li>
+</ol>
+
+</body>
+</html>

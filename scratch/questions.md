@@ -12,11 +12,21 @@ Choices made headless for review; the plan says what each passed over.
   callback completes without pasting.
 - A rental's `logins` list comes from its on-demand template. Passed over: a
   rent-time flag persisted in a `machines.logins` store column.
+- Concept review: `logins` lives only on `ondemands.<name>`; owned Machines
+  have no list, and `own_logins` is gone (not running the command is the
+  opt-out). Passed over: lists on machines/pools/on-demands plus `own_logins`.
+- Concept review: the verb is `lf machine login <provider> [<machine>…]`,
+  `logout`, `logins`; `connect` already means the SSH destination in
+  `lf machine`. Passed over: `connect`/`disconnect` with machine first.
+- Concept review: `--refused` is derived (probe signed out, or refused with no
+  successful launch since); no sign-in time is recorded. Open: whether a
+  usage-limit refusal should count, since signing in again helps only if the
+  approving browser now holds a different account.
 - The launch login check runs on every launch, local too, fail-open, bounded at
   0.5 s p95. Passed over: only behind SSH.
-- `lf machine disconnect` is kept (runs each provider's own logout).
-- An unasserted existing login on a target: `lf machine connect` replaces it
-  (the provider's login overwrites its own file); rental prepare and
-  `--refused` skip a provider that is already signed in and not refused.
+- `lf machine logout` is kept (runs each provider's own logout).
+- An existing login on a target: `lf machine login` replaces it (the
+  provider's login overwrites its own file); rental prepare and `--refused`
+  skip a provider that is already signed in and not refused.
 - Not tested: whether device code login works on the ChatGPT plan in use, and
   whether either approval page tolerates an automated browser.

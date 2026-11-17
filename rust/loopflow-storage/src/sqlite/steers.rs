@@ -435,6 +435,17 @@ fn unread() -> String {
     )
 }
 
+/// The unread steers that name Session `?1`: its own, or its Task's when it
+/// is the Task's primary conversation. The server starts a stopped Session
+/// for these, and its start takes its unread steers when one exists.
+fn naming() -> String {
+    format!(
+        "{} AND (p.session_id=?1 OR p.source NOT LIKE 'update:%'
+            AND p.task_id IN (SELECT task_id FROM task_primary_sessions WHERE session_id=?1))",
+        unread()
+    )
+}
+
 fn pending_count(conn: &Connection, session: &str) -> StoreResult<i64> {
     Ok(conn.query_row(
         &format!("SELECT count(*) FROM ({})", unread()),
@@ -733,15 +744,10 @@ impl SqliteStore {
     pub fn take_steers_to_start(&self, session: &str) -> StoreResult<Vec<Steer>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         // Nearly every start has none; asking takes no write lock.
-        let named: bool = conn.query_row(
-            &format!(
-                "SELECT EXISTS({} AND (p.session_id=?1 OR p.source NOT LIKE 'update:%'
-                    AND p.task_id IN (SELECT task_id FROM task_primary_sessions WHERE session_id=?1)))",
-                unread()
-            ),
-            [session],
-            |row| row.get(0),
-        )?;
+        let named: bool =
+            conn.query_row(&format!("SELECT EXISTS({})", naming()), [session], |row| {
+                row.get(0)
+            })?;
         if !named {
             return Ok(Vec::new());
         }
@@ -752,10 +758,9 @@ impl SqliteStore {
     }
 
     /// The steers saved since the server last read, each read once: those
-    /// that name an interactive Session which has not read them, with that
-    /// Session's unfinished AgentProcess identity. A Task's steer names its
-    /// primary conversation; Task updates and Wave and repository steers
-    /// name no one.
+    /// that name an interactive Session which has not read them, by the rule
+    /// its start takes them with (`take_steers_to_start`), with that
+    /// Session's unfinished AgentProcess identity.
     pub fn read_steer_wakes(&self) -> StoreResult<Vec<SteerWake>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let (after, newest): (i64, i64) = conn.query_row(
@@ -768,16 +773,15 @@ impl SqliteStore {
             return Ok(Vec::new());
         }
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let wakes = tx
+        // Candidates: the one Session each new steer could name. `naming`
+        // decides, so a start never finds nothing to take.
+        let candidates = tx
             .prepare(
                 "SELECT p.id,s.id,pr.pid,pr.os_started_at FROM steers p
-                 LEFT JOIN task_primary_sessions t
-                   ON t.task_id=p.task_id AND p.source NOT LIKE 'update:%'
+                 LEFT JOIN task_primary_sessions t ON t.task_id=p.task_id
                  JOIN agent_sessions s ON s.id=COALESCE(p.session_id,t.session_id)
                  LEFT JOIN processes pr ON pr.id=s.agent_process_id AND pr.completed_at IS NULL
                  WHERE p.seq>?1 AND p.seq<=?2 AND s.interactive=1
-                   AND NOT EXISTS(SELECT 1 FROM steer_delivered d
-                     WHERE d.session_id=s.id AND d.steer_id=p.id AND d.delivered_at IS NOT NULL)
                  ORDER BY p.seq",
             )?
             .query_map(params![after, newest], |row| {
@@ -790,6 +794,14 @@ impl SqliteStore {
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut names = tx.prepare(&format!("SELECT EXISTS({} AND p.id=?2)", naming()))?;
+        let mut wakes = Vec::new();
+        for wake in candidates {
+            if names.query_row(params![wake.session, wake.steer], |row| row.get(0))? {
+                wakes.push(wake);
+            }
+        }
+        drop(names);
         tx.execute("UPDATE steer_wake_reading SET seq=?1 WHERE id=1", [newest])?;
         tx.commit()?;
         Ok(wakes)

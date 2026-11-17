@@ -831,6 +831,41 @@ fn each_steer_wakes_the_session_it_names_once() {
     assert_eq!(woken(&store), [("primary".to_string(), false)]);
 }
 
+/// The server starts a Session only for a steer its start would take: not a
+/// Task steer a later revision replaced, nor one another Session read before
+/// the primary conversation began.
+#[test]
+fn a_steer_its_start_would_not_take_starts_nothing() {
+    let (_home, store, _adapter) = fixture();
+    task_with_primary(&store, "primary", "worker");
+    {
+        let conn = store.conn.lock().unwrap();
+        for (source, text) in [("task", "First"), ("task", "Replaced"), ("shared", "Read")] {
+            let revision = if text == "Replaced" { "2" } else { "1" };
+            save_in(
+                &conn,
+                ("task", "task"),
+                source,
+                revision,
+                &Author::Named("Author".into()),
+                text,
+            )
+            .unwrap();
+        }
+        conn.execute_batch(
+            "INSERT INTO steer_delivered(session_id,steer_id,claimed_at,delivered_at)
+               SELECT 'worker',id,1,1 FROM steers WHERE source='shared';
+             INSERT INTO steer_delivered(session_id,steer_id,claimed_at,delivered_at)
+               SELECT 'primary',id,1,1 FROM steers WHERE source='task' AND revision='2';
+             UPDATE agent_sessions SET created_at=(SELECT MAX(created_at)+1 FROM steers)
+               WHERE id='primary';",
+        )
+        .unwrap();
+    }
+    assert!(store.take_steers_to_start("primary").unwrap().is_empty());
+    assert!(woken(&store).is_empty());
+}
+
 /// A conversation starting again takes its unread steers as its first input
 /// only when one names it.
 #[test]

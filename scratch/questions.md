@@ -44,5 +44,6 @@
   plan's "a held start that fails leaves the steer undelivered" holds only for
   a start that fails before launch.
 - Post-build concept review 2026-11-17: the start set and the take rule
-  become one SQL predicate in this Task (slice 4). Passed over: leaving both,
-  since they agree for every steer today.
+  are one SQL predicate (`naming()`, slice 4, built). It also counts an
+  unlapsed claim as read, so a steer a hook is printing right now starts
+  nothing. Passed over: leaving both.

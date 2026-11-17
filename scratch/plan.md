@@ -214,7 +214,12 @@ Remaining:
    help names the server start and `-b`; `.lf/qa/provider-switching.md` drives
    `lf -b steer`.
 
-4. **One rule for who a steer starts.** *Next.* Post-build concept review
+4. **One rule for who a steer starts.** *Built.* `naming()` in
+   `sqlite/steers.rs` is the one "unread steers naming ?1" fragment;
+   `take_steers_to_start` asks it and `read_steer_wakes` keeps each
+   candidate (steer, Session) past the cursor only when it holds. Test
+   `a_steer_its_start_would_not_take_starts_nothing` (superseded Task steer,
+   shared steer another Session read first). Was: Post-build concept review
    (`scratch/concept-review.html`): the server's start set
    (`read_steer_wakes`, a `COALESCE(session_id, task_primary_sessions)` join)
    and the started conversation's take (`take_steers_to_start`, a predicate

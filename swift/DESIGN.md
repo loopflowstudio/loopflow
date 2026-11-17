@@ -208,7 +208,7 @@ rows. Opening started, unpaused Work appends once. Activity and query refresh ne
 reorder slots; explicit pause hides a slot without deleting its stored position.
 Working references are saved through WorkCache; they convey no execution authority.
 Unstarted Tasks show their brief beside a Start offer in the Session slot, the
-same view as Move here, without joining the working set. Only Start runs anything.
+same view as Take back, without joining the working set. Only Start runs anything.
 
 The navigator's Working tasks / Available / Running choice filters presentation
 without selecting Work or changing panes, clients, focus or drafts. Missing planning

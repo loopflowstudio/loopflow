@@ -141,7 +141,7 @@ extension WorkspacePanesView: Equatable {
 }
 
 /// The Session slot before a conversation runs here: what that means and its
-/// one explicit action. Move here and an unstarted Task's Start share it.
+/// one explicit action. Take back and an unstarted Task's Start share it.
 struct SessionSlotOffer<Description: View>: View {
     let title: String
     let systemImage: String

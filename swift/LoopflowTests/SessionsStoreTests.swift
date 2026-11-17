@@ -269,7 +269,7 @@ struct SessionsStoreTests {
         #expect(item(store, "native")?.error == nil)
     }
 
-    @Test("Selecting an active Session leaves its other terminal running until Move here")
+    @Test("Selecting an active Session leaves its other terminal running until Take back")
     func interactiveSelectionRequiresExplicitMove() async throws {
         let store = SessionsStore(
             repoPath: "/tmp/repo",

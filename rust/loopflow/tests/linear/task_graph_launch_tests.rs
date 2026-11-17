@@ -3113,7 +3113,7 @@ fn task_ship_blocked_at_verification_waits_there_without_building_again() {
     .unwrap();
     task.repo.create_file(
         ".lf/graphs/verifying.yaml",
-        "- graph: proof\n- loop: proof\n  interactive: {name: verify, id: check}\n",
+        "- loop:\n    - graph: proof\n    - interactive: {name: verify, id: check}\n",
     );
     task.repo.stage_all();
     task.repo.commit("Define the verifying Graph");

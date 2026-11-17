@@ -872,7 +872,7 @@ def test_native_write_fixture_uses_normalized_tasks_and_keeps_repository_identit
     # Exercise the SQL the native runner actually sends against the released
     # normalized Task schema, without needing a display to discover stale columns.
     migration = (
-        performance.REPO / "rust/loopflow/src/store/migrations/0.14.6.001_release.sql"
+        performance.REPO / "rust/loopflow-storage/src/migrations/0.14.6.001_release.sql"
     ).read_text()
     schema = re.search(r"CREATE TABLE tasks_migration \(.*?;", migration, re.S).group()
     source = (performance.REPO / "swift/LoopflowTests/DesktopPerformanceTests.swift").read_text()

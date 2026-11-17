@@ -1501,7 +1501,7 @@ mod tests {
     use crate::server::wire::MAX_CONNECTIONS;
     use crate::server::wire::{
         ClientIdentity, ClientMessage, Hello, Operation, ServerMessage, ServerOperation, MAX_BULK,
-        MAX_MESSAGE, REVISION,
+        MAX_MESSAGE, MIN_REVISION, REVISION,
     };
     use loopflow_execution::engine::ErrorCode;
     use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
@@ -2073,10 +2073,21 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn oldest_supported_revision_is_welcomed() {
+        let mut client = Client::connect();
+        let ServerMessage::Welcome(welcome) = client.hello(MIN_REVISION, MIN_REVISION).await else {
+            panic!("expected welcome");
+        };
+        assert_eq!(welcome.revision, MIN_REVISION);
+        drop(client.writer);
+        client.server.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
     async fn no_common_revision_names_the_side_to_update_then_closes() {
         for (revision, min_revision, side) in [
             (REVISION + 1, REVISION + 1, "selected installation"),
-            (REVISION - 1, REVISION - 1, "client"),
+            (MIN_REVISION - 1, MIN_REVISION - 1, "client"),
         ] {
             let mut client = Client::connect();
             let ServerMessage::Error {
@@ -2351,6 +2362,9 @@ mod tests {
             };
             assert_eq!(id, "ps");
             assert!(frame["unavailable"].is_null(), "{frame}");
+            let work: loopflow_storage::instrumentation::SqlReceipt =
+                serde_json::from_value(frame["work"].clone()).unwrap();
+            assert!(!work.id.is_empty());
             // Its acknowledgement does not release a subscription's ID.
             client
                 .send(&ClientMessage::Request {

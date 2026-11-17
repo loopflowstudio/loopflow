@@ -161,6 +161,24 @@ attention now, tell the Task conversation. `lf open --file <path>` presents the
 original in an attached Desktop Files view. Internal changes with no
 documentation impact leave the docs alone.
 
+`qa` keeps what it learns about reaching each part of your product in
+`.lf/qa/`, one file per surface. The first line says when to read it, so a run
+lists them and opens only the ones its change touches:
+
+```
+$ head -n 1 .lf/qa/*.md
+==> .lf/qa/desktop.md <==
+Read when the change reaches Loopflow Desktop: its windows, panes or bundled `lf`.
+
+==> .lf/qa/hooks.md <==
+Read when the change touches turn or tool hooks, or what they record.
+```
+
+When a step no note describes had to be worked out, or a note stopped working,
+`qa` writes the working version into that surface's file and commits it with
+the change. Edit them like any other file. A repository without `.lf/qa/` gets
+its first note when `qa` has something to keep.
+
 The last step of a block does its own work, then returns advance (go on),
 iterate (run the block again, with direction) or blocked (with the question).
 Loopflow tells it what each decision means, so any Skill can decide; a command

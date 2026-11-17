@@ -170,6 +170,9 @@ not parse. So in this PR:
 All six are built (commits f10c0b6a74, a36284d737, b38466264c and the docs
 commit after them). What is left is gate: publish so CI runs the suites.
 
+User docs: `docs/orchestration.md` (extensions and `lf list skill`, step
+commits, `.lf/qa/` notes), `docs/ops.md`, `docs/agent-api.md`.
+
 ## What the runs showed (2026-11-16, branch `lf`, isolated `LF_HOME`, `claude:haiku`)
 
 - `lf -b code '<add one README line>'` in a fixture with a bare origin ran all

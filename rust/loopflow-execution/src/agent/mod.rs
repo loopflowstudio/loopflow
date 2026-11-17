@@ -194,9 +194,6 @@ pub struct AgentConfig {
     pub directive_relay: Option<std::path::PathBuf>,
     /// Environment scoped to this provider process and its descendants.
     pub env: BTreeMap<String, String>,
-    /// Exact attachment selected before provider launch. Never
-    /// inherited by provider tools or serialized into replay input.
-    pub session_attachment: Option<(String, crate::process::SessionAttachment)>,
 }
 
 impl AgentConfig {
@@ -963,7 +960,6 @@ fn run_admitted_agent(
         runtime.claim_session_attachment().map_err(|error| {
             CoreError::ExecutionFailed(format!("conversation admission failed: {error}"))
         })?;
-        launch.session_attachment = runtime.session_attachment();
         if launch.resume_token.is_none() {
             launch.resume_token = runtime.conversation_resume_token().map_err(|error| {
                 CoreError::ExecutionFailed(format!("conversation recovery failed: {error}"))
@@ -1405,9 +1401,12 @@ fn _run_harness_once(
     if let Some(runtime) = runtime {
         // A new harness gets the invocation owner's current snapshot. Existing
         // dispatch/history operations never refresh theirs from the runtime.
-        config.session_attachment = runtime.session_attachment();
         config.env.extend(runtime.environment());
     }
+    let admitted = crate::harness::Admitted::from_runtime(
+        runtime.expect("run_admitted_agent supplies a runtime before retrying"),
+    )
+    .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     let prompt = std::mem::take(&mut config.task_prompt);
     let launch_worktree = config.cwd.clone().or_else(|| std::env::current_dir().ok());
     if let Some(cwd) = launch_worktree.as_deref() {
@@ -1429,7 +1428,7 @@ fn _run_harness_once(
         harness.set_agent_session(launch.resume_token.clone());
         harness.set_runtime(process.runtime.clone());
         harness
-            .start(&config)
+            .start(&config, &admitted)
             .await
             .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
         let agent_session = harness.agent_session();
@@ -1640,6 +1639,7 @@ mod tests {
     fn terminal_args(config: &AgentConfig) -> Vec<String> {
         build_session_command(
             config,
+            &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
             ProviderInvocation::Terminal { session_id: None },
             None,
         )
@@ -1884,6 +1884,7 @@ trust_level = "trusted"
             .unwrap();
         let args = build_session_command(
             &config,
+            &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
             ProviderInvocation::ClaudeStream {
                 session_id: Some(&"sess_abc".into()),
             },
@@ -1922,11 +1923,6 @@ trust_level = "trusted"
                 "bare {harness} selected a model: {cmd:?}"
             );
         }
-    }
-
-    #[test]
-    fn unknown_provider_is_rejected() {
-        assert!(crate::harness::HarnessKind::parse("not-a-provider").is_none());
     }
 
     #[test]
@@ -2282,6 +2278,7 @@ trust_level = "trusted"
         };
         let claude = build_session_command(
             &launch,
+            &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
             ProviderInvocation::Resume {
                 session_id: launch.resume_token.as_ref().unwrap(),
             },
@@ -2309,7 +2306,13 @@ trust_level = "trusted"
                 ProviderInvocation::Terminal { session_id: None },
                 ProviderInvocation::ClaudeStream { session_id: None },
             ] {
-                let command = build_session_command(&launch, invocation, None).unwrap();
+                let command = build_session_command(
+                    &launch,
+                    &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
+                    invocation,
+                    None,
+                )
+                .unwrap();
                 let model = command
                     .args
                     .windows(2)

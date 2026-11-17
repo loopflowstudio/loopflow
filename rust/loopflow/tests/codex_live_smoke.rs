@@ -77,10 +77,19 @@ async fn codex_live_one_turn_smoke() {
     let config = AgentConfig {
         agent: Some("codex".to_string()),
         cwd: Some(dir.path().to_path_buf()),
-        session_attachment: Some(("smoke".into(), attachment)),
         ..AgentConfig::default()
     };
-    harness.start(&config).await.expect("codex start");
+    harness
+        .start(
+            &config,
+            &loopflow_execution::harness::Admitted {
+                store,
+                session: "smoke".into(),
+                attachment,
+            },
+        )
+        .await
+        .expect("codex start");
     assert!(
         harness.agent_session().is_some(),
         "thread id should be captured during start"

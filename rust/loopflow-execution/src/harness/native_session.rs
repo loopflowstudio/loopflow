@@ -11,6 +11,7 @@ use crate::agent::{
     build_session_command, session_environment, AgentConfig, ProviderInvocation, SessionCommand,
 };
 use crate::harness::native_exit::{attachment_lost, departure};
+use crate::harness::Admitted;
 use crate::process::LfProcessRuntime;
 use crate::provider_auth::Provider;
 use loopflow_model::id::AgentSessionId;
@@ -22,15 +23,42 @@ pub fn launch_session(
     context_file: Option<&Path>,
     capture: Option<&LfProcessRuntime>,
 ) -> Result<SessionCommandOutcome> {
-    let command = build_session_command(
-        config,
-        ProviderInvocation::Terminal {
-            session_id: agent_session,
-        },
-        context_file,
-    )?;
-    let environment = session_environment(config, context_file)?;
-    run_session_command_with_env(&command, &environment, agent_session, None, capture)
+    let cwd = config
+        .cwd
+        .clone()
+        .map(Ok)
+        .unwrap_or_else(std::env::current_dir)?;
+    crate::journal::with_runtime(&cwd, &std::env::args().collect::<Vec<_>>(), || {
+        let mut environment = session_environment(config, context_file)?;
+        let (admitted, created) = match capture {
+            Some(capture) => {
+                environment.extend(capture.environment());
+                (Admitted::from_runtime(capture)?, None)
+            }
+            None => admit(config.agent()?, &cwd, &mut environment)?,
+        };
+        let result = (|| {
+            let command = build_session_command(
+                config,
+                &admitted,
+                ProviderInvocation::Terminal {
+                    session_id: agent_session,
+                },
+                context_file,
+            )?;
+            run_session_command_with_env(
+                &command,
+                &environment,
+                agent_session,
+                None,
+                capture.or(created.as_ref()),
+            )
+        })();
+        if capture.is_none() {
+            finish_admission(&admitted, created, &result);
+        }
+        result
+    })
 }
 
 pub(crate) fn resume_session(
@@ -89,24 +117,40 @@ pub fn resume_session_with_env(
         crate::config::participant_name()?.unwrap_or_default(),
     );
     let context_file = crate::agent::write_system_prompt_file(&config, "resume-instructions")?;
-    let command = build_session_command(
-        &config,
-        match provider_session {
-            Some(provider) => ProviderInvocation::Resume {
-                session_id: &provider.agent_session,
-            },
-            None => ProviderInvocation::Terminal { session_id: None },
-        },
-        context_file.as_deref(),
-    )?;
-    let environment = session_environment(&config, context_file.as_deref())?;
-    spawn_session_command_with_env(
-        &command,
-        &environment,
-        provider_session.map(|provider| &provider.agent_session),
-        launch_lock,
-        None,
-    )
+    let cwd = config
+        .cwd
+        .as_deref()
+        .expect("resolved session config has a working directory");
+    crate::journal::with_runtime(cwd, &std::env::args().collect::<Vec<_>>(), || {
+        let mut environment = session_environment(&config, context_file.as_deref())?;
+        let (admitted, capture) = admit(config.agent()?, cwd, &mut environment)?;
+        let result = (|| {
+            let command = build_session_command(
+                &config,
+                &admitted,
+                match provider_session {
+                    Some(provider) => ProviderInvocation::Resume {
+                        session_id: &provider.agent_session,
+                    },
+                    None => ProviderInvocation::Terminal { session_id: None },
+                },
+                context_file.as_deref(),
+            )?;
+            run_session_command_with_env(
+                &command,
+                &environment,
+                provider_session.map(|provider| &provider.agent_session),
+                launch_lock,
+                capture.as_ref(),
+            )
+        })();
+        finish_admission(&admitted, capture, &result);
+        result?.result(
+            &crate::config::parse_agent(config.agent()?).0,
+            provider_session.is_some(),
+            config.holder,
+        )
+    })
 }
 
 pub(crate) fn require_provider_session_process(dir: &Path) -> Result<()> {
@@ -138,20 +182,6 @@ pub(crate) fn require_session_task(
         );
     }
     Ok(())
-}
-
-fn spawn_session_command_with_env(
-    command: &SessionCommand,
-    environment: &BTreeMap<String, String>,
-    agent_session: Option<&AgentSessionId>,
-    launch_lock: Option<File>,
-    capture: Option<&LfProcessRuntime>,
-) -> Result<()> {
-    run_session_command_with_env(command, environment, agent_session, launch_lock, capture)?.result(
-        &command.program,
-        agent_session.is_some(),
-        command.holder,
-    )
 }
 
 fn run_session_command_with_env(
@@ -289,11 +319,12 @@ fn record_interactive_opened(environment: &BTreeMap<String, String>) -> Result<(
 fn native_provider_attachment(
     command: &SessionCommand,
     environment: &BTreeMap<String, String>,
-) -> Result<crate::harness::agent_process::AttachmentOwner> {
-    let (session, attachment) = command
-        .attachment
-        .as_ref()
-        .ok_or_else(|| anyhow!("Native launch has no admitted attachment"))?;
+) -> Result<crate::harness::Admitted> {
+    let Admitted {
+        store,
+        session,
+        attachment,
+    } = &command.admitted;
     let caller = environment
         .get(crate::process::AGENT_CALLER_ENV)
         .ok_or_else(|| anyhow!("Native launch has no admitted conversation"))?;
@@ -305,7 +336,6 @@ fn native_provider_attachment(
     {
         bail!("Session attachment differs from native launch provenance");
     }
-    let store = crate::store::open_sqlite(&crate::store::database_path_from_env()?)?;
     store.with_session_attachment(session, attachment, || {
         if let Some(remote) = &command.remote {
             let endpoint = store
@@ -327,7 +357,100 @@ fn native_provider_attachment(
         }
         Ok(())
     })?;
-    Ok((store, session.clone(), attachment.clone()))
+    Ok(command.admitted.clone())
+}
+
+/// Admit a native invocation before constructing its provider command.
+pub fn admit(
+    program: &str,
+    cwd: &Path,
+    environment: &mut BTreeMap<String, String>,
+) -> Result<(Admitted, Option<LfProcessRuntime>)> {
+    let mut capture = None;
+    if !environment.contains_key(crate::session_record::CAPTURE_KEY_ENV) {
+        let context = crate::trace::PreparedTurnContext::from_prompts("", "");
+        let created = crate::session_record::SessionRecorder::begin_with_context(
+            crate::session_record::SessionCaptureSpec {
+                harness: crate::config::parse_agent(program).0,
+                model: None,
+                surface: "tui".into(),
+                cwd: cwd.into(),
+                repo: None,
+                worktree: Some(cwd.into()),
+                skill: None,
+                subjects: Vec::new(),
+                graph: crate::session_record::SessionGraphMembership::Independent,
+                work: None,
+            },
+            &context,
+            None,
+        )
+        .map(LfProcessRuntime::new)?;
+        environment.extend(created.environment());
+        capture = Some(created);
+    }
+    let store = crate::store::open_sqlite(&crate::store::database_path_from_env()?)?;
+    let input = environment
+        .get(crate::session_record::CAPTURE_KEY_ENV)
+        .expect("native admission has a capture");
+    let session = store
+        .session_for_artifact(input)?
+        .ok_or_else(|| anyhow!("Session input {input} is not recorded"))?;
+    let process = crate::journal::current_lf_process_id()
+        .ok_or_else(|| anyhow!("Native launch has no admitted invocation"))?;
+    let attachment = crate::process::resume_session_agent_process(&store, &session.id, &process)?;
+    store.make_session_interactive(&session.id, &attachment)?;
+    if let Some(terminal) = crate::transport::current() {
+        store.bind_session_terminal(&session.id, &attachment, terminal)?;
+    }
+    environment.insert(
+        crate::process::AGENT_CALLER_ENV.into(),
+        serde_json::to_string(&attachment.caller(session.id.clone()))?,
+    );
+    crate::process::register_session_attachment_interrupt(
+        &store,
+        session.id.to_string(),
+        attachment.clone(),
+    );
+    Ok((
+        Admitted {
+            store,
+            session: session.id.to_string(),
+            attachment,
+        },
+        capture,
+    ))
+}
+
+fn finish_admission(
+    admitted: &Admitted,
+    capture: Option<LfProcessRuntime>,
+    result: &Result<SessionCommandOutcome>,
+) {
+    let outcome = result
+        .as_ref()
+        .map_or("failed", SessionCommandOutcome::capture_outcome);
+    let Admitted {
+        store,
+        session,
+        attachment,
+    } = admitted;
+    match crate::process::finish_session_attachment(store, session, attachment, outcome) {
+        Ok(()) | Err(crate::store::StoreError::InvalidAuthority(_)) => {}
+        Err(error) => {
+            tracing::warn!(%error, %session, "cannot record the Session attachment's end")
+        }
+    }
+    crate::transcript::facts::record_session(
+        store,
+        session,
+        crate::transcript::facts::Moment::Exit,
+    );
+    if let Some(capture) = capture {
+        if let Err(error) = capture.finish(outcome) {
+            tracing::warn!(%error, "cannot settle the Session capture at exit");
+        }
+    }
 }
 
 fn session_command_status_with_env(
@@ -335,113 +458,28 @@ fn session_command_status_with_env(
     environment: &BTreeMap<String, String>,
     agent_session: Option<&AgentSessionId>,
     launch_lock: Option<File>,
-    caller_capture: Option<&LfProcessRuntime>,
+    capture: Option<&LfProcessRuntime>,
 ) -> Result<SessionCommandOutcome> {
     let mut progress = crate::startup::Startup::new(format!("Preparing {}", command.program));
-    let argv = std::env::args().collect::<Vec<_>>();
-    crate::journal::with_runtime(&command.cwd, &argv, || {
-        let mut command = command.clone();
-        let mut environment = environment.clone();
-        let mut capture = None;
-        let admitted = if command.attachment.is_none() {
-            if environment.contains_key(crate::process::AGENT_CALLER_ENV) {
-                bail!("Native launch provenance has no admitted attachment");
-            }
-            if command.remote.is_some() {
-                bail!("Remote client has no admitted attachment");
-            }
-            if !environment.contains_key(crate::session_record::CAPTURE_KEY_ENV) {
-                let context = crate::trace::PreparedTurnContext::from_prompts("", "");
-                let created = crate::session_record::SessionRecorder::begin_with_context(
-                    crate::session_record::SessionCaptureSpec {
-                        harness: command.program.clone(),
-                        model: None,
-                        surface: "tui".into(),
-                        cwd: command.cwd.clone(),
-                        repo: None,
-                        worktree: Some(command.cwd.clone()),
-                        skill: None,
-                        subjects: Vec::new(),
-                        graph: crate::session_record::SessionGraphMembership::Independent,
-                        work: None,
-                    },
-                    &context,
-                    None,
-                )
-                .map(crate::process::LfProcessRuntime::new)?;
-                environment.extend(created.environment());
-                capture = Some(created);
-            }
-            let store = crate::store::open_sqlite(&crate::store::database_path_from_env()?)?;
-            let input = environment
-                .get(crate::session_record::CAPTURE_KEY_ENV)
-                .expect("native launch has a capture");
-            let session = store
-                .session_for_artifact(input)?
-                .ok_or_else(|| anyhow!("Session input {input} is not recorded"))?;
-            let process = crate::journal::current_lf_process_id()
-                .ok_or_else(|| anyhow!("Native launch has no admitted invocation"))?;
-            let attachment =
-                crate::process::resume_session_agent_process(&store, &session.id, &process)?;
-            store.make_session_interactive(&session.id, &attachment)?;
-            if let Some(terminal) = crate::transport::current() {
-                store.bind_session_terminal(&session.id, &attachment, terminal)?;
-            }
-            environment.insert(
-                crate::process::AGENT_CALLER_ENV.into(),
-                serde_json::to_string(&attachment.caller(session.id.clone()))?,
-            );
-            crate::process::register_session_attachment_interrupt(
-                &store,
-                session.id.to_string(),
-                attachment.clone(),
-            );
-            command.attachment = Some((session.id.to_string(), attachment.clone()));
-            Some((store, session.id.to_string(), attachment))
-        } else {
-            None
-        };
-        let result = run_native_session(
-            &command,
-            &environment,
-            agent_session,
-            launch_lock,
-            caller_capture.or(capture.as_ref()),
-            &mut progress,
-        );
-        let outcome = result
-            .as_ref()
-            .map_or("failed", SessionCommandOutcome::capture_outcome);
-        // Records of the exit are best-effort: the provider's own result is
-        // what the person gets back, whatever the store says.
-        if let Some((store, session, attachment)) = admitted {
-            match crate::process::finish_session_attachment(&store, &session, &attachment, outcome)
-            {
-                Ok(()) | Err(crate::store::StoreError::InvalidAuthority(_)) => {}
-                Err(error) => {
-                    tracing::warn!(%error, %session, "cannot record the Session attachment's end")
-                }
-            }
-            crate::transcript::facts::record_session(
-                &store,
-                &session,
-                crate::transcript::facts::Moment::Exit,
-            );
-        }
-        if let Some(capture) = capture {
-            if let Err(error) = capture.finish(outcome) {
-                tracing::warn!(%error, "cannot settle the Session capture at exit");
-            }
-        }
-        result
-    })
+    run_native_session(
+        command,
+        environment,
+        agent_session,
+        launch_lock,
+        capture,
+        &mut progress,
+    )
 }
 
 /// Claude's folder-trust question is the provider asking a person, before any
 /// hook can say so; a hidden pane would otherwise hold it unseen. The provider's
 /// first reading after an answer replaces this one.
-fn report_folder_trust_dialog(attachment: &crate::harness::agent_process::AttachmentOwner) {
-    let (store, session, expected) = attachment;
+fn report_folder_trust_dialog(attachment: &crate::harness::Admitted) {
+    let Admitted {
+        store,
+        session,
+        attachment: expected,
+    } = attachment;
     let reading = crate::session::SessionActivity {
         preview: None,
         observed_at: time::OffsetDateTime::now_utc().unix_timestamp(),
@@ -474,9 +512,9 @@ fn run_native_session(
     if let Some(dir) = &capture_dir {
         require_provider_session_process(dir)?;
     }
-    attachment.0.record_session_terminal(
-        &attachment.1,
-        &attachment.2,
+    attachment.store.record_session_terminal(
+        &attachment.session,
+        &attachment.attachment,
         crate::session_record::current_terminal_id()
             .or_else(crate::terminal_host::host_placement)
             .as_deref(),
@@ -550,7 +588,7 @@ fn run_native_session(
     // starts it fresh instead of resuming one that never ran. A Session's
     // first launch (`lf resume` starting a repository conversation) names no
     // Work on its command line; its recorded Session does.
-    if let Some((store, session, _)) = owned {
+    if let Some(Admitted { store, session, .. }) = owned {
         let named_work = command.holder == crate::session::Holder::Server;
         if store.is_work(named_work, store.session(session)?.as_ref())? {
             crate::harness::agent_process::require_server()?;
@@ -573,8 +611,8 @@ fn run_native_session(
             capture.observe_provider(agent_session.cloned());
         }
         let exit = crate::harness::native_exit::NativeExit {
-            session: attachment.1.clone(),
-            attachment: attachment.2.clone(),
+            session: attachment.session.clone(),
+            attachment: attachment.attachment.clone(),
             provider: command.program.clone(),
             client: owned.is_none(),
             cwd: command.cwd.clone(),
@@ -618,7 +656,11 @@ fn run_native_session(
     let spawned = match owned {
         Some(owner) => crate::harness::agent_process::spawn_native(process, owner, command.holder),
         None => {
-            let (store, session, expected) = &attachment;
+            let Admitted {
+                store,
+                session,
+                attachment: expected,
+            } = &attachment;
             store
                 .with_session_attachment(session, expected, || Ok(process.spawn()))?
                 .map_err(Into::into)
@@ -724,7 +766,7 @@ fn run_opencode_native(
     agent_session: Option<&AgentSessionId>,
     launch_lock: Option<File>,
     progress: &mut crate::startup::Startup,
-    owner: crate::harness::agent_process::AttachmentOwner,
+    owner: crate::harness::Admitted,
 ) -> Result<SessionCommandOutcome> {
     use crate::harness::Harness;
     let mut launch = command
@@ -738,7 +780,6 @@ fn run_opencode_native(
     if let Some(config) = original_config {
         launch.env.insert("OPENCODE_CONFIG_CONTENT".into(), config);
     }
-    launch.session_attachment = Some((owner.1.clone(), owner.2.clone()));
     launch.conversation_context = command.context.clone();
     let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
     let (closed_tx, closed_rx) = tokio::sync::oneshot::channel();
@@ -750,6 +791,7 @@ fn run_opencode_native(
         .transpose()?
         .map(|directory| directory.join("opencode.stderr.log"));
     let observer_diagnostics = &diagnostics;
+    let observer_owner = &owner;
     progress.stage("Starting OpenCode");
     std::thread::scope(|scope| {
         let worker = scope.spawn(move || -> Result<()> {
@@ -759,7 +801,7 @@ fn run_opencode_native(
                 let mut harness = crate::harness::opencode::OpenCodeHarness::new(tx, crate::harness::ApprovalPolicy::AutoApprove);
                 harness.prepare_terminal();
                 harness.set_agent_session(thread);
-                harness.start(&launch).await?;
+                harness.start(&launch, observer_owner).await?;
                 let (endpoint, password) = harness.terminal_connection()?;
                 let id = harness.agent_session().expect("server confirmed native identity");
                 let _ = ready_tx.send((endpoint.to_owned(), password.to_owned(), id));
@@ -868,7 +910,7 @@ fn run_codex_native(
     launch_lock: Option<File>,
     capture: Option<&LfProcessRuntime>,
     progress: &mut crate::startup::Startup,
-    owner: crate::harness::agent_process::AttachmentOwner,
+    owner: crate::harness::Admitted,
 ) -> Result<SessionCommandOutcome> {
     progress.stage("Starting Codex");
     let mut launch = command
@@ -877,7 +919,6 @@ fn run_codex_native(
         .expect("native Codex command carries its launch configuration")
         .clone();
     launch.env = environment.clone();
-    launch.session_attachment = command.attachment.clone();
     launch.conversation_context = command.context.clone();
     launch.resume_token = agent_session.cloned();
     if let Some(skill) = launch.skill_invocation.take() {
@@ -899,7 +940,7 @@ fn run_codex_native(
         command.cwd.clone(),
         &opened.thread,
         opened.endpoint,
-        command.attachment.clone(),
+        command.admitted.clone(),
     );
     run_native_session(
         &client,
@@ -920,11 +961,15 @@ struct OpenedCodex {
 /// the native client only joins it. Nothing here outlives the client's start.
 async fn open_codex_native(
     launch: &crate::agent::AgentConfig,
-    owner: &crate::harness::agent_process::AttachmentOwner,
+    owner: &crate::harness::Admitted,
 ) -> Result<OpenedCodex> {
     use crate::harness::{codex::CodexHarness, codex_connection, ApprovalPolicy, Harness};
 
-    let (store, session, attachment) = owner;
+    let Admitted {
+        store,
+        session,
+        attachment,
+    } = owner;
     let saved = launch
         .resume_token
         .clone()
@@ -933,7 +978,12 @@ async fn open_codex_native(
     let mut harness = CodexHarness::new(events, ApprovalPolicy::NativeClient);
     harness.set_agent_session(saved.clone());
 
-    match tokio::time::timeout(std::time::Duration::from_secs(20), harness.start(launch)).await {
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(20),
+        harness.start(launch, owner),
+    )
+    .await
+    {
         Ok(result) => result?,
         Err(_) => {
             harness.stop().await?;
@@ -989,7 +1039,7 @@ async fn open_codex_native(
 /// commands outside lf. Leaving ends the invocation and its AgentProcess on
 /// every harness; only detaching keeps it.
 fn native_return(
-    (store, session, _): &crate::harness::agent_process::AttachmentOwner,
+    Admitted { store, session, .. }: &Admitted,
 ) -> Option<crate::transport::NativeClient> {
     let name = store
         .session(session)
@@ -1010,11 +1060,11 @@ fn native_return(
 
 #[cfg(test)]
 mod tests {
+    use crate::harness::Admitted;
     use crate::process::attachment;
 
     use super::{
         departure_notice, launch_session, resume_session_with_env, session_command_status_with_env,
-        spawn_session_command_with_env,
     };
     use crate::agent::{build_session_command, AgentConfig, ProviderInvocation, SessionCommand};
     use crate::provider_auth::Provider;
@@ -1137,6 +1187,38 @@ mod tests {
         provider
     }
 
+    fn native_fixture(
+        program: &str,
+        args: Vec<String>,
+        cwd: &std::path::Path,
+        environment: &BTreeMap<String, String>,
+    ) -> anyhow::Result<super::SessionCommandOutcome> {
+        crate::journal::with_runtime(cwd, &["lf".into(), "fixture".into()], || {
+            let mut environment = environment.clone();
+            let (admitted, capture) = super::admit(program, cwd, &mut environment)?;
+            let command = SessionCommand {
+                launch: None,
+                holder: crate::session::Holder::Caller,
+                input: None,
+                context: None,
+                admitted: admitted.clone(),
+                remote: None,
+                program: program.into(),
+                args,
+                cwd: cwd.into(),
+            };
+            let result = super::run_session_command_with_env(
+                &command,
+                &environment,
+                None,
+                None,
+                capture.as_ref(),
+            );
+            super::finish_admission(&admitted, capture, &result);
+            result
+        })
+    }
+
     /// A bare launch's provider failure, without a terminal handing it signals.
     fn bare_provider_error(body: &str) -> anyhow::Error {
         let ledger = crate::journal::TestLedgerGuard::new();
@@ -1162,19 +1244,14 @@ mod tests {
         )
         .map(crate::process::LfProcessRuntime::new)
         .unwrap();
-        let command = SessionCommand {
-            launch: None,
-            holder: crate::session::Holder::Caller,
-            input: None,
-            context: None,
-            attachment: None,
-            remote: None,
-            program: provider.display().to_string(),
-            args: Vec::new(),
-            cwd: temp.path().to_path_buf(),
-        };
-        spawn_session_command_with_env(&command, &capture.environment(), None, None, None)
-            .expect_err("a failed provider fails its launch")
+        native_fixture(
+            &provider.display().to_string(),
+            Vec::new(),
+            temp.path(),
+            &capture.environment(),
+        )
+        .and_then(|outcome| outcome.result("fake-provider", false, crate::session::Holder::Caller))
+        .expect_err("a failed provider fails its launch")
     }
 
     fn exit_code(error: &anyhow::Error) -> u8 {
@@ -1213,6 +1290,7 @@ mod tests {
                     cwd: Some(temp.path().to_path_buf()),
                     ..Default::default()
                 },
+                &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
                 ProviderInvocation::Resume {
                     session_id: &"recorded-session".into(),
                 },
@@ -1454,18 +1532,8 @@ mod tests {
                 std::thread::sleep(std::time::Duration::from_millis(10));
             }
         });
-        let command = SessionCommand {
-            launch: None,
-            holder: crate::session::Holder::Caller,
-            input: None,
-            context: None,
-            program: "/bin/sleep".into(),
-            args: vec!["10".into()],
-            cwd: home.into(),
-            attachment: None,
-            remote: None,
-        };
-        let result = spawn_session_command_with_env(&command, &BTreeMap::new(), None, None, None);
+        let result = native_fixture("/bin/sleep", vec!["10".into()], home, &BTreeMap::new())
+            .and_then(|outcome| outcome.result("sleep", false, crate::session::Holder::Caller));
         stop.join().unwrap().unwrap();
         result.unwrap();
         assert!(!home.join("provider-client-stops").exists());
@@ -1476,34 +1544,28 @@ mod tests {
         let ledger = crate::journal::TestLedgerGuard::new();
         let _ambient = crate::test_ambient::EnvGuard::new();
         let home = ledger.home();
-        let mut command = SessionCommand {
-            launch: None,
-            holder: crate::session::Holder::Caller,
-            input: None,
-            program: "/bin/sh".into(),
-            args: vec!["-c".into(), "printf '%s' \"$$\" > pid".into()],
-            cwd: home.into(),
-            context: None,
-            attachment: None,
-            remote: None,
-        };
-        assert!(
-            session_command_status_with_env(&command, &BTreeMap::new(), None, None, None)
-                .unwrap()
-                .status
-                .success()
-        );
+        assert!(native_fixture(
+            "/bin/sh",
+            vec!["-c".into(), "printf '%s' \"$$\" > pid".into()],
+            home,
+            &BTreeMap::new()
+        )
+        .unwrap()
+        .status
+        .success());
         let pid: u32 = std::fs::read_to_string(home.join("pid"))
             .unwrap()
             .parse()
             .unwrap();
-        command.program = home.join("absent").display().to_string();
-        assert!(
-            session_command_status_with_env(&command, &BTreeMap::new(), None, None, None)
-                .unwrap_err()
-                .to_string()
-                .contains("not installed")
-        );
+        assert!(native_fixture(
+            &home.join("absent").display().to_string(),
+            vec![],
+            home,
+            &BTreeMap::new()
+        )
+        .unwrap_err()
+        .to_string()
+        .contains("not installed"));
         let store = crate::store::open_sqlite(&home.join("loopflow.db")).unwrap();
         let rows = store.processes_since(0).unwrap();
         let agents = rows
@@ -1554,7 +1616,11 @@ mod tests {
             command.env_clear().arg("60");
             let mut provider = crate::harness::agent_process::spawn_native(
                 command,
-                &(store.clone(), session.id.to_string(), original.clone()),
+                &crate::harness::Admitted {
+                    store: store.clone(),
+                    session: session.id.to_string(),
+                    attachment: original.clone(),
+                },
                 crate::session::Holder::Caller,
             )?;
             let endpoint = home.join("provider.sock");
@@ -1584,7 +1650,11 @@ mod tests {
                 args: vec![],
                 cwd: home.into(),
                 context: None,
-                attachment: Some((session.id.to_string(), attached.clone())),
+                admitted: Admitted {
+                    store: store.clone(),
+                    session: session.id.to_string(),
+                    attachment: attached.clone(),
+                },
                 remote: Some(endpoint.clone()),
             };
             let result = session_command_status_with_env(&command, &environment, None, None, None);
@@ -1595,12 +1665,13 @@ mod tests {
             command.remote = Some(home.join("other.sock"));
             let wrong_endpoint =
                 session_command_status_with_env(&command, &environment, None, None, None);
-            command.attachment = None;
-            let unadmitted =
-                session_command_status_with_env(&command, &BTreeMap::new(), None, None, None);
             crate::harness::agent_process::stop_native(
                 &mut provider,
-                Some(&(store, session.id.to_string(), attached)),
+                Some(&crate::harness::Admitted {
+                    store,
+                    session: session.id.to_string(),
+                    attachment: attached,
+                }),
             )?;
             assert!(result?.status.success());
             assert!(alive && unchanged);
@@ -1609,10 +1680,6 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("endpoint differs"));
-            assert!(unadmitted
-                .unwrap_err()
-                .to_string()
-                .contains("no admitted attachment"));
             Ok(())
         })
         .unwrap();
@@ -1662,7 +1729,7 @@ mod tests {
                 holder: crate::session::Holder::Caller,
                 input: None,
                 context: None,
-                attachment: capture.session_attachment(),
+                admitted: Admitted::from_runtime(&capture)?,
                 remote: None,
                 program: "/bin/sleep".into(),
                 args: vec!["60".into()],

@@ -13,6 +13,7 @@
 //! - `turn/interrupt {threadId, turnId}` -> `{}`; the turn then ends with
 //!   `turn/completed` status "interrupted" (probed live).
 
+use crate::harness::Admitted;
 use crate::process::attachment;
 use loopflow_model::id::AgentSessionId;
 use std::collections::{HashMap, HashSet};
@@ -285,7 +286,7 @@ pub struct CodexHarness {
     child_group: Option<u32>,
     agent_directory: Option<tempfile::TempDir>,
     native_start: Option<(std::path::PathBuf, Value)>,
-    session_attachment: Option<super::agent_process::AttachmentOwner>,
+    owner: Option<super::Admitted>,
 }
 
 impl std::fmt::Debug for CodexHarness {
@@ -319,7 +320,7 @@ impl CodexHarness {
             child_group: None,
             agent_directory: None,
             native_start: None,
-            session_attachment: None,
+            owner: None,
         }
     }
 
@@ -435,7 +436,7 @@ impl Harness for CodexHarness {
         self.child_group.filter(|pid| *pid > 1)
     }
 
-    async fn start(&mut self, config: &AgentConfig) -> Result<()> {
+    async fn start(&mut self, config: &AgentConfig, admitted: &Admitted) -> Result<()> {
         if self.outbound_tx.is_some() {
             return Ok(());
         }
@@ -454,7 +455,7 @@ impl Harness for CodexHarness {
             .lock()
             .expect("codex turn id lock poisoned") = None;
 
-        let start_result = self.start_inner(config).await;
+        let start_result = self.start_inner(config, admitted).await;
         if let Err(err) = start_result {
             let _ = self.stop().await;
             return Err(err);
@@ -586,9 +587,7 @@ impl Harness for CodexHarness {
     async fn stop(&mut self) -> Result<()> {
         self.shutdown_requested.store(true, Ordering::Relaxed);
 
-        if self.session_attachment.is_some()
-            && (self.agent_session().is_some() || self.native_start.is_some())
-        {
+        if self.owner.is_some() && (self.agent_session().is_some() || self.native_start.is_some()) {
             // The invocation closes its AgentProcess under the attachment lock
             // during settlement, without holding SQLite across provider I/O.
             // Harness teardown only drops this connection after takeover.
@@ -609,7 +608,12 @@ impl Harness for CodexHarness {
             }
             Ok(())
         };
-        if let Some((store, session, expected)) = &self.session_attachment {
+        if let Some(Admitted {
+            store,
+            session,
+            attachment: expected,
+        }) = &self.owner
+        {
             if store
                 .with_session_attachment(session, expected, terminate)
                 .is_err()
@@ -707,10 +711,14 @@ impl CodexHarness {
         Ok(config)
     }
 
-    async fn start_inner(&mut self, launch: &AgentConfig) -> Result<()> {
-        let owner = super::agent_process::open_owner(launch.session_attachment.as_ref())?;
-        self.session_attachment = Some(owner.clone());
-        let (store, session, _) = &owner;
+    async fn start_inner(&mut self, launch: &AgentConfig, admitted: &Admitted) -> Result<()> {
+        let owner = admitted.clone();
+        self.owner = Some(owner.clone());
+        let Admitted {
+            store,
+            session,
+            attachment: _,
+        } = &owner;
         let connection = attachment::session_connection(store, session)?;
         let saved_thread = store.session_thread(session)?;
         if let Some(thread) = &saved_thread {
@@ -883,9 +891,9 @@ impl CodexHarness {
         let authority = owner.clone();
         let writer_events = self.events.clone();
         let stream = Arc::new(tokio::sync::Mutex::new(CodexStream::new(FactWriter::new(
-            owner.0.clone(),
-            owner.1.clone(),
-            Some(owner.2.clone()),
+            owner.store.clone(),
+            owner.session.clone(),
+            Some(owner.attachment.clone()),
             Default::default(),
         ))));
         let writer_stream = stream.clone();
@@ -912,7 +920,11 @@ impl CodexHarness {
                     break;
                 }
                 let message = Message::Text(payload.to_string().into());
-                let (store, session, expected) = authority.clone();
+                let Admitted {
+                    store,
+                    session,
+                    attachment: expected,
+                } = authority.clone();
                 let dispatched = tokio::task::spawn_blocking(move || {
                     let outcome = store.with_session_dispatch(&session, &expected, || {
                         super::dispatch::send_fenced(&mut writer, message)
@@ -960,7 +972,11 @@ impl CodexHarness {
                 let Ok(value) = serde_json::from_str::<Value>(&line) else {
                     continue;
                 };
-                let (store, session, _) = &reader_owner;
+                let Admitted {
+                    store,
+                    session,
+                    attachment: _,
+                } = &reader_owner;
                 let decoded = {
                     let thread = super::dispatch::off_reactor(|| store.session_thread(session));
                     let (decoded, written) = stream
@@ -1152,7 +1168,11 @@ impl CodexHarness {
         self.send_notification("initialized").await?;
 
         if self.approval == ApprovalPolicy::NativeClient {
-            let (store, session, attachment) = &owner;
+            let Admitted {
+                store,
+                session,
+                attachment,
+            } = &owner;
             store.record_agent_endpoint(session, attachment, &endpoint.to_string_lossy())?;
             self.native_start = Some((endpoint, Value::Object(thread_params)));
             return Ok(());
@@ -1174,7 +1194,11 @@ impl CodexHarness {
         // returning None rather than failing startup.
         match tokio::time::timeout(Duration::from_secs(10), thread_id_rx).await {
             Ok(Ok(thread_id)) => {
-                let (store, session, attachment) = &owner;
+                let Admitted {
+                    store,
+                    session,
+                    attachment,
+                } = &owner;
                 if let Some(context) = &launch.conversation_context {
                     store.with_session_attachment(session, attachment, || {
                         let mut context = context.clone();
@@ -1318,7 +1342,6 @@ mod tests {
         let (tx, _rx) = mpsc::unbounded_channel();
         let mut harness = CodexHarness::new(tx, ApprovalPolicy::AutoApprove);
         let config = AgentConfig {
-            session_attachment: Some(("saved".into(), attachment.clone())),
             // Even a mistakenly reached spawn cannot launch a real provider.
             cwd: Some(ledger.home().join("absent")),
             ..Default::default()
@@ -1327,7 +1350,16 @@ mod tests {
             .enable_all()
             .build()
             .unwrap();
-        let error = runtime.block_on(harness.start_inner(&config)).unwrap_err();
+        let error = runtime
+            .block_on(harness.start_inner(
+                &config,
+                &Admitted {
+                    store: store.clone(),
+                    session: "saved".into(),
+                    attachment: attachment.clone(),
+                },
+            ))
+            .unwrap_err();
         assert!(error
             .to_string()
             .contains("Saved conversation thread differs"));
@@ -1338,11 +1370,16 @@ mod tests {
             attachment::claim_session_attachment(&store, "saved", Some(&released), &process, true)
                 .unwrap();
         harness.resume_agent_session = Some("saved-thread".into());
-        let config = AgentConfig {
-            session_attachment: Some(("saved".into(), retry)),
-            ..config
-        };
-        let error = runtime.block_on(harness.start_inner(&config)).unwrap_err();
+        let error = runtime
+            .block_on(harness.start_inner(
+                &config,
+                &Admitted {
+                    store: store.clone(),
+                    session: "saved".into(),
+                    attachment: retry,
+                },
+            ))
+            .unwrap_err();
         assert!(
             error.to_string().contains("failed to spawn codex"),
             "{error}"

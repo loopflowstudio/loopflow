@@ -14,10 +14,10 @@ use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 
-use super::agent_process::AttachmentOwner;
 use super::fact::{Decoded, ProviderFact, ProviderTurn};
 use super::fact_writer::FactWriter;
 use super::pi_decode::Turn;
+use super::Admitted;
 use super::{Harness, HarnessError, SendCurrentOutcome};
 use crate::agent::AgentConfig;
 use crate::steer::NativeBoundary;
@@ -61,7 +61,7 @@ impl State {
 pub struct PiHarness {
     events: mpsc::UnboundedSender<ConversationEvent>,
     state: Arc<Mutex<State>>,
-    owner: Option<AttachmentOwner>,
+    owner: Option<Admitted>,
     session: Option<AgentSessionId>,
     child: Option<Child>,
     stdin: Option<ChildStdin>,
@@ -163,14 +163,18 @@ impl PiHarness {
         }
     }
 
-    fn owner(&self) -> Result<AttachmentOwner> {
+    fn owner(&self) -> Result<Admitted> {
         self.owner
             .clone()
             .ok_or_else(|| anyhow!("Pi has not started"))
     }
 
     async fn write(&mut self, value: &Value) -> Result<()> {
-        let (store, session, attachment) = self.owner()?;
+        let Admitted {
+            store,
+            session,
+            attachment,
+        } = self.owner()?;
         let mut stdin = self
             .stdin
             .take()
@@ -260,7 +264,11 @@ impl PiHarness {
             .stderr(Stdio::piped());
         let mut child = super::agent_process::spawn(command, None, &owner, config.holder)
             .with_context(|| crate::agent::missing_agent_message("pi"))?;
-        let (store, session, attachment) = owner;
+        let Admitted {
+            store,
+            session,
+            attachment,
+        } = owner;
         self.state.lock().expect("Pi state lock poisoned").writer = Some(FactWriter::new(
             store,
             session,
@@ -376,10 +384,8 @@ impl Harness for PiHarness {
         self.pid()
     }
 
-    async fn start(&mut self, config: &AgentConfig) -> Result<()> {
-        self.owner = Some(super::agent_process::open_owner(
-            config.session_attachment.as_ref(),
-        )?);
+    async fn start(&mut self, config: &AgentConfig, admitted: &Admitted) -> Result<()> {
+        self.owner = Some(admitted.clone());
         self.seed = Some(match &config.skill_invocation {
             Some(skill) => skill.terminal_input("pi", config)?.1,
             None => config.task_prompt.clone(),

@@ -11,7 +11,7 @@ use std::process::ExitStatus;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::harness::agent_process::AttachmentOwner;
+use crate::harness::Admitted;
 use crate::process::SessionAttachment;
 use crate::session_record::CaptureHandoff;
 use crate::store::StoreError;
@@ -51,8 +51,12 @@ pub(crate) fn exit_line(provider: &str, code: u8) -> String {
 /// is best-effort: the provider's own exit is what the person gets back, and a
 /// store that is locked, refused or missing only loses the records, logged.
 pub fn settle(exit: &NativeExit, status: ExitStatus) -> Settled {
-    let owner: Option<AttachmentOwner> = match open_store() {
-        Ok(store) => Some((store, exit.session.clone(), exit.attachment.clone())),
+    let owner: Option<Admitted> = match open_store() {
+        Ok(store) => Some(Admitted {
+            store,
+            session: exit.session.clone(),
+            attachment: exit.attachment.clone(),
+        }),
         Err(error) => {
             tracing::warn!(%error, session = %exit.session, "store unavailable at exit; the provider's own result stands");
             None
@@ -81,7 +85,12 @@ pub fn settle(exit: &NativeExit, status: ExitStatus) -> Settled {
         moved: lost.then(|| owner.as_ref().and_then(departure)).flatten(),
     };
     let outcome = command.capture_outcome();
-    if let Some((store, session, attachment)) = &owner {
+    if let Some(Admitted {
+        store,
+        session,
+        attachment,
+    }) = &owner
+    {
         match crate::process::finish_session_attachment(store, session, attachment, outcome) {
             Ok(()) | Err(StoreError::InvalidAuthority(_)) => {}
             Err(error) => {
@@ -89,7 +98,7 @@ pub fn settle(exit: &NativeExit, status: ExitStatus) -> Settled {
             }
         }
     }
-    if let Some((store, ..)) = &owner {
+    if let Some(Admitted { store, .. }) = &owner {
         crate::transcript::facts::record_session(
             store,
             &exit.session,
@@ -129,7 +138,10 @@ pub fn settle(exit: &NativeExit, status: ExitStatus) -> Settled {
             .lines
             .push(format!("Loopflow recorded diagnostics: {}", path.display()));
     }
-    if let Some((store, _, attachment)) = &owner {
+    if let Some(Admitted {
+        store, attachment, ..
+    }) = &owner
+    {
         let recorded = (|| -> Result<()> {
             let mut process = store
                 .lf_process(&attachment.provider_lf_process_id)?
@@ -162,8 +174,12 @@ fn open_store() -> Result<SqliteStore> {
 }
 
 /// Record the provider's exit under its attachment; whether an interrupt ended it.
-pub(crate) fn record_exit(owner: &AttachmentOwner) -> Result<bool> {
-    let (store, session, attachment) = owner;
+pub(crate) fn record_exit(owner: &Admitted) -> Result<bool> {
+    let Admitted {
+        store,
+        session,
+        attachment,
+    } = owner;
     match store.with_session_attachment(session, attachment, || {
         store.record_agent_process_exit(session, attachment, true)
     }) {
@@ -179,13 +195,23 @@ pub(crate) fn record_exit(owner: &AttachmentOwner) -> Result<bool> {
 
 /// Whether a mover ended this launch's attachment.
 pub(crate) fn attachment_lost(
-    (store, session, expected): &AttachmentOwner,
+    Admitted {
+        store,
+        session,
+        attachment: expected,
+    }: &Admitted,
 ) -> crate::store::StoreResult<bool> {
     Ok(store.session_attachment(session)?.as_ref() != Some(expected))
 }
 
 /// Where this launch's conversation went, when a mover ended its attachment.
-pub fn departure((store, session, attachment): &AttachmentOwner) -> Option<String> {
+pub fn departure(
+    Admitted {
+        store,
+        session,
+        attachment,
+    }: &Admitted,
+) -> Option<String> {
     let notice = || -> Result<Option<String>> {
         store
             .attachment_departure(session, attachment)?

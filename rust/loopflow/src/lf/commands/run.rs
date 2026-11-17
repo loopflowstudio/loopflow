@@ -762,7 +762,6 @@ fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<String>> {
             config.env = environment.clone();
             let context_file =
                 loopflow_execution::agent::write_system_prompt_file(&config, &built.log_name)?;
-            config.session_attachment = runtime.session_attachment();
             launch_session(
                 &config,
                 agent_session.as_ref(),

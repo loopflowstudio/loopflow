@@ -92,8 +92,10 @@ pub trait Harness: Sync {
     /// companion lf keeps alive while it runs (Codex/OpenCode servers are
     /// started here).
     fn open(&self, launch: &Launch<'_>) -> Result<NativeClient>;
-    /// Stream driver for a headless launch (today's trait, renamed).
-    fn driver(&self, events: mpsc::UnboundedSender<ConversationEvent>,
+    /// Stream driver for a headless launch (today's trait, renamed), built
+    /// admitted from the launch.
+    fn driver(&self, launch: &Launch<'_>,
+              events: mpsc::UnboundedSender<ConversationEvent>,
               approval: ApprovalPolicy) -> Box<dyn Driver>;
 }
 
@@ -130,22 +132,28 @@ pub struct Launch<'a> {
 pub struct Admitted { store: SqliteStore, session: String, attachment: SessionAttachment }
 ```
 
-- `transport::delegate*` returns `Delegation::{Delegated, Here { mode, holder }}`
+- `transport::delegate*` returns `Delegation::{Delegated, Here { mode }}`
   instead of `bool`. The early return (inside a held terminal or a detached
-  launcher) resolves them too, so a re-executed child gets the same holder.
-  `Mode` comes from `is_interactive_run`, moved into `transport`;
-  `Place::Held` still keys on `batch`.
-- The holder has one input. Today `delegate` reads `named_work`
-  (`bin/lf.rs:2534`: `task_run || --task/--wave`), while the launch sets
-  `AgentConfig::holder` from `WorkSource::is_managed()` (`run.rs:52`, `:284`),
-  from `named_work` (`run.rs:205`) and from `store.is_work`
-  (`native_session.rs:68`). `run` reaches `run_bound_prompt` through
-  `implicit_binding` only when no selector was given, so `delegate` saw
-  `named_work = false` and the holder still comes from the binding's source.
-  Slice 3 passes the launch's managed-work fact (`WorkSource::is_managed()`,
-  or `store.is_work` for a reopened Session) into the resolver, and both
-  `Place` and `Holder` read it. If any entry gives a different holder than
-  today, record the entry and stop; that would be a behavior change.
+  launcher) resolves the mode too. `Mode` comes from `is_interactive_run`,
+  moved into `transport`; `Place::Held` still keys on `batch`.
+- Place and Holder read two facts, each derived once in `transport`.
+  **Place** reads whether the command names its Work (`named`: `task run`,
+  `--task`, `--wave`, or a reopened Session that is not bare), as `delegate`
+  does today. **Holder** reads whether the launch's Work source is managed
+  (`WorkSource::is_managed()`, or `store.is_work` for a reopened Session).
+  They agree at every entry but one: inherited `LF_AS` outside a Task checkout
+  binds as `Declared`, so it runs here (`named = false`) with `Holder::Server`.
+  A Graph step is already `Server` and here, so that pair is not new. This
+  Task keeps every entry as it is ("behave as before"); the entry gets its own
+  row in the launch matrix so the next change to it is deliberate.
+- `delegate` runs before the binding is resolved, so it cannot know the
+  source. `Delegation::Here { mode }` carries the mode; one
+  `transport::holder(named, source, session)` returns the `Holder` once the
+  binding exists, and it is the only caller of `Holder::of`. It replaces the
+  four derivations (`run.rs:52`, `:205`, `:285`, `native_session.rs:96`). A
+  held or detached child re-executes the same argv and reaches the same
+  function. Do not resolve the implicit binding before `delegate` to merge the
+  two: that adds a store read ahead of delegation for every bare launch.
 - In-process headless callers that never delegate (commit message, PR text,
   sync execution, replay) build `Launch` with `Mode::Headless` and
   `Holder::Caller`. A Graph step for a Task is `Holder::Server`
@@ -223,14 +231,36 @@ Second pass, against the working diff (runner deletion):
   selects anything inside execution. Its remaining reads are dead and go
   with the field in slice 3 (list under "Delete"). Mode lives in the CLI's
   `PromptBuild` until the resolver returns it.
-- `agent::tests::unknown_provider_is_rejected` now asserts only
-  `HarnessKind::parse(..).is_none()`, which
-  `harness::tests::default_create_harness_rejects_unknown` covers. Delete it.
-- The holder has two derivations today (see "Launch value"); the resolver
-  takes one fact.
+- The holder has four derivations today (see "Launch value"); one function
+  replaces them.
 - `Outcome` was undefined; see "One entry point".
 
-No open product choice.
+Third pass, against the admission diff:
+
+- Place and Holder are two facts (see "Launch value"). The earlier "one
+  managed-work input" would have moved inherited `LF_AS` outside a Task
+  checkout from here to held or detached. Slice 3 is unblocked.
+- `Harness::driver` takes the `Launch`. Today `claude::` and `pi::` drivers
+  are built empty and hold `owner: Option<Admitted>` with a "has not started"
+  error, because `start(config, admitted)` delivers it late. Built from a
+  `Launch`, a driver owns its `Admitted` from construction; `Driver::start`
+  takes no arguments and both `owner() -> Result` helpers go.
+- `Admitted::from_runtime` still fails with "invocation has not claimed its
+  Session attachment" when `LfProcessRuntime::admitted()` is `None`. Slice 4
+  checks whether an agent launch can reach that; if only non-agent captures
+  have no attachment, the agent entry points take a runtime type that always
+  has one. `native_exit::settle`'s `Option<Admitted>` stays: there `None` is a
+  store that did not open, a recording gap.
+
+Open, outside this Task (not blocking): what inherited `LF_AS` outside a Task
+checkout should be. `server/README.md` "Turn and tool boundaries" and
+`transport/README.md` "Which launches are managed" list the managed entries
+and say every other launch is bare, a child run a Session's agent starts
+included; the code makes this one `Holder::Server`. But lf also sets `LF_AS`
+on purpose for workers it starts (`pr_landing.rs:354`, the ci-fix worker), and
+`task/delivery.rs` calls it "an explicit declaration". Either the READMEs gain
+this entry or the inherited case binds as `WorkSource::Inherited`; the second
+changes hooks and the server requirement for those child runs.
 
 ## Delete, do not maintain
 
@@ -239,25 +269,17 @@ No open product choice.
   `"tui"` surface and the `begin_with_context` arm of `_begin_process_runtime`,
   and the `for auto in [false, true]` test loop. Confirm each is unreachable
   from `run.rs`'s interactive path before deleting.
-  `AgentConfig::{holder, session_attachment}`; any remaining
-  `pin_provider_account*`; `agent::tests::unknown_provider_is_rejected`.
+  `AgentConfig::holder`; any remaining `pin_provider_account*`.
 - `run.rs`: the `!process.auto && holder == Caller` exit arm in
   `run_headless_prompt` (`run_prompt` returns before it when not `auto`).
-- `native_session.rs`: `native_provider_attachment`'s Option handling,
-  the program-name dispatch and provider `SessionCommand`.
+- `native_session.rs`: the program-name dispatch and provider `SessionCommand`.
 - `agent/session.rs`: `ProviderInvocation`, `SessionCommand`,
   `build_session_command`, `native_connection_command`; its name-keyed tests
   become `HarnessKind::ALL` loops.
-- `harness/agent_process.rs`: `open_owner(Option)` and its "requires an
-  admitted invocation" refusal, plus `mod.rs`'s
-  `unattached_launch_is_refused_before_any_provider_starts`, which the type
-  now makes unrepresentable.
 - `harness/mod.rs`: `default_create_harness`, `canonical_harness` (callers use
   `HarnessKind::parse`), `is_terminal_harness_error`'s string list.
 - `Holder`'s `Default` derive, plus `Holder::of` callers outside `transport`.
 - `agent::missing_agent_message` match.
-- Docs: `docs/dev/codebase.md` "Add a provider" steps 1-2 (account routing is
-  gone after LOO-913) and `harness/README.md`'s account paragraphs.
 
 ## Forbidden outcomes
 
@@ -266,7 +288,9 @@ No open product choice.
   admits lazily.
 - A `match kind { … }` outside `HarnessKind::harness()` and `parse`/`as_str`.
   Branch on `Capabilities` instead.
-- `Holder::of` or `is_interactive_run` called anywhere but the resolver.
+- `Holder::of` called anywhere but `transport::holder`, or
+  `is_interactive_run` anywhere but `delegate`.
+- An entry whose place or holder differs from main.
 - A test-only harness variant or factory trait. Fixtures use the existing
   stand-in provider scripts.
 
@@ -285,12 +309,19 @@ removed in the working diff. Their settled-attachment and late-exit checks now
 exercise `agent_process::spawn_native` and the store fence on the surviving path.
 The full design remains unfinished; the remaining internal slices are:
 
-2. **Required admission.** `Admitted` and `admit`; remove both Option fields
-   and `open_owner`; `admit_for_test` returns `Admitted`. Focused:
-   `--lib harness::native_session::` and `--lib harness::agent_process::`.
-3. **Mode and holder at delegate.** `Delegation`, `Mode`, one managed-work
-   input; delete `AgentConfig::holder`, `ProcessConfig::auto` with its dead
-   reads, `Holder: Default`. Focused:
+Required admission is implemented: native entry points admit before command
+construction; every stream `start` takes `&Admitted`; the runtime retains that
+same store and frozen attachment. Native `admit` returns its `Admitted` alongside
+any capture it created, so the entry point owns that capture's settlement; a
+supplied runtime stays caller-owned. Both optional launch fields, `open_owner` and
+the unattached-launch test are deleted. `admit_for_test(home)` returns `Admitted`.
+
+Remaining work:
+3. **Mode at delegate, holder in `transport`.** `Delegation::Here { mode }`,
+   `Mode`, `transport::holder` as the only `Holder::of` caller; delete
+   `AgentConfig::holder`, `ProcessConfig::auto` with its dead reads,
+   `Holder: Default`. No entry changes place or holder; a test pins inherited
+   `LF_AS` outside a Task checkout as here with `Holder::Server`. Focused:
    `cargo test -p loopflow --lib lf::commands::run::` and
    `--lib transport::`.
 4. **`Harness` + `Driver` + per-harness `open`.** Move the table rows above;
@@ -328,12 +359,11 @@ behave exactly as before.
 
 ## Checks
 
-- implement (2026-11-16): `cargo test -p loopflow-execution --lib agent::tests::unknown_provider_is_rejected` — execution test binary built; 1 passed.
-- implement (2026-11-16): built `loopflow_execution-* --exact` with `native_cleanup_records_wait_without_touching_a_replacement_or_remote_provider`, `a_failed_terminal_receipt_still_closes_only_the_owned_provider`, `a_settled_runtime_cannot_launch_another_native_provider` — 3 passed.
-
-- implement (2026-11-16): `cargo fmt --check` and `git diff --check` — passed.
-
-- gate: `uv run python scripts/test.py --reuse-passing --rust-filter 'test(harness::) | test(agent::) | test(transport::)'`; CI runs the suites.
+- implement (2026-11-16): `cargo test -p loopflow-execution --lib --no-run` — built; its test binary passed 78 tests selected by `harness::native_session::`, `harness::agent_process::`, `process::runtime::tests::`, `session_record::capture_tests::` and `agent::session::tests::`.
+- implement (2026-11-16): same binary with `harness::claude::tests::interrupted_capture_retains_policy_after_settings_change_and_fences_old_snapshots` and `harness::pi_tests::pi_turns_resume_the_exact_conversation_and_capture_tools_usage` — 2 passed.
+- implement (2026-11-16): `cargo test -p loopflow --lib lf::commands::run::launch_policy_tests::` — built; 5 passed. macOS ld emitted its compact-unwind size warning (`__eh_frame` over 16 MB).
+- implement (2026-11-16): `cargo fmt --all -- --check` and `git diff --check` — passed; no checkout test processes remain.
+- gate (after the remaining design): `uv run python scripts/test.py --reuse-passing --rust-filter 'test(harness::launch_matrix) | test(session_record::capture_tests::) | test(lf::commands::run::launch_policy_tests::) | test(documented_commands::)'`; CI runs the suites and clippy.
 - gate: the two `rg` commands above.
 - demo/qa: real-terminal launches above (needs installed providers).
 
@@ -345,7 +375,7 @@ behave exactly as before.
 #1953 replaced the README's account paragraphs with "Native clients own
 authentication."
 
-Both describe the finished design, none of which exists yet (no `Launch`,
-`Admitted`, `Mode` or `launch_matrix` in the tree). Realign (2026-11-16)
+Both describe the finished design; `Admitted` now exists, but shared `Launch`,
+`Mode`, per-harness `open` and `launch_matrix` remain absent. Realign (2026-11-16)
 replaced the README's `Placement` with `mode` and `holder`. They must not merge
 ahead of slice 4; implement corrects them to whatever it actually builds.

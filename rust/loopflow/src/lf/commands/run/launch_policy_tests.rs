@@ -99,7 +99,12 @@ impl Table {
         } else {
             ProviderInvocation::Terminal { session_id: None }
         };
-        let command = build_session_command(&built.agent_config, invocation, None)?;
+        let command = build_session_command(
+            &built.agent_config,
+            &loopflow_execution::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
+            invocation,
+            None,
+        )?;
         Ok(Launch {
             config: built.agent_config,
             args: command.args,
@@ -139,6 +144,7 @@ impl Table {
         let config = resolve_session_config(session, serde_yaml_ng::Value::Null, None, false)?;
         let command = build_session_command(
             &config,
+            &loopflow_execution::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
             ProviderInvocation::Resume {
                 session_id: &"saved".into(),
             },

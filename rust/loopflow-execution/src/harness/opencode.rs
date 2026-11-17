@@ -14,11 +14,11 @@ use tokio::task::JoinHandle;
 
 use crate::agent::AgentConfig;
 use crate::config::parse_agent;
-use crate::harness::agent_process::AttachmentOwner;
 use crate::harness::common::TurnInProgressGuard;
 use crate::harness::fact::Decoded;
 use crate::harness::fact_writer::FactWriter;
 use crate::harness::opencode_decode::{OpenCodeDecoder, ReaderState, Snapshot};
+use crate::harness::Admitted;
 use crate::harness::{ApprovalPolicy, Harness, HarnessError, SendCurrentOutcome};
 use loopflow_model::chat::types::{ConversationEvent, FailureEvidence};
 use loopflow_model::id::AgentSessionId;
@@ -31,7 +31,7 @@ pub struct OpenCodeHarness {
     password: String,
     authorization: reqwest::header::HeaderValue,
     interactive: bool,
-    owner: Option<AttachmentOwner>,
+    owner: Option<Admitted>,
     stream: Option<Arc<tokio::sync::Mutex<OpenCodeStream>>>,
     config: Option<AgentConfig>,
     should_seed_prompt: bool,
@@ -90,7 +90,7 @@ impl OpenCodeHarness {
         }
     }
 
-    fn owner(&self) -> Result<AttachmentOwner> {
+    fn owner(&self) -> Result<Admitted> {
         self.owner
             .clone()
             .ok_or_else(|| anyhow!("OpenCode server not started"))
@@ -115,11 +115,11 @@ impl OpenCodeHarness {
         ))
     }
 
-    async fn start_inner(&mut self, config: &AgentConfig) -> Result<()> {
-        let owner = super::agent_process::open_owner(config.session_attachment.as_ref())?;
+    async fn start_inner(&mut self, config: &AgentConfig, admitted: &Admitted) -> Result<()> {
+        let owner = admitted.clone();
         let mut config = config.clone();
         if let Some(context) = &mut config.conversation_context {
-            context.identify(&owner.0, &owner.1)?;
+            context.identify(&owner.store, &owner.session)?;
         }
         let config = &config;
         self.owner = Some(owner.clone());
@@ -209,7 +209,11 @@ impl OpenCodeHarness {
         let agent_session =
             open_agent_session(&self.client, &base_url, self.agent_session.as_ref(), config)
                 .await?;
-        let (store, session, attachment) = &owner;
+        let Admitted {
+            store,
+            session,
+            attachment,
+        } = &owner;
         store.record_session_connection(session, attachment, &base_url, &agent_session)?;
 
         let messages = read_messages(&self.client, &base_url, &agent_session).await?;
@@ -419,7 +423,7 @@ impl Harness for OpenCodeHarness {
         self.child.as_ref().and_then(Child::id)
     }
 
-    async fn start(&mut self, config: &AgentConfig) -> Result<()> {
+    async fn start(&mut self, config: &AgentConfig, admitted: &Admitted) -> Result<()> {
         if self.child.is_some() {
             return Ok(());
         }
@@ -428,7 +432,7 @@ impl Harness for OpenCodeHarness {
         self.config = Some(config.clone());
         self.should_seed_prompt = true;
 
-        let start_result = self.start_inner(config).await;
+        let start_result = self.start_inner(config, admitted).await;
         if let Err(err) = start_result {
             let _ = self.stop().await;
             return Err(err);
@@ -761,13 +765,17 @@ async fn read_messages(
 
 // Freeze dispatch under the attachment fence. Uncertain requests are never replayed.
 async fn post(
-    owner: AttachmentOwner,
+    owner: Admitted,
     authorization: reqwest::header::HeaderValue,
     url: String,
     payload: Value,
 ) -> Result<bool> {
     tokio::task::spawn_blocking(move || {
-        let (store, session, attachment) = owner;
+        let Admitted {
+            store,
+            session,
+            attachment,
+        } = owner;
         store.with_session_dispatch(&session, &attachment, || {
             reqwest::blocking::Client::new()
                 .post(url)
@@ -942,7 +950,11 @@ mod tests {
         .unwrap();
         let first =
             attachment::claim_session_attachment(&store, "stop", None, &process, true).unwrap();
-        let owner = (store.clone(), "stop".to_string(), first.clone());
+        let owner = crate::harness::Admitted {
+            store: store.clone(),
+            session: "stop".to_string(),
+            attachment: first.clone(),
+        };
         let mut command = Command::new("/bin/sleep");
         command.env_clear().arg("60");
         let child = super::super::agent_process::spawn(
@@ -964,7 +976,11 @@ mod tests {
                 .unwrap();
         assert!(harness.stop().await.is_err());
         assert!(!crate::journal::OsProcess::group(pid).unwrap().is_empty());
-        harness.owner = Some((store, "stop".into(), current));
+        harness.owner = Some(crate::harness::Admitted {
+            store,
+            session: "stop".into(),
+            attachment: current,
+        });
         harness.stop().await.unwrap();
         assert_eq!(harness.pid(), None);
         assert_eq!(harness.process_group_id(), None);
@@ -1163,9 +1179,10 @@ mod tests {
     async fn live_basic_turn_completes() {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mut harness = OpenCodeHarness::new(tx, ApprovalPolicy::AutoApprove);
-        let mut config = live_config();
-        let _ledger = super::super::admit_for_test(&mut config);
-        harness.start(&config).await.expect("start");
+        let config = live_config();
+        let _ledger = crate::journal::TestLedgerGuard::new();
+        let admitted = super::super::admit_for_test(_ledger.home());
+        harness.start(&config, &admitted).await.expect("start");
 
         harness
             .send_input("Reply with exactly: ALPHA")
@@ -1183,9 +1200,10 @@ mod tests {
     async fn live_send_current_coalesces_into_one_boundary() {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mut harness = OpenCodeHarness::new(tx, ApprovalPolicy::AutoApprove);
-        let mut config = live_config();
-        let _ledger = super::super::admit_for_test(&mut config);
-        harness.start(&config).await.expect("start");
+        let config = live_config();
+        let _ledger = crate::journal::TestLedgerGuard::new();
+        let admitted = super::super::admit_for_test(_ledger.home());
+        harness.start(&config, &admitted).await.expect("start");
 
         harness
             .send_input(

@@ -31,7 +31,7 @@ pub struct SessionCommand {
     pub cwd: PathBuf,
     pub context: Option<crate::context_block::ContextDelivery>,
     pub remote: Option<PathBuf>,
-    pub attachment: Option<(String, crate::process::SessionAttachment)>,
+    pub admitted: crate::harness::Admitted,
 }
 
 /// The native client joins this running conversation at the provider's own
@@ -41,7 +41,7 @@ pub fn native_connection_command(
     cwd: PathBuf,
     session_id: &AgentSessionId,
     remote: PathBuf,
-    attachment: Option<(String, crate::process::SessionAttachment)>,
+    admitted: crate::harness::Admitted,
 ) -> SessionCommand {
     let args = vec![
         "--remote".into(),
@@ -61,12 +61,13 @@ pub fn native_connection_command(
         cwd,
         context: None,
         remote: Some(remote),
-        attachment,
+        admitted,
     }
 }
 
 pub fn build_session_command(
     config: &AgentConfig,
+    admitted: &crate::harness::Admitted,
     invocation: ProviderInvocation<'_>,
     context_file: Option<&Path>,
 ) -> Result<SessionCommand> {
@@ -184,7 +185,7 @@ pub fn build_session_command(
         cwd,
         context: config.conversation_context.clone(),
         remote: None,
-        attachment: config.session_attachment.clone(),
+        admitted: admitted.clone(),
     })
 }
 
@@ -418,7 +419,13 @@ mod tests {
                 },
                 ProviderInvocation::ClaudeStream { session_id: None },
             ] {
-                let command = build_session_command(&config, invocation, context_file).unwrap();
+                let command = build_session_command(
+                    &config,
+                    &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
+                    invocation,
+                    context_file,
+                )
+                .unwrap();
                 assert_eq!(
                     command.args.contains(&"--append-system-prompt".into()),
                     context_file.is_none() && !instructions.trim().is_empty(),
@@ -454,7 +461,13 @@ mod tests {
                     session_id: &"saved".into(),
                 },
             ] {
-                let command = build_session_command(&config, invocation, None).unwrap();
+                let command = build_session_command(
+                    &config,
+                    &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
+                    invocation,
+                    None,
+                )
+                .unwrap();
                 assert!(!command
                     .args
                     .contains(&"--dangerously-skip-permissions".into()));
@@ -486,6 +499,7 @@ mod tests {
             } else if provider == "claude" {
                 let command = build_session_command(
                     &config,
+                    &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
                     ProviderInvocation::ClaudeStream { session_id: None },
                     None,
                 )
@@ -523,6 +537,7 @@ mod tests {
         for token in [None, Some(&"saved".into())] {
             let command = build_session_command(
                 &config,
+                &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
                 ProviderInvocation::ClaudeStream { session_id: token },
                 None,
             )
@@ -558,7 +573,13 @@ mod tests {
                 ProviderInvocation::Terminal { session_id: None },
                 ProviderInvocation::ClaudeStream { session_id: None },
             ] {
-                let command = build_session_command(&config, invocation, None).unwrap();
+                let command = build_session_command(
+                    &config,
+                    &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
+                    invocation,
+                    None,
+                )
+                .unwrap();
                 let sent: Vec<_> = command
                     .args
                     .iter()
@@ -584,6 +605,7 @@ mod tests {
             };
             let command = build_session_command(
                 &config,
+                &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
                 ProviderInvocation::Terminal { session_id: None },
                 None,
             )
@@ -614,6 +636,7 @@ mod tests {
             };
             build_session_command(
                 &config,
+                &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
                 ProviderInvocation::Terminal { session_id: None },
                 None,
             )
@@ -641,6 +664,7 @@ mod tests {
             };
             let command = build_session_command(
                 &config,
+                &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
                 ProviderInvocation::Terminal { session_id: None },
                 None,
             )
@@ -670,6 +694,7 @@ mod tests {
         let bare = config(crate::session::Holder::Caller);
         let start = build_session_command(
             &bare,
+            &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
             ProviderInvocation::Terminal { session_id: None },
             None,
         )
@@ -687,6 +712,7 @@ mod tests {
             .any(|arg| arg == "app-server" || arg == "--remote"));
         let resume = build_session_command(
             &bare,
+            &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
             ProviderInvocation::Resume {
                 session_id: &"thread-1".into(),
             },
@@ -702,6 +728,7 @@ mod tests {
 
         let held = build_session_command(
             &config(crate::session::Holder::Server),
+            &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
             ProviderInvocation::Terminal { session_id: None },
             None,
         )
@@ -728,7 +755,13 @@ mod tests {
                         session_id: &"saved".into(),
                     },
                 ] {
-                    let error = build_session_command(&config, invocation, None).unwrap_err();
+                    let error = build_session_command(
+                        &config,
+                        &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
+                        invocation,
+                        None,
+                    )
+                    .unwrap_err();
                     assert!(error.to_string().contains("require a headless Run"));
                 }
             }

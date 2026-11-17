@@ -244,7 +244,7 @@ pub trait Harness: Send + Sync {
     /// The invocation owner receives replacement attachment snapshots when a
     /// provider must respawn within the same lf invocation.
     fn set_runtime(&mut self, _runtime: Option<crate::process::LfProcessRuntime>) {}
-    async fn start(&mut self, config: &AgentConfig) -> Result<()>;
+    async fn start(&mut self, config: &AgentConfig, admitted: &Admitted) -> Result<()>;
     /// Start the next provider Turn from durable seed input.
     async fn send_input(&mut self, content: &str) -> Result<()>;
     /// Try to deliver input to the exact Turn currently active.
@@ -280,6 +280,22 @@ pub trait Harness: Send + Sync {
     /// Seed a previously persisted vendor session id so the next turn resumes
     /// it. Harnesses that take resume state at `start` instead ignore this.
     fn set_agent_session(&mut self, _agent_session: Option<AgentSessionId>) {}
+}
+
+/// The Session and frozen attachment an invocation launches and records under.
+#[derive(Debug, Clone)]
+pub struct Admitted {
+    pub store: loopflow_storage::sqlite::SqliteStore,
+    pub session: String,
+    pub attachment: crate::process::SessionAttachment,
+}
+
+impl Admitted {
+    pub fn from_runtime(runtime: &crate::process::LfProcessRuntime) -> Result<Self> {
+        runtime
+            .admitted()
+            .ok_or_else(|| anyhow::anyhow!("invocation has not claimed its Session attachment"))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -356,9 +372,8 @@ pub fn default_create_harness(
 /// Admit a fixture launch: a private ledger with one Session attached to one
 /// recorded lf invocation. Keep the guard for the life of the harness.
 #[cfg(any(test, feature = "test-support"))]
-pub fn admit_for_test(config: &mut AgentConfig) -> crate::journal::TestLedgerGuard {
-    let ledger = crate::journal::TestLedgerGuard::new();
-    let database = ledger.home().join("loopflow.db");
+pub fn admit_for_test(home: &std::path::Path) -> Admitted {
+    let database = home.join("loopflow.db");
     let store = crate::store::opening::open_ephemeral(&database).unwrap();
     let process = loopflow_model::id::LfProcessId::new();
     rusqlite::Connection::open(&database)
@@ -373,52 +388,17 @@ pub fn admit_for_test(config: &mut AgentConfig) -> crate::journal::TestLedgerGua
         &store, "fixture", None, &process, true,
     )
     .unwrap();
-    config.session_attachment = Some(("fixture".into(), attachment));
-    ledger
+    Admitted {
+        store,
+        session: "fixture".into(),
+        attachment,
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::os::unix::fs::PermissionsExt;
 
     use super::*;
-
-    #[tokio::test]
-    async fn unattached_launch_is_refused_before_any_provider_starts() {
-        // Account selection reads this private, empty store; no route exists.
-        let ledger = crate::journal::TestLedgerGuard::new();
-        let _env = crate::test_ambient::EnvGuard::clear(&["PATH", "LF_BIN"]);
-        // Claude probes its version before the first input launches an agent.
-        let claude = ledger.home().join("claude");
-        std::fs::write(&claude, "#!/bin/sh\n[ \"$1\" = --version ]\n").unwrap();
-        std::fs::set_permissions(&claude, std::fs::Permissions::from_mode(0o755)).unwrap();
-        std::env::set_var("PATH", ledger.home());
-        std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
-        let absent = ledger.home().join("absent");
-        for name in ["codex", "claude", "opencode", "pi"] {
-            let (tx, _rx) = mpsc::unbounded_channel();
-            let mut harness =
-                default_create_harness(name, ApprovalPolicy::AutoApprove, tx).unwrap();
-            let config = AgentConfig {
-                agent: Some(name.into()),
-                // Even a mistakenly reached spawn cannot launch a real provider.
-                cwd: Some(absent.clone()),
-                ..Default::default()
-            };
-            let error = match harness.start(&config).await {
-                // Claude launches on its first input.
-                Ok(()) => harness.send_input("unrecorded").await.unwrap_err(),
-                Err(error) => error,
-            };
-            assert!(
-                error
-                    .to_string()
-                    .contains("AgentProcess requires an admitted invocation"),
-                "{name}: {error}"
-            );
-            assert_eq!(harness.pid(), None, "{name}");
-        }
-    }
 
     #[test]
     fn canonical_harness_is_case_insensitive_and_trimmed() {

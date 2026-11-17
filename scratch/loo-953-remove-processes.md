@@ -62,7 +62,8 @@ direction.** Settled by the design; build before the carriers.
   writer per owner table, as the 2a review said, now spelled in the type.
 - **The spawner's end write is best-effort.** `finish_run(...)?` at
   `lf/commands/graph.rs:240` and `:940` still fails a Graph whose child
-  succeeded when the store is busy. Both become warn-and-continue (the
+  succeeded when the store is busy (`:899`, a step that never started,
+  replaces the start error with the store's). All three become warn-and-continue (the
   journal's warn-once gap); the child's own end write and the liveness pass
   cover a missed one. Closes the 2a review's open item. Still untested
   from that review: the spawner-written end for a child that died without

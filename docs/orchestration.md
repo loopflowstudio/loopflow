@@ -33,12 +33,33 @@ extends: builtin
 Run `make e2e` before publishing.
 ```
 
-That file is the builtin with your section appended.
+That file is the builtin with your section appended. `lf list skill` says
+which of your Skills extend a builtin and which replace one:
+
+```
+    lf skill gate (.lf/skills/gate.md, extends builtin)
+    lf skill qa (.lf/skills/qa.md, replaces builtin)
+```
 
 One Skill, one job: `design` writes the plan, `implement` builds it, `gate`
 judges whether it ships. Chain them in a Graph rather than writing one Skill
 that does everything. Pass work between steps through what already holds it:
 commits, and notes in `scratch/`.
+
+Each Skill step's edits become one commit, pushed unless you're on the default
+branch:
+
+```
+lf implement: Count retries per Task
+
+The board read attempts from the wrong row.
+```
+
+The `commit-message` Skill writes it on its own agent, so a cheap model can
+take that job alone: `lf skill customize commit-message`, then set `agent:
+claude:haiku` in its frontmatter.
+Without an answer the title is `lf implement: checkpoint`. `lf commit --step
+implement` runs the same thing by hand; plain `lf commit` has no prefix.
 
 ## Pick the agent for each step
 

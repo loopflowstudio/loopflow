@@ -271,7 +271,8 @@ Checks (third pass): `scripts/test_desktop.sh --filter 'PendingChangesTests|Work
    shows a "Control failed" banner: a second Start path with no request ID,
    no "requested" Notice and its own error string. It becomes
    `model.startTask(nil, task:)`. `activeControlId` gating for it goes, and so
-   does `LocalWaveAgentLauncher.runTask` if nothing else calls it.
+   does `LocalWaveAgentLauncher.runTask` (`MacLocalWaveAgentLauncher.swift:16`;
+   `RoadmapView` is its only caller).
 2. **Action failures post the Notice.** The remaining per-view error strings
    for things a person did go to `navigation.notices` as events, and their
    state goes: `controlError` and its `evidenceBanner` in `RoadmapView` and
@@ -280,8 +281,11 @@ Checks (third pass): `scripts/test_desktop.sh --filter 'PendingChangesTests|Work
    button in `TaskWorkView` (New session failed; Notice action "Try again").
    `conversationError` stays: it is the conversation pane's own content, with
    its retry in place. `completionPending` stays: it is a fact of the Task's
-   row, not an action's answer. This supersedes the questions.md entry that
-   left them inline.
+   row, not an action's answer; so is `WorkSurfaceView`'s "Retained Task ·
+   planning unavailable" banner (that Task's own `unavailableTasks` reason,
+   beside the Wave's condition Notice). `taskSessionErrors` assertions in
+   `WorkNavigationTests` and `TaskSessionLaunchProofTests` move to the
+   Notice. This supersedes the questions.md entry that left them inline.
 3. **A failure that outlasts a lost link reports once.** `NoticeCenter.read`
    drops a transition into failure while the link is lost, and a reading that
    is still failing after the link returns makes no transition, so it never

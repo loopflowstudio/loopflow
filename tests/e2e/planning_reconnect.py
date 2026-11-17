@@ -295,13 +295,13 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
         saved = json.loads(run("task", "comment", "INF-124", "Saved offline", "--json"))
         comment_id = saved["pending_sync"][0]
         receipt = db.execute(
-            "SELECT id FROM task_state_deliveries WHERE task_id=? ORDER BY seq DESC LIMIT 1",
+            "SELECT id FROM tracker_actions WHERE task_id=? AND kind='state' ORDER BY seq DESC LIMIT 1",
             (local_id,),
         ).fetchone()[0]
         task_graphs = db.execute("SELECT * FROM task_graphs ORDER BY task_id").fetchall()
         _await(
             lambda: db.execute(
-                "SELECT error FROM task_state_deliveries WHERE id=?", (receipt,)
+                "SELECT error FROM tracker_actions WHERE id=?", (receipt,)
             ).fetchone()[0],
             "active connection did not observe outage",
         )
@@ -321,14 +321,14 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
         def caught_up() -> bool:
             return (
                 db.execute(
-                    "SELECT settled FROM task_state_deliveries WHERE id=?", (receipt,)
+                    "SELECT phase FROM tracker_actions WHERE id=?", (receipt,)
                 ).fetchone()
-                == (1,)
+                == ("confirmed",)
                 and db.execute(
-                    "SELECT acknowledged FROM task_comment_deliveries WHERE comment_id=?",
+                    "SELECT phase FROM tracker_actions WHERE kind='comment' AND subject=?",
                     (comment_id,),
                 ).fetchone()
-                == (1,)
+                == ("confirmed",)
                 and db.execute(
                     "SELECT count(*) FROM task_comments WHERE id=?", (incoming["id"],)
                 ).fetchone()
@@ -366,8 +366,8 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
             None,
         )
         assert db.execute(
-            "SELECT count(*) FROM task_changes WHERE task_id=? AND field='task_title' "
-            "AND conflict_json IS NULL AND acknowledged=0",
+            "SELECT count(*) FROM tracker_actions WHERE task_id=? AND kind='field' "
+            "AND subject='task_title' AND phase IN ('queued','sent')",
             (fixture["task"],),
         ).fetchone() == (1,)
         with server.lock:
@@ -394,8 +394,8 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
 
             def delivered() -> bool:
                 return db.execute(
-                    "SELECT acknowledged FROM task_comment_deliveries WHERE comment_id=?", (gap,)
-                ).fetchone() == (1,)
+                    "SELECT phase FROM tracker_actions WHERE kind='comment' AND subject=?", (gap,)
+                ).fetchone() == ("confirmed",)
 
             watch = Subscription(fixture, env, "planning", "status")
             watch.frame(lambda f: True)

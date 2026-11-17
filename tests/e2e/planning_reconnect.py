@@ -166,7 +166,7 @@ class Handler(BaseHTTPRequestHandler):
             issue["completedAt"] = (
                 issue["updatedAt"] if variables["stateId"] == "completed" else None
             )
-            state["state_writes"] += 1
+            state["state_writes"].append((variables["id"], variables["stateId"]))
             # Commit, then lose the response. Never send this mutation twice.
             return {"errors": [{"message": "lost state response"}]}
         elif "mutation DeliverTaskField" in query:
@@ -262,7 +262,9 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
     remote_id = db.execute(
         "SELECT id FROM tasks WHERE external_issue_id=?", (server.state["issues"][2]["id"],)
     ).fetchone()[0]
-    local_id = db.execute("SELECT id FROM tasks WHERE issue_identifier='INF-124'").fetchone()[0]
+    local_id, completed = db.execute(
+        "SELECT id, external_issue_id FROM tasks WHERE issue_identifier='INF-124'"
+    ).fetchone()
     prs = db.execute("SELECT id,task_id,branch,base_commit FROM task_prs").fetchall()
     watch = None
     graph = None
@@ -370,7 +372,10 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
             (fixture["task"],),
         ).fetchone() == (1,)
         with server.lock:
-            assert server.state["state_writes"] == 1
+            # Each state write commits and loses its reply; none is sent twice.
+            writes = server.state["state_writes"]
+            assert len(writes) == len(set(writes)), writes
+            assert (completed, "completed") in writes, writes
             assert len([c for c in server.state["comments"] if c["id"] == comment_id]) == 1
             assert not server.state["unexpected"], server.state["unexpected"]
         if not graph:
@@ -522,7 +527,7 @@ for line in sys.stdin:
             issues=[issue, other, remote],
             comments=[],
             offline=False,
-            state_writes=0,
+            state_writes=[],
             requests=0,
             unexpected=[],
         )

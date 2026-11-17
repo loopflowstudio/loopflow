@@ -1,6 +1,6 @@
 # LOO-935: remove what the product no longer uses, and keep it removed
 
-Status (2026-11-17): `lf resume` does one thing (Rust, Swift, docs done) and main through #1960 is merged (conflict notes in `questions.md`); before it, `lf task view`, `lf open --diff`, the Rex follower and Task widening went and every view of a held terminal types. One resume decision is built (below). Next: gate.
+Status (2026-11-17): `lf resume` does one thing (Rust, Swift, docs done) and main through #1960 is merged (conflict notes in `questions.md`); before it, `lf task view`, `lf open --diff`, the Rex follower and Task widening went and every view of a held terminal types. One resume decision is built for labels and `--explain`; next, `open` acts on it (below), then gate.
 
 ## Demo
 
@@ -325,6 +325,26 @@ held copy, `session_resume_explanations.json` openings match their intents.
 Checks: `cargo test -p loopflow-execution --lib ops::human_session::` (46),
 `--test integration dto_fixtures::session_` (4), clippy execution,
 `test_desktop.sh --filter DTOFixtureTests` (56): pass.
+
+Next (concept review, 2026-11-17): the executor still decides alone. `open`
+(`ops/human_session.rs` ~893) dispatches on its own reads (`input_provider_session`
+for the handoff, `session_terminal` for View, `running()` requiring Live evidence
+for TakeOver, `captured`/provider session for Start), and `primary::prepare`
+(:334) repeats `session_terminal || provider session` for "retained". The labels
+now predict `open` instead of being what it does. Counterexample: an admitted
+agent process with Unknown evidence lists "Take over", but `open` stops nothing
+(`running()` wants Live) and resumes beside the client; `stop_session_agent`
+itself signals anything not Dead.
+
+- `open` reads the summary after `lock_session_process`/`admit_workspace` and
+  matches `resume_intent` (with the same NewThread/prepare-only overrides
+  `read_resume` applies; move that override into one helper both call): View →
+  attach the held terminal; TakeOver → `stop_session_agent`, then resume;
+  Resume → `resume_session`; Start → `open_waiting`. `running()` goes.
+- `primary::prepare` treats retained as `resume_intent != Start`.
+- `transport::delegate_session` stays a per-invocation step before acting.
+- Test: the Unknown-evidence row opens as a take over (stops the recorded
+  agent) in `ops::human_session::` tests; existing open/resume tests unchanged.
 
 Not this Task: what `lf open` itself does. Jack Heart: "lets start with maknig
 resume do what it should do. and then we can talk about what opens does".

@@ -218,107 +218,103 @@ pub fn current() -> Option<&'static TerminalId> {
     HANDOFF.get().map(|handoff| &handoff.terminal)
 }
 
-/// Where a delegated launch runs; running here needs no delegation.
+/// Whether this process runs the launch or handed it to its owner.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Place {
-    Held,
-    Detached,
+pub enum Delegation {
+    Delegated,
+    Here { run: crate::harness::Run },
 }
 
-/// `SqliteStore::is_work` for the Session a launch opens. An unreadable store
-/// keeps the launch Work.
-fn works(named_work: bool, session: Option<&str>) -> bool {
-    let Some(session) = session else {
-        return named_work;
-    };
-    crate::journal::process_ledger()
-        .and_then(|store| store.is_work(named_work, store.session(session)?.as_ref()))
-        .unwrap_or(true)
+/// Inputs that select the native client or stream driver before delegation.
+#[derive(Debug, Clone, Copy)]
+pub struct LaunchInput {
+    pub batch: bool,
+    pub interactive: bool,
+    pub has_prompt: bool,
 }
 
-/// Delegate before capture admission or provider effects. A missing startup
-/// acknowledgement is uncertainty, never permission to launch again. Returns
-/// false when this process runs the launch itself: inside its host or
-/// launcher, or as a bare launch in its own terminal or headless.
-///
-/// `named_work` says the command names its Task or Wave or starts a Task's
-/// Graph; its conversation is held for the Machine server when a terminal
-/// views it.
-pub fn delegate_current(batch: bool, named_work: bool) -> Result<bool> {
+impl LaunchInput {
+    /// Select the native client or stream driver from the invocation and terminal.
+    pub fn mode(self) -> crate::harness::Mode {
+        self.mode_with_tty(io::stdin().is_terminal() || io::stdout().is_terminal())
+    }
+
+    fn mode_with_tty(self, tty: bool) -> crate::harness::Mode {
+        if !self.batch && (self.interactive || tty || !self.has_prompt) {
+            crate::harness::Mode::Interactive
+        } else {
+            crate::harness::Mode::Headless
+        }
+    }
+}
+
+/// Delegate a direct command; Task attribution never changes its lifetime.
+pub fn delegate_current(input: LaunchInput, worker: bool) -> Result<Delegation> {
     let argv: Vec<String> = std::env::args().collect();
-    delegate(batch, None, None, argv, true, named_work)
+    delegate(
+        if worker || crate::journal::worker_step() {
+            crate::harness::Run::Worker
+        } else if current().is_some() {
+            crate::harness::Run::Managed
+        } else {
+            crate::harness::Run::Bare(input.mode())
+        },
+        None,
+        None,
+        argv,
+        true,
+    )
 }
 
-/// Delegate the reopening of a recorded Session; `named_work` as for
-/// `delegate_current`.
+/// Reopen a recorded Session as a Managed conversation.
 pub(crate) fn delegate_session(
     json_session: Option<&str>,
     preview_session: Option<&str>,
     replace: bool,
-    named_work: bool,
-) -> Result<bool> {
+) -> Result<Delegation> {
     let mut argv: Vec<String> = std::env::args().collect();
     if json_session.is_some() {
         // The viewer owns this continuation, including an early detach.
         argv.retain(|arg| arg != "--json");
     }
     delegate(
-        false,
+        crate::harness::Run::Managed,
         json_session,
         preview_session,
         argv,
         replace,
-        named_work,
     )
 }
 
 /// Open the resulting Session after a fork or thread replacement, without
 /// repeating the command that prepared it.
-pub(crate) fn delegate_prepared_session(id: &str, json: bool) -> Result<bool> {
+pub(crate) fn delegate_prepared_session(id: &str, json: bool) -> Result<Delegation> {
     delegate(
-        false,
+        crate::harness::Run::Managed,
         json.then_some(id),
         Some(id),
         vec![String::new(), "session".into(), "resume".into(), id.into()],
         true,
-        false,
     )
 }
 
-/// The one place a launch's place is chosen
-/// ([What runs on a Machine](../../../docs/dev/index.md#what-runs-on-a-machine)).
-/// A launch something views (a terminal for Work, or a Desktop or framed
-/// relay for any conversation) runs in a terminal the Machine server's holder
-/// keeps. Other Work runs as a plain detached process that this one prints
-/// until it exits or lets go. Everything else runs here: as the terminal's
-/// foreground program, as a Graph's step, or headless as its caller's child.
+/// Resolve lifetime before admission or provider effects. Only conversations
+/// use held terminals; direct commands keep their caller and Graphs use workers.
 fn delegate(
-    batch: bool,
+    run: crate::harness::Run,
     json_session: Option<&str>,
     preview_session: Option<&str>,
     mut argv: Vec<String>,
     replace: bool,
-    named_work: bool,
-) -> Result<bool> {
-    // Library tests do not execute the CLI entry point.
-    if cfg!(test) || current().is_some() || crate::os_process::detached::launched() {
-        return Ok(false);
+) -> Result<Delegation> {
+    if cfg!(test)
+        || current().is_some()
+        || crate::os_process::detached::launched()
+        || matches!(run, crate::harness::Run::Bare(_))
+        || (run == crate::harness::Run::Worker && crate::journal::graph_step())
+    {
+        return Ok(Delegation::Here { run });
     }
-    let work = works(named_work, preview_session.or(json_session));
-    // A Desktop pane or a framed `lf --machine` view relays this launch.
-    let relayed =
-        std::env::var_os("LF_SERVER_STATUS").is_some() || std::env::var_os(STREAM_ENV).is_some();
-    // `lf -b … > file` typed at a terminal writes only the answer, never a
-    // relayed screen; an interactive run keeps the terminal it reads from.
-    let terminal = io::stdout().is_terminal() || (!batch && io::stdin().is_terminal());
-    let place = if !batch && (relayed || (work && terminal)) {
-        Place::Held
-    // A Graph waits on its step; the step has no caller to outlive.
-    } else if work && !crate::journal::graph_step() {
-        Place::Detached
-    } else {
-        return Ok(false);
-    };
     crate::journal::admit_process(
         &std::env::current_dir()?,
         &std::env::args().collect::<Vec<_>>(),
@@ -328,11 +324,8 @@ fn delegate(
     )?;
     argv[0] = std::env::current_exe()?.to_string_lossy().into_owned();
     let cwd = std::env::current_dir()?;
-    if place == Place::Detached {
-        // A reopened conversation reads what its caller pipes in; other work
-        // never consumes this process's stdin.
-        let input = preview_session.is_some() && !io::stdin().is_terminal();
-        let code = crate::os_process::detached::run(&argv, &cwd, input, &|command| {
+    if run == crate::harness::Run::Worker {
+        let code = crate::os_process::detached::run(&argv, &cwd, false, &|command| {
             // No terminal shows detached work; it claims none.
             command
                 .env_remove(STREAM_ENV)
@@ -343,7 +336,7 @@ fn delegate(
         if code != 0 {
             return Err(crate::process::CommandExit(code).into());
         }
-        return Ok(true);
+        return Ok(Delegation::Delegated);
     }
     let preview = if std::env::var_os(STREAM_ENV).is_some() {
         if let Some(screen) = preview_session.and_then(snapshot::last_screen) {
@@ -363,7 +356,7 @@ fn delegate(
         preview,
         replace,
     )?;
-    Ok(true)
+    Ok(Delegation::Delegated)
 }
 
 /// Start `argv` in a terminal this build's holder keeps, through the Machine
@@ -2805,5 +2798,90 @@ mod tests {
         let mut exec = Command::new("lf");
         carry_across_exec(&mut exec);
         assert_eq!(exec.get_envs().count(), 0);
+    }
+}
+
+#[cfg(test)]
+mod launch_mode_tests {
+    use super::LaunchInput;
+    use crate::harness::Mode;
+
+    #[test]
+    fn mode_keeps_batch_interactive_tty_and_empty_prompt_semantics() {
+        for (batch, interactive, has_prompt, tty, expected) in [
+            (true, false, false, false, Mode::Headless),
+            (true, true, false, true, Mode::Headless),
+            (false, true, true, false, Mode::Interactive),
+            (false, false, true, true, Mode::Interactive),
+            (false, false, true, false, Mode::Headless),
+            (false, false, false, false, Mode::Interactive),
+        ] {
+            let input = LaunchInput {
+                batch,
+                interactive,
+                has_prompt,
+            };
+            assert_eq!(input.mode_with_tty(tty), expected, "{input:?}, tty={tty}");
+        }
+    }
+
+    #[test]
+    fn direct_commands_keep_their_mode_and_caller() {
+        for (batch, mode) in [(true, Mode::Headless), (false, Mode::Interactive)] {
+            let input = LaunchInput {
+                batch,
+                interactive: true,
+                has_prompt: true,
+            };
+            assert_eq!(
+                super::delegate_current(input, false).unwrap(),
+                super::Delegation::Here {
+                    run: crate::harness::Run::Bare(mode)
+                }
+            );
+            assert_eq!(
+                super::delegate_current(input, true).unwrap(),
+                super::Delegation::Here {
+                    run: crate::harness::Run::Worker
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn inherited_task_attribution_keeps_a_direct_command_bare() {
+        let _lock = crate::journal::test_env_lock();
+        let _env = crate::test_ambient::EnvGuard::new();
+        std::env::set_var(crate::ops::WORK_DECLARATION_ENV, "task:inherited");
+        for batch in [false, true] {
+            let input = LaunchInput {
+                batch,
+                interactive: true,
+                has_prompt: true,
+            };
+            assert_eq!(
+                super::delegate_current(input, false).unwrap(),
+                super::Delegation::Here {
+                    run: crate::harness::Run::Bare(input.mode())
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn reopening_a_session_is_managed_without_reading_the_store() {
+        assert_eq!(
+            super::delegate(
+                crate::harness::Run::Managed,
+                None,
+                Some("unreadable-session"),
+                Vec::new(),
+                true
+            )
+            .unwrap(),
+            super::Delegation::Here {
+                run: crate::harness::Run::Managed
+            }
+        );
     }
 }

@@ -72,6 +72,11 @@ pub fn steer(
         };
         anyhow::Ok((store, session))
     })?;
+    if let (Some(session), true) = (&session, cli.batch) {
+        if steer_turn(cli, &runtime, &store, session, &directory, message)? {
+            return Ok(());
+        }
+    }
     let scope = match (&session, target, cli.wave.as_deref()) {
         (Some(session), _, _) => SteerScope::Session(&session.id),
         (None, Some(issue), wave) => {
@@ -105,12 +110,76 @@ pub fn steer(
     let steer = runtime.block_on(loopflow_execution::engine::session::steer(
         &store, &directory, scope, message,
     ))?;
-    if json {
-        println!("{}", serde_json::to_string(&steer)?);
-    } else {
-        println!("Saved {}", steer.id);
+    match (json, &session) {
+        (true, _) => println!("{}", serde_json::to_string(&steer)?),
+        (false, Some(session)) => println!(
+            "Saved {}; {}",
+            steer.id,
+            steer_reader(&store.sqlite, session)?
+        ),
+        (false, None) => println!("Saved {}", steer.id),
     }
     Ok(())
+}
+
+/// Who reads a steer saved for `session`, with no turn of its own to run it.
+fn steer_reader(
+    sqlite: &loopflow_execution::store::sqlite::SqliteStore,
+    session: &loopflow_execution::session::LfSession,
+) -> anyhow::Result<String> {
+    let id = &session.id;
+    Ok(
+        if loopflow_execution::ops::human_session::agent_running(sqlite, session)? {
+            format!("{id} reads it at its next boundary")
+        } else if session.interactive {
+            format!("the Machine server starts {id} to read it")
+        } else if session.graph_lf_process_id.is_some() {
+            format!("{id} is a finished worker; nothing reads it until its Graph continues it")
+        } else {
+            format!("{id} is a finished batch; nothing reads it")
+        },
+    )
+}
+
+/// `lf -b steer SESSION TEXT`: a Session whose agent is stopped reads its
+/// unread steers, this one last, in one headless turn here, and the reply
+/// prints. False when there is no turn to run here: a running Session reads
+/// the steer at its next boundary, and a finished worker only when its own Graph
+/// continues it, so the caller only saves it.
+fn steer_turn(
+    cli: &crate::lf::Cli,
+    runtime: &tokio::runtime::Runtime,
+    store: &Arc<Store>,
+    session: &loopflow_execution::session::LfSession,
+    directory: &Path,
+    message: &str,
+) -> anyhow::Result<bool> {
+    use loopflow_execution::ops::human_session as human;
+    use loopflow_execution::transport::{delegate_current, Delegation, LaunchInput};
+    let input = LaunchInput {
+        batch: true,
+        interactive: false,
+        has_prompt: true,
+    };
+    let run = match delegate_current(input, false)? {
+        Delegation::Delegated => return Ok(true),
+        Delegation::Here { run } => run,
+    };
+    // One process per Session: this turn holds the launch lock to its end.
+    let _launch = human::lock_session_process(&session.id)?;
+    let sqlite = &store.sqlite;
+    if human::agent_running(sqlite, session)?
+        || !session.interactive && !super::run::continues_own_step(sqlite, session)?
+    {
+        return Ok(false);
+    }
+    let session = runtime.block_on(human::admit_workspace(store, session.clone()))?;
+    let author = loopflow_execution::config::participant_name_in(directory)?
+        .unwrap_or_else(|| "attribution unresolved".into());
+    let steers = sqlite.take_session_steers(&session.id, &author, message)?;
+    let prompt = loopflow_execution::steer::render_complete(&steers);
+    super::run::resume(sqlite, &session, &prompt, cli, run)?;
+    Ok(true)
 }
 
 async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()> {
@@ -777,42 +846,14 @@ async fn resume(
     fork: bool,
 ) -> anyhow::Result<()> {
     // Prepared connections have already returned through shared mutation dispatch.
-    let message = &connection.message;
     anyhow::ensure!(
-        message.is_none() || cli.batch,
-        "a next-turn message requires -b"
-    );
-    anyhow::ensure!(
-        !cli.batch || message.is_some(),
-        "a headless connection requires --message TEXT"
-    );
-    anyhow::ensure!(
-        cli.batch || cli.output_schema.is_none(),
-        "response schemas require a headless Run (-b)"
+        !cli.batch && cli.output_schema.is_none(),
+        "`lf resume` connects; `lf -b steer SESSION TEXT` runs one more turn here"
     );
     let progress = loopflow_execution::startup::Startup::new("Finding conversation");
     let store = open_shared_store().await?;
     let cwd = std::env::current_dir()?;
     drop(progress);
-    let named_work = connection.work_flag(cli).is_some();
-    if let Some(message) = message {
-        let id = select(&store, &cwd, target).await?;
-        let session = loopflow_execution::ops::human_session::session_by_id(&store, &id)
-            .await?
-            .context("Session not found")?;
-        let lock_id = session.id.to_string();
-        let launch = tokio::task::spawn_blocking(move || {
-            loopflow_execution::ops::human_session::lock_session_process(&lock_id)
-        })
-        .await??;
-        let session =
-            loopflow_execution::ops::human_session::admit_workspace(&store, session).await?;
-        drop(launch);
-        let id = session.id;
-        return tokio::task::block_in_place(|| {
-            crate::lf::commands::run::resume(&id, message, cli, named_work)
-        });
-    }
     let session = reopen(
         &store,
         &cwd,
@@ -820,7 +861,6 @@ async fn resume(
         connection,
         fork,
         connection.json || cli.json,
-        named_work,
     )
     .await?;
     print_opened(connection.json || cli.json, &session)
@@ -856,7 +896,6 @@ async fn reopen(
     connection: &SessionConnectionArgs,
     fork: bool,
     json: bool,
-    named_work: bool,
 ) -> anyhow::Result<SessionRecord> {
     let intent = connection.intent();
     if intent != SessionOpenIntent::Resume {
@@ -871,7 +910,6 @@ async fn reopen(
             intent,
             !connection.prepare,
             json,
-            named_work,
         )
         .await;
     }
@@ -883,7 +921,6 @@ async fn reopen(
         fork,
         !connection.prepare,
         json,
-        named_work,
     )
     .await
 }
@@ -904,11 +941,8 @@ pub(crate) fn prepared(cli: &crate::lf::Cli, directory: &Path) -> anyhow::Result
                 fork,
             } if connection.prepare => {
                 let target = connection.target(cli, id.as_deref())?;
-                let named_work = connection.work_flag(cli).is_some();
-                let mut record = reopen(
-                    &store, directory, target, connection, *fork, false, named_work,
-                )
-                .await?;
+                let mut record =
+                    reopen(&store, directory, target, connection, *fork, false).await?;
                 // The opening terminal resumes this Session by id, managed
                 // when the prepare named its Work.
                 if let Some(flag) = connection.work_flag(cli) {
@@ -946,10 +980,6 @@ async fn new_thread(
     target: loopflow_execution::ops::human_session::SessionTarget<'_>,
     request_id: Option<&str>,
 ) -> anyhow::Result<()> {
-    anyhow::ensure!(
-        connection.message.is_none(),
-        "`lf session new` starts an interactive thread; continue it with `lf -b resume --message`"
-    );
     let store = open_shared_store().await?;
     let record = restarted(
         &store,
@@ -1101,10 +1131,6 @@ pub(super) fn mutate(
     if let SessionCommand::Resume { connection, .. } | SessionCommand::New { connection, .. } =
         command
     {
-        anyhow::ensure!(
-            connection.message.is_none(),
-            "prepared Sessions do not accept a message"
-        );
         let session = prepared(cli, directory)?;
         if connection.json || cli.json {
             writeln!(io.output, "{}", serde_json::to_string_pretty(&session)?)?;

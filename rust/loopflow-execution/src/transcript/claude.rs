@@ -114,14 +114,14 @@ impl Tally {
             };
         }
         let id = message["id"].as_str().unwrap_or_default();
-        let reported = &message["usage"];
+        let reported = crate::harness::claude::usage(&message["usage"]);
         let tokens = [
-            "input_tokens",
-            "cache_read_input_tokens",
-            "cache_creation_input_tokens",
-            "output_tokens",
+            reported.input_tokens,
+            reported.cache_read_tokens,
+            reported.cache_write_tokens,
+            reported.output_tokens,
         ]
-        .map(|key| reported[key].as_u64().unwrap_or(0));
+        .map(|tokens| tokens.unwrap_or(0));
         match self.calls.iter_mut().find(|(call, _)| call == id) {
             Some((_, counted)) => *counted = tokens,
             None => self.calls.push((id.to_owned(), tokens)),

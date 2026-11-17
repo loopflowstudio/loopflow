@@ -2389,15 +2389,9 @@ fn normalize_env_name(name: &str) -> String {
 }
 
 pub fn provider_env_allowed_for_program(program: &str, env_name: &str) -> bool {
-    match env_name {
-        "GH_TOKEN" => true,
-        "CLAUDE_CODE_OAUTH_TOKEN" => normalize_program_name(program) == "claude",
-        "CODEX_ACCESS_TOKEN" => normalize_program_name(program) == "codex",
-        "ANTHROPIC_API_KEY" => normalize_program_name(program) == "claude",
-        "OPENAI_API_KEY" => normalize_program_name(program) == "codex",
-        "OPENCODE_API_KEY" => normalize_program_name(program) == "opencode",
-        _ => false,
-    }
+    env_name == "GH_TOKEN"
+        || crate::harness::HarnessKind::parse(&normalize_program_name(program))
+            .is_some_and(|kind| kind.harness().provider_env().contains(&env_name))
 }
 
 const API_KEY_ENV_NAMES: &[&str] = &[
@@ -2421,14 +2415,8 @@ pub fn api_key_env_allowed_for_program(program: &str, env_name: &str) -> bool {
     }
     // An exported API key would bill Claude and Codex per token instead of
     // their native login; only harnesses that take one see it.
-    match normalize_program_name(program).as_str() {
-        "pi" => matches!(
-            env_name.as_str(),
-            "ANTHROPIC_API_KEY" | "OPENAI_API_KEY" | "GEMINI_API_KEY" | "MOONSHOT_API_KEY"
-        ),
-        "opencode" => matches!(env_name.as_str(), "OPENCODE_API_KEY" | "MOONSHOT_API_KEY"),
-        _ => false,
-    }
+    crate::harness::HarnessKind::parse(&normalize_program_name(program))
+        .is_some_and(|kind| kind.harness().api_key_env().contains(&env_name.as_str()))
 }
 
 pub fn api_key_env_names() -> &'static [&'static str] {

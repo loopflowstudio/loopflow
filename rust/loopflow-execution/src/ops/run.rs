@@ -1082,7 +1082,7 @@ mod tests {
                     crate::harness::native_session::resume_session(
                         &capture.artifact_key(),
                         &history,
-                        false,
+                        crate::harness::Run::Bare(crate::harness::Mode::Headless),
                     )
                 },
             );

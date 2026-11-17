@@ -31,16 +31,13 @@ for line in sys.stdin:
 fn base_launch() -> AgentConfig {
     AgentConfig {
         task_prompt: "prompt".to_string(),
-        agent: Some("claude".to_string()),
         skip_permissions: true,
-        cwd: None,
-        ..Default::default()
+        ..AgentConfig::new(loopflow_execution::config::Agent::parse("claude").unwrap())
     }
 }
 
 fn base_process() -> ProcessConfig {
     ProcessConfig {
-        auto: true,
         stream: false,
         ..Default::default()
     }
@@ -64,7 +61,12 @@ fn claude_batch_reads_large_context_without_argv_limits() {
             stream,
             ..base_process()
         };
-        let result = run_agent(&launch, &process).expect("large context launch");
+        let result = run_agent(
+            &launch,
+            &process,
+            loopflow_execution::harness::Run::Bare(loopflow_execution::harness::Mode::Headless),
+        )
+        .expect("large context launch");
         assert_eq!(result.exit_code, 0);
         assert_eq!(std::fs::read_to_string(&path).unwrap(), prompt);
     }
@@ -79,7 +81,12 @@ fn library_launch_records_each_provider_under_its_invocation() {
         ..base_launch()
     };
     for _ in 0..2 {
-        let result = run_agent(&launch, &base_process()).unwrap();
+        let result = run_agent(
+            &launch,
+            &base_process(),
+            loopflow_execution::harness::Run::Bare(loopflow_execution::harness::Mode::Headless),
+        )
+        .unwrap();
         assert_eq!(result.exit_code, 0);
         let pid: u32 = result
             .stdout
@@ -130,7 +137,11 @@ fn library_launch_reuses_the_enclosing_invocation() {
     };
     loopflow_execution::journal::with_runtime(directory.path(), &["fixture".into()], || {
         for _ in 0..2 {
-            let result = run_agent(&launch, &base_process())?;
+            let result = run_agent(
+                &launch,
+                &base_process(),
+                loopflow_execution::harness::Run::Bare(loopflow_execution::harness::Mode::Headless),
+            )?;
             assert_eq!(result.exit_code, 0);
         }
         let store = loopflow_execution::store::open_sqlite(
@@ -160,14 +171,24 @@ fn library_launch_reuses_the_enclosing_invocation() {
 #[test]
 fn launch_returns_exit_code() {
     let _env = EnvGuard::new(&[("claude", &claude_script("text = 'done'"))]);
-    let result = run_agent(&base_launch(), &base_process()).expect("launch");
+    let result = run_agent(
+        &base_launch(),
+        &base_process(),
+        loopflow_execution::harness::Run::Bare(loopflow_execution::harness::Mode::Headless),
+    )
+    .expect("launch");
     assert_eq!(result.exit_code, 0);
 }
 
 #[test]
 fn launch_captures_stdout() {
     let _env = EnvGuard::new(&[("claude", &claude_script("text = 'hello'"))]);
-    let result = run_agent(&base_launch(), &base_process()).expect("launch");
+    let result = run_agent(
+        &base_launch(),
+        &base_process(),
+        loopflow_execution::harness::Run::Bare(loopflow_execution::harness::Mode::Headless),
+    )
+    .expect("launch");
     assert!(result.stdout.contains("hello"));
 }
 
@@ -177,7 +198,12 @@ fn launch_captures_stderr() {
         "claude",
         &claude_script("text = 'fixture error'; failed = True"),
     )]);
-    let result = run_agent(&base_launch(), &base_process()).expect("launch");
+    let result = run_agent(
+        &base_launch(),
+        &base_process(),
+        loopflow_execution::harness::Run::Bare(loopflow_execution::harness::Mode::Headless),
+    )
+    .expect("launch");
     assert!(result.stderr.contains("error"));
 }
 
@@ -213,8 +239,11 @@ text = 'Fable 5 is currently unavailable. Switch to another model.' if failed el
         let _directory = support::InDirectory::enter(home.path());
         let launches = home.path().join("launches");
         let launch = AgentConfig {
-            agent: Some("claude:fable".into()),
-            fallback_agents: fallbacks.into_iter().map(str::to_owned).collect(),
+            agent: loopflow_execution::config::Agent::parse("claude:fable").unwrap(),
+            fallback_agents: fallbacks
+                .into_iter()
+                .map(|agent| loopflow_execution::config::Agent::parse(agent).unwrap())
+                .collect(),
             cwd: Some(home.path().to_path_buf()),
             env: BTreeMap::from([
                 ("LF_TEST_LAUNCHES".into(), launches.display().to_string()),
@@ -226,7 +255,12 @@ text = 'Fable 5 is currently unavailable. Switch to another model.' if failed el
             wait_for_capacity,
             ..base_process()
         };
-        let result = run_agent(&launch, &process).unwrap();
+        let result = run_agent(
+            &launch,
+            &process,
+            loopflow_execution::harness::Run::Bare(loopflow_execution::harness::Mode::Headless),
+        )
+        .unwrap();
         assert_eq!(
             std::fs::read_to_string(launches).unwrap(),
             expected_launches
@@ -252,7 +286,12 @@ fn launch_scopes_process_environment_to_child() {
         ..base_launch()
     };
 
-    let result = run_agent(&launch, &base_process()).expect("launch with scoped environment");
+    let result = run_agent(
+        &launch,
+        &base_process(),
+        loopflow_execution::harness::Run::Bare(loopflow_execution::harness::Mode::Headless),
+    )
+    .expect("launch with scoped environment");
 
     assert_eq!(result.stdout, "owned");
 }
@@ -260,14 +299,23 @@ fn launch_scopes_process_environment_to_child() {
 #[test]
 fn launch_nonzero_exit() {
     let _env = EnvGuard::new(&[("claude", &claude_script("sys.exit(7)"))]);
-    let result = run_agent(&base_launch(), &base_process()).expect("launch");
+    let result = run_agent(
+        &base_launch(),
+        &base_process(),
+        loopflow_execution::harness::Run::Bare(loopflow_execution::harness::Mode::Headless),
+    )
+    .expect("launch");
     assert_ne!(result.exit_code, 0);
 }
 
 #[test]
 fn launch_missing_binary_returns_error() {
     let _env = EnvGuard::new_isolated(&[]);
-    let result = run_agent(&base_launch(), &base_process());
+    let result = run_agent(
+        &base_launch(),
+        &base_process(),
+        loopflow_execution::harness::Run::Bare(loopflow_execution::harness::Mode::Headless),
+    );
     assert!(matches!(
         result,
         Err(CoreError::IoError(_)) | Err(CoreError::ExecutionFailed(_))
@@ -280,7 +328,12 @@ fn launch_with_cwd() {
     let cwd = TempDir::new().expect("cwd");
     let mut launch = base_launch();
     launch.cwd = Some(cwd.path().to_path_buf());
-    let result = run_agent(&launch, &base_process()).expect("launch");
+    let result = run_agent(
+        &launch,
+        &base_process(),
+        loopflow_execution::harness::Run::Bare(loopflow_execution::harness::Mode::Headless),
+    )
+    .expect("launch");
     assert!(result.stdout.contains(&cwd.path().display().to_string()));
 }
 
@@ -288,11 +341,15 @@ fn launch_with_cwd() {
 fn launch_streaming_mode() {
     let _env = EnvGuard::new(&[("claude", &claude_script("text = 'first\\nsecond'"))]);
     let process = ProcessConfig {
-        auto: true,
         stream: true,
         ..Default::default()
     };
-    let result = run_agent(&base_launch(), &process).expect("launch");
+    let result = run_agent(
+        &base_launch(),
+        &process,
+        loopflow_execution::harness::Run::Bare(loopflow_execution::harness::Mode::Headless),
+    )
+    .expect("launch");
     assert!(result.stdout.contains("first"));
     assert!(result.stdout.contains("second"));
 }
@@ -301,13 +358,16 @@ fn launch_streaming_mode() {
 fn launch_batch_times_out() {
     let _env = EnvGuard::new(&[("claude", &claude_script("time.sleep(2); text = 'late'"))]);
     let process = ProcessConfig {
-        auto: true,
         stream: false,
         timeout: Some(Duration::from_millis(100)),
         ..Default::default()
     };
 
-    let result = run_agent(&base_launch(), &process);
+    let result = run_agent(
+        &base_launch(),
+        &process,
+        loopflow_execution::harness::Run::Bare(loopflow_execution::harness::Mode::Headless),
+    );
     assert!(
         matches!(result, Err(CoreError::ExecutionFailed(ref message)) if message.contains("timed out")),
         "expected timeout error, got: {result:?}"
@@ -318,13 +378,16 @@ fn launch_batch_times_out() {
 fn launch_streaming_times_out() {
     let _env = EnvGuard::new(&[("claude", &claude_script("time.sleep(2); text = 'late'"))]);
     let process = ProcessConfig {
-        auto: true,
         stream: true,
         timeout: Some(Duration::from_millis(100)),
         ..Default::default()
     };
 
-    let result = run_agent(&base_launch(), &process);
+    let result = run_agent(
+        &base_launch(),
+        &process,
+        loopflow_execution::harness::Run::Bare(loopflow_execution::harness::Mode::Headless),
+    );
     assert!(
         matches!(result, Err(CoreError::ExecutionFailed(ref message)) if message.contains("timed out")),
         "expected timeout error, got: {result:?}"

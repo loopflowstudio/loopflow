@@ -7,7 +7,7 @@ use super::SqliteStore;
 use crate::process::SessionAttachment;
 use crate::steer::{
     IdleConversation, IdleReach, NativeBoundary, SessionSteerPage, SessionSteerStatus, Steer,
-    SteerAdapter,
+    SteerAdapter, SteerWake,
 };
 use crate::{StoreError, StoreResult};
 
@@ -232,12 +232,12 @@ impl SqliteStore {
         let mut statement = conn.prepare(
             "SELECT s.id,p.id,a.capability,s.provider_thread,s.cwd,
                 CASE WHEN p.agent_provider='codex' THEN p.endpoint END,p.inbox,
-                s.work_source,p.pid,p.os_started_at
+                p.pid,p.os_started_at
              FROM processes p INDEXED BY processes_unfinished
              JOIN agent_sessions s ON s.agent_process_id=p.id
              JOIN steer_adapters a ON a.agent_process_id=p.id
              JOIN session_activity act ON act.session_id=s.id AND act.agent_process_id=p.id
-             WHERE act.yielded=1 AND p.completed_at IS NULL AND s.provider_thread IS NOT NULL
+             WHERE act.yielded=1 AND s.interactive=1 AND p.completed_at IS NULL AND s.provider_thread IS NOT NULL
                AND (p.agent_provider='codex' AND p.endpoint IS NOT NULL OR p.inbox IS NOT NULL)
                AND (?1 IS NULL OR s.id=?1)",
         )?;
@@ -246,20 +246,9 @@ impl SqliteStore {
                 Some(endpoint) => IdleReach::Codex(endpoint.into()),
                 None => IdleReach::Claude(row.get::<_, String>(6)?.into()),
             };
-            let source: Option<crate::session::WorkSource> = row
-                .get::<_, Option<String>>(7)?
-                .map(|source| serde_json::from_value(serde_json::Value::String(source)))
-                .transpose()
-                .map_err(|error| {
-                    rusqlite::Error::FromSqlConversionFailure(
-                        7,
-                        rusqlite::types::Type::Text,
-                        Box::new(error),
-                    )
-                })?;
             let identity = row
-                .get::<_, Option<u32>>(8)?
-                .zip(row.get::<_, Option<i64>>(9)?);
+                .get::<_, Option<u32>>(7)?
+                .zip(row.get::<_, Option<i64>>(8)?);
             let conversation = IdleConversation {
                 adapter: SteerAdapter {
                     session: row.get(0)?,
@@ -270,16 +259,12 @@ impl SqliteStore {
                 cwd: row.get::<_, String>(4)?.into(),
                 reach,
             };
-            Ok(source
-                .filter(|source| source.is_managed())
-                .map(|_| IdleCandidate {
-                    conversation,
-                    identity,
-                }))
+            Ok(IdleCandidate {
+                conversation,
+                identity,
+            })
         })?;
-        Ok(rows
-            .filter_map(Result::transpose)
-            .collect::<Result<_, _>>()?)
+        Ok(rows.collect::<Result<_, _>>()?)
     }
 
     /// A woken conversation is in a turn until its next Stop says otherwise.
@@ -447,6 +432,17 @@ fn unread() -> String {
         WHERE NOT EXISTS(SELECT 1 FROM steer_delivered d WHERE d.session_id=?1 AND d.steer_id=a.id
             AND (d.delivered_at IS NOT NULL OR d.claimed_at>unixepoch()-{CLAIM_SECS}))",
         scopes()
+    )
+}
+
+/// The unread steers that name Session `?1`: its own, or its Task's when it
+/// is the Task's primary conversation. The server starts a stopped Session
+/// for these, and its start takes its unread steers when one exists.
+fn naming() -> String {
+    format!(
+        "{} AND (p.session_id=?1 OR p.source NOT LIKE 'update:%'
+            AND p.task_id IN (SELECT task_id FROM task_primary_sessions WHERE session_id=?1))",
+        unread()
     )
 }
 
@@ -717,6 +713,100 @@ impl SqliteStore {
         Ok((steers, remaining as usize))
     }
 
+    /// Save `text` as a steer for `session` and take every steer it has not
+    /// read, oldest first and the new one last, as read by the caller's own
+    /// turn. One write, so no hook or wake sees them as news in between.
+    pub fn take_session_steers(
+        &self,
+        session: &str,
+        author: &str,
+        text: &str,
+    ) -> StoreResult<Vec<Steer>> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        save_in(
+            &tx,
+            ("session", session),
+            &uuid::Uuid::new_v4().to_string(),
+            "1",
+            &loopflow_model::durable::Author::Named(author.into()),
+            text,
+        )?;
+        let steers = take_unread_in(&tx, session)?;
+        tx.commit()?;
+        Ok(steers)
+    }
+
+    /// The first input of a stopped conversation starting again: every steer
+    /// it has not read, oldest first, taken as read, when one of them names
+    /// it (its own, or its Task's for the Task's primary conversation).
+    /// Otherwise nothing, and its hooks hear the rest at its boundaries.
+    pub fn take_steers_to_start(&self, session: &str) -> StoreResult<Vec<Steer>> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        // Nearly every start has none; asking takes no write lock.
+        let named: bool =
+            conn.query_row(&format!("SELECT EXISTS({})", naming()), [session], |row| {
+                row.get(0)
+            })?;
+        if !named {
+            return Ok(Vec::new());
+        }
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let steers = take_unread_in(&tx, session)?;
+        tx.commit()?;
+        Ok(steers)
+    }
+
+    /// The steers saved since the server last read, each read once: those
+    /// that name an interactive Session which has not read them, by the rule
+    /// its start takes them with (`take_steers_to_start`), with that
+    /// Session's unfinished AgentProcess identity.
+    pub fn read_steer_wakes(&self) -> StoreResult<Vec<SteerWake>> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let (after, newest): (i64, i64) = conn.query_row(
+            "SELECT r.seq,COALESCE((SELECT MAX(seq) FROM steers),r.seq)
+             FROM steer_wake_reading r WHERE r.id=1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        if newest <= after {
+            return Ok(Vec::new());
+        }
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        // Candidates: the one Session each new steer could name. `naming`
+        // decides, so a start never finds nothing to take.
+        let candidates = tx
+            .prepare(
+                "SELECT p.id,s.id,pr.pid,pr.os_started_at FROM steers p
+                 LEFT JOIN task_primary_sessions t ON t.task_id=p.task_id
+                 JOIN agent_sessions s ON s.id=COALESCE(p.session_id,t.session_id)
+                 LEFT JOIN processes pr ON pr.id=s.agent_process_id AND pr.completed_at IS NULL
+                 WHERE p.seq>?1 AND p.seq<=?2 AND s.interactive=1
+                 ORDER BY p.seq",
+            )?
+            .query_map(params![after, newest], |row| {
+                Ok(SteerWake {
+                    steer: row.get(0)?,
+                    session: row.get(1)?,
+                    identity: row
+                        .get::<_, Option<u32>>(2)?
+                        .zip(row.get::<_, Option<i64>>(3)?),
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut names = tx.prepare(&format!("SELECT EXISTS({} AND p.id=?2)", naming()))?;
+        let mut wakes = Vec::new();
+        for wake in candidates {
+            if names.query_row(params![wake.session, wake.steer], |row| row.get(0))? {
+                wakes.push(wake);
+            }
+        }
+        drop(names);
+        tx.execute("UPDATE steer_wake_reading SET seq=?1 WHERE id=1", [newest])?;
+        tx.commit()?;
+        Ok(wakes)
+    }
+
     /// The caller printed these claimed steers: the Session has read them.
     pub fn deliver_session_steers(
         &self,
@@ -735,6 +825,24 @@ impl SqliteStore {
         tx.commit()?;
         Ok(())
     }
+}
+
+/// Take every steer `session` has not read as read by the caller, oldest first.
+fn take_unread_in(tx: &Connection, session: &str) -> StoreResult<Vec<Steer>> {
+    let steers = tx
+        .prepare(&format!("{} ORDER BY p.seq", unread()))?
+        .query_map([session], read_steer)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    for read in &steers {
+        tx.execute(
+            "INSERT INTO steer_delivered(session_id,steer_id,claimed_at,delivered_at)
+            VALUES(?1,?2,unixepoch(),unixepoch())
+            ON CONFLICT(session_id,steer_id) DO UPDATE
+            SET claimed_at=unixepoch(),delivered_at=unixepoch()",
+            params![session, read.id],
+        )?;
+    }
+    Ok(steers)
 }
 
 #[cfg(test)]

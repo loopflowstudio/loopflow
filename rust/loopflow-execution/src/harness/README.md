@@ -4,6 +4,65 @@ Each provider (`claude.rs`, `codex.rs`, `opencode.rs`, `pi.rs`) gets launched,
 observed and recorded here. The provider owns the conversation; lf adds context
 at turn boundaries, interjects through hooks and records what happened.
 
+## One launch type per harness
+
+```rust
+let launch = Launch {
+    config: &config,
+    harness,            // resolved once from the selected agent
+    run,                // Bare(mode), Managed or Worker, from delegation
+    admitted: &admitted, // required before opening the provider
+    start: Start::Resume { thread: &thread },
+    context_file: Some(&context),
+};
+```
+
+Native and headless launches share `Launch` and the same per-harness `Harness`.
+`native_session::run` opens and waits for a native client; `drive::run` drives
+one headless provider turn. Native results retain the provider's OS exit status;
+headless results retain answer text and typed turn failures for retry policy.
+
+`transport::delegate` decides `Run` once. `Bare(Mode)` follows its caller,
+`Managed` is an interactive conversation in a held terminal, and `Worker` is a
+headless run lf starts for a Task or Wave, which nobody views and whose turns the
+server records: `lf task run` steps, the `ci-fix` run landing starts, and each
+Discord answer for a Wave. In-process callers such as commit messages, PR text
+and replay use `Bare(Headless)`. Task attribution never changes this choice.
+`admit` creates the capture and claims its attachment before a native launch;
+headless admission claims the runtime's attachment before constructing `Launch`.
+
+Each harness file answers the rest:
+
+| method | answers |
+|---|---|
+| `capabilities()` | who names the thread, initial prompt on resume, execution boundary, failure classification, native skills, turn limit, output schema, respawn after crash, install hint |
+| `open(&Launch)` | native interactive client: argv, hook and title flags; starts private servers and returns any observer companion |
+| `driver(&Launch, events, approval)` | headless stream `Driver`: start, input, interrupt, stop |
+
+`HarnessKind::harness()` is the only harness dispatch. Core launch and transcript
+code reads capabilities or asks the harness for policy.
+That policy includes input recency, live process ownership and saved-turn detail.
+A harness whose server may host other conversations validates it before the
+shared AgentProcess close path signals the recorded process group.
+
+An interactive client with a companion waits in this process; any other client
+may `exec` into a held terminal.
+
+| harness | interactive client | names the thread |
+|---|---|---|
+| Claude | native TUI, prompt on stdin | lf (`--session-id`) |
+| Pi, Bare | native TUI | lf (`--session-id`) |
+| Pi, Managed | native TUI with the lf extension | provider |
+| Codex, Bare | `codex`, prompt in argv | provider (start hook) |
+| Codex, Managed | `codex --remote` after lf opens the app-server thread | provider |
+| OpenCode | `opencode --server … --session` beside a private server; waits | provider |
+
+`cargo test -p loopflow-execution --lib harness::launch_matrix -- --nocapture`
+runs every harness with bare/managed interactive and bare/worker headless
+launches against stand-in provider scripts, and prints each cell's argv, hook ownership, wait mechanism and recorded thread.
+Headless matrix runs wait here; held-terminal exec handoff is covered by the
+transport fixtures.
+
 A skill keeps one `LfProcess` across successive provider `AgentProcess` instances.
 Its shared `LfProcessRuntime` in [`process/runtime.rs`](../process/runtime.rs)
 holds the current attachment, provider, thread and outcome, with no

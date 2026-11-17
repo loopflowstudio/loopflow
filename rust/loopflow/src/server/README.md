@@ -411,8 +411,9 @@ the phone's `view.select` Task list and its creation destinations all read it.
   nothing, and a start whose holder reply was lost is reconciled against the
   holder's inventory first; a start that could not be reconciled answers
   `outcome_unknown`, and repeating the same `request` settles it. It creates
-  a process and, with `session.continue`, the only operation here that does;
-  attaching never does.
+  a process and, with `session.continue` and the wake watcher's start of a
+  stopped conversation, the only operation here that does; attaching never
+  does.
 - `session.continue {session, request, rows, cols}` starts `lf session resume`
   of exactly that Session in a held terminal, in its recorded directory, with
   the server's environment and its own `LF_HOME` and `LF_BIN`, for a client
@@ -533,20 +534,17 @@ reported, never started by an attachment attempt.
 
 ## Turn and tool boundaries
 
-A launch is managed when a Task, Wave or repository command starts it: `lf
-task run` and its Graph's steps, `--task`, `--wave`, a Task, Wave or
-repository conversation, `lf resume [ID] --task` or `--wave`, a Session bound
-with `lf session bind`. Every other launch is bare, including
-`lf <skill>` or `lf graph` typed, or run by an agent, inside a Task's
-checkout; that run still counts toward the Task. The launch's Work source
-decides (`WorkSource::is_managed`; `lf task run` names its Task to each agent
-step), and reopening a recorded conversation also reads the Session row
-(`SqliteStore::is_bare`). The launch carries the answer as
-`AgentConfig::holder`: `Server` for managed work, `Caller` for every bare
-launch, which reports no boundary, held in a Desktop pane or not. Every launch
-[reads its own steers from the store](#every-launch-reads-its-own-steers).
+`transport::delegate` returns one launch state in `Launch::run`:
+`Bare(Mode)` for direct skill and Graph commands and `lf resume <ID> 'message'`,
+`Managed` for interactive Task, Wave, repository and resumed conversations, and
+`Worker` for headless runs lf starts for a Task or Wave: `lf task run` steps,
+the `ci-fix` run landing starts, and Discord answers for a Wave. The command decides this state. The checkout, `--task` and
+`LF_AS` only decide Task membership: accounting and Task steers always travel
+together. Every launch [reads its own steers from the store](#every-launch-reads-its-own-steers).
+Bare launches report no boundaries. Managed conversations and Workers report
+the same turn boundaries to the Machine server.
 
-For a managed launch, Claude and Codex hooks run `lf __context-block --moment <moment>` at session start,
+For a Managed conversation or Worker, Claude and Codex hooks run `lf __context-block --moment <moment>` at session start,
 compaction, each prompt and each turn end. That process first makes one
 `session.boundary` request on `machine.sock`, for the server to record. The
 OpenCode plugin and the Pi extension send the same request from inside the
@@ -659,6 +657,29 @@ Claude inbox leaves its news unclaimed. After a failed send the steers arrive
 again. Bare Sessions are never woken. No
 process or clock runs per Session: the watcher's only clock is the change
 signal's 60 s fallback for a missed checkpoint or a Machine's sleep.
+
+### Starting a stopped conversation
+
+The same reading finds a third case: an interactive Session with a steer
+that names it, or names its Task when it is the Task's primary conversation,
+and no live AgentProcess. The watcher starts it with `session.continue`'s
+launch (`lf session resume` in a held terminal, in its recorded directory,
+refused through `run_refusal` when the Session is already running), with the
+first such steer's ID as the start's `request`; a Session a held terminal
+already runs is left to it. A resumed provider waits for input and never
+yields on its own, so the resume itself hands the conversation every unread
+steer as its first input when one of them names it, whoever resumes it.
+Nothing else starts a Session for a steer: `lf steer` and `session.steer`
+only save it.
+
+The watcher reads each steer once: `steer_wake_reading` holds the newest steer
+it has read for starts. A server restart, a Machine reboot or an upgrade
+therefore starts nothing for a steer already read, and steers saved before
+the migration that added it start nothing. A start that fails is a line in
+`logs/lf.log` with the steers left pending for the Session's next start. A
+worker or a batch (a headless Session) is never started: only a worker's own
+Graph continues it, through `lf -b steer`. Wave and repository steers and Task
+updates start nothing.
 
 A managed launch's agent starts only once the server answers. The launch
 opens a connection to the server, as a hook does; when nothing answers it runs `lf install server`

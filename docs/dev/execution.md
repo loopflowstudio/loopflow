@@ -161,13 +161,15 @@ Fresh native launches and saved-history resumes share invocation admission and
 attachment settlement. A recorded client move is an intentional command exit,
 not provider failure; it does not establish a successful provider turn.
 
-### Runs are not resumed
+### Workers and batches are not resumed
 
-`lf resume` takes only Sessions. A Run's id (`-b`, a Graph step), running or
-finished, is refused, with `--fork`, `--prepare`, `-b resume --message` and
-`lf --explain resume` alike, and the refusal points to `lf resume --task <task>`.
-Resume never stops a Run; stopping a Graph is `lf task interrupt`. The one exception
-is the Graph process continuing its own step's Run to correct a structured answer.
+`lf resume` opens only work sessions and chats. A headless Session's id, a
+worker (a Graph step) or a batch (`lf -b`), running or finished, is refused,
+with `--fork`, `--prepare` and `lf --explain resume` alike, and the refusal
+points to `lf resume --task <task>`. Resume never stops a worker; stopping a
+Graph is `lf task interrupt`. A worker is continued only by its own Graph
+process correcting a structured answer with `lf -b steer`; a steer from anyone
+else is saved and reported unread.
 
 Harness stop and resume use common exact-identity group close under the frozen
 attachment fence. Superseded callers, unknown identity and duplicate OS owners
@@ -303,7 +305,7 @@ iteration counts to GraphProcess, beside the Graph's name and launched graph. A
 step's result is how its process exited. A deciding or routing step gets its
 answer contract in its message and the Graph process reads the final answer of the
 Session turn that step Process captured; an invalid answer is corrected by
-resuming the same conversation (`lf -b resume ID --message TEXT`), at most
+steering the same conversation in the foreground (`lf -b steer ID TEXT`), at most
 twice, then the Graph fails. A mechanical step is its own child Process and invents
 no LfSession. After an operation the Graph process stops the Graph when a landing of
 its checkout is still being watched; neither failed. A killed Graph process leaves its Processes

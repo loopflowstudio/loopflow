@@ -31,7 +31,7 @@ impl WorkControlReceipt {
 pub(crate) async fn observe_interrupt(
     store: &SharedStore,
     work: &WorkRef,
-    harness: &mut dyn crate::harness::Harness,
+    harness: &mut dyn crate::harness::Driver,
     cursor: &mut i64,
 ) {
     match store.latest_interrupt_id(work).await {

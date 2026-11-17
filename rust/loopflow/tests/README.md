@@ -763,8 +763,9 @@ Never use the installed store to prove an unmerged migration.
 `session_launch_contract::native_auth_owns_launches_with_a_populated_catalog`
 checks native launch/resume with unusable saved accounts, transcript-only adoption,
 sandboxed Tasks and remote preparation. Credential markers stay private to the
-fixture. `agent::tests::native_retry_policy_matrix` checks bare/Task ×
-interactive/headless refusal handling: only headless Graph steps follow
+fixture. `agent::tests::native_retry_policy_matrix` checks Task-attributed and
+taskless headless refusal handling, with pinned agents and fallback orders.
+Only headless Graph steps follow
 configured model/harness fallbacks and wait out a usage limit, explicit pins
 stop, a revoked login skips its provider's models, and quota snapshots or
 successful answers mentioning limits do not trigger fallback. Fixtures use isolated homes,

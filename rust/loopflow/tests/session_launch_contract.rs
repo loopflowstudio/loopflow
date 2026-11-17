@@ -168,7 +168,8 @@ if stream:
     message = json.loads(sys.stdin.readline())
     record['input'] = message
 elif os.path.basename(sys.argv[0]) == 'claude':
-    record['input'] = sys.stdin.read()
+    # Resume opens history with no seed; a held terminal keeps stdin open.
+    record['input'] = '' if '--resume' in args else sys.stdin.read()
 with open(os.environ['HOME']+'/received.json.tmp', 'w') as out:
     json.dump(record, out)
 os.replace(os.environ['HOME']+'/received.json.tmp', os.environ['HOME']+'/received.json')
@@ -284,7 +285,9 @@ fn files_named(dir: &Path, file: &str) -> Vec<std::path::PathBuf> {
 fn success(output: &Output) {
     assert!(
         output.status.success(),
-        "{}",
+        "{}\n{}\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
 }
@@ -328,7 +331,7 @@ fn bypass(value: &Value, provider: &str, enabled: bool) {
             assert!(!args(value).contains(&"--dangerously-bypass-approvals-and-sandbox"));
         }
         "opencode" => {
-            let config: Value = serde_json::from_str(value["opencode"].as_str().unwrap()).unwrap();
+            let config = &value["server"];
             assert_eq!(
                 config["permissions"][0]["effect"].as_str() == Some("allow"),
                 enabled,
@@ -489,12 +492,19 @@ fn terminal_launch_and_resume_use_current_policy_and_preserve_native_identity() 
                 "INSERT INTO provider_accounts(provider,account_id,home,credential_state,cooldown_until,created_at,updated_at) VALUES(?1,'retired',?2,'missing',4000000000,1,1)",
                 rusqlite::params![provider,saved.to_str().unwrap()]).unwrap();
         }
-        // A bare Codex launch runs plain `codex`; behind its app-server it is Work.
-        let mut launch = vec!["-i", ":", "--", "--- keep spaces and 雪"];
-        if provider == "codex" {
-            fixture.create_wave();
-            launch.splice(1..1, ["--wave", "fixture"]);
-        }
+        let session = (provider == "codex").then(|| {
+            crate::support::prepare_native_conversation(
+                &fixture.home.path().join("machine/loopflow.db"),
+                fixture.repo.path(),
+                "codex",
+                None,
+                "--- keep spaces and 雪",
+            )
+        });
+        let launch = match &session {
+            Some(session) => vec!["-i", "resume", session],
+            None => vec!["-i", ":", "--", "--- keep spaces and 雪"],
+        };
         let first = fixture.run(&launch);
         bypass(&first, provider, true);
         if provider != "opencode" {
@@ -623,7 +633,7 @@ fn previews_do_not_start_a_provider_and_terminal_schema_is_explicitly_unsupporte
         .output()
         .unwrap();
     assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("require a headless Run"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("lf -b steer"));
     assert!(!fixture.home.path().join("received.json").exists());
     assert_eq!(fixture.session(), session);
 }
@@ -1017,13 +1027,6 @@ fn linked_worktree_metadata_is_accessible_on_launch_and_resume() {
         let fixture = Fixture::new(provider);
         fixture.repo.stage_all();
         fixture.repo.commit("fixture config");
-        // Codex reaches its app-server as Work.
-        let launch: &[&str] = if provider == "codex" {
-            fixture.create_wave();
-            &["-i", "--wave", "fixture", ":", "--", "--- literal prompt"]
-        } else {
-            &["-i", ":", "--", "--- literal prompt"]
-        };
         let worktree = fixture.home.path().join("work tree with spaces");
         success(
             &Command::new("git")
@@ -1033,11 +1036,24 @@ fn linked_worktree_metadata_is_accessible_on_launch_and_resume() {
                 .output()
                 .unwrap(),
         );
+        let prepared = (provider == "codex").then(|| {
+            crate::support::prepare_native_conversation(
+                &fixture.home.path().join("machine/loopflow.db"),
+                &worktree,
+                "codex",
+                None,
+                "--- literal prompt",
+            )
+        });
+        let launch = match &prepared {
+            Some(session) => vec!["-i", "resume", session],
+            None => vec!["-i", ":", "--", "--- literal prompt"],
+        };
         success(
             &fixture
                 .command()
                 .current_dir(&worktree)
-                .args(launch)
+                .args(&launch)
                 .output()
                 .unwrap(),
         );
@@ -1179,12 +1195,11 @@ fn live_taskless_provider_switch_preserves_identity_and_accepts_terminal_input()
     let _ = first.kill();
     first.wait().unwrap();
     success(&switched);
-    // A bare Codex launch is plain `codex`: the import rides its opening prompt.
     let imported = fixture.received();
     assert!(
-        args(&imported)
-            .iter()
-            .any(|arg| arg.contains("Preserve the original design")),
+        imported["turns"]
+            .to_string()
+            .contains("Preserve the original design"),
         "{imported}"
     );
     assert_eq!(fixture.session(), session);
@@ -1241,12 +1256,10 @@ fn provider_switch_imports_session_history_with_current_policy() {
     fixture.settings("claude", true, false);
     let imported = fixture.run(&[
         "-b",
-        "session",
-        "resume",
-        &session,
         "-a",
         "codex:new-model",
-        "--message",
+        "steer",
+        &session,
         "Continue the design",
     ]);
     assert_eq!(imported["method"], "thread/start");
@@ -1465,14 +1478,7 @@ fn wave_targets_prepare_reuse_and_open_in_the_selected_checkout_in_both_formats(
         .find(|pair| pair[0] == "--resume")
         .unwrap()[1]
         .to_owned();
-    let continued = fixture.run(&[
-        "-b",
-        "resume",
-        "--wave",
-        wave_id,
-        "--message",
-        "next Wave turn",
-    ]);
+    let continued = fixture.run(&["-b", "steer", id, "next Wave turn"]);
     pair(&continued, "--resume", &native);
     pair(&continued, "--model", "haiku");
     assert!(continued["input"].to_string().contains("next Wave turn"));
@@ -1813,13 +1819,20 @@ fn pi_native_callbacks_retain_identity_final_output_and_usage() {
     let fixture = pi_fixture();
     // Pi's callbacks carry provider context only for a managed launch.
     fixture.create_wave();
+    let prepared = crate::support::prepare_native_conversation(
+        &fixture.home.path().join("machine/loopflow.db"),
+        fixture.repo.path(),
+        "pi",
+        None,
+        "Native Pi input",
+    );
     let output = fixture
         .command()
         .env(
             "PI_FIXTURE_RECORD",
             fixture.home.path().join("received.json"),
         )
-        .args(["-i", "--wave", "fixture", ":", "Native Pi input"])
+        .args(["-i", "resume", &prepared])
         .output()
         .unwrap();
     success(&output);
@@ -1869,16 +1882,17 @@ fn pi_native_callbacks_retain_identity_final_output_and_usage() {
 fn pi_native_crash_keeps_the_paid_step_and_interrupts_the_turn() {
     let fixture = pi_fixture();
     fixture.create_wave();
+    let prepared = crate::support::prepare_native_conversation(
+        &fixture.home.path().join("machine/loopflow.db"),
+        fixture.repo.path(),
+        "pi",
+        None,
+        "Crash after a paid model step",
+    );
     let output = fixture
         .command()
         .env("PI_FIXTURE_CRASH", "1")
-        .args([
-            "-i",
-            "--wave",
-            "fixture",
-            ":",
-            "Crash after a paid model step",
-        ])
+        .args(["-i", "resume", &prepared])
         .output()
         .unwrap();
     assert!(!output.status.success());
@@ -1903,12 +1917,19 @@ fn pi_native_crash_keeps_the_paid_step_and_interrupts_the_turn() {
 fn pi_native_failed_start_reopens_without_replacing_the_loopflow_session() {
     let fixture = pi_fixture();
     fixture.create_wave();
+    let prepared = crate::support::prepare_native_conversation(
+        &fixture.home.path().join("machine/loopflow.db"),
+        fixture.repo.path(),
+        "pi",
+        None,
+        "Initial input",
+    );
     let provider = fixture.home.path().join("bin/pi");
     let original = fs::read(&provider).unwrap();
     fs::write(&provider, "#!/bin/sh\nexit 9\n").unwrap();
     let failed = fixture
         .command()
-        .args(["-i", "--wave", "fixture", ":", "Initial input"])
+        .args(["-i", "resume", &prepared])
         .output()
         .unwrap();
     assert!(!failed.status.success());

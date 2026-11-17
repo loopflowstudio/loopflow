@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>LOO-958 QA: steer wakes a stopped Session</title>
+<style>
+body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:920px;margin:2rem auto;padding:0 1rem;color:#1d1d1f}
+h1{font-size:1.5rem}h2{font-size:1.15rem;margin-top:2rem}
+pre{background:#f5f5f7;padding:.75rem;border-radius:6px;overflow-x:auto;font-size:13px}
+.ok{color:#1a7f37;font-weight:600}.bad{color:#b42318;font-weight:600}.fix{color:#8250df;font-weight:600}
+table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid #ddd;padding:.4rem;text-align:left;vertical-align:top}
+</style></head><body>
+<h1>LOO-958 QA: one verb per want; a steer wakes a stopped Session</h1>
+<p>Branch <code>lf</code> at ecf1f31cb, private <code>LF_HOME=/tmp/lfq958/home</code>, a fresh Git repository, real Claude Code 2.1.326 on the account's login, the branch's <code>lf server run</code> in the foreground. Every step below is the CLI a person types, a PTY viewer for <code>lf resume</code>, and reads of the transcript and store.</p>
+
+<table>
+<tr><th>Scenario</th><th>Result</th></tr>
+<tr><td>1. <code>lf -b resume S --message hi</code></td><td class="ok">Clap error: unexpected argument '--message'</td></tr>
+<tr><td>2. <code>lf -b steer</code> on a prepared Session, twice</td><td class="ok">prints <code>OK</code>, then <code>ognam</code>; both steers delivered</td></tr>
+<tr><td>3. <code>lf steer S</code>, server down, then server up</td><td class="ok">saved, says the server starts S; on server start one held Claude runs and replies KIWI</td></tr>
+<tr><td>4. <code>lf steer</code> / <code>lf -b steer</code> to a running Session</td><td class="ok">both save and return at once: "reads it at its next boundary"</td></tr>
+<tr><td>5. Idle held Session, no viewer, <code>lf steer S</code></td><td class="ok">woken through Claude's inbox, replies GRAPE (once the QA environment was clean; see below)</td></tr>
+<tr><td>6. Task steer, primary conversation quit</td><td class="ok">server starts the primary conversation only; replies MELON; the other Session keeps its PID</td></tr>
+<tr><td>7. Steer to a finished Run with no Graph</td><td class="fix">said "nothing reads it until its Graph continues it"; fixed to "a finished Run outside any Graph; nothing reads it"</td></tr>
+<tr><td>8. Quit, then <code>lf -b steer S</code></td><td class="ok">reply prints here, no held start beside it, 0 pending</td></tr>
+<tr><td>9. Task steer whose primary was killed before its first turn</td><td class="bad">held start resumes an assigned thread Claude never wrote: "No conversation found", exit 1; the steer reads delivered</td></tr>
+</table>
+
+<h2>2. Foreground turns</h2>
+<pre>$ lf -a claude session resume --prepare --json        # id 7b9fe34d…
+$ lf -b steer 7b9fe34d… 'Remember the word mango. Reply only with OK.'
+OK
+$ lf -b steer 7b9fe34d… 'What word did I give you? Reply with the word spelled backwards, nothing else.'
+ognam
+$ lf session steers 7b9fe34d…
+0 pending
+bea28754-… delivered
+e617f64b-… delivered</pre>
+
+<h2>3. Stopped Session, server down then up</h2>
+<pre>$ lf steer 7b9fe34d… 'Reply only with the word KIWI.'
+Saved 6c8c4467-…; the Machine server starts 7b9fe34d… to read it
+$ lf session steers 7b9fe34d…   →  6c8c4467-… pending
+$ lf server run &amp;                  # a few seconds later:
+6c8c4467-… delivered
+claude --name repo … --resume 93872343-… --      # child of the private holder</pre>
+<p>The held Claude stopped on Claude's own "Adding a new directory: /private/tmp/lfq958/repo … Is this a directory you created or one you trust?" dialog: <code>--add-dir</code> names the main checkout, which a fresh <code>/tmp</code> repo has never trusted. Attaching with <code>lf resume</code> and choosing "Yes, add it", the conversation read its steer:</p>
+<pre>❯ &lt;lf:steers&gt; Steer 6c8c4467-…; author QA: Reply only with the word KIWI. &lt;/lf:steers&gt;
+⏺ KIWI</pre>
+<p>The steer reads <code>delivered</code> while the dialog waits; nothing in <code>lf session list</code> said the start was waiting. Pre-existing (<code>claude_trust::awaits_dialog</code> checks only the cwd), and a person's real main checkout is normally trusted, so the rest of the run trusted it once through Claude's own folder dialog.</p>
+
+<h2>5. Idle wake and a QA trap</h2>
+<p>The first idle steers (LIME, FIG) stayed pending: the held Claude had no <code>~/.claude/sessions/&lt;pid&gt;.json</code>, so <code>open_inbox</code> returned nothing. Bisecting flags with bare <code>claude</code> showed file stdin, <code>--resume</code>, <code>--name</code> and <code>--settings</code> all write the record; the cause was the server's environment: started from this agent's shell, it passed <code>CLAUDECODE</code> and <code>CLAUDE_CODE_CHILD_SESSION</code> to every Claude it held. With those unset (now in <code>.lf/qa/native-conversations.md</code>):</p>
+<pre>$ lf steer 7b9fe34d… 'Reply only with the word PEAR.'      # stopped → held start → PEAR
+$ lf steer 7b9fe34d… 'Reply only with the word GRAPE.'
+Saved 56d326e8-…; 7b9fe34d… reads it at its next boundary
+# 15 s later: 56d326e8 delivered; transcript ends "GRAPE"</pre>
+
+<h2>6. Task steer</h2>
+<pre>$ lf task create --title 'QA steer wake two'; lf checkout ef5e50   # primary acfa6334…, first turn runs
+$ kill &lt;its claude&gt;
+$ lf steer ef5e50 'Reply only with the word MELON.'
+Saved 14face6b-…
+# 30 s later: one new claude in repo.ef5e50-qa-steer-wake, transcript ends "MELON";
+# the repository conversation's claude (64314) untouched; 14face6b delivered</pre>
+
+<h2>7. Finished Run (fixed)</h2>
+<pre>$ lf -b : 'Reply only with OK'          # session_fa28755e…, interactive=0
+$ lf steer session_fa28755e… 'x'
+before: Saved …; session_fa28755e… is a finished Run; nothing reads it until its Graph continues it
+after:  Saved …; session_fa28755e… is a finished Run outside any Graph; nothing reads it</pre>
+<p>Also: <code>lf steer</code>'s one-line help said "Direct running agents"; it now says "Direct agents", since a steer starts a stopped Session too (the long help already explained).</p>
+
+<h2>8. Foreground after quitting</h2>
+<pre>$ kill &lt;held claude&gt;
+$ lf -b steer 7b9fe34d… 'Which fruit words have I asked you to reply with? Comma-separated, nothing else.'
+PEAR, GRAPE
+# no held start appeared; 0 pending</pre>
+<p>KIWI, LIME, FIG and PLUM are missing for reasons the QA run made: KIWI ran in a child-session Claude whose turns did not reach the transcript; LIME, FIG and PLUM were the first input of a start I killed at the trust dialog.</p>
+
+<h2>9. A start that never runs a turn</h2>
+<pre>$ lf resume 793e773b…                    # the server's start, viewed
+No conversation found with session ID: c3dc5f7a-9947-4f50-a22c-b41ef7fcfc53
+claude exited with 1.</pre>
+<p>That Task's primary conversation was killed at the dialog before its first turn, so its assigned thread was never written; every later resume fails the same way (pre-existing). The new part: each server start marks the steers it carries delivered before the provider runs, so the steer reads <code>delivered</code> and that steer never starts the Session again. Recorded in <code>scratch/questions.md</code>.</p>
+
+<h2>10. Rerun at 6c96330 (slice 4: one rule for who a steer starts)</h2>
+<p>Same private home, now a returning Machine with the earlier run's Sessions, steers and cursor, opened by the branch <code>lf</code> rebuilt at 6c96330.</p>
+<pre>$ lf steer 7b9fe34d… 'Reply only with the word MANGO.'      # server down
+Saved f9680559-…; the Machine server starts 7b9fe34d… to read it
+$ lf server run &amp;
+# f9680559 delivered; one held claude --resume 93872343-… in repo.repo; transcript ends "MANGO"
+
+$ lf steer ef5e50 'Reply only with the word PAPAYA.'        # primary acfa6334 stopped
+Saved 7483ff7b-…
+# one new held claude --resume a79c38fc-…; transcript ends "PAPAYA"; repo Session's claude (85600) untouched
+
+$ lf task create --title 'QA shared steer'                  # 95b5dc, server down
+$ lf steer 95b5dc 'Reply only with the word LYCHEE.'        # no Session of the Task exists yet
+$ lf checkout 95b5dc                                        # starts the server and primary 0992fa76
+# 0992fa76 read 46836ee3 (LYCHEE) at its start: a Task steer saved before its primary existed, read by no one, still reaches it
+
+$ kill &lt;server&gt;; lf server run                           # restart
+# no new process; every Session 0 pending</pre>
+<p>The slice-4 cases themselves (a Task steer a later revision of its source replaced, a Task steer another Session read before the primary began) can't be made through commands: <code>lf steer TASK</code> gives each steer its own source, and the primary exists from the Task's first checkout, before any other Session can read a Task steer. <code>steers_tests::a_steer_its_start_would_not_take_starts_nothing</code> covers them.</p>
+<p>Seen, not changed: <code>lf steer TASK</code> prints only "Saved …", with no reader line, while <code>lf steer SESSION</code> says who reads it. A person steering a Task whose conversation is quit isn't told the server starts it.</p>
+<h2>11. Slice 5 at 8e26c5a: worker and batch in the refusals</h2>
+<p>Fresh private home <code>/tmp/lfq5/home</code>, a fresh repository with a bare <code>origin</code>, real Claude Code, the branch's <code>lf server run</code>. The slice-4 home's store was migrated by an earlier draft of <code>steer_wake_reading</code>, which the branch now refuses to open (a draft artifact, not a released path). The slice-4 run had also left its server (PID 66215) running on that home; stopped first.</p>
+<pre>$ lf -b : 'Reply only with OK'                       # batch session_68050bb2…, interactive=0
+OK
+$ lf resume session_68050bb2…
+Error: session_68050bb2… is a batch (finished); `lf resume` opens only work sessions and chats. `lf resume` opens this checkout's Session.
+$ lf steer session_68050bb2… 'Reply only with KIWI'
+Saved ded1118e-…; session_68050bb2… is a finished batch; nothing reads it
+$ lf -b steer session_68050bb2… 'Reply only with PEAR'
+Saved a0951d7f-…; session_68050bb2… is a finished batch; nothing reads it      # exit 0, no turn
+
+$ lf -b task run d517e2 proof                        # one-step Graph, worker session_3ee9b308…
+$ lf resume session_3ee9b308…
+Error: session_3ee9b308… is a worker (d517e2 · proof · probe · finished); `lf resume` opens only work sessions and chats. `lf resume --task d517e2` opens its Task's Session.
+$ lf -b resume session_3ee9b308…
+Error: `lf resume` connects; `lf -b steer SESSION TEXT` runs one more turn here
+$ lf steer session_3ee9b308… 'Reply only with FIG'
+Saved f3ccf7ef-…; session_3ee9b308… is a finished worker; nothing reads it until its Graph continues it
+$ lf steer d517e2 'Reply only with LIME'
+Saved 73416c79-…
+$ lf resume --task d517e2                            # the refusal's pointer: attaches the primary
+# primary waiting on the --add-dir trust dialog (still-wrong item 2); after "Yes, add it":
+⏺ … One steer arrived with this turn, a comment from QA: "Reply only with LIME". I've recorded it and not acted on it
+# 73416c79 delivered
+
+$ lf task run 65ec50 slowg                           # step runs `sleep 90`; worker session_a326693f…
+$ lf resume session_a326693f…
+Error: session_a326693f… is a worker (65ec50 · slowg · slow · running); `lf resume` opens only work sessions and chats. `lf resume --task 65ec50` opens its Task's Session.
+$ lf steer session_a326693f… 'When you finish, reply SLOW-STEERED instead.'
+Saved 0ce2992d-…; session_a326693f… reads it at its next boundary
+$ time lf -b steer session_a326693f… 'and nothing else'
+Saved 22be21f8-…; session_a326693f… reads it at its next boundary              # 0.41 s
+# step ends: both delivered; graph log "…I'll reply once it finishes.SLOW-STEERED"</pre>
+<p>Every refusal and reader line names worker or batch; no "finished Run", "is a Run" or "takes only Sessions" is left in docs, messages or QA notes. <code>lf -b steer</code> to a running Session saving and returning, which the plan lists as untested, works on the real product.</p>
+<p>Seen, not changed: a finished batch's ID is in neither <code>lf session list --headless</code> (unfinished only) nor <code>lf history --json</code> (empty), and <code>lf -b</code> prints the reply with no ID, so a person holding a batch has no command that names it. Pre-existing.</p>
+<h2>Where it stands</h2>
+<p><b>Works:</b> <code>resume</code> without <code>--message</code>; <code>lf -b steer</code> foreground turns with full text; a named stopped Session started once by the server and answering; Task steer starting only the primary conversation; the three reader lines; idle wake of a server-started Session. Rerun at 6c96330 on the returning home: named start, Task start, a Task steer saved before its primary existed, and a restart starting nothing (case 10). Slice 5 at 8e26c5a: <code>lf resume</code> refusals and <code>lf steer</code> reader lines for a finished batch, a finished worker and a running worker; <code>-b steer</code> to a running worker saves and returns; a running worker reads two steers at its boundary (case 11).</p>
+<p><b>Not reached:</b> Codex, Pi and OpenCode held starts (no Codex held-terminal run; the plan's open question stands); the upgrade (steers saved by the released <code>lf</code> starting nothing), covered only by storage and wake unit tests; the slice-4 replaced and already-read Task steers, which no command produces (case 10).</p>
+<p><b>Still wrong, worst first:</b></p>
+<ol>
+<li>Steers taken by a start that never runs a turn read <code>delivered</code> and nothing retries them (case 9, and a start killed at a dialog).</li>
+<li>A server start waiting on Claude's <code>--add-dir</code> trust dialog shows nothing in <code>lf session list</code>; only attaching shows it. Pre-existing, matters more now that the server starts unattended conversations.</li>
+<li>A resume of a Claude thread that was assigned but never written exits 1 with "No conversation found". Pre-existing.</li>
+<li>A finished batch cannot be listed: it is in neither <code>lf session list --headless</code> nor <code>lf history</code> (case 11). Pre-existing.</li>
+</ol>
+</body></html>

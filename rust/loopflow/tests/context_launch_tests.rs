@@ -71,6 +71,20 @@ fn codex_task(
     (server, worktree, id)
 }
 
+fn native_logs(home: &Path) -> String {
+    fs::read_dir(home.join("logs"))
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            fs::read_to_string(entry.path())
+                .ok()
+                .map(|text| format!("{}: {text}", entry.path().display()))
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// Live agent Processes once their exit records are written. The terminal
 /// gets the provider's exit after a short wait; its host lingers to settle the
 /// provider, so a reader waits for it.
@@ -127,8 +141,11 @@ fn codex_service_tier_reaches_native_and_headless_launch_and_resume() {
                     .unwrap();
                 assert!(
                     output.status.success(),
-                    "{mode}/{setting:?} {args:?}: {}",
-                    String::from_utf8_lossy(&output.stderr)
+                    "{mode}/{setting:?} {args:?}: {}\n{}\n{}\n{}",
+                    output.status,
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr),
+                    native_logs(home.path())
                 );
             };
             if let Some(setting) = setting {
@@ -141,10 +158,27 @@ fn codex_service_tier_reaches_native_and_headless_launch_and_resume() {
             let read = |name: &str| -> serde_json::Value {
                 serde_json::from_slice(&fs::read(home.path().join(name)).unwrap()).unwrap()
             };
+            let session = (mode == "-i").then(|| {
+                support::prepare_native_conversation(
+                    &home.path().join("loopflow.db"),
+                    &worktree,
+                    "codex",
+                    None,
+                    "Tier probe",
+                )
+            });
             let args = if mode == "-b" {
                 vec![mode, "-a", "codex", "graph", "tier-check"]
             } else {
-                vec![mode, "--task", &task, "-a", "codex", ":", "Tier probe"]
+                vec![
+                    mode,
+                    "--task",
+                    &task,
+                    "-a",
+                    "codex",
+                    "resume",
+                    session.as_ref().unwrap(),
+                ]
             };
             run(&args);
             let params = read("native-config.json");
@@ -187,9 +221,10 @@ fn codex_service_tier_reaches_native_and_headless_launch_and_resume() {
             if resume_tier.is_some() {
                 args.extend(["--setting", "codex.service_tier=default"]);
             }
-            args.extend(["resume", &session]);
             if mode == "-b" {
-                args.extend(["--message", "Resume tier probe"]);
+                args.extend(["steer", &session, "Resume tier probe"]);
+            } else {
+                args.extend(["resume", &session]);
             }
             run(&args);
             assert_eq!(
@@ -1632,13 +1667,30 @@ fn explicit_documents_match_preview_capture_and_codex_input() {
             assert!(!home.path().join("runs").exists());
             // Creating the Task opened the store; preview still writes nothing.
             assert_eq!(home.path().join("loopflow.db").exists(), work.is_some());
+            let managed_session = (selection == "external").then(|| {
+                support::prepare_native_conversation(
+                    &home.path().join("loopflow.db"),
+                    &checkout,
+                    "codex",
+                    Some("probe"),
+                    "Report final marker.",
+                )
+            });
+            if let Some(session) = &managed_session {
+                let skill = args.iter().position(|arg| *arg == "skill").unwrap();
+                args.truncate(skill);
+                args.extend(["resume", session]);
+            }
             let output = native_codex_command(&checkout, home.path(), &args)
                 .output()
                 .unwrap();
             assert!(
                 output.status.success(),
-                "{selection}/{large}: {}",
-                String::from_utf8_lossy(&output.stderr)
+                "{selection}/{large}: {}\n{}\n{}\n{}",
+                output.status,
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr),
+                native_logs(home.path())
             );
             let turns: serde_json::Value =
                 serde_json::from_slice(&fs::read(home.path().join("native-turns.json")).unwrap())
@@ -1732,9 +1784,8 @@ fn explicit_documents_native_reconnect_supplies_only_the_new_selection() {
         "codex",
         "--docs",
         first_path.to_str().unwrap(),
-        "resume",
+        "steer",
         session,
-        "--message",
         "FIRST-REQUEST-662",
     ])
     .output()
@@ -1749,9 +1800,8 @@ fn explicit_documents_native_reconnect_supplies_only_the_new_selection() {
         "-b",
         "--docs",
         next_path.to_str().unwrap(),
-        "resume",
+        "steer",
         session,
-        "--message",
         "Read the new document.",
     ])
     .output()

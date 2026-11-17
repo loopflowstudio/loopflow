@@ -15,8 +15,11 @@ pub mod context;
 mod dispatch;
 #[cfg(all(test, unix))]
 mod dispatch_tests;
+pub mod drive;
 pub(crate) mod fact;
 mod fact_writer;
+#[cfg(all(test, unix))]
+mod launch_matrix;
 mod lf_tag;
 pub(crate) mod native_exit;
 pub mod native_session;
@@ -105,11 +108,10 @@ mod environment_tests {
     use std::path::Path;
 
     use super::{configure_agent_env, set_vendor_std_env};
-    use crate::agent::AgentConfig;
 
     #[test]
     fn conversation_tools_observe_sanitized_overrides_and_removals() {
-        let mut config = AgentConfig::default();
+        let mut config = crate::agent::AgentConfig::default();
         for key in [
             "LF_DISCORD_TOKEN",
             "LOOPFLOW_DIRECTIVE_FILE",
@@ -147,7 +149,7 @@ mod environment_tests {
         let mut command = tokio::process::Command::new("/bin/sh");
         command.args(["-c", "test -z \"${LF_DISCORD_TOKEN+x}\""]);
         command.env(crate::os_process::DISCORD_TOKEN_ENV, "fixture-token");
-        let mut config = AgentConfig::default();
+        let mut config = crate::agent::AgentConfig::default();
         config.env.insert(
             crate::os_process::DISCORD_TOKEN_ENV.into(),
             "fixture-override".into(),
@@ -196,16 +198,6 @@ pub fn is_turn_in_progress(err: &anyhow::Error) -> bool {
     )
 }
 
-/// A stream error that means the harness session itself is dead (not just the
-/// turn). Claude keeps a process across turns, but a crash fails the active turn
-/// and the next input respawns it with `--resume` instead of ending the harness.
-pub fn is_terminal_harness_error(code: &str) -> bool {
-    matches!(
-        code,
-        "codex_disconnected" | "opencode_disconnected" | "pi_disconnected"
-    )
-}
-
 /// What happened when the controller tried to deliver input to the exact
 /// provider Turn active at the time of the call.
 ///
@@ -240,11 +232,11 @@ pub enum ApprovalPolicy {
 }
 
 #[async_trait]
-pub trait Harness: Send + Sync {
+pub trait Driver: Send + Sync {
     /// The invocation owner receives replacement attachment snapshots when a
     /// provider must respawn within the same lf invocation.
     fn set_runtime(&mut self, _runtime: Option<crate::process::LfProcessRuntime>) {}
-    async fn start(&mut self, config: &AgentConfig) -> Result<()>;
+    async fn start(&mut self) -> Result<()>;
     /// Start the next provider Turn from durable seed input.
     async fn send_input(&mut self, content: &str) -> Result<()>;
     /// Try to deliver input to the exact Turn currently active.
@@ -277,12 +269,66 @@ pub trait Harness: Send + Sync {
     fn process_group_id(&self) -> Option<u32> {
         None
     }
-    /// Seed a previously persisted vendor session id so the next turn resumes
-    /// it. Harnesses that take resume state at `start` instead ignore this.
-    fn set_agent_session(&mut self, _agent_session: Option<AgentSessionId>) {}
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    Interactive,
+    Headless,
+}
+
+/// Who keeps the provider running, independently of Task attribution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Run {
+    Bare(Mode),
+    Managed,
+    Worker,
+}
+
+impl Run {
+    pub fn mode(self) -> Mode {
+        match self {
+            Self::Bare(mode) => mode,
+            Self::Managed => Mode::Interactive,
+            Self::Worker => Mode::Headless,
+        }
+    }
+
+    pub fn reports_turns(self) -> bool {
+        !matches!(self, Self::Bare(_))
+    }
+}
+
+/// The Session and frozen attachment an invocation launches and records under.
+#[derive(Debug, Clone)]
+pub struct Admitted {
+    pub store: loopflow_storage::sqlite::SqliteStore,
+    pub session: String,
+    pub attachment: crate::process::SessionAttachment,
+}
+
+impl Admitted {
+    pub fn assigned_thread(&self) -> Result<AgentSessionId> {
+        let session = self
+            .store
+            .session(&self.session)?
+            .ok_or_else(|| anyhow::anyhow!("admitted Session is missing"))?;
+        let key = session
+            .artifact_key
+            .ok_or_else(|| anyhow::anyhow!("admitted Session has no capture"))?;
+        let raw = key.strip_prefix("run_").unwrap_or(&key);
+        Ok(uuid::Uuid::parse_str(raw)?.to_string().into())
+    }
+
+    pub fn from_runtime(runtime: &crate::process::LfProcessRuntime) -> Result<Self> {
+        runtime
+            .admitted()
+            .ok_or_else(|| anyhow::anyhow!("invocation has not claimed its Session attachment"))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
 pub enum HarnessKind {
     Codex,
     Claude,
@@ -312,53 +358,307 @@ impl HarnessKind {
 
     /// The provider whose home keeps this harness's transcripts and accounts.
     pub fn provider(self) -> Option<crate::provider_auth::Provider> {
+        self.harness().provider()
+    }
+
+    pub const ALL: [Self; 4] = [Self::Claude, Self::Codex, Self::OpenCode, Self::Pi];
+
+    pub fn harness(self) -> &'static dyn Harness {
         match self {
-            Self::Claude => Some(crate::provider_auth::Provider::Claude),
-            Self::Codex => Some(crate::provider_auth::Provider::Codex),
-            Self::OpenCode | Self::Pi => None,
+            Self::Claude => &claude::Claude,
+            Self::Codex => &codex::Codex,
+            Self::OpenCode => &opencode::OpenCode,
+            Self::Pi => &pi::Pi,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThreadName {
+    Assigned,
+    Reported,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ThreadNaming {
+    pub bare: ThreadName,
+    pub reporting: ThreadName,
+}
+
+impl ThreadNaming {
+    pub fn for_run(self, run: Run) -> ThreadName {
+        match run {
+            Run::Bare(_) => self.bare,
+            Run::Managed | Run::Worker => self.reporting,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Capabilities {
+    pub thread: ThreadNaming,
+    pub initial_prompt_on_resume: bool,
+    pub supports_execution_boundary: bool,
+    pub classifies_failures: bool,
+    pub native_skills: Option<crate::skills::catalog::SkillDialect>,
+    pub turn_limit: bool,
+    pub output_schema: bool,
+    pub respawns_after_crash: bool,
+    pub install_hint: &'static str,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum Start<'a> {
+    New,
+    Resume { thread: &'a AgentSessionId },
+}
+
+impl<'a> Start<'a> {
+    pub fn from_thread(thread: Option<&'a AgentSessionId>) -> Self {
+        thread.map_or(Self::New, |thread| Self::Resume { thread })
+    }
+
+    pub fn thread(self) -> Option<AgentSessionId> {
+        match self {
+            Self::New => None,
+            Self::Resume { thread } => Some(thread.clone()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Launch<'a> {
+    pub config: &'a AgentConfig,
+    pub harness: &'static dyn Harness,
+    pub run: Run,
+    pub admitted: &'a Admitted,
+    pub start: Start<'a>,
+    pub context_file: Option<&'a std::path::Path>,
+}
+
+impl Launch<'_> {
+    pub fn thread(&self) -> Result<Option<AgentSessionId>> {
+        let naming = self.harness.capabilities().thread;
+        match self.start.thread() {
+            None if naming.for_run(self.run) == ThreadName::Assigned => {
+                self.admitted.assigned_thread().map(Some)
+            }
+            thread => Ok(thread),
         }
     }
 
-    fn create(
-        self,
+    pub(crate) fn terminal_input(&self) -> Result<(Vec<String>, Option<String>)> {
+        anyhow::ensure!(
+            self.config.max_turns.is_none() && self.config.output_schema.is_none(),
+            "turn limits and response schemas require a headless Run (-b)"
+        );
+        match self.start {
+            Start::New => {
+                let (flags, prompt) = match &self.config.skill_invocation {
+                    Some(skill) => skill.terminal_input(self.harness, self.config)?,
+                    None => (Vec::new(), self.config.task_prompt.clone()),
+                };
+                Ok((flags, Some(prompt)))
+            }
+            Start::Resume { .. } => Ok((
+                Vec::new(),
+                (!self.config.task_prompt.is_empty()).then(|| self.config.task_prompt.clone()),
+            )),
+        }
+    }
+}
+
+pub(crate) fn command_program(command: &str, program: &str) -> bool {
+    command.split_whitespace().any(|part| {
+        std::path::Path::new(part)
+            .file_name()
+            .is_some_and(|name| name == program)
+    })
+}
+
+pub trait Harness: Sync + std::fmt::Debug {
+    fn kind(&self) -> HarnessKind;
+    fn capabilities(&self) -> Capabilities;
+    fn open(&self, launch: &Launch<'_>) -> Result<native_session::NativeClient>;
+    fn driver(
+        &self,
+        launch: &Launch<'_>,
+        events: mpsc::UnboundedSender<ConversationEvent>,
         approval: ApprovalPolicy,
-        event_tx: mpsc::UnboundedSender<ConversationEvent>,
-    ) -> Box<dyn Harness> {
-        match self {
-            Self::Codex => Box::new(codex::CodexHarness::new(event_tx, approval)),
-            // Claude approvals ride the process-launch CLI flags built from
-            // AgentConfig, not a runtime channel; no policy to thread.
-            Self::Claude => Box::new(claude::ClaudeHarness::new(event_tx)),
-            Self::OpenCode => Box::new(opencode::OpenCodeHarness::new(event_tx, approval)),
-            Self::Pi => Box::new(pi::PiHarness::new(event_tx)),
-        }
+    ) -> Box<dyn Driver>;
+
+    fn validate_agent_process_close(
+        &self,
+        _store: &loopflow_storage::sqlite::SqliteStore,
+        _session: &str,
+        _process: &loopflow_model::id::AgentProcessId,
+    ) -> crate::store::StoreResult<()> {
+        Ok(())
+    }
+    fn human_input_times(
+        &self,
+        _home: &std::path::Path,
+        _wanted: &std::collections::BTreeSet<&str>,
+    ) -> std::collections::BTreeMap<String, i64> {
+        std::collections::BTreeMap::new()
+    }
+    fn conversation_owners(
+        &self,
+        _home: &std::path::Path,
+        _processes: &std::collections::HashMap<u32, &crate::journal::OsProcess>,
+    ) -> std::collections::HashMap<u32, String> {
+        std::collections::HashMap::new()
+    }
+    fn transcript_completion_detail(
+        &self,
+        _turn: &crate::transcript::Turn,
+        detail: &mut serde_json::Value,
+    ) {
+        detail["error"] = serde_json::Value::Null;
+    }
+    fn provider(&self) -> Option<crate::provider_auth::Provider> {
+        None
+    }
+    fn recognizes_driver(&self, command: &str) -> bool {
+        command_program(command, self.kind().as_str())
+    }
+    fn title_args(&self, _name: &str) -> Vec<String> {
+        Vec::new()
+    }
+
+    fn recognizes(&self, process: &crate::journal::OsProcess) -> bool {
+        process.command == self.kind().as_str()
+    }
+    fn model_rungs(&self) -> &'static [&'static str] {
+        &[]
+    }
+    fn sign_in_advice(&self) -> &'static str {
+        "sign in with its own client"
+    }
+    fn provider_env(&self) -> &'static [&'static str] {
+        &[]
+    }
+    fn api_key_env(&self) -> &'static [&'static str] {
+        &[]
+    }
+    fn transcript_home(&self) -> std::path::PathBuf {
+        self.provider()
+            .map(crate::transcript::native_home)
+            .unwrap_or_default()
+    }
+    fn locate_transcript(
+        &self,
+        store: &loopflow_storage::sqlite::SqliteStore,
+        id: &AgentSessionId,
+        cwd: &std::path::Path,
+    ) -> Result<crate::transcript::Located> {
+        use crate::transcript::{Gap, Located, Source};
+        let Some(provider) = self.provider() else {
+            return Ok(Located::Gone(Gap::FileMissing {
+                home: self.transcript_home(),
+            }));
+        };
+        let Some(home) = crate::transcript::conversation_home(store, provider, id)? else {
+            return Ok(Located::Gone(Gap::AccountHomeRemoved));
+        };
+        Ok(
+            match crate::transcript::find(self.kind(), &home, id.as_str(), cwd) {
+                Some(path) => Located::Found {
+                    source: Source::File(path),
+                    home: Some(home),
+                },
+                None => Located::Gone(Gap::FileMissing { home }),
+            },
+        )
+    }
+    fn transcript_reader(&self) -> fn(&[serde_json::Value]) -> Vec<crate::transcript::Turn>;
+    fn transcript_id<'a>(&self, _name: &'a str) -> Option<&'a str> {
+        None
+    }
+    fn transcript_root(&self, home: &std::path::Path) -> (std::path::PathBuf, usize) {
+        (home.join("projects"), 1)
+    }
+    fn transcript_watch_store(&self, _home: &std::path::Path) -> Option<std::path::PathBuf> {
+        None
+    }
+    fn direct_transcript(
+        &self,
+        _home: &std::path::Path,
+        _cwd: &std::path::Path,
+        _id: &str,
+    ) -> Option<std::path::PathBuf> {
+        None
+    }
+    fn transcript_siblings(&self) -> bool {
+        false
+    }
+    fn expiry_policy(&self, _home: Option<&std::path::Path>) -> crate::transcript::ExpiryPolicy {
+        crate::transcript::ExpiryPolicy::Kept
+    }
+    fn transcript_markers(&self) -> &'static [&'static [u8]] {
+        &crate::transcript::live::MARKERS
+    }
+    fn transcript_retention(
+        &self,
+        _thread: &AgentSessionId,
+    ) -> (crate::transcript::RetentionState, Option<i64>) {
+        (crate::transcript::RetentionState::Unknown, None)
+    }
+    fn recent_transcripts(
+        &self,
+        home: &std::path::Path,
+        cwd: &std::path::Path,
+        since: i64,
+        owned: &std::collections::HashSet<&str>,
+    ) -> Vec<(String, crate::transcript::Source, i64)> {
+        crate::transcript::raw::unowned(
+            crate::transcript::scan(self.kind(), home)
+                .into_iter()
+                .filter(|(_, indexed)| {
+                    indexed.modified >= since
+                        && crate::transcript::recorded_cwd(&indexed.path).as_deref() == Some(cwd)
+                })
+                .map(|(id, indexed)| {
+                    (
+                        id,
+                        crate::transcript::Source::File(indexed.path),
+                        indexed.modified,
+                    )
+                })
+                .collect(),
+            owned,
+        )
+    }
+    fn terminal_error(&self, code: &str) -> bool {
+        !self.capabilities().respawns_after_crash
+            && code == format!("{}_disconnected", self.kind().as_str())
+    }
+    fn validate_model(&self, _model: &str) -> Result<()> {
+        Ok(())
     }
 }
 
-pub fn canonical_harness(name: &str) -> Option<&'static str> {
-    HarnessKind::parse(name).map(HarnessKind::as_str)
-}
-
-pub fn default_create_harness(
-    name: &str,
-    approval: ApprovalPolicy,
-    event_tx: mpsc::UnboundedSender<ConversationEvent>,
-) -> Result<Box<dyn Harness>> {
-    if let Some(kind) = HarnessKind::parse(name) {
-        return Ok(kind.create(approval, event_tx));
+#[cfg(any(test, feature = "test-support"))]
+pub fn launch_for_test<'a>(
+    kind: HarnessKind,
+    config: &'a AgentConfig,
+    admitted: &'a Admitted,
+) -> Launch<'a> {
+    Launch {
+        config,
+        admitted,
+        harness: kind.harness(),
+        run: Run::Bare(Mode::Headless),
+        start: Start::from_thread(config.resume_token.as_ref()),
+        context_file: None,
     }
-    anyhow::bail!(
-        "unsupported session harness: {}",
-        name.trim().to_lowercase()
-    )
 }
 
 /// Admit a fixture launch: a private ledger with one Session attached to one
 /// recorded lf invocation. Keep the guard for the life of the harness.
 #[cfg(any(test, feature = "test-support"))]
-pub fn admit_for_test(config: &mut AgentConfig) -> crate::journal::TestLedgerGuard {
-    let ledger = crate::journal::TestLedgerGuard::new();
-    let database = ledger.home().join("loopflow.db");
+pub fn admit_for_test(home: &std::path::Path) -> Admitted {
+    let database = home.join("loopflow.db");
     let store = crate::store::opening::open_ephemeral(&database).unwrap();
     let process = loopflow_model::id::LfProcessId::new();
     rusqlite::Connection::open(&database)
@@ -373,96 +673,57 @@ pub fn admit_for_test(config: &mut AgentConfig) -> crate::journal::TestLedgerGua
         &store, "fixture", None, &process, true,
     )
     .unwrap();
-    config.session_attachment = Some(("fixture".into(), attachment));
-    ledger
+    Admitted {
+        store,
+        session: "fixture".into(),
+        attachment,
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::os::unix::fs::PermissionsExt;
 
     use super::*;
 
-    #[tokio::test]
-    async fn unattached_launch_is_refused_before_any_provider_starts() {
-        // Account selection reads this private, empty store; no route exists.
-        let ledger = crate::journal::TestLedgerGuard::new();
-        let _env = crate::test_ambient::EnvGuard::clear(&["PATH", "LF_BIN"]);
-        // Claude probes its version before the first input launches an agent.
-        let claude = ledger.home().join("claude");
-        std::fs::write(&claude, "#!/bin/sh\n[ \"$1\" = --version ]\n").unwrap();
-        std::fs::set_permissions(&claude, std::fs::Permissions::from_mode(0o755)).unwrap();
-        std::env::set_var("PATH", ledger.home());
-        std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
-        let absent = ledger.home().join("absent");
-        for name in ["codex", "claude", "opencode", "pi"] {
-            let (tx, _rx) = mpsc::unbounded_channel();
-            let mut harness =
-                default_create_harness(name, ApprovalPolicy::AutoApprove, tx).unwrap();
-            let config = AgentConfig {
-                agent: Some(name.into()),
-                // Even a mistakenly reached spawn cannot launch a real provider.
-                cwd: Some(absent.clone()),
-                ..Default::default()
-            };
-            let error = match harness.start(&config).await {
-                // Claude launches on its first input.
-                Ok(()) => harness.send_input("unrecorded").await.unwrap_err(),
-                Err(error) => error,
-            };
-            assert!(
-                error
-                    .to_string()
-                    .contains("AgentProcess requires an admitted invocation"),
-                "{name}: {error}"
-            );
-            assert_eq!(harness.pid(), None, "{name}");
-        }
-    }
-
     #[test]
-    fn canonical_harness_is_case_insensitive_and_trimmed() {
-        assert_eq!(canonical_harness(" claUDe "), Some("claude"));
-        assert_eq!(canonical_harness(" CODEX"), Some("codex"));
-        assert_eq!(canonical_harness("OpenCode"), Some("opencode"));
-        assert_eq!(canonical_harness("lfharness"), None);
-    }
-
-    #[test]
-    fn default_create_harness_rejects_unknown() {
-        let (tx, _rx) = mpsc::unbounded_channel();
-        match default_create_harness("lfharness", ApprovalPolicy::AutoApprove, tx) {
-            Ok(_) => panic!("should reject unknown harness"),
-            Err(err) => assert!(err.to_string().contains("unsupported session harness")),
-        }
-    }
-
-    #[test]
-    fn terminal_harness_error_recognizes_disconnects_only() {
-        assert!(is_terminal_harness_error("opencode_disconnected"));
-        assert!(is_terminal_harness_error("codex_disconnected"));
-        assert!(!is_terminal_harness_error("opencode_error"));
-        // Claude can respawn after a crash without ending the harness.
-        assert!(!is_terminal_harness_error("claude_harness_crashed"));
-    }
-
-    #[test]
-    fn hollow_and_decode_gap_are_turn_terminal_not_session_terminal() {
-        // The hollow-body and decode-gap codes fail the turn, not the session:
-        // the harness process may still be alive (the upstream stream
-        // truncated, not our /event stream). They must NOT register as
-        // session-terminal — that would prevent a same-session retry or
-        // handoff that reuses the opencode server.
-        assert!(!is_terminal_harness_error("opencode_hollow_body"));
-        assert!(!is_terminal_harness_error("opencode_decode_gap"));
+    fn parsing_normalizes_case_and_whitespace() {
+        assert_eq!(
+            HarnessKind::parse(" claUDe ").map(HarnessKind::as_str),
+            Some("claude")
+        );
+        assert_eq!(
+            HarnessKind::parse(" CODEX").map(HarnessKind::as_str),
+            Some("codex")
+        );
+        assert_eq!(
+            HarnessKind::parse("OpenCode").map(HarnessKind::as_str),
+            Some("opencode")
+        );
+        assert_eq!(
+            HarnessKind::parse("lfharness").map(HarnessKind::as_str),
+            None
+        );
     }
 
     #[tokio::test]
     async fn current_send_is_decided_from_the_active_turn() {
         let (tx, _rx) = mpsc::unbounded_channel();
-        for name in ["codex", "claude", "opencode", "pi"] {
-            let mut harness = default_create_harness(name, ApprovalPolicy::AutoApprove, tx.clone())
-                .expect("known harness");
+        for kind in HarnessKind::ALL {
+            let name = kind.as_str();
+            let config = AgentConfig {
+                agent: crate::config::Agent {
+                    harness: kind,
+                    model: None,
+                },
+                ..AgentConfig::default()
+            };
+            let home = tempfile::tempdir().unwrap();
+            let admitted = admit_for_test(home.path());
+            let launch = launch_for_test(kind, &config, &admitted);
+            let mut harness =
+                launch
+                    .harness
+                    .driver(&launch, tx.clone(), ApprovalPolicy::AutoApprove);
             assert_eq!(
                 harness.send_current("direction").await,
                 SendCurrentOutcome::NotSteerable,

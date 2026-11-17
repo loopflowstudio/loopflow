@@ -100,8 +100,9 @@ Desktop's sidebar shows the same open set, and `lf task status` still shows ever
 conversation a Task had.
 
 Finished conversations can continue: `lf resume <session>` reopens an interactive
-one, and a Graph correcting its own step reopens that step's run until the turn
-ends.
+one, a steer naming it starts it again ([Steer](#steer-without-interrupting)),
+and a Graph correcting its own step reopens that step's run with `lf -b steer`
+until the turn ends.
 
 ```bash
 lf session list --wave craft       # the Wave's conversations, ad hoc runs and Task checkouts
@@ -148,7 +149,7 @@ exits, `lf` reads its transcript, records usage and completion in
 | Closing the terminal | ends the agent, as it would plain `claude` |
 | Coming back | `lf resume <session>` continues its thread from history |
 | `lf install` meanwhile | leaves it running; the next launch uses the new build |
-| Steers | arrive when it is next started or resumed, not mid-turn |
+| Steers | arrive at its next turn; one naming it after it exits starts it again in a held terminal |
 | Run in a Task's checkout | counts toward that Task's cost; it is still not the Task's conversation |
 
 This covers bare interactive conversations typed at a terminal, a Desktop
@@ -314,14 +315,14 @@ lf resume --task <ID>
 
 Open the conversation you want, on the provider and login it was using, with
 its native history. Resuming does not replay a turn cut off by the crash.
-Other conversations stay stopped until opened.
+Other conversations stay stopped until opened or steered by name.
 
 | After a crash… | |
 |---|---|
 | interactive conversations | `lf resume --task <ID>` or `lf resume SESSION` |
 | only the server crashed | nothing to do: agents kept running and views reconnect |
 | Task worktrees, branches, PRs | untouched |
-| steers and reports | saved; delivered at the agent's next boundary |
+| steers and reports | saved; a steer naming a stopped conversation, or its Task, starts that conversation once |
 | a headless Graph that died | kept as history; nothing resumes it. `lf task status`, then `lf task run` what remains |
 
 `lf resume` takes interactive Sessions. A headless Session (`-b`, a Graph step),
@@ -433,17 +434,41 @@ same way.
 ## Steer without interrupting
 
 ```bash
-lf steer <session> "use the existing retry helper"   # saved; delivered at its next boundary
-lf --repo . steer "freeze merges until 3pm"          # every Session in this repository
-lf --wave billing steer "invoices before refunds"    # every Session on the Wave
+lf steer <session> "use the existing retry helper"   # saved; it reads it, starting again if it stopped
+lf steer LOO-12 "keep the public API"                # every running Session on the Task; wakes its conversation
+lf --repo . steer "freeze merges until 3pm"          # every running Session in this repository
+lf --wave billing steer "invoices before refunds"    # every running Session on the Wave
 lf session steers <session>                          # was it delivered?
 ```
 
-Each Session receives a steer at its next supported provider boundary. An idle
-managed conversation is woken with it now
-([below](#keep-several-conversations-open)); an idle bare one waits until it
-next runs. For a Task, `lf steer` does the same for every Session on it
-([Work](work.md#steer-it-while-it-runs)).
+`lf steer` saves the steer, says who will read it, and returns:
+
+```text
+$ lf steer 0199b7c4 "what word did I give you?"
+Saved 7f3a…; the Machine server starts 0199b7c4 to read it
+```
+
+| The Session is… | It reads the steer |
+|---|---|
+| running a turn | at its next provider boundary |
+| idle in a held terminal | now: the Machine server wakes it ([below](#keep-several-conversations-open)) |
+| interactive and stopped (you quit it, or the Machine restarted) | the Machine server starts it again in a held terminal, where it reads the steer first |
+| a finished headless run (`-b`, a Graph step) | when its own Graph continues it; nothing else starts it |
+
+A stopped Session started this way runs in a held terminal with no viewer.
+`lf resume <session>` attaches to it, with the answer on screen. Several steers
+saved together start it once and arrive together. Each steer starts its Session
+at most once: if that start fails (`logs/lf.log` says why), the steer stays
+pending in `lf session steers` and the Session reads it whenever it next runs.
+
+Only a steer naming a stopped Session starts it. A Task steer starts one: the
+Task's conversation (the one `lf resume LOO-12` opens), which decides what
+happens next, including steering a step by name. Every running Session on the
+Task, its Graph's current step included, reads the steer at its next boundary;
+the Task's other stopped Sessions are not started. Repository and Wave steers
+start nothing. With no Machine server running, the steer waits, and the
+server's first reading starts the Session.
+
 Delivery proves the agent saw the steer, not that it followed it; to say it
 again, steer again.
 
@@ -475,15 +500,22 @@ lands while the server is down reaches the idle conversation when the server
 comes back. Failed wake attempts are logged in `logs/lf.log`. Steers and Task
 updates remain pending until sent.
 
-## One more headless turn
+## One more turn, here
 
 ```bash
-lf -b resume <session> --message "now add the migration test"
+lf -b steer <session> "now add the migration test"
 ```
 
-Runs the next turn in the Session's saved workspace, from any directory, with
-its native history and without re-running the original skill. Output prints and
-the command returns when the turn ends.
+Runs the Session's next turn in this process, headless, in its saved workspace
+and native history, without re-running the original skill. The turn's input
+is the steer's full text; the reply prints and the command returns when the
+turn ends, with the turn's exit status. A Session that is already running reads
+the steer at its next boundary and the command returns at once. A Graph step
+correcting its own answer continues the step's finished run this way; for
+anyone else, a finished headless run can't be continued.
+
+`lf resume` only connects; it takes no message, and `lf -b resume` points
+here.
 
 ## Name it and file it
 

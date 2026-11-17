@@ -1998,7 +1998,7 @@ fn saved_graph_stand_in(fixture: &Fixture) {
     std::fs::write(lf.join("skills/decide-proof.md"), "Decide the fixture.").unwrap();
     std::fs::write(
         lf.join("graphs/work-then-decide.yaml"),
-        "- work-proof\n- loop: work-proof\n  step: decide-proof\n",
+        "- loop:\n    - work-proof\n    - decide-proof\n",
     )
     .unwrap();
     // Committed, as a repository's definitions are: a step leaves only its own edits.

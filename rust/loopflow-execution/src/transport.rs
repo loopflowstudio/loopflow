@@ -329,11 +329,16 @@ pub(crate) fn delegate_prepared_session(id: &str, json: bool) -> Result<Delegati
 }
 
 /// Chats reopen as chats; bound and primary Sessions as work sessions. A held
-/// child keeps its parent's choice.
+/// child keeps its parent's choice. A relayed viewer (a Desktop pane or a
+/// framed `lf --machine` stream) is no terminal a chat can own, so the holder
+/// keeps what it opens.
 fn session_kind(id: &str) -> crate::harness::LaunchKind {
     use crate::harness::LaunchKind;
 
-    if current().is_some() {
+    if current().is_some()
+        || std::env::var_os("LF_SERVER_STATUS").is_some()
+        || std::env::var_os(STREAM_ENV).is_some()
+    {
         return LaunchKind::WorkSession;
     }
     static GAP: LazyLock<Mutex<crate::store::RecordingGap>> = LazyLock::new(Default::default);
@@ -3001,6 +3006,20 @@ mod launch_mode_tests {
                     store.runs_in_its_terminal(&session.id).unwrap(),
                     surface == "interactive" && !expected.is_managed()
                 );
+                // A Desktop pane or framed remote viewer has no terminal for
+                // a chat to own; the holder keeps every Session it opens.
+                for relay in ["LF_SERVER_STATUS", super::STREAM_ENV] {
+                    std::env::set_var(relay, "1");
+                    let relayed = super::delegate_session(&session.id, false, true, true);
+                    std::env::remove_var(relay);
+                    assert_eq!(
+                        relayed.unwrap(),
+                        super::Delegation::Here {
+                            kind: LaunchKind::WorkSession
+                        },
+                        "{relay}: source={source:?}"
+                    );
+                }
             }
             Ok(())
         })

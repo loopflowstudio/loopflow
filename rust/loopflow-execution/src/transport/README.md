@@ -59,12 +59,14 @@ Task it belongs to. Every launch belonging to a Task counts toward its usage
 and receives its steers. Work sessions and workers report turn
 boundaries to the Machine server; chats and batches read their steers directly.
 
-`delegate` returns either a completed delegation or `Here { run }`. Direct
+`delegate` returns either a completed delegation or `Here { kind }`. Direct
 launches outside a held terminal or worker step choose between a chat and a
 batch. `--batch` selects a batch. Otherwise `--interactive`, a terminal or no
 prompt selects a chat. Reopening a Session with no message reads its binding
 and primary scope once before `delegate`. Chats reopen as chats, and bound and
-primary conversations reopen as work sessions.
+primary conversations reopen as work sessions. A Desktop pane or a framed
+`lf --machine` viewer is no terminal a chat can own, so a Session it reopens
+is a work session the holder keeps.
 An unreadable store falls back to a work session and logs a recording gap.
 
 ### Chats at a terminal

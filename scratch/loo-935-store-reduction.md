@@ -1,6 +1,6 @@
 # LOO-935: remove what the product no longer uses, and keep it removed
 
-Status (2026-11-17): `lf resume` does one thing (Rust, Swift, docs done) and main through #1960 is merged (conflict notes in `questions.md`); before it, `lf task view`, `lf open --diff`, the Rex follower and Task widening went and every view of a held terminal types. One resume decision drives labels, `--explain` and `open`; next, gate.
+Status (2026-11-17): `lf resume` does one thing (Rust, Swift, docs done) and main through #1960 is merged (conflict notes in `questions.md`); before it, `lf task view`, `lf open --diff`, the Rex follower and Task widening went and every view of a held terminal types. One resume decision (`resume_intent`) drives labels, `--explain`, `primary::prepare` and `open`'s dispatch; remaining: `open` launches through one path under the launch lock, then gate.
 
 ## Demo
 
@@ -298,24 +298,10 @@ pass; display suites left to gate/CI.
 
 ## One resume decision (concept review, 2026-11-17: built)
 
-Resume does one thing, but three functions still decide what it will do, from
-different evidence: `session_action` (process evidence → "Take over"),
-`held_action` (`unviewed` → "Reconnect"/"Open here") and `read_resume`'s
-`SessionResumeIntent` (`is_running(state)`, `session_terminal`). `--explain`
-prints both the intent and the record's `opening`, so it can say "Take over"
-under an Action of View.
-
-- One function decides `SessionResumeIntent` from a Session's summary;
-  `SessionAction` (label, help) is a function of that intent. Labels stay:
-  View reads "Reconnect" when unviewed, else "Open here"; Start reads "Try
-  again" after a consumed launch, else "Start conversation"; TakeOver reads
-  "Take over"; Resume reads "Open here".
-- `NewThread` (a different harness, `-a`) is decided per invocation, so a
-  listed record never carries it; it needs no label.
-- `projected_action`, `held_action` and `session_action` fold into it;
-  `explain_resume` takes `opening` from the same value it reports as `intent`.
-- Test: a label table keyed by intent, and one explain row whose intent and
-  opening come from one decision. Wire shapes unchanged.
+Labels by intent: View reads "Reconnect" when unviewed, else "Open here"; Start
+reads "Try again" after a consumed launch, else "Start conversation"; TakeOver
+reads "Take over"; Resume reads "Open here". `NewThread` (`-a` another
+harness) is per invocation, so a listed record never carries it.
 
 Built: `resume_intent` and `opening(intent, session)` in `ops/human_session.rs`;
 `session_action` composes them; `held_action`/`projected_action` are gone;

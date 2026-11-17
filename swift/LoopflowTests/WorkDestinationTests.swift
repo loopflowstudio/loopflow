@@ -43,7 +43,7 @@ struct WorkDestinationTests {
         let resolved = WorkLink(label: record.title ?? "Conversation", url: address, markdown: "", fallbackArgv: [],
                                 target: .init(kind: waveScoped ? .wave : .repository, repositoryPath: wave.wave.repo,
                                               repositoryId: "repo", task: nil, taskId: nil,
-                                              wave: waveScoped ? wave.wave.id : nil, session: record.id, diff: false,
+                                              wave: waveScoped ? wave.wave.id : nil, session: record.id,
                                               executionMachine: nil),
                                 conversation: .otherConversation, conversationReason: nil,
                                 route: .init(host: .desktop, reason: "Selected Desktop"))
@@ -804,7 +804,7 @@ struct WorkDestinationTests {
         }
         let (model, _) = destinationModel(query: query, repoPath: wave.wave.repo)
         model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
-        let link = TaskLink(issue: taskID, repo: wave.wave.repo, session: nil, diff: false,
+        let link = TaskLink(issue: taskID, repo: wave.wave.repo, session: nil,
                             machine: remote ? "peer" : nil, repository: remote ? "repository" : nil)
         await model.openTaskLink(link)
         #expect(model.selection == .task(id: task.id))
@@ -902,7 +902,7 @@ struct WorkDestinationTests {
         let files = local.files(issue: taskID, cwd: localIdentity.worktree, query: query)
         let document = files.document("draft.txt")
         document.editor.string = "unfinished local draft"
-        let link = TaskLink(issue: taskID, repo: wave.wave.repo, session: record.id, diff: true,
+        let link = TaskLink(issue: taskID, repo: wave.wave.repo, session: record.id,
                             machine: "peer", repository: "repository")
         await model.openTaskLink(link)
         #expect(model.repoPath == wave.wave.repo)
@@ -912,7 +912,7 @@ struct WorkDestinationTests {
         if outcome == "recorded" {
             let opened = try #require(workspaceRegistry.selectedWork.flatMap(workspaceRegistry.retained))
             let pane = try #require(opened.multiplexer.layout.allPanes.first { $0.sessionId == record.id })
-            let request = LinkedSession(generation: 0, record: record, task: task, showsChanges: true, location: pane.executionLocation)
+            let request = LinkedSession(generation: 0, record: record, task: task, location: pane.executionLocation)
             #expect(request.record.id == record.id)
             #expect(request.location?.machineID == "peer")
             #expect(model.selection == .task(id: task.id))
@@ -920,14 +920,10 @@ struct WorkDestinationTests {
             #expect(model.taskOpening?.status != .usable)
             let remote = registry.workspace(for: WorkWorkspaceKey(repository: "repository", kind: .task, id: task.runtime?.workId ?? task.id), title: task.task.name, location: remoteIdentity)
             remote.multiplexer.load(sessionId: record.id, location: record.workspace?.identity)
-            let sessionOnly = LinkedSession(generation: request.generation, record: record,
-                task: task, showsChanges: false, location: request.location)
-            #expect(try registry.openLinkedFiles(sessionOnly, in: remote.key, query: query) == nil)
             let companion = try remote.files(for: .browser(taskId: task.id, tabs: [.files], selected: "files", execution: request.location), task: task, query: query)
             companion.document("remote-draft.txt").editor.string = "retained peer draft"
-            #expect(remote.multiplexer.browserPane.map(remote.multiplexer.isVisible) == false)
-            #expect(try registry.openLinkedFiles(request, in: remote.key, query: query) === companion)
-            #expect(companion.document("remote-draft.txt").editor.string == "retained peer draft")
+            remote.multiplexer.updateSessionLocation(record.id, location: remoteIdentity, execution: request.location)
+            remote.multiplexer.showBrowser(.files, location: remoteIdentity, execution: request.location)
             let sessions = local.sessionStore(repoPath: wave.wave.repo, query: query)
             sessions.retainLocation(try #require(request.location), for: record)
             sessions.reconcile([record])
@@ -1105,23 +1101,18 @@ struct WorkDestinationTests {
         let sessionOnly = TaskLink(issue: task.task.identifier, repo: wave.wave.repo, session: record.id)
         await model.openTaskLink(sessionOnly)
         #expect(installedSession(model, workspaceRegistry)?.id == record.id)
-        // Adding a companion reuses the installed terminal and its pane.
-        let link = TaskLink(issue: try #require(task.runtime?.workId), repo: wave.wave.repo, session: record.id, diff: true)
-        await model.openTaskLink(link)
-        #expect(installedSession(model, workspaceRegistry)?.id == record.id)
-        #expect(model.taskOpening?.status != .usable) // placement is not native readiness
+        // Reopening by work ID reuses the installed terminal and its pane.
+        let link = TaskLink(issue: try #require(task.runtime?.workId), repo: wave.wave.repo, session: record.id)
         let workspace = try #require(workspaceRegistry.selectedWork.flatMap(workspaceRegistry.retained))
         let terminal = try #require(workspace.multiplexer.layout.allPanes.first { $0.sessionId == record.id })
         let files = workspace.files(issue: task.task.identifier, cwd: identity.worktree, query: query)
         files.selection = "retained-draft.rs"
         await model.openTaskLink(link)
-        #expect(workspace.multiplexer.layout.allPanes.count == 3)
+        #expect(installedSession(model, workspaceRegistry)?.id == record.id)
+        #expect(model.taskOpening?.status != .usable) // placement is not native readiness
         #expect(workspace.multiplexer.layout.pane(for: terminal.id) == terminal)
-        #expect(workspace.multiplexer.focusedPane.content.selectedBrowserTab == .files)
-        #expect(workspace.multiplexer.focusedPane.content.location == identity)
         #expect(files.selection == "retained-draft.rs")
-        #expect(files.showsChanges)
-        let failure = TaskLink(issue: task.task.identifier, repo: wave.wave.repo, session: "missing", diff: true)
+        let failure = TaskLink(issue: task.task.identifier, repo: wave.wave.repo, session: "missing")
         await model.openTaskLink(failure)
         #expect(model.taskOpening?.status == .failed)
         #expect(model.taskOpening?.url == failure.address)
@@ -1132,8 +1123,8 @@ struct WorkDestinationTests {
         #expect(model.taskOpening?.reason == model.taskLinkReading.errorMessage)
     }
 
-    @Test(arguments: ["usable", "connection", "surface", "comparison", "closed", "hidden", "zoomed", "replaced"])
-    func composedOpeningWaitsForNativeSessionAndComparison(outcome: String) async throws {
+    @Test(arguments: ["usable", "connection", "surface", "closed", "hidden", "replaced"])
+    func openingWaitsForNativeSession(outcome: String) async throws {
         let (model, registry, record, url, query) = try openingFixture(outcome: outcome)
         await model.openTaskLink(url)
         let workspace = try #require(registry.selectedWork.flatMap(registry.retained))
@@ -1142,24 +1133,20 @@ struct WorkDestinationTests {
         let files = workspace.files(issue: task.task.identifier,
             cwd: try #require(record.workspace?.worktree), query: query)
         files.selection = "retained-draft.rs"
-        if outcome != "connection", outcome != "comparison" {
+        if outcome != "connection" {
             #expect(store.sessions.first?.state == .prepared)
             #expect(model.taskOpening?.status == .opening)
             let pane = workspace.multiplexer.focusedPane
             switch outcome {
             case "closed": workspace.multiplexer.close(pane.id)
             case "hidden": workspace.multiplexer.setCollapsed(paneId: pane.id, collapsed: true)
-            case "zoomed": workspace.multiplexer.setZoom(pane.id, enabled: true)
-            case "replaced":
-                if pane.kind == .session { workspace.multiplexer.replace(pane.id, with: .session(id: "replacement")) }
-                else { workspace.multiplexer.showBrowser(.graphLog) }
+            case "replaced": workspace.multiplexer.replace(pane.id, with: .session(id: "replacement"))
             case "surface": store.recordPaneFailure(try #require(store.sessions.first), reason: "Native surface unavailable")
             default: store.recordPaneLive(record.id)
             }
         }
         try await waitForOpening(model)
-        let reasons = ["connection": "Connection unavailable", "surface": "Native surface unavailable",
-                       "comparison": "Comparison unavailable"]
+        let reasons = ["connection": "Connection unavailable", "surface": "Native surface unavailable"]
         #expect(model.taskOpening?.status == (outcome == "usable" ? .usable : .failed))
         if outcome != "usable" {
             #expect(model.taskOpening?.reason == (reasons[outcome] ?? "Opening panes were hidden, closed or replaced."))
@@ -1225,30 +1212,6 @@ struct WorkDestinationTests {
         #expect(store.sessions.isEmpty)
     }
 
-    @Test func canceledComparisonCannotSettleNewOpening() async throws {
-        let barrier = LinkedDestinationBarrier()
-        let (model, registry, record, url, query) = try openingFixture(outcome: "usable", comparisonBarrier: barrier)
-        let opening = Task { await model.openTaskLink(url) }
-        while !(await barrier.contains("comparison")) { await Task.yield() }
-        let workspace = try #require(registry.selectedWork.flatMap(registry.retained))
-        let originalPane = try #require(workspace.multiplexer.pane(forSessionId: record.id))
-        #expect(workspace.openingConversation)
-        let store = registry.sessionStore(repository: "repo", repoPath: try #require(model.repoPath), query: query)
-        // New request to the same Session, without its still-reading companion.
-        let task = try #require(model.selection.flatMap { model.task(id: $0.id)?.task })
-        let next = TaskLink(issue: task.task.identifier, repo: model.repoPath, session: record.id)
-        await model.openTaskLink(next)
-        #expect(!workspace.openingConversation)
-        await barrier.release("comparison")
-        await opening.value
-        #expect(model.taskOpening?.url == next.address)
-        #expect(model.taskOpening?.status == .opening)
-        #expect(workspace.multiplexer.focusedPane == originalPane)
-        store.recordPaneLive(record.id)
-        try await waitForOpening(model)
-        #expect(model.taskOpening?.status == .usable)
-    }
-
     @Test func canceledOpeningCannotBecomeUsableFromALateSurface() async throws {
         let (model, registry, record, url, query) = try openingFixture(outcome: "usable")
         await model.openTaskLink(url)
@@ -1269,7 +1232,7 @@ struct WorkDestinationTests {
         }
     }
 
-    private func openingFixture(outcome: String, comparisonBarrier: LinkedDestinationBarrier? = nil) throws -> (WorkModel, SessionsWorkspaceRegistry, SessionRecord, TaskLink, RegistryQuery) {
+    private func openingFixture(outcome: String) throws -> (WorkModel, SessionsWorkspaceRegistry, SessionRecord, TaskLink, RegistryQuery) {
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(try fixture().utf8))
         let wave = try #require(snapshot.waves.first)
         let task = try #require(wave.tasks.items.first)
@@ -1296,8 +1259,6 @@ struct WorkDestinationTests {
                 return encoded
             }
             if args.starts(with: ["task", "changes"]) {
-                if let comparisonBarrier { await comparisonBarrier.wait("comparison") }
-                if outcome == "comparison" { throw RegistryQueryError("Comparison unavailable") }
                 return changes
             }
             throw RegistryQueryError("Unexpected fixture operation")
@@ -1306,10 +1267,10 @@ struct WorkDestinationTests {
         model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
         let registry = SessionsWorkspaceRegistry(localMachineId: identity.machineId)
         model.bindWorkspaces(registry, repository: "repo")
-        return (model, registry, record, TaskLink(issue: task.task.identifier, repo: wave.wave.repo, session: record.id, diff: true), query)
+        return (model, registry, record, TaskLink(issue: task.task.identifier, repo: wave.wave.repo, session: record.id), query)
     }
 
-    @Test(arguments: [false, true]) func delayedPrimarySessionPreparationDoesNotOpenChangesInAnotherTask(conversation: Bool) async throws {
+    @Test(arguments: [false, true]) func delayedPrimarySessionPreparationDoesNotOpenAnotherTask(conversation: Bool) async throws {
         let data = try workingFixture()
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
         let wave = try #require(snapshot.waves.first)
@@ -1323,7 +1284,7 @@ struct WorkDestinationTests {
             return encoded
         }, repoPath: wave.wave.repo)
         model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
-        let url = TaskLink(issue: task.task.identifier, repo: wave.wave.repo, diff: true)
+        let url = TaskLink(issue: task.task.identifier, repo: wave.wave.repo, conversation: true)
         let opening = Task {
             if conversation { await model.openTaskConversation(task.id) }
             else { await model.openTaskLink(url) }
@@ -1818,7 +1779,7 @@ struct WorkDestinationTests {
             received.append(url)
         }
         for machine in ["local-owner", "peer-owner"] {
-            let link = LinkedWork.task(TaskLink(issue: "task-\(machine)", repo: path, session: "session-\(machine)", diff: true,
+            let link = LinkedWork.task(TaskLink(issue: "task-\(machine)", repo: path, session: "session-\(machine)",
                                 machine: machine, repository: "plan"))
             _ = try await router.openRepository(path: path, link: link, query: query) { _ in
                 Issue.record("Execution Machine must not create another repository window")
@@ -1827,7 +1788,7 @@ struct WorkDestinationTests {
         while received.count < 2 { await Task.yield() }
         let tasks = received.compactMap { if case .task(let link) = $0 { link } else { nil } }
         #expect(tasks.map(\.machine) == ["local-owner", "peer-owner"])
-        #expect(tasks.allSatisfy { $0.repository == "plan" && $0.diff })
+        #expect(tasks.allSatisfy { $0.repository == "plan" })
         #expect(router.inspect().windows.map(\.window) == [window.uuidString])
     }
 

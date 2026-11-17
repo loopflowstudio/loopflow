@@ -134,11 +134,10 @@ public struct WorkLink: Codable, Equatable, Sendable {
         public let taskId: String?
         public let wave: String?
         public let session: String?
-        public let diff: Bool
         public let executionMachine: String?
 
         enum CodingKeys: String, CodingKey {
-            case kind, task, wave, session, diff
+            case kind, task, wave, session
             case repositoryPath = "repo_path", repositoryId = "repo_id"
             case taskId = "task_id", executionMachine = "execution_machine"
         }

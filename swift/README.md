@@ -967,7 +967,7 @@ supplies `graph_processes`, using the same execution details as CLI inspection.
 ### Inspect retained workspaces
 
 ```sh
-lf open loopflow://loopflow/task/LOO-427 --diff --json
+lf open loopflow://loopflow/task/LOO-427 --explain --json
 lf desktop state --json
 lf task run LOO-427 --explain --json
 ```
@@ -1002,13 +1002,11 @@ window. After explicit `config repo --bind`, the next open reuses the existing
 scene, including one still registering. Retained local IDs come from `lf`, not
 path matching. Drafts, native views and pending links stay in place; old pane
 targets become stale, so inspect again before control. Restoration accepts a
-retained ID but refuses a location that no longer owns it. `--diff` reveals the existing Changes browser beside the conversation,
-retaining file selection and drafts. Launch acceptance returns `opening`; it does
+retained ID but refuses a location that no longer owns it. Launch acceptance returns `opening`; it does
 not prove a usable native endpoint. Inspection retains the latest request's outcome:
-`usable` for a Session request requires the Session's native-surface callback and a loaded Changes reading
-when requested, with both original panes still visible. Closing, hiding, replacing or
-zooming away a requested pane fails the pending request, as do connection, surface and
-comparison errors. Navigation cancels an unfinished opening; late results cannot settle a newer
+`usable` for a Session request requires the Session's native-surface callback, with its
+pane still visible. Closing, hiding, replacing or zooming away that pane fails the pending
+request, as do connection and surface errors. Navigation cancels an unfinished opening; late results cannot settle a newer
 request, even for the same URL. This is endpoint readiness, not provider-turn completion
 or proof of compositor rendering. A plain Task link waits for its Task page to mount;
 it does not require a Session or checkout. An unavailable workspace reports failure.
@@ -1023,9 +1021,8 @@ result. Session panes report attachment separately from native surface existence
 place, while a pending attachment stays with its current viewer.
 These are transient receipts, not opening history or Work identity. Remote Task links
 retain the local repository window and re-observe the named execution Machine before
-opening its Session and optional Changes pane. A remote link without `--session`
-shows the Task without creating or connecting a Session. An explicit Changes
-request without a Session still uses that Task's primary Session. Missing, changed or unavailable recorded locations
+opening its Session. A remote link without `--session` shows the Task without
+creating or connecting a Session. Missing, changed or unavailable recorded locations
 never prepare another checkout. The CLI transports native Session argv over SSH,
 keeping the owner's data directory and explicit takeover behavior. Local panes and
 drafts remain retained; no remote planning tree or execution record is imported.

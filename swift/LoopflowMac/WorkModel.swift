@@ -95,7 +95,6 @@ struct LinkedSession {
     let generation: Int
     let record: SessionRecord
     let task: RoadmapTask
-    let showsChanges: Bool
     let location: TaskLocationObservation?
     var preparedIntent: SessionOpenIntent?
 }
@@ -448,7 +447,7 @@ final class WorkModel {
 
     private func openLinkedTask(wave: WaveRoadmap?, task: RoadmapTask, link: TaskLink, generation: Int, intent requested: SessionOpenIntent? = nil) async throws {
         let intent = requested ?? task.conversationIntent
-        let opensConversation = link.session != nil || link.diff || taskLinkConversation
+        let opensConversation = link.session != nil || taskLinkConversation
         let isLocalRepository = repoPath?.normalizedFilePath == task.task.repo.normalizedFilePath
         let key = workspaceKey(for: .task(id: task.id), repository: workspaceRepository ?? "")
         // The Task's workspace carries the opening's spinner and error, retained or not.
@@ -508,7 +507,7 @@ final class WorkModel {
             executionTask = remoteTask
             executionIdentity = WorkspaceIdentity(machineId: machine, worktree: checkout)
         }
-        guard link.session != nil || link.diff || taskLinkConversation else {
+        guard link.session != nil || taskLinkConversation else {
             if location != nil, let executionIdentity {
                 navigation.preparedTaskWorktrees[task.id] = executionIdentity
             }
@@ -580,12 +579,6 @@ final class WorkModel {
                 throw RegistryQueryError("The Session no longer belongs to the observed Machine/checkout; nothing was opened.")
             }
         }
-        if link.diff {
-            guard let identity = record.workspace?.identity,
-                  identity == executionIdentity else {
-                throw RegistryQueryError("The Session and Task do not share a recorded checkout; no Changes pane was opened.")
-            }
-        }
         guard !Task.isCancelled, destinationGeneration == generation else { return }
         if let workspace {
             guard workspace.conversationRequest == request, !workspace.conversationClosed else {
@@ -608,7 +601,7 @@ final class WorkModel {
             sessions = .available(records)
         }
         workspace?.conversationStart = nil
-        let destination = LinkedSession(generation: generation, record: record, task: task, showsChanges: link.diff, location: location, preparedIntent: preparation == nil ? nil : intent)
+        let destination = LinkedSession(generation: generation, record: record, task: task, location: location, preparedIntent: preparation == nil ? nil : intent)
         try await installConversation(destination, repository: task.task.repo)
     }
 
@@ -629,11 +622,7 @@ final class WorkModel {
         let target = registry.workspace(for: key, title: destination.task.task.name, location: record.workspace?.identity)
         if record.workspace?.identity != nil { registry.confirmLocation(in: target) }
         let workspace = placeSession(record, in: target, store: store, registry: registry)
-        let files = try registry.openLinkedFiles(destination, in: workspace.key, query: store.query)
-        if files != nil, let zoomed = workspace.multiplexer.zoomedPaneId {
-            workspace.multiplexer.setZoom(zoomed, enabled: false)
-        }
-        await connectLinkedOpening(destination, store: store, workspace: workspace, files: files)
+        await connectLinkedOpening(destination, store: store, workspace: workspace)
     }
 
     /// Exact contextual links share the same synchronous pane placement as Task entry.
@@ -700,50 +689,44 @@ final class WorkModel {
         linkedTaskPage = nil
     }
 
-    /// Observe the existing Session and Files owners, never a second readiness store.
+    /// Observe the existing Session owner, never a second readiness store.
     /// Each callback retains the request generation, including repeated identical URLs.
-    private func connectLinkedOpening(_ destination: LinkedSession, store: SessionsStore, workspace: SessionsWorkspace, files: TaskFilesStore?) async {
+    private func connectLinkedOpening(_ destination: LinkedSession, store: SessionsStore, workspace: SessionsWorkspace) async {
         guard destination.generation == destinationGeneration, taskOpening?.status == .opening else { return }
         let layout = workspace.multiplexer.layout
         let sessionPane: PaneState?
         if case .shell(let id, _) = store.localTerminal(for: destination.record) {
             sessionPane = workspace.multiplexer.shell(id) == nil ? nil : workspace.multiplexer.shellPane
         } else { sessionPane = layout.allPanes.first { $0.sessionId == destination.record.id } }
-        var panes = [PaneState]()
-        if let sessionPane { panes.append(sessionPane) }
-        if destination.showsChanges, let pane = layout.pane(of: .browser),
-           pane.content.selectedBrowserTab == .files { panes.append(pane) }
-        guard panes.count == (destination.showsChanges ? 2 : 1) else {
+        guard let sessionPane else {
             taskOpening = taskOpening.map { DesktopOpening(revision: UUID().uuidString, url: $0.url, status: .failed, reason: "Opening panes are no longer available.") }
             return
         }
         if let intent = destination.preparedIntent { store.adoptPreparation(destination.record, intent: intent) }
         else { await store.select(destination.record.id, intent: workspace.conversationIntent) }
         guard !Task.isCancelled, destination.generation == destinationGeneration, taskOpening?.status == .opening else { return }
-        if let files { await files.refreshChanges() }
-        guard !Task.isCancelled, destination.generation == destinationGeneration, taskOpening?.status == .opening else { return }
-        observeOpeningOwners(generation: destination.generation, record: destination.record, showsChanges: destination.showsChanges, store: store, workspace: workspace, panes: panes, files: files)
+        observeOpeningOwners(generation: destination.generation, record: destination.record, store: store, workspace: workspace, pane: sessionPane)
     }
 
-    private func observeOpeningOwners(generation: Int, record: SessionRecord, showsChanges: Bool, store: SessionsStore, workspace: SessionsWorkspace, panes: [PaneState], files: TaskFilesStore?) {
+    private func observeOpeningOwners(generation: Int, record: SessionRecord, store: SessionsStore, workspace: SessionsWorkspace, pane: PaneState) {
         guard generation == destinationGeneration, taskOpening?.status == .opening else { return }
         withObservationTracking {
-            updateLinkedOpening(generation: generation, record: record, showsChanges: showsChanges, store: store, workspace: workspace, panes: panes, files: files)
-        } onChange: { [weak self, weak store, weak workspace, weak files] in
+            updateLinkedOpening(generation: generation, record: record, store: store, workspace: workspace, pane: pane)
+        } onChange: { [weak self, weak store, weak workspace] in
             Task { @MainActor in
                 guard let self, let store, let workspace else { return }
-                self.observeOpeningOwners(generation: generation, record: record, showsChanges: showsChanges, store: store, workspace: workspace, panes: panes, files: files)
+                self.observeOpeningOwners(generation: generation, record: record, store: store, workspace: workspace, pane: pane)
             }
         }
     }
 
-    private func updateLinkedOpening(generation: Int, record: SessionRecord, showsChanges: Bool, store: SessionsStore, workspace: SessionsWorkspace, panes: [PaneState], files: TaskFilesStore?) {
+    private func updateLinkedOpening(generation: Int, record: SessionRecord, store: SessionsStore, workspace: SessionsWorkspace, pane: PaneState) {
         guard generation == destinationGeneration,
               let opening = taskOpening, opening.status == .opening else { return }
-        // Observe the panes even before the Session reading arrives. Its absence
+        // Observe the pane even before the Session reading arrives. Its absence
         // cannot hide a definitive close, replacement or visibility change.
         guard (workspaceRegistry == nil || workspaceRegistry?.selectedWork == workspace.key),
-              panes.allSatisfy(workspace.multiplexer.isVisible) else {
+              workspace.multiplexer.isVisible(pane) else {
             taskOpening = DesktopOpening(revision: UUID().uuidString, url: opening.url, status: .failed, reason: "Opening panes were hidden, closed or replaced.")
             return
         }
@@ -758,7 +741,7 @@ final class WorkModel {
             case .failed(let message), .unavailable(let message), .ended(let message): reason = message
             case .pending where item.record.action(.open) == nil:
                 reason = "Session has no available opening action."
-            default: reason = files?.isRefreshingChanges == true ? nil : files?.changesError
+            default: reason = nil
             }
         }
         if let reason {
@@ -771,7 +754,7 @@ final class WorkModel {
                 reason: store.connectionReading(record.id)?.message ?? "Conversation attachment failed or ended.")
         case .elsewhere:
             taskOpening = DesktopOpening(revision: UUID().uuidString, url: opening.url, status: .elsewhere, reason: "Conversation input is held by another client.")
-        case .usable where !showsChanges || (files?.changes != nil && files?.isRefreshingChanges == false):
+        case .usable:
             taskOpening = DesktopOpening(revision: UUID().uuidString, url: opening.url, status: .usable, reason: nil)
         default: break
         }
@@ -914,8 +897,7 @@ final class WorkModel {
             generation = destinationGeneration
             taskOpening = DesktopOpening(revision: UUID().uuidString, url: address, status: .opening, reason: nil)
             await store.select(id, intent: .start)
-            observeOpeningOwners(generation: generation, record: record, showsChanges: false,
-                                 store: store, workspace: workspace, panes: [pane], files: nil)
+            observeOpeningOwners(generation: generation, record: record, store: store, workspace: workspace, pane: pane)
         } catch {
             guard !Task.isCancelled, destinationGeneration == generation else { return }
             taskOpening = DesktopOpening(revision: UUID().uuidString, url: address, status: .failed, reason: error.localizedDescription)

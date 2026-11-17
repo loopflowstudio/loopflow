@@ -866,23 +866,6 @@ final class SessionsWorkspaceRegistry {
         }
     }
 
-    /// Record the Session owner; only explicit Changes opens a Files companion.
-    @discardableResult
-    func openLinkedFiles(_ destination: LinkedSession, in key: WorkWorkspaceKey, query: RegistryQuery) throws -> TaskFilesStore? {
-        guard let identity = destination.record.workspace?.identity else { return nil }
-        let workspace = workspace(for: key, title: destination.task.task.name, location: identity)
-        workspace.multiplexer.updateSessionLocation(destination.record.id, location: identity, execution: destination.location)
-        guard destination.showsChanges else { return nil }
-        let content = PaneContent.browser(taskId: destination.task.id, tabs: [.files], selected: BrowserTab.files.id,
-            location: identity, execution: destination.location)
-        let files = try workspace.files(for: content, task: destination.task, query: query)
-        files.showsChanges = true
-        files.page = .files
-        workspace.multiplexer.showBrowser(.files, location: identity, execution: destination.location,
-            focus: workspace.multiplexer.pane(forSessionId: destination.record.id) != nil)
-        return files
-    }
-
     func readText(_ request: DesktopTextRequest) throws -> DesktopTextReading {
         let (workspace, pane, terminal) = try retainedPane(for: request.target)
         let store = workspace.multiplexer

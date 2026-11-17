@@ -149,7 +149,6 @@ fi
     let claude = home.path().join("bin/claude");
     fs::write(&claude, crate::test_support::task_graph::HOLDING_CLAUDE).unwrap();
     fs::set_permissions(&claude, fs::Permissions::from_mode(0o755)).unwrap();
-    crate::test_support::task_graph::connect_fixture_claude(home.path(), &store);
     crate::config::files::update(&home.path().join("config.yaml"), |value| {
         value["agent"] = "claude".into();
         Ok(())

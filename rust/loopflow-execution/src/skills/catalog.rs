@@ -106,14 +106,84 @@ impl SkillSource {
         })
     }
 
+    /// How this file stands to the builtin of the same name, if there is one.
+    pub fn builtin_relation(&self) -> Option<crate::skills::listing::BuiltinRelation> {
+        use crate::skills::listing::BuiltinRelation;
+        let path = self.path.as_ref()?;
+        let builtin = self.builtin_text()?;
+        let content = crate::observe::read_to_string(path).ok()?;
+        let extends = self.dialect == SkillDialect::Loopflow
+            && split_frontmatter(&content)
+                .and_then(|(frontmatter, _)| extends_key(frontmatter))
+                .is_some_and(|value| value.as_str() == Some("builtin"));
+        Some(if extends {
+            BuiltinRelation::Extends
+        } else if content.trim() == builtin.trim() {
+            BuiltinRelation::Copies
+        } else {
+            BuiltinRelation::Replaces
+        })
+    }
+
+    /// The skill's text. A Loopflow file whose frontmatter says
+    /// `extends: builtin` is the builtin of the same name with the file's body
+    /// appended, so a repository adds its own section and keeps following the
+    /// builtin as it changes. The builtin's frontmatter stands under the
+    /// file's: a key the file sets wins.
     pub fn read(&self) -> Result<String, LoadError> {
-        match &self.path {
-            Some(path) => Ok(crate::observe::read_to_string(path)?),
-            None => Ok(builtins::get_builtin_skill(&self.name)
+        let Some(path) = &self.path else {
+            return Ok(builtins::get_builtin_skill(&self.name)
                 .expect("embedded catalog entry names a builtin")
-                .to_string()),
+                .to_string());
+        };
+        let content = crate::observe::read_to_string(path)?;
+        if self.dialect != SkillDialect::Loopflow {
+            return Ok(content);
+        }
+        let Some((frontmatter, addition)) = split_frontmatter(&content) else {
+            return Ok(content);
+        };
+        match extends_key(frontmatter).as_ref().map(Value::as_str) {
+            None => Ok(content),
+            Some(Some("builtin")) => {
+                let base = self.builtin_text().ok_or_else(|| {
+                    LoadError::InvalidSkill(format!(
+                        "{} extends a builtin, but no builtin skill is named {:?}",
+                        path.display(),
+                        self.name
+                    ))
+                })?;
+                let (inherited, base) = split_frontmatter(base).unwrap_or(("", base));
+                let mut merged = serde_yaml_ng::from_str::<serde_yaml_ng::Mapping>(inherited)
+                    .unwrap_or_default();
+                if let Ok(own) = serde_yaml_ng::from_str::<serde_yaml_ng::Mapping>(frontmatter) {
+                    merged.extend(own);
+                }
+                let frontmatter = serde_yaml_ng::to_string(&merged)
+                    .map_err(|error| LoadError::InvalidSkill(error.to_string()))?;
+                Ok(format!(
+                    "---\n{frontmatter}---\n{}\n\n{}",
+                    base.trim_end(),
+                    addition.trim_start()
+                ))
+            }
+            Some(_) => Err(LoadError::InvalidSkill(format!(
+                "{}: `extends` takes only `builtin`",
+                path.display()
+            ))),
         }
     }
+
+    fn builtin_text(&self) -> Option<&'static str> {
+        builtins::resolve_builtin_skill(&self.name).and_then(builtins::get_builtin_skill)
+    }
+}
+
+fn extends_key(frontmatter: &str) -> Option<Value> {
+    serde_yaml_ng::from_str::<Value>(frontmatter)
+        .ok()?
+        .get("extends")
+        .cloned()
 }
 
 #[derive(Debug)]
@@ -316,6 +386,63 @@ mod tests {
         let path = root.join(relative);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, content).unwrap();
+    }
+
+    #[test]
+    fn a_repository_skill_can_append_to_the_builtin_it_names() {
+        let repo = TempDir::new().unwrap();
+        write(
+            repo.path(),
+            ".lf/skills/gate.md",
+            "---\nextends: builtin\n---\n## Here\n\nRun the local suite first.\n",
+        );
+        write(
+            repo.path(),
+            ".lf/skills/mine.md",
+            "---\nextends: builtin\n---\nNothing to extend.\n",
+        );
+        let catalog = SkillCatalog::load(Some(repo.path()), None, false).unwrap();
+        let builtin = SkillCatalog::load(None, None, false)
+            .unwrap()
+            .load_skill("gate")
+            .unwrap()
+            .content
+            .unwrap();
+        let extended = catalog.load_skill("gate").unwrap().content.unwrap();
+        assert_eq!(
+            extended,
+            format!(
+                "{}\n\n## Here\n\nRun the local suite first.\n",
+                builtin.trim_end()
+            )
+        );
+        let error = catalog.load_skill("mine").unwrap_err().to_string();
+        assert!(error.contains("no builtin skill is named"), "{error}");
+    }
+
+    #[test]
+    fn a_listing_tells_extensions_from_replacements_and_copies() {
+        use crate::skills::listing::BuiltinRelation;
+        let repo = TempDir::new().unwrap();
+        write(
+            repo.path(),
+            ".lf/skills/gate.md",
+            "---\nextends: builtin\n---\n## Here\n",
+        );
+        write(repo.path(), ".lf/skills/qa.md", "Our own QA.\n");
+        write(
+            repo.path(),
+            ".lf/skills/debug.md",
+            loopflow_definitions::builtins::get_builtin_skill("debug").unwrap(),
+        );
+        write(repo.path(), ".lf/skills/mine.md", "Ours alone.\n");
+        let catalog = SkillCatalog::load(Some(repo.path()), None, false).unwrap();
+        let relation = |name: &str| catalog.resolve(name).unwrap().unwrap().builtin_relation();
+        assert_eq!(relation("gate"), Some(BuiltinRelation::Extends));
+        assert_eq!(relation("qa"), Some(BuiltinRelation::Replaces));
+        assert_eq!(relation("debug"), Some(BuiltinRelation::Copies));
+        assert_eq!(relation("mine"), None);
+        assert_eq!(relation("polish"), None);
     }
 
     #[test]

@@ -62,7 +62,6 @@
     "preview": null,
     "transition": null,
     "model": null,
-    "blocked": false,
     "turn": null,
     "raw": false
   },

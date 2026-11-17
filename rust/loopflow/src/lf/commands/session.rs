@@ -223,7 +223,6 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             use loopflow_execution::ops::human_session::moves_bulk::{move_sessions, parse_target};
             let target = parse_target(cli.agent.as_deref())?;
             let filter = loopflow_execution::session::SessionFilter {
-                blocked: selector.blocked,
                 on: selector.on.clone(),
                 repo: if *all {
                     None
@@ -438,7 +437,6 @@ pub(crate) fn list_filter(
     directory: &std::path::Path,
 ) -> anyhow::Result<loopflow_execution::session::SessionFilter> {
     Ok(loopflow_execution::session::SessionFilter {
-        blocked: args.selector.blocked,
         on: args.selector.on.clone(),
         available: args.available,
         raw: !args.no_raw,
@@ -595,14 +593,12 @@ pub(crate) fn bound(id: &str, task: &str, preview: bool) -> anyhow::Result<Sessi
 
 /// The report `lf session move --all --json` prints for the selector and agent.
 pub(crate) fn moved(
-    blocked: bool,
     on: Option<&str>,
     agent: &str,
 ) -> anyhow::Result<loopflow_execution::ops::human_session::moves_bulk::MoveReport> {
     use loopflow_execution::ops::human_session::moves_bulk::{move_sessions, parse_target};
     let target = parse_target(Some(agent))?;
     let filter = loopflow_execution::session::SessionFilter {
-        blocked,
         on: on.map(str::to_owned),
         repo: None,
         ..Default::default()
@@ -708,7 +704,7 @@ async fn list(
                 },
                 place,
                 match &session.account {
-                    Some(account) => format!("{}  on {account}", session.title),
+                    Some(account) => format!("{}  historical account: {account}", session.title),
                     None => session.title.clone(),
                 }
             );

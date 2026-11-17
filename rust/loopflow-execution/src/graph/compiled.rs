@@ -312,10 +312,12 @@ mod tests {
       pass:
         description: Continue
         steps: []
-- step: {name: sample, id: start}
-- loop: start
-- demo
-- loop: start
+- loop:
+    - loop:
+        - step: {name: sample, id: start}
+        - loop-or-next
+    - demo
+    - loop-or-next
 "#,
         )
         .unwrap();
@@ -463,21 +465,25 @@ mod tests {
                 "pursue",
                 &[
                     "kickoff",
+                    "concept-review",
                     "write-docs",
                     "implement",
-                    "concept-review",
                     "sync",
                     "realign",
-                    "loop-or-next",
                     "compress",
                     "qa",
-                    "loop-or-next",
+                    "concept-review",
                     "pr-publish",
                 ],
                 &[],
                 2,
             ),
-            ("deliver", &["gate", "land --wait-and-fix"], &[], 0),
+            (
+                "deliver",
+                &["reflect", "gate", "land --wait-and-fix"],
+                &[],
+                0,
+            ),
             ("vsm-operate", &["s1", "s2", "s3", "s4", "s5"], &[], 0),
         ];
         for (name, labels, interactive, returns) in cases {
@@ -552,19 +558,18 @@ mod tests {
             labels,
             [
                 "kickoff",
+                "concept-review",
                 "write-docs",
                 "implement",
-                "concept-review",
                 "sync",
                 "realign",
-                "loop-or-next",
                 "compress",
                 "qa",
-                "loop-or-next",
+                "concept-review",
                 "pr-publish",
             ]
         );
-        let implement = compiled.steps[2].key;
+        let implement = compiled.steps[3].key;
         let returns: Vec<_> = compiled
             .steps
             .iter()
@@ -573,8 +578,8 @@ mod tests {
         assert_eq!(
             returns,
             [
-                (compiled.steps[6].key, &implement),
-                (compiled.steps[9].key, &implement)
+                (compiled.steps[5].key, &implement),
+                (compiled.steps[8].key, &implement)
             ]
         );
         // Review and landing are the conversation's to launch, not this Graph's.
@@ -583,7 +588,7 @@ mod tests {
             .steps
             .iter()
             .all(|node| node.kind != GraphNodeKind::Op || node.label == "sync"));
-        assert_eq!(compiled.steps[4].sources, ["pursue", "refresh"]);
+        assert_eq!(compiled.steps[4].sources, ["pursue", "build"]);
     }
 
     #[test]

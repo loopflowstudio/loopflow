@@ -235,12 +235,10 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     /// Provider harness recorded on the Session's capture manifest; nil when the
     /// capture is on another Machine or its manifest is unreadable.
     public let provider: String?
-    /// The login its conversation is pinned to; nil for a shared or unrouted one.
+    /// Historical attribution: the saved login its conversation last recorded; never the current native login.
     public let account: String?
     /// The model its current input launched with, when one was named.
     public let model: String?
-    /// Its next message would fail: the login it would use cannot take its model now.
-    public let blocked: Bool
     public let cwd: String
     public let state: SessionState
     public let readySummary: String?
@@ -281,7 +279,7 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, interactive, work, workspace, title, detail, provider, account, model, blocked, cwd, state, availability
+        case id, interactive, work, workspace, title, detail, provider, account, model, cwd, state, availability
         case preview, transition
         case programStatus = "program_status"
         case agentProcessId = "agent_process_id"
@@ -426,7 +424,6 @@ extension SessionRecord {
         try values.encode(provider, forKey: .provider)
         try values.encode(account, forKey: .account)
         try values.encode(model, forKey: .model)
-        try values.encode(blocked, forKey: .blocked)
         try values.encode(cwd, forKey: .cwd)
         try values.encode(state, forKey: .state)
         try values.encode(readySummary, forKey: .readySummary)
@@ -460,7 +457,6 @@ extension SessionRecord {
         provider = try values.decodeIfPresent(String.self, forKey: .provider)
         account = try values.decodeIfPresent(String.self, forKey: .account)
         model = try values.decodeIfPresent(String.self, forKey: .model)
-        blocked = try values.decode(Bool.self, forKey: .blocked)
         cwd = try values.decode(String.self, forKey: .cwd)
         state = try values.decode(SessionState.self, forKey: .state)
         readySummary = try values.decodeIfPresent(String.self, forKey: .readySummary)

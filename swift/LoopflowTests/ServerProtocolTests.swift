@@ -274,19 +274,8 @@ struct ServerProtocolTests {
                                                       continueSync: false, abort: false, adopt: false)),
             ("checkout_create", "create-1", .checkoutCreate(directory: "/repo", name: "spike", preview: false,
                                                             persistent: false)),
-            ("account_disconnect", "disconnect-1", .accountDisconnect(provider: "claude", email: "maya@example.com")),
-            ("account_connect", "connect-1", .accountConnect(provider: "codex", email: "maya@example.com",
-                                                             chromeProfile: "Profile 1", import: false, apiKey: false)),
-            ("account_set", "set-1", .accountSet(provider: "codex", email: "maya@example.com", loginEmail: nil,
-                                                 plan: nil, clearPlan: false, paidThrough: nil,
-                                                 clearPaidThrough: false, clearCooldown: true, chromeProfiles: [],
-                                                 clearChromeProfiles: false)),
-            ("account_redeem_reset", "redeem-1", .accountRedeemReset(provider: "codex", email: "maya@example.com",
-                                                                     idempotencyKey: "4b0e1f2a-9c3d-4e5f-8a6b-7c8d9e0f1a2b",
-                                                                     creditId: nil)),
-            ("account_use", "use-1", .accountUse(login: "claude=maya@example.com")),
-            ("account_pause", "pause-1", .accountPause(login: "claude=maya@example.com")),
-            ("account_unpause", "unpause-1", .accountUnpause(login: "claude=maya@example.com")),
+            ("account_disconnect", "disconnect-1", .accountDisconnect(provider: "linear")),
+            ("account_connect", "connect-1", .accountConnect(provider: "linear", chromeProfile: "Profile 1", apiKey: false)),
             ("graph_run", "graph-1", .graphRun(directory: "/repo", name: "code", message: "Serve the graph namespace",
                                                agent: "claude")),
             ("skill_run", "skill-1", .skillRun(directory: "/repo", name: "debug", message: nil, agent: nil)),
@@ -375,31 +364,22 @@ struct ServerProtocolTests {
         guard case .response(_, _, .array(let entries)) = try answer("skill_entries") else {
             Issue.record("Missing skill.list result"); return
         }
-        #expect(entries.count == 2)
-        #expect(ServedWrite.accountUse(login: "claude=maya@example.com").cwd == "/")
+        #expect(entries.count == 3)
+        // A repository skill that extends its builtin says so; the others carry no mark.
+        let marks = entries.map { entry -> JSONValue? in
+            if case .object(let fields) = entry { return fields["builtin"] }
+            return nil
+        }
+        #expect(marks == [.null, .string("extends"), .null])
+        #expect(ServedWrite.accountDisconnect(provider: "linear").cwd == "/")
         let accounts = ServerClientMessage.request(id: "accounts-1",
-                                                   operation: .read(.accountList(target: "claude", cached: true)), select: nil, requestID: nil)
+            operation: .read(.accountList(target: "linear")), select: nil, requestID: nil)
         #expect(try encoded(accounts) == value("account_list"))
-        let route = ServerClientMessage.request(id: "route-1",
-                                                operation: .read(.accountNext(directory: "/repo", repo: nil,
-                                                                               default: false, agent: nil)), select: nil, requestID: nil)
-        #expect(try encoded(route) == value("account_next_request"))
-        let fable = ServedRead.accountNext(directory: "/repo", repo: nil, default: false, agent: "claude:fable")
-        #expect(fable.argv == ["account", "next", "--agent", "claude:fable", "--json"])
-        let fableRoute = ServerClientMessage.request(id: "fable-route", operation: .read(fable), select: nil, requestID: nil)
-        guard case .object(let request) = try encoded(fableRoute),
-              case .object(let operation) = request["operation"] else {
-            Issue.record("Missing account.next operation"); return
-        }
-        #expect(operation["agent"] == .string("claude:fable"))
         guard case .response(_, _, .object(let report)) = try answer("account_report") else {
-            Issue.record("Missing account.list result"); return
+            Issue.record("Missing service auth result"); return
         }
-        #expect(report["browser"] == .null)
-        guard case .response(_, _, .object(let redeemed)) = try answer("account_redeemed") else {
-            Issue.record("Missing account.redeem_reset result"); return
-        }
-        #expect(redeemed["after"] == .null)
+        #expect(report["accounts"] != nil)
+
     }
 
     @Test func aWaitEndsAfterTheReadingThatReachedIt() throws {

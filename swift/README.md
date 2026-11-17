@@ -1189,10 +1189,12 @@ issue; a test blocked on a child process still holds the run.
 CI passes `--skip-build` after its separate Rust and Swift builds so compilation
 does not consume the test deadline.
 
-On a pull request the Swift tests get 5 minutes after the build (161 s on
-2026-10-22); the merge queue and main keep a 20-minute hang guard. A PR that makes
-the suite slower fails on its own PR: make the slow test fast or share its setup,
-and raise the budget only with a measured reason.
+On a pull request CI runs two complementary groups after the build: transport/CLI
+fixtures and the remaining model/view tests. Each gets six minutes; main keeps a
+20-minute hang guard per group. Both remain under the required `swift-test` check.
+The same suite expression supplies `--filter` and `--skip`, so every test runs once.
+The local command runs both groups together. A PR that makes a group slower fails
+on its own PR: make the slow test fast or share its setup.
 
 After the tests, `swift-test` launches the debug app it built and waits for it
 to quit, the same check the release package runs:
@@ -1211,10 +1213,9 @@ frame the app is waiting in (for #1811's hang, `uiTestSnapshot`).
 
 Failed Swift CI runs write the unfinished and slowest tests to the job summary
 (`scripts/swift_test_report.py`) and retain a `swift-tests-<run>-<attempt>`
-artifact for seven days with the toolchain, output log, and Swift Testing event
-stream. Tests run in parallel, so the last test the log shows starting is not
-necessarily the stuck one. SwiftPM buffers console output, so silence alone does
-not establish that test execution never began.
+artifact for seven days with the toolchain and each group's output log and Swift
+Testing event stream. Tests run serially within each group. SwiftPM buffers
+console output, so silence alone does not establish that test execution never began.
 
 The Swift transport suite launches `target/debug/lf` against a temporary Machine.
 Build it before running the suite; an existing developer build can hide a missing

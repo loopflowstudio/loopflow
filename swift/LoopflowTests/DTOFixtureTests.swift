@@ -557,7 +557,6 @@ struct DTOFixtureTests {
         #expect(agent.agentSessionID == "conversation")
         #expect(agent.osStartedAt == 1790640000)
         #expect(agent.parentLfProcessId == lf.id)
-        #expect(agent.outcome == nil)
         #expect(page.next?.id == agent.id.rawValue)
         #expect(try JSONDecoder().decode(ProcessPage.self, from: JSONEncoder().encode(page)) == page)
         #expect(throws: DecodingError.self) {

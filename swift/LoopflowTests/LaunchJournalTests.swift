@@ -4,6 +4,8 @@ import Foundation
 import Testing
 @testable import LoopflowMac
 
+private final class LaunchJournalBundleMarker: NSObject {}
+
 @Suite("Launch journal")
 struct LaunchJournalTests {
     @Test @MainActor
@@ -21,11 +23,43 @@ struct LaunchJournalTests {
     }
 
     @Test @MainActor
-    func startupIntervalCanBeginBeforeAppKit() {
-        #expect(NSApp == nil)
-        Perf.begin(.coldStart, "startup", id: "startup-before-appkit")
-        #expect(Perf.isPending(.coldStart))
-        Perf.end(.coldStart, id: "startup-before-appkit", inputReady: false)
+    func startupIntervalCanBeginBeforeAppKit() async throws {
+        let variable = "LOOPFLOW_STARTUP_INTERVAL_PROOF"
+        if let proof = ProcessInfo.processInfo.environment[variable] {
+            #expect(NSApp == nil)
+            Perf.begin(.coldStart, "startup", id: "startup-before-appkit")
+            #expect(Perf.isPending(.coldStart))
+            Perf.end(.coldStart, id: "startup-before-appkit", inputReady: false)
+            try Data().write(to: URL(fileURLWithPath: proof))
+            return
+        }
+
+        // Earlier view tests may have initialized AppKit in this process.
+        _ = NSApplication.shared
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let proof = directory.appendingPathComponent("completed")
+        let child = Process()
+        child.executableURL = Bundle.main.executableURL
+        child.arguments = [
+            "--test-bundle-path", try #require(Bundle(for: LaunchJournalBundleMarker.self).executablePath),
+            "--testing-library", "swift-testing",
+            "--filter", "LaunchJournalTests/startupIntervalCanBeginBeforeAppKit", "--no-parallel",
+        ]
+        child.environment = ProcessInfo.processInfo.environment.merging(
+            [variable: proof.path], uniquingKeysWith: { _, new in new })
+        let status: Int32 = try await withCheckedThrowingContinuation { exited in
+            child.terminationHandler = { exited.resume(returning: $0.terminationStatus) }
+            do {
+                try child.run()
+            } catch {
+                child.terminationHandler = nil
+                exited.resume(throwing: error)
+            }
+        }
+        #expect(status == 0)
+        #expect(FileManager.default.fileExists(atPath: proof.path))
     }
 
     @Test("A launch records each milestone once, with the app version and no arguments")

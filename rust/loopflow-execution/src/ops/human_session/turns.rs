@@ -40,6 +40,7 @@ fn handed_back(turn: &Option<SessionTurn>) -> bool {
 /// The transcript's last turn; ended where Loopflow recorded the end of the
 /// same turn when the transcript shows none.
 fn current(store: &SqliteStore, session: &mut SessionRecord) -> Result<()> {
+    session.turn = None;
     let Some(conversation) = store.current_conversation(session.id.as_str())? else {
         return Ok(());
     };
@@ -200,7 +201,6 @@ fn record(
         provider: Some(provider),
         account: None,
         model: turn.as_ref().and_then(|turn| turn.model.clone()),
-        blocked: false,
         cwd: cwd.display().to_string(),
         state: SessionState::Active,
         ready_summary: None,
@@ -256,6 +256,18 @@ mod tests {
                 Some(SessionAvailability::Available)
             );
         }
+    }
+
+    #[test]
+    fn an_unavailable_transcript_does_not_retain_a_previous_turn() {
+        let home = tempfile::tempdir().unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let mut sessions = [raw(turn(TurnState::Running))];
+
+        read(&store, &mut sessions).unwrap();
+
+        assert_eq!(sessions[0].turn, None);
+        assert_eq!(sessions[0].availability, None);
     }
 
     #[test]

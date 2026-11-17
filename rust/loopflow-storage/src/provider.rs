@@ -87,7 +87,7 @@ impl Provider {
     pub fn supports_automatic_refresh(self) -> bool {
         matches!(
             self,
-            Self::GitHub | Self::Codex | Self::Linear | Self::Asana | Self::Notion
+            Self::GitHub | Self::Linear | Self::Asana | Self::Notion
         )
     }
 }

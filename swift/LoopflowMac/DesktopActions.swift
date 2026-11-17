@@ -576,15 +576,10 @@ struct DesktopAction {
                             repository: context.model.repoPath, liveSessions: context.model.liveSessionCount,
                             owner: workspace.performanceOwner) {
                 Perf.acknowledged(.reconnect, id: id, owner: workspace.performanceOwner)
-                Perf.userAction(.reconnect, scenario: "refresh_to_typing", id: id,
-                            repository: context.model.repoPath, liveSessions: context.model.liveSessionCount,
-                            owner: workspace.performanceOwner) {
-                Perf.acknowledged(.reconnect, id: id, owner: workspace.performanceOwner)
                 Task { @MainActor in
                     await context.workspaces.refreshSession(id, in: workspace)
                     Perf.reconnected(id: id, owner: workspace.performanceOwner)
                 }
-            }
             }
             return DesktopActionOutcome(pane: pane.id, tab: nil)
         },

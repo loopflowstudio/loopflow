@@ -542,6 +542,54 @@ fn refused_signs_in_again_only_the_machines_that_signed_out_or_refused_a_launch(
 }
 
 #[test]
+fn services_that_sign_in_here_only_never_reach_another_machine() {
+    let fixture = Machines::new();
+    assert_success(&fixture.run(&["machine", "add", "mini"]));
+    let reached = fixture.root.path().join("ssh-reached");
+    executable(
+        &fixture.root.path().join("bin/ssh"),
+        &format!("#!/bin/sh\ntouch '{}'\nexit 1\n", reached.display()),
+    );
+    let output = fixture.run(&["machine", "login", "asana", "mini"]);
+    assert!(!output.status.success());
+    let shown = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        shown.contains("Asana signs in on this Machine only; run `lf machine login asana` on mini"),
+        "{shown}"
+    );
+    assert!(!reached.exists());
+
+    let output = fixture.run(&[
+        "ondemand",
+        "add",
+        "quote",
+        "--provider",
+        "daytona",
+        "--vcpus",
+        "4",
+        "--memory-gb",
+        "8",
+        "--max",
+        "1",
+        "--max-usd-per-hour",
+        "1",
+        "--logins",
+        "claude,doppler",
+    ]);
+    assert!(!output.status.success());
+    let shown = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        shown.contains("Doppler signs in on this Machine only"),
+        "{shown}"
+    );
+    let listed = fixture.run(&["ondemand", "list"]);
+    assert!(
+        !String::from_utf8_lossy(&listed.stdout).contains("quote"),
+        "{listed:?}"
+    );
+}
+
+#[test]
 fn a_refusing_approver_leaves_the_machine_signed_out() {
     let fixture = Machines::new();
     fake_codex(&fixture.root.path().join("remote/.local/bin/codex"));

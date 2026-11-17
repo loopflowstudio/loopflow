@@ -40,6 +40,7 @@ pub async fn login(
     if here(machine) && !matches!(provider, Provider::Claude | Provider::Codex) {
         return crate::provider_auth::operations::connect(provider, chrome_profile, api_key).await;
     }
+    require_reach(provider, &name(machine))?;
     let approver = approver(provider, chrome_profile)?;
     match provider {
         Provider::Claude => claude(machine, approver.as_ref(), batch),
@@ -48,6 +49,33 @@ pub async fn login(
             crate::machine::credentials::connect(machine, provider, approver.as_ref(), batch).await
         }
     }
+}
+
+/// Whether `lf machine login` can sign another Machine in to `provider`:
+/// the agents run their own login there, and GitHub, Linear and OpenCode send
+/// a credential. Asana, Notion and Doppler sign in here only.
+pub fn reaches_other_machines(provider: Provider) -> bool {
+    matches!(
+        provider,
+        Provider::Claude
+            | Provider::Codex
+            | Provider::GitHub
+            | Provider::Linear
+            | Provider::OpenCodeZen
+    )
+}
+
+/// Refuses, before anything connects to it, to sign `machine` in to a
+/// provider that signs in here only.
+pub fn require_reach(provider: Provider, machine: &str) -> Result<()> {
+    if !reaches_other_machines(provider) {
+        bail!(
+            "{} signs in on this Machine only; run `lf machine login {}` on {machine}",
+            provider.display_name(),
+            provider.as_str(),
+        );
+    }
+    Ok(())
 }
 
 fn claude(machine: &Machine, approver: Option<&Approver>, batch: bool) -> Result<()> {

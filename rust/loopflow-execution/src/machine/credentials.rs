@@ -42,7 +42,7 @@ enum Credential {
 const LINEAR_ACCESS_HOURS: f64 = 24.0;
 const _: () = assert!(loopflow_storage::rental::MAX_HOURS <= LINEAR_ACCESS_HOURS);
 
-pub async fn connect(
+pub(crate) async fn connect(
     machine: &Machine,
     provider: Provider,
     approver: Option<&crate::config::placement::Approver>,
@@ -124,7 +124,7 @@ pub async fn connect(
             };
             Credential::OpenCode { login, entry }
         }
-        _ => bail!("machine login supports github, opencode and linear"),
+        _ => unreachable!("login::reaches_other_machines admits only these here"),
     };
     send(machine, &credential)?;
     println!(

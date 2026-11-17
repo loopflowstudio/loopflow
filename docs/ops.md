@@ -362,7 +362,9 @@ lf machine end code-1                                # give a rented machine bac
 ```
 
 A rented machine is signed in as it is prepared, once per provider, to the
-template's `--logins` or every provider signed in here. With
+template's `--logins` or every provider signed in here that reaches another
+Machine: Claude, Codex, GitHub, Linear and OpenCode. Asana, Notion and Doppler
+sign in on each Machine itself. With
 [approvers](subscriptions.md#choose-who-approves) set to a command, that needs
 no one present.
 

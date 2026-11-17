@@ -173,6 +173,14 @@ pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
             max_usd_per_hour,
             logins,
         } => {
+            if let Some(provider) = logins.iter().find(|provider| {
+                !loopflow_execution::machine::login::reaches_other_machines(**provider)
+            }) {
+                return Err(anyhow!(
+                    "{} signs in on this Machine only; a rental cannot be signed in to it",
+                    provider.display_name()
+                ));
+            }
             let ondemand = OnDemand {
                 name: name.clone(),
                 provider: *provider,
@@ -740,26 +748,18 @@ fn prepare(
     batch: bool,
 ) -> anyhow::Result<()> {
     use loopflow_execution::machine::login;
-    use loopflow_execution::provider_auth::Provider;
-    let mut named: Vec<Provider> = if logins.is_empty() {
+    let logins = if logins.is_empty() {
         let here = runtime.block_on(loopflow_execution::machine::connection::local_machine())?;
-        runtime
-            .block_on(login::logins(&here))?
-            .into_iter()
-            .filter(|row| row.state == login::LoginState::SignedIn)
-            .map(|row| row.provider)
-            .collect()
+        sign_in_order(
+            runtime
+                .block_on(login::logins(&here))?
+                .into_iter()
+                .filter(|row| row.state == login::LoginState::SignedIn)
+                .map(|row| row.provider),
+        )
     } else {
-        logins.to_vec()
+        sign_in_order(logins.iter().copied())
     };
-    // GitHub first: the checkout below clones with it.
-    named.sort_by_key(|provider| *provider != Provider::GitHub);
-    let mut logins = Vec::new();
-    for provider in named {
-        if !logins.contains(&provider) {
-            logins.push(provider);
-        }
-    }
     let machine = runtime.block_on(loopflow_execution::machine::connection::resolve_target(
         label, false,
     ))?;
@@ -780,6 +780,24 @@ fn prepare(
         return Err(anyhow!("could not clone {origin} on {label}"));
     }
     Ok(())
+}
+
+/// The providers a rental signs in to, once each: those that reach another
+/// Machine, GitHub first because the checkout clones with it.
+fn sign_in_order(
+    providers: impl IntoIterator<Item = loopflow_execution::provider_auth::Provider>,
+) -> Vec<loopflow_execution::provider_auth::Provider> {
+    use loopflow_execution::provider_auth::Provider;
+    let mut order = Vec::new();
+    for provider in providers {
+        if loopflow_execution::machine::login::reaches_other_machines(provider)
+            && !order.contains(&provider)
+        {
+            order.push(provider);
+        }
+    }
+    order.sort_by_key(|provider| *provider != Provider::GitHub);
+    order
 }
 
 /// The origin, and the remote script that clones it and binds `repository`.
@@ -843,7 +861,26 @@ pub fn end(label: &str, force: bool) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::checkout_script;
+    use super::{checkout_script, sign_in_order};
+    use loopflow_execution::provider_auth::Provider;
+
+    #[test]
+    fn a_rental_signs_in_once_to_each_provider_that_reaches_it_github_first() {
+        let signed_in_here = [
+            Provider::Claude,
+            Provider::Asana,
+            Provider::Linear,
+            Provider::Notion,
+            Provider::GitHub,
+            Provider::Doppler,
+            Provider::Claude,
+        ];
+        assert_eq!(
+            sign_in_order(signed_in_here),
+            [Provider::GitHub, Provider::Claude, Provider::Linear]
+        );
+    }
+
     #[test]
     fn a_worktree_checkout_binds_its_tasks_repository_on_a_fresh_home() {
         let _env = loopflow_execution::journal::test_env_lock();

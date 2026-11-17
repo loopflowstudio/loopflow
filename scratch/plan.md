@@ -363,7 +363,15 @@ checks on both ends; LOO-913's fallback and wait rules.
    `ServerProtocolTests` (CI); a real `lf machine login claude mini` and
    `codex mini` (a person at gate).
 
-## Remaining: one set of providers that reach other Machines (concept review, as built)
+## Built: one set of providers that reach other Machines (concept review)
+
+Built as below. Taught: `resolve_target` asks the Machine's lf version over
+SSH, so the check inside `login::login` came too late for "nothing reaches
+SSH"; `login::require_reach` also runs on each named Machine before the CLI
+resolves it. Tests: `machine_commands::services_that_sign_in_here_only_never_reach_another_machine`
+and `rental::tests::a_rental_signs_in_once_to_each_provider_that_reaches_it_github_first`.
+
+### As planned
 
 `lf machine login <provider> <machine>` parses eight providers, but only
 Claude, Codex, GitHub, Linear and OpenCode reach another Machine; Asana,

@@ -89,6 +89,9 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
                 }
                 targets
             } else {
+                for machine in machines {
+                    login::require_reach(*provider, machine)?;
+                }
                 named_or_here(machines).await
             };
             return each(targets, "signed in", |machine| async move {

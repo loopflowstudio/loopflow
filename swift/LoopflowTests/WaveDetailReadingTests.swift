@@ -17,22 +17,9 @@ struct WaveDetailReadingTests {
             sourceWindowStart: "2026-08-13T18:00:00Z",
             sourceWindowEnd: "2026-08-20T18:00:00Z"
         ))
-        reading.recordFailure(RegistryQueryError("registry busy"))
+        reading.clear()
 
         #expect(reading.snapshot == nil)
-        #expect(reading.errorMessage == "Wave status unavailable: registry busy")
-    }
-
-    @Test("a successful refresh clears the stale warning")
-    func successfulRefreshClearsWarning() throws {
-        let detail = try planningWave()
-        var reading = WaveDetailReading()
-        reading.recordFailure(RegistryQueryError("registry busy"))
-
-        reading.update(detail)
-
-        #expect(reading.errorMessage == nil)
-        #expect(reading.snapshot?.wave.id == "wave-1")
     }
 
     @Test("a readable status with no chapter does not revive cached KRs")
@@ -47,9 +34,8 @@ struct WaveDetailReadingTests {
         #expect(reading.plan(cached: cached).currentProject == nil)
         #expect(reading.plan(cached: cached).objective == current.workMap.objective)
 
-        reading.recordFailure(RegistryQueryError("registry unavailable"))
+        reading.clear()
         #expect(reading.plan(cached: cached) == cached)
-        #expect(reading.errorMessage != nil)
     }
 
     @Test("Mac metric rows render the shared DTO fields without recomputing evidence")

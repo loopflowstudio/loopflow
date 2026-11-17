@@ -21,8 +21,8 @@ enum WorkFixture {
                 )
             case .mockWaves:
                 let fixture = try loadRoadmap(sourceFile: sourceFile)
-                let reading: WorkReading<RoadmapSnapshot>
-                let workActivity: WorkReading<WorkActivitySnapshot>
+                let reading: Reading<RoadmapSnapshot>
+                let workActivity: Reading<WorkActivitySnapshot>
                 switch MockWaveFixture.detailState {
                 case .loading:
                     reading = .loading

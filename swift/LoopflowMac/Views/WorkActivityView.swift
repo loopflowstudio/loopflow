@@ -10,9 +10,6 @@ struct WorkActivityView: View {
         VStack(spacing: 0) {
             header
             Divider()
-            if let reason = model.workActivity.errorMessage {
-                evidenceBanner(reason)
-            }
             content
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -65,7 +62,7 @@ struct WorkActivityView: View {
 
     @ViewBuilder
     private var content: some View {
-        if model.workActivity.value == nil, model.workActivity.errorMessage == nil {
+        if model.workActivity.isLoading {
             ProgressView("Reading Activity…")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .accessibilityIdentifier("loopflow-activity-loading")
@@ -192,18 +189,6 @@ struct WorkActivityView: View {
 
     private func exactTime(_ time: Date) -> String {
         time.formatted(date: .abbreviated, time: .shortened)
-    }
-
-    private func evidenceBanner(_ reason: String) -> some View {
-        Label(reason, systemImage: "exclamationmark.triangle.fill")
-            .font(Typography.caption(9))
-            .foregroundStyle(palette.warning)
-            .lineLimit(2)
-            .textSelection(.enabled)
-            .padding(.horizontal, Spacing.lg)
-            .padding(.vertical, Spacing.sm)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(palette.warning.opacity(0.10))
     }
 
 }

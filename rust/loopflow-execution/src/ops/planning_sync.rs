@@ -66,9 +66,46 @@ enum Exchange {
     Publish { wait: bool },
 }
 
-/// A short command saves first, then makes one foreground exchange attempt.
+/// A short command saves first, then makes one exchange attempt. A served
+/// command answers first and the attempt runs after its reply; pending exports
+/// are durable rows, so a server that stops before it runs loses nothing.
 /// Failure leaves its successful local mutation and durable pending state intact.
 pub(crate) async fn sync_after_save(store: &Store, repo: &str) {
+    let deferred = repo.to_owned();
+    if crate::journal::request::after_reply(move || {
+        after_reply(|store| async move { sync_saved(&store, &deferred).await })
+    })
+    .is_none()
+    {
+        return;
+    }
+    sync_saved(store, repo).await
+}
+
+/// Run `sync` on the Machine's store once a served command has answered.
+pub(crate) fn after_reply<F, Fut>(sync: F)
+where
+    F: FnOnce(crate::store::SharedStore) -> Fut,
+    Fut: Future<Output = ()>,
+{
+    let finished = tokio::runtime::Runtime::new()
+        .map_err(message)
+        .and_then(|runtime| {
+            runtime.block_on(async {
+                let store = crate::store::open_existing_store()
+                    .await
+                    .map_err(message)?
+                    .ok_or_else(|| message("no Loopflow store on this Machine"))?;
+                sync(Arc::new(store)).await;
+                Ok(())
+            })
+        });
+    if let Err(error) = finished {
+        tracing::warn!(%error, "planning synchronization after reply did not start");
+    }
+}
+
+async fn sync_saved(store: &Store, repo: &str) {
     let attempt = async {
         let config = crate::config::load_config(Some(Path::new(repo)))
             .map_err(message)?

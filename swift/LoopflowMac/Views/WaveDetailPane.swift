@@ -4,7 +4,6 @@ import Loopflow
 
 struct WaveDetailReading {
     private(set) var snapshot: WaveRoadmap?
-    private(set) var errorMessage: String?
 
     func plan(cached: WavePlan) -> WavePlan {
         guard let snapshot else { return cached }
@@ -13,17 +12,11 @@ struct WaveDetailReading {
 
     mutating func update(_ snapshot: WaveRoadmap) {
         self.snapshot = snapshot
-        errorMessage = nil
     }
 
-    mutating func recordFailure(_ error: Error) {
-        snapshot = nil
-        errorMessage = "Wave status unavailable: \(error.localizedDescription)"
-    }
-
+    /// The Wave has no live reading; the planning reading's Notice says why.
     mutating func clear() {
         snapshot = nil
-        errorMessage = nil
     }
 }
 
@@ -138,7 +131,6 @@ private struct WavePlanView: View {
                         onOpenTask: onOpenTask
                     )
                 }
-                liveStatusFooter
             }
             .padding(Spacing.xl)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -162,7 +154,7 @@ private struct WavePlanView: View {
             historyNow = Date()
             reading.update(snapshot)
         } else {
-            reading.recordFailure(RegistryQueryError(streamed.reason ?? "Wave status unavailable"))
+            reading.clear()
         }
         isAwaitingDetail = false
     }
@@ -278,35 +270,7 @@ private struct WavePlanView: View {
                 WorkSectionHeading("Tasks")
                 Text("Task status unavailable.").foregroundStyle(palette.textSecondary)
             }
-            ForEach(reading.snapshot?.unavailableTasks ?? [], id: \.taskId) { task in
-                Text("\(task.taskIdentifier): \(task.reason) · \(task.recovery)")
-                    .foregroundStyle(palette.warning)
-            }
         }.accessibilityIdentifier("wave-tasks")
-    }
-
-    /// Live-status failures are operational detail, not primary hierarchy: a
-    /// quiet footer says the authored plan is showing cached and hides the raw
-    /// reason behind disclosure. Volatile status and metrics never survive a
-    /// failed refresh; the plan above still renders from the cached `WavePlan`.
-    @ViewBuilder
-    private var liveStatusFooter: some View {
-        if let errorMessage = reading.errorMessage {
-            DisclosureGroup {
-                Text(errorMessage)
-                    .font(Typography.caption(10))
-                    .foregroundStyle(palette.textSecondary)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, Spacing.xxs)
-            } label: {
-                Label("Showing cached plan · live status unavailable", systemImage: "arrow.triangle.2.circlepath")
-                    .font(Typography.caption(10))
-                    .foregroundStyle(palette.textSecondary)
-            }
-            .tint(palette.textSecondary)
-            .accessibilityIdentifier("wave-live-status-footer")
-        }
     }
 
     private func applyMockDetail() {

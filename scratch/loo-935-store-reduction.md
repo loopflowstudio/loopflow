@@ -115,3 +115,21 @@ state; the file is not rewritten.
 - QA: the two `#[ignore]` installed-host tests in `work_open_tests.rs` now expect one Task Session and a Task-view-only arrival; Rex and Herdr pass with `LOOPFLOW_TEST_REX`/`LOOPFLOW_TEST_HERDR` (Rex misses its 2 s answer at load ~500).
 - Split: `nextest -p loopflow-storage --lib` revisions/task_ownership/migration_runner/rentals/canonical_ids/query_plans (172), `cargo clippy --all-targets -- -D warnings`, `pytest test_check_migrations.py test_due_removals.py` (29), `schema_page.py --check`: pass. After merging ffb29c6b29 (`task_summaries.sql`), `check_migrations.py` and `schema_page.py --check`: pass.
 - Verify: `uv run python scripts/due_removals.py install` on the Machine that runs Tasks.
+
+## lf workspace folds into lf open (2026-11-16)
+
+Jack Heart, word for word: "i think workspace should just be for waves and repos
+now", "and honesrly workspace should be combined w open fr that reason", "do it
+here". Asked what `lf open --wave product` shows, the answer picked:
+"Conversation; overview by flag".
+
+- `lf workspace` is deleted, no alias. Everything it did moves to `lf open`.
+- `lf open --task X` is unchanged: the Task's conversation (`--diff` adds Changes).
+- `lf open --wave X`, or from a repository/Wave checkout, still attaches that
+  scope's conversation. `--workspace` instead opens the
+  overview; Jack Heart named it: "--workspace". It opens started, unfinished Tasks as tabs, Desktop's board, Rex's follow
+  tab. A Task has no overview.
+- `--available` and `--no-focus` move to `lf open`.
+- Update every caller (Swift, skills, docs, `docs/workspaces.md`, tests,
+  `documented_commands`), and list the removed command and new flags under
+  User interface changes in the PR body.

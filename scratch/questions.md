@@ -6,6 +6,7 @@
 - Jack Heart: "we can drop the thing where lf open does anything other than
   just open the task session in other surfaces."
 - Jack Heart: "we dont need to try to copy our desktop layouts".
+- Jack Heart: "i think workspace should just be for waves and repos now", "and honesrly workspace should be combined w open fr that reason", "do it here"; Wave open: "Conversation; overview by flag". See the lf workspace section of loo-935-store-reduction.md.
 - Jack Heart: "lets split the PR" (drops move to a staged contract; see the Split section of loo-935-store-reduction.md).
 
 ## Picks made headless

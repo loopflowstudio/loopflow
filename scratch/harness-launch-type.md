@@ -21,7 +21,8 @@ required in the type; a fifth harness is one file.
 LOO-913 (#1953, which removes account routing) is on main at 4a0691a9a0 and
 merged into this branch. Add no account selection back.
 
-#1955 (528ccd8eda) is merged into this checkout. `native_exit::record_exit`
+Main is merged through ffb29c6b29 (#1959, #1961; neither touches harness,
+transport or agent code). #1955 (528ccd8eda) is merged into this checkout. `native_exit::record_exit`
 uses main's `Result<()>` body with `&Admitted`; native interruption no longer
 reads a stored AgentProcess outcome. Main also supplies `PromptBuild::skill_version`.
 Earlier merge analysis is in b9542ecef5:scratch/harness-launch-type.md.
@@ -402,7 +403,7 @@ behave exactly as before.
   harnesses. The launch matrix passes and names each cell.
 - This prints only `HarnessKind::parse`/`as_str` and `#[cfg(test)]` code:
   `rg -n --type rust '(==|!=|=>)\s*"(claude|codex|opencode|pi)"|"(claude|codex|opencode|pi)"\s*(==|!=|=>|\|)' rust/*/src -g '!*test*'`
-  (83 non-test comparisons at 470da475a1; 79 at d49e0e16f9).
+  (83 non-test comparisons at 470da475a1; 79 at 2100785981).
 - `rg -n 'fn run_interactive|ProviderInvocation|SessionCommand\b|session_attachment: Option|holder: crate::session::Holder' rust/loopflow-execution/` prints nothing.
   The unrelated Clap `loopflow::lf::SessionCommand` remains.
 - `docs/dev/codebase.md` "Add a provider" says: add `<name>.rs`

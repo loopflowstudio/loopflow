@@ -197,7 +197,7 @@ fn subscription_writer() {
         let delta = meter::snapshot().since(before);
         cpu += delta.user_ms + delta.system_ms;
         let (receipts, payload_bytes): (i64, i64) = store.conn.lock().unwrap().query_row(
-            "SELECT count(*),coalesce(sum(length(CAST(payload AS BLOB))),0) FROM session_events WHERE session_id='session-127' AND kind='observed'",
+            "SELECT count(*),coalesce(sum(length(CAST(payload AS BLOB))),0) FROM history.session_history WHERE session_id='session-127' AND kind='observed'",
             [], |row| Ok((row.get(0)?, row.get(1)?)),
         ).unwrap();
         assert_eq!(receipts as u64, count);

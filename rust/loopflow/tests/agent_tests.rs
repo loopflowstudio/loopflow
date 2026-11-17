@@ -658,7 +658,15 @@ while read -r line; do :; done
         revoked.cooldown_reason.as_deref(),
         Some("token_invalidated")
     );
-    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    let store = home.path().join("loopflow.db");
+    let db = rusqlite::Connection::open(&store).unwrap();
+    db.execute(
+        "ATTACH ?1 AS history",
+        [loopflow_storage::history::history_path(&store)
+            .to_string_lossy()
+            .as_ref()],
+    )
+    .unwrap();
     let agents = db.prepare(
         "SELECT id,agent_session_id,parent_lf_process_id,completed_at,spawn_state FROM processes WHERE kind='agent' ORDER BY rowid"
     ).unwrap().query_map([], |row| Ok((
@@ -682,7 +690,10 @@ while read -r line; do :; done
     // The shared home carries the conversation on to the fallback login.
     assert_eq!(thread, "thread-revoked");
     let observations = db
-        .prepare("SELECT payload FROM session_events WHERE session_id=?1 ORDER BY seq")
+        .prepare(
+            "SELECT payload FROM session_events WHERE session_id=?1
+             UNION ALL SELECT payload FROM history.session_history WHERE session_id=?1",
+        )
         .unwrap()
         .query_map([&agents[0].1], |row| row.get::<_, String>(0))
         .unwrap()
@@ -701,21 +712,16 @@ while read -r line; do :; done
             "missing retained history: {retained}"
         );
     }
-    for (thread, account) in [
-        ("thread-revoked", "revoked"),
-        ("thread-revoked", "fallback"),
-    ] {
-        let retained: bool = db
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM session_events WHERE session_id=?1
-             AND json_extract(payload,'$.evidence.provider_session_id')=?2
-             AND json_extract(payload,'$.evidence.account_id')=?3)",
-                rusqlite::params![agents[0].1, thread, account],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert!(retained, "native history lost account {account}");
-    }
+    // The input resumes the shared conversation on the login that last ran it.
+    let resumes: bool = db
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM session_events WHERE session_id=?1
+             AND kind='captured' AND provider_thread='thread-revoked' AND provider_account='fallback')",
+            [&agents[0].1],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(resumes, "the input does not resume on the fallback login");
 }
 
 #[test]

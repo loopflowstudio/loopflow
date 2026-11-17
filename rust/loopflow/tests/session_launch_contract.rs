@@ -164,6 +164,20 @@ fn files_named(dir: &Path, file: &str) -> Vec<std::path::PathBuf> {
     found
 }
 
+/// The Machine's store, with Session history attached as `history`.
+fn machine_db(home: &Path) -> rusqlite::Connection {
+    let store = home.join("machine/loopflow.db");
+    let db = rusqlite::Connection::open(&store).unwrap();
+    db.execute(
+        "ATTACH ?1 AS history",
+        [loopflow_storage::history::history_path(&store)
+            .to_string_lossy()
+            .as_ref()],
+    )
+    .unwrap();
+    db
+}
+
 fn success(output: &Output) {
     assert!(
         output.status.success(),
@@ -1818,7 +1832,7 @@ fn pi_native_callbacks_retain_identity_final_output_and_usage() {
         .unwrap();
     success(&output);
     let session = fixture.session();
-    let db = rusqlite::Connection::open(fixture.home.path().join("machine/loopflow.db")).unwrap();
+    let db = machine_db(fixture.home.path());
     let (provider, thread): (String, String) = db
         .query_row(
             "SELECT provider,provider_thread FROM agent_sessions WHERE id=?1",
@@ -1838,13 +1852,13 @@ fn pi_native_callbacks_retain_identity_final_output_and_usage() {
             .display()
             .to_string()
     );
-    let output: String = db.query_row("SELECT json_extract(payload,'$.text') FROM session_events WHERE session_id=?1 AND kind='output'", [&session], |row| row.get(0)).unwrap();
+    let output: String = db.query_row("SELECT json_extract(payload,'$.text') FROM history.session_history WHERE session_id=?1 AND kind='output'", [&session], |row| row.get(0)).unwrap();
     assert_eq!(output, "native answer");
-    let tokens: i64 = db.query_row("SELECT json_extract(payload,'$.usage.total_input_tokens') FROM session_events WHERE session_id=?1 AND kind='usage' ORDER BY seq DESC LIMIT 1", [&session], |row| row.get(0)).unwrap();
+    let tokens: i64 = db.query_row("SELECT json_extract(payload,'$.usage.total_input_tokens') FROM history.session_history WHERE session_id=?1 AND kind='usage' ORDER BY seq DESC LIMIT 1", [&session], |row| row.get(0)).unwrap();
     assert_eq!(tokens, 26);
     let receipts: i64 = db
         .query_row(
-            "SELECT count(*) FROM session_events WHERE session_id=?1 AND kind='usage'",
+            "SELECT count(*) FROM history.session_history WHERE session_id=?1 AND kind='usage'",
             [&session],
             |row| row.get(0),
         )
@@ -1877,14 +1891,14 @@ fn pi_native_crash_keeps_the_paid_step_and_interrupts_the_turn() {
         .unwrap();
     assert!(!output.status.success());
     let session = fixture.session();
-    let db = rusqlite::Connection::open(fixture.home.path().join("machine/loopflow.db")).unwrap();
+    let db = machine_db(fixture.home.path());
     let (count, tokens): (i64, i64) = db.query_row(
-        "SELECT count(*), json_extract(payload,'$.usage.total_input_tokens') FROM session_events WHERE session_id=?1 AND kind='usage'",
+        "SELECT count(*), json_extract(payload,'$.usage.total_input_tokens') FROM history.session_history WHERE session_id=?1 AND kind='usage'",
         [&session], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
     assert_eq!((count, tokens), (1, 13));
     // The exit read closes the turn the transcript left open.
     let statuses: Vec<String> = db
-        .prepare("SELECT json_extract(payload,'$.status') FROM session_events WHERE session_id=?1 AND kind='completed' AND provider_turn IS NOT NULL")
+        .prepare("SELECT json_extract(payload,'$.status') FROM history.session_history WHERE session_id=?1 AND kind='completed' AND provider_turn IS NOT NULL")
         .unwrap()
         .query_map([&session], |row| row.get(0))
         .unwrap()
@@ -1915,7 +1929,7 @@ fn pi_native_failed_start_reopens_without_replacing_the_loopflow_session() {
         .unwrap();
     success(&resumed);
     assert_eq!(fixture.session(), id);
-    let db = rusqlite::Connection::open(fixture.home.path().join("machine/loopflow.db")).unwrap();
+    let db = machine_db(fixture.home.path());
     let sessions: i64 = db
         .query_row(
             "SELECT count(*) FROM agent_sessions WHERE provider='pi'",
@@ -1926,7 +1940,7 @@ fn pi_native_failed_start_reopens_without_replacing_the_loopflow_session() {
     assert_eq!(sessions, 1);
     let outputs: i64 = db
         .query_row(
-            "SELECT count(*) FROM session_events WHERE session_id=?1 AND kind='output'",
+            "SELECT count(*) FROM history.session_history WHERE session_id=?1 AND kind='output'",
             [&id],
             |row| row.get(0),
         )

@@ -477,7 +477,7 @@ mod tests {
         assert!(yielded);
         let gaps: i64 = conn
             .query_row(
-                "SELECT count(*) FROM session_events WHERE session_id='session'
+                "SELECT count(*) FROM history.session_history WHERE session_id='session'
                  AND json_extract(payload,'$.source')='store-gap'
                  AND json_extract(payload,'$.first_miss')=1794358000",
                 [],

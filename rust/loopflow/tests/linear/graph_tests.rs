@@ -2546,11 +2546,14 @@ for line in sys.stdin:
             "{:?}",
             graphs
         );
-        let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+        let history = rusqlite::Connection::open(loopflow_storage::history::history_path(
+            &home.path().join("loopflow.db"),
+        ))
+        .unwrap();
         for kind in ["started", "output", "completed"] {
-            let count: i64 = db
+            let count: i64 = history
                 .query_row(
-                    "SELECT count(*) FROM session_events WHERE kind=?1",
+                    "SELECT count(*) FROM session_history WHERE kind=?1",
                     [kind],
                     |row| row.get(0),
                 )

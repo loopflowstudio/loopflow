@@ -199,8 +199,18 @@ impl Fixture {
         }
     }
 
+    /// The store, with Session history attached as `history`.
     fn db(&self) -> rusqlite::Connection {
-        rusqlite::Connection::open(self.home.path().join("loopflow.db")).unwrap()
+        let store = self.home.path().join("loopflow.db");
+        let db = rusqlite::Connection::open(&store).unwrap();
+        db.execute(
+            "ATTACH ?1 AS history",
+            [loopflow_storage::history::history_path(&store)
+                .to_string_lossy()
+                .as_ref()],
+        )
+        .unwrap();
+        db
     }
 
     fn count(&self, table: &str) -> i64 {
@@ -257,7 +267,7 @@ Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
                             CASE WHEN m.task_id IS s.task_id AND m.wave_id IS s.wave_id THEN s.work_source END)
                     END
                  FROM agent_sessions s JOIN session_events i ON i.session_id=s.id AND i.kind='captured'
-                 LEFT JOIN session_events m ON m.session_id=s.id AND m.kind='observed'
+                 LEFT JOIN history.session_history m ON m.session_id=s.id AND m.kind='observed'
                     AND m.receipt_key=i.receipt_key||':manifest.json'
                  WHERE i.receipt_key=?1",
                 [run_id],
@@ -402,7 +412,7 @@ fn task_conversation_starts_at_launch_not_creation() {
         );
         assert_eq!(fixture.captures(), 1);
         let native: String = db.query_row(
-            "SELECT json_extract(payload,'$.evidence.provider_session_id') FROM session_events WHERE session_id=?1 AND json_extract(payload,'$.evidence.provider_session_id') IS NOT NULL ORDER BY seq DESC LIMIT 1",
+            "SELECT provider_thread FROM session_events WHERE session_id=?1 AND kind='captured' AND provider_thread IS NOT NULL ORDER BY seq DESC LIMIT 1",
             [&session], |row| row.get(0)).unwrap();
         assert!(
             !native.is_empty(),
@@ -440,7 +450,8 @@ fn primary_readiness_is_metadata_only_for_repository_wave_and_task() {
         let before: i64 = fixture
             .db()
             .query_row(
-                "SELECT count(*) FROM session_events WHERE session_id=?1",
+                "SELECT (SELECT count(*) FROM session_events WHERE session_id=?1)
+                    + (SELECT count(*) FROM history.session_history WHERE session_id=?1)",
                 [id],
                 |row| row.get(0),
             )
@@ -455,7 +466,8 @@ fn primary_readiness_is_metadata_only_for_repository_wave_and_task() {
         let after: i64 = fixture
             .db()
             .query_row(
-                "SELECT count(*) FROM session_events WHERE session_id=?1",
+                "SELECT (SELECT count(*) FROM session_events WHERE session_id=?1)
+                    + (SELECT count(*) FROM history.session_history WHERE session_id=?1)",
                 [id],
                 |row| row.get(0),
             )
@@ -643,7 +655,7 @@ fn personal_task_launch_resume_and_skill_graph_keep_native_identity() {
     let native: String = fixture
         .db()
         .query_row(
-            "SELECT json_extract(payload,'$.evidence.provider_session_id') FROM session_events WHERE session_id=?1 AND json_extract(payload,'$.evidence.provider_session_id') IS NOT NULL ORDER BY seq DESC LIMIT 1",
+            "SELECT provider_thread FROM session_events WHERE session_id=?1 AND kind='captured' AND provider_thread IS NOT NULL ORDER BY seq DESC LIMIT 1",
             [&session],
             |row| row.get(0),
         )
@@ -659,7 +671,7 @@ fn personal_task_launch_resume_and_skill_graph_keep_native_identity() {
         fixture
             .db()
             .query_row(
-                "SELECT json_extract(payload,'$.evidence.provider_session_id') FROM session_events WHERE session_id=?1 AND json_extract(payload,'$.evidence.provider_session_id') IS NOT NULL ORDER BY seq DESC LIMIT 1",
+                "SELECT provider_thread FROM session_events WHERE session_id=?1 AND kind='captured' AND provider_thread IS NOT NULL ORDER BY seq DESC LIMIT 1",
                 [&session],
                 |row| row.get::<_, String>(0)
             )
@@ -1092,8 +1104,8 @@ fn public_history_discovers_unlinked_native_receipts_without_borrowing_a_later_b
         ("usage", serde_json::json!({"total":count,"last":count})),
         ("completed", serde_json::json!({"status":"completed"})),
     ] {
-        fixture.db().execute(
-            "INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,observed_at,payload)
+        store.execute_history(
+            "INSERT INTO session_history(session_id,provider_thread,provider_turn,kind,receipt_key,observed_at,payload)
              VALUES(?1,'retained-thread','retained-turn',?2,'',strftime('%s','now'),?3)",
             rusqlite::params![session,kind,payload.to_string()]).unwrap();
     }
@@ -2045,7 +2057,7 @@ fn taskless_structured_output_correction_is_bounded_and_preserves_the_conversati
         let starts: i64 = fixture
             .db()
             .query_row(
-                "SELECT count(*) FROM session_events WHERE kind='started'",
+                "SELECT count(*) FROM history.session_history WHERE kind='started'",
                 [],
                 |row| row.get(0),
             )
@@ -2364,8 +2376,8 @@ fn opencode_disconnect_after_tool_preserves_unknown_native_completion() {
     let rows: (i64, i64) = fixture
         .db()
         .query_row(
-            "SELECT (SELECT count(*) FROM session_events WHERE kind='started'),
-                (SELECT count(*) FROM session_events WHERE kind='completed')",
+            "SELECT (SELECT count(*) FROM history.session_history WHERE kind='started'),
+                (SELECT count(*) FROM history.session_history WHERE kind='completed')",
             [],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
@@ -2435,7 +2447,7 @@ fn repository_upgrade_and_move_resume_the_same_native_conversation() {
         .unwrap();
     let native = || {
         fixture.db().query_row(
-        "SELECT json_extract(payload,'$.evidence.provider_session_id') FROM session_events WHERE session_id=?1 AND json_extract(payload,'$.evidence.provider_session_id') IS NOT NULL ORDER BY seq DESC LIMIT 1",
+        "SELECT provider_thread FROM session_events WHERE session_id=?1 AND kind='captured' AND provider_thread IS NOT NULL ORDER BY seq DESC LIMIT 1",
         [&session], |row| row.get::<_, String>(0)).unwrap()
     };
     let before = native();

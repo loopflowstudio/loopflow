@@ -7,7 +7,25 @@ pre{background:#f5f5f7;padding:.7rem .9rem;border-radius:6px;overflow-x:auto;fon
 .fixed{color:#0a7d32;font-weight:600}.bad{color:#b3261e;font-weight:600}.ok{color:#0a7d32}
 table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:.35rem .5rem;text-align:left;vertical-align:top}
 </style></head><body>
-<h1>LOO-957 QA: <code>lf machine login / logins / logout</code></h1>
+<h1>LOO-957 QA, second pass: providers that sign in here only</h1>
+<p>Branch build <code>0.16.0+b0567072f</code> (plus the fix below), 2026-11-17, private homes here and on
+<code>mini-heart</code> as in <code>.lf/qa/machine-logins.md</code>; an <code>ssh</code> wrapper logged every call.</p>
+<table><tr><th>Scenario</th><th>Saw</th></tr>
+<tr><td><code>lf machine login asana|notion|doppler mini</code>, <code>doppler --refused</code>, <code>notion mini-heart nosuch</code></td>
+<td class="ok">Each: <code>Error: Asana signs in on each Machine itself; run `lf machine login asana` there</code>, exit 1, <b>0 ssh calls</b>.</td></tr>
+<tr><td><code>lf machine login claude mini</code> (approver declines)</td><td class="ok">Still reaches mini (2 ssh calls), approver got the URL, declined cleanly; no <code>claude auth login</code> left on mini.</td></tr>
+<tr><td><code>lf machine login asana</code> here, command approver declining</td><td class="ok">Approver got the real Asana authorize URL (PKCE, localhost:19222); error names this Machine; nothing left listening on 19222. From <code>/tmp</code> it fails earlier: Asana's client comes from this checkout's Doppler project.</td></tr>
+<tr><td><code>lf machine login doppler</code> here, already signed in to the doppler CLI</td>
+<td><span class="bad">before:</span> <code>Approve Doppler in your browser.</code> and <code>open ""</code> (a command approver would get an empty <code>LF_APPROVE_URL</code>).<br>
+<span class="fixed">after:</span> <code>Connecting local Doppler... / Jacks-MacBook-Pro-2: Doppler signed in</code>, nothing opened. Fixed in <code>provider_auth/operations.rs::sign_in</code>: a finished flow with no page skips the approver. Same bug on main's <code>lf account connect</code>.</td></tr>
+<tr><td><code>lf ondemand add … --logins</code> with doppler / asana / notion,codex</td><td class="ok">Refused with the same message; no template written. <code>claude,github,linear,opencode</code> saved and listed (<code>signs in claude, github, linear, opencodezen</code>).</td></tr>
+<tr><td><code>lf machine logout asana mini</code></td><td>Reaches mini and runs its own logout (<code>mini: Asana signed out</code>). Logging out remotely stays allowed while logging in remotely is refused; left as is.</td></tr>
+<tr><td>Launch check, here and on mini</td><td class="ok"><code>This Machine has no Codex login; run `lf machine login codex`</code> / <code>mini has no Codex login; run `lf machine login codex mini`</code>.</td></tr>
+</table>
+<p><b>Works:</b> the reach set gates login, <code>--refused</code> and <code>ondemand add</code> before any SSH. <b>Not reached:</b> rental prepare's default list (no rental rented); a real approval (needs a person). <b>Still rough, worst first:</b>
+the <code>ondemand add</code> refusal says “run … there” for a Machine that doesn't exist yet; <code>lf set</code> prints its effect variant (<code>saved; DomainAction</code>), also on released lf.</p>
+<hr>
+<h1>LOO-957 QA, first pass: <code>lf machine login / logins / logout</code></h1>
 <p>Branch build <code>0.16.0+83eb33cd6</code> plus the fixes below, run 2026-11-17 against the real
 <code>claude</code> 2.1.326 and <code>codex</code> 0.169.0 here and the real <code>claude</code> 2.1.311 and
 <code>codex</code> 0.165.0 on <code>mini-heart</code> over the tailnet. Every home was private

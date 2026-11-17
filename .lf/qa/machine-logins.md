@@ -37,3 +37,11 @@ The launch check: in a fresh Git repo with a local identity, `lf -b -a codex
 : 'say hi'` and `lf --machine mini -b -a codex : 'say hi'` stop before the
 agent with the `lf machine login` command. Bare `lf -b` never walks `agents`;
 only a Graph step moves to the next provider.
+
+Services here: Asana and Notion take their OAuth client from Doppler, so run
+`lf machine login asana` from this checkout (its Doppler project holds
+`ASANA_CLIENT_*`/`NOTION_CLIENT_*`); from `/tmp` it fails with "asana CLI not
+found". A command approver receives the real authorize URL and declining frees
+port 19222. Doppler reads the person's real `doppler` CLI login and finishes
+with no page when it is signed in. To check that a provider never reaches
+another Machine, log every `ssh` argv from the wrapper and count lines.

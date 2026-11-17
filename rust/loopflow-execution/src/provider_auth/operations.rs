@@ -48,7 +48,10 @@ async fn sign_in(provider: Provider, chrome_profile: Option<&str>) -> Result<()>
         if matches!(flow.completion, AuthCompletion::Manual) {
             println!("Manual authorization is required.");
         }
-        approve(provider, approver, url, flow.user_code.clone()).await?;
+        // An already signed-in Doppler returns a finished flow with no page.
+        if !url.is_empty() {
+            approve(provider, approver, url, flow.user_code.clone()).await?;
+        }
         tokio::select! {
             biased;
             result = service.wait_for_auth(provider) => result.map_err(anyhow::Error::from),

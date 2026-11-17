@@ -167,15 +167,6 @@ impl OpenCodeDecoder {
                     message.get("error").filter(|error| !error.is_null()).cloned().unwrap_or_else(
                         || json!({"message":"OpenCode execution ended without a successful answer"}))
                 };
-                if let Some(text) = &output {
-                    facts.push(
-                        ProviderFact::Output {
-                            turn: turn(request_id),
-                            answer: json!({"text":text}),
-                        }
-                        .into(),
-                    );
-                }
                 facts.push(ProviderFact::TurnCompleted {
                     turn: Some(turn(request_id)),
                     status,

@@ -319,7 +319,8 @@ struct Turn {
     started: bool,
     request: Option<String>,
     attributed: bool,
-    final_answer: Option<String>,
+    response_prefix: String,
+    response_previewed: bool,
 }
 
 impl Turn {
@@ -429,6 +430,29 @@ impl CodexDecoder {
             }
         }
         if turn.is_none() || turn == self.active_turn {
+            if method == "item/agentMessage/delta" {
+                if let (Some(turn), Some(delta)) = (&turn, params["delta"].as_str()) {
+                    let observed = self.observe(turn);
+                    if !observed.response_previewed {
+                        let remaining =
+                            64usize.saturating_sub(observed.response_prefix.chars().count());
+                        observed
+                            .response_prefix
+                            .extend(delta.chars().take(remaining));
+                        let text = observed.response_prefix.trim_start();
+                        if text.chars().any(char::is_whitespace) || text.chars().count() >= 64 {
+                            observed.response_previewed = true;
+                            if !text.trim().is_empty() {
+                                signals.push(Signal::Previewed {
+                                    turn: provider_turn(turn),
+                                    source: "codex",
+                                    text: text.to_owned(),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
             match (
                 &turn,
                 method == "item/completed" && params["item"]["type"] == "agentMessage",
@@ -474,24 +498,7 @@ impl CodexDecoder {
                         out.push(ProviderFact::Request { input_tokens }.into());
                     }
                 }
-                "item/completed" => {
-                    if let Some(text) = final_text(&params["item"]) {
-                        observed.final_answer = Some(text.to_owned());
-                    }
-                }
-                "turn/completed" => {
-                    let answer = observed.final_answer.take();
-                    completion(thread, &params["turn"], out);
-                    if let Some(text) = answer {
-                        out.push(
-                            ProviderFact::Output {
-                                turn: provider_turn(&turn),
-                                answer: json!({"text": text}),
-                            }
-                            .into(),
-                        );
-                    }
-                }
+                "turn/completed" => completion(thread, &params["turn"], out),
                 _ => {}
             }
             self.observe(&turn).correlate(provider_turn(&turn), out);
@@ -520,12 +527,6 @@ impl CodexDecoder {
     }
 }
 
-fn final_text(item: &Value) -> Option<&str> {
-    (item["type"] == "agentMessage" && (item["phase"].is_null() || item["phase"] == "final_answer"))
-        .then(|| item["text"].as_str())
-        .flatten()
-}
-
 /// Completion of a native turn object, from a live notification or snapshot.
 fn completion(thread: &AgentSessionId, turn: &Value, out: &mut Vec<Decoded>) {
     let Some(id) = turn["id"].as_str() else {
@@ -541,18 +542,6 @@ fn completion(thread: &AgentSessionId, turn: &Value, out: &mut Vec<Decoded>) {
         thread: thread.clone(),
         turn: id.to_owned(),
     };
-    if let Some(text) = turn["items"]
-        .as_array()
-        .and_then(|items| items.iter().rev().find_map(final_text))
-    {
-        out.push(
-            ProviderFact::Output {
-                turn: provider_turn.clone(),
-                answer: json!({"text": text}),
-            }
-            .into(),
-        );
-    }
     out.push(
         ProviderFact::TurnCompleted {
             turn: Some(provider_turn),
@@ -984,6 +973,39 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn first_response_word_is_previewed_once_before_message_completion() {
+        let mut decoder = CodexDecoder::default();
+        let thread = AgentSessionId::from("thread-1");
+        decoder.decode(
+            &json!({"method":"turn/started", "params":{
+                "threadId":"thread-1", "turn":{"id":"turn-1"}
+            }}),
+            Some(&thread),
+        );
+        let mut previews = Vec::new();
+        for delta in ["Hel", "lo ", "world", "!"] {
+            let decoded = decoder.decode(
+                &json!({"method":"item/agentMessage/delta", "params":{
+                    "threadId":"thread-1", "turnId":"turn-1", "itemId":"message-1", "delta":delta
+                }}),
+                Some(&thread),
+            );
+            previews.extend(
+                fact::fact_lines(&decoded)
+                    .into_iter()
+                    .filter(|line| line.starts_with("Activity Previewed")),
+            );
+        }
+        assert_eq!(previews, [r#"Activity Previewed "Hello ""#]);
+        let stale = decoder.decode(&json!({"method":"item/agentMessage/delta", "params":{
+            "threadId":"thread-1", "turnId":"older-turn", "itemId":"message-0", "delta":"Old answer "
+        }}), Some(&thread));
+        assert!(!fact::fact_lines(&stale)
+            .iter()
+            .any(|line| line.starts_with("Activity Previewed")));
+    }
+
     /// A recorded trace decoded alone, without a store, as its fact sequence.
     fn replay(file: &str) -> Vec<String> {
         let mut decoder = CodexDecoder::default();
@@ -999,7 +1021,7 @@ mod tests {
         format!("{fact} 0197f00d-aaaa-7000-8000-000000000001/0197f00d-{turn}{rest}")
     }
 
-    /// The request's size arrives before completion; the answer follows it.
+    /// The request's size arrives before completion.
     #[test]
     fn trace_codex_normal_turn() {
         let turn = "bbbb-7000-8000-000000000002";
@@ -1017,7 +1039,6 @@ mod tests {
                 "Request 16065".to_owned(),
                 "Activity Yielded(true)".to_owned(),
                 at("TurnCompleted", turn, " Completed"),
-                at("Output", turn, r#" {"text":"OK"}"#),
             ]
         );
     }
@@ -1049,7 +1070,6 @@ mod tests {
                 "Request 100".to_owned(),
                 "Activity Yielded(true)".to_owned(),
                 at("TurnCompleted", turn, " Completed"),
-                at("Output", turn, r#" {"text":"Recovered after the retry."}"#),
             ]
         );
     }

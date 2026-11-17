@@ -4378,6 +4378,89 @@
         }
       ]
     },
+    "MeasuredOperation": {
+      "description": "The ordinary operation and its per-request work receipt in one response.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "examples": [
+            {
+              "kind": "performance.read",
+              "query": {
+                "kind": "machine.self"
+              }
+            },
+            {
+              "kind": "performance.read",
+              "query": {
+                "kind": "machine.self"
+              }
+            }
+          ],
+          "properties": {
+            "kind": {
+              "const": "performance.read",
+              "type": "string"
+            },
+            "query": {
+              "$ref": "#/$defs/Read"
+            }
+          },
+          "required": [
+            "kind",
+            "query"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/MeasuredResult"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "examples": [
+            {
+              "change": {
+                "directory": "/repo",
+                "id": "session_5e55105e000040008000000000000001",
+                "kind": "session.rename",
+                "name": "Focused work"
+              },
+              "kind": "performance.write"
+            }
+          ],
+          "properties": {
+            "change": {
+              "$ref": "#/$defs/Write"
+            },
+            "kind": {
+              "const": "performance.write",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "change"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/MeasuredResult"
+          }
+        }
+      ]
+    },
+    "MeasuredResult": {
+      "properties": {
+        "result": true,
+        "work": {
+          "$ref": "#/$defs/SqlReceipt"
+        }
+      },
+      "required": [
+        "result",
+        "work"
+      ],
+      "type": "object"
+    },
     "MemberRef": {
       "description": "The source path contains authored IDs, never array indexes or current focus.",
       "properties": {
@@ -5422,6 +5505,9 @@
       "anyOf": [
         {
           "$ref": "#/$defs/ServerOperation"
+        },
+        {
+          "$ref": "#/$defs/MeasuredOperation"
         },
         {
           "$ref": "#/$defs/Read"
@@ -10621,12 +10707,6 @@
           "description": "A conversation open here that Loopflow never launched; `id` is the\nprovider's conversation ID and no Session records it.",
           "type": "boolean"
         },
-        "ready_summary": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "state": {
           "$ref": "#/$defs/SessionState"
         },
@@ -10735,7 +10815,6 @@
         "model",
         "cwd",
         "state",
-        "ready_summary",
         "open_argv",
         "terminal_ids",
         "turn",
@@ -11327,6 +11406,30 @@
       ],
       "type": "string"
     },
+    "SqlReceipt": {
+      "description": "One evaluation can be shared by several subscriptions. Its identity lets\nclients count that physical work once within an interaction.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "rows": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "statements": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "statements",
+        "rows"
+      ],
+      "type": "object"
+    },
     "Starter": {
       "description": "Who started a Process, derived from its ancestry: the first Session an\nagent ran it from, else the person at the root of its chain.",
       "oneOf": [
@@ -11766,12 +11869,23 @@
             "string",
             "null"
           ]
+        },
+        "work": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SqlReceipt"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
         "answers",
         "unavailable",
-        "body"
+        "body",
+        "work"
       ],
       "type": "object"
     },
@@ -16590,7 +16704,6 @@
             "program_status": null,
             "provider": "codex",
             "raw": false,
-            "ready_summary": "The design now reflects Jack's requested changes.",
             "state": "unknown",
             "task_ids": [
               "task_00000000000000000000000000000001"
@@ -18500,7 +18613,7 @@
   ],
   "title": "Loopflow server protocol",
   "x-min-revision": 5,
-  "x-revision": 5,
+  "x-revision": 6,
   "x-terminal-close": {
     "payload": {
       "$ref": "#/$defs/Close"

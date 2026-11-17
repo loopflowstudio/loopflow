@@ -1,8 +1,8 @@
 {
   "type": "welcome",
   "client_id": "6f1c2d3e-4b5a-4c6d-8e7f-0a1b2c3d4e5f",
-  "revision": 5,
-  "server_revision": 5,
+  "revision": 6,
+  "server_revision": 6,
   "min_revision": 5,
   "instance": "service-incarnation",
   "build": "0.15.1",

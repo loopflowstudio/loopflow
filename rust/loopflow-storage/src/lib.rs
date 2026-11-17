@@ -10,6 +10,7 @@ pub mod error;
 pub mod execution;
 pub mod graph;
 pub mod graph_process;
+pub mod history;
 pub mod instrumentation;
 pub mod linear_records;
 pub mod machine_records;

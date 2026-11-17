@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-936 concept review</title>
+<style>
+:root { --bg:#fbfaf7; --fg:#1d1c1a; --soft:#5f5b54; --line:#dcd8cf; --card:#fff; --yes:#1f7a45; --no:#b3261e; --part:#8a5a00; --new:#2456a6; --newbg:#e8eefb; --nobg:#fbe9e7; --code:#f0ede6; }
+@media (prefers-color-scheme: dark) { :root { --bg:#161513; --fg:#ebe8e1; --soft:#a8a39a; --line:#34312c; --card:#1e1d1a; --yes:#6fcf97; --no:#ff8a80; --part:#e0b050; --new:#9bbcff; --newbg:#1c2740; --nobg:#3a1f1c; --code:#26241f; } }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.55 -apple-system, "Segoe UI", sans-serif; }
+main { max-width:980px; margin:0 auto; padding:32px 16px 64px; }
+h1 { font-size:30px; line-height:1.2; margin:0 0 6px; }
+h2 { font-size:21px; margin:40px 0 10px; }
+h3 { font-size:17px; margin:22px 0 6px; }
+p { margin:8px 0; }
+.sub { color:var(--soft); }
+code { background:var(--code); padding:1px 5px; border-radius:4px; font:13.5px/1.4 ui-monospace, Menlo, monospace; }
+table { width:100%; border-collapse:collapse; margin:12px 0; background:var(--card); }
+th, td { text-align:left; vertical-align:top; padding:9px 10px; border:1px solid var(--line); }
+th { font-weight:600; }
+.wrap { overflow-x:auto; }
+.yes { color:var(--yes); font-weight:600; } .no { color:var(--no); font-weight:600; } .part { color:var(--part); font-weight:600; }
+.new { background:var(--newbg); color:var(--new); border-radius:4px; padding:1px 6px; font-size:13px; font-weight:600; white-space:nowrap; }
+.files { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:12px; margin:14px 0; }
+.file { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:12px 14px; }
+.file h3 { margin:0 0 2px; }
+.file ul { margin:8px 0 0; padding-left:18px; }
+.file li { margin:3px 0; }
+.bad { background:var(--nobg); border-left:3px solid var(--no); padding:2px 6px; border-radius:3px; }
+.two { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:12px; }
+.box { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:12px 14px; }
+.box.after { border-color:var(--new); }
+ol.q > li { margin:14px 0; }
+ol.q ol { list-style:lower-alpha; margin-top:4px; }
+.num { font-variant-numeric:tabular-nums; }
+</style>
+</head>
+<body>
+<main>
+<h1>Do the product's concepts and the code's concepts line up?</h1>
+<p class="sub">LOO-936, PR #1965, reviewed at <code>5e98f52d69</code> on 2026-11-17, against <code>origin/main</code>. Read from the branch's code, the plan and a read-only look at the live store. The run's own review of <code>f326e99cbb</code> is in git history at <code>89d27f36fb</code>.</p>
+
+<p><strong>Area taken:</strong> what lf records about a Session's work and where it keeps it, as it stands with the five answers built: the message, the turn that answers it, the history a person reads later, and the two files that hold them. Wider than the last pass (the turn's state), because the change now states one rule for the whole store and the question is whether the code keeps it.</p>
+
+<p><span class="new">proposed</span> marks anything that does not exist yet. Everything else is as built.</p>
+
+<h2>The rule the change states</h2>
+<p>From the top of <code>history.rs</code>: "Nothing the product acts on lives here: deleting the file loses history and usage, not state." <code>loopflow.db</code> is what the product acts on now. <code>history.db</code> is what a person reads later.</p>
+
+<h2>One interaction, walked: it holds</h2>
+<p>A Graph runs a <code>loop-or-next</code> step, one turn.</p>
+<ol>
+  <li>The Graph sends the message. lf writes the message row in <code>loopflow.db</code>.</li>
+  <li>The turn starts. lf inserts a row in <code>history.turns</code> with its Task, Wave, skill and step.</li>
+  <li>The turn ends. lf writes the turn id, end time and status onto the message row, then completes the turn row with its numbers.</li>
+  <li>The Graph asks which turn answered. <code>input_answered_turn</code> reads the message row and nothing else, and requires <code>turn_status='completed'</code>. The text comes from the provider's transcript.</li>
+  <li>The Session list asks whether the turn ended. <code>recorded_turn_end</code> reads the message row.</li>
+</ol>
+<p><strong>Failure:</strong> something holds <code>history.db</code> for the whole turn. Steps 4 and 5 are exact, because they never open it. Only the numbers are late, with one gap in <code>lf.log</code>. The guess is gone from the code.</p>
+<p><strong>Recovery:</strong> the transcript pass fills the turn row later. A failed turn keeps the stream error unless a later turn completes.</p>
+<p>This was the biggest mismatch last time. It is fixed.</p>
+
+<h2>A second interaction: it does not hold</h2>
+<p>The Task list shows LOO-936 as <em>moving</em>. Where does "moving" come from?</p>
+<ol>
+  <li><code>task_state_sql</code> asks whether the Task has an unfinished Graph Process.</li>
+  <li>To decide which Processes belong to the Task it calls <code>task_open_process_ids</code>, which joins Processes to Sessions five ways. Two of the five read <span class="bad"><code>history.session_history</code> and <code>history.turns</code></span>.</li>
+  <li>The Task list subscribes as <code>Watch::State</code>, so it does not wake when <code>history.db</code> changes.</li>
+</ol>
+<p>So a Task's state is computed partly from the file that "nothing the product acts on" lives in, by a view that is not told when that file changes.</p>
+<p><strong>Measured on the live store, last 7 days:</strong> <span class="num">8,038</span> Process-and-Session pairs are named by rows that move to history. The message row names <span class="num">7,643</span> of them and the current attachment <span class="num">66</span> more. <span class="num">329</span> are known only from history rows, and <span class="num">0</span> of those are unfinished Processes. For the open-Process read the two history arms found nothing.</p>
+
+<h2>Where the product still acts on history.db</h2>
+<div class="wrap"><table>
+<tr><th>What the product decides</th><th>What it reads</th><th>If the history write was missed</th></tr>
+<tr><td>A Task's state: moving or shipping (Task list, <code>lf task status</code>)</td><td><code>task_open_process_ids</code>: both history tables, by Process id</td><td>Nothing in the sample; the arms are dead weight on a hot read.</td></tr>
+<tr><td>Each row of the Session list</td><td><code>SUMMARY_SELECT</code> and <code>SESSION_SELECT</code> read a <code>legacy_review_feedback</code> row from <code>history.session_history</code></td><td>Nothing writes that row. The store has 23, the newest from early October; they all expire inside 90 days.</td></tr>
+<tr><td>What a viewer prints when its conversation was moved to another terminal ("moved to …")</td><td><code>attachment_departure</code> reads the exit row from <code>history.session_history</code></td><td>The viewer exits with no notice of where the conversation went.</td></tr>
+<tr><td>A Session's latest transition (started or forked), shown in the Session summary</td><td><code>provider_transitions::observe_in</code> reads the <code>provider_lineage</code> row from history, then writes the result to <code>agent_sessions.transition</code></td><td>A fork reads as an ordinary start.</td></tr>
+<tr><td>Which Session a finished Process ran, for ci-fix (<code>process_session</code>) and Graph inventory (<code>task_of_process</code>)</td><td>Both history tables, by Process id</td><td>About 4% of pairs in the sample are known only here. Process rows are LOO-953.</td></tr>
+</table></div>
+
+<h2>Where each fact lives</h2>
+<div class="files">
+  <div class="file"><h3>loopflow.db</h3><div class="sub">what the product acts on now</div>
+    <ul>
+      <li>Session, Task, Graph</li>
+      <li>the message row, now with the turn that answered it, when it ended, its status and error</li>
+      <li>the message's resume conversation and account</li>
+      <li>the Session's latest transition and when it was last opened</li>
+      <li>Process rows (LOO-953)</li>
+    </ul></div>
+  <div class="file"><h3>history.db</h3><div class="sub">what a person reads later</div>
+    <ul>
+      <li><code>session_history</code>, 90 days: what a message was made of, transitions, gaps, a command's settlement</li>
+      <li><code>turns</code>, kept: tokens, cost, time, Task, Wave, skill, step, model, final message</li>
+      <li class="bad">which Processes belong to a Task</li>
+      <li class="bad">where a moved conversation went</li>
+      <li class="bad">whether a Session forked</li>
+    </ul></div>
+  <div class="file"><h3>provider transcript</h3><div class="sub">Claude: 90 days idle on this Machine. Codex: kept</div>
+    <ul>
+      <li>the conversation</li>
+      <li>the turn's final answer, read by Graph routing</li>
+    </ul></div>
+</div>
+
+<h2>The pairings</h2>
+<div class="wrap"><table>
+<tr><th>What a person knows</th><th>What the code has</th><th>Line up?</th><th>What is wrong</th></tr>
+<tr><td>A Session</td><td><code>agent_sessions</code> with <code>opened_at</code> and <code>transition</code></td><td class="yes">yes</td><td></td></tr>
+<tr><td>A message got its answer, or failed</td><td><code>turn_thread</code>, <code>turn_id</code>, <code>turn_ended_at</code>, <code>turn_status</code>, <code>turn_error</code> on the message row</td><td class="yes">yes</td><td>One row, one writer per fact, no guess. The end time, status and error are also on the turn row in <code>history.db</code>: a copy on purpose, so each file answers alone.</td></tr>
+<tr><td>A turn's tokens and time, by skill, model or Wave</td><td><code>history.turns</code>, one row per turn</td><td class="part">mostly</td><td>Same three holes as before: headless Claude turns have no duration, a rebuilt turn lacks skill and start, <code>lf usage</code> cannot group by skill, model or step.</td></tr>
+<tr><td>What happened in a Session</td><td><code>history.session_history</code></td><td class="part">partly</td><td>A row's kind has no column. Code finds it three ways: the last 14 characters of <code>receipt_key</code>, a <code>GLOB</code> on its start, and <code>$.type</code> or <code>$.source</code> inside the JSON. Two of the table's indexes exist to spell a kind this way.</td></tr>
+<tr><td>What the agent concluded</td><td>Transcript for routing; <code>turns.final_message</code> for a person when the transcript is gone</td><td class="yes">yes</td><td>The copy is on the one table with no retention. See question 3.</td></tr>
+<tr><td>"History is apart from state"</td><td>Two files, <code>Watch::State</code> and <code>Watch::History</code></td><td class="no">no</td><td>True for routing and the Session list's running state. Not true for the five reads above.</td></tr>
+<tr><td>Something lf failed to record</td><td><code>store::RecordingGap</code></td><td class="yes">yes</td><td></td></tr>
+<tr><td>Old history going away</td><td><code>lf machine prune</code>, hourly on the Machine server</td><td class="part">mostly</td><td>It has its own name now. Process cleanup is split: <code>lf machine prune</code> closes dead Processes and forgets finished ones, <code>lf process prune</code> reaps orphaned providers and receipts.</td></tr>
+<tr><td>The message</td><td><code>session_events</code>, <code>kind='captured'</code>; input, capture, receipt</td><td class="no">no</td><td>Unchanged and out of this work (LOO-937). The table now holds only these rows, so its <code>kind</code> column has one live value, the same thing this change removed from <code>session_history</code>.</td></tr>
+<tr><td>A Process</td><td><code>processes</code></td><td class="no">no</td><td>LOO-953.</td></tr>
+</table></div>
+
+<h2>The biggest mismatch: the rule is stated but nothing holds the code to it</h2>
+<p>The change moved the turn's state and declared the file clean. Five other reads were carried across with a new <code>history.</code> prefix, because on <code>main</code> they read the same rows from <code>session_events</code>. Each one is small. Together they mean the sentence at the top of <code>history.rs</code> is false, and the next read someone adds can break it again without anyone noticing.</p>
+<div class="two">
+  <div class="box"><h3>As built</h3>
+    <ul>
+      <li>Every store connection attaches <code>history.db</code>, so any query can name it.</li>
+      <li>Task state and the Session list read it while subscribed as <code>Watch::State</code>.</li>
+      <li>A moved conversation's destination and a fork's lineage pass through it between live processes.</li>
+    </ul></div>
+  <div class="box after"><h3>After <span class="new">proposed</span></h3>
+    <ul>
+      <li>The open-Process read drops its two history arms. Task state reads <code>loopflow.db</code> only.</li>
+      <li>The Session list drops the <code>legacy_review_feedback</code> read and the <code>ready_summary</code> field with it.</li>
+      <li>One test runs every <code>Watch::State</code> projection twice, with <code>history.db</code> present and deleted, and expects the same answer. That is the rule, checked.</li>
+      <li>Departure and lineage: see question 2.</li>
+    </ul></div>
+</div>
+
+<h3>Tested</h3>
+<div class="wrap"><table>
+<tr><th>Path</th><th>As built</th><th>Proposed</th></tr>
+<tr><td>Normal</td><td>Works.</td><td>Works; the Task state query is two joins shorter.</td></tr>
+<tr><td><code>history.db</code> deleted while a Graph runs</td><td>Routing exact. Task state unchanged in the sample, by luck of the other arms.</td><td>Task state unchanged by construction.</td></tr>
+<tr><td>A history write missed while a conversation moves</td><td>The old viewer exits without saying where it went.</td><td>Same unless question 2 moves it.</td></tr>
+</table></div>
+
+<h3>Counterexamples kept</h3>
+<ul>
+  <li>The sample is 7 days on one Machine. An unfinished Process that neither captured a message nor holds an attachment, but did write a turn, would lose its Task membership. None appeared; a turn's Process is the attachment's, so it should not exist while the Process is open.</li>
+  <li>The finished-Process reads (<code>process_session</code>, <code>task_of_process</code>, Task work history) do need history: 4% of pairs. They are a person reading later, except ci-fix finding the Session to continue. Removing those arms here would lose data; LOO-953 replaces the join.</li>
+  <li>A "same answer with the file deleted" test fails today on the Session list until the legacy read goes. That is the point of it.</li>
+</ul>
+
+<h2>Smaller findings</h2>
+<ul>
+  <li><strong>A history row's kind.</strong> <code>history.db</code> does not exist on any Machine yet and its schema only adds once it does. A <code>kind</code> column holding the real kind (manifest, terminal, transition, gap, attempt, lineage) costs nothing now and replaces two partial indexes and three ways of spelling it.</li>
+  <li><strong><code>turns</code> is the only table that grows without limit.</strong> Estimate from the inventory: about 1,760 turns a day at about 0.7 KB is 0.45 GB a year, and <code>final_message</code> at about 1 KB for about 1,200 of them adds roughly the same again.</li>
+  <li><strong><code>input_events</code></strong> is read only by tests. The plan lists it as a follow-up; it can go now.</li>
+</ul>
+
+<h2>Larger than this work</h2>
+<ul>
+  <li>Process rows and every join through them: LOO-953. It also decides whether <code>lf process prune</code> survives.</li>
+  <li>One name for the message, and <code>session_events</code> renamed for what it holds: LOO-937.</li>
+  <li>Headless Claude turn duration; <code>lf usage</code> grouping by skill, model and step.</li>
+  <li>Sessions still running the released lf after install leave the message row's turn state empty, so a new Graph finds no answer for them. The fallback that used to cover this was the guess, and it is deleted. Settled as detect-and-name.</li>
+</ul>
+
+<h2>Questions</h2>
+<ol class="q">
+  <li>The reads that should never have needed history: Task state's two history arms and the Session list's legacy feedback read.
+    <ol>
+      <li>Leave as built.</li>
+      <li>Remove both in this PR, with the test that runs State projections with <code>history.db</code> deleted.</li>
+      <li>Remove both in this PR, no test.</li>
+      <li>Leave to LOO-953.</li>
+    </ol></li>
+  <li>Where a moved conversation went, and whether a Session forked.
+    <ol>
+      <li>Leave in history. A missed write loses the notice or the fork label, nothing else.</li>
+      <li>Put both on the Session row in this PR.</li>
+      <li>Hand to LOO-953, which already moves the attachment onto the Session.</li>
+    </ol></li>
+  <li>How long the final message copy is kept.
+    <ol>
+      <li>As long as the turn row: forever, as built.</li>
+      <li>90 days, like the rest of history; the numbers stay.</li>
+    </ol></li>
+  <li>A real <code>kind</code> column on <code>session_history</code>.
+    <ol>
+      <li>Leave it in the key.</li>
+      <li>Add it now, before the file exists anywhere.</li>
+    </ol></li>
+</ol>
+</main>
+</body>
+</html>

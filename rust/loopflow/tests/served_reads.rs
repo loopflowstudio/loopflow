@@ -626,7 +626,6 @@ fn screen_reads_are_compact_passive_and_match_cli() {
             title: "Recorded conversation".into(),
             title_source: loopflow_execution::session::TitleSource::Generated,
             request: None,
-            ready_summary: None,
             completed_at: None,
             created_at: 1,
         },
@@ -1186,8 +1185,11 @@ fn server_operations_match_their_lf_commands() {
             let id = connection.subscribe(served.clone()).unwrap();
             frame = connection.reading(&id).unwrap().expect("a reading");
         });
-        let served = frame;
+        let mut served = frame;
         assert!(served["unavailable"].is_null(), "{argv:?}: {served}");
+        let work: loopflow_storage::instrumentation::SqlReceipt =
+            serde_json::from_value(served["work"].take()).unwrap();
+        assert!(!work.id.is_empty());
         let printed = first_frame(repo.path(), home.path(), &argv);
         assert_eq!(without_clock(served), without_clock(printed), "{argv:?}");
     }

@@ -107,6 +107,13 @@ answer) and why: Claude removes conversations idle longer than
 `cleanupPeriodDays` (30 days unless set in its `settings.json`); Codex, OpenCode
 and Pi keep everything. Raise `cleanupPeriodDays` to keep more Claude history.
 
+lf keeps its own records of what happened apart from the store of current
+work, in `~/.lf/history.db`: one row per provider turn (time, status, model,
+tokens, final message, and the Task, Wave, skill and Graph step it ran for),
+kept, and 90 days of Session history (retries, failures, provider changes).
+The Machine server prunes history past 90 days every hour; `lf machine prune`
+does the same at once.
+
 Replay a captured request as new work, with the same prompt, model and permissions, using current native authentication; the original record is left alone:
 
 ```bash
@@ -116,27 +123,19 @@ lf replay <run-id>
 ## What's running now
 
 ```bash
-lf ps                           # live Sessions and Graph runs on this Machine
-lf ps --json                    # the same list, for another tool or agent
+lf session list                 # live Sessions on this Machine
+lf graph list                   # Graphs that ran; live ones marked
 ```
 
-```text
-$ lf ps
-LOO-953  session  claude  remove-process-rows        pid 48211  running 12m
-LOO-953  graph    code    implement (step 3 of 6)    pid 50117  running 4m
-LOO-941  ship     -       carrying #1960             pid 50388  running 1m
-repo     session  codex   loopflow                   pid 31002  idle    2h
-```
-
-Each row is a Session, a Graph run, or a Task's run or ship carrier, and the OS
-confirms its pid is alive with the start time lf recorded. A run that exited
-drops out; `lf task status <ID>` and `lf graph show <RUN>` keep its result. There
-is no call tree and no command log: commands an agent runs are tool calls in its
-transcript (`lf session history show <ID> --transcript`).
+A live Session or Graph run is one whose recorded pid the OS confirms alive
+with the start time lf recorded. A run that exited keeps its result in
+`lf task status <ID>` and `lf graph show <RUN>`. There is no call tree and no
+command log: commands an agent runs are tool calls in its transcript
+(`lf session history show <ID> --transcript`).
 
 When a process died without lf seeing it exit, the Machine server notices on its
 next pass, marks the run ended with an unknown result and releases the Session.
-Nothing needs pruning.
+`lf machine prune` drops history past its retention and compacts the files.
 
 ## How big the codebase is
 
@@ -174,7 +173,8 @@ them and stops nothing; end one with `kill <pid>` once you know what it is.
 | `lf session history show ID` | One Session; `--final`, `--context`, `--transcript`, `--events`, `--instructions` |
 | `lf session history search TEXT` / `lf session retention` | Find text in recent conversations / what providers still keep |
 | `lf replay ID` | New work from a captured request |
-| `lf ps` | Live Sessions and Graph runs, OS-confirmed |
+| `lf session list`, `lf graph list` | Live Sessions and Graph runs, OS-confirmed |
+| `lf machine prune` | Expire old history and compact the files |
 | `lf repo tokens [--days N]` | Codebase size in lines and tokens |
 | `lf machine doctor [--plan]` | Installation, storage and stray processes |
 

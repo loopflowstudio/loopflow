@@ -88,6 +88,10 @@ pub fn report() -> Result<DoctorReport> {
     let rows = events.as_ref().map_or(0, |(events, _)| events.len());
     // Binary freshness remains useful when the store cannot open.
     checks.extend(check_installation(&database_path));
+    checks.push(check_history(
+        &database_path,
+        time::OffsetDateTime::now_utc().unix_timestamp(),
+    ));
     checks.push(check_running_binaries());
     checks.push(check_binary_freshness());
     checks.push(check_contention(
@@ -137,6 +141,47 @@ fn check_running_binaries() -> Check {
 }
 
 const CONTENTION_WINDOW_SECONDS: i64 = 86_400;
+
+/// `history.db` grows with use: its size and oldest rows. A history row past
+/// retention means no prune has run on this Machine.
+fn check_history(database: &Path, now: i64) -> Check {
+    const NAME: &str = "history";
+    let path = loopflow_storage::history::history_path(database);
+    let Ok(metadata) = std::fs::metadata(&path) else {
+        return Check::ok(NAME, "history.db absent");
+    };
+    let retained = now - (loopflow_storage::sqlite::retention::HISTORY_DAYS + 2) * 86_400;
+    let conn =
+        rusqlite::Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY);
+    let oldest = |query: &str| -> Option<i64> {
+        conn.as_ref()
+            .ok()
+            .and_then(|conn| conn.query_row(query, [], |row| row.get(0)).ok())
+            .flatten()
+    };
+    let since = |oldest: Option<i64>| {
+        oldest
+            .and_then(|at| time::OffsetDateTime::from_unix_timestamp(at).ok())
+            .map_or("empty".into(), |at| format!("oldest {}", at.date()))
+    };
+    let history = oldest("SELECT MIN(observed_at) FROM session_history");
+    let turns = oldest("SELECT MIN(COALESCE(started_at,ended_at)) FROM turns");
+    let stale = history.is_some_and(|at| at < retained);
+    let detail = format!(
+        "history.db {:.1} MB; Session history {}; turns {}",
+        metadata.len() as f64 / 1_000_000.0,
+        since(history),
+        since(turns)
+    );
+    if stale {
+        Check::warn(
+            NAME,
+            format!("{detail}; history is past retention: is the Machine server running? `lf machine prune` applies it now"),
+        )
+    } else {
+        Check::ok(NAME, detail)
+    }
+}
 
 /// Who waited on the store's write lock and who held it, by binary, from lf.log.
 fn check_contention(log: &Path, since: i64) -> Check {

@@ -223,6 +223,9 @@ struct WaveViewRatios: Equatable {
 @MainActor
 @Observable
 final class WorkNavigation {
+    let performanceOwner = UUID()
+    @ObservationIgnored var liveSessionCount: Int?
+
     enum SidebarFilter: String, CaseIterable {
         case working = "Working tasks"
         case available = "Available"
@@ -252,7 +255,10 @@ final class WorkNavigation {
     var showsSlotHints = false
     var sidebarFilter: SidebarFilter = .working {
         willSet {
-            if newValue != sidebarFilter { Perf.begin(Perf.hierarchyInteraction, "filter", id: "outline") }
+            if newValue != sidebarFilter { Perf.begin(Perf.hierarchyInteraction, "filter", id: "outline:\(newValue.rawValue)", liveSessions: liveSessionCount, owner: performanceOwner) }
+        }
+        didSet {
+            if oldValue != sidebarFilter { Perf.acknowledged(Perf.hierarchyInteraction, id: "outline:\(sidebarFilter.rawValue)", owner: performanceOwner) }
         }
     }
     var sidebarFocusRequested = false

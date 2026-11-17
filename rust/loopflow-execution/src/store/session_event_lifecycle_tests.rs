@@ -1,10 +1,9 @@
 use crate::process::attachment;
 use crate::store::sessions::history_tests::record_captured_start;
-use loopflow_storage::session::SessionEventKind;
 use serde_json::json;
 
 #[test]
-fn delayed_origin_preserves_pre_bind_assignment_and_rejects_conflicting_repeat() {
+fn delayed_origin_preserves_pre_bind_assignment_through_a_conflicting_repeat() {
     let home = tempfile::tempdir().unwrap();
     let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
     let session = store.test_session(
@@ -36,52 +35,32 @@ fn delayed_origin_preserves_pre_bind_assignment_and_rejects_conflicting_repeat()
     let before = store.session_turn_origin(&session.id, &attachment).unwrap();
     crate::store::sessions::bind_session(&store, &session.id, session.captured, &task).unwrap();
     let after = store.session_turn_origin(&session.id, &attachment).unwrap();
-    let seq = store
-        .record_session_turn_origin(&"thread".into(), "late", &before)
-        .unwrap();
+    store.record_session_turn_origin(&"thread".into(), "late", &before);
     let revisions = store.revisions().unwrap();
-    assert_eq!(
-        store
-            .record_session_turn_origin(&"thread".into(), "late", &before)
-            .unwrap(),
-        seq
-    );
+    store.record_session_turn_origin(&"thread".into(), "late", &before);
     assert_eq!(store.revisions().unwrap(), revisions);
-    assert!(store
-        .record_session_turn_origin(&"thread".into(), "late", &after)
-        .is_err());
-    store
-        .record_session_turn_origin(&"thread".into(), "new", &after)
-        .unwrap();
-    let events = store.session_history(&session.id, 0, 0).unwrap();
-    let late = events
-        .iter()
-        .find(|event| event.provider_turn.as_deref() == Some("late"))
-        .unwrap();
-    let new = events
-        .iter()
-        .find(|event| event.provider_turn.as_deref() == Some("new"))
-        .unwrap();
+    // A conflicting repeat is a recording gap; the turn keeps its origin.
+    store.record_session_turn_origin(&"thread".into(), "late", &after);
+    store.record_session_turn_origin(&"thread".into(), "new", &after);
+    let turns = store.session_turns(&session.id).unwrap();
+    let late = turns.iter().find(|turn| turn.turn == "late").unwrap();
+    let new = turns.iter().find(|turn| turn.turn == "new").unwrap();
     assert_eq!(late.task_id, None);
     assert_eq!(late.wave_id, None);
     assert_eq!(new.task_id.as_deref(), Some(task.as_str()));
     assert_eq!(new.wave_id.as_deref(), Some(wave.as_str()));
     store.move_task(&task, Some(&project), None).unwrap();
     let detached = store.session_turn_origin(&session.id, &attachment).unwrap();
-    store
-        .record_session_turn_origin(&"thread".into(), "dispatched-before-move", &after)
-        .unwrap();
-    store
-        .record_session_turn_origin(&"thread".into(), "dispatched-after-move", &detached)
-        .unwrap();
-    let history = store.session_history(&session.id, 0, 0).unwrap();
-    let before_move = history
+    store.record_session_turn_origin(&"thread".into(), "dispatched-before-move", &after);
+    store.record_session_turn_origin(&"thread".into(), "dispatched-after-move", &detached);
+    let turns = store.session_turns(&session.id).unwrap();
+    let before_move = turns
         .iter()
-        .find(|event| event.provider_turn.as_deref() == Some("dispatched-before-move"))
+        .find(|turn| turn.turn == "dispatched-before-move")
         .unwrap();
-    let after_move = history
+    let after_move = turns
         .iter()
-        .find(|event| event.provider_turn.as_deref() == Some("dispatched-after-move"))
+        .find(|turn| turn.turn == "dispatched-after-move")
         .unwrap();
     assert_eq!(before_move.wave_id.as_deref(), Some(wave.as_str()));
     assert_eq!(after_move.wave_id, None);
@@ -251,14 +230,13 @@ fn session_exit_retires_orphans_and_headless_runs_but_preserves_primary_and_task
         let saved = store.session(id).unwrap().unwrap();
         assert_eq!(saved.completed_at.is_some(), retired);
         assert_eq!(saved.captured, session.captured);
+        // An exit with nowhere to go writes no history: its outcome is the
+        // Process's, and it completes no turn.
         let history = store.session_history(id, 0, 100).unwrap();
-        assert!(history
-            .iter()
-            .any(|event| event.payload["type"] == "attachment_exit"
-                && event.payload["outcome"] == outcome));
         assert!(!history
             .iter()
-            .any(|event| event.kind == SessionEventKind::Completed));
+            .any(|event| event.payload["type"] == "attachment_exit"));
+        assert!(store.session_turns(id).unwrap().is_empty());
     }
     assert!(!crate::store::session_projection::session_summaries(
         &store,
@@ -310,17 +288,14 @@ fn completed_turn_does_not_complete_the_conversation() {
         "unfinished",
         &loopflow_storage::session_record::new_artifact_key(),
     );
-    for kind in [SessionEventKind::Started, SessionEventKind::Completed] {
-        store
-            .record_session_event(
-                &session.id,
-                &"thread".into(),
-                "turn",
-                kind,
-                &json!({"status": "completed"}),
-            )
-            .unwrap();
-    }
+    store.record_turn_start(&session.id, &"thread".into(), "turn", 1);
+    store.record_turn_completion(
+        &session.id,
+        &"thread".into(),
+        "turn",
+        2,
+        &json!({"status": "completed"}),
+    );
     for _ in 0..2 {
         let rows = crate::store::session_projection::session_summaries(
             &store,
@@ -358,15 +333,13 @@ fn stopped_turn_and_stale_attachment_cannot_retire_a_resumed_conversation() {
     let original =
         attachment::claim_session_attachment(&store, &session.id, None, &first, true).unwrap();
     record_captured_start(&store, &session.id, "turn");
-    store
-        .record_session_event(
-            &session.id,
-            &"thread".into(),
-            "turn",
-            SessionEventKind::Completed,
-            &json!({"status":"interrupted"}),
-        )
-        .unwrap();
+    store.record_turn_completion(
+        &session.id,
+        &"thread".into(),
+        "turn",
+        2,
+        &json!({"status":"interrupted"}),
+    );
     assert!(store
         .session(&session.id)
         .unwrap()
@@ -408,59 +381,32 @@ fn stopped_turn_and_stale_attachment_cannot_retire_a_resumed_conversation() {
 }
 
 #[test]
-fn recovered_completion_keeps_missing_start_and_usage_and_rejects_conflicts() {
+fn recovered_completion_keeps_missing_start_and_usage_and_its_first_answer() {
     let home = tempfile::tempdir().unwrap();
     let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
     store.test_session("conversation", "run_00000000000000000000000000000001");
     let completed = json!({"status":"completed", "error":null, "started_at":10, "completed_at":20, "duration_ms":10000});
-    let seq = store
-        .record_session_event(
-            "conversation",
-            &"thread".into(),
-            "turn",
-            SessionEventKind::Completed,
-            &completed,
-        )
-        .unwrap();
+    let record = |payload: &serde_json::Value| {
+        store.record_turn_completion("conversation", &"thread".into(), "turn", 20, payload)
+    };
+    record(&completed);
+    record(&completed);
+    // A conflicting receipt is a recording gap; the first answer stays.
+    record(&json!({"status":"failed"}));
+    let turns = store.session_turns("conversation").unwrap();
+    assert_eq!(turns.len(), 1);
+    let turn = &turns[0];
     assert_eq!(
-        store
-            .record_session_event(
-                "conversation",
-                &"thread".into(),
-                "turn",
-                SessionEventKind::Completed,
-                &completed
-            )
-            .unwrap(),
-        seq
-    );
-    assert!(store
-        .record_session_event(
-            "conversation",
-            &"thread".into(),
-            "turn",
-            SessionEventKind::Completed,
-            &json!({"status":"failed"})
-        )
-        .is_err());
-    let history: Vec<_> = store
-        .session_history("conversation", 0, 100)
-        .unwrap()
-        .into_iter()
-        .filter(|event| event.kind != SessionEventKind::Captured)
-        .collect();
-    assert_eq!(
-        history.len(),
-        1,
+        (turn.started_at, &turn.usage),
+        (None, &None),
         "recovery cannot invent start or usage receipts"
     );
-    assert_eq!(history[0].payload, completed);
-    assert_eq!(history[0].agent_process_id, None);
-    assert_eq!(history[0].lf_process_id, None);
-    assert!(store
-        .session_history("conversation", seq, 100)
-        .unwrap()
-        .is_empty());
+    assert_eq!(
+        (turn.ended_at, turn.status.as_deref(), turn.duration_ms),
+        (Some(20), Some("completed"), Some(10000))
+    );
+    assert_eq!(turn.agent_process_id, None);
+    assert_eq!(turn.lf_process_id, None);
 
     let first = loopflow_model::id::LfProcessId::new();
     let second = loopflow_model::id::LfProcessId::new();
@@ -488,15 +434,13 @@ fn recovered_completion_keeps_missing_start_and_usage_and_rejects_conflicts() {
     store
         .record_agent_process_identity("conversation", &original, 12345, 12)
         .unwrap();
-    store
-        .record_session_turn_origin(
-            &"thread".into(),
-            "later",
-            &store
-                .session_turn_origin("conversation", &original)
-                .unwrap(),
-        )
-        .unwrap();
+    store.record_session_turn_origin(
+        &"thread".into(),
+        "later",
+        &store
+            .session_turn_origin("conversation", &original)
+            .unwrap(),
+    );
     let replacement = attachment::claim_session_attachment(
         &store,
         "conversation",
@@ -528,30 +472,22 @@ fn recovered_completion_keeps_missing_start_and_usage_and_rejects_conflicts() {
     assert!(store
         .record_agent_process_identity("conversation", &original, 12346, 13)
         .is_err());
-    store
-        .record_session_event(
+    for turn in ["later", "unobserved"] {
+        store.record_turn_usage(
             "conversation",
             &"thread".into(),
-            "later",
-            SessionEventKind::Usage,
+            turn,
+            30,
             &json!({"total":{"inputTokens":40}}),
-        )
-        .unwrap();
-    store
-        .record_session_event(
-            "conversation",
-            &"thread".into(),
-            "unobserved",
-            SessionEventKind::Usage,
-            &json!({"total":{"inputTokens":60}}),
-        )
-        .unwrap();
-    let events = store.session_history("conversation", seq, 100).unwrap();
+        );
+    }
+    let turns = store.session_turns("conversation").unwrap();
+    let turn = |id: &str| turns.iter().find(|turn| turn.turn == id).unwrap();
     assert_eq!(
-        events[1].agent_process_id.as_deref(),
+        turn("later").agent_process_id.as_deref(),
         Some(original.agent_process_id.as_str())
     );
-    assert_eq!(events[1].lf_process_id.as_deref(), Some(first.as_str()));
-    assert_eq!(events[2].agent_process_id, None);
-    assert_eq!(events[2].lf_process_id, None);
+    assert_eq!(turn("later").lf_process_id.as_deref(), Some(first.as_str()));
+    assert_eq!(turn("unobserved").agent_process_id, None);
+    assert_eq!(turn("unobserved").lf_process_id, None);
 }

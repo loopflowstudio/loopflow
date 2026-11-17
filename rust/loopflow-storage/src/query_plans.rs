@@ -44,6 +44,10 @@ const GROWING: [&str; 16] = [
 /// `task_ship_events` counts the 396 rows that store's 174 shipping and 12
 /// stopped Tasks backfill to, 216 of them naming a Process.
 /// `task_ownership` counts November 13's 895 entries over 880 Tasks.
+/// `session_capture_provider_thread` counts the 21,078 inputs with a resume
+/// reference on November 16's store. `session_capture_turn` is estimated from
+/// that store's 28,791 `completed` rows over 21,601 inputs: about 19,000
+/// inputs with an ended turn, rarely two per Session thread.
 const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          'agent_sessions','processes','session_events','tasks','steer_delivered',
          'steer_adapters','projects','waves',
@@ -91,6 +95,8 @@ const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          ('repository_plans','sqlite_autoindex_repository_plans_1','53 1'),
          ('session_events','session_capture_caller','17360 15'),
          ('session_events','session_capture_key','17360 1'),
+         ('session_events','session_capture_provider_thread','21078 1'),
+         ('session_events','session_capture_turn','19000 2 1 1'),
          ('session_events','session_capture_window','17723 1'),
          ('session_events','session_event_input','20942 15 14'),
          ('session_events','session_event_receipt','278035 51 37 20 7 1'),
@@ -260,7 +266,7 @@ pub fn growing_scans(store: &SqliteStore, statements: &[String]) -> Vec<String> 
         steps
     };
     let mut steps = plan("unanalyzed");
-    conn.execute_batch("ANALYZE").unwrap();
+    conn.execute_batch("ANALYZE main").unwrap();
     conn.execute_batch(MEASURED).unwrap();
     steps.extend(plan("analyzed"));
     // An index's size is a property of the data, so both passes judge a walk
@@ -585,13 +591,13 @@ mod tests {
     fn a_walk_of_a_large_partial_index_is_a_scan() {
         let home = tempfile::tempdir().unwrap();
         let store = crate::test_fixture::open(&home.path().join("loopflow.db")).unwrap();
-        let history = "SELECT session_id FROM session_events WHERE kind='observed'
-             AND json_extract(payload,'$.evidence.provider_session_id')='thread'";
-        let scans = growing_scans(&store, &[history.to_owned()]);
+        let inputs = "SELECT session_id FROM session_events WHERE kind='captured'
+             AND json_extract(payload,'$.cwd')='/fixture'";
+        let scans = growing_scans(&store, &[inputs.to_owned()]);
         assert!(
             scans
                 .iter()
-                .any(|scan| scan.contains("session_observation_receipt (")
+                .any(|scan| scan.contains("session_capture_window (")
                     && scan.contains(" rows measured)")),
             "{}",
             scans.join("\n")
@@ -606,7 +612,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let store = crate::test_fixture::open(&home.path().join("loopflow.db")).unwrap();
         let conn = store.conn.lock().unwrap();
-        conn.execute_batch("ANALYZE; DELETE FROM sqlite_stat1;")
+        conn.execute_batch("ANALYZE main; DELETE FROM sqlite_stat1;")
             .unwrap();
         conn.execute_batch(MEASURED).unwrap();
         let unmeasured: Vec<String> = conn
@@ -636,7 +642,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let store = crate::test_fixture::open(&home.path().join("loopflow.db")).unwrap();
         let conn = store.conn.lock().unwrap();
-        conn.execute_batch("ANALYZE; DELETE FROM sqlite_stat1;")
+        conn.execute_batch("ANALYZE main; DELETE FROM sqlite_stat1;")
             .unwrap();
         conn.execute_batch(MEASURED).unwrap();
         let stale: Vec<String> = conn

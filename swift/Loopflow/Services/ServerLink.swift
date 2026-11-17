@@ -101,6 +101,35 @@ public actor ServerLink {
     /// stalled server shows as unavailable rather than current. Without one the
     /// request waits, because its outcome would otherwise become unknown.
     public func request(_ operation: ServerOperation, deadline: Duration? = nil) async throws -> RawJSON {
+        let measured: ServerOperation? = switch operation {
+        case .read(let query): .measuredRead(query)
+        case .command(let change): .measuredWrite(change)
+        case .submittedCreation(let payload): .measuredSubmission(payload)
+        default: nil
+        }
+        if let measured, let work = InteractionTrace.current?.work, !work.isSealed {
+            if case .read = operation { work.servedRead() } else { work.servedWrite() }
+            defer { work.requestFinished() }
+            if welcome.revision < 6 {
+                work.sqlUnavailable()
+                return try await InteractionTrace.$current.withValue(nil) { try await self.request(operation, deadline: deadline) }
+            }
+            do {
+                let response = try await request(measured, deadline: deadline)
+                let fields = try response.fields()
+                struct Receipt: Decodable { let id: String; let statements: UInt64; let rows: UInt64 }
+                guard let result = fields["result"] else {
+                    throw RegistryQueryError("Measured read is missing its result")
+                }
+                if let counts = try? fields["work"]?.decode(Receipt.self) {
+                    work.sql(statements: counts.statements, rows: counts.rows, receipt: counts.id)
+                } else { work.sqlUnavailable() }
+                return result
+            } catch {
+                work.sqlUnavailable()
+                throw error
+            }
+        }
         guard let deadline else { return try await admitted(operation) }
         struct Expired: Error {}
         do {
@@ -411,6 +440,8 @@ final class ServerSubscription: @unchecked Sendable {
     private let consumesEvents: Bool
     private let connect: @Sendable () async throws -> ServerLink
     private var stopped = false
+    private let work: InteractionWork?
+    private var initialReceipt = true
 
     init<Output: Sendable>(_ continuation: AsyncThrowingStream<Output, any Error>.Continuation,
                            query: ServedRead, events: Bool,
@@ -419,6 +450,8 @@ final class ServerSubscription: @unchecked Sendable {
         self.query = query
         self.consumesEvents = events
         self.connect = connect
+        self.work = InteractionTrace.current?.work
+        self.work?.servedRead()
         self.deliver = { update in
             guard let output = try encode(update) else { return true }
             switch continuation.yield(output) {
@@ -483,6 +516,13 @@ final class ServerSubscription: @unchecked Sendable {
         do {
             let delivered = try lock.withLock {
                 guard !stopped else { return true }
+                if checkpoint != resumeToken, let work {
+                    struct Receipt: Decodable { let id: String; let statements: UInt64; let rows: UInt64 }
+                    if let receipt = try? frame.fields()["work"]?.decode(Receipt.self) {
+                        work.sql(statements: receipt.statements, rows: receipt.rows, receipt: receipt.id)
+                    } else { work.sqlUnavailable() }
+                    if initialReceipt { work.requestFinished(); initialReceipt = false }
+                }
                 guard try deliver(.reading(frame)) else { return false }
                 resumeToken = checkpoint
                 eventBaseline = true

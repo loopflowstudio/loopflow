@@ -83,6 +83,8 @@ mod ownership_lifecycle_tests;
 #[cfg(test)]
 mod rental_lifecycle_tests;
 #[cfg(test)]
+mod state_without_history_tests;
+#[cfg(test)]
 mod steer_lifecycle_tests;
 
 pub use error::{StoreError, StoreResult};

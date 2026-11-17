@@ -13,7 +13,7 @@ lf resume                       # return to this scope’s conversation
 
 | Survives | Where it lives | Pick it up with |
 |---|---|---|
-| Conversations, interactive and headless | `~/.lf/loopflow.db` and the provider's own history | `lf resume SESSION`, `lf resume --task <ID>` |
+| Conversations, interactive and headless | `~/.lf/loopflow.db`, `~/.lf/history.db` and the provider's own history | `lf resume SESSION`, `lf resume --task <ID>` |
 | A Task's worktree, branch, PR and thread | Beside your repository, on the code host | `lf task run <ID>` |
 | A stopped Graph | Its run and step results, as history | `lf task runs <ID>` |
 | Uncommitted files | The worktree; prune never removes them | `lf wt list` |
@@ -327,13 +327,15 @@ shrink it. Persistent docs belong in `docs:` in `.lf/config.yaml`.
 ```bash
 scripts/disk-cleanup.sh            # reclaim now; each removal is logged to ~/.lf/logs/disk.log
 scripts/disk-cleanup.sh install    # run the disk-cleanup skill hourly from crontab
+lf machine prune                   # only lf's records: expired history, then vacuum
+ls -la ~/.lf/loopflow.db ~/.lf/history.db   # state stays small
 ```
 
 The script prunes every repository under `~/src`: finished worktrees, completed
 Tasks' build output and merged branches through `lf wt prune`, and ignored
 build output (`target`, `node_modules`, `.venv`, `.build`, `DerivedData`) that no process
 holds and nothing wrote for 4 hours. It removes nothing under `~/.lf`: the
-database, its pre-migration clones (lf's own, see
+databases, its pre-migration clones (lf's own, see
 `rust/loopflow-storage/src/MIGRATIONS.md`), captures, logs and account homes stay.
 Anything a process holds open is never removed; when `lsof` fails, neither is
 anything else that check protects.
@@ -343,6 +345,12 @@ what it kept and why, and worktrees still holding unpushed work; it deletes
 nothing itself. Edit `scripts/disk-cleanup.sh` or
 `.lf/skills/disk-cleanup.md` to change the policy. Provider transcripts follow
 each provider's own retention; raise Claude's `cleanupPeriodDays` to keep more.
+
+`history.db` grows with use. The Machine server keeps 90 days of Session
+history, pruning every hour; turns are kept. `lf doctor` reports the file's
+size and oldest rows, and warns when history is past retention. Deleting it
+while nothing runs loses only past history and usage: Tasks, conversations,
+Graph routing and `lf resume` read `loopflow.db`.
 
 ## Stale worktrees and branches
 

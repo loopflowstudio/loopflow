@@ -241,7 +241,6 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     public let model: String?
     public let cwd: String
     public let state: SessionState
-    public let readySummary: String?
     public var openArgv: [String]
     public let terminalIds: [String]
     /// Its current or last turn while it is live; nil when nothing says.
@@ -291,7 +290,6 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
         case titleSource = "title_source"
         case graphMembership = "graph_membership"
         case workPath = "work_path"
-        case readySummary = "ready_summary"
         case openArgv = "open_argv"
         case terminalIds = "terminal_ids"
         case turn, raw
@@ -426,7 +424,6 @@ extension SessionRecord {
         try values.encode(model, forKey: .model)
         try values.encode(cwd, forKey: .cwd)
         try values.encode(state, forKey: .state)
-        try values.encode(readySummary, forKey: .readySummary)
         try values.encode(openArgv, forKey: .openArgv)
         try values.encode(terminalIds, forKey: .terminalIds)
         try values.encode(turn, forKey: .turn)
@@ -459,7 +456,6 @@ extension SessionRecord {
         model = try values.decodeIfPresent(String.self, forKey: .model)
         cwd = try values.decode(String.self, forKey: .cwd)
         state = try values.decode(SessionState.self, forKey: .state)
-        readySummary = try values.decodeIfPresent(String.self, forKey: .readySummary)
         openArgv = try values.decode([String].self, forKey: .openArgv)
         terminalIds = try values.decode([String].self, forKey: .terminalIds)
         turn = try values.decode(SessionTurn?.self, forKey: .turn)

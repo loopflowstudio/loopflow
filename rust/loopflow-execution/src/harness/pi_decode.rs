@@ -272,13 +272,6 @@ impl Turn {
         let mut out = Vec::new();
         facts.push(ProviderFact::Activity(Signal::Yielded(status == Lifecycle::Completed)).into());
         if !self.final_text.is_empty() {
-            facts.push(
-                ProviderFact::Output {
-                    turn: self.turn.clone(),
-                    answer: json!({"text": self.final_text}),
-                }
-                .into(),
-            );
             out.push(ConversationEvent::ItemCompleted {
                 turn_id: self.id.clone(),
                 item: ConversationItem::Message {
@@ -390,10 +383,7 @@ pub fn native(thread: &AgentSessionId, value: &Value) -> Result<Vec<Decoded>> {
         });
         // The extension's own counts describe availability, not replayed signals.
         out.extend(latest.into_iter().filter(|decoded| {
-            matches!(
-                decoded,
-                Decoded::Fact(ProviderFact::Output { .. } | ProviderFact::TurnCompleted { .. })
-            )
+            matches!(decoded, Decoded::Fact(ProviderFact::TurnCompleted { .. }))
         }));
     }
     let count = |key: &str| -> Result<usize> {

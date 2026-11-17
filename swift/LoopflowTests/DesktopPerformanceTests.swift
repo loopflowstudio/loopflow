@@ -119,7 +119,7 @@ struct DesktopPerformanceTests {
         }
         let template = listed.task.task
         let scenarios = ["task_renamed", "task_created"]
-        try journal.write(["event": "plan", "population_version": "home-copy-v2",
+        try journal.write(["event": "plan", "population_version": "home-copy-v3-task-rows",
                            "populations": ["home": current.count], "samples": samples,
                            "scenarios": scenarios, "endpoint": "store_commit_to_native_capture_ocr",
                            "poll_interval_ms": 5, "frame_hitches": NSNull(),
@@ -133,7 +133,7 @@ struct DesktopPerformanceTests {
         model.select(.task(id: listed.task.id))
         let run = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
         let shows = { (text: String) in window.outlineText.contains { $0.contains(text) } }
-        let restore = "UPDATE pm_items SET body=json_set(body,'$.name','\(template.name.sqlQuoted)') WHERE id='\(template.id.sqlQuoted)';"
+        let restore = "UPDATE tasks SET issue_title='\(template.name.sqlQuoted)' WHERE id='\(template.id.sqlQuoted)';"
 
         do {
             for attempt in 0..<samples {
@@ -143,24 +143,23 @@ struct DesktopPerformanceTests {
                 model.select(.task(id: listed.task.id))
                 await model.refresh()
                 try await written("task_renamed", attempt, journal, window, store, sql: """
-                    UPDATE pm_items SET body=json_set(body,'$.name','\(label) moved') WHERE id='\(template.id.sqlQuoted)';
+                    UPDATE tasks SET issue_title='\(label) moved' WHERE id='\(template.id.sqlQuoted)';
                     """, ready: { shows("\(label) moved") })
                 model.select(.wave(id: wave))
                 await model.refresh()
                 let fresh = String(format: "Fresh %03d", attempt)
                 try await written("task_created", attempt, journal, window, store, sql: """
-                    INSERT INTO pm_items(repo,provider,id,identifier,project_id,observed_at,needs_refresh,body)
-                    SELECT repo,provider,'\(task)','BENCH-\(attempt)',project_id,unixepoch(),0,
-                        json_set(body,'$.id','\(task)','$.identifier','BENCH-\(attempt)','$.name','\(fresh)','$.rank',0)
-                    FROM pm_items WHERE id='\(template.id.sqlQuoted)';
+                    INSERT INTO tasks(id,repository_id,project_id,issue_identifier,created_at,issue_title,planning_rank,planning_state)
+                    SELECT '\(task)',repository_id,project_id,'BENCH-\(attempt)',unixepoch(),'\(fresh)',0,'unstarted'
+                    FROM tasks WHERE id='\(template.id.sqlQuoted)';
                     """, ready: { window.contentText.contains { $0.contains(fresh) } })
 
                 // Outside every interval: the next attempt starts from the same Tasks.
-                try store.write("DELETE FROM pm_items WHERE id='\(task)'; \(restore)")
+                try store.write("DELETE FROM tasks WHERE id='\(task)'; \(restore)")
                 try await wait(window, render: true, for: .seconds(60)) { !shows(label) }
             }
         } catch {
-            try? store.write("DELETE FROM pm_items WHERE id LIKE 'bench-\(run)-%'; \(restore)")
+            try? store.write("DELETE FROM tasks WHERE id LIKE 'bench-\(run)-%'; \(restore)")
             try journal.write(["event": "setup_or_journey", "population": "home",
                                "outcome": (error as? PerformanceFailure)?.outcome ?? "failed",
                                "reason": String(describing: error)])
@@ -997,7 +996,7 @@ struct DesktopPerformanceTests {
              "workspace": ["machine_id": fixtureMachineId, "worktree": checkout,
                            "task_id": "perf-task-\(index)", "unavailable": NSNull()],
              "title": String(format: "Conversation %03d", index), "detail": "Benchmark fixture",
-             "cwd": checkout, "wave_id": "wave-1", "state": "active", "ready_summary": NSNull(), "work_path": NSNull(),
+             "cwd": checkout, "wave_id": "wave-1", "state": "active", "work_path": NSNull(),
              "actions": sessionActionFixture(state: "active"),
              "blocked": false, "title_source": "generated", "task_primary": false, "graph_membership": ["kind": "independent"], "task_ids": ["perf-task-\(index)"], "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids": [], "open_argv": ["must-not-launch"]] as [String: Any]
         })

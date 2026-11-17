@@ -1,5 +1,11 @@
 # LOO-953: no Process table; liveness on Sessions and Graph runs
 
+Status 2026-11-17: stacked on LOO-936's branch
+(`jack/loo-936-record-only-what-the-product-reads-apart-from`, PR #1965,
+"close to landing") and merged with it; the remaining slices build now on
+top of it. Next: the renames under "Direction from neighbouring Tasks", then
+the Session slice.
+
 Status 2026-11-16 (realigned after syncing main at `4852348e5c`): slice 2a
 (Graph runs and steps) is built, merged with main and passed QA
 (`scratch/qa.html`); the QA fixes (`lf graph show <RUN_ID>`, step `error` in
@@ -446,6 +452,30 @@ two live agents on one Session; a `Legacy*` type.
 Turn rows and usage reports (LOO-936). Renaming `agent_sessions`/
 `graph_processes` columns named `lf_process_id` (LOO-937 or the contract).
 Dropping other dead columns (LOO-935). `lf server stop` keeps its own path.
+
+## Direction from neighbouring Tasks (2026-11-17)
+
+- **Names.** LOO-924 (#1966) adds `loopflow_execution::harness::Run`, a
+  launch's lifetime (`Bare(Mode)` or managed, `Delegation::Here { run }`,
+  `Launch.run`). It keeps the name: "Leave it; LOO-953 picks other names."
+  Rename here, next implement pass: storage `Run` → `Execution`,
+  `RunResult` → `ExecutionResult`, both `RunStart`s → `ExecutionStart`,
+  `GraphRun` → `GraphExecution`, `LF_RUN_ID` → `LF_EXECUTION_ID`
+  (branch-only, nothing released reads it). `GraphStep` stays. Prose keeps
+  "Graph run".
+- **No launch-state column.** On showing bare vs managed in `lf session list`
+  / `lf ps`: "Not needed". LOO-924 derives it from the Session row
+  (`SqliteStore::is_bare`); nothing to carry over.
+- **#1966 also changes:** `Holder`, `Place`, `transport::holder`,
+  `WorkSource::is_managed` deleted; `Admitted` → `Recording`;
+  `AgentConfig.agent` is typed `config::Agent { harness, model }`. Expect
+  conflicts in `agent/mod.rs`, `transport.rs`, `harness/native_session.rs`,
+  `process/runtime.rs` when it reaches this branch.
+- **Agent columns are built here.** `agent_sessions.agent_pid`,
+  `agent_os_started_at`, `agent_ended_at`, `agent_exit_code` land in the
+  Session slice as in "Target records"; LOO-959, stacked on this branch,
+  reads them for quit/died (an earlier steer that LOO-959 would add them was
+  withdrawn).
 
 ## Decisions taken headless (reversible)
 

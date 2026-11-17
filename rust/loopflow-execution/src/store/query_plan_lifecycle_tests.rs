@@ -7,15 +7,13 @@ fn session_history_reads_plan_by_window() {
     let (_home, store, task, _viewer) = fixture();
     let input = crate::session_record::new_artifact_key();
     store.test_session("history", &input);
-    store
-        .record_session_event(
-            "history",
-            &"thread".into(),
-            "turn",
-            crate::session::SessionEventKind::Completed,
-            &serde_json::json!({"status":"completed"}),
-        )
-        .unwrap();
+    store.record_turn_completion(
+        "history",
+        &"thread".into(),
+        "turn",
+        1,
+        &serde_json::json!({"status":"completed"}),
+    );
     let mut traced = statements(&store, || {
         crate::store::sessions::recent_conversation_history(&store, None, None, None, 100, 50)
             .unwrap();

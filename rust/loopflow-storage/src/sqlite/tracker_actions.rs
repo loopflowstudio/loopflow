@@ -398,7 +398,7 @@ pub(crate) fn enqueue_local(
 
 /// Deleting an owner whose creation never left: the tracker has nothing to
 /// trash, so its unsent actions retire instead of creating it to delete it.
-/// A creation already attempted may exist there, so its deletion still goes.
+/// A creation already sent may exist there, so its deletion still goes.
 fn withdraw_unsent(conn: &Connection, owner: &ActionOwner) -> StoreResult<bool> {
     let unbound = match owner {
         ActionOwner::Task(_) => {
@@ -666,7 +666,7 @@ pub(crate) fn unconfirmed_for_in(
 }
 
 /// The newest unconfirmed value of each field an owner has queued.
-pub(crate) fn pending_changes_in(
+pub(crate) fn queued_changes_in(
     conn: &Connection,
     owner: &ActionOwner,
 ) -> StoreResult<Vec<crate::planning_sync::PlanningChange>> {
@@ -687,7 +687,7 @@ pub(crate) fn pending_changes_in(
 }
 
 /// Acceptance of the provider's copy of `owner` at `revision`, before it is
-/// written: attempted actions the copy answers resolve (the rule the drain
+/// written: sent actions the copy answers resolve (the rule the drain
 /// uses), unsent values rebase onto it, and every unconfirmed value replaces the
 /// observed one in `edits`, so the write keeps local intent until it resolves.
 /// Returns the resolutions made, so the caller can tell what was adopted.
@@ -861,7 +861,7 @@ pub(crate) fn attach_in(
 }
 
 /// A historical filing recorded its creation intent but no attempt boundary:
-/// it may have reached Linear, so its `create` is attempted with the reply
+/// it may have reached Linear, so its `create` is sent with the reply
 /// unknown and its values are the intent's, never today's Task.
 pub(crate) fn retain_filing_create_in(
     conn: &Connection,
@@ -1139,7 +1139,7 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// Record a look in the provider for an attempted action's lost reply.
+    /// Record a look in the provider for a sent action's lost reply.
     pub fn look_tracker_action(&self, id: &str, at: i64) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
@@ -1269,7 +1269,7 @@ mod tests {
     }
 
     #[test]
-    fn a_later_save_retires_the_unsent_value_and_keeps_the_attempted_one() {
+    fn a_later_save_retires_the_unsent_value_and_keeps_the_sent_one() {
         let (_dir, store) = store();
         let task = task(&store, true);
         let sent = enqueue(&store, &task, ActionKind::Field, "task_title").unwrap();

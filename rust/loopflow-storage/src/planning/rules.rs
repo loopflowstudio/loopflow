@@ -34,7 +34,7 @@ pub enum Decision {
     Resolve(Resolution),
 }
 
-/// What to do with an attempted action before anything else on its owner.
+/// What to do with a sent action before anything else on its owner.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LostReply {
     /// The send carries our id, so repeating it cannot duplicate.
@@ -44,7 +44,7 @@ pub enum LostReply {
     Wait,
 }
 
-/// An attempted action is looked for at most once per `window` seconds; its
+/// A sent action is looked for at most once per `window` seconds; its
 /// first look happens on the next pass. Idempotent sends repeat instead.
 pub fn lost_reply(action: &TrackerAction, idempotent: bool, now: i64, window: i64) -> LostReply {
     if idempotent {
@@ -57,15 +57,15 @@ pub fn lost_reply(action: &TrackerAction, idempotent: bool, now: i64, window: i6
 }
 
 /// Resolve `action` against what the provider holds (`None`: no such object).
-/// `parent_pending` is true while a Project this action names has no remote id.
+/// `parent_uncreated` is true while a Project this action names has no remote id.
 pub fn decide(
     action: &TrackerAction,
     observed: Option<&Observed>,
-    parent_pending: bool,
+    parent_uncreated: bool,
 ) -> Decision {
     match action.kind {
-        ActionKind::Create => create(observed, parent_pending),
-        ActionKind::Field if parent_pending => Decision::Hold,
+        ActionKind::Create => create(observed, parent_uncreated),
+        ActionKind::Field if parent_uncreated => Decision::Hold,
         ActionKind::Field => field(action, observed),
         ActionKind::State => state(action, observed),
         ActionKind::Order => order(action, observed),
@@ -75,17 +75,17 @@ pub fn decide(
     }
 }
 
-fn acknowledged(observed: &Observed) -> Decision {
+fn confirmed(observed: &Observed) -> Decision {
     Decision::Resolve(Resolution::Confirmed {
         revision: observed.revision.clone(),
         remote_id: observed.remote_id.clone(),
     })
 }
 
-fn create(observed: Option<&Observed>, parent_pending: bool) -> Decision {
+fn create(observed: Option<&Observed>, parent_uncreated: bool) -> Decision {
     match observed {
-        Some(observed) => acknowledged(observed),
-        None if parent_pending => Decision::Hold,
+        Some(observed) => confirmed(observed),
+        None if parent_uncreated => Decision::Hold,
         None => Decision::Send,
     }
 }
@@ -106,7 +106,7 @@ fn same(a: &WorkValue, b: &WorkValue) -> bool {
 }
 
 /// Unsent values go out even over a provider edit: the change sent last wins.
-/// A sent value whose reply was lost is acknowledged when it is there, sent
+/// A sent value whose reply was lost is confirmed when it is there, sent
 /// again when the provider still holds the baseline, and otherwise loses to
 /// the provider's newer value, which the store keeps beside it.
 fn field(action: &TrackerAction, observed: Option<&Observed>) -> Decision {
@@ -122,7 +122,7 @@ fn field(action: &TrackerAction, observed: Option<&Observed>) -> Decision {
         return Decision::Send;
     };
     if same(remote, &value) {
-        return acknowledged(observed);
+        return confirmed(observed);
     }
     if action.phase == ActionPhase::Queued {
         return Decision::Send;
@@ -184,7 +184,7 @@ fn order(action: &TrackerAction, observed: Option<&Observed>) -> Decision {
     };
     let desired: Vec<String> = serde_json::from_value(action.value.clone()).unwrap_or_default();
     if desired.iter().all(|id| order.contains(id)) && same_order(&desired, order) {
-        return acknowledged(observed);
+        return confirmed(observed);
     }
     if action.phase == ActionPhase::Queued {
         return Decision::Send;
@@ -217,7 +217,7 @@ fn comment(action: &TrackerAction, observed: Option<&Observed>) -> Decision {
                 Some(seen.as_str()) == action.subject.as_deref() || Some(seen.as_str()) == body
             }) =>
         {
-            acknowledged(observed)
+            confirmed(observed)
         }
         _ => Decision::Send,
     }
@@ -234,7 +234,7 @@ fn delete(action: &TrackerAction, observed: Option<&Observed>) -> Decision {
         });
     };
     if observed.deleted {
-        return acknowledged(observed);
+        return confirmed(observed);
     }
     let nanos = |revision: Option<&str>| crate::planning::revision_nanos(revision).ok().flatten();
     let base = action
@@ -259,7 +259,7 @@ fn link(action: &TrackerAction, observed: Option<&Observed>) -> Decision {
         serde_json::from_value(action.value["value"].clone()).unwrap_or_default();
     match observed {
         Some(observed) if wanted.iter().all(|id| observed.initiatives.contains(id)) => {
-            acknowledged(observed)
+            confirmed(observed)
         }
         _ => Decision::Send,
     }

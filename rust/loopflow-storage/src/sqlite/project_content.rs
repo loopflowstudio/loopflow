@@ -14,7 +14,7 @@ use super::SqliteStore;
 impl SqliteStore {
     pub fn pending_project_changes(&self, project: &ProjectId) -> StoreResult<Vec<PlanningChange>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        super::tracker_actions::pending_changes_in(
+        super::tracker_actions::queued_changes_in(
             &conn,
             &super::tracker_actions::ActionOwner::Project(project.clone()),
         )

@@ -186,7 +186,7 @@ async fn drain(
         owners.retain(|(_, queued)| {
             queued.iter().any(|action| {
                 parent_named(action).is_some_and(|project| pass.creating.contains(&project))
-                    && !pass.parent_pending(action)
+                    && !pass.parent_uncreated(action)
             })
         });
         pass.round(owners, bound.concurrency).await;
@@ -308,7 +308,7 @@ impl Drain<'_> {
             .collect()
             .await;
         for error in results.into_iter().filter_map(Result::err) {
-            tracing::debug!(%error, "tracker action pending");
+            tracing::debug!(%error, "tracker action unconfirmed");
         }
     }
 
@@ -324,7 +324,7 @@ impl Drain<'_> {
     }
 
     /// Whether this action names a Project being created that has no remote id yet.
-    fn parent_pending(&self, action: &TrackerAction) -> bool {
+    fn parent_uncreated(&self, action: &TrackerAction) -> bool {
         let Some(project) = parent_named(action).filter(|project| self.creating.contains(project))
         else {
             return false;
@@ -338,7 +338,7 @@ impl Drain<'_> {
     }
 
     /// Whether this action relates its Task to one with no tracker object yet.
-    fn target_pending(&self, action: &TrackerAction) -> bool {
+    fn target_unbound(&self, action: &TrackerAction) -> bool {
         let Some(TaskLink::Relation { target, .. }) = action.task_link() else {
             return false;
         };
@@ -400,7 +400,7 @@ impl Drain<'_> {
                 return Ok(Step::Done);
             }
         }
-        let parent = self.parent_pending(&action) || self.target_pending(&action);
+        let parent = self.parent_uncreated(&action) || self.target_unbound(&action);
         let looked = match action.phase {
             ActionPhase::Sent => {
                 let now = loopflow_storage::rows::now_unix();

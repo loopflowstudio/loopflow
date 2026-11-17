@@ -58,7 +58,7 @@ impl SqliteStore {
 
     pub fn pending_task_changes(&self, task: &TaskId) -> StoreResult<Vec<PlanningChange>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        super::tracker_actions::pending_changes_in(
+        super::tracker_actions::queued_changes_in(
             &conn,
             &super::tracker_actions::ActionOwner::Task(task.clone()),
         )

@@ -24,7 +24,7 @@ other implementation and proof gaps.
 | plan | the shared Waves, Projects and Tasks; a Wave's plan is its Project | |
 | Project | the Wave's current plan | Chapter |
 | tracker | where the plan is mirrored: Git, Linear or Asana | bridge; provider means the agent's provider |
-| action | one outgoing change in `tracker_actions`: queued, sent, then confirmed, conflicted or retired | effect |
+| action | one outgoing change for Linear or Asana in `tracker_actions`: queued, sent, then confirmed, conflicted or retired; Git exchanges the journal instead | effect |
 | event | one incoming change from a tracker | |
 | sync | moving the plan in either direction | |
 | Work | the model's name, in dev docs only | |
@@ -221,7 +221,7 @@ entry its Machine has seen.
 
 ### One outbound queue
 
-Every change a tracker carries is one `tracker_actions` row, written in the
+Every change Linear or Asana carries is one `tracker_actions` row, written in the
 transaction that saves it: `create`, `field`, `order`, `state`, `comment`,
 `delete` or `link` (a Project's Initiative, a follow-up relation
 `relation:<id>`, a pull request `pr:<url>`). Each row addresses one owner, a

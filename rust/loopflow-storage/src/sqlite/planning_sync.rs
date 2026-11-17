@@ -8,7 +8,7 @@ use super::children::ids_json;
 use super::tracker_actions::{change_word, read_action, ActionKind, ActionPhase, COLUMNS, IN_REPO};
 use super::SqliteStore;
 use crate::planning_exchange::{winning_heads, PlanningMutation};
-use crate::planning_sync::{TrackerActionStatus, TrackerReceipts};
+use crate::planning_sync::{ActionOwnerKind, TrackerActionStatus, TrackerActions, TrackerKind};
 use crate::StoreResult;
 use loopflow_model::durable::{ProjectId, TaskId};
 
@@ -22,17 +22,17 @@ const OPEN: &str = "NOT (e.kind='create' AND (EXISTS(SELECT 1 FROM tasks t WHERE
         AND later.kind=e.kind AND later.subject IS e.subject AND later.seq>e.seq AND later.phase IN ('confirmed','conflicted')))";
 
 impl SqliteStore {
-    pub fn task_tracker_receipts(&self, task: &TaskId) -> StoreResult<TrackerReceipts> {
+    pub fn task_tracker_actions(&self, task: &TaskId) -> StoreResult<TrackerActions> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.savepoint()?;
-        let status = task_tracker_receipts_in(&tx, std::slice::from_ref(task))?
+        let actions = task_tracker_actions_in(&tx, std::slice::from_ref(task))?
             .remove(task)
             .ok_or(crate::StoreError::NotFound)?;
         tx.commit()?;
-        Ok(status)
+        Ok(actions)
     }
 
-    pub fn project_tracker_receipts(&self, project: &ProjectId) -> StoreResult<TrackerReceipts> {
+    pub fn project_tracker_actions(&self, project: &ProjectId) -> StoreResult<TrackerActions> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.savepoint()?;
         let repo: String = tx.query_row(
@@ -50,7 +50,7 @@ impl SqliteStore {
                 .unwrap_or_default(),
         );
         tx.commit()?;
-        Ok(TrackerReceipts { repo, actions })
+        Ok(TrackerActions { repo, actions })
     }
 
     /// Every open action in `repo`, in send order: what `lf repo plan` lists.
@@ -74,11 +74,12 @@ impl SqliteStore {
     }
 }
 
-/// Each Task's receipts, in one statement per kind across all repositories.
-pub(super) fn task_tracker_receipts_in(
+/// Each Task's open tracker actions, in one statement per kind across all
+/// repositories.
+pub(super) fn task_tracker_actions_in(
     conn: &Connection,
     tasks: &[TaskId],
-) -> StoreResult<HashMap<TaskId, TrackerReceipts>> {
+) -> StoreResult<HashMap<TaskId, TrackerActions>> {
     let ids = ids_json(tasks.iter().map(TaskId::as_str));
     let mut statement = conn.prepare(
         "SELECT t.id,w.repo,p.id FROM tasks t JOIN repository_plans w ON w.id=t.repository_id
@@ -102,7 +103,7 @@ pub(super) fn task_tracker_receipts_in(
     let mut task_actions = owned_actions(conn, "task_id", &task_ids, false)?;
     let mut task_conflicts = git_conflicts(conn, &task_ids)?;
     let project_actions = owned_actions(conn, "project_id", &project_ids, true)?;
-    let mut receipts = HashMap::new();
+    let mut open = HashMap::new();
     for (task, repo, project) in owners {
         let mut actions = task_actions.remove(&task).unwrap_or_default();
         if let Some(order) = project
@@ -112,9 +113,9 @@ pub(super) fn task_tracker_receipts_in(
             actions.extend(order.iter().cloned());
         }
         actions.extend(task_conflicts.remove(&task).unwrap_or_default());
-        receipts.insert(TaskId::from_raw(task), TrackerReceipts { repo, actions });
+        open.insert(TaskId::from_raw(task), TrackerActions { repo, actions });
     }
-    Ok(receipts)
+    Ok(open)
 }
 
 /// Open actions of every owner in `ids` (a JSON array), by owner id.
@@ -200,16 +201,15 @@ fn git_conflicts(
                 id: id.clone(),
                 seq: None,
                 owner_kind: match table.as_str() {
-                    "projects" => "project",
-                    _ => "task",
-                }
-                .to_owned(),
+                    "projects" => ActionOwnerKind::Project,
+                    _ => ActionOwnerKind::Task,
+                },
                 owner_id: mutation.edit.target.clone(),
                 kind,
                 change: change_word(kind, Some(field), local_value.as_str()),
                 subject: Some(field.to_owned()),
                 phase: ActionPhase::Conflicted,
-                tracker: "git".to_owned(),
+                tracker: TrackerKind::Git,
                 error: None,
                 local_value,
                 tracker_value: Some(shown(won)?),

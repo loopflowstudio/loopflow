@@ -240,7 +240,10 @@ order of their oldest action, except that the owner a command just saved goes
 first. Within an owner, everything waits behind an unconfirmed `create`; otherwise
 only actions on the same subject wait behind each other. A Task naming a Project
 still being created, and a relation to a Task with no tracker object, hold
-without a request. A pass with nothing unconfirmed asks the provider nothing.
+without a request. A tracker that refuses before any request leaves (a Linear
+Project whose Wave has no Initiative) saves its error and keeps the action
+queued at no cost to the pass: the bound counts only requests that leave. A pass
+with nothing unconfirmed asks the provider nothing.
 `lf task sync <id>` drains one owner now, looking for every sent action at
 once; on Git it exchanges the planning ref.
 

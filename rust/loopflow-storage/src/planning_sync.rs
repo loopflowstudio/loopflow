@@ -1,7 +1,9 @@
-//! Planning provider delivery evidence for saved Work.
+//! What an owner's tracker has yet to confirm and what it won: the open
+//! tracker actions `lf repo plan`, `lf task show` and Desktop read.
 
 use serde::{Deserialize, Serialize};
 
+use crate::provider::Provider;
 use crate::sqlite::tracker_actions::{ActionKind, ActionPhase};
 
 /// A pending field edit and its provider baseline, independent of connection state.
@@ -25,15 +27,15 @@ pub struct TaskDeletion {
     pub base_revision: Option<String>,
 }
 
-/// An owner's open actions read with its repository, before observing
+/// An owner's open tracker actions read with its repository, before observing
 /// whether that repository still names a tracker.
 #[derive(Debug, Clone)]
-pub struct TrackerReceipts {
+pub struct TrackerActions {
     pub repo: String,
     pub actions: Vec<TrackerActionStatus>,
 }
 
-impl TrackerReceipts {
+impl TrackerActions {
     /// With no tracker configured, nothing queued will be sent, so only what
     /// was sent or lost stays.
     pub fn status(self, connected: bool) -> TrackerSync {
@@ -61,8 +63,7 @@ pub struct TrackerActionStatus {
     pub id: String,
     /// Send order across the repository; none for Git, which keeps no queue.
     pub seq: Option<i64>,
-    /// `task`, `project` or `wave`.
-    pub owner_kind: String,
+    pub owner_kind: ActionOwnerKind,
     pub owner_id: String,
     pub kind: ActionKind,
     /// What changes, as a person names it: `title`, `complete`, `comment`.
@@ -71,8 +72,7 @@ pub struct TrackerActionStatus {
     pub subject: Option<String>,
     /// `queued`, `sent` (reply unknown) or `conflicted` (the tracker's value won).
     pub phase: ActionPhase,
-    /// `git`, `linear` or `asana`.
-    pub tracker: String,
+    pub tracker: TrackerKind,
     /// Why the last request did not confirm it.
     pub error: Option<String>,
     /// The value saved here; when conflicted, the one that lost.
@@ -81,12 +81,64 @@ pub struct TrackerActionStatus {
     pub tracker_value: Option<serde_json::Value>,
 }
 
+/// What a tracker action addresses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum ActionOwnerKind {
+    Task,
+    Project,
+    Wave,
+}
+
+impl ActionOwnerKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Task => "task",
+            Self::Project => "project",
+            Self::Wave => "wave",
+        }
+    }
+}
+
+/// Where a planning change goes: Git's journal, or a queued tracker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum TrackerKind {
+    Git,
+    Linear,
+    Asana,
+}
+
+impl TrackerKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Git => "git",
+            Self::Linear => "linear",
+            Self::Asana => "asana",
+        }
+    }
+
+    /// The queued tracker a provider names; `None` for a provider that is not one.
+    pub fn of(provider: Provider) -> Option<Self> {
+        match provider {
+            Provider::Linear => Some(Self::Linear),
+            Provider::Asana => Some(Self::Asana),
+            _ => None,
+        }
+    }
+}
+
 impl TrackerActionStatus {
     /// One line: `title · queued`, `title · conflicted · lost here: "A" · linear: "B"`.
     pub fn line(&self) -> String {
         let mut line = format!("{} · {}", self.change, self.phase.as_str());
         if self.phase == ActionPhase::Sent {
-            line.push_str(&format!(", waiting for {} to confirm", self.tracker));
+            line.push_str(&format!(
+                ", waiting for {} to confirm",
+                self.tracker.as_str()
+            ));
         }
         if self.phase == ActionPhase::Conflicted {
             let won = self
@@ -95,7 +147,8 @@ impl TrackerActionStatus {
                 .unwrap_or(&serde_json::Value::Null);
             line.push_str(&format!(
                 " · lost here: {} · {}: {won}",
-                self.local_value, self.tracker
+                self.local_value,
+                self.tracker.as_str()
             ));
         }
         if let Some(error) = &self.error {

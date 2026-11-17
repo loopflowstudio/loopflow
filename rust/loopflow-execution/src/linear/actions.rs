@@ -135,7 +135,10 @@ impl LinearClient {
         project: &ProjectId,
         action: &TrackerAction,
     ) -> OpsResult<Sent> {
-        let (wave, initiative) = project_scope(store, repo, project).await?;
+        let (wave, initiative) = match project_scope(store, repo, project).await {
+            Ok(scope) => scope,
+            Err(error) => return Ok(Sent::Refused(error.to_string())),
+        };
         let team = repository_scope(repo)?;
         let id = creation_id(project.as_str())?;
         let mut input = json!({"id": id, "teamIds": [team], "useDefaultTemplate": false});

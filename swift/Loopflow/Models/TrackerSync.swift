@@ -10,16 +10,26 @@ public enum TrackerActionPhase: String, Decodable, Sendable, Hashable {
     case queued, sent, confirmed, conflicted, retired
 }
 
+/// What a tracker action addresses.
+public enum TrackerActionOwnerKind: String, Decodable, Sendable, Hashable {
+    case task, project, wave
+}
+
+/// Where a planning change goes: Git's journal, or a queued tracker.
+public enum TrackerKind: String, Decodable, Sendable, Hashable {
+    case git, linear, asana
+}
+
 public struct TrackerActionStatus: Decodable, Sendable, Hashable, Identifiable {
     public let id: String
     public let seq: Int?
-    public let ownerKind: String
+    public let ownerKind: TrackerActionOwnerKind
     public let ownerId: String
     public let kind: String
     public let change: String
     public let subject: String?
     public let phase: TrackerActionPhase
-    public let tracker: String
+    public let tracker: TrackerKind
     public let error: String?
     public let localValue: JSONValue
     public let trackerValue: JSONValue?
@@ -36,13 +46,13 @@ public struct TrackerActionStatus: Decodable, Sendable, Hashable, Identifiable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
         seq = try container.decode(Int?.self, forKey: .seq)
-        ownerKind = try container.decode(String.self, forKey: .ownerKind)
+        ownerKind = try container.decode(TrackerActionOwnerKind.self, forKey: .ownerKind)
         ownerId = try container.decode(String.self, forKey: .ownerId)
         kind = try container.decode(String.self, forKey: .kind)
         change = try container.decode(String.self, forKey: .change)
         subject = try container.decode(String?.self, forKey: .subject)
         phase = try container.decode(TrackerActionPhase.self, forKey: .phase)
-        tracker = try container.decode(String.self, forKey: .tracker)
+        tracker = try container.decode(TrackerKind.self, forKey: .tracker)
         error = try container.decode(String?.self, forKey: .error)
         localValue = try container.decode(JSONValue.self, forKey: .localValue)
         trackerValue = try container.decode(JSONValue?.self, forKey: .trackerValue)
@@ -52,9 +62,9 @@ public struct TrackerActionStatus: Decodable, Sendable, Hashable, Identifiable {
     /// `title · conflicted · lost here: "A" · linear: "B"`.
     public var text: String {
         var text = "\(change) · \(phase.rawValue)"
-        if phase == .sent { text += ", waiting for \(tracker) to confirm" }
+        if phase == .sent { text += ", waiting for \(tracker.rawValue) to confirm" }
         if phase == .conflicted {
-            text += " · lost here: \(display(localValue)) · \(tracker): \(display(trackerValue ?? .null))"
+            text += " · lost here: \(display(localValue)) · \(tracker.rawValue): \(display(trackerValue ?? .null))"
         }
         if let error { text += " · \(error)" }
         return text

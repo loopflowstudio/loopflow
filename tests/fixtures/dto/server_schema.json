@@ -83,6 +83,15 @@
       ],
       "type": "string"
     },
+    "ActionOwnerKind": {
+      "description": "What a tracker action addresses.",
+      "enum": [
+        "task",
+        "project",
+        "wave"
+      ],
+      "type": "string"
+    },
     "ActionPhase": {
       "description": "Where an action stands. A person sees `queued`, `sent` and `conflicted`;\n`confirmed` and `retired` actions have left the queue.",
       "oneOf": [
@@ -14794,8 +14803,7 @@
           "type": "string"
         },
         "owner_kind": {
-          "description": "`task`, `project` or `wave`.",
-          "type": "string"
+          "$ref": "#/$defs/ActionOwnerKind"
         },
         "phase": {
           "$ref": "#/$defs/ActionPhase",
@@ -14817,8 +14825,7 @@
           ]
         },
         "tracker": {
-          "description": "`git`, `linear` or `asana`.",
-          "type": "string"
+          "$ref": "#/$defs/TrackerKind"
         },
         "tracker_value": {
           "description": "The tracker's winning value, when conflicted."
@@ -14839,6 +14846,15 @@
         "tracker_value"
       ],
       "type": "object"
+    },
+    "TrackerKind": {
+      "description": "Where a planning change goes: Git's journal, or a queued tracker.",
+      "enum": [
+        "git",
+        "linear",
+        "asana"
+      ],
+      "type": "string"
     },
     "TrackerSync": {
       "description": "A Task's or Project's slice of `lf repo plan`'s actions: what its tracker\nhas yet to confirm, and each value the tracker won until it is saved again.\nRead-only; these rows never confer execution authority.",

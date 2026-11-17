@@ -28,8 +28,12 @@ pub enum Sent {
         revision: Option<String>,
         remote_id: Option<String>,
     },
-    /// Refused before acting (validation, rate limit): safe to send again.
+    /// The provider refused before acting (validation, rate limit): safe to
+    /// send again.
     Rejected(String),
+    /// The tracker refused before any request left, so the pass spent nothing
+    /// (a Linear Project whose Wave has no Initiative). The action stays queued.
+    Refused(String),
     /// No reply: the provider may or may not have acted.
     Unknown(String),
     /// The tracker has no form for this action; it retires with the reason.
@@ -501,6 +505,8 @@ pub(crate) mod fake {
         pub idempotent: Vec<ActionKind>,
         pub held: Mutex<Option<Observed>>,
         pub requests: AtomicUsize,
+        /// Refuses these actions before any request, with the reason.
+        pub refuse: fn(&TrackerAction) -> Option<String>,
     }
 
     impl Fake {
@@ -509,6 +515,7 @@ pub(crate) mod fake {
                 idempotent: Vec::new(),
                 held: Mutex::new(None),
                 requests: AtomicUsize::new(0),
+                refuse: |_| None,
             }
         }
 
@@ -517,6 +524,9 @@ pub(crate) mod fake {
         }
 
         pub(super) fn send(&self, action: &TrackerAction) -> Sent {
+            if let Some(reason) = (self.refuse)(action) {
+                return Sent::Refused(reason);
+            }
             self.requests.fetch_add(1, Ordering::SeqCst);
             Sent::Acknowledged {
                 revision: Some("2026-11-16T00:00:00Z".into()),

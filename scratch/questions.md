@@ -117,7 +117,7 @@ Built (glossary in `docs/dev/planning.md` "Words"; renames in
   no Linear Initiative) still takes one of the pass's 20 requests, every pass.
   One such Project on this Machine (manabot `infrastructure`). Concept
   review 2026-11-17, headless: charge only requests that leave, since the
-  bound is the provider's allowance (next implement, `tracker-mirror.md`).
+  bound is the provider's allowance. Built as `Sent::Refused`.
 
 ## Concept review round (2026-11-17)
 

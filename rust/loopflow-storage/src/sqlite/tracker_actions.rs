@@ -6,7 +6,7 @@ use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde_json::Value;
 
 use super::SqliteStore;
-use crate::planning_sync::{PlanningBaseline, TrackerActionStatus};
+use crate::planning_sync::{ActionOwnerKind, PlanningBaseline, TrackerActionStatus, TrackerKind};
 use crate::provider::Provider;
 use crate::rows::now_unix;
 use crate::work::edit::WorkValue;
@@ -146,12 +146,11 @@ pub enum ActionOwner {
 }
 
 impl ActionOwner {
-    /// `task`, `project` or `wave`.
-    pub fn kind(&self) -> &'static str {
+    pub fn kind(&self) -> ActionOwnerKind {
         match self {
-            Self::Wave(_) => "wave",
-            Self::Project(_) => "project",
-            Self::Task(_) => "task",
+            Self::Wave(_) => ActionOwnerKind::Wave,
+            Self::Project(_) => ActionOwnerKind::Project,
+            Self::Task(_) => ActionOwnerKind::Task,
         }
     }
 
@@ -241,7 +240,7 @@ impl TrackerAction {
         TrackerActionStatus {
             id: self.id.clone(),
             seq: Some(self.seq),
-            owner_kind: self.owner.kind().to_owned(),
+            owner_kind: self.owner.kind(),
             owner_id: self.owner.id().to_owned(),
             kind: self.kind,
             change: change_word(
@@ -251,7 +250,8 @@ impl TrackerAction {
             ),
             subject: self.subject.clone(),
             phase: self.phase,
-            tracker: self.provider.as_str().to_owned(),
+            tracker: TrackerKind::of(self.provider)
+                .expect("tracker_actions.provider is checked to be linear or asana"),
             error: self.error.clone(),
             local_value: shown(&self.value),
             tracker_value: self

@@ -17,14 +17,14 @@ impl Store {
     }
 
     pub fn task_tracker_sync(&self, task: &TaskId) -> StoreResult<TrackerSync> {
-        let receipts = self.sqlite.task_tracker_receipts(task)?;
-        let connected = crate::ops::tracker::connected(&receipts.repo);
-        Ok(receipts.status(connected))
+        let open = self.sqlite.task_tracker_actions(task)?;
+        let connected = crate::ops::tracker::connected(&open.repo);
+        Ok(open.status(connected))
     }
 
     pub fn project_tracker_sync(&self, project: &ProjectId) -> StoreResult<TrackerSync> {
-        let receipts = self.sqlite.project_tracker_receipts(project)?;
-        let connected = crate::ops::tracker::connected(&receipts.repo);
-        Ok(receipts.status(connected))
+        let open = self.sqlite.project_tracker_actions(project)?;
+        let connected = crate::ops::tracker::connected(&open.repo);
+        Ok(open.status(connected))
     }
 }

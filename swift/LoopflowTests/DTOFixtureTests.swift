@@ -442,6 +442,10 @@ struct DTOFixtureTests {
         #expect(sync.actions[2].localValue == .string("Local title"))
         #expect(sync.actions[2].trackerValue == .string("Linear title"))
         #expect(sync.actions[3].text.contains("linear: null"))
+        #expect(sync.actions[1].ownerKind == .project)
+        #expect(sync.actions[5].seq == nil)
+        #expect(sync.actions[5].tracker == .git)
+        #expect(sync.actions[5].text == #"title · conflicted · lost here: "Mine" · git: "Peer title""#)
         #expect(throws: DecodingError.self) {
             try JSONDecoder().decode(TrackerSync.self, from: Data("{}".utf8))
         }

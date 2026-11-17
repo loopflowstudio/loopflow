@@ -5,7 +5,7 @@ use std::path::Path;
 use anyhow::{anyhow, Result};
 
 use crate::lf::RepoPlanCommand as PlanCommand;
-use loopflow_execution::store::planning_sync::TrackerActionStatus;
+use loopflow_execution::store::planning_sync::{ActionOwnerKind, TrackerActionStatus};
 use loopflow_execution::store::Store;
 
 /// `lf repo plan [key|journal]`; bare, the planning status.
@@ -167,12 +167,12 @@ impl Status {
 /// Project's name.
 fn owner_name(store: &Store, action: &TrackerActionStatus) -> Result<String> {
     let id = &action.owner_id;
-    Ok(match action.owner_kind.as_str() {
-        "task" => store
+    Ok(match action.owner_kind {
+        ActionOwnerKind::Task => store
             .sqlite
             .task(&loopflow_model::durable::TaskId::from_raw(id))?
             .map_or_else(|| id.clone(), |task| task.identifier),
-        "project" => store
+        ActionOwnerKind::Project => store
             .sqlite
             .project(&loopflow_model::durable::ProjectId::from_raw(id))?
             .map_or_else(|| id.clone(), |project| project.name),

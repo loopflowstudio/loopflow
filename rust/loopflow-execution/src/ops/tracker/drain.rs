@@ -1,7 +1,8 @@
 //! One bounded pass over the outbound queue. Owners go in order of their
 //! oldest unconfirmed action; within an owner actions go strictly in `seq`
 //! order, so an owner whose head waits holds its later actions and no one
-//! else's. A pass stops after its request or time budget, whichever is first.
+//! else's. A pass stops after its request or time budget, whichever is first;
+//! the request budget counts only requests that leave for the tracker.
 
 use std::collections::HashSet;
 use std::fs::File;
@@ -348,18 +349,13 @@ impl Drain<'_> {
     // Another lf on this store may be sending for the same object; the lock
     // file keeps the two from interleaving requests.
     fn lock(&self, owner: &ActionOwner) -> OpsResult<Option<File>> {
-        let (kind, id) = match owner {
-            ActionOwner::Task(id) => ("task", id.to_string()),
-            ActionOwner::Project(id) => ("project", id.to_string()),
-            ActionOwner::Wave(id) => ("wave", id.to_string()),
-        };
         let path = self
             .store
             .sqlite
             .home_dir()
             .map_err(message)?
             .join("locks/planning-fields")
-            .join(format!("{kind}-{id}.lock"));
+            .join(format!("{}-{}.lock", owner.kind().as_str(), owner.id()));
         Ok(lock_delivery(&path)?)
     }
 
@@ -486,6 +482,14 @@ impl Drain<'_> {
                 },
             )?,
             Sent::Rejected(error) => {
+                self.store
+                    .sqlite
+                    .reject_tracker_action(&action.id, &error)
+                    .map_err(message)?;
+                return Ok(Step::Wait);
+            }
+            Sent::Refused(error) => {
+                self.used.fetch_sub(1, Ordering::SeqCst);
                 self.store
                     .sqlite
                     .reject_tracker_action(&action.id, &error)
@@ -678,6 +682,44 @@ mod tests {
                 .len(),
             80
         );
+    }
+
+    #[tokio::test]
+    async fn a_creation_refused_before_any_request_costs_the_pass_nothing() {
+        let mut fake = Fake::new();
+        fake.refuse = |action| {
+            matches!(action.owner, ActionOwner::Project(_))
+                .then(|| "Wave has no Linear Initiative; its Projects stay local".into())
+        };
+        let mut f = fixture();
+        f.fake = Arc::new(fake);
+        f.tracker = Tracker::Fake(f.fake.clone());
+        for at in 0..21 {
+            loopflow_storage::test_fixture::project(
+                &f.store.sqlite,
+                "/repo",
+                &format!("project-{at}"),
+            );
+        }
+        // The creations queue ahead of the edit, so a charged refusal would
+        // spend the pass before the edit's turn.
+        f.store
+            .sqlite
+            .enqueue_tracker_creations("/repo", Provider::Linear)
+            .unwrap();
+        let task = f.bound_task();
+        f.title(&task, "Renamed", "queued", None);
+        let pass = f.pass().await;
+        assert_eq!(f.fake.requests(), 1);
+        assert_eq!(pass.requests, 1);
+        assert_eq!(f.phases(&task), [ActionPhase::Confirmed]);
+        let refused: Vec<_> = f.store.sqlite.unconfirmed_tracker_actions("/repo").unwrap();
+        assert_eq!(refused.len(), 21);
+        assert!(refused
+            .iter()
+            .all(|action| action.phase == ActionPhase::Queued
+                && action.error.as_deref()
+                    == Some("Wave has no Linear Initiative; its Projects stay local")));
     }
 
     #[tokio::test]

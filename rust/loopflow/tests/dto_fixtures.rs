@@ -713,6 +713,7 @@ fn composed_lifecycle_preserves_completion_before_graph_arrival() {
 
 #[test]
 fn tracker_sync_preserves_sent_actions_and_losing_values() {
+    use loopflow_execution::store::planning_sync::{ActionOwnerKind, TrackerKind};
     use loopflow_execution::store::sqlite::tracker_actions::ActionPhase;
     let value: serde_json::Value = serde_json::from_str(include_str!(
         "../../../tests/fixtures/dto/tracker_sync.json"
@@ -733,6 +734,19 @@ fn tracker_sync_preserves_sent_actions_and_losing_values() {
         r#"title · conflicted · lost here: "Local title" · linear: "Linear title""#
     );
     assert!(sync.lines()[3].contains("linear: null"));
+    assert_eq!(sync.actions[1].owner_kind, ActionOwnerKind::Project);
+    assert_eq!(sync.actions[5].seq, None);
+    assert_eq!(sync.actions[5].tracker, TrackerKind::Git);
+    assert_eq!(
+        sync.lines()[5],
+        r#"title · conflicted · lost here: "Mine" · git: "Peer title""#
+    );
+    let mut unknown = value;
+    unknown["actions"][0]["tracker"] = serde_json::json!("notion");
+    assert!(
+        serde_json::from_value::<loopflow_execution::store::planning_sync::TrackerSync>(unknown)
+            .is_err()
+    );
 }
 
 #[test]

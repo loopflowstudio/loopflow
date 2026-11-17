@@ -24,7 +24,7 @@ fn task(store: &SqliteStore, repo: &TestRepo) -> Task {
 }
 
 #[test]
-fn disconnected_planning_keeps_uncertain_and_conflicting_receipts() {
+fn disconnected_planning_keeps_sent_and_conflicted_actions() {
     let home = tempfile::tempdir().unwrap();
     let store = Store {
         sqlite: crate::store::opening::open_ephemeral(&home.path().join("registry.db")).unwrap(),
@@ -47,8 +47,8 @@ fn disconnected_planning_keeps_uncertain_and_conflicting_receipts() {
             conn.execute("INSERT INTO tracker_actions(id,task_id,kind,value_json,phase,provider,conflict_json) VALUES(?1,?2,'state',?3,?4,'linear',?5)", rusqlite::params![id, task.id.as_str(), completed, phase, conflict]).unwrap();
         }
     }
-    let receipts = store.sqlite.task_tracker_receipts(&task.id).unwrap();
-    let connected = receipts.clone().status(true);
+    let open = store.sqlite.task_tracker_actions(&task.id).unwrap();
+    let connected = open.status(true);
     assert!(connected
         .actions
         .iter()
@@ -171,10 +171,10 @@ fn planning_receipt_queries_stay_batched_across_repositories() {
     });
     let multiple = statements(&store, || {
         let facts = crate::store::ownership::task_detail_facts(&store, &[&first, &second]).unwrap();
-        assert_eq!(facts.tracker_receipts.len(), 2);
+        assert_eq!(facts.tracker_actions.len(), 2);
         assert_ne!(
-            facts.tracker_receipts[&first.id].repo,
-            facts.tracker_receipts[&second.id].repo
+            facts.tracker_actions[&first.id].repo,
+            facts.tracker_actions[&second.id].repo
         );
     });
     assert_eq!(single.len(), multiple.len());

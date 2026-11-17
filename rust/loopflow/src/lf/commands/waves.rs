@@ -1720,10 +1720,10 @@ impl<'a> DetailReads<'a> {
         }
         let facts = loopflow_execution::store::ownership::task_detail_facts(&store.sqlite, tasks)?;
         let mut planning_connections = HashMap::new();
-        for receipts in facts.tracker_receipts.values() {
+        for open in facts.tracker_actions.values() {
             planning_connections
-                .entry(receipts.repo.clone())
-                .or_insert_with(|| loopflow_execution::ops::tracker::connected(&receipts.repo));
+                .entry(open.repo.clone())
+                .or_insert_with(|| loopflow_execution::ops::tracker::connected(&open.repo));
         }
         let graphs = store
             .sqlite
@@ -2051,14 +2051,10 @@ async fn snapshot_task_detail(
         task: task_summary(
             task,
             facts
-                .tracker_receipts
+                .tracker_actions
                 .get(&task.id)
-                .map(|receipts| {
-                    receipts
-                        .clone()
-                        .status(reads.planning_connections[&receipts.repo])
-                })
-                .ok_or_else(|| anyhow!("Task {} has no planning receipts", task.id))?,
+                .map(|open| open.clone().status(reads.planning_connections[&open.repo]))
+                .ok_or_else(|| anyhow!("Task {} has no tracker actions read", task.id))?,
             acquisition,
             facts
                 .repository_paths

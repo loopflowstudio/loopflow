@@ -27,3 +27,10 @@
   Keep it in this review slice; LOO-958 owns Session command changes. The
   older plan's live batch → interactive resume check is therefore unavailable,
   not an acceptance proved by the launch-mode unit test.
+
+- 2026-11-17, concept review of `55416284eb`: chose four `Run` variants named
+  for the cells (`Chat`, `Batch`, `WorkSession`, `Worker`) over renaming only
+  `Run::Managed`. The plan allowed either. Reversible: a rename.
+- Same review: with managed defined by turn reports alone, the Discord Wave
+  answer staying a worker needs no exception. Whether it should report turns
+  at all is still the assumption recorded above.

@@ -229,9 +229,75 @@ these four words in `harness/README.md` (linking `docs/glossary.md`), `transport
 `server/README.md`, `docs/sessions.md` and `AGENTS.md`, replacing "bare
 conversation", "managed conversation", "bare headless run" and similar. In
 code, name constructors or variants after the cells where it reads truer
-(`Run::Worker` stays); no cell gets a behavior its two axes don't explain.
+(`Run::Worker` stays; the next implement section names all four); no cell gets
+a behavior its two axes don't explain.
 Prior art checked (T3 Code, Orchestrator, Paseo, HumanLayer): all are always
 daemon-backed and name none of the cells; Orchestrator says "worker session".
+
+## Next implement: one vocabulary in code and in the model doc
+
+Concept review of `55416284eb`. The four names are in the glossary and the
+READMEs; three places still speak an older vocabulary. No behavior changes.
+
+1. **`Run` variants are the four cells.** The glossary's Managed is a row
+   (work session and worker); `Run::Managed` is one cell of it, and the
+   predicate that means managed is spelled `reports_turns()`. The comment on
+   `harness/context.rs::claude_args` already reads `Run::Managed` as the row
+   while the code tests `reports_turns()`.
+
+   ```rust
+   enum Run { Chat, Batch, WorkSession, Worker }
+   impl Run {
+       fn bare(mode: Mode) -> Run      // Chat or Batch
+       fn is_managed(self) -> bool     // WorkSession | Worker; replaces reports_turns()
+       fn mode(self) -> Mode
+   }
+   ```
+
+   `matches!(run, Run::Bare(_))` becomes `!run.is_managed()`;
+   `ThreadNaming { bare, reporting }` becomes `{ bare, managed }`. The
+   `harness/README.md` table then maps each name to the variant of the same
+   name and can shrink to a sentence. At `55416284eb`: 27 `Run::Managed`, 52
+   `Run::Bare(Mode::Headless)`, 6 `Run::Bare(Mode::Interactive)`, 8
+   `Run::Worker`, 13 `reports_turns()`.
+
+2. **Managed and bare are defined by turn reports alone.** That is the
+   definition quoted under review answer 1. The glossary rows add a lifetime
+   ("outlives its initiating command or viewer", "follows its caller") that
+   the Discord Wave answer contradicts: it is a worker, runs in the bridge's
+   process and returns its answer to it. Managed: the Machine server is told
+   each turn. Bare: it is not. Lifetime stays in the four cell rows, and the
+   Worker row says most workers are Graph steps.
+
+3. **`docs/dev/index.md`, "What runs on a Machine", still teaches the model
+   this change deletes.** It is untouched on this branch, and
+   `transport/README.md` calls it "the model". It names three places (Here,
+   Held, Detached), says "Work decides between Here and the other two: a
+   command that names a Task or Wave ... is Work", and "Hooks follow Work,
+   not the place". Here `lf research --task LOO-12` is a chat. Rewrite the
+   launch table and the two paragraphs after it with managed/bare and the
+   four names, linking the glossary; keep the process diagram, the process
+   table and "what survives what". Drop "Detached" as a launch word, so
+   `detached` means only the Session state `lf session list` prints. Line 12
+   of that file points at the section; check it still reads true.
+   That table lists one launch the others omit: a plain conversation a
+   Desktop pane or framed `lf --machine` view opens is held. Read
+   `transport::delegate_current` (`current().is_some()` selects managed) and
+   say which cell it is in the glossary's Work session row and the transport
+   README table.
+
+4. **"Held launch" where the sentence is about turn reports.** Workers
+   report turns and are not held. `harness/README.md` ("A held launch's hook
+   first sends one `session.boundary` request") and `server/README.md` ("A
+   held launch's prompt hook always runs") say managed launch, after checking
+   the second is true of workers; `transport/README.md` ("A held launch calls
+   `session.start`") says work session, and the `session.start` row in
+   `server/README.md` lists `lf task run` under "a managed launch" though a
+   worker is started detached, not through `session.start`: check and fix
+   whichever is wrong. "Held terminal" keeps its meaning.
+
+Checks: the focused commands under "Implementation checks" again, plus
+`cargo clippy --all-targets -- -D warnings`.
 
 ## Glossary (this PR)
 

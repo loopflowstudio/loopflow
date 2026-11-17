@@ -184,24 +184,23 @@ pub fn commit_step(
     agent: Option<&str>,
     progress: &impl Progress,
 ) -> OpsResult<bool> {
-    let mut message = format!("lf {step}: checkpoint");
-    if !is_clean(repo)? {
-        stage_all(repo, &|_| {})?;
-        if !git_stdout(repo, &["diff", "--cached", "--name-only"])?
-            .trim()
-            .is_empty()
-        {
-            progress.status("Writing the commit message...");
-            let written = generate_commit_message(repo, agent)
-                .inspect_err(|error| progress.error(&error.to_string()));
-            message = step_commit_message(step, written.ok().as_ref());
-        }
-    }
+    stage_all(repo, &|_| {})?;
+    let staged = !git_stdout(repo, &["diff", "--cached", "--name-only"])?
+        .trim()
+        .is_empty();
+    let written = if staged {
+        progress.status("Writing the commit message...");
+        generate_commit_message(repo, agent)
+            .inspect_err(|error| progress.error(&error.to_string()))
+            .ok()
+    } else {
+        None
+    };
     commit_workflow(
         repo,
         &CommitOptions {
             push: off_default_branch(repo)?,
-            message: Some(message),
+            message: Some(step_commit_message(step, written.as_ref())),
             ..CommitOptions::for_task(step)
         },
         progress,

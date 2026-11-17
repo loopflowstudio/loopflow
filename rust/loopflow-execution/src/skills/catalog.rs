@@ -110,15 +110,12 @@ impl SkillSource {
     pub fn builtin_relation(&self) -> Option<crate::skills::listing::BuiltinRelation> {
         use crate::skills::listing::BuiltinRelation;
         let path = self.path.as_ref()?;
-        let builtin =
-            builtins::resolve_builtin_skill(&self.name).and_then(builtins::get_builtin_skill)?;
+        let builtin = self.builtin_text()?;
         let content = crate::observe::read_to_string(path).ok()?;
         let extends = self.dialect == SkillDialect::Loopflow
             && split_frontmatter(&content)
-                .and_then(|(frontmatter, _)| serde_yaml_ng::from_str::<Value>(frontmatter).ok())
-                .is_some_and(|value| {
-                    value.get("extends").and_then(Value::as_str) == Some("builtin")
-                });
+                .and_then(|(frontmatter, _)| extends_key(frontmatter))
+                .is_some_and(|value| value.as_str() == Some("builtin"));
         Some(if extends {
             BuiltinRelation::Extends
         } else if content.trim() == builtin.trim() {
@@ -146,21 +143,16 @@ impl SkillSource {
         let Some((frontmatter, addition)) = split_frontmatter(&content) else {
             return Ok(content);
         };
-        let extends = serde_yaml_ng::from_str::<Value>(frontmatter)
-            .ok()
-            .and_then(|value| value.get("extends").cloned());
-        match extends.as_ref().map(Value::as_str) {
+        match extends_key(frontmatter).as_ref().map(Value::as_str) {
             None => Ok(content),
             Some(Some("builtin")) => {
-                let base = builtins::resolve_builtin_skill(&self.name)
-                    .and_then(builtins::get_builtin_skill)
-                    .ok_or_else(|| {
-                        LoadError::InvalidSkill(format!(
-                            "{} extends a builtin, but no builtin skill is named {:?}",
-                            path.display(),
-                            self.name
-                        ))
-                    })?;
+                let base = self.builtin_text().ok_or_else(|| {
+                    LoadError::InvalidSkill(format!(
+                        "{} extends a builtin, but no builtin skill is named {:?}",
+                        path.display(),
+                        self.name
+                    ))
+                })?;
                 let (inherited, base) = split_frontmatter(base).unwrap_or(("", base));
                 let mut merged = serde_yaml_ng::from_str::<serde_yaml_ng::Mapping>(inherited)
                     .unwrap_or_default();
@@ -181,6 +173,17 @@ impl SkillSource {
             ))),
         }
     }
+
+    fn builtin_text(&self) -> Option<&'static str> {
+        builtins::resolve_builtin_skill(&self.name).and_then(builtins::get_builtin_skill)
+    }
+}
+
+fn extends_key(frontmatter: &str) -> Option<Value> {
+    serde_yaml_ng::from_str::<Value>(frontmatter)
+        .ok()?
+        .get("extends")
+        .cloned()
 }
 
 #[derive(Debug)]

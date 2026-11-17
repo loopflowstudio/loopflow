@@ -999,10 +999,11 @@ fn answer_value(text: &str) -> Result<serde_json::Value, String> {
 
 impl RunningGraph<'_> {
     /// Every skill step's edits become one commit, written and pushed by a
-    /// child `lf commit --step`, which also pushes commits the skill made, so its message-writing agent is a Process of
-    /// this Graph like any other step. A Graph contributing to a Task that
-    /// another run carries leaves the checkout's edits to that run.
-    /// Best-effort: the next step runs either way.
+    /// child `lf commit --step` (which also pushes commits the skill made
+    /// itself), so its message-writing agent is a Process of this Graph like
+    /// any other step. A Graph contributing to a Task that another run carries
+    /// leaves the checkout's edits to that run. Best-effort: the next step
+    /// runs either way.
     async fn commit_step(&self, step: &str) {
         let contribution = self.task.is_some() && self.task_run.is_none();
         if contribution

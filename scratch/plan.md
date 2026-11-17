@@ -210,3 +210,7 @@ commits, `.lf/qa/` notes), `docs/ops.md`, `docs/agent-api.md`.
   instruction_levels + skill_alignment (21): pass, run here.
 - Full suites and Swift (the skill-version and `outcome` mirrors were never
   built): CI.
+- Compress: `commit_step` stages first and asks for a message only when
+  something is staged; `SkillSource::builtin_text` and `extends_key` replace
+  the duplicated builtin lookup and frontmatter parse. `skills:: ops::commit::`
+  (36), `commit_tests::` (13), clippy: pass, run here.

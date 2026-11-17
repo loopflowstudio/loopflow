@@ -35,7 +35,7 @@ struct TaskFilesView: View {
                         if prURL != nil { Button("Pull request") { store.page = .pullRequest; store.noteInteraction() } }
                         ForEach(store.tabs) { tab in
                             HStack(spacing: 4) {
-                                Button(tab.path) { store.selectFile(tab.path, mode: .read) }
+                                Button(tab.path) { store.selectFileFromInput(tab.path, mode: .read) }
                                     .fontWeight(store.page == .files && store.selection == tab.path ? .semibold : .regular)
                                 Button { store.closeTab(tab.id); store.noteInteraction() } label: { Image(systemName: "xmark") }
                                     .accessibilityLabel("Close \(tab.path)")
@@ -282,7 +282,7 @@ struct TaskFilesView: View {
 
     private func selectFile(_ path: String, mode: TaskFilesStore.Mode) {
         let wasDropdown = store.navigator == .dropdown
-        store.selectFile(path, mode: mode)
+        store.selectFileFromInput(path, mode: mode)
         if wasDropdown { dismissNavigator() }
     }
 
@@ -459,6 +459,7 @@ private struct TaskDocumentView: NSViewRepresentable {
             host.addSubview(document.scroll)
         }
         document.editor.applyPalette(palette)
+        document.editor.recordReadiness()
         document.scroll.backgroundColor = NSColor(palette.background)
     }
 }

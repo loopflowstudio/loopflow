@@ -89,6 +89,7 @@ pub struct SubscriptionFrame<'a, T> {
     /// Why the read failed. `body` is then `null`.
     pub unavailable: Option<String>,
     pub body: Option<&'a T>,
+    pub work: Option<loopflow_storage::instrumentation::SqlReceipt>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -367,6 +368,7 @@ where
                 answers: None,
                 unavailable: Some(error),
                 body: None,
+                work: None,
             })
             .ok(),
             events: Vec::new(),
@@ -601,6 +603,7 @@ where
                     answers: self.answers,
                     unavailable,
                     body: body.as_ref(),
+                    work: None,
                 })?);
             }
             self.failures = if body.is_none() {
@@ -675,6 +678,7 @@ fn encode<T: Serialize>(frame: &SubscriptionFrame<'_, T>) -> Result<Vec<u8>> {
             answers: frame.answers,
             unavailable: Some("subscription frame exceeds the 64 MiB transport limit".into()),
             body: None,
+            work: frame.work.clone(),
         })?;
     }
     bytes.push(b'\n');

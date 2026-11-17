@@ -125,10 +125,18 @@ struct WorkSurfaceView: View {
                                 let navigation = model.navigation
                                 guard navigation.startingTaskSessions.insert(task.id).inserted else { return }
                                 navigation.taskSessionErrors[task.id] = nil
-                                Task {
-                                    defer { navigation.startingTaskSessions.remove(task.id) }
-                                    do { try await onNewSession(task.id) }
-                                    catch { navigation.taskSessionErrors[task.id] = error.localizedDescription }
+                                Perf.userAction(.newConversation, scenario: "new_session_to_typing", id: task.id,
+                                                repository: model.repoPath, liveSessions: model.liveSessionCount,
+                                                owner: navigation.performanceOwner) {
+                                    Perf.acknowledged(.newConversation, id: task.id, owner: navigation.performanceOwner)
+                                    Task {
+                                        defer { navigation.startingTaskSessions.remove(task.id) }
+                                        do { try await onNewSession(task.id) }
+                                        catch {
+                                            Perf.finish(.newConversation, id: task.id, owner: navigation.performanceOwner, outcome: .failed)
+                                            navigation.taskSessionErrors[task.id] = error.localizedDescription
+                                        }
+                                    }
                                 }
                             } label: {
                                 Label("New session", systemImage: "plus.bubble")
@@ -182,7 +190,11 @@ struct WorkSurfaceView: View {
                 // Exact Available links preserve access to secondary conversations
                 // needing input without restoring a Session inventory.
                 ForEach((sessions ?? []).filter { $0.availability == .available }) { session in
-                    Button { onOpenSession(session) } label: {
+                    Button {
+                        Perf.userAction(Perf.taskWorkspaceReady, scenario: "session", id: session.id,
+                                        repository: model.repoPath, liveSessions: model.liveSessionCount,
+                                        owner: model.navigation.performanceOwner) { onOpenSession(session) }
+                    } label: {
                         Label(session.readySummary ?? "Input needed in \(session.title)", systemImage: "bubble.left")
                     }
                     .buttonStyle(WorkPlainButtonStyle())
@@ -211,7 +223,7 @@ struct WorkSurfaceView: View {
                 TaskCommentsView(model: model, task: task)
             }
             .onChange(of: task.id, initial: true) { _, id in
-                Perf.endAfterCommit(Perf.taskWorkspaceReady, id: id)
+                Perf.stateObserved(Perf.taskWorkspaceReady, id: id, owner: model.navigation.performanceOwner, inputReady: false)
             }
         } else {
             missingSelection

@@ -134,3 +134,13 @@ tables and whether Process rows are needed are in LOO-953's
 - Claude's `cleanupPeriodDays`: Jack Heart: "Lets set this to 90 on my machine". Set in `~/.claude/settings.json` (was unset, default 30).
 - On why `history.db` and `usage.db` are separate files: Jack Heart asked "Why are these separate dbs"; after the per-row breakdown of one turn (one `usage.db` row, six `history.db` rows, four of them repeating the turn row): "ok. seems ok". Not a decision to merge the files or to keep each turn's final answer in lf's files; both remain open.
 - Observed: for an ordinary turn, `provider_attempt_started`, `provider_attempt_finished`, `terminal.json` and the `conversation` turn-completed row repeat the turn row; the manifest and the transition do not.
+
+## Concept review of the built change, 2026-11-17
+
+Page: `scratch/concept-review.html` (five numbered questions). Jack Heart: "1b 2b 3b 4b 5b".
+
+- 1b: move "ended" and "answering turn" onto the message row in `loopflow.db`, in this PR.
+- 2b: one file beside `loopflow.db`, holding both tables with separate retention.
+- 3b: write attempt and terminal history rows only on a retry or failure, in this PR.
+- 4b: also keep the agent's final message on the turn row.
+- 5b: give store retention its own command name.

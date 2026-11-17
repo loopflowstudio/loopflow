@@ -465,3 +465,54 @@ Compress after QA (2026-11-16): the unrecorded-answer test writes the
 thread's transcript in place instead of writing and renaming twice; plan
 sections superseded by the "as built" ones cut (git: `edd2df6b44`).
 `transcript::answer::` 4 passed; clippy on execution clean.
+
+## Direction after the concept review of the built change, 2026-11-17 (supersedes any section above that disagrees)
+
+Reasoning and the walked interaction are in `scratch/concept-review.html`; the
+answers are quoted in `questions.md`. Five changes, all in this PR. Remove
+what each replaces; leave no section of this plan or of `docs/dev/data.md`
+describing the three-file shape.
+
+1. **A turn's state lives on the message row in `loopflow.db`.** The
+   `captured` row records the provider turn that answered it, when that turn
+   ended and its status (enough for the failed-step read: interrupted or
+   errored). Written in `loopflow.db` at turn end, where lf already writes
+   `session_activity`. Graph routing (`input_answered_turn`), the Session
+   list (`recorded_turn_end`), completion dedupe (`session_turn_completed`,
+   `session_completions`) and the Graph's interrupted/error check read only
+   `loopflow.db`. Delete the fallback that guesses the thread's last turn.
+   Several turns can answer one message: the row holds the latest completed
+   one. `Watch::Journals` is left only on reads that show history or usage;
+   the Session list and Task view/status become `Watch::State` if nothing
+   else in them reads the journal. Measure the added main-lock writes per
+   hour and report it with the other before/after numbers.
+2. **One file beside `loopflow.db`.** `session_history` and `turns` are two
+   tables in one journal file with one write lock, one writer per process and
+   one revision; retention stays per table (history 90 days, turns kept).
+   Choose the file's name for what it holds now (both history and turns) and
+   use that one word in code and docs. No Machine has the two-file layout
+   installed, so there is nothing to migrate from it. Re-run the locked-file
+   QA scenario: one wait per turn boundary, not two.
+3. **History stops restating the turn.** `provider_attempt_started`,
+   `provider_attempt_finished`, `terminal.json` and the provider's
+   turn-completed `conversation` row are written only when the turn retries
+   or does not complete; check every reader of each before dropping it
+   ("Recorded …" status in Telemetry and Task history, `pending_inputs`, the
+   Graph's `turn_events`). `session_history.kind` either names the real kind
+   or goes. The retention pass does not move the restating rows of ordinary
+   turns from old stores.
+4. **The turn row keeps the agent's final message.** A text column on
+   `turns`, written when the turn's numbers are, from the transcript. It is a
+   record for people: `--final` and the Task view read it when the transcript
+   is gone. Graph routing keeps reading the transcript at step end and never
+   depends on this column. A missed write is a recording gap and is filled by
+   the same later pass that fills tokens.
+5. **Store retention has its own command name.** Not under `lf process
+   prune`; the Machine server's hourly pass and the docs use the new name.
+   Canonicalize any alias in shared navigation so help and execution agree.
+
+A turn row rebuilt after a gap takes skill and start from the message row.
+
+Still follow-ups, not this PR: headless Claude turns record no duration;
+`lf usage` grouping by skill, model and step; one name for the message
+(input, capture, receipt) and for `session_events`.

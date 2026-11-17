@@ -1,0 +1,389 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-936 concept review</title>
+<style>
+  :root {
+    --bg: #fbfaf7; --ink: #1d1c1a; --soft: #5d5a54; --line: #dcd8cf; --panel: #f3f0e9;
+    --yes: #1f7a4d; --yes-bg: #e2f2e8; --no: #a8321f; --no-bg: #f8e3de;
+    --part: #8a6100; --part-bg: #f6ecd0; --prop: #2b4f9e; --prop-bg: #e6ecf9;
+    --code: #efece4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #171614; --ink: #ece9e2; --soft: #a9a59b; --line: #38352f; --panel: #201f1c;
+      --yes: #6fd09b; --yes-bg: #173324; --no: #f08a76; --no-bg: #3a1c16;
+      --part: #e6bd5a; --part-bg: #352b10; --prop: #9db8f5; --prop-bg: #1b2744;
+      --code: #26241f;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 16px/1.55 ui-serif, Georgia, "Iowan Old Style", serif; }
+  main { max-width: 980px; margin: 0 auto; padding: 40px 20px 80px; }
+  h1 { font-size: 30px; line-height: 1.2; margin: 0 0 6px; }
+  h2 { font-size: 22px; margin: 44px 0 10px; padding-top: 18px; border-top: 1px solid var(--line); }
+  h3 { font-size: 17px; margin: 22px 0 6px; }
+  p { margin: 8px 0; max-width: 72ch; }
+  .lede { color: var(--soft); font-size: 17px; }
+  code { font: 13.5px/1.4 ui-monospace, "SF Mono", Menlo, monospace; background: var(--code);
+    padding: 1px 5px; border-radius: 4px; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 15px; }
+  th, td { text-align: left; vertical-align: top; padding: 9px 10px; border-bottom: 1px solid var(--line); }
+  th { font-weight: 600; color: var(--soft); border-bottom: 2px solid var(--line); }
+  .wrap { overflow-x: auto; }
+  .tag { display: inline-block; font: 600 13px/1 ui-sans-serif, system-ui, sans-serif;
+    padding: 4px 8px; border-radius: 999px; white-space: nowrap; }
+  .yes { color: var(--yes); background: var(--yes-bg); }
+  .no { color: var(--no); background: var(--no-bg); }
+  .part { color: var(--part); background: var(--part-bg); }
+  .prop { color: var(--prop); background: var(--prop-bg); }
+  .files { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 14px 0; }
+  .file { border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: var(--panel); }
+  .file h4 { margin: 0 0 2px; font: 600 14px ui-monospace, Menlo, monospace; }
+  .file .says { color: var(--soft); font-size: 13.5px; margin: 0 0 8px; }
+  .file ul { margin: 0; padding-left: 18px; font-size: 14.5px; }
+  .file li { margin: 4px 0; }
+  .file li.live { color: var(--no); }
+  .proposed { border: 2px dashed var(--prop); background: var(--prop-bg); }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 12px 0; }
+  .box { border: 1px solid var(--line); border-radius: 8px; padding: 14px; background: var(--panel); }
+  .box h3 { margin-top: 0; }
+  .steps { counter-reset: s; list-style: none; padding: 0; margin: 10px 0; }
+  .steps li { counter-increment: s; padding: 8px 0 8px 38px; position: relative; border-bottom: 1px solid var(--line); }
+  .steps li::before { content: counter(s); position: absolute; left: 0; top: 8px; width: 26px; height: 26px;
+    border-radius: 50%; background: var(--panel); border: 1px solid var(--line); text-align: center;
+    font: 600 13px/25px ui-sans-serif, system-ui, sans-serif; }
+  .q { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin: 10px 0; }
+  .q b { font-weight: 600; }
+  .q ol { margin: 6px 0 0; padding-left: 22px; list-style: lower-alpha; }
+  .note { color: var(--soft); font-size: 14.5px; }
+  @media (max-width: 760px) { .files { grid-template-columns: 1fr 1fr; } .two { grid-template-columns: 1fr; } }
+  @media (max-width: 480px) { .files { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Do the product's concepts and the code's concepts line up?</h1>
+<p class="lede">LOO-936 as built, PR #1965 at <code>e83f48c89d</code>, reviewed against its base.</p>
+
+<p><b>Area taken:</b> what lf records about a Session's work and where it keeps it: the message
+that starts work, the turn that answers it, the history of what happened, and the three store files
+that hold them after this change. That is wider than the diff's stated subject (taking history off
+the write lock) because the change draws a new line through the store, and the question is whether
+that line is where the product's concepts are.</p>
+
+<p><span class="tag prop">proposed</span> marks anything that does not exist yet. Everything else
+is as built.</p>
+
+<h2>One interaction, walked</h2>
+
+<p>A Graph runs a <code>loop-or-next</code> step. Fourteen seconds, one turn.</p>
+
+<ol class="steps">
+  <li>The Graph sends the step's message. lf writes a <code>captured</code> row in
+      <code>loopflow.db</code>.</li>
+  <li>The provider starts a turn. lf inserts a row in <code>usage.db</code>, then writes the
+      turn's Task, Wave, skill and step onto it.</li>
+  <li>While it runs, lf appends about six rows to <code>history.db</code>: what the message was
+      made of, the attempt starting, the provider's state change, the provider's own events.</li>
+  <li>The turn ends. lf completes the <code>usage.db</code> row in place: end time, status, tokens.</li>
+  <li>The Graph asks "which turn answered my message?" It reads <code>usage.db</code> to get the
+      turn id, then reads that turn's last message from the provider's transcript, and routes.</li>
+  <li>The Session list asks "is this turn finished?" It reads <code>usage.db</code>.</li>
+</ol>
+
+<h3>The failure</h3>
+<p>Something holds <code>usage.db</code> for the length of the turn. The turn still completes (about
+5 s of waiting per locked file, measured in QA) and <code>lf.log</code> gets a recording gap. But
+step 5 now has no turn id. The code falls back to "the last turn this provider conversation began
+since the message was captured", guarded by a check that no later message continued the same
+conversation. The comment on that fallback says why the guard exists: <i>"that thread's last turn
+may answer someone else."</i> Step 6 has no recorded end, so the turn reads as running until the
+transcript moves.</p>
+
+<h3>The recovery</h3>
+<p>At the next unlocked write the gap closes, and the missed turn gets its row written later from
+the transcript, with model and tokens but without skill or start time. So the row that was meant to
+answer "time by skill" is missing both for exactly the turns that had trouble.</p>
+
+<h2>Where each fact lives, and who reads it to act right now</h2>
+
+<div class="files">
+  <div class="file">
+    <h4>loopflow.db</h4>
+    <p class="says">Says: what the product reads to act now</p>
+    <ul>
+      <li>Session, Task, Graph</li>
+      <li>the message (<code>captured</code>)</li>
+      <li>activity: tools open, yielded</li>
+      <li>Process rows</li>
+    </ul>
+  </div>
+  <div class="file">
+    <h4>usage.db</h4>
+    <p class="says">Says: one row per turn, for tokens and time</p>
+    <ul>
+      <li>tokens, cost, duration</li>
+      <li>Task, Wave, skill, step, model</li>
+      <li class="live">whether the turn ended (Session list)</li>
+      <li class="live">which turn answered a message (Graph routing)</li>
+      <li class="live">whether a completion was already seen (dedupe)</li>
+    </ul>
+  </div>
+  <div class="file">
+    <h4>history.db</h4>
+    <p class="says">Says: what a person reads later</p>
+    <ul>
+      <li>what the message was made of</li>
+      <li>provider state changes</li>
+      <li>attempts, terminal, recording gaps</li>
+      <li class="live">interrupted or errored (Graph, when a step's Process fails)</li>
+    </ul>
+  </div>
+  <div class="file">
+    <h4>provider transcript</h4>
+    <p class="says">Claude: idle 90 days here, 30 by default. Codex: kept</p>
+    <ul>
+      <li>the conversation</li>
+      <li class="live">the turn's final answer (Graph routing, Task view)</li>
+    </ul>
+  </div>
+</div>
+<p class="note">Red lines are facts the product reads to decide what to do next, sitting in a file
+whose stated job is something else. The Session list, <code>lf history</code> and the Task view and
+status all subscribe with <code>Watch::Journals</code>, so they wake on every write to all three
+files.</p>
+
+<h2>The pairings</h2>
+
+<div class="wrap">
+<table>
+  <tr><th>What a person knows</th><th>What the code has</th><th>Line up?</th><th>What is wrong</th></tr>
+  <tr>
+    <td>A Session</td>
+    <td><code>agent_sessions</code>, now with <code>opened_at</code>, the latest transition and
+        the independent flag as columns</td>
+    <td><span class="tag yes">yes</span></td>
+    <td>Three facts that used to be dug out of event rows are now on the Session.</td>
+  </tr>
+  <tr>
+    <td>A turn: the agent working on something and handing back</td>
+    <td>A row in <code>usage.turns</code>, in <code>usage.db</code></td>
+    <td><span class="tag no">no</span></td>
+    <td>One name for two ideas. The file is named for a report, but the row is the turn itself:
+        the Session list and Graph routing depend on it. When its write is missed, the product
+        guesses.</td>
+  </tr>
+  <tr>
+    <td>Tokens and time by skill, model, Wave</td>
+    <td>Columns on <code>usage.turns</code>, one query, no join</td>
+    <td><span class="tag part">mostly</span></td>
+    <td>This is the win. Three holes: headless Claude turns record no duration
+        (<code>started_at = ended_at</code>); a turn recovered from a gap has no skill or start;
+        there is no command, only <code>sqlite3</code>.</td>
+  </tr>
+  <tr>
+    <td>The message that starts work</td>
+    <td>A <code>captured</code> row in <code>session_events</code>; called input, capture, captured
+        event, artifact key and receipt key in different places</td>
+    <td><span class="tag no">no</span></td>
+    <td>One idea under five names. After this change <code>session_events</code> holds nothing
+        but these rows (and old answers until they age out), so the table is named for what moved
+        away.</td>
+  </tr>
+  <tr>
+    <td>What happened in a Session</td>
+    <td><code>history.session_history</code>: rows whose <code>kind</code> may only be
+        <code>'observed'</code>; the real kind is inside <code>receipt_key</code> and the JSON</td>
+    <td><span class="tag part">partly</span></td>
+    <td>For an ordinary turn, four of its six rows (attempt started, attempt finished, terminal,
+        turn completed) restate the turn row. A column with one legal value says nothing.</td>
+  </tr>
+  <tr>
+    <td>What the agent concluded</td>
+    <td>Read from the provider's transcript by turn id</td>
+    <td><span class="tag part">partly</span></td>
+    <td>Right for routing. For a person later, it lasts only as long as the provider keeps the
+        transcript, and lf keeps no copy.</td>
+  </tr>
+  <tr>
+    <td>"History is apart from the state people edit" (the Task's title)</td>
+    <td>Three files; <code>Watch::State</code> and <code>Watch::Journals</code></td>
+    <td><span class="tag no">no</span></td>
+    <td>The lock is separate, which was the goal. The meaning is not: the main live views read
+        all three files, and a Graph step reads two of them to decide what to do.</td>
+  </tr>
+  <tr>
+    <td>Something lf failed to record</td>
+    <td><code>store::RecordingGap</code>, a line in <code>lf.log</code>, a <code>store-gap</code>
+        row when the file answers again</td>
+    <td><span class="tag yes">yes</span></td>
+    <td>One type, one place, and the turn carries on.</td>
+  </tr>
+  <tr>
+    <td>Old history going away</td>
+    <td>The Machine server, hourly; by hand, <code>lf process prune</code></td>
+    <td><span class="tag no">no</span></td>
+    <td>The action has no name of its own. A person who wants to clear Session history runs a
+        command named for Processes.</td>
+  </tr>
+  <tr>
+    <td>(nothing)</td>
+    <td>Journal, observation, receipt, attempt</td>
+    <td><span class="tag part">code only</span></td>
+    <td>Concepts the code has and a person never sees. Fine inside the code; "journal" and
+        "history" are used for the same files in different layers.</td>
+  </tr>
+  <tr>
+    <td>A Process</td>
+    <td><code>processes</code>; history and turn rows still name one and keep it for 30 days</td>
+    <td><span class="tag no">no</span></td>
+    <td>Out of this work: LOO-953.</td>
+  </tr>
+</table>
+</div>
+
+<h2>The biggest mismatch: the turn</h2>
+
+<p>The change set out to separate two things: state the product acts on, and a record people read
+later. It then put the turn, which is both, in a file named for the second. Everything awkward in
+the walk above comes from that. The guess in step 5, the "running" turn in step 6, and three files
+that all have to be watched by the main views are one problem.</p>
+
+<p>A turn has two parts with different needs. Whether it ended and which message it answered are
+tiny facts the product needs at once and must not guess. Its tokens, cost, duration and grouping
+are a record that can arrive late and can be rebuilt from the transcript.</p>
+
+<div class="two">
+  <div class="box">
+    <h3>Before (as built)</h3>
+    <ul>
+      <li>"Did it end?" and "which turn answered?" are read from <code>usage.db</code>.</li>
+      <li>A missed write means a guess, or a turn shown as running.</li>
+      <li>Session list, Task view and status watch all three files.</li>
+      <li>Deleting <code>usage.db</code> loses trends and also changes what running Graphs and
+          Session lists see.</li>
+    </ul>
+  </div>
+  <div class="box proposed">
+    <h3>After <span class="tag prop">proposed</span></h3>
+    <ul>
+      <li>The message row in <code>loopflow.db</code> records the turn that answered it and when
+          it ended. lf already writes to <code>loopflow.db</code> at these moments: the message
+          itself, and <code>session_activity</code> each time the agent yields.</li>
+      <li>Graph routing and the Session list read only <code>loopflow.db</code>. No guess.</li>
+      <li><code>usage.db</code> becomes what its name says: numbers that can arrive late.</li>
+      <li>Only history views watch the other files.</li>
+      <li>Deleting <code>usage.db</code> or <code>history.db</code> changes nothing a running
+          Graph or a Session list sees.</li>
+    </ul>
+  </div>
+</div>
+
+<h3>Tested</h3>
+<div class="wrap">
+<table>
+  <tr><th>Path</th><th>As built</th><th>Proposed</th></tr>
+  <tr><td>Normal turn</td><td>Works.</td><td>Works. One more column written on a row lf already
+      touches.</td></tr>
+  <tr><td><code>usage.db</code> locked for the turn</td><td>Answer found by a guarded guess; turn
+      shows running until the transcript moves.</td><td>Answer and end are exact; only the numbers
+      are late.</td></tr>
+  <tr><td>Recovery</td><td>Row rebuilt without skill or start.</td><td>Same rebuild, but the
+      message row knows the skill and the start, so the rebuilt row can have them.</td></tr>
+  <tr><td><code>loopflow.db</code> locked</td><td>The message can't be captured, so there is no
+      turn to record.</td><td>Same. Nothing new depends on it.</td></tr>
+</table>
+</div>
+
+<h3>Counterexamples kept</h3>
+<ul>
+  <li><b>It puts a write back on the main lock.</b> The point of the Task was to take per-turn
+      writes off it. This adds one update per turn end, to a row in a table already written per
+      turn. The inventory measured about 0.3 history writes a second against 7 of state. Worth
+      measuring before accepting.</li>
+  <li><b>Several turns can answer one message</b> in an interactive Session. The message row then
+      holds the latest completed one, which is what routing asks for today
+      (<code>ORDER BY ended_at DESC LIMIT 1</code>).</li>
+  <li><b>A prompt folded into an earlier turn</b> has no message row of its own. It has no turn
+      row today either, and reads as running until the transcript moves. Unchanged.</li>
+  <li><b>The failed-step read</b> (interrupted or errored, from <code>history.db</code>) is not
+      covered by this. It would need the turn's status on the message row too, or the Graph to
+      read the transcript as it does for the answer.</li>
+</ul>
+
+<h2>Smaller findings</h2>
+<ul>
+  <li><b>History repeats the turn.</b> Attempt and terminal rows could be written only when a turn
+      retries or fails. That would cut <code>history.db</code> to roughly a third for ordinary
+      turns. Not checked against every reader.</li>
+  <li><b>Two journal files or one.</b> If the turn's state moves to <code>loopflow.db</code>,
+      <code>usage.db</code> and <code>history.db</code> are both pure later-reading, written by
+      the same process at the same moments. One file would halve the worst-case wait QA measured
+      (5 s per locked file). Two files keep usage easy to copy and history safe to delete.</li>
+  <li><b><code>kind</code> in <code>session_history</code></b> can only be <code>'observed'</code>.
+      Either it names the real kind (transition, manifest, gap) or it goes.</li>
+</ul>
+
+<h2>Larger than this work</h2>
+<ul>
+  <li><b>Naming the message.</b> Picking one word among input, capture and receipt, and renaming
+      <code>session_events</code> to match, touches most of the Session code and three clients.
+      Sibling Task 5 ("Name a repository and a person one way everywhere") is the same kind of
+      work.</li>
+  <li><b>Headless Claude turns have no duration.</b> Without it, "time by skill" is wrong for most
+      Graph steps. The released build has the same hole.</li>
+  <li><b>A command for the questions.</b> <code>lf usage</code> groups by Wave, Project and Task
+      but not skill, model or step.</li>
+  <li><b>Process rows named by history and turns.</b> LOO-953.</li>
+</ul>
+
+<h2>Questions</h2>
+
+<div class="q"><b>1. Where does a turn's state live?</b>
+  <ol>
+    <li>Leave as built: read from <code>usage.db</code>, with the fallback guess.</li>
+    <li>Move "ended" and "answering turn" onto the message row in <code>loopflow.db</code>, in
+        this PR.</li>
+    <li>Same as b, as a follow-up Task after this PR lands.</li>
+    <li>Keep it in the turn file but rename the file for what it is (<code>turns.db</code>) and
+        document it as state.</li>
+  </ol>
+</div>
+
+<div class="q"><b>2. How many files beside <code>loopflow.db</code>?</b>
+  <ol>
+    <li>Two, as built: <code>history.db</code> and <code>usage.db</code>.</li>
+    <li>One, holding both tables with separate retention.</li>
+  </ol>
+</div>
+
+<div class="q"><b>3. History rows that restate the turn</b>
+  <ol>
+    <li>Keep writing them.</li>
+    <li>Write attempt and terminal rows only on a retry or failure, in this PR.</li>
+    <li>Same as b, as a follow-up.</li>
+  </ol>
+</div>
+
+<div class="q"><b>4. The agent's conclusion, for a person later</b>
+  <ol>
+    <li>Transcript only, as built. On this Machine that is 90 days for Claude.</li>
+    <li>Also keep the final message on the turn row.</li>
+  </ol>
+</div>
+
+<div class="q"><b>5. The name of the retention action</b>
+  <ol>
+    <li>Leave it under <code>lf process prune</code>.</li>
+    <li>Give store retention its own command name.</li>
+  </ol>
+</div>
+
+</main>
+</body>
+</html>

@@ -123,9 +123,6 @@ pub fn participant_email(repo: &Path) -> Option<String> {
     (!email.is_empty()).then(|| email.to_lowercase())
 }
 
-/// Agents Loopflow can drive; listing order grants no preference.
-const KNOWN_AGENTS: [&str; 4] = ["codex", "claude", "opencode", "pi"];
-
 /// Claude model families a launch can name with `claude:<family>` and a
 /// scoped Claude limit can name in its `rate_limit_type` suffix.
 pub const CLAUDE_MODEL_FAMILIES: [&str; 4] = ["fable", "opus", "sonnet", "haiku"];
@@ -171,14 +168,17 @@ pub(crate) fn resume_choice(provider: &str, model: Option<&str>, selected: Optio
 /// Select automatically only when exactly one supported harness is installed.
 pub fn default_agent() -> Option<&'static str> {
     #[cfg(test)]
-    let is_installed = |agent: &str| agent == KNOWN_AGENTS[0];
+    let is_installed = |agent: &str| agent == crate::harness::HarnessKind::Codex.as_str();
     #[cfg(not(test))]
     let is_installed = check_cli_available;
     installed_agent(is_installed)
 }
 
 fn installed_agent(is_installed: impl Fn(&str) -> bool) -> Option<&'static str> {
-    let mut installed = KNOWN_AGENTS.into_iter().filter(|agent| is_installed(agent));
+    let mut installed = crate::harness::HarnessKind::ALL
+        .into_iter()
+        .map(crate::harness::HarnessKind::as_str)
+        .filter(|agent| is_installed(agent));
     let only = installed.next()?;
     installed.next().is_none().then_some(only)
 }

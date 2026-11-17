@@ -1,456 +1,178 @@
 # LOO-924: one launch type per harness
 
-## Problem
+## Outcome and constraints
 
-lf launches Claude Code, Codex, OpenCode and Pi, interactive or headless, as
-the caller (bare) or for the Machine server. The `Harness` trait
-(`harness/mod.rs`) covers only the headless, stream-driven launch. Interactive
-launches are assembled from `match harness.as_str()` arms spread across
-`agent/session.rs`, `harness/context.rs`, `harness/native_session.rs`,
-`terminal_title.rs`, `skills/invocation.rs`, `transcript/raw.rs` and
-`lf/commands/{run,replay}.rs`. Mode and holder are re-derived at each
-entry point, and the attachment is an `Option` that gets refused at runtime.
+One per-harness `Harness` answers native and headless launch questions. Core
+uses capabilities and `HarnessKind::harness()`; adding a harness adds its file,
+kind/registry entry and conformance fixtures. Launches retain their existing
+mode, terminal placement, holder, hooks, provider thread and exit behavior.
 
-Outcome (Task text): one per-harness type answers every launch question; mode
-and holder resolved once at `transport::delegate`; `HarnessKind` is the only
-place a harness name is compared; one interactive Claude path; attachment
-required in the type; a fifth harness is one file.
+lf stays outside provider conversation bytes. Codex clients reach their private
+app-server directly. Recording failures remain gaps. No account routing returns.
+LOO-913 (#1953, 4a0691a9a0) and main through 4852348e5c are merged here.
 
-## Risk findings (measured at 470da475a1)
+The full earlier design and counterexamples are at
+58a4135e40:scratch/harness-launch-type.md. The Task directive snapshot is in
+`.lf/prompts/20261116-210624-4d5d755e-928f-47e1-a709-941f4eb980c5-d6amE0-summary.md`.
 
-LOO-913 (#1953, which removes account routing) is on main at 4a0691a9a0 and
-merged into this branch. Add no account selection back.
+## Interface
 
-Main is merged through 4852348e5c (#1959, #1961, #1962, #1963; they touch
-only Graph code and builtin skills, not harness, transport or agent code). #1955 (528ccd8eda) is merged into this checkout. `native_exit::record_exit`
-uses main's `Result<()>` body with `&Admitted`; native interruption no longer
-reads a stored AgentProcess outcome. Main also supplies `PromptBuild::skill_version`.
-Earlier merge analysis is in b9542ecef5:scratch/harness-launch-type.md.
+`HarnessKind` owns parse/as_str/ALL and one registry dispatch, `harness()`.
+Each file has a unit `Harness` implementation and its persistent stream
+`Driver`. The driver protocol is start, input, same-turn input, interrupt,
+stop, provider identity and runtime updates. `start()` takes no arguments;
+construction clones the required configuration and frozen admission.
 
-**The resume path admits lazily.** `session_command_status_with_env`
-(`native_session.rs:379`) creates a capture and claims an attachment when
-`command.attachment` is `None`. That is the "Option means admit later"
-contract. Making the attachment required means moving that block into one
-`admit` function that runs before the harness is chosen. Nothing new is
-refused.
+`Launch<'a>` borrows `AgentConfig` and required `Admitted`; it carries its
+`Harness`, `Holder`, `Start::{New, Resume { thread }}` and optional
+context-file path (built today with `Mode` and without the harness; slice 6).
+`Admitted` retains the store, Session and exact `SessionAttachment`. Assigned
+native thread IDs come from the admission's capture UUID; callers do not name
+them. Capabilities include a Caller/Server thread-naming pair, native skill
+dialect, same-turn input, turn limits, schemas, respawn behavior and install copy.
 
-**Interactive shapes differ by mechanism, not by name.**
+### Two runners (implementation choice, 2026-11-16)
 
-| harness | interactive client | who names the thread | companion while client runs |
-|---|---|---|---|
-| Claude | native TUI, prompt on stdin | lf (`--session-id`) | none; may `exec` into a held terminal |
-| Pi, `Holder::Caller` | native TUI | lf (`--session-id`) | none |
-| Pi, `Holder::Server` | native TUI + extension | provider (extension reports file) | none |
-| Codex, `Holder::Caller` | plain `codex`, prompt in argv | provider (start hook, `reported_thread`) | none |
-| Codex, `Holder::Server` | `codex --remote unix://…` after lf opens the app-server thread | provider | none (client may `exec`) |
-| OpenCode | `opencode --server … --session` after lf starts the private server | provider | observer thread draining events; must wait here, never `exec` |
+Use the original design's two-runner option over the same `Launch` and `Harness`.
+`native_session::run` returns `NativeOutcome`: an OS exit status, interruption
+and move notice. `drive::run` returns `AgentProcessResult`: a provider turn's
+answer and typed failure for retry policy. No synthetic OS status or mode-tagged
+result joins them. `run_agent` owns retries/admission and builds a new `Launch`
+for each attempt; native entry points admit before selecting their harness.
 
-So the shared runner needs only one rule: a client with a companion waits in
-this process, and every other client may `exec` into a held terminal.
+`NativeClient` holds a prepared `std::process::Command`, optional remote endpoint,
+thread, title, reported-thread path and owned companion. The shared runner may
+exec a client with no companion into a held terminal. OpenCode's companion owns
+its observer thread and shutdown sender; it signals and joins on every exit path.
 
-Three axes, three words. `Holder` (Caller | Server) is who the provider
-reports to. `Mode` is whether a native client or a stream driver runs.
-`transport::Place` (Held | Detached | here) is which process runs the launch;
-it stays private to `transport` and no harness sees it. "Held" means only
-`Place::Held`.
+| harness | native client | Caller names thread | Server names thread | companion |
+|---|---|---|---|---|
+| Claude | native TUI; prompt on stdin | admission | admission | none |
+| Codex | Caller: plain codex; Server: remote app-server client | start hook | app-server | none |
+| OpenCode | private server client | server | server | observer; always wait |
+| Pi | native TUI + extension | admission | extension | none |
 
-**Mode is not `!batch`.** `is_interactive_run` (`run.rs:700`) is
-`!batch && (--interactive || tty || no prompt)`, and `delegate` separately
-decides `Place::Held` from `!batch`. The resolver keeps both inputs so neither decision
-changes.
+Hook declarations, title flags, model validation, skill dialect and process
+recognition are answered by the owning harness. Shared context helpers keep
+hook persistence; they do not dispatch by provider name. Claude stream syntax
+and usage decoding each have one implementation.
 
-**Usage parsing** now shares `claude::usage(&Value)` between stream and
-transcript decoding. Missing input remains distinct from zero; cache-only
-observations still contribute to peak pressure.
+## Next implement direction: slice 6, one representation per launch fact
 
-## Role models: what to take
+Concept review of the implemented slices 4–5 (2026-11-16). Launch behavior is
+right; four launch facts still have two or three forms. Each item removes a
+form and changes no behavior. Do them in this order; 1–3 unlock each other.
 
-- **ACP (Zed)**: the agent advertises capabilities at `initialize`
-  (`loadSession`, prompt content types); the client never infers them from
-  identity. Session new/load/prompt/cancel are the whole surface. Take the
-  capability struct and new-vs-load as one `Start` value. Don't take the
-  transport: ACP puts the client in the byte path of every turn, and lf must
-  keep native TUIs and stay out of the byte path. That is why driving all four
-  harnesses through ACP adapters (`claude-code-acp`, `codex-acp`) is ruled out.
-- **LSP**: capabilities are data the core branches on. Take that `if caps.x`
-  replaces `if name == "codex"` everywhere outside the harness's own file.
-- **Terraform providers**: core holds a registry and never names a provider.
-  Take one registry function, `HarnessKind::harness()`, as the only dispatch.
-- **`llm`**: a model plugin is one class with flag attributes (`can_stream`,
-  `supports_schema`) and one `execute`. Take this as the size to aim for: a
-  harness file is a unit struct, a capability literal, and three methods.
+1. **Mode is the runner, not a field.** No harness reads `Launch::mode`. Its
+   only readers are `drive::run` and `native_session::run`, each refusing the
+   other value, and `codex.rs::open_native` / `opencode.rs::open_native`
+   hand-write `Mode::Interactive` to build a `Driver`. Mode is still resolved
+   once at `transport::delegate` (`Delegation::Here { mode }`) and selects
+   `native_session::run` or `drive::run`; the harness learns it by being asked
+   for `open` or `driver`. Delete `Launch::mode` and both refusals.
+   `harness::Mode` stays for transport and prompt assembly.
+2. **Resume is `Start`.** It is also `AgentConfig::resume_token` and
+   `Driver::set_agent_session`. Every `Driver::new` copies
+   `launch.start.thread()` back into a cloned config; Codex `open_native`
+   builds `Start::New` and then calls `set_agent_session(saved)`, its only
+   production caller. Drivers read `launch.start`; a native Codex open whose
+   store has a thread passes `Start::Resume`; `set_agent_session` leaves the
+   `Driver` trait. `resume_token` remains only as `run_agent`'s retry state,
+   read where the attempt's `Launch` is built; harness files do not read it.
+   Check that a held Codex with a stored thread and a first prompt still sends
+   that prompt (`initial_prompt_on_resume`).
+3. **Harnesses do not build Launches.** After 1 and 2, `open` passes the
+   Launch it received, with a replaced config where needed
+   (`Launch { config: &config, ..*launch }`, as `drive::run` does). The two
+   literal constructions in `codex.rs` and `opencode.rs` go, and with them
+   their dropped `context_file`.
+4. **Launch carries its harness.** `Launch::harness()` re-parses the agent
+   string on every call and returns `Result`; `drive::run` calls it three
+   times, once behind `expect("validated launch")`, and
+   `resume_session_with_env` re-parses behind `expect("resolved harness")`.
+   Add `harness: &'static dyn Harness`, parsed once where each Launch is built
+   (`agent/mod.rs`, `native_session::{launch_session, resume_session_with_env}`);
+   delete the method and the expects.
+5. **Capabilities are one struct.** `initial_prompt_on_resume`,
+   `supports_execution_boundary` and `classifies_failures` are yes/no
+   capabilities answered as trait methods beside `Capabilities`. Move them in.
+6. **Sweep the last kind tables.** `transcript/watch.rs::watch` lists four
+   homes and their subdirectories beside `Harness::transcript_root` (Pi is
+   `sessions` there and the trait default is `projects`: find which is read
+   before merging). `provider_conversation.rs::find` maps `Provider` back to a
+   kind with `_ => Claude`, the inverse of `Harness::provider()`. A fifth
+   harness must not need a line in either.
 
-## Design
+The launch matrix and conformance tests are the check: same 16 cells, same
+commands and threads, with `mode` gone from the fixtures.
 
-### Source of truth
+## Decisions that must remain true
 
-`HarnessKind` (enum, `harness/mod.rs`) keeps `parse`/`as_str`/`ALL` and gains
-one method, `fn harness(self) -> &'static dyn Harness`. These are the only
-places a harness name appears outside its own file and tests.
+- Mode is not `!batch`: `LaunchInput::mode()` is
+  `!batch && (interactive || tty || !has_prompt)`. Place still uses `batch`.
+  `Delegation::Here { mode }` carries that decision to prompt assembly.
+  Previews call the same resolver without delegating. Nonlaunch commands have
+  no invented mode and `Cli` stores none.
+- Place and Holder read different facts. Place reads named Work. Holder reads
+  the selected source's managed fact. Inherited `LF_AS` outside a Task checkout
+  is `Declared`: here + Server. Do not resolve implicit binding ahead of
+  delegation; that adds a store read to every bare invocation.
+- Native resume by ID reads `store.is_work(named_work, Some(session))` for
+  Holder and propagates read failures. Headless `lf -b resume ID --message`
+  uses only CLI Work selectors: without selectors it remains here + Caller,
+  even for a stored managed Session. Its command passes no stored Session to
+  the holder resolver. These are distinct matrix rows.
+- Graph steps re-exec lf, resolving their own mode and holder. Replay, commit
+  messages, PR text and sync execution select Headless + Caller in process.
+- `Provider` in storage means provider homes/credentials, not a harness; its
+  parsing remains. The application Clap `SessionCommand` is unrelated and stays.
+- A missing native store is a recording gap in exit settlement; that owner's
+  `Option<Admitted>` is unrelated to a required launch admission.
+- Pi's native Server thread comes from its extension; Caller gets an assigned
+  UUID. A bare Codex reports its provider thread through the start hook.
 
-```rust
-pub trait Harness: Sync {
-    fn kind(&self) -> HarnessKind;
-    fn capabilities(&self) -> Capabilities;
-    /// Native client for an interactive launch: the command, and any
-    /// companion lf keeps alive while it runs (Codex/OpenCode servers are
-    /// started here).
-    fn open(&self, launch: &Launch<'_>) -> Result<NativeClient>;
-    /// Stream driver for a headless launch (today's trait, renamed), built
-    /// admitted from the launch.
-    fn driver(&self, launch: &Launch<'_>,
-              events: mpsc::UnboundedSender<ConversationEvent>,
-              approval: ApprovalPolicy) -> Box<dyn Driver>;
-}
+The unresolved meaning of inherited LF_AS is outside this Task; see
+`scratch/questions.md`. It must not change as part of this refactor.
 
-pub struct Capabilities {
-    pub thread: ThreadNaming,          // { caller, server }: Assigned | Reported
-    pub same_turn_input: bool,         // send_current can succeed
-    pub native_skills: Option<SkillDialect>,
-    pub turn_limit: bool,              // Claude only today
-    pub output_schema: bool,           // Claude only today
-    pub respawns_after_crash: bool,    // replaces is_terminal_harness_error's list
-    pub install_hint: &'static str,    // replaces missing_agent_message's match
-}
-```
+## Delete — do not maintain
 
-`Driver` is the current `Harness` trait renamed: start, send_input,
-send_current, interrupt, stop, agent_session, pid, process_group_id,
-set_agent_session, set_runtime. `ClaudeHarness` and the others become
-`claude::Driver` and so on. LOO-913 removes the account methods.
+The surviving paths replace these; their coverage belongs on Harness/Launch:
 
-### Launch value
+- duplicate interactive runner and its runtime launch/exit methods;
+- provider `SessionCommand`, `ProviderInvocation`, `build_session_command`,
+  `native_connection_command` and program dispatch in native_session;
+- `AgentConfig::holder`, Holder's Default and optional launch attachments;
+- private Claude Launch, optional driver owners and late `start(config, owner)`;
+- `default_create_harness`, `canonical_harness`, terminal-error string table;
+- context native_args table, title-argument match, skill native-name tables,
+  raw process-name table, settings OpenCode model rule and install-hint match;
+- saved-transcript reader, layout and retention dispatch, and KNOWN_AGENTS.
+  The final deletion sweep found these remaining HarnessKind authorities;
+  they now ask the same harness for transcript policy and use ALL for discovery.
 
-```rust
-pub enum Mode { Interactive, Headless }
+Do not remove store `Provider`, Clap `SessionCommand`, transcript's parsed
+`Launch`, or exit-record `Option<Admitted>`.
 
-pub struct Launch<'a> {
-    pub config: &'a AgentConfig,     // what to run; no holder, no attachment
-    pub mode: Mode,
-    pub holder: Holder,
-    pub admitted: &'a Admitted,      // required
-    pub start: Start<'a>,            // New | Resume { thread: &AgentSessionId }
-    pub context_file: Option<&'a Path>,
-}
+## Remaining gate and demo checks
 
-pub struct Admitted { store: SqliteStore, session: String, attachment: SessionAttachment }
-```
+Slices 4–5 are implemented; slice 6 above is not. Local checks cover the 16-cell native/headless ×
+Caller/Server matrix, command policy, recorded threads, OpenCode diagnostics,
+mode/holder decisions, bare native resume and saved-transcript policy.
 
-- `transport::delegate*` returns `Delegation::{Delegated, Here { mode }}`
-  instead of `bool`. The early return (inside a held terminal or a detached
-  launcher) resolves the mode too. `LaunchInput::mode` owns the former
-  `is_interactive_run` predicate; `Place::Held` still keys on `batch`.
-- Place and Holder read two facts, each derived once in `transport`.
-  **Place** reads whether the command names its Work (`named`: `task run`,
-  `--task`, `--wave`, or a reopened Session that is not bare), as `delegate`
-  does today. **Holder** reads whether the launch's Work source is managed
-  (`WorkSource::is_managed()`, or `store.is_work` for a native reopened Session).
-  A headless resume by ID uses only the command's named Work, as today; native
-  resume consults stored Session Work. Inherited `LF_AS` outside a Task
-  checkout binds as `Declared`, so it runs here (`named = false`) with
-  `Holder::Server`.
-  A Graph step is already `Server` and here, so that pair is not new. This
-  Task keeps every entry as it is ("behave as before"); the entry gets its own
-  row in the launch matrix so the next change to it is deliberate.
-- `delegate` runs before the binding is resolved, so it cannot know the
-  source. `Delegation::Here { mode }` carries the mode; one
-  `transport::holder(work, source)` returns the `Holder` once the
-  binding exists, and it is the only caller of `Holder::of`. A caller that
-  holds a Session record reads `store.is_work` itself and passes the answer. It replaces the
-  four derivations (`run.rs:52`, `:205`, `:285`, `native_session.rs:96`). A
-  held or detached child re-executes the same argv and reaches the same
-  function. Do not resolve the implicit binding before `delegate` to merge the
-  two: that adds a store read ahead of delegation for every bare launch.
-- In-process headless callers that never delegate (commit message, PR text,
-  sync execution, replay) build `Launch` with `Mode::Headless` and
-  `Holder::Caller`. A Graph step for a Task is `Holder::Server`
-  (`lf -b --task`); it goes through the resolver.
-- `Admitted` replaces the `AttachmentOwner` tuple and both
-  `Option<(String, SessionAttachment)>` fields. One `admit(…) -> Result<Admitted>`
-  holds today's lazy block from `session_command_status_with_env`, and the
-  runtime path wraps `LfProcessRuntime::session_attachment()`. Claude headless
-  respawn keeps getting fresh attachments through `Driver::set_runtime`.
-
-### One entry point
-
-`harness::launch(launch: Launch) -> Result<Outcome>`:
-
-- `Mode::Interactive` → `native::run(harness.open(&launch)?, &launch)`:
-  today's `run_native_session` tail made harness-agnostic (terminal record,
-  folder-trust report, hooks, title, transport `exec` handoff unless a
-  companion exists, spawn/wait, exit record, move detection, reported thread).
-- `Mode::Headless` → today's `_run_harness_once` with `harness.driver(...)`.
-
-`run_prompt`, `resume_session_with_env` and `run_agent` all build a `Launch`
-and call this. `SessionCommandOutcome::result` and `bare_exit_code` take the
-`Holder` and the `HarnessKind`, not a program string.
-
-`Outcome` is one struct both modes fill (exit status, interrupted, moved,
-thread, answer or failure), replacing `SessionCommandOutcome` and
-`AgentProcessResult`. The test: no caller matches on which mode produced it.
-If the two cannot merge, drop the single entry point and keep
-`native::run` and the driver loop as two functions over the same `Harness`
-and `Launch`; do not add a mode-tagged result.
-
-### Per-harness files absorb the tables
-
-| today | moves to |
-|---|---|
-| `agent/session.rs` `build_session_command` match, `ProviderInvocation::ClaudeStream`, `native_connection_command` | each harness's `open` (and Claude's driver args) |
-| `harness/context.rs` `native_args` match, `configure_hooks` filter `"claude"\|"codex"\|"pi"` | each harness's `open` |
-| `native_session.rs` `program == "codex"/"opencode"` dispatch, `run_codex_native`, `run_opencode_native`, `open_codex_native` | `codex::open`, `opencode::open` |
-| `claude_trust` calls gated on `program == "claude"` | `claude::open` |
-| `terminal_title.rs:257` match | a `title_args` step in each `open` |
-| `skills/invocation.rs` `native_for(&str)`, `native_declarations(&str)` | take `Capabilities::native_skills` |
-| `run.rs:740` `names_thread` | `capabilities().thread` |
-| `agent/mod.rs` `run_admitted_agent` Claude-only warnings | `turn_limit` / `output_schema` |
-| `transcript/raw.rs:194-221` process recognition | `HarnessKind::parse` plus a per-harness argv check |
-| `config/settings.rs:311-344` OpenCode model rule | `opencode.rs` |
-| `replay.rs:185-266` per-harness defaults | capabilities + `HarnessKind::ALL` |
-| Claude usage keys in two decoders | one `claude::usage(&Value)` |
-| `transcript/summary.rs:269` name match | `HarnessKind::provider()` |
-
-### Concept review (2026-11-16, headless)
-
-Settled by the design:
-
-- `Start::New` carries no thread. An Assigned thread id is the UUID in the
-  capture's artifact key (`run.rs:743-753` strips `run_` today), so `admit`
-  owns it: `Admitted::assigned_thread()`, and `harness::launch` passes it to
-  `open` when `capabilities().thread` is `Assigned` for the placement's
-  holder. Callers never choose or pass one; `run.rs`'s `names_thread` block
-  is deleted, not moved.
-- `ThreadNaming` is a pair `{ caller, server }` of `Assigned | Reported`,
-  because Pi differs by holder. It stays data, not a method.
-- "Whether it can be managed" (Task text) is not a capability. After LOO-913
-  every harness can run for the Machine server; managed means
-  `Holder::Server`, which `Launch` already carries.
-- `install_hint` is copy, not behavior; keep it on `Capabilities` only
-  because it removes a name `match`.
-
-Second pass, against the working diff (runner deletion):
-
-- No `Placement` type. The name already means the `machine:` setting
-  (`config::placement::Placement`) and a pane's container
-  (`open/workspace.rs`), and reads as `transport::Place`. `Launch` carries
-  `mode` and `holder` as fields.
-- `run_agent` is now headless only, so `ProcessConfig::auto` no longer
-  selects anything inside execution. Its remaining reads are dead and go
-  with the field in slice 3 (list under "Delete"). The CLI passes the resolved Mode into
-  `PromptBuild`.
-- The holder has four derivations today (see "Launch value"); one function
-  replaces them.
-- `Outcome` was undefined; see "One entry point".
-
-Third pass, against the admission diff:
-
-- Place and Holder are two facts (see "Launch value"). The earlier "one
-  managed-work input" would have moved inherited `LF_AS` outside a Task
-  checkout from here to held or detached. Slice 3 is unblocked.
-- `Harness::driver` takes the `Launch`. Today `claude::` and `pi::` drivers
-  are built empty and hold `owner: Option<Admitted>` with a "has not started"
-  error, because `start(config, admitted)` delivers it late. Built from a
-  `Launch`, a driver owns its `Admitted` from construction; `Driver::start`
-  takes no arguments and both `owner() -> Result` helpers go.
-- `Admitted::from_runtime` still fails with "invocation has not claimed its
-  Session attachment" when `LfProcessRuntime::admitted()` is `None`. Slice 4
-  checks whether an agent launch can reach that; if only non-agent captures
-  have no attachment, the agent entry points take a runtime type that always
-  has one. `native_exit::settle`'s `Option<Admitted>` stays: there `None` is a
-  store that did not open, a recording gap.
-
-Slice 3 counterexample (2026-11-16): headless `lf -b resume ID --message`
-reaches `run::resume` with `named_work` derived only from CLI selectors in
-`lf/commands/session.rs::resume`. It neither delegates by stored Session Work
-nor uses it for Holder. The same ID can therefore be Caller headless and Server
-native. The resolver now retains that distinction; the matrix needs separate
-headless/native resume-by-ID rows. The earlier blanket statement about reopened
-Sessions was incorrect. This changes the written design, not launch behavior.
-
-Fourth-pass design repairs (2026-11-16, against 1c3af13938):
-`transport::holder(work, source)` consumes the Work fact its caller already
-holds; native resume propagates `store.is_work` failures. `Mode` travels as a
-required argument through dispatch and prompt assembly, never on `Cli`.
-`LaunchInput::mode()` owns terminal-based resolution; previews call it without
-delegating. The detailed counterexamples are at
-2c11969a48:scratch/harness-launch-type.md (“Fourth pass”).
-
-Fifth pass (2026-11-16, against the slice 3a working diff). 3a did what the
-fourth pass asked; `Cli::launch_mode` is gone. Two values are still invented
-where no launch decides them:
-
-- **A `Mode` exists only where a launch does.** `bin/lf.rs::dispatch` ends
-  `else { Mode::Headless }` for every non-execution command, and the
-  planning-read path calls `execute_command(Mode::Headless, …)`. Nothing reads
-  either: `execute_command` uses `mode` only in its `Commands::Inline` arm, and
-  `Inline` is always in the `execution` set. That is the forbidden fallback
-  without the `Option`. Move the `Inline` arm out to the launch arms
-  (`execute_target`, `run_bound`, `run_default_agent`), which run only under
-  `Delegation::Here { mode }`; `execute_command` loses the parameter.
-- **Headless resume has no mode to pass.** `session.rs::resume` builds
-  `LaunchInput { batch: true, .. }`, which can only resolve Headless, then
-  threads it into `run::resume(mode, …)`. `run::resume` is "one more headless
-  turn" by definition, like `answer_bound`: it drops the parameter and names
-  `Mode::Headless` itself; the caller matches `Here { .. }`.
-- `transport::holder(work, source)`: every caller passes exactly one of the
-  two (`(false, Some(source))` or `(fact, None)`). Don't reshape it now. When
-  slice 4 builds `Launch`, its constructor takes the one Work fact and this
-  function goes with `AgentConfig::holder`.
-
-Checked and unchanged: `preview_prompt` is its own command, never under
-`dispatch`'s delegation, so calling `LaunchInput::mode()` there is right.
-Native resume reads `store.is_work` twice (`transport::works` for Place, which
-keeps an unreadable store as Work; `resume_session_with_env` for Holder, which
-fails). The second surfaces the error before admission; leave both.
-
-Checked and unchanged: Graph steps spawn `lf` children from `step_args`, so no
-resolved mode crosses into a step; `place` matches the former inline branch
-row for row.
-
-Sixth pass (2026-11-16, against the slice 3b working diff). 3b did what the
-fifth pass asked and changes no entry: every definition target
-(`definition_invocation`) and the bare `lf` are in `dispatch`'s `execution`
-set, so skipping `resolve_cli_target` for ordinary commands drops nothing.
-The design is unchanged; slices 4–5 are the next implement direction. Three
-notes for slice 4:
-
-- `dispatch_launch` falls through to `execute_command` for `task run` and
-  history replay. Right for `task run` (its steps are `lf` children that
-  resolve their own mode). Replay launches in this process, so when it builds a
-  `Launch` it names `Mode::Headless` and `Holder::Caller` itself, like
-  `run::resume`; it does not take the delegated mode.
-- `Launch<'a>` borrows `config` and `admitted`; a driver outlives the call, so
-  `Harness::driver` clones both (`Admitted` is `Clone`), as `claude.rs`'s
-  private `Launch::new` does today. Don't give `Launch` owned fields to avoid it.
-- `execute_command` now has two `unreachable!` arms (`Inline`; Desktop/Open/
-  Workspace). Merge them into one arm when that function is next touched.
-
-Open, outside this Task (not blocking): what inherited `LF_AS` outside a Task
-checkout should be. `server/README.md` "Turn and tool boundaries" and
-`transport/README.md` "Which launches are managed" list the managed entries
-and say every other launch is bare, a child run a Session's agent starts
-included; the code makes this one `Holder::Server`. But lf also sets `LF_AS`
-on purpose for workers it starts (`pr_landing.rs:354`, the ci-fix worker), and
-`task/delivery.rs` calls it "an explicit declaration". Either the READMEs gain
-this entry or the inherited case binds as `WorkSource::Inherited`; the second
-changes hooks and the server requirement for those child runs.
-
-## Delete, do not maintain
-
-- `agent/mod.rs`: `AgentConfig::holder`; any remaining `pin_provider_account*`.
-- `native_session.rs`: the program-name dispatch and provider `SessionCommand`.
-- `agent/session.rs`: `ProviderInvocation`, `SessionCommand`,
-  `build_session_command`, `native_connection_command`; its name-keyed tests
-  become `HarnessKind::ALL` loops.
-- `harness/mod.rs`: `default_create_harness`, `canonical_harness` (callers use
-  `HarnessKind::parse`), `is_terminal_harness_error`'s string list.
-- `Holder`'s `Default` derive, plus `Holder::of` callers outside `transport`.
-- `agent::missing_agent_message` match.
-
-## Forbidden outcomes
-
-- `SessionCommand` or `ProviderInvocation` surviving beside `NativeClient`/`Start`.
-- `Launch` or `Admitted` holding an `Option` attachment, or a constructor that
-  admits lazily.
-- A `match kind { … }` outside `HarnessKind::harness()` and `parse`/`as_str`.
-  Branch on `Capabilities` instead.
-- `Holder::of` called anywhere but `transport::holder`, or
-  `is_interactive_run` anywhere but `delegate`.
-- A resolved `Mode` stored on `Cli`, an `Option<Mode>` with a fallback, or a
-  `Mode` literal handed to a command that launches nothing.
-- An entry whose place or holder differs from main.
-- A test-only harness variant or factory trait. Fixtures use the existing
-  stand-in provider scripts.
-
-## Exclusions
-
-- Swift display names (`SessionProgramStatus.swift:115`,
-  `WorkspacePanesView.swift:608`): UI labels, not launch decisions.
-- `loopflow_storage::provider::Provider` (provider homes, not harnesses).
-- Session move, resume-explanation and Desktop relay behavior beyond the
-  signature changes.
-
-## Slices (one PR)
-
-The duplicate interactive runner and its runtime-only launch/exit methods are
-removed in the working diff. Their settled-attachment and late-exit checks now
-exercise `agent_process::spawn_native` and the store fence on the surviving path.
-The full design remains unfinished; the remaining internal slices are:
-
-Required admission is implemented: native entry points admit before command
-construction; every stream `start` takes `&Admitted`; the runtime retains that
-same store and frozen attachment. Native `admit` returns its `Admitted` alongside
-any capture it created, so the entry point owns that capture's settlement; a
-supplied runtime stays caller-owned. Both optional launch fields, `open_owner` and
-the unattached-launch test are deleted. `admit_for_test(home)` returns `Admitted`.
-
-Remaining work:
-3. **Mode and holder resolved once: done (3a, 3b).** Mode comes from
-   `Delegation::Here { mode }` and reaches `PromptBuild` as a required
-   argument; previews call `LaunchInput::mode`; `execute_command` and
-   `run::resume` take no `Mode`, and `bin/lf.rs` has no `Mode::Headless`
-   literal. `transport::holder` is the only `Holder::of` caller. Place reads
-   named Work; inherited `LF_AS` stays here + Server. `AgentConfig::holder`
-   and `Holder: Default` go in slice 4, when ownership travels on `Launch`.
-   Focused: `--lib transport::launch_mode_tests::` and
-   `--lib lf::commands::run::launch_policy_tests::`.
-4. **`Harness` + `Driver` + per-harness `open`.** Move the table rows above;
-   one `harness::launch`; shared `native::run`. `claude.rs`'s private
-   `Launch { config, owner }` is the driver-side half of this and goes when
-   `Harness::driver` takes `harness::Launch`. (`transcript::Launch`, a parsed
-   launch turn, is unrelated and keeps its name.) Focused:
-   `--lib harness::conformance_tests` plus a new `harness::launch_matrix` test.
-5. **Leftovers.** Replay, raw process recognition, settings rule, docs.
-   Claude usage parsing now has one helper for live and saved observations.
-
-## Demo
-
-```bash
-cargo test -p loopflow-execution --lib harness::launch_matrix -- --nocapture
-```
-
-For every `HarnessKind::ALL × {Interactive, Headless} × {Caller, Server}`, the
-matrix runs one `harness::launch` against the stand-in provider scripts and
-prints a row: argv, hook flags, whether it `exec`ed or waited, and the thread
-lf recorded. That table is the launch contract, and today it is
-spread over six files. Then, in a real terminal, run `lf -a claude 'say hi'`,
-`lf -a pi 'say hi'`, `lf -b -a codex 'say hi'` and `lf resume <id>`. They
-behave exactly as before.
-
-## Done when
-
-- `lf`, `lf -b`, `lf resume`, `lf --task …` behave as before for all four
-  harnesses. The launch matrix passes and names each cell.
-- This prints only `HarnessKind::parse`/`as_str` and `#[cfg(test)]` code:
-  `rg -n --type rust '(==|!=|=>)\s*"(claude|codex|opencode|pi)"|"(claude|codex|opencode|pi)"\s*(==|!=|=>|\|)' rust/*/src -g '!*test*'`
-  (83 non-test comparisons at 470da475a1; 79 at 842abad8a6).
-- `rg -n 'fn run_interactive|ProviderInvocation|SessionCommand\b|session_attachment: Option|holder: crate::session::Holder' rust/loopflow-execution/` prints nothing.
-  The unrelated Clap `loopflow::lf::SessionCommand` remains.
-- `docs/dev/codebase.md` "Add a provider" says: add `<name>.rs`
-  implementing `Harness`, add its `HarnessKind` variant and registry line, and
-  add conformance fixtures.
+Gate/CI still owns held-terminal exec, `documented_commands`, the session CLI
+resolution contract, application launch/resume and attachment completion suites.
+Real-terminal launches with installed providers remain the demo. The headless
+matrix prints waited rows; it does not claim held-terminal exec coverage.
 
 ## Checks
 
-Earlier admission and runner checks are recorded at
-b9542ecef5:scratch/harness-launch-type.md.
+- `cargo test -p loopflow-execution --lib harness::conformance_tests` — 10 passed.
+- Combined nextest decision filter (`test(harness::launch_matrix::) | test(lf::commands::run::launch_policy_tests::) | test(transport::launch_mode_tests::) | test(harness::native_session::tests::bare_codex_resume_does_not_resend_its_first_turn)`) — all 12 settings/mode/holder rows and bare resume passed; the stand-in's missing bare Codex hook report was repaired and the final matrix passed below.
+- Combined nextest transcript filter (`test(harness::launch_matrix::) | test(transcript::tests::) | test(transcript::raw::tests::a_pi_process_takes_the_newest_session_file_of_its_directory) | test(transcript::summary::tests::)`) — 10 transcript tests passed; history rendering's `a_turn_prints_one_line_then_its_requests_and_what_the_agent_did` reported LEAK. Gate owns that observation. Pi's provider-only sandbox rejection was retained; the matrix now uses Pi's existing configured policy.
+- `cargo nextest run -p loopflow -p loopflow-execution --lib -E 'test(harness::launch_matrix::) | test(harness::native_session::tests::bare_codex_resume_does_not_resend_its_first_turn) | test(transcript::raw::tests::a_pi_process_takes_the_newest_session_file_of_its_directory)'` — 4 passed, including every one of the 16 launch cells, native policy refusals and the OpenCode diagnostic-log assertion (2026-11-16).
+- `cargo clippy --all-targets -- -D warnings` — passed on the finished Rust changes; `cargo fmt` and `git diff --check` passed.
+- `cargo build -p loopflow --bin lf` — passed on the finished source; `target/debug/lf --version` ran successfully.
+- Obsolete-symbol check — no provider SessionCommand, ProviderInvocation, default_create_harness, canonical_harness or run_interactive; Holder::of has one caller, transport::holder. Runtime and exit-record optional owners remain outside launch admission.
 
-- implement (2026-11-16): `cargo test -p loopflow-execution --lib harness::native_exit::` — 3 passed after the #1955 merge.
-- implement (2026-11-16, slice 3b): `cargo nextest run -p loopflow -p loopflow-execution --lib -E 'test(transport::launch_mode_tests::) | test(lf::commands::run::launch_policy_tests::)'` — 11 passed; `cargo test -p loopflow --bin lf definition_execution_stays_explicit` — 1 passed; `cargo check -p loopflow --bin lf` and `cargo clippy --all-targets -- -D warnings` passed; formatting and `git diff --check` passed. Earlier slice 3a checks: c42a60e75d:scratch/harness-launch-type.md.
-- gate (after the remaining design): `uv run python scripts/test.py --reuse-passing --rust-filter 'test(harness::launch_matrix) | test(session_record::capture_tests::) | test(lf::commands::run::launch_policy_tests::) | test(documented_commands::) | test(session_cli_tests::session_cli_uses_one_truthful_resolution_contract) | binary(lf)'`; CI runs the suites and clippy.
-- gate: the two `rg` commands above.
-- demo/qa: real-terminal launches above (needs installed providers).
-
-## Docs written (write-docs)
-
-- `rust/loopflow-execution/src/harness/README.md` "One launch type per harness"
-- `docs/dev/codebase.md` "Add a provider"
-
-#1953 replaced the README's account paragraphs with "Native clients own
-authentication."
-
-Both describe the finished design. `Admitted` and `Mode` now exist; shared
-`Launch`, per-harness `open` and `launch_matrix` remain absent. The README
-names `transport::holder` after Work binding and distinguishes Caller/Server
-from physical terminal placement. The finished interface docs stay with this
-unpublished branch until slice 4 is built.
+Earlier admission/runner checks: b9542ecef5:scratch/harness-launch-type.md.
+Slice 3b checks: 58a4135e40:scratch/harness-launch-type.md.

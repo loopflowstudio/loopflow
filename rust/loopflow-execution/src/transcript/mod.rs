@@ -3,12 +3,12 @@
 //! none of the text. Where a transcript is, how long its provider keeps it,
 //! and what to say when it is gone are derived here when read.
 
-mod claude;
-mod codex;
+pub(crate) mod claude;
+pub(crate) mod codex;
 pub mod facts;
 pub mod live;
 pub mod opencode;
-mod pi;
+pub(crate) mod pi;
 pub mod raw;
 mod session;
 pub mod summary;
@@ -154,19 +154,7 @@ impl Source {
 /// Where a harness keeps its conversations on this Machine, for the shared
 /// home. Pi honors `PI_CODING_AGENT_DIR`, OpenCode `XDG_DATA_HOME`.
 pub fn home(harness: HarnessKind) -> PathBuf {
-    let user = || dirs::home_dir().unwrap_or_default();
-    let set = |name: &str| std::env::var_os(name).filter(|value| !value.is_empty());
-    match harness {
-        HarnessKind::Claude => native_home(Provider::Claude),
-        HarnessKind::Codex => native_home(Provider::Codex),
-        HarnessKind::Pi => set("PI_CODING_AGENT_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| user().join(".pi/agent")),
-        HarnessKind::OpenCode => set("XDG_DATA_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| user().join(".local/share"))
-            .join("opencode"),
-    }
+    harness.harness().transcript_home()
 }
 
 /// The caller's provider home, or the provider default.
@@ -256,49 +244,7 @@ pub fn locate(
     id: &AgentSessionId,
     cwd: &Path,
 ) -> Result<Located> {
-    let gone = |home: PathBuf| Located::Gone(Gap::FileMissing { home });
-    let provider = match harness {
-        HarnessKind::Claude => Provider::Claude,
-        HarnessKind::Codex => Provider::Codex,
-        HarnessKind::Pi => {
-            // A held Pi's id is its session file; a bare one's is the
-            // `--session-id` lf gave it.
-            let path = crate::harness::pi::conversation_file(id);
-            return Ok(if path.is_file() {
-                Located::Found {
-                    source: Source::File(path),
-                    home: None,
-                }
-            } else {
-                gone(path.parent().map(Path::to_path_buf).unwrap_or_default())
-            });
-        }
-        HarnessKind::OpenCode => {
-            let home = home(harness);
-            let store = opencode::store(&home);
-            return Ok(if store.is_file() {
-                Located::Found {
-                    source: Source::OpenCode {
-                        store,
-                        id: id.as_str().to_owned(),
-                    },
-                    home: Some(home),
-                }
-            } else {
-                gone(home)
-            });
-        }
-    };
-    let Some(home) = conversation_home(store, provider, id)? else {
-        return Ok(Located::Gone(Gap::AccountHomeRemoved));
-    };
-    Ok(match find(harness, &home, id.as_str(), cwd) {
-        Some(path) => Located::Found {
-            source: Source::File(path),
-            home: Some(home),
-        },
-        None => gone(home),
-    })
+    harness.harness().locate_transcript(store, id, cwd)
 }
 
 /// Where each conversation's transcript was found; a transcript never moves,
@@ -307,7 +253,7 @@ static FOUND: LazyLock<Mutex<HashMap<(String, PathBuf), PathBuf>>> = LazyLock::n
 
 /// Conversation `id`'s transcript in `home`, which ran in `cwd`. Claude's is
 /// tried where its directory puts it before the home is walked.
-fn find(harness: HarnessKind, home: &Path, id: &str, cwd: &Path) -> Option<PathBuf> {
+pub(crate) fn find(harness: HarnessKind, home: &Path, id: &str, cwd: &Path) -> Option<PathBuf> {
     let key = (id.to_owned(), home.to_path_buf());
     let known = FOUND
         .lock()
@@ -317,8 +263,9 @@ fn find(harness: HarnessKind, home: &Path, id: &str, cwd: &Path) -> Option<PathB
     if let Some(path) = known.filter(|path| path.is_file()) {
         return Some(path);
     }
-    let direct = (harness == HarnessKind::Claude)
-        .then(|| live::claude_project(home, cwd).join(format!("{id}.jsonl")))
+    let direct = harness
+        .harness()
+        .direct_transcript(home, cwd, id)
         .filter(|path| path.is_file());
     let path = direct.or_else(|| transcript(harness, home, id))?;
     FOUND
@@ -344,12 +291,7 @@ pub fn read(harness: HarnessKind, source: &Source) -> Result<Vec<Turn>> {
 /// The reader of a harness's transcript rows; OpenCode's rows are the
 /// messages of its store.
 fn reader(harness: HarnessKind) -> fn(&[Value]) -> Vec<Turn> {
-    match harness {
-        HarnessKind::Claude => claude::read,
-        HarnessKind::Codex => codex::read,
-        HarnessKind::Pi => pi::read,
-        HarnessKind::OpenCode => opencode::read,
-    }
+    harness.harness().transcript_reader()
 }
 
 /// Rows of a JSONL file, skipping what does not parse.
@@ -371,26 +313,12 @@ pub(crate) fn json_lines(path: &Path) -> impl Iterator<Item = Value> {
 /// `sessions/<year>/<month>/<day>/rollout-<time>-<id>.jsonl`; Claude keeps
 /// `projects/<directory>/<id>.jsonl`.
 fn conversation_id(harness: HarnessKind, name: &str) -> Option<&str> {
-    let stem = name.strip_suffix(".jsonl")?;
-    match harness {
-        HarnessKind::Codex => {
-            let rest = stem.strip_prefix("rollout-")?;
-            let at = rest.len().checked_sub(36)?;
-            rest.is_char_boundary(at)
-                .then(|| &rest[at..])
-                .filter(|id| uuid::Uuid::parse_str(id).is_ok())
-        }
-        HarnessKind::Claude => Some(stem),
-        HarnessKind::Pi | HarnessKind::OpenCode => None,
-    }
+    harness.harness().transcript_id(name)
 }
 
 /// The directory under a home holding transcripts, and how deep they are.
 fn transcript_root(harness: HarnessKind, home: &Path) -> (PathBuf, usize) {
-    match harness {
-        HarnessKind::Codex => (home.join("sessions"), 3),
-        _ => (home.join("projects"), 1),
-    }
+    harness.harness().transcript_root(home)
 }
 
 /// The transcript of conversation `id` in `home`.
@@ -424,7 +352,7 @@ pub(crate) fn copy_between(
     }
     copy_entry(&source, &target)?;
     let sibling = source.with_extension("");
-    if harness == HarnessKind::Claude && sibling.is_dir() {
+    if harness.harness().transcript_siblings() && sibling.is_dir() {
         copy_entry(&sibling, &target.with_extension(""))?;
     }
     Ok(Some(target))
@@ -503,9 +431,6 @@ pub(crate) fn recorded_cwd(transcript: &Path) -> Option<PathBuf> {
 
 // -- How long providers keep transcripts --
 
-/// Claude's default `cleanupPeriodDays`.
-const CLAUDE_CLEANUP_DAYS: u32 = 30;
-
 /// How long a provider keeps a transcript in one home.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -520,28 +445,7 @@ pub enum ExpiryPolicy {
 impl ExpiryPolicy {
     /// The home-level policy; project and managed settings are not modeled.
     pub fn read(harness: HarnessKind, home: Option<&Path>) -> Self {
-        match harness {
-            HarnessKind::Claude => {
-                let settings = home.map(|home| home.join("settings.json"));
-                let days = settings
-                    .as_deref()
-                    .and_then(|path| fs::read(path).ok())
-                    .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
-                    .and_then(|value| value["cleanupPeriodDays"].as_u64())
-                    .and_then(|days| u32::try_from(days).ok());
-                match days {
-                    Some(days) => Self::ClaudeCleanup {
-                        days,
-                        settings: settings.map(|path| path.display().to_string()),
-                    },
-                    None => Self::ClaudeCleanup {
-                        days: CLAUDE_CLEANUP_DAYS,
-                        settings: None,
-                    },
-                }
-            }
-            HarnessKind::Codex | HarnessKind::Pi | HarnessKind::OpenCode => Self::Kept,
-        }
+        harness.harness().expiry_policy(home)
     }
 
     /// When a transcript last written at `modified` becomes eligible for removal.

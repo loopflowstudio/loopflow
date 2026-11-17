@@ -132,18 +132,6 @@ pub(crate) fn add_opencode_context(
     Ok(())
 }
 
-pub(crate) fn native_args(
-    harness: &str,
-    context: Option<&ContextDelivery>,
-    holder: Holder,
-) -> Result<Vec<String>> {
-    match (harness, context) {
-        ("claude", Some(context)) => claude_args(context, holder),
-        ("pi", context) => pi_args(context, true, holder),
-        _ => Ok(Vec::new()),
-    }
-}
-
 pub(crate) fn pi_args(
     context: Option<&ContextDelivery>,
     native: bool,
@@ -307,7 +295,7 @@ mod tests {
             references: Vec::new(),
         };
         let settings = |holder: Holder| -> serde_json::Value {
-            let args = super::native_args("claude", Some(&context), holder).unwrap();
+            let args = super::claude_args(&context, holder).unwrap();
             assert_eq!(args[0], "--settings");
             serde_json::from_slice(&std::fs::read(&args[1]).unwrap()).unwrap()
         };

@@ -12,8 +12,8 @@ use std::time::Duration;
 
 use loopflow_execution::agent::AgentConfig;
 use loopflow_execution::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
-use loopflow_execution::harness::codex::CodexHarness;
-use loopflow_execution::harness::{ApprovalPolicy, Harness};
+use loopflow_execution::harness::codex::Driver as CodexDriver;
+use loopflow_execution::harness::{ApprovalPolicy, Driver};
 use loopflow_execution::session::{LfSession, TitleSource};
 use loopflow_execution::store::{open_ephemeral_store, StorageConfig};
 use loopflow_model::id::LfProcessId;
@@ -24,7 +24,6 @@ use tokio::sync::mpsc;
 async fn codex_live_one_turn_smoke() {
     let dir = tempfile::tempdir().expect("tempdir");
     let (tx, mut rx) = mpsc::unbounded_channel();
-    let mut harness = CodexHarness::new(tx, ApprovalPolicy::AutoApprove);
 
     // Every launch is recorded: admit one Session in a private store.
     std::env::set_var("LF_HOME", dir.path());
@@ -79,17 +78,19 @@ async fn codex_live_one_turn_smoke() {
         cwd: Some(dir.path().to_path_buf()),
         ..AgentConfig::default()
     };
-    harness
-        .start(
+    let mut harness = CodexDriver::new(
+        &loopflow_execution::harness::launch_for_test(
             &config,
             &loopflow_execution::harness::Admitted {
                 store,
                 session: "smoke".into(),
                 attachment,
             },
-        )
-        .await
-        .expect("codex start");
+        ),
+        tx,
+        ApprovalPolicy::AutoApprove,
+    );
+    harness.start().await.expect("codex start");
     assert!(
         harness.agent_session().is_some(),
         "thread id should be captured during start"

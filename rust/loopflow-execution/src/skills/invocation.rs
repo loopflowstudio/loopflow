@@ -69,7 +69,7 @@ impl SkillInvocation {
         })
     }
 
-    fn native_declarations(&self, harness: &str) -> bool {
+    fn native_declarations(&self, dialect: SkillDialect) -> bool {
         let fields = self.declarations();
         if self
             .skill
@@ -82,7 +82,7 @@ impl SkillInvocation {
         {
             return false;
         }
-        harness != "codex"
+        dialect != SkillDialect::Codex
             || fields.as_ref().is_some_and(|fields| {
                 ["name", "description"]
                     .iter()
@@ -94,10 +94,12 @@ impl SkillInvocation {
         &self,
         config: &crate::agent::AgentConfig,
     ) -> anyhow::Result<(Vec<String>, String)> {
-        if !self.native_for("claude") || !self.native_declarations("claude") {
+        if !self.native_for(Some(SkillDialect::Claude))
+            || !self.native_declarations(SkillDialect::Claude)
+        {
             return Ok((Vec::new(), self.translated_input("claude")));
         }
-        self.report_native_declarations("claude");
+        self.report_native_declarations("claude", SkillDialect::Claude);
         self.prepare_claude(config, None)
     }
 
@@ -145,12 +147,12 @@ impl SkillInvocation {
 
     fn codex_skill(&self) -> Option<(&Path, String)> {
         let source = self.skill.source.as_ref()?;
-        (self.native_for("codex")
+        (self.native_for(Some(SkillDialect::Codex))
             && source
                 .path
                 .file_name()
                 .is_some_and(|name| name == "SKILL.md")
-            && self.native_declarations("codex")
+            && self.native_declarations(SkillDialect::Codex)
             && self.unchanged_source())
         .then(|| (source.path.as_path(), self.native_name()))
     }
@@ -160,7 +162,7 @@ impl SkillInvocation {
             // Explicit Markdown references resolve outside Codex's catalog too;
             // a `skill` input item alone is silently ignored there.
             Some((path, name)) => {
-                self.report_native_declarations("codex");
+                self.report_native_declarations("codex", SkillDialect::Codex);
                 self.command(&format!("[${name}]({})", path.display()))
             }
             None => self.translated_input("codex"),
@@ -173,11 +175,16 @@ impl SkillInvocation {
         config: &crate::agent::AgentConfig,
     ) -> anyhow::Result<(Vec<String>, String)> {
         let context = &config.task_prompt;
-        if self.native_for("claude") && harness == "claude" && self.native_declarations("claude") {
-            self.report_native_declarations("claude");
+        let dialect = crate::harness::HarnessKind::parse(harness)
+            .and_then(|kind| kind.harness().capabilities().native_skills);
+        if self.native_for(dialect)
+            && dialect == Some(SkillDialect::Claude)
+            && self.native_declarations(SkillDialect::Claude)
+        {
+            self.report_native_declarations("claude", SkillDialect::Claude);
             return self.prepare_claude(config, (!context.is_empty()).then_some(context.as_str()));
         }
-        let prompt = if harness == "codex" {
+        let prompt = if dialect == Some(SkillDialect::Codex) {
             self.codex_prompt()
         } else {
             self.translated_input(harness)
@@ -185,9 +192,9 @@ impl SkillInvocation {
         Ok((Vec::new(), format!("{prompt}\n\n{context}")))
     }
 
-    fn report_native_declarations(&self, harness: &str) {
-        let supported: &[&str] = match harness {
-            "claude" => &[
+    fn report_native_declarations(&self, harness: &str, dialect: SkillDialect) {
+        let supported: &[&str] = match dialect {
+            SkillDialect::Claude => &[
                 "name",
                 "description",
                 "argument-hint",
@@ -235,14 +242,8 @@ impl SkillInvocation {
         self.ported_text(harness)
     }
 
-    fn native_for(&self, harness: &str) -> bool {
-        matches!(
-            (
-                self.skill.source.as_ref().map(|source| source.dialect),
-                harness
-            ),
-            (Some(SkillDialect::Claude), "claude") | (Some(SkillDialect::Codex), "codex")
-        )
+    fn native_for(&self, dialect: Option<SkillDialect>) -> bool {
+        dialect.is_some() && self.skill.source.as_ref().map(|source| source.dialect) == dialect
     }
 
     fn ported_text(&self, harness: &str) -> String {

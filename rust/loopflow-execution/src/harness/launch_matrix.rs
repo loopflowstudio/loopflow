@@ -1,0 +1,278 @@
+//! Launch contracts exercised through the real native runner and stream loop.
+use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
+
+use crate::agent::{AgentConfig, ProcessConfig};
+use crate::harness::{Admitted, HarnessKind, Launch, Mode, Start};
+use crate::process::LfProcessRuntime;
+use crate::session::Holder;
+use crate::session_record::{SessionCaptureSpec, SessionGraphMembership, SessionRecorder};
+
+fn executable(path: &Path, source: &str) {
+    std::fs::write(path, source).unwrap();
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+fn providers(home: &Path) {
+    let bin = home.join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let record = r#"
+import json, os, sys, uuid
+from pathlib import Path
+with (Path(os.environ["LF_HOME"]) / "matrix-argv.jsonl").open("a") as log:
+    log.write(json.dumps({"args":sys.argv[1:], "managed":"LF_PROVIDER_CONTEXT" in os.environ, "delivery":"LF_CONTEXT_DELIVERY" in os.environ, "opencode":os.environ.get("OPENCODE_CONFIG_CONTENT")}) + "\n")
+"#;
+    executable(
+        &bin.join("claude"),
+        &format!(
+            r#"#!/usr/bin/python3
+{record}
+if "--version" in sys.argv: print("fixture"); sys.exit(0)
+if "-p" not in sys.argv: sys.stdin.read(); sys.exit(0)
+thread = "matrix-" + uuid.uuid4().hex
+for line in sys.stdin:
+    json.loads(line)
+    print(json.dumps({{"type":"system","subtype":"init","session_id":thread}}), flush=True)
+    print(json.dumps({{"type":"result","subtype":"success","result":"matrix answer"}}), flush=True)
+"#
+        ),
+    );
+    std::fs::write(
+        bin.join("codex_socket.py"),
+        include_str!("../../tests/support/codex_socket.py"),
+    )
+    .unwrap();
+    executable(
+        &bin.join("codex"),
+        &format!(
+            "#!/usr/bin/python3\n{record}\n{}",
+            include_str!("../../tests/support/native_codex.py")
+                .replace("args = sys.argv[1:]", "args = sys.argv[1:]\n    if 'app-server' not in args and '--remote' not in args and os.environ.get('LF_CONTEXT_DELIVERY'):\n        Path(os.environ['LF_CONTEXT_DELIVERY']).with_suffix('.thread').write_text('matrix-bare-' + uuid.uuid4().hex)")
+                .replace("from __future__ import annotations", "")
+        ),
+    );
+    executable(
+        &bin.join("opencode"),
+        &format!(
+            "#!/usr/bin/python3\n{record}\n{}",
+            include_str!("../../tests/support/opencode_server.py").replace("__WAIT__", "False").replace("if \"serve\" not in sys.argv:\n    _record_launch()", "if \"serve\" not in sys.argv:\n    print('native diagnostic', file=sys.stderr)\n    _record_launch()")
+        ),
+    );
+    // Bare Pi's extension uses the launch snapshot; only managed Pi reports
+    // its native conversation to the server. The RPC fixture is shared unchanged.
+    executable(
+        &bin.join("pi"),
+        &format!(
+            r#"#!/usr/bin/python3
+{record}
+if "--mode" not in sys.argv and "LF_PROVIDER_CONTEXT" not in os.environ: sys.exit(0)
+{}
+"#,
+            include_str!("testdata/pi_rpc.py")
+        ),
+    );
+}
+
+#[test]
+fn every_harness_runs_native_and_headless_for_each_holder() {
+    let ledger = crate::journal::TestLedgerGuard::new();
+    let _ambient = crate::test_ambient::EnvGuard::new();
+    let home = ledger.home();
+    providers(home);
+    let binary = loopflow_test_support::lf_binary();
+    let _environment = crate::test_ambient::EnvGuard::clear(&[
+        "LF_BIN",
+        "PATH",
+        "CODEX_HOME",
+        "OPENCODE_CONFIG_CONTENT",
+    ]);
+    std::env::set_var("LF_BIN", binary);
+    std::env::set_var(
+        "PATH",
+        format!("{}:/usr/bin:/bin", home.join("bin").display()),
+    );
+    let _server = loopflow_test_support::MachineServer::start(binary, home);
+
+    for kind in HarnessKind::ALL {
+        for mode in [Mode::Interactive, Mode::Headless] {
+            for holder in [Holder::Caller, Holder::Server] {
+                let row = format!("{kind:?} {mode:?} {holder:?}");
+                let directory = tempfile::tempdir_in(home).unwrap();
+                let cwd = directory.path();
+                crate::journal::with_runtime(home, &["lf".into(), "matrix".into()], || {
+                    let capture = SessionRecorder::begin_at(
+                        home,
+                        SessionCaptureSpec {
+                            harness: kind.as_str().into(),
+                            model: None,
+                            surface: if mode == Mode::Interactive {
+                                "tui"
+                            } else {
+                                "headless"
+                            }
+                            .into(),
+                            cwd: cwd.into(),
+                            repo: None,
+                            worktree: None,
+                            skill: None,
+                            subjects: vec![],
+                            graph: SessionGraphMembership::Independent,
+                            work: None,
+                        },
+                    )
+                    .map(LfProcessRuntime::new)?;
+                    capture.claim_session_attachment()?;
+                    let admitted = Admitted::from_runtime(&capture)?;
+                    let mut config = AgentConfig {
+                        agent: Some(kind.as_str().into()),
+                        cwd: Some(cwd.into()),
+                        system_prompt: "fixed instructions".into(),
+                        chrome: Some(true),
+                        skip_permissions: true,
+                        write_scope: if kind == HarnessKind::Pi {
+                            crate::agent::AgentWriteScope::Configured
+                        } else {
+                            crate::agent::AgentWriteScope::Worktree
+                        },
+                        task_prompt: "say hi".into(),
+                        conversation_context: Some(crate::context_block::ContextDelivery {
+                            identity: None,
+                            repository: None,
+                            repo: home.into(),
+                            home: home.into(),
+                            wave: None,
+                            skill_file: None,
+                            submitted_docs: None,
+                            references: vec![],
+                        }),
+                        env: capture.environment(),
+                        ..Default::default()
+                    };
+                    config.env.insert("LF_BIN".into(), binary.into());
+                    let launch = Launch {
+                        config: &config,
+                        mode,
+                        holder,
+                        admitted: &admitted,
+                        start: Start::New,
+                        context_file: None,
+                    };
+                    let before = std::fs::read_to_string(home.join("matrix-argv.jsonl"))
+                        .unwrap_or_default()
+                        .lines()
+                        .count();
+                    let thread = match mode {
+                        Mode::Interactive => {
+                            let outcome =
+                                super::native_session::run(&launch, None, Some(&capture))?;
+                            anyhow::ensure!(!outcome.failed(), "{row}: {:?}", outcome.status);
+                            if kind == HarnessKind::OpenCode {
+                                let log = std::fs::read_to_string(
+                                    capture.artifact_dir().join("opencode.stderr.log"),
+                                )?;
+                                anyhow::ensure!(
+                                    log.contains("native diagnostic"),
+                                    "{row}: native diagnostics left their log"
+                                );
+                            }
+                            crate::session_record::read_provider_session(&capture.artifact_dir())?
+                                .map(|session| session.agent_session)
+                        }
+                        Mode::Headless => {
+                            let outcome = super::drive::run(
+                                &launch,
+                                &ProcessConfig {
+                                    runtime: Some(capture.clone()),
+                                    timeout: Some(std::time::Duration::from_secs(20)),
+                                    ..Default::default()
+                                },
+                            )?;
+                            anyhow::ensure!(outcome.exit_code == 0, "{row}: {}", outcome.stderr);
+                            outcome.agent_session
+                        }
+                    };
+                    anyhow::ensure!(thread.is_some(), "{row}: no recorded provider thread");
+                    let recorded = std::fs::read_to_string(home.join("matrix-argv.jsonl"))?;
+                    let commands: Vec<serde_json::Value> = recorded
+                        .lines()
+                        .skip(before)
+                        .map(serde_json::from_str)
+                        .collect::<Result<_, _>>()?;
+                    anyhow::ensure!(!commands.is_empty(), "{row}: provider did not run");
+                    let flag = |name: &str| {
+                        commands.iter().any(|command| {
+                            command["args"]
+                                .as_array()
+                                .is_some_and(|args| args.iter().any(|arg| arg == name))
+                        })
+                    };
+                    anyhow::ensure!(
+                        flag("--chrome") == (kind == HarnessKind::Claude),
+                        "{row}: Chrome flag ownership"
+                    );
+                    anyhow::ensure!(
+                        !flag("--dangerously-skip-permissions")
+                            && !flag("--dangerously-bypass-approvals-and-sandbox"),
+                        "{row}: yolo escaped worktree policy"
+                    );
+                    if kind == HarnessKind::OpenCode {
+                        let settings = commands
+                            .iter()
+                            .find_map(|command| command["opencode"].as_str())
+                            .ok_or_else(|| anyhow::anyhow!("{row}: no server settings"))?;
+                        let settings: serde_json::Value = serde_json::from_str(settings)?;
+                        anyhow::ensure!(
+                            settings["permissions"][1]["action"] == "external_directory"
+                                && settings["permissions"][1]["effect"] == "deny",
+                            "{row}: worktree permissions lost"
+                        );
+                    }
+                    let managed = commands.iter().any(|command| command["managed"] == true);
+                    anyhow::ensure!(
+                        managed == (holder == Holder::Server),
+                        "{row}: wrong hook ownership: {commands:?}"
+                    );
+                    println!(
+                        "{row}: waited; thread={thread:?}; argv/hooks={commands}",
+                        commands = serde_json::to_string(&commands)?
+                    );
+                    capture.finish("completed")?;
+                    Ok(())
+                })
+                .unwrap_or_else(|error| panic!("{row}: {error:#}"));
+            }
+        }
+    }
+}
+
+#[test]
+fn native_limits_and_schemas_require_a_headless_run() {
+    let home = tempfile::tempdir().unwrap();
+    let admitted = super::admit_for_test(home.path());
+    for kind in HarnessKind::ALL {
+        for (max_turns, output_schema) in [
+            (Some(7), None),
+            (None, Some(serde_json::json!({"type":"object"}))),
+        ] {
+            let config = AgentConfig {
+                agent: Some(kind.as_str().into()),
+                max_turns,
+                output_schema,
+                ..Default::default()
+            };
+            let launch = Launch {
+                config: &config,
+                mode: Mode::Interactive,
+                holder: Holder::Caller,
+                admitted: &admitted,
+                start: Start::New,
+                context_file: None,
+            };
+            let error = kind.harness().open(&launch).unwrap_err();
+            assert!(
+                error.to_string().contains("require a headless Run"),
+                "{kind:?}: {error}"
+            );
+        }
+    }
+}

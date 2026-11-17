@@ -6,9 +6,9 @@ use serde_json::json;
 use tokio::sync::mpsc;
 
 use super::fact::{Decoded, ProviderTurn};
-use super::pi::PiHarness;
+use super::pi::Driver as PiDriver;
 use super::pi_decode::Turn;
-use super::{Harness, SendCurrentOutcome};
+use super::{Driver, SendCurrentOutcome};
 use crate::agent::AgentConfig;
 use loopflow_model::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
 
@@ -60,8 +60,9 @@ async fn pi_turns_resume_the_exact_conversation_and_capture_tools_usage() {
     let mut config = AgentConfig::default();
     let (_ledger, _env, admitted) = fixture(&mut config);
     let (tx, mut rx) = mpsc::unbounded_channel();
-    let mut pi = PiHarness::new(tx);
-    pi.start(&config, &admitted).await.unwrap();
+
+    let mut pi = PiDriver::new(&crate::harness::launch_for_test(&config, &admitted), tx);
+    pi.start().await.unwrap();
     let token = pi.agent_session().unwrap();
     // Selecting another Machine must not redirect this admitted conversation's
     // input or shutdown to that Machine's store.
@@ -99,8 +100,9 @@ async fn pi_turns_resume_the_exact_conversation_and_capture_tools_usage() {
     };
     config.resume_token = Some(token.clone());
     let (tx, mut rx) = mpsc::unbounded_channel();
-    let mut pi = PiHarness::new(tx);
-    pi.start(&config, &admitted).await.unwrap();
+
+    let mut pi = PiDriver::new(&crate::harness::launch_for_test(&config, &admitted), tx);
+    pi.start().await.unwrap();
     assert_eq!(pi.agent_session(), Some(token));
     pi.send_input("second").await.unwrap();
     let events = completed(&mut rx).await;
@@ -113,8 +115,9 @@ async fn pi_interrupt_keeps_the_conversation_alive_and_auth_failure_is_not_succe
     let mut config = AgentConfig::default();
     let (_ledger, _env, admitted) = fixture(&mut config);
     let (tx, mut rx) = mpsc::unbounded_channel();
-    let mut pi = PiHarness::new(tx);
-    pi.start(&config, &admitted).await.unwrap();
+
+    let mut pi = PiDriver::new(&crate::harness::launch_for_test(&config, &admitted), tx);
+    pi.start().await.unwrap();
     let id = pi.agent_session();
     pi.send_input("wait").await.unwrap();
     assert!(pi.send_input("overlap").await.is_err());
@@ -155,8 +158,9 @@ async fn pi_crash_closes_open_tools_and_fails_the_turn() {
     let mut config = AgentConfig::default();
     let (_ledger, _env, admitted) = fixture(&mut config);
     let (tx, mut rx) = mpsc::unbounded_channel();
-    let mut pi = PiHarness::new(tx);
-    pi.start(&config, &admitted).await.unwrap();
+
+    let mut pi = PiDriver::new(&crate::harness::launch_for_test(&config, &admitted), tx);
+    pi.start().await.unwrap();
     pi.send_input("crash").await.unwrap();
     let events = completed(&mut rx).await;
     assert!(events.iter().any(|e| matches!(
@@ -240,8 +244,9 @@ async fn pi_rejected_prompt_and_malformed_stream_remain_failures() {
     let mut config = AgentConfig::default();
     let (_ledger, _env, admitted) = fixture(&mut config);
     let (tx, mut rx) = mpsc::unbounded_channel();
-    let mut pi = PiHarness::new(tx);
-    pi.start(&config, &admitted).await.unwrap();
+
+    let mut pi = PiDriver::new(&crate::harness::launch_for_test(&config, &admitted), tx);
+    pi.start().await.unwrap();
     assert!(pi
         .send_input("reject")
         .await
@@ -276,8 +281,9 @@ async fn pi_headless_dialogs_and_extension_failures_do_not_hang_or_succeed() {
         let mut config = AgentConfig::default();
         let (_ledger, _env, admitted) = fixture(&mut config);
         let (tx, mut rx) = mpsc::unbounded_channel();
-        let mut pi = PiHarness::new(tx);
-        pi.start(&config, &admitted).await.unwrap();
+
+        let mut pi = PiDriver::new(&crate::harness::launch_for_test(&config, &admitted), tx);
+        pi.start().await.unwrap();
         pi.send_input(input).await.unwrap();
         assert!(matches!(
             completed(&mut rx).await.last(),
@@ -299,8 +305,9 @@ async fn pi_missing_binary_records_a_failed_launch_without_a_live_process() {
     let (ledger, _env, admitted) = fixture(&mut config);
     std::fs::remove_file(ledger.home().join("pi")).unwrap();
     let (tx, _rx) = mpsc::unbounded_channel();
-    let mut pi = PiHarness::new(tx);
-    let error = pi.start(&config, &admitted).await.unwrap_err().to_string();
+
+    let mut pi = PiDriver::new(&crate::harness::launch_for_test(&config, &admitted), tx);
+    let error = pi.start().await.unwrap_err().to_string();
     assert!(error.contains("Install Pi"), "{error}");
     assert_eq!(pi.pid(), None);
     let crate::harness::Admitted {
@@ -325,20 +332,30 @@ fn pi_model_selection_native_resume_and_credentials_keep_their_owners() {
         cwd: Some(directory.path().into()),
         ..Default::default()
     };
-    let cmd = crate::agent::build_session_command(
-        &config,
-        &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
-        crate::agent::ProviderInvocation::Resume { session_id: &token },
-        Some(&directory.path().join("context.md")),
-    )
-    .unwrap();
-    assert_eq!(cmd.program, "pi");
+    let cmd = crate::harness::HarnessKind::Pi
+        .harness()
+        .open(&crate::harness::Launch {
+            config: &config,
+            admitted: &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
+            mode: crate::harness::Mode::Interactive,
+            holder: crate::session::Holder::Caller,
+            start: crate::harness::Start::Resume { thread: &token },
+            context_file: Some(&directory.path().join("context.md")),
+        })
+        .unwrap();
+    assert_eq!(cmd.process.get_program(), "pi");
     assert!(cmd
-        .args
+        .process
+        .get_args()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect::<Vec<_>>()
         .windows(2)
         .any(|a| a == ["--model", "openai/gpt-5:high"]));
     assert!(cmd
-        .args
+        .process
+        .get_args()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect::<Vec<_>>()
         .windows(2)
         .any(|a| a == ["--session", path.to_str().unwrap()]));
     for name in [
@@ -361,8 +378,9 @@ async fn pi_stale_attachment_cannot_send_or_stop_the_provider() {
     let mut config = AgentConfig::default();
     let (_ledger, _env, admitted) = fixture(&mut config);
     let (tx, _rx) = mpsc::unbounded_channel();
-    let mut pi = PiHarness::new(tx);
-    pi.start(&config, &admitted).await.unwrap();
+
+    let mut pi = PiDriver::new(&crate::harness::launch_for_test(&config, &admitted), tx);
+    pi.start().await.unwrap();
     let crate::harness::Admitted {
         store,
         session,
@@ -450,8 +468,9 @@ async fn pi_steering_receipts_preserve_one_turn_and_distinguish_uncertainty() {
     let mut config = AgentConfig::default();
     let (_ledger, _env, admitted) = fixture(&mut config);
     let (tx, mut rx) = mpsc::unbounded_channel();
-    let mut pi = PiHarness::new(tx);
-    pi.start(&config, &admitted).await.unwrap();
+
+    let mut pi = PiDriver::new(&crate::harness::launch_for_test(&config, &admitted), tx);
+    pi.start().await.unwrap();
     assert_eq!(
         pi.send_current("idle").await,
         SendCurrentOutcome::NotSteerable
@@ -551,46 +570,65 @@ fn bare_pi_names_its_thread_and_resumes_it_by_that_id() {
         ..Default::default()
     };
     let id: loopflow_model::id::AgentSessionId = "8f0c5e2a-0000-4000-8000-944455556666".into();
-    let start = crate::agent::build_session_command(
-        &config,
-        &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
-        crate::agent::ProviderInvocation::Terminal {
-            session_id: Some(&id),
-        },
-        None,
-    )
-    .unwrap();
+    let start = crate::harness::HarnessKind::Pi
+        .harness()
+        .open(&crate::harness::Launch {
+            config: &config,
+            admitted: &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
+            mode: crate::harness::Mode::Interactive,
+            holder: crate::session::Holder::Caller,
+            start: crate::harness::Start::New,
+            context_file: None,
+        })
+        .unwrap();
     assert!(start
-        .args
+        .process
+        .get_args()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect::<Vec<_>>()
         .windows(2)
         .any(|a| a == ["--session-id", id.as_str()]));
 
     // Before Pi wrote the conversation (no reply yet), a resume starts it
     // fresh under the same id.
-    let fresh = crate::agent::build_session_command(
-        &config,
-        &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
-        crate::agent::ProviderInvocation::Resume { session_id: &id },
-        None,
-    )
-    .unwrap();
+    let fresh = crate::harness::HarnessKind::Pi
+        .harness()
+        .open(&crate::harness::Launch {
+            config: &config,
+            admitted: &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
+            mode: crate::harness::Mode::Interactive,
+            holder: crate::session::Holder::Caller,
+            start: crate::harness::Start::Resume { thread: &id },
+            context_file: None,
+        })
+        .unwrap();
     assert!(fresh
-        .args
+        .process
+        .get_args()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect::<Vec<_>>()
         .windows(2)
         .any(|a| a == ["--session-id", id.as_str()]));
     let project = agent_dir.path().join("sessions").join("--repo--");
     std::fs::create_dir_all(&project).unwrap();
     let file = project.join(format!("2026-11-11T11-22-55-913Z_{id}.jsonl"));
     std::fs::write(&file, format!("{{\"type\":\"session\",\"id\":\"{id}\"}}\n")).unwrap();
-    let resume = crate::agent::build_session_command(
-        &config,
-        &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
-        crate::agent::ProviderInvocation::Resume { session_id: &id },
-        None,
-    )
-    .unwrap();
+    let resume = crate::harness::HarnessKind::Pi
+        .harness()
+        .open(&crate::harness::Launch {
+            config: &config,
+            admitted: &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
+            mode: crate::harness::Mode::Interactive,
+            holder: crate::session::Holder::Caller,
+            start: crate::harness::Start::Resume { thread: &id },
+            context_file: None,
+        })
+        .unwrap();
     assert!(resume
-        .args
+        .process
+        .get_args()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect::<Vec<_>>()
         .windows(2)
         .any(|a| a == ["--session", file.to_str().unwrap()]));
 }

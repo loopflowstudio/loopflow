@@ -7,36 +7,38 @@ at turn boundaries, interjects through hooks and records what happened.
 ## One launch type per harness
 
 ```rust
-let harness = HarnessKind::Codex.harness();
-let outcome = harness::launch(Launch {
+let launch = Launch {
     config: &config,
     mode,               // from transport::delegate
-    holder,             // from transport::holder after Work binding
-    admitted: &admitted, // from admit(); never optional
+    holder,             // resolved after Work binding
+    admitted: &admitted, // required before selecting the harness
     start: Start::Resume { thread: &thread },
     context_file: Some(&context),
-})?;
+};
 ```
 
-Every launch, interactive or headless, for the caller or server, goes through
-`harness::launch`. `transport::delegate` decides `Mode` (`Interactive` or
-`Headless`); after Work binding, `transport::holder` decides `Holder` (`Caller`
-or `Server`) once. In-process callers that
-never delegate, like commit messages and PR text, use `Mode::Headless` and
-`Holder::Caller`; a Graph step for a Task goes through `delegate`. `admit` creates the capture and claims the
-attachment before any harness is chosen, so a launch cannot start unattached.
+Native and headless launches share `Launch` and the same per-harness `Harness`.
+`native_session::run` opens and waits for a native client; `drive::run` drives
+one headless provider turn. Native results retain the provider's OS exit status;
+headless results retain answer text and typed turn failures for retry policy.
+
+`transport::delegate` decides `Mode`; after Work binding, `transport::holder`
+decides `Holder` once. In-process callers such as commit messages, PR text and
+replay choose Headless + Caller. A Task Graph step goes through `delegate`.
+`admit` creates the capture and claims its attachment before a native launch;
+headless admission claims the runtime's attachment before constructing `Launch`.
 
 Each harness file answers the rest:
 
 | method | answers |
 |---|---|
 | `capabilities()` | who names the thread, same-turn input, native skills, turn limit, output schema, respawn after crash, install hint |
-| `open(&Launch)` | native interactive client: argv, hook and title flags, plus any companion lf keeps alive (Codex app-server, OpenCode server and observer) |
+| `open(&Launch)` | native interactive client: argv, hook and title flags; starts private servers and returns any observer companion |
 | `driver(&Launch, events, approval)` | headless stream `Driver`: start, input, interrupt, stop |
 
 `HarnessKind::harness()` is the only dispatch, and `HarnessKind::parse` and
 `as_str` are the only places a harness name appears outside its own file.
-Everything else branches on `Capabilities`.
+Core code reads capabilities or asks the harness for its command and transcript policy.
 
 An interactive client with a companion waits in this process; any other client
 may `exec` into a held terminal.
@@ -52,8 +54,9 @@ may `exec` into a held terminal.
 
 `cargo test -p loopflow-execution --lib harness::launch_matrix -- --nocapture`
 runs every harness × mode × holder against the stand-in provider scripts and
-prints each cell's argv, hook flags, whether it `exec`ed or waited, and the
-thread lf recorded.
+prints each cell's argv, hook ownership, wait mechanism and recorded thread.
+Headless matrix runs wait here; held-terminal exec handoff is covered by the
+transport fixtures.
 
 A skill keeps one `LfProcess` across successive provider `AgentProcess` instances.
 Its shared `LfProcessRuntime` in [`process/runtime.rs`](../process/runtime.rs)

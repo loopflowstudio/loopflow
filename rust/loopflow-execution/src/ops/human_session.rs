@@ -1911,7 +1911,9 @@ pub(crate) fn resume_native_session(
     let native = NativeSession::of(&session)?;
     let provider_session = store.sqlite.input_provider_session(artifact_key)?;
     if provider_session.is_none() {
-        if native.provider != "codex" {
+        if !crate::harness::HarnessKind::parse(native.provider)
+            .is_some_and(|kind| kind.harness().initial_prompt_on_resume())
+        {
             return Ok(false);
         }
         // A failed Codex bootstrap may have no provider history yet. Reopen its

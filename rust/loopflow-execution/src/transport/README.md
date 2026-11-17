@@ -51,7 +51,7 @@ A launch is managed when it comes through a Task, Wave or repository
 conversation command, including those Desktop opens. `--task` and `--wave` (a
 Task or Wave conversation passes them, and `lf task run` passes `--task` to
 its Graph's agent steps) bind it as `WorkSource::Declared`, and the launch
-carries that as `Holder::Server` (`AgentConfig::holder`). Beside a Session id,
+carries that as `Holder::Server` (`Launch::holder`). Beside a Session id,
 `--task`/`--wave` make the resume managed and the id still selects: Desktop's
 Task and Wave workspaces prepare with `lf session resume [ID] --task X
 --prepare`, and the `open_argv` it gets back is `lf session resume ID --task

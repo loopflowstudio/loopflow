@@ -307,7 +307,7 @@ fn generate_commit_message(repo: &Path, agent: MessageAgent<'_>) -> OpsResult<Co
             skip_permissions: true,
             ..Default::default()
         };
-        match run_agent(&launch, &process) {
+        match run_agent(&launch, &process, crate::session::Holder::Caller) {
             Ok(result) if result.exit_code == 0 => {
                 let combined = format!("{}\n{}", result.stdout, result.stderr);
                 if let Some(message) = parse_commit_message(&combined) {

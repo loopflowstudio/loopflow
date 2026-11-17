@@ -253,17 +253,8 @@ impl TerminalTitle {
             }
         };
         // Called before adding any subcommand, positional input or `--` boundary.
-        match harness {
-            "claude" => {
-                // The provider keeps its name; where the Task stands changes.
-                command.args(["--name", &title.provider_name]);
-                // Claude's title-disable flag also suppresses OSC 7501 reports.
-                // Keep its native activity reporting enabled.
-            }
-            "codex" => {
-                command.args(["-c", "tui.terminal_title=[]"]);
-            }
-            _ => {}
+        if let Some(harness) = crate::harness::HarnessKind::parse(harness) {
+            command.args(harness.harness().title_args(&title.provider_name));
         }
         if let Err(error) = write!(
             std::io::stderr().lock(),

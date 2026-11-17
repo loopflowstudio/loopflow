@@ -550,7 +550,7 @@ pub fn generate_pr_copy(
         ..Default::default()
     };
 
-    let result = run_agent(&launch, &process)
+    let result = run_agent(&launch, &process, crate::session::Holder::Caller)
         .map_err(|err| OpsError::Message(format!("failed to generate PR copy: {err}")))?;
     if result.exit_code != 0 {
         return Err(OpsError::Message(format!(

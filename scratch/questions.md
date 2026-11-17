@@ -15,3 +15,29 @@
   every reopened Session reads its stored Work was too broad. Preserve this
   behavior under "behave as before": headless resume passes no Session to
   `transport::holder`; add both resume modes to the final launch matrix.
+
+- Slice 4 implementation (2026-11-16): use the design's two-runner option over
+  the same `Launch`/`Harness`: native returns an OS `ExitStatus` (signals and
+  shell status included); the stream loop returns answer prose and a typed
+  provider-turn failure used by retry policy. No synthetic OS status or
+  mode-tagged result. Native commands are prepared `std::process::Command`
+  values, with an owned OpenCode observer companion that closes and joins on
+  every exit path. The headless matrix waits here; transport fixtures own
+  actual held-terminal exec coverage.
+
+- Slice 4 implementation (2026-11-16): `Launch` carries the resolved Holder;
+  `transport::holder` remains its single resolver after binding. A constructor
+  does not reinterpret Work: headless selectors and native stored Session Work
+  deliberately differ. The earlier draft's constructor-removal note gives way
+  to the design's resolved `Launch { holder, .. }` form.
+- Deletion-check scope (2026-11-16): the old `holder: crate::session::Holder`
+  grep also matches function parameters, including the unchanged
+  `ContextDelivery::hook_settings`. The removed authority is AgentConfig's
+  field, not required Holder arguments passed to a launch.
+
+- Concept review (2026-11-16, headless): `Launch::mode` is dropped in slice 6.
+  The Task outcome says mode is "resolved once, at `transport::delegate`, into
+  a launch value the harness receives". With two runners, the resolved mode
+  selects the runner and the harness receives it as `open` or `driver`; the
+  field had no reader but two refusals. Simpler option taken; reversible by
+  restoring one field.

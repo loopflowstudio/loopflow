@@ -378,7 +378,7 @@ fn process_skill_agent(
         ..Default::default()
     };
 
-    let result = run_agent(&launch, &process);
+    let result = run_agent(&launch, &process, crate::session::Holder::Caller);
     let outcome = match &result {
         Ok(result) if result.exit_code == 0 => "completed",
         Ok(_) | Err(_) => "failed",

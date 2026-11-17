@@ -122,8 +122,9 @@ branches on what the harness declares.
    `Capabilities`, `open` for the native interactive client and `driver` for
    the headless stream. Its native client owns authentication.
 2. Add its `HarnessKind` variant and its line in `HarnessKind::harness()`.
-3. Map native output to the common stream. Keep native session ids,
-   cumulative usage, omissions and finality.
+3. Map native output to the common stream and implement `transcript_reader`.
+   Supply the provider's saved-history layout and retention policy when it
+   keeps transcripts. Keep native session ids, usage omissions and finality.
 4. Add conformance fixtures for normal, tool, error and retry output; the
    `harness::launch_matrix` test picks the new variant up from
    `HarnessKind::ALL`.

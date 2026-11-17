@@ -902,14 +902,14 @@ fn assert_native_runner_is_quiet_until_its_turn_ends(agent: &str, task_bound: bo
                 fixture.directory.path(),
             )
         });
+        let holder = if agent == "codex" {
+            crate::session::Holder::Server
+        } else {
+            crate::session::Holder::Caller
+        };
         let launch = crate::agent::AgentConfig {
             agent: Some(agent.into()),
             cwd: Some(repo.to_path_buf()),
-            holder: if agent == "codex" {
-                crate::session::Holder::Server
-            } else {
-                crate::session::Holder::Caller
-            },
             env: std::collections::BTreeMap::from([
                 ("PATH".into(), path),
                 ("FIXTURE_STARTED".into(), started.display().to_string()),
@@ -922,8 +922,9 @@ fn assert_native_runner_is_quiet_until_its_turn_ends(agent: &str, task_bound: bo
         runtime.block_on(async {
             let running = tokio::task::spawn_blocking(move || {
                 crate::journal::with_test_ledger(database, || {
-                    LINEAR_TEST_CONTEXT
-                        .sync_scope(context, || crate::agent::run_agent(&launch, &process))
+                    LINEAR_TEST_CONTEXT.sync_scope(context, || {
+                        crate::agent::run_agent(&launch, &process, holder)
+                    })
                 })
             });
             let observed = tokio::time::timeout(std::time::Duration::from_secs(70), async {

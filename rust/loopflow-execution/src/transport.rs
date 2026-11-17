@@ -2945,6 +2945,30 @@ mod launch_mode_tests {
     }
 
     #[test]
+    fn resume_by_id_keeps_headless_caller_and_native_work_ownership() {
+        let home = tempfile::tempdir().unwrap();
+        let admitted = crate::harness::admit_for_test(home.path());
+        let mut session = admitted.store.session(&admitted.session).unwrap().unwrap();
+        session.work_source = Some(crate::session::WorkSource::Declared);
+        for (mode, stored_work, expected) in [
+            (Mode::Headless, false, crate::session::Holder::Caller),
+            (Mode::Interactive, true, crate::session::Holder::Server),
+        ] {
+            // Headless resume consults CLI selectors only. Native resume uses
+            // the saved Session. Neither command here has a Work selector.
+            let fact = admitted
+                .store
+                .is_work(false, stored_work.then_some(&session))
+                .unwrap();
+            assert_eq!(super::holder(fact, None), expected, "{mode:?}");
+            assert_eq!(
+                super::place(mode == Mode::Headless, false, fact, true, false).is_some(),
+                stored_work
+            );
+        }
+    }
+
+    #[test]
     fn inherited_declaration_keeps_server_reporting_without_naming_work() {
         // Inherited LF_AS declares reporting ownership but does not name Work
         // on the command line; neither a TTY nor a headless caller delegates it.

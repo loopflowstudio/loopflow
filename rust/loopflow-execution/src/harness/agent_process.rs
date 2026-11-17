@@ -752,30 +752,9 @@ fn is_agent_process(process: &OsProcess, started_at: i64, provider: Option<&str>
     {
         return false;
     }
-    let has = |word: &str| process.command.split_whitespace().any(|part| part == word);
-    let program = |name: &str| {
-        process.command.split_whitespace().any(|part| {
-            std::path::Path::new(part)
-                .file_name()
-                .is_some_and(|file| file == name)
-        })
-    };
-    match provider {
-        Some("codex") => program("codex") && has("app-server") && has("--listen"),
-        Some("opencode") => program("opencode") && has("serve"),
-        Some("pi") => {
-            (program("pi")
-                || process
-                    .command
-                    .split_whitespace()
-                    .any(|part| part.contains("/pi-coding-agent/") && part.ends_with("/cli.js")))
-                && has("--mode")
-                && has("rpc")
-        }
-        // Headless Claude has no subcommand to match; identity and group carry it.
-        Some("claude") => program("claude"),
-        _ => false,
-    }
+    provider
+        .and_then(super::HarnessKind::parse)
+        .is_some_and(|kind| kind.harness().recognizes_driver(&process.command))
 }
 
 /// Stop the AgentProcess's group, then any group one of its descendants leads.

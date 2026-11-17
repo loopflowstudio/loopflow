@@ -4,10 +4,7 @@
 //! supported coding agent. Output can be captured or streamed.
 
 mod session;
-pub use session::{
-    build_session_command, native_connection_command, resolve_session_config, session_environment,
-    ProviderInvocation, SessionCommand,
-};
+pub use session::resolve_session_config;
 
 use loopflow_model::id::AgentSessionId;
 use std::collections::BTreeMap;
@@ -76,9 +73,9 @@ pub fn wait_for_interrupt_cleanup() {
 #[derive(Debug, Clone, Default)]
 pub struct AgentProcessResult {
     pub exit_code: i32,
-    /// Harness answer prose, never raw provider protocol.
+    /// Driver answer prose, never raw provider protocol.
     pub stdout: String,
-    /// Harness error messages; native terminals leave both output fields empty.
+    /// Driver error messages; native terminals leave both output fields empty.
     pub stderr: String,
     /// Opaque provider continuation token observed during this Process.
     pub agent_session: Option<AgentSessionId>,
@@ -108,7 +105,9 @@ pub fn checkout_execution_boundary(
     agent: &str,
 ) -> anyhow::Result<AgentExecutionBoundary> {
     let (harness, _) = parse_agent(agent);
-    if !matches!(harness.as_str(), "codex" | "claude" | "pi") {
+    if !crate::harness::HarnessKind::parse(&harness)
+        .is_some_and(|kind| kind.harness().supports_execution_boundary())
+    {
         return Err(anyhow::anyhow!(format!(
             "Agent execution unavailable: agent {agent:?} uses harness {harness:?}, which does not support a managed execution boundary; select codex, claude, or pi"
         )));
@@ -158,9 +157,6 @@ pub struct AgentConfig {
     pub system_prompt: String,
     /// Saved sources for native startup and compaction hooks.
     pub conversation_context: Option<crate::context_block::ContextDelivery>,
-    /// Who holds the provider process, which decides its hooks, its server
-    /// check and its steers.
-    pub holder: crate::session::Holder,
     /// Task prompt content sent as the turn input.
     pub task_prompt: String,
     /// Native skill selection, kept separate from gathered reference context.
@@ -318,11 +314,10 @@ fn _record_stop(provider: &str, reason: &str, advice: &str) {
 /// The provider revoked the login: no model of it can go on until someone
 /// signs in again.
 fn _sign_in_advice(provider: &str) -> String {
-    let sign_in = match provider {
-        "claude" => "run `claude`, then /login",
-        "codex" => "run `codex login`",
-        _ => "sign in with its own client",
-    };
+    let sign_in = crate::harness::HarnessKind::parse(provider)
+        .map_or("sign in with its own client", |kind| {
+            kind.harness().sign_in_advice()
+        });
     format!("The {provider} login was revoked; sign in again on this Machine: {sign_in}")
 }
 
@@ -334,11 +329,11 @@ fn _limit_stop_advice(provider: &str, launch: &AgentConfig, rungs: &[String]) ->
             rungs.join(", ")
         );
     }
-    let another = if provider == "claude" {
-        "codex"
-    } else {
-        "claude"
-    };
+    let another = crate::harness::HarnessKind::ALL
+        .into_iter()
+        .find(|kind| kind.as_str() != provider)
+        .expect("more than one harness")
+        .as_str();
     format!(
         "No fallback remains. Change an `agent` or `-a` pin to select another model or provider, or remove it to allow fallbacks. If `agents` is missing or has only one entry, configure fallbacks with `lf set --global agents {provider},{another}`"
     )
@@ -641,13 +636,13 @@ fn claude_skip_permissions(cwd: Option<&Path>, auto: bool, skip_permissions: boo
 }
 
 /// Common Claude options shared by terminal and stream-input launches.
-fn claude_options(
+pub(crate) fn claude_options(
     config: &AgentConfig,
     model: Option<&str>,
     context_file: Option<&Path>,
     stream: bool,
 ) -> Vec<String> {
-    // Harness preferences (Chrome, model) pass through only when a Loopflow
+    // Driver preferences (Chrome, model) pass through only when a Loopflow
     // setting names them; Claude's own configuration decides the rest.
     let mut args: Vec<String> = Vec::new();
     if let Some(chrome) = config.chrome {
@@ -704,19 +699,6 @@ fn claude_options(
         }
     }
     args
-}
-
-/// Resolve a model string to a Codex model override.
-///
-/// For `codex:<variant>`, returns `<variant>`. For bare `codex`, returns `None`
-/// so Codex can pick its own default. Non-codex model strings pass through.
-pub fn resolve_codex_model(model: &str) -> Option<String> {
-    let (harness, model_variant) = parse_agent(model);
-    if harness == "codex" {
-        model_variant
-    } else {
-        Some(model.to_string())
-    }
 }
 
 const TRANSIENT_RETRY_DELAYS: [Duration; 4] = [
@@ -783,7 +765,11 @@ pub fn build_codex_thread_start_params(
         );
     }
 
-    if let Some(model) = launch.agent.as_deref().and_then(resolve_codex_model) {
+    if let Some(model) = launch
+        .agent
+        .as_deref()
+        .and_then(crate::harness::codex::resolve_model)
+    {
         params.insert("model".to_string(), serde_json::Value::String(model));
     }
 
@@ -812,7 +798,10 @@ pub fn build_codex_thread_start_params(
 /// A bare Codex launch's options, as plain `codex` takes them: the thread
 /// settings an app-server launch would send, the writable roots and the two
 /// context hooks. Nothing else of lf's configuration rides along.
-pub(crate) fn codex_terminal_options(launch: &AgentConfig) -> anyhow::Result<Vec<String>> {
+pub(crate) fn codex_terminal_options(
+    launch: &AgentConfig,
+    holder: crate::session::Holder,
+) -> anyhow::Result<Vec<String>> {
     let params = build_codex_thread_start_params(launch, false);
     let mut args = Vec::new();
     if let Some(model) = params.get("model").and_then(serde_json::Value::as_str) {
@@ -842,7 +831,7 @@ pub(crate) fn codex_terminal_options(launch: &AgentConfig) -> anyhow::Result<Vec
     if let Some(context) = &launch.conversation_context {
         config.insert(
             "hooks".into(),
-            crate::harness::context::codex_hooks(context, None, launch.holder)?,
+            crate::harness::context::codex_hooks(context, None, holder)?,
         );
     }
     args.extend(crate::harness::codex::config_overrides(&config.into())?);
@@ -905,6 +894,7 @@ pub(crate) fn validate_terminal_turn(prompt: &str) -> Result<(), CoreError> {
 pub fn run_agent(
     launch: &AgentConfig,
     process: &ProcessConfig,
+    holder: crate::session::Holder,
 ) -> Result<AgentProcessResult, CoreError> {
     let cwd = match &launch.cwd {
         Some(cwd) => cwd.clone(),
@@ -912,7 +902,7 @@ pub fn run_agent(
     };
     let command = std::env::args().collect::<Vec<_>>();
     crate::journal::with_runtime(&cwd, &command, || {
-        run_admitted_agent(launch, process).map_err(Into::into)
+        run_admitted_agent(launch, process, holder).map_err(Into::into)
     })
     .map_err(|error| {
         error
@@ -924,13 +914,18 @@ pub fn run_agent(
 fn run_admitted_agent(
     launch: &AgentConfig,
     process: &ProcessConfig,
+    holder: crate::session::Holder,
 ) -> Result<AgentProcessResult, CoreError> {
     let mut launch = launch.clone();
-    if parse_agent(launch.agent()?).0 != "claude" {
-        if launch.max_turns.is_some() {
+    let capabilities = crate::harness::HarnessKind::parse(&parse_agent(launch.agent()?).0)
+        .expect("resolved harness")
+        .harness()
+        .capabilities();
+    {
+        if launch.max_turns.is_some() && !capabilities.turn_limit {
             eprintln!("warning: Loopflow turn limits are supported only by Claude; this provider will run without a turn limit");
         }
-        if launch.output_schema.is_some() {
+        if launch.output_schema.is_some() && !capabilities.output_schema {
             eprintln!("warning: Loopflow native response-schema enforcement is Claude-specific; using ordinary provider output (Graph output validation still applies)");
         }
     }
@@ -978,7 +973,7 @@ fn run_admitted_agent(
         &launch,
         &process,
         &TRANSIENT_RETRY_DELAYS,
-        |attempt, retry| _run_harness_once(attempt, &process, retry),
+        |attempt, retry| _run_harness_once(attempt, &process, holder, retry),
         _sleep_wall_clock,
     );
     if let Err(error) = crate::ops::planning_sync::check_directory(&directory) {
@@ -1013,7 +1008,9 @@ fn _run_with_retries(
         let provider = parse_agent(attempt.agent()?).0;
         let mut result = run(&attempt, launched)?;
         launched = true;
-        if matches!(provider.as_str(), "opencode" | "pi") {
+        if !crate::harness::HarnessKind::parse(&provider)
+            .is_some_and(|kind| kind.harness().classifies_failures())
+        {
             return Ok(result);
         }
         result.failure = result.failure.or_else(|| _classify_agent_failure(&result));
@@ -1124,17 +1121,26 @@ fn _fallthrough_rungs(
     if !process.wait_for_capacity {
         return Ok(vec![first]);
     }
-    let configured = |agent: &str| match (agent, &launch.claude_model) {
-        ("claude", Some(model)) => format!("claude:{model}"),
-        _ => agent.to_owned(),
+    let configured = |agent: &str| {
+        let model = crate::harness::HarnessKind::parse(agent)
+            .filter(|kind| !kind.harness().model_rungs().is_empty())
+            .and(launch.claude_model.as_ref());
+        model.map_or_else(|| agent.to_owned(), |model| format!("{agent}:{model}"))
     };
     let mut order: Vec<String> = std::iter::once(first.as_str())
         .chain(launch.fallback_agents.iter().map(String::as_str))
         .map(configured)
         .collect();
     // With no order to move through, a bare Claude tries its other models.
-    if launch.fallback_agents.is_empty() && first == "claude" {
-        order.extend(crate::config::CLAUDE_MODEL_RUNGS.map(|model| format!("claude:{model}")));
+    if launch.fallback_agents.is_empty() {
+        if let Some(kind) = crate::harness::HarnessKind::parse(&first) {
+            order.extend(
+                kind.harness()
+                    .model_rungs()
+                    .iter()
+                    .map(|model| format!("{first}:{model}")),
+            );
+        }
     }
     let mut rungs: Vec<String> = Vec::new();
     for rung in order {
@@ -1350,6 +1356,7 @@ fn _begin_process_runtime(
 fn _run_harness_once(
     launch: &AgentConfig,
     process: &ProcessConfig,
+    holder: crate::session::Holder,
     retry: bool,
 ) -> Result<AgentProcessResult, CoreError> {
     if tokio::runtime::Handle::try_current().is_ok() {
@@ -1357,16 +1364,13 @@ fn _run_harness_once(
         let process = process.clone();
         return std::thread::Builder::new()
             .name("lf-native-harness".to_string())
-            .spawn(move || _run_harness_once(&launch, &process, retry))
+            .spawn(move || _run_harness_once(&launch, &process, holder, retry))
             .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?
             .join()
             .map_err(|_| {
                 CoreError::ExecutionFailed("Native harness thread panicked".to_string())
             })?;
     }
-
-    use crate::harness::ApprovalPolicy;
-    use loopflow_model::chat::types::{ConversationEvent, Lifecycle};
 
     let runtime = process.runtime.as_ref();
     let (provider, model) = parse_agent(&launch.resolved_agent()?);
@@ -1389,154 +1393,27 @@ fn _run_harness_once(
         runtime.expect("run_admitted_agent supplies a runtime before retrying"),
     )
     .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
-    let prompt = std::mem::take(&mut config.task_prompt);
-    let launch_worktree = config.cwd.clone().or_else(|| std::env::current_dir().ok());
-    if let Some(cwd) = launch_worktree.as_deref() {
-        crate::ops::git_operation::prepare_agent_process(cwd)
-            .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
-    }
-    let executor = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
-    let result = executor.block_on(async {
-        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut harness = crate::harness::default_create_harness(
-            &provider,
-            ApprovalPolicy::AutoApprove,
-            event_tx,
-        )
-        .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
-        harness.set_agent_session(launch.resume_token.clone());
-        harness.set_runtime(process.runtime.clone());
-        harness
-            .start(&config, &admitted)
-            .await
-            .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
-        let agent_session = harness.agent_session();
-        if let Some(runtime) = runtime {
-            runtime.observe_provider(agent_session.clone());
-        }
-
-        let drive = async {
-            harness
-                .send_input(&prompt)
-                .await
-                .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
-            let mut stdout = String::new();
-            let mut stderr = String::new();
-            let mut exit_code = None;
-            let mut limited = false;
-            let mut input_tick = tokio::time::interval(Duration::from_millis(250));
-            input_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-            let mut activity_tick = tokio::time::interval(crate::session_record::activity::SAMPLE_INTERVAL);
-            activity_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-            while exit_code.is_none() {
-                tokio::select! {
-                    _ = input_tick.tick(), if process.task_input.is_some() => {
-                        process.task_input.as_ref().expect("Task input is enabled")
-                            .poll(harness.as_mut()).await
-                            .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
-                    }
-                    _ = activity_tick.tick(), if runtime.is_some() => {
-                        if let Some(runtime) = runtime { runtime.observe_activity(harness.pid()).await; }
-                    }
-                    event = event_rx.recv() => {
-                        let Some(event) = event else {
-                            stderr.push_str(&format!("{provider} event stream closed\n"));
-                            exit_code = Some(1);
-                            continue;
-                        };
-                        if let Some(runtime) = runtime {
-                            runtime.observe_provider(harness.agent_session());
-                            runtime.record_conversation(event.clone());
-                        }
-                        match event {
-                            ConversationEvent::TextDelta { content, .. } => {
-                                stdout.push_str(&content);
-                                if process.stream {
-                                    print!("{content}");
-                                    let _ = std::io::stdout().flush();
-                                }
-                            }
-                            ConversationEvent::Error { code, message, .. } => {
-                                stderr.push_str(&format!("{code}: {message}\n"));
-                                limited |= code == "provider_rate_limited";
-                                if crate::harness::is_terminal_harness_error(&code)
-                                    || code == "codex_dispatch_rejected"
-                                {
-                                    exit_code = Some(1);
-                                }
-                            }
-                            ConversationEvent::TurnCompleted { status, .. } => {
-                                exit_code = Some(match status {
-                                    Lifecycle::Completed => 0,
-                                    Lifecycle::Interrupted => 130,
-                                    _ => 1,
-                                });
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-            }
-            while let Ok(event) = event_rx.try_recv() {
-                if let Some(runtime) = runtime { runtime.record_conversation(event.clone()); }
-                if let ConversationEvent::Error { code, message, .. } = event {
-                    stderr.push_str(&format!("{code}: {message}\n"));
-                }
-            }
-            if process.stream && !stdout.ends_with('\n') {
-                println!();
-            }
-            let exit_code = exit_code.expect("event loop stops with an exit code");
-            Ok(AgentProcessResult {
-                exit_code,
-                stdout,
-                stderr,
-                agent_session: harness.agent_session(),
-                // A turn the provider finished was served, whatever a rate
-                // limit event said along the way.
-                failure: (limited && exit_code != 0).then_some(AgentFailure::UsageLimit),
-            })
-        };
-        let result = match process.timeout {
-            Some(timeout) => match tokio::time::timeout(timeout, drive).await {
-                Ok(result) => result,
-                Err(_) => Err(CoreError::ExecutionFailed(format!(
-                        "agent timed out after {}",
-                        format_timeout(Some(timeout))
-                    ))),
-            },
-            None => drive.await,
-        };
-        harness.stop().await
-            .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
-        result
-    });
-
-    result
-}
-
-fn format_timeout(timeout: Option<Duration>) -> String {
-    timeout
-        .map(|value| format!("{}ms", value.as_millis()))
-        .unwrap_or_else(|| "unknown duration".to_string())
+    let value = crate::harness::Launch {
+        config: &config,
+        mode: crate::harness::Mode::Headless,
+        holder,
+        admitted: &admitted,
+        start: launch
+            .resume_token
+            .as_ref()
+            .map_or(crate::harness::Start::New, |thread| {
+                crate::harness::Start::Resume { thread }
+            }),
+        context_file: None,
+    };
+    crate::harness::drive::run(&value, process)
 }
 
 /// What to tell someone whose agent CLI is missing.
 pub fn missing_agent_message(cli: &str) -> String {
-    let hint = match cli {
-        "claude" => {
-            "Install it with `npm install -g @anthropic-ai/claude-code`, then open `claude` to sign in."
-        }
-        "codex" => {
-            "Install it with `npm install -g @openai/codex`, then sign in with `codex login`."
-        }
-        "pi" => "Install Pi 1.3 or later with `npm install -g --ignore-scripts @earendil-works/pi-coding-agent`. Configure its model and credentials in Pi.",
-        "opencode" => "Install OpenCode 2 or later with `npm install -g @opencode/cli`; the `opencode-ai` package stops at 1.x.",
-        _ => "Install it, or choose another agent with `-a claude` or `-a codex`.",
-    };
+    let hint = crate::harness::HarnessKind::parse(cli)
+        .map(|kind| kind.harness().capabilities().install_hint)
+        .unwrap_or("Install it, or choose another agent with `-a claude` or `-a codex`.");
     format!("'{cli}' is not installed. {hint}")
 }
 
@@ -1619,14 +1496,20 @@ mod tests {
     }
 
     fn terminal_args(config: &AgentConfig) -> Vec<String> {
-        build_session_command(
-            config,
-            &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
-            ProviderInvocation::Terminal { session_id: None },
-            None,
-        )
-        .unwrap()
-        .args
+        let admitted = crate::harness::admit_for_test(tempfile::tempdir().unwrap().path());
+        let launch = crate::harness::Launch {
+            mode: crate::harness::Mode::Interactive,
+            ..crate::harness::launch_for_test(config, &admitted)
+        };
+        launch
+            .harness()
+            .unwrap()
+            .open(&launch)
+            .unwrap()
+            .process
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect()
     }
 
     /// A Graph step: it moves through its agents and waits for capacity.
@@ -1770,7 +1653,7 @@ trust_level = "trusted"
     #[test]
     fn terminal_commands_keep_native_context_and_main_repo_scope() {
         let (_tmp, main, _) = git_worktree_fixture();
-        for provider in ["claude", "codex", "opencode"] {
+        for provider in ["claude", "codex"] {
             let launch = AgentConfig {
                 agent: Some(provider.into()),
                 cwd: Some(main.clone()),
@@ -1792,18 +1675,21 @@ trust_level = "trusted"
 
     #[test]
     fn resolve_codex_model_bare() {
-        assert_eq!(resolve_codex_model("codex"), None);
+        assert_eq!(crate::harness::codex::resolve_model("codex"), None);
     }
 
     #[test]
     fn resolve_codex_model_with_variant() {
-        assert_eq!(resolve_codex_model("codex:o3"), Some("o3".to_string()));
+        assert_eq!(
+            crate::harness::codex::resolve_model("codex:o3"),
+            Some("o3".to_string())
+        );
     }
 
     #[test]
     fn resolve_codex_model_passthrough_non_codex() {
         assert_eq!(
-            resolve_codex_model("gpt-5.1-codex-high"),
+            crate::harness::codex::resolve_model("gpt-5.1-codex-high"),
             Some("gpt-5.1-codex-high".to_string())
         );
     }
@@ -1863,16 +1749,9 @@ trust_level = "trusted"
         let path = write_system_prompt_file(&config, "session")
             .unwrap()
             .unwrap();
-        let args = build_session_command(
-            &config,
-            &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
-            ProviderInvocation::ClaudeStream {
-                session_id: Some(&"sess_abc".into()),
-            },
-            Some(&path),
-        )
-        .unwrap()
-        .args;
+        let args =
+            crate::harness::claude::stream_args(&config, Some(&"sess_abc".into()), Some(&path))
+                .unwrap();
         assert!(args.iter().all(|arg| arg.len() < 122_880));
         for (flag, value) in [
             ("--append-system-prompt-file", path.to_str().unwrap()),
@@ -2257,16 +2136,20 @@ trust_level = "trusted"
             resume_token: Some("session-123".into()),
             ..default_launch()
         };
-        let claude = build_session_command(
-            &launch,
-            &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
-            ProviderInvocation::Resume {
-                session_id: launch.resume_token.as_ref().unwrap(),
+        let admitted = crate::harness::admit_for_test(tempfile::tempdir().unwrap().path());
+        let value = crate::harness::Launch {
+            mode: crate::harness::Mode::Interactive,
+            start: crate::harness::Start::Resume {
+                thread: launch.resume_token.as_ref().unwrap(),
             },
-            None,
-        )
-        .unwrap()
-        .args;
+            ..crate::harness::launch_for_test(&launch, &admitted)
+        };
+        let command = value.harness().unwrap().open(&value).unwrap();
+        let claude = command
+            .process
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
         assert_arg_pair(&claude, "--resume", "session-123");
     }
 
@@ -2283,19 +2166,11 @@ trust_level = "trusted"
                 skip_permissions: true,
                 ..default_launch()
             };
-            for invocation in [
-                ProviderInvocation::Terminal { session_id: None },
-                ProviderInvocation::ClaudeStream { session_id: None },
+            for args in [
+                terminal_args(&launch),
+                crate::harness::claude::stream_args(&launch, None, None).unwrap(),
             ] {
-                let command = build_session_command(
-                    &launch,
-                    &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
-                    invocation,
-                    None,
-                )
-                .unwrap();
-                let model = command
-                    .args
+                let model = args
                     .windows(2)
                     .find(|pair| pair[0] == "--model")
                     .map(|pair| pair[1].as_str());

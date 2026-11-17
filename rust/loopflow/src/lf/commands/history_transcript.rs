@@ -264,7 +264,11 @@ fn render_retention(summary: &RetentionSummary) -> String {
                 " · next removal after {}",
                 transcript::date(after)
             )),
-            None if harness.harness == HarnessKind::Claude.as_str() => {}
+            None if HarnessKind::parse(&harness.harness).is_some_and(|kind| {
+                transcript::ExpiryPolicy::read(kind, None)
+                    .after(0)
+                    .is_some()
+            }) => {}
             None => line.push_str(" · no provider expiry"),
         }
         out.push_str(&line);

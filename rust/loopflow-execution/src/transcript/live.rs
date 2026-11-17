@@ -23,7 +23,7 @@ const TAIL: u64 = 8 * 1024 * 1024;
 
 /// Claude and Codex rows that can carry a turn boundary, model or usage;
 /// others are not parsed. Every Pi row is: its entries chain through parents.
-const MARKERS: [&[u8]; 5] = [
+pub(crate) const MARKERS: [&[u8]; 5] = [
     b"\"type\":\"user\"",
     b"\"type\":\"assistant\"",
     b"\"type\":\"system\"",
@@ -32,10 +32,7 @@ const MARKERS: [&[u8]; 5] = [
 ];
 
 fn markers(harness: HarnessKind) -> &'static [&'static [u8]] {
-    match harness {
-        HarnessKind::Pi => &[],
-        _ => &MARKERS,
-    }
+    harness.harness().transcript_markers()
 }
 
 /// A conversation's current or last turn: a transcript `Turn` without what

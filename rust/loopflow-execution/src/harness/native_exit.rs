@@ -82,7 +82,7 @@ pub fn settle(exit: &NativeExit, status: ExitStatus) -> Settled {
             attachment_lost(owner).map_err(Into::into),
         )
     });
-    let command = crate::harness::native_session::SessionCommandOutcome {
+    let command = crate::harness::native_session::NativeOutcome {
         status,
         interrupted: lost,
         moved: lost.then(|| owner.as_ref().and_then(departure)).flatten(),

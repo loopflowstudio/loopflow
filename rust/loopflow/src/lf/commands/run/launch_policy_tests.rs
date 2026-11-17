@@ -1,15 +1,5 @@
 //! Launch and resume policy as table rows.
-//!
-//! A fresh launch (`lf -i : …`, `lf -b : …`) reaches `run::run` →
-//! `build_prompt` → `build_prompt_at`: it selects the command line's settings,
-//! loads personal and repository config at the checkout, and
-//! `prepare_process_prompt` returns the `AgentConfig`. `launch_session`
-//! (`harness/native_session.rs`) and the Claude stream (`harness/claude.rs`) turn
-//! that into argv with `build_session_command`. `lf session resume` selects the
-//! command line's settings in `bin/lf.rs`; `resume_session_with_env` then calls
-//! `resolve_session_config(session, serde_yaml_ng::Value::Null, None, false)` and
-//! `build_session_command` with `ProviderInvocation::Resume`.
-//!
+//! Native argv comes from the harness; companions run in the launch matrix.
 //! Owners, PTYs, provider processes, native conversation identity and the
 //! handler's own refusals stay with the full-Machine tests in `tests/README.md`.
 
@@ -18,9 +8,7 @@ use std::path::Path;
 use clap::Parser;
 
 use crate::lf::Cli;
-use loopflow_execution::agent::{
-    build_session_command, resolve_session_config, AgentConfig, ProviderInvocation,
-};
+use loopflow_execution::agent::{resolve_session_config, AgentConfig};
 use loopflow_execution::session::LfSession;
 use loopflow_execution::session_record::{
     SessionCaptureSpec, SessionGraphMembership, SessionRecorder,
@@ -105,22 +93,14 @@ impl Table {
             Some("hello"),
             &cli,
         )?;
-        let invocation = if built.mode == loopflow_execution::harness::Mode::Headless
-            && built.harness == "claude"
-        {
-            ProviderInvocation::ClaudeStream { session_id: None }
-        } else {
-            ProviderInvocation::Terminal { session_id: None }
-        };
-        let command = build_session_command(
+        let args = self.args(
             &built.agent_config,
-            &loopflow_execution::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
-            invocation,
-            None,
+            built.mode,
+            loopflow_execution::harness::Start::New,
         )?;
         Ok(Launch {
             config: built.agent_config,
-            args: command.args,
+            args,
         })
     }
 
@@ -155,18 +135,49 @@ impl Table {
         let _settings =
             loopflow_execution::config::settings::select_invocation(cli.setting_values()?);
         let config = resolve_session_config(session, serde_yaml_ng::Value::Null, None, false)?;
-        let command = build_session_command(
+        let args = self.args(
             &config,
-            &loopflow_execution::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
-            ProviderInvocation::Resume {
-                session_id: &"saved".into(),
+            loopflow_execution::harness::Mode::Interactive,
+            loopflow_execution::harness::Start::Resume {
+                thread: &"saved".into(),
             },
-            None,
         )?;
-        Ok(Launch {
-            config,
-            args: command.args,
-        })
+        Ok(Launch { config, args })
+    }
+
+    fn args(
+        &self,
+        config: &AgentConfig,
+        mode: loopflow_execution::harness::Mode,
+        start: loopflow_execution::harness::Start<'_>,
+    ) -> anyhow::Result<Vec<String>> {
+        use loopflow_execution::harness::{HarnessKind, Launch, Mode};
+        let kind = HarnessKind::parse(&loopflow_execution::config::parse_agent(config.agent()?).0)
+            .unwrap();
+        if kind.harness().capabilities().turn_limit && mode == Mode::Headless {
+            return loopflow_execution::harness::claude::stream_args(
+                config,
+                start.thread().as_ref(),
+                None,
+            );
+        }
+        if !kind.harness().capabilities().turn_limit {
+            return Ok(Vec::new());
+        }
+        let admitted =
+            loopflow_execution::harness::admit_for_test(tempfile::tempdir().unwrap().path());
+        let launch = Launch {
+            mode,
+            start,
+            ..loopflow_execution::harness::launch_for_test(config, &admitted)
+        };
+        Ok(kind
+            .harness()
+            .open(&launch)?
+            .process
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect())
     }
 
     fn claude_settings(&self, mode: &str) {

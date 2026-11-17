@@ -1,3 +1,4 @@
+use crate::session::Holder;
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -10,13 +11,13 @@ use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-use crate::agent::{build_session_command, AgentConfig, ProviderInvocation};
+use crate::agent::AgentConfig;
 use crate::harness::claude_decode::ClaudeDecoder;
 use crate::harness::common::TurnInProgressGuard;
 use crate::harness::fact::{Decoded, ProviderFact};
 use crate::harness::fact_writer::{FactWriter, RequestOrigins};
 use crate::harness::Admitted;
-use crate::harness::{Harness, HarnessError, SendCurrentOutcome};
+use crate::harness::{Driver as StreamDriver, HarnessError, SendCurrentOutcome};
 use crate::provider_auth::Provider;
 use loopflow_model::chat::types::{ConversationEvent, Lifecycle, TurnUsage};
 use loopflow_model::id::AgentSessionId;
@@ -39,19 +40,6 @@ pub(crate) fn usage(value: &serde_json::Value) -> TurnUsage {
     }
 }
 
-/// Launch settings and the admitted owner used for every turn and respawn.
-#[derive(Debug)]
-struct Launch {
-    config: AgentConfig,
-    owner: Admitted,
-}
-
-impl Launch {
-    fn new(config: AgentConfig, owner: Admitted) -> Self {
-        Self { config, owner }
-    }
-}
-
 /// One persistent `claude -p --input-format stream-json` process drives every
 /// turn of a run. `send_input` writes the seed message; the process stays alive
 /// (holding conversation context, warm prompt cache) for the next turn instead
@@ -59,9 +47,11 @@ impl Launch {
 /// the next turn in the same session — and the reader coalesces the seed turn
 /// and its queued steers into one `TurnCompleted` so the runner still sees one
 /// boundary per `send_input`.
-pub struct ClaudeHarness {
+pub struct Driver {
     events: mpsc::UnboundedSender<ConversationEvent>,
-    launch: Option<Launch>,
+    config: AgentConfig,
+    owner: Admitted,
+    holder: Holder,
     runtime: Option<crate::process::LfProcessRuntime>,
     should_seed_task_prompt: bool,
     skill_input: Option<String>,
@@ -87,9 +77,9 @@ pub struct ClaudeHarness {
     interrupt_requested: Arc<AtomicBool>,
 }
 
-impl std::fmt::Debug for ClaudeHarness {
+impl std::fmt::Debug for Driver {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ClaudeHarness").finish()
+        f.debug_struct("Driver").finish()
     }
 }
 
@@ -102,15 +92,23 @@ fn user_message_line(text: &str, id: &str) -> String {
     format!("{message}\n")
 }
 
-impl ClaudeHarness {
-    pub fn new(events: mpsc::UnboundedSender<ConversationEvent>) -> Self {
+impl Driver {
+    pub fn new(
+        launch: &super::Launch<'_>,
+        events: mpsc::UnboundedSender<ConversationEvent>,
+    ) -> Self {
         Self {
             events,
-            launch: None,
+            config: AgentConfig {
+                resume_token: launch.start.thread(),
+                ..launch.config.clone()
+            },
+            owner: launch.admitted.clone(),
+            holder: launch.holder,
             runtime: None,
             should_seed_task_prompt: true,
             skill_input: None,
-            agent_session: Arc::new(Mutex::new(None)),
+            agent_session: Arc::new(Mutex::new(launch.start.thread())),
             turn_in_progress: Arc::new(AtomicBool::new(false)),
             pending_results: Arc::new(AtomicI64::new(0)),
             current_turn_id: Arc::new(Mutex::new(None)),
@@ -141,7 +139,7 @@ impl ClaudeHarness {
             store,
             session,
             attachment,
-        } = self.owner()?;
+        } = self.owner.clone();
         Ok(store.session_turn_origin(&session, &attachment)?)
     }
 
@@ -151,17 +149,13 @@ impl ClaudeHarness {
         if self.child.is_some() {
             return Ok(());
         }
-        let launch = self
-            .launch
-            .as_mut()
-            .ok_or_else(|| anyhow!("claude harness not started"))?;
-        let config = &mut launch.config;
+        let config = &mut self.config;
         if let Some(runtime) = &self.runtime {
             let Admitted {
                 store: _,
                 session,
                 attachment,
-            } = &mut launch.owner;
+            } = &mut self.owner;
             *attachment = runtime.prepare_agent_process(session, attachment)?;
             config.env.insert(
                 crate::process::AGENT_CALLER_ENV.into(),
@@ -174,15 +168,7 @@ impl ClaudeHarness {
             .expect("claude provider session id lock poisoned")
             .clone();
         let context_file = crate::agent::write_system_prompt_file(config, "session")?;
-        let mut args = build_session_command(
-            config,
-            &launch.owner,
-            ProviderInvocation::ClaudeStream {
-                session_id: resume_id.as_ref(),
-            },
-            context_file.as_deref(),
-        )?
-        .args;
+        let mut args = stream_args(config, resume_id.as_ref(), context_file.as_deref())?;
         if let Some(invocation) = &config.skill_invocation {
             let (flags, input) = invocation.claude_input(config)?;
             args.extend(flags);
@@ -191,7 +177,7 @@ impl ClaudeHarness {
         let mut cmd = Command::new("claude");
         cmd.args(&args);
         if let Some(context) = &config.conversation_context {
-            cmd.args(super::context::claude_args(context, config.holder)?);
+            cmd.args(super::context::claude_args(context, self.holder)?);
         }
         super::configure_agent_env(&mut cmd, config);
         if let Some(context) = &config.conversation_context {
@@ -203,11 +189,11 @@ impl ClaudeHarness {
         if let Some(cwd) = &config.cwd {
             cmd.current_dir(cwd);
         }
-        let holder = config.holder;
+        let holder = self.holder;
         super::configure_vendor_std_env(cmd.as_std_mut())?;
         self.shutdown_requested.store(false, Ordering::SeqCst);
 
-        let owner = self.owner()?;
+        let owner = self.owner.clone();
         let mut child = super::agent_process::spawn(cmd, None, &owner, holder)?;
         let stdin = child
             .stdin
@@ -400,7 +386,7 @@ impl ClaudeHarness {
     /// `send_input` respawns and resumes the captured session.
     async fn kill_process(&mut self) -> Result<()> {
         if self.child.is_some() {
-            super::agent_process::stop(&self.owner()?)?;
+            super::agent_process::stop(&self.owner.clone())?;
             // Common close proves group death and reaps our leader. Dropping
             // the Tokio handle also permits its reaper to collect a late zombie.
             self.child = None;
@@ -422,13 +408,6 @@ impl ClaudeHarness {
         Ok(())
     }
 
-    fn owner(&self) -> Result<Admitted> {
-        self.launch
-            .as_ref()
-            .map(|launch| launch.owner.clone())
-            .ok_or_else(|| anyhow!("claude harness not started"))
-    }
-
     async fn send_line(&mut self, line: String) -> Result<()> {
         let mut stdin = self
             .stdin
@@ -438,13 +417,7 @@ impl ClaudeHarness {
             store,
             session,
             attachment,
-        } = match self.owner() {
-            Ok(owner) => owner,
-            Err(error) => {
-                self.stdin = Some(stdin);
-                return Err(error);
-            }
-        };
+        } = self.owner.clone();
         let (stdin, result) = tokio::task::spawn_blocking(move || {
             let result = store.with_session_dispatch(&session, &attachment, || {
                 super::dispatch::write_fenced(&mut stdin, line.as_bytes())
@@ -459,7 +432,7 @@ impl ClaudeHarness {
 }
 
 #[async_trait]
-impl Harness for ClaudeHarness {
+impl StreamDriver for Driver {
     fn set_runtime(&mut self, runtime: Option<crate::process::LfProcessRuntime>) {
         self.runtime = runtime;
     }
@@ -467,7 +440,9 @@ impl Harness for ClaudeHarness {
         self.child.as_ref().and_then(Child::id)
     }
 
-    async fn start(&mut self, config: &AgentConfig, admitted: &Admitted) -> Result<()> {
+    async fn start(&mut self) -> Result<()> {
+        let config = self.config.clone();
+        let config = &config;
         let requested_session = self
             .agent_session
             .lock()
@@ -501,7 +476,6 @@ impl Harness for ClaudeHarness {
             }
         }
 
-        self.launch = Some(Launch::new(config.clone(), admitted.clone()));
         self.should_seed_task_prompt = true;
         Ok(())
     }
@@ -526,14 +500,7 @@ impl Harness for ClaudeHarness {
         // The first message of a run carries the task prompt as a preamble.
         let mut turn_content = content.to_string();
         if self.should_seed_task_prompt {
-            let task_prompt = self
-                .launch
-                .as_ref()
-                .ok_or_else(|| anyhow!("claude harness not started"))?
-                .config
-                .task_prompt
-                .trim()
-                .to_string();
+            let task_prompt = self.config.task_prompt.trim().to_string();
             self.should_seed_task_prompt = false;
             if !task_prompt.is_empty() {
                 turn_content = format!("{task_prompt}\n\n{content}");
@@ -669,14 +636,20 @@ mod activity_tests {
     use tokio::process::Command;
     use tokio::sync::mpsc;
 
-    use super::ClaudeHarness;
-    use crate::harness::Harness;
+    use super::Driver;
+    use crate::harness::Driver as StreamDriver;
     use crate::session_record::activity;
 
     #[tokio::test]
     async fn claude_body_activity_does_not_require_process_group_authority() {
         let (tx, _rx) = mpsc::unbounded_channel();
-        let mut harness = ClaudeHarness::new(tx);
+        let mut harness = Driver::new(
+            &crate::harness::launch_for_test(
+                &crate::agent::AgentConfig::default(),
+                &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
+            ),
+            tx,
+        );
         harness.child = Some(
             Command::new("sleep")
                 .arg("300")
@@ -739,16 +712,17 @@ mod tests {
             let attachment =
                 attachment::claim_session_attachment(&store, id, None, &process, true).unwrap();
             let (tx, _rx) = mpsc::unbounded_channel();
-            let mut harness = ClaudeHarness::new(tx);
+
             let config = live_config();
-            harness.launch = Some(Launch::new(
+            let (config, admitted) = (
                 config,
                 Admitted {
                     store: store.clone(),
                     session: id.into(),
                     attachment: attachment.clone(),
                 },
-            ));
+            );
+            let mut harness = Driver::new(&crate::harness::launch_for_test(&config, &admitted), tx);
             harness.send_input("one turn").await.unwrap();
             let (pid, birth) = store
                 .agent_process_identity(id)
@@ -760,7 +734,7 @@ mod tests {
             // Retain the first process while the same Process starts the next step.
             harnesses.push(harness);
         }
-        let original = harnesses[0].owner().unwrap().attachment;
+        let original = harnesses[0].owner.attachment.clone();
         let replacement =
             attachment::claim_session_attachment(&store, "first", Some(&original), &process, false)
                 .unwrap();
@@ -769,7 +743,7 @@ mod tests {
             crate::journal::process_identity_evidence(recorded[0].0, recorded[0].1),
             crate::journal::ProcessIdentityEvidence::Live
         );
-        harnesses[0].launch.as_mut().unwrap().owner.attachment = replacement;
+        harnesses[0].owner.attachment = replacement;
         for harness in &mut harnesses {
             harness.stop().await.unwrap();
         }
@@ -847,8 +821,8 @@ mod tests {
             let store = crate::store::open_sqlite(&home.join("loopflow.db"))?;
             runtime.block_on(async {
                 let (tx, _rx) = mpsc::unbounded_channel();
-                let mut harness = ClaudeHarness::new(tx);
-                harness.launch = Some(Launch::new(
+
+                let (config, admitted) = (
                     AgentConfig {
                         agent: settings.agent,
                         chrome: settings.chrome,
@@ -861,7 +835,9 @@ mod tests {
                         session: session.clone(),
                         attachment: first.clone(),
                     },
-                ));
+                );
+                let mut harness =
+                    Driver::new(&crate::harness::launch_for_test(&config, &admitted), tx);
                 harness.set_runtime(Some(capture.clone()));
                 harness.send_input("first request").await.unwrap();
                 // Pipe acceptance precedes provider execution. Interrupt only
@@ -921,7 +897,7 @@ mod tests {
 
                 // Pending operations retain the old snapshot, not the capture's
                 // current value. Neither a pipe write nor a signal may use it.
-                harness.launch.as_mut().unwrap().owner.attachment = first;
+                harness.owner.attachment = first;
                 assert!(harness.send_line("stale request\n".into()).await.is_err());
                 assert!(harness.stop().await.is_err());
                 assert!(harness
@@ -931,7 +907,7 @@ mod tests {
                     .try_wait()
                     .unwrap()
                     .is_none());
-                harness.launch.as_mut().unwrap().owner.attachment = second.clone();
+                harness.owner.attachment = second.clone();
                 assert!(!observed_input(home, "resumed request")
                     .await
                     .contains("stale request"));
@@ -966,7 +942,7 @@ mod tests {
     #[tokio::test]
     async fn send_input_spawn_failure_releases_turn_guard() {
         let (tx, _rx) = mpsc::unbounded_channel();
-        let mut harness = ClaudeHarness::new(tx);
+
         let config = AgentConfig {
             agent: Some("claude".into()),
             task_prompt: "task".into(),
@@ -978,7 +954,8 @@ mod tests {
         let _env = crate::test_ambient::EnvGuard::clear(&["PATH", "LF_BIN"]);
         std::env::set_var("PATH", ledger.home());
         std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
-        harness.launch = Some(Launch::new(config, admitted));
+        let (config, admitted) = (config, admitted);
+        let mut harness = Driver::new(&crate::harness::launch_for_test(&config, &admitted), tx);
 
         let first = harness
             .send_input("first")
@@ -1005,7 +982,13 @@ mod tests {
     #[tokio::test]
     async fn interrupt_without_turn_is_noop() {
         let (tx, _rx) = mpsc::unbounded_channel();
-        let mut harness = ClaudeHarness::new(tx);
+        let mut harness = Driver::new(
+            &crate::harness::launch_for_test(
+                &crate::agent::AgentConfig::default(),
+                &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
+            ),
+            tx,
+        );
         harness.interrupt().await.expect("noop interrupt");
         assert!(!harness.interrupt_requested.load(Ordering::SeqCst));
     }
@@ -1065,7 +1048,7 @@ mod tests {
         }
 
         /// Config for a fresh headless Session the stand-in attaches to.
-        fn attach(&self, id: &str) -> Launch {
+        fn attach(&self, id: &str) -> (AgentConfig, Admitted) {
             self.store
                 .test_session(id, &crate::session_record::new_artifact_key());
             rusqlite::Connection::open(&self.database)
@@ -1080,7 +1063,7 @@ mod tests {
                     .unwrap();
             let mut config = live_config();
             config.cwd = Some(self.home.path().to_path_buf());
-            Launch::new(
+            (
                 config,
                 Admitted {
                     store: self.store.clone(),
@@ -1129,8 +1112,9 @@ done
         // Each harness is its own admitted conversation; both resume one
         // provider-owned AgentSession.
         let (tx, mut rx) = mpsc::unbounded_channel();
-        let mut first = ClaudeHarness::new(tx);
-        first.launch = Some(claude.attach("first"));
+
+        let (config, admitted) = claude.attach("first");
+        let mut first = Driver::new(&crate::harness::launch_for_test(&config, &admitted), tx);
         first.send_input("remember").await.unwrap();
         let (status, answer, _) =
             tokio::time::timeout(Duration::from_secs(30), drive_turn(&mut rx))
@@ -1141,9 +1125,10 @@ done
         let agent_session: AgentSessionId = first.agent_session().unwrap();
 
         let (tx, mut rx) = mpsc::unbounded_channel();
-        let mut resumed = ClaudeHarness::new(tx);
+
+        let (config, admitted) = claude.attach("second");
+        let mut resumed = Driver::new(&crate::harness::launch_for_test(&config, &admitted), tx);
         resumed.set_agent_session(Some(agent_session.clone()));
-        resumed.launch = Some(claude.attach("second"));
         resumed.send_input("recall").await.unwrap();
         let (status, answer, _) =
             tokio::time::timeout(Duration::from_secs(30), drive_turn(&mut rx))
@@ -1180,8 +1165,9 @@ done
 "#,
         );
         let (tx, mut rx) = mpsc::unbounded_channel();
-        let mut harness = ClaudeHarness::new(tx);
-        harness.launch = Some(claude.attach("step"));
+
+        let (config, admitted) = claude.attach("step");
+        let mut harness = Driver::new(&crate::harness::launch_for_test(&config, &admitted), tx);
         harness.send_input("run the suites").await.unwrap();
         let (status, _, _) = tokio::time::timeout(Duration::from_secs(30), drive_turn(&mut rx))
             .await
@@ -1217,8 +1203,9 @@ cat > /dev/null
 "#,
         );
         let (tx, mut rx) = mpsc::unbounded_channel();
-        let mut harness = ClaudeHarness::new(tx);
-        harness.launch = Some(claude.attach("step"));
+
+        let (config, admitted) = claude.attach("step");
+        let mut harness = Driver::new(&crate::harness::launch_for_test(&config, &admitted), tx);
         harness.send_input("run the suites").await.unwrap();
         assert!(matches!(
             harness.send_current("also lint").await,
@@ -1272,11 +1259,12 @@ cat > /dev/null
     #[ignore = "drives the real claude CLI; needs a live subscription login"]
     async fn live_persistent_process_handles_sequential_turns() {
         let (tx, mut rx) = mpsc::unbounded_channel();
-        let mut harness = ClaudeHarness::new(tx);
+
         let config = live_config();
         let _ledger = crate::journal::TestLedgerGuard::new();
         let admitted = super::super::admit_for_test(_ledger.home());
-        harness.start(&config, &admitted).await.expect("start");
+        let mut harness = Driver::new(&crate::harness::launch_for_test(&config, &admitted), tx);
+        harness.start().await.expect("start");
 
         harness
             .send_input("Reply with exactly: ALPHA")
@@ -1308,11 +1296,12 @@ cat > /dev/null
     #[ignore = "drives the real claude CLI; needs a live subscription login"]
     async fn live_send_current_coalesces_into_one_boundary() {
         let (tx, mut rx) = mpsc::unbounded_channel();
-        let mut harness = ClaudeHarness::new(tx);
+
         let config = live_config();
         let _ledger = crate::journal::TestLedgerGuard::new();
         let admitted = super::super::admit_for_test(_ledger.home());
-        harness.start(&config, &admitted).await.expect("start");
+        let mut harness = Driver::new(&crate::harness::launch_for_test(&config, &admitted), tx);
+        harness.start().await.expect("start");
 
         harness
             .send_input("Write a slow, detailed 200-word explanation of how a bicycle works.")
@@ -1343,4 +1332,196 @@ cat > /dev/null
 
         harness.stop().await.expect("stop");
     }
+}
+
+#[derive(Debug)]
+pub struct Claude;
+
+impl super::Harness for Claude {
+    fn recognizes(&self, process: &crate::journal::OsProcess) -> bool {
+        if process.command == "claude" {
+            return true;
+        }
+        let name = &process.command;
+        if !name.contains('.') || !name.chars().all(|c| c.is_ascii_digit() || c == '.') {
+            return false;
+        }
+        let Some(executable) = crate::journal::OsProcess::executable(process.pid) else {
+            return false;
+        };
+        executable.parent().is_some_and(|versions| {
+            versions.file_name().is_some_and(|name| name == "versions")
+                && versions
+                    .parent()
+                    .is_some_and(|dir| dir.file_name().is_some_and(|name| name == "claude"))
+        })
+    }
+    fn classifies_failures(&self) -> bool {
+        true
+    }
+    fn model_rungs(&self) -> &'static [&'static str] {
+        &crate::config::CLAUDE_MODEL_RUNGS
+    }
+    fn sign_in_advice(&self) -> &'static str {
+        "run `claude`, then /login"
+    }
+    fn provider_env(&self) -> &'static [&'static str] {
+        &["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"]
+    }
+    fn provider(&self) -> Option<crate::provider_auth::Provider> {
+        Some(crate::provider_auth::Provider::Claude)
+    }
+    fn transcript_reader(&self) -> fn(&[serde_json::Value]) -> Vec<crate::transcript::Turn> {
+        crate::transcript::claude::read
+    }
+    fn transcript_id<'a>(&self, name: &'a str) -> Option<&'a str> {
+        name.strip_suffix(".jsonl")
+    }
+    fn direct_transcript(
+        &self,
+        home: &std::path::Path,
+        cwd: &std::path::Path,
+        id: &str,
+    ) -> Option<std::path::PathBuf> {
+        Some(crate::transcript::live::claude_project(home, cwd).join(format!("{id}.jsonl")))
+    }
+    fn transcript_siblings(&self) -> bool {
+        true
+    }
+    fn expiry_policy(&self, home: Option<&std::path::Path>) -> crate::transcript::ExpiryPolicy {
+        let settings = home.map(|home| home.join("settings.json"));
+        let days = settings
+            .as_deref()
+            .and_then(|path| std::fs::read(path).ok())
+            .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+            .and_then(|value| value["cleanupPeriodDays"].as_u64())
+            .and_then(|days| u32::try_from(days).ok());
+        match days {
+            Some(days) => crate::transcript::ExpiryPolicy::ClaudeCleanup {
+                days,
+                settings: settings.map(|path| path.display().to_string()),
+            },
+            None => crate::transcript::ExpiryPolicy::ClaudeCleanup {
+                days: 30,
+                settings: None,
+            },
+        }
+    }
+    fn recent_transcripts(
+        &self,
+        home: &std::path::Path,
+        cwd: &std::path::Path,
+        since: i64,
+        owned: &std::collections::HashSet<&str>,
+    ) -> Vec<(String, crate::transcript::Source, i64)> {
+        crate::transcript::raw::unowned(
+            crate::transcript::raw::in_directory(
+                &crate::transcript::live::claude_project(home, cwd),
+                |path| Some(path.file_stem()?.to_str()?.to_owned()),
+            )
+            .into_iter()
+            .filter(|(_, _, at)| *at >= since)
+            .map(|(id, path, at)| (id, crate::transcript::Source::File(path), at))
+            .collect(),
+            owned,
+        )
+    }
+    fn kind(&self) -> super::HarnessKind {
+        super::HarnessKind::Claude
+    }
+    fn capabilities(&self) -> super::Capabilities {
+        super::Capabilities {
+            thread: super::ThreadNaming { caller: super::ThreadName::Assigned, server: super::ThreadName::Assigned },
+            same_turn_input: true,
+            native_skills: Some(crate::skills::catalog::SkillDialect::Claude),
+            turn_limit: true, output_schema: true, respawns_after_crash: true,
+            install_hint: "Install it with `npm install -g @anthropic-ai/claude-code`, then open `claude` to sign in.",
+        }
+    }
+    fn driver(
+        &self,
+        launch: &super::Launch<'_>,
+        events: mpsc::UnboundedSender<ConversationEvent>,
+        approval: super::ApprovalPolicy,
+    ) -> Box<dyn super::Driver> {
+        let _ = approval;
+        Box::new(Driver::new(launch, events))
+    }
+    fn title_args(&self, name: &str) -> Vec<String> {
+        vec!["--name".into(), name.into()]
+    }
+
+    fn open(&self, launch: &super::Launch<'_>) -> Result<super::native_session::NativeClient> {
+        let mut client = super::native_session::NativeClient::new("claude", launch)?;
+        let (mut args, input) = launch.terminal_input("claude")?;
+        let (_, model) = crate::config::parse_agent(&launch.config.resolved_agent()?);
+        args.extend(crate::agent::claude_options(
+            launch.config,
+            model.as_deref(),
+            launch.context_file,
+            false,
+        ));
+        if let Some(thread) = &client.thread {
+            args.extend([
+                if matches!(launch.start, super::Start::New) {
+                    "--session-id"
+                } else {
+                    "--resume"
+                }
+                .into(),
+                thread.to_string(),
+            ]);
+        }
+        if let Some(context) = &launch.config.conversation_context {
+            context.configure_hooks(&mut client.process)?;
+        }
+        client
+            .process
+            .args(
+                launch
+                    .config
+                    .conversation_context
+                    .as_ref()
+                    .map(|context| super::context::claude_args(context, launch.holder))
+                    .transpose()?
+                    .unwrap_or_default(),
+            )
+            .args(args);
+        if let Some(input) = input {
+            client.process.arg("--");
+            crate::agent::configure_native_input(&mut client.process, &input)?;
+        }
+        super::claude_trust::accept_created_worktree(&client.process);
+        if super::claude_trust::awaits_dialog(&client.process) {
+            super::native_session::report_folder_trust_dialog(launch.admitted);
+        }
+        Ok(client)
+    }
+}
+
+pub fn stream_args(
+    config: &AgentConfig,
+    thread: Option<&AgentSessionId>,
+    context_file: Option<&std::path::Path>,
+) -> Result<Vec<String>> {
+    let (_, model) = crate::config::parse_agent(&config.resolved_agent()?);
+    let mut args = vec![
+        "-p".into(),
+        "--replay-user-messages".into(),
+        "--input-format".into(),
+        "stream-json".into(),
+        "--output-format".into(),
+        "stream-json".into(),
+        "--verbose".into(),
+    ];
+    args.extend(crate::agent::claude_options(
+        config,
+        model.as_deref(),
+        context_file,
+        true,
+    ));
+    if let Some(thread) = thread {
+        args.extend(["--resume".into(), thread.to_string()]);
+    }
+    Ok(args)
 }

@@ -168,7 +168,8 @@ fn prepare_prompt(
         .skill
         .as_ref()
         .filter(|skill| {
-            matches!(parse_agent(&agent).0.as_str(), "claude" | "codex")
+            crate::harness::HarnessKind::parse(&parse_agent(&agent).0)
+                .is_some_and(|kind| kind.harness().capabilities().native_skills.is_some())
                 && skill.source.as_ref().is_some_and(|source| {
                     source.dialect != crate::skills::catalog::SkillDialect::Loopflow
                 })
@@ -197,8 +198,6 @@ fn prepare_prompt(
         claude_model: config.claude.model.clone(),
         system_prompt,
         conversation_context,
-        // The command that names the launch's Work decides this.
-        holder: crate::session::Holder::Caller,
         task_prompt,
         skill_invocation,
         output_schema: None,

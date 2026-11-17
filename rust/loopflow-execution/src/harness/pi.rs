@@ -1,4 +1,5 @@
 //! Pi 1.3 RPC transport. Pi owns models, credentials and its JSONL conversation.
+use crate::session::Holder;
 use std::collections::HashMap;
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
@@ -18,7 +19,7 @@ use super::fact::{Decoded, ProviderFact, ProviderTurn};
 use super::fact_writer::FactWriter;
 use super::pi_decode::Turn;
 use super::Admitted;
-use super::{Harness, HarnessError, SendCurrentOutcome};
+use super::{Driver as StreamDriver, HarnessError, SendCurrentOutcome};
 use crate::agent::AgentConfig;
 use crate::steer::NativeBoundary;
 use loopflow_model::chat::types::{ConversationEvent, Lifecycle};
@@ -58,10 +59,12 @@ impl State {
 }
 
 #[derive(Debug)]
-pub struct PiHarness {
+pub struct Driver {
     events: mpsc::UnboundedSender<ConversationEvent>,
     state: Arc<Mutex<State>>,
-    owner: Option<Admitted>,
+    config: AgentConfig,
+    owner: Admitted,
+    holder: Holder,
     session: Option<AgentSessionId>,
     child: Option<Child>,
     stdin: Option<ChildStdin>,
@@ -148,13 +151,21 @@ pub fn options(config: &AgentConfig, context_file: Option<&Path>) -> Result<Vec<
     Ok(args)
 }
 
-impl PiHarness {
-    pub fn new(events: mpsc::UnboundedSender<ConversationEvent>) -> Self {
+impl Driver {
+    pub fn new(
+        launch: &super::Launch<'_>,
+        events: mpsc::UnboundedSender<ConversationEvent>,
+    ) -> Self {
         Self {
             events,
             state: Arc::default(),
-            owner: None,
-            session: None,
+            config: AgentConfig {
+                resume_token: launch.start.thread(),
+                ..launch.config.clone()
+            },
+            owner: launch.admitted.clone(),
+            holder: launch.holder,
+            session: launch.start.thread(),
             child: None,
             stdin: None,
             reader: None,
@@ -163,18 +174,12 @@ impl PiHarness {
         }
     }
 
-    fn owner(&self) -> Result<Admitted> {
-        self.owner
-            .clone()
-            .ok_or_else(|| anyhow!("Pi has not started"))
-    }
-
     async fn write(&mut self, value: &Value) -> Result<()> {
         let Admitted {
             store,
             session,
             attachment,
-        } = self.owner()?;
+        } = self.owner.clone();
         let mut stdin = self
             .stdin
             .take()
@@ -230,7 +235,7 @@ impl PiHarness {
     }
 
     async fn start_process(&mut self, config: &AgentConfig) -> Result<()> {
-        let owner = self.owner()?;
+        let owner = self.owner.clone();
         let resumed = self
             .session
             .as_ref()
@@ -248,7 +253,7 @@ impl PiHarness {
         command.args(super::context::pi_args(
             config.conversation_context.as_ref(),
             false,
-            config.holder,
+            self.holder,
         )?);
         super::configure_agent_env(&mut command, config);
         if let Some(context) = &config.conversation_context {
@@ -262,7 +267,7 @@ impl PiHarness {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        let mut child = super::agent_process::spawn(command, None, &owner, config.holder)
+        let mut child = super::agent_process::spawn(command, None, &owner, self.holder)
             .with_context(|| crate::agent::missing_agent_message("pi"))?;
         let Admitted {
             store,
@@ -370,7 +375,7 @@ impl PiHarness {
 }
 
 #[async_trait]
-impl Harness for PiHarness {
+impl StreamDriver for Driver {
     fn set_agent_session(&mut self, session: Option<AgentSessionId>) {
         self.session = session;
     }
@@ -384,8 +389,9 @@ impl Harness for PiHarness {
         self.pid()
     }
 
-    async fn start(&mut self, config: &AgentConfig, admitted: &Admitted) -> Result<()> {
-        self.owner = Some(admitted.clone());
+    async fn start(&mut self) -> Result<()> {
+        let config = self.config.clone();
+        let config = &config;
         self.seed = Some(match &config.skill_invocation {
             Some(skill) => skill.terminal_input("pi", config)?.1,
             None => config.task_prompt.clone(),
@@ -474,11 +480,6 @@ impl Harness for PiHarness {
         let Some(turn) = turn else {
             return SendCurrentOutcome::NotSteerable;
         };
-        if let Err(error) = self.owner() {
-            return SendCurrentOutcome::Failed {
-                error: error.to_string(),
-            };
-        }
         // Pi owns the queue. An acknowledgment proves acceptance, not incorporation.
         // Missing responses and a settlement racing the acknowledgment are uncertain.
         match self
@@ -523,7 +524,7 @@ impl Harness for PiHarness {
     async fn stop(&mut self) -> Result<()> {
         if self.child.is_some() {
             // Use the shared attachment-fenced process-group teardown.
-            super::agent_process::stop(&self.owner()?)?;
+            super::agent_process::stop(&self.owner.clone())?;
             self.stdin = None;
             // Shared teardown already reaps the group leader.
             self.child = None;
@@ -618,4 +619,182 @@ pub fn observe_native(
         writer.record(&decoded)
     })?;
     Ok(())
+}
+
+#[derive(Debug)]
+pub struct Pi;
+
+impl super::Harness for Pi {
+    fn recognizes(&self, process: &crate::journal::OsProcess) -> bool {
+        process.command == "node"
+            && crate::journal::OsProcess::arguments(process.pid)
+                .ok()
+                .flatten()
+                .is_some_and(|args| runs_pi(&args))
+    }
+    fn api_key_env(&self) -> &'static [&'static str] {
+        &[
+            "ANTHROPIC_API_KEY",
+            "OPENAI_API_KEY",
+            "GEMINI_API_KEY",
+            "MOONSHOT_API_KEY",
+        ]
+    }
+    fn recognizes_driver(&self, command: &str) -> bool {
+        (super::command_program(command, "pi")
+            || command
+                .split_whitespace()
+                .any(|arg| arg.contains("/pi-coding-agent/") && arg.ends_with("/cli.js")))
+            && command.split_whitespace().any(|arg| arg == "--mode")
+            && command.split_whitespace().any(|arg| arg == "rpc")
+    }
+    fn transcript_reader(&self) -> fn(&[serde_json::Value]) -> Vec<crate::transcript::Turn> {
+        crate::transcript::pi::read
+    }
+    fn transcript_home(&self) -> PathBuf {
+        std::env::var_os("PI_CODING_AGENT_DIR")
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".pi/agent"))
+    }
+    fn locate_transcript(
+        &self,
+        _store: &loopflow_storage::sqlite::SqliteStore,
+        id: &AgentSessionId,
+        _cwd: &Path,
+    ) -> Result<crate::transcript::Located> {
+        let path = conversation_file(id);
+        Ok(if path.is_file() {
+            crate::transcript::Located::Found {
+                source: crate::transcript::Source::File(path),
+                home: None,
+            }
+        } else {
+            crate::transcript::Located::Gone(crate::transcript::Gap::FileMissing {
+                home: path.parent().map(Path::to_path_buf).unwrap_or_default(),
+            })
+        })
+    }
+    fn transcript_markers(&self) -> &'static [&'static [u8]] {
+        &[]
+    }
+    fn transcript_retention(
+        &self,
+        thread: &AgentSessionId,
+    ) -> (crate::transcript::RetentionState, Option<i64>) {
+        match crate::transcript::modified(thread.as_str().as_ref()) {
+            Some(at) => (crate::transcript::RetentionState::Provider, Some(at)),
+            None => (crate::transcript::RetentionState::Facts, None),
+        }
+    }
+    fn recent_transcripts(
+        &self,
+        home: &Path,
+        cwd: &Path,
+        since: i64,
+        owned: &std::collections::HashSet<&str>,
+    ) -> Vec<(String, crate::transcript::Source, i64)> {
+        let name = cwd
+            .to_string_lossy()
+            .trim_start_matches('/')
+            .replace('/', "-");
+        crate::transcript::raw::unowned(
+            crate::transcript::raw::in_directory(
+                &home.join("sessions").join(format!("--{name}--")),
+                |path| Some(path.to_str()?.to_owned()),
+            )
+            .into_iter()
+            .filter(|(_, path, at)| {
+                *at >= since && crate::transcript::recorded_cwd(path).as_deref() == Some(cwd)
+            })
+            .map(|(id, path, at)| (id, crate::transcript::Source::File(path), at))
+            .collect(),
+            owned,
+        )
+    }
+    fn kind(&self) -> super::HarnessKind {
+        super::HarnessKind::Pi
+    }
+    fn capabilities(&self) -> super::Capabilities {
+        super::Capabilities {
+            thread: super::ThreadNaming { caller: super::ThreadName::Assigned, server: super::ThreadName::Reported },
+            same_turn_input: true,
+            native_skills: None,
+            turn_limit: false, output_schema: false, respawns_after_crash: false,
+            install_hint: "Install Pi 1.3 or later with `npm install -g --ignore-scripts @earendil-works/pi-coding-agent`. Configure its model and credentials in Pi.",
+        }
+    }
+    fn driver(
+        &self,
+        launch: &super::Launch<'_>,
+        events: mpsc::UnboundedSender<ConversationEvent>,
+        approval: super::ApprovalPolicy,
+    ) -> Box<dyn super::Driver> {
+        let _ = approval;
+        Box::new(Driver::new(launch, events))
+    }
+
+    fn open(&self, launch: &super::Launch<'_>) -> Result<super::native_session::NativeClient> {
+        let mut client = super::native_session::NativeClient::new("pi", launch)?;
+        let (mut args, input) = launch.terminal_input("pi")?;
+        args.extend(options(launch.config, launch.context_file)?);
+        match launch.start {
+            super::Start::Resume { thread } => args.extend(resume_args(thread)?),
+            super::Start::New => {
+                if let Some(thread) = &client.thread {
+                    args.extend(["--session-id".into(), thread.to_string()]);
+                }
+            }
+        }
+        if let Some(input) = input.filter(|input| !input.is_empty()) {
+            crate::agent::validate_terminal_turn(&input)?;
+            args.extend(["--".into(), input]);
+        }
+        if let Some(context) = &launch.config.conversation_context {
+            context.configure_hooks(&mut client.process)?;
+        }
+        client
+            .process
+            .args(super::context::pi_args(
+                launch.config.conversation_context.as_ref(),
+                true,
+                launch.holder,
+            )?)
+            .args(args);
+        Ok(client)
+    }
+}
+
+fn runs_pi(arguments: &[String]) -> bool {
+    if arguments.first().is_some_and(|title| title == "pi") {
+        return true;
+    }
+    let Some(script) = arguments.get(1).map(Path::new) else {
+        return false;
+    };
+    script.file_name().is_some_and(|name| name == "pi")
+        || script.components().any(|part| {
+            part.as_os_str()
+                .to_string_lossy()
+                .ends_with("pi-coding-agent")
+        })
+}
+
+#[cfg(test)]
+mod recognition_tests {
+    use super::runs_pi;
+    #[test]
+    fn pi_is_its_title_or_the_node_script_its_package_installs() {
+        let pi = |arguments: &[&str]| {
+            runs_pi(&arguments.iter().map(|a| a.to_string()).collect::<Vec<_>>())
+        };
+        assert!(pi(&["pi"]), "Pi's own process title");
+        assert!(pi(&["node", "/Users/me/.nvm/versions/node/v24/bin/pi"]));
+        assert!(pi(&[
+            "node",
+            "/usr/lib/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js"
+        ]));
+        assert!(!pi(&["node", "/usr/lib/node_modules/vite/bin/vite.js"]));
+        assert!(!pi(&["pi-rpc"]), "lf launches Pi under RPC");
+    }
 }

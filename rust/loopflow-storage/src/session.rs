@@ -250,12 +250,11 @@ impl WorkSource {
 /// Who holds a launch's provider process. It decides the launch's hooks,
 /// whether it needs the Machine server and whether it takes steers, and is
 /// decided once, where the launch is configured.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Holder {
     /// A bare launch: the terminal it runs in, or the caller waiting on a
     /// headless run. It behaves as the harness alone would, with no server:
     /// two context hooks, and a steer check that reads the store itself.
-    #[default]
     Caller,
     /// Task, Wave or repository work: every hook and steers, beside a
     /// Machine server that must be up before the agent starts.

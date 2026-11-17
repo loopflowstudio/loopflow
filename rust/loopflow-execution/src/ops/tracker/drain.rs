@@ -315,13 +315,22 @@ impl Drain<'_> {
 
     /// Spend one request of the pass, if any is left.
     fn take(&self) -> bool {
-        Instant::now() < self.until
-            && self
-                .used
-                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |used| {
-                    (used < self.limit).then_some(used + 1)
-                })
-                .is_ok()
+        if Instant::now() >= self.until {
+            return false;
+        }
+        let mut used = self.used.load(Ordering::SeqCst);
+        while used < self.limit {
+            match self.used.compare_exchange_weak(
+                used,
+                used + 1,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            ) {
+                Ok(_) => return true,
+                Err(current) => used = current,
+            }
+        }
+        false
     }
 
     /// Whether this action names a Project being created that has no remote id yet.

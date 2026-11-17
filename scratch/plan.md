@@ -225,7 +225,8 @@ for Claude/Codex is the one-time code, on SSH stdin. Independent of LOO-926;
 the two meet only at `forward::deliver`'s call sites. PR #1966 adds
 `HarnessKind` and a per-harness trait: if it merges first, the sign-in command,
 status probe and logout live on that trait instead of a `match` in
-`machine/`; rebase onto it before slice 2.
+`machine/`. Slices 1–2 used the `match` (#1966 still open 2026-11-17); whichever
+slice follows its merge moves them onto the trait.
 
 ## Exclusions
 
@@ -306,7 +307,11 @@ checks on both ends; LOO-913's fallback and wait rules.
    the probes have no timeout (slice 3 bounds them for the launch check);
    `lf machine credentials inspect` still answers service transfers (slice 4).
 3. **Next. Launch check and rentals.** The harness login probe feeding the revoked-
-   login path with the new advice; `logins` on on-demand templates;
+   login path with the new advice, bounded by a timeout (fail-open to unknown).
+   The probe is one type: `login.rs` now has `Status` (private, carries the
+   account) beside the public `LoginState`, and `claude_status` returns its
+   raw `ClaudeStatus`; fold them into one `signed_in(account) | signed_out |
+   unknown` the launch check and `logins` both read; `logins` on on-demand templates;
    rental prepare signs in the list; delete the forward agent-
    login names and `read_for_rental`.
 4. **Retire `lf account`.** Services through `lf machine login`, `logout`,

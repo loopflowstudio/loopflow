@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>LOO-958 QA: steer wakes a stopped Session</title>
+<style>
+body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:920px;margin:2rem auto;padding:0 1rem;color:#1d1d1f}
+h1{font-size:1.5rem}h2{font-size:1.15rem;margin-top:2rem}
+pre{background:#f5f5f7;padding:.75rem;border-radius:6px;overflow-x:auto;font-size:13px}
+.ok{color:#1a7f37;font-weight:600}.bad{color:#b42318;font-weight:600}.fix{color:#8250df;font-weight:600}
+table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid #ddd;padding:.4rem;text-align:left;vertical-align:top}
+</style></head><body>
+<h1>LOO-958 QA: one verb per want; a steer wakes a stopped Session</h1>
+<p>Branch <code>lf</code> at ecf1f31cb, private <code>LF_HOME=/tmp/lfq958/home</code>, a fresh Git repository, real Claude Code 2.1.326 on the account's login, the branch's <code>lf server run</code> in the foreground. Every step below is the CLI a person types, a PTY viewer for <code>lf resume</code>, and reads of the transcript and store.</p>
+
+<table>
+<tr><th>Scenario</th><th>Result</th></tr>
+<tr><td>1. <code>lf -b resume S --message hi</code></td><td class="ok">Clap error: unexpected argument '--message'</td></tr>
+<tr><td>2. <code>lf -b steer</code> on a prepared Session, twice</td><td class="ok">prints <code>OK</code>, then <code>ognam</code>; both steers delivered</td></tr>
+<tr><td>3. <code>lf steer S</code>, server down, then server up</td><td class="ok">saved, says the server starts S; on server start one held Claude runs and replies KIWI</td></tr>
+<tr><td>4. <code>lf steer</code> / <code>lf -b steer</code> to a running Session</td><td class="ok">both save and return at once: "reads it at its next boundary"</td></tr>
+<tr><td>5. Idle held Session, no viewer, <code>lf steer S</code></td><td class="ok">woken through Claude's inbox, replies GRAPE (once the QA environment was clean; see below)</td></tr>
+<tr><td>6. Task steer, primary conversation quit</td><td class="ok">server starts the primary conversation only; replies MELON; the other Session keeps its PID</td></tr>
+<tr><td>7. Steer to a finished Run with no Graph</td><td class="fix">said "nothing reads it until its Graph continues it"; fixed to "a finished Run outside any Graph; nothing reads it"</td></tr>
+<tr><td>8. Quit, then <code>lf -b steer S</code></td><td class="ok">reply prints here, no held start beside it, 0 pending</td></tr>
+<tr><td>9. Task steer whose primary was killed before its first turn</td><td class="bad">held start resumes an assigned thread Claude never wrote: "No conversation found", exit 1; the steer reads delivered</td></tr>
+</table>
+
+<h2>2. Foreground turns</h2>
+<pre>$ lf -a claude session resume --prepare --json        # id 7b9fe34d…
+$ lf -b steer 7b9fe34d… 'Remember the word mango. Reply only with OK.'
+OK
+$ lf -b steer 7b9fe34d… 'What word did I give you? Reply with the word spelled backwards, nothing else.'
+ognam
+$ lf session steers 7b9fe34d…
+0 pending
+bea28754-… delivered
+e617f64b-… delivered</pre>
+
+<h2>3. Stopped Session, server down then up</h2>
+<pre>$ lf steer 7b9fe34d… 'Reply only with the word KIWI.'
+Saved 6c8c4467-…; the Machine server starts 7b9fe34d… to read it
+$ lf session steers 7b9fe34d…   →  6c8c4467-… pending
+$ lf server run &amp;                  # a few seconds later:
+6c8c4467-… delivered
+claude --name repo … --resume 93872343-… --      # child of the private holder</pre>
+<p>The held Claude stopped on Claude's own "Adding a new directory: /private/tmp/lfq958/repo … Is this a directory you created or one you trust?" dialog: <code>--add-dir</code> names the main checkout, which a fresh <code>/tmp</code> repo has never trusted. Attaching with <code>lf resume</code> and choosing "Yes, add it", the conversation read its steer:</p>
+<pre>❯ &lt;lf:steers&gt; Steer 6c8c4467-…; author QA: Reply only with the word KIWI. &lt;/lf:steers&gt;
+⏺ KIWI</pre>
+<p>The steer reads <code>delivered</code> while the dialog waits; nothing in <code>lf session list</code> said the start was waiting. Pre-existing (<code>claude_trust::awaits_dialog</code> checks only the cwd), and a person's real main checkout is normally trusted, so the rest of the run trusted it once through Claude's own folder dialog.</p>
+
+<h2>5. Idle wake and a QA trap</h2>
+<p>The first idle steers (LIME, FIG) stayed pending: the held Claude had no <code>~/.claude/sessions/&lt;pid&gt;.json</code>, so <code>open_inbox</code> returned nothing. Bisecting flags with bare <code>claude</code> showed file stdin, <code>--resume</code>, <code>--name</code> and <code>--settings</code> all write the record; the cause was the server's environment: started from this agent's shell, it passed <code>CLAUDECODE</code> and <code>CLAUDE_CODE_CHILD_SESSION</code> to every Claude it held. With those unset (now in <code>.lf/qa/native-conversations.md</code>):</p>
+<pre>$ lf steer 7b9fe34d… 'Reply only with the word PEAR.'      # stopped → held start → PEAR
+$ lf steer 7b9fe34d… 'Reply only with the word GRAPE.'
+Saved 56d326e8-…; 7b9fe34d… reads it at its next boundary
+# 15 s later: 56d326e8 delivered; transcript ends "GRAPE"</pre>
+
+<h2>6. Task steer</h2>
+<pre>$ lf task create --title 'QA steer wake two'; lf checkout ef5e50   # primary acfa6334…, first turn runs
+$ kill &lt;its claude&gt;
+$ lf steer ef5e50 'Reply only with the word MELON.'
+Saved 14face6b-…
+# 30 s later: one new claude in repo.ef5e50-qa-steer-wake, transcript ends "MELON";
+# the repository conversation's claude (64314) untouched; 14face6b delivered</pre>
+
+<h2>7. Finished Run (fixed)</h2>
+<pre>$ lf -b : 'Reply only with OK'          # session_fa28755e…, interactive=0
+$ lf steer session_fa28755e… 'x'
+before: Saved …; session_fa28755e… is a finished Run; nothing reads it until its Graph continues it
+after:  Saved …; session_fa28755e… is a finished Run outside any Graph; nothing reads it</pre>
+<p>Also: <code>lf steer</code>'s one-line help said "Direct running agents"; it now says "Direct agents", since a steer starts a stopped Session too (the long help already explained).</p>
+
+<h2>8. Foreground after quitting</h2>
+<pre>$ kill &lt;held claude&gt;
+$ lf -b steer 7b9fe34d… 'Which fruit words have I asked you to reply with? Comma-separated, nothing else.'
+PEAR, GRAPE
+# no held start appeared; 0 pending</pre>
+<p>KIWI, LIME, FIG and PLUM are missing for reasons the QA run made: KIWI ran in a child-session Claude whose turns did not reach the transcript; LIME, FIG and PLUM were the first input of a start I killed at the trust dialog.</p>
+
+<h2>9. A start that never runs a turn</h2>
+<pre>$ lf resume 793e773b…                    # the server's start, viewed
+No conversation found with session ID: c3dc5f7a-9947-4f50-a22c-b41ef7fcfc53
+claude exited with 1.</pre>
+<p>That Task's primary conversation was killed at the dialog before its first turn, so its assigned thread was never written; every later resume fails the same way (pre-existing). The new part: each server start marks the steers it carries delivered before the provider runs, so the steer reads <code>delivered</code> and that steer never starts the Session again. Recorded in <code>scratch/questions.md</code>.</p>
+
+<h2>Where it stands</h2>
+<p><b>Works:</b> <code>resume</code> without <code>--message</code>; <code>lf -b steer</code> foreground turns with full text; a named stopped Session started once by the server and answering; Task steer starting only the primary conversation; the three reader lines; idle wake of a server-started Session.</p>
+<p><b>Not reached:</b> Codex, Pi and OpenCode held starts (no Codex held-terminal run; the plan's open question stands); a Graph worker reading a Task steer; the upgrade (steers saved by the released <code>lf</code> starting nothing), covered only by storage and wake unit tests.</p>
+<p><b>Still wrong, worst first:</b></p>
+<ol>
+<li>Steers taken by a start that never runs a turn read <code>delivered</code> and nothing retries them (case 9, and a start killed at a dialog).</li>
+<li>A server start waiting on Claude's <code>--add-dir</code> trust dialog shows nothing in <code>lf session list</code>; only attaching shows it. Pre-existing, matters more now that the server starts unattended conversations.</li>
+<li>A resume of a Claude thread that was assigned but never written exits 1 with "No conversation found". Pre-existing.</li>
+</ol>
+</body></html>

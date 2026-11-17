@@ -36,3 +36,10 @@
   headless Session (`lf steer`'s "is a finished Run", `docs/sessions.md`, the
   server README). Compress left them; the rename follows LOO-924's, which
   owns the `Run` type.
+- QA 2026-11-17: a held start takes every unread steer as its first input and
+  marks them delivered before the provider runs. A start that never runs a
+  turn (killed at a dialog, or a resume of a thread Claude never wrote, which
+  exits 1 with "No conversation found") leaves them reading `delivered`, and
+  nothing starts the Session again for them. Same trade as `-b steer`'s; the
+  plan's "a held start that fails leaves the steer undelivered" holds only for
+  a start that fails before launch.

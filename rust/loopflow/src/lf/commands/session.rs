@@ -133,8 +133,10 @@ fn steer_reader(
             format!("{id} reads it at its next boundary")
         } else if session.interactive {
             format!("the Machine server starts {id} to read it")
-        } else {
+        } else if session.graph_lf_process_id.is_some() {
             format!("{id} is a finished Run; nothing reads it until its Graph continues it")
+        } else {
+            format!("{id} is a finished Run outside any Graph; nothing reads it")
         },
     )
 }

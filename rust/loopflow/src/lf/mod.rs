@@ -445,7 +445,7 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: WaveCommand,
     },
-    /// Direct running agents: a Session, a Task's Sessions, or with `--wave` or `--repo` every Session there
+    /// Direct agents: a Session, a Task's Sessions, or with `--wave` or `--repo` every Session there
     ///
     /// The steer is saved; each Session it applies to reads it after its next
     /// tool call, or when it is next woken or prompted. A stopped Session it

@@ -455,6 +455,17 @@ whether reports group by the values frozen at dispatch or follow later binds
 through the Session id (`questions.md`); "interrupted" for an unknown
 OpenCode completion.
 
+## Concept review after slice 5 (2026-11-16, headless)
+
+The build matches the design: three files, one rule per fact, one writer
+type (`JournalFile`), retention and the move pass on the server's hourly
+clock in 10,000-row transactions, reads declaring `Watch::JOURNALS` or
+`STATE`. Nothing the design implies is left to build. Carried to the PR body,
+not blocking: turn-row retention (none until one constant is chosen),
+report grouping frozen at dispatch versus later binds (no report reads it
+yet; `lf usage` grouping is separate work), "interrupted" for an unknown
+OpenCode completion, and the two skew costs under "Upgrade skew".
+
 ## Slice 5 as built (2026-11-16)
 
 - `JournalFile` in `journals.rs` (was `HistoryFile`, `history.rs`).

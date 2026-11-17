@@ -275,6 +275,32 @@ crash, unreachable and unstartable errors, and "What the server must learn":
 - Deleted: `MachineOperation`/`machine.write`, `Write::in_checkout`,
   `forward::take`/`exported`, `forwarding_environment`.
 
+Next implement direction (concept review of `4be26c7113`, headless):
+
+1. **Sync `main` and bump the protocol.** `origin/main` #1960 moved
+   `machine/wire.rs` to revision 7 (`MIN_REVISION` 7, `revisions` on write
+   answers); this branch still says 6 and adds `sender` without a bump.
+   `ClientMessage` is `deny_unknown_fields` and `sender` is required, so
+   neither side can parse the other's request. Merge main, make it revision 8
+   with `MIN_REVISION` 8, and an older destination answers `incompatible`
+   at `hello`, as "A server on an older protocol answers `incompatible`
+   itself" above already says. Fixtures, `server_schema.json` and Swift's
+   revision follow.
+2. **The test that `Secrets` prints nothing.** The design asks for one and
+   none exists. Put a value in a `Sender` and assert it is absent from
+   `Debug` of the `ClientMessage` and from what the served request writes to
+   `logs/lf.log`.
+3. **A Machine's request carries its sender.** Both senders
+   (`Remote::call`, `subscribe_remote_task_status`) always send one, so
+   `Origin::Machine(Option<Box<Sender>>)` only adds a case where the sender's
+   own path is used here as a directory. Make it `Origin::Machine(Box<Sender>)`
+   and answer a Machine's null `sender` with `invalid`. The `None` arms in
+   `run_here` and `place` go.
+
+Kept on purpose: the plain-command launch (`lf/commands/ssh.rs`) still sends
+`forward.env` as a delivered one-time file, because no server is reached.
+It is the only remaining env-file path.
+
 Not done here:
 - `Write::remote_session` builds a Clap command line (`session_spelling`) to
   ask `work_route::forward` which Machine. PR 3.

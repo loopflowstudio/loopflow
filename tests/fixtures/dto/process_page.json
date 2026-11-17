@@ -28,7 +28,6 @@
       "cwd": "/fixture/repo",
       "started_at": 1790640000,
       "completed_at": null,
-      "outcome": null,
       "exit_code": null,
       "signal": null,
       "error": null,

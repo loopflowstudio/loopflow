@@ -149,6 +149,18 @@ impl LfProcessRuntime {
             .artifact_dir()
     }
 
+    /// Record which skill text this launch runs. A store that cannot take it
+    /// costs the grouping of this run, never the launch.
+    pub fn record_skill_version(&self, version: &str) {
+        let runtime = self.0.lock().expect("Process runtime mutex poisoned");
+        let recorded = row_store(&runtime.recorder.dir).and_then(|store| {
+            store.record_skill_version(&runtime.recorder.manifest.artifact_key, version)
+        });
+        if let Err(error) = recorded {
+            tracing::warn!(%error, "could not record the skill version");
+        }
+    }
+
     /// Claim an admitted conversation and retain the exact provider provenance
     /// used by its tools. A later attachment transfer never rewrites this process.
     pub fn claim_session_attachment(&self) -> StoreResult<()> {
@@ -831,7 +843,6 @@ mod tests {
         assert_eq!(ended.pid, before.pid);
         assert_eq!(ended.os_started_at, before.os_started_at);
         assert!(ended.completed_at.is_some());
-        assert!(ended.outcome.is_none());
     }
 
     #[test]
@@ -888,7 +899,6 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(ended.completed_at.is_some());
-        assert!(ended.outcome.is_none());
         assert_eq!(ended.pid, Some(pid));
         assert_eq!(
             store.session_thread("resume").unwrap(),
@@ -1103,7 +1113,6 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(ended.completed_at.is_some());
-        assert!(ended.outcome.is_none());
     }
 
     #[test]

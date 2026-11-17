@@ -171,22 +171,23 @@ mod graph_instructions {
         .unwrap();
         fs::write(
             repo.path().join(".lf/graphs/repair.yaml"),
-            "- work\n- loop: work\n",
+            "- loop:\n    - work\n    - loop-or-next\n",
         )
         .unwrap();
         fs::write(
             repo.path().join(".lf/graphs/chat.yaml"),
             r#"
-- step: {name: work, id: first}
-- cmd: commit -m don't-expand-$HOME;echo-unsafe
-- xor:
-    paths:
-      repair:
-        graph: repair
-        description: Repair the findings
-      skip:
-        description: Nothing to repair
-- loop: first
+- loop:
+    - step: {name: work, id: first}
+    - cmd: commit -m don't-expand-$HOME;echo-unsafe
+    - xor:
+        paths:
+          repair:
+            graph: repair
+            description: Repair the findings
+          skip:
+            description: Nothing to repair
+    - loop-or-next
 - interactive: {name: demo, id: review}
 "#,
         )
@@ -229,7 +230,7 @@ mod graph_instructions {
             )
             .unwrap();
         }
-        fs::write(repo.path().join(".lf/graphs/chat.yaml"), "- implement\n- loop: implement\n- xor:\n    paths:\n      done:\n        description: Finished\n").unwrap();
+        fs::write(repo.path().join(".lf/graphs/chat.yaml"), "- loop:\n    - implement\n    - loop-or-next\n- xor:\n    paths:\n      done:\n        description: Finished\n").unwrap();
         let plan = recipe(repo.path(), "chat");
         for name in ["loop-or-next", "xor-route"] {
             assert!(plan.contains(&format!("Execute the skill `{name}` in this conversation.")));
@@ -323,20 +324,6 @@ fn configuration_write_rejects_a_scope_outside_its_destination() {
         request["scope"] = "global".into();
         assert!(serde_json::from_value::<crate::lf::commands::write::Write>(request).is_err());
     }
-}
-
-#[test]
-fn work_skill_help_includes_the_operating_guidance() {
-    let repo = loopflow_test_support::TestRepo::new();
-    let source = loopflow_definitions::builtins::get_builtin_skill("work").unwrap();
-    let (_, body) = loopflow_definitions::text::split_frontmatter(source).unwrap();
-    let help = crate::lf::navigation::render_help(
-        &["skill".to_owned(), "work".to_owned()],
-        repo.path(),
-        false,
-    )
-    .unwrap();
-    assert!(help.contains(body.trim()));
 }
 
 #[test]

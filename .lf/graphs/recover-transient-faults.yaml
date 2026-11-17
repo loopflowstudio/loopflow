@@ -1,5 +1,6 @@
-- implement
-- compress
-- graph: refresh
-- loop: implement
+- loop:
+    - implement
+    - compress
+    - graph: refresh
+    - loop-or-next
 - graph: deliver

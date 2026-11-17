@@ -1165,6 +1165,8 @@ fn headless_run(command: &[&str], resume: bool) {
     fixture
         .repo
         .create_file(".lf/graphs/proof.yaml", "- probe\n");
+    fixture.repo.stage_all();
+    fixture.repo.commit("Define the probe skill and Graph");
     std::fs::write(fixture.home.path().join("hold-turn"), "").unwrap();
     let mut creator = fixture
         .command(&[&["-b", "--agent", "opencode"], command].concat())

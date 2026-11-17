@@ -2,10 +2,10 @@
 # forward remains. Leaves the result on the branch for the caller to deliver.
 - step: {name: measure, id: baseline}
 - step: {name: optimize-plan, id: first-plan}
-- step: {name: implement, id: climb}
-- step: {name: measure, id: compare}
-- loop: climb
-  step: optimize-plan
+- loop:
+    - implement
+    - step: {name: measure, id: compare}
+    - optimize-plan         # decides: another change, or done
 - compress
 - graph: refresh
 - step: {name: measure, id: final}

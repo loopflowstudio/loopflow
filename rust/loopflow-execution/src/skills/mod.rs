@@ -53,8 +53,13 @@ struct Export {
     inputs: BTreeMap<String, String>,
 }
 
-/// Copy a builtin skill only when the repository has no local definition.
-pub fn customize(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
+/// What `lf skill customize` writes for a builtin: the builtin stays in force
+/// and the repository's section is appended to it.
+const EXTENSION: &str = "---\nextends: builtin\n---\n## In this repository\n";
+
+/// Give the repository its own file for a builtin skill when it has none: an
+/// extension of the builtin, or with `full` the builtin's whole text.
+pub fn customize(name: &str, repo: &Path, full: bool) -> Result<PathBuf, LoadError> {
     let local = SkillCatalog::load(Some(repo), None, false)?;
     if let Some(path) = local.resolve(name)?.and_then(|source| source.path.clone()) {
         return Ok(path);
@@ -65,7 +70,7 @@ pub fn customize(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
         .ok_or_else(|| LoadError::SkillNotFound(name.to_string()))?;
     let path = repo.join(format!(".lf/skills/{name}.md"));
     fs::create_dir_all(path.parent().expect("definition has a parent"))?;
-    fs::write(&path, content)?;
+    fs::write(&path, if full { content } else { EXTENSION })?;
     Ok(path)
 }
 
@@ -578,17 +583,37 @@ mod tests {
     }
 
     #[test]
-    fn customize_copies_a_builtin_once_then_returns_the_repository_file() {
+    fn customize_extends_a_builtin_once_then_returns_the_repository_file() {
         let repo = TempDir::new().unwrap();
-        let path = customize("pr-message", repo.path()).unwrap();
-        assert_eq!(path, repo.path().join(".lf/skills/pr-message.md"));
+        let loaded = |name: &str| {
+            super::SkillCatalog::load(Some(repo.path()), None, false)
+                .unwrap()
+                .load_skill(name)
+                .unwrap()
+        };
+        let builtin = loaded("implement");
+        let path = customize("implement", repo.path(), false).unwrap();
+        assert_eq!(path, repo.path().join(".lf/skills/implement.md"));
+        let extended = loaded("implement");
         assert_eq!(
-            fs::read_to_string(&path).unwrap(),
+            extended.content.unwrap(),
+            format!(
+                "{}\n\n## In this repository\n",
+                builtin.content.unwrap().trim_end()
+            )
+        );
+        // The builtin's frontmatter still applies to the extension.
+        assert_eq!(extended.action_style.as_deref(), Some("procedural"));
+        assert_eq!(extended.action_style, builtin.action_style);
+        fs::write(&path, "Repository copy.").unwrap();
+        assert_eq!(customize("implement", repo.path(), true).unwrap(), path);
+        assert_eq!(fs::read_to_string(&path).unwrap(), "Repository copy.");
+
+        let full = customize("pr-message", repo.path(), true).unwrap();
+        assert_eq!(
+            fs::read_to_string(full).unwrap(),
             builtins::get_builtin_skill("pr-message").unwrap()
         );
-        fs::write(&path, "Repository copy.").unwrap();
-        assert_eq!(customize("pr-message", repo.path()).unwrap(), path);
-        assert_eq!(fs::read_to_string(&path).unwrap(), "Repository copy.");
     }
 
     #[cfg(unix)]
@@ -763,7 +788,7 @@ mod tests {
             Some("Repository implementation.")
         );
         assert_eq!(selected.skill.agent.as_deref(), Some("claude:repo"));
-        assert_eq!(selected.skill.occurrence.as_ref().unwrap().graph, "pursue");
+        assert_eq!(selected.skill.occurrence.as_ref().unwrap().graph, "build");
         assert_eq!(selected.arguments, "Exact request");
         // A runtime Graph's already resolved capture retains its body/arguments.
         let captured = home.path().join("runtime.json");
@@ -849,22 +874,22 @@ mod tests {
         let repo = TempDir::new().unwrap();
         fs::create_dir_all(home.path().join(".lf/skills")).unwrap();
         fs::write(
-            home.path().join(".lf/skills/loop-or-next.md"),
-            "Personal decision criteria",
+            home.path().join(".lf/skills/realign.md"),
+            "Personal realign method",
         )
         .unwrap();
         sync_skills(&options_for(&home)).unwrap();
         let global = home.path().join(".claude/skills/pursue/SKILL.md");
         let original = fs::read_to_string(&global).unwrap();
-        assert!(original.contains("Execute the skill `loop-or-next` in this conversation."));
+        assert!(original.contains("Execute the skill `realign` in this conversation."));
         assert!(original.contains(
             &home
                 .path()
-                .join(".lf/skills/loop-or-next.md")
+                .join(".lf/skills/realign.md")
                 .display()
                 .to_string()
         ));
-        assert!(!original.contains("Personal decision criteria"));
+        assert!(!original.contains("Personal realign method"));
 
         fs::create_dir_all(repo.path().join(".lf/graphs")).unwrap();
         let graph = repo.path().join(".lf/graphs/pursue.yaml");

@@ -1,3 +1,2 @@
 - cmd: doctor
-- telemetry-scorecard
 - cmd: monitor usage --weekly

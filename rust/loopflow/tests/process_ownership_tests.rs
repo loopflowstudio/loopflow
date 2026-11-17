@@ -164,10 +164,6 @@ async fn agent_settlement_on_read_reports_failed_observation_and_recovers_withou
         .unwrap()
         .unwrap();
     assert!(ended.completed_at.is_some());
-    assert!(
-        ended.outcome.is_none(),
-        "observed death is not successful work"
-    );
     assert_eq!(ended.pid, before.pid);
     assert_eq!(ended.parent_lf_process_id, Some(parent));
     assert_eq!(store.session_history("orphan", 0, 0).unwrap(), history);

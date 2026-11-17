@@ -1621,6 +1621,8 @@ public struct SessionHistory: Decodable, Sendable, Identifiable, Hashable {
     public let workSource: String?
     public let waveName: String?
     public let skill: String?
+    /// SHA-256 of the resolved skill text the run launched with.
+    public let skillVersion: String?
     public let observedAt: Int
     public let firstProviderAttemptAt: Int?
     public let recordedOutcome: String?
@@ -1659,6 +1661,7 @@ public struct SessionHistory: Decodable, Sendable, Identifiable, Hashable {
         case sessionId = "session_id", artifactKey = "artifact_key", callerArtifactKey = "caller_artifact_key"
         case taskPrId = "task_pr_id", taskId = "task_id", waveId = "wave_id"
         case taskIdentifier = "task_identifier", waveName = "wave_name", workSource = "work_source"
+        case skillVersion = "skill_version"
         case observedAt = "observed_at", firstProviderAttemptAt = "first_provider_attempt_at"
         case recordedOutcome = "recorded_outcome", recordedAt = "recorded_at", evidenceGaps = "evidence_gaps"
     }

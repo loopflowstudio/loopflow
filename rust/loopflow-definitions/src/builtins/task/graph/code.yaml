@@ -1,8 +1,9 @@
-# Build, deliver and verify. You try the change, then check it on main, in the
-# Task conversation.
-- graph: pursue
-- loop: implement
-  interactive: demo
-- graph: deliver
-- loop: implement
-  interactive: verify
+# Build, deliver and verify. You review the change's concepts, then check it
+# on main, in the Task conversation.
+- graph: plan
+- loop:
+    - loop:
+        - graph: build
+        - interactive: concept-review   # you read the page; iterate goes back to build
+    - graph: deliver
+    - interactive: verify

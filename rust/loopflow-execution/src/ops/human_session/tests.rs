@@ -1190,8 +1190,9 @@ fn opening_any_primary_without_a_request_only_reads() {
         loopflow_definitions::builtins::get_builtin_skill("wave-session").unwrap(),
     ] {
         let skill = skill.split_whitespace().collect::<Vec<_>>().join(" ");
-        assert!(skill.contains("request is a reading pass"));
-        assert!(skill.contains("Steers delivered with that turn are recorded direction"));
+        assert!(skill.contains("A first turn without a request"));
+        assert!(skill.contains("with no Work changed"));
+        assert!(skill.contains("report them, and act when asked here"));
         assert!(!skill.contains("without waiting for a greeting"));
     }
 }

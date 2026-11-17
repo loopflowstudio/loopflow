@@ -495,7 +495,7 @@ fn work_first_repository_entry_preserves_primary_and_mixed_inventory() {
     let prompt = preview["task_prompt"].as_str().unwrap();
     assert!(prompt.contains("What do you want to work on?"));
     assert!(prompt.contains("no setup checklist first"));
-    assert!(prompt.contains("Opening this conversation asks for nothing"));
+    assert!(prompt.contains("Opening asks for nothing"));
     let empty = fixture.json(&["desktop", "plan", "--all", "--json"]);
     let primary = fixture.json(&["session", "resume", "--prepare", "--json"]);
     let again = fixture.json(&["session", "resume", "--prepare", "--json"]);
@@ -2017,9 +2017,12 @@ fn saved_graph_stand_in(fixture: &Fixture) {
     std::fs::write(lf.join("skills/decide-proof.md"), "Decide the fixture.").unwrap();
     std::fs::write(
         lf.join("graphs/work-then-decide.yaml"),
-        "- work-proof\n- loop: work-proof\n  step: decide-proof\n",
+        "- loop:\n    - work-proof\n    - decide-proof\n",
     )
     .unwrap();
+    // Committed, as a repository's definitions are: a step leaves only its own edits.
+    fixture.repo.stage_all();
+    fixture.repo.commit("Define the fixture skills and Graph");
 }
 
 /// (input, node, ordinal at that node, outcome, Task) from conversation history.
@@ -2197,6 +2200,8 @@ fn custom_router_returns_a_captured_path_without_an_in_turn_command() {
     saved_graph_stand_in(&fixture);
     std::fs::write(fixture.repo.path().join(".lf/graphs/choose.yaml"),
         "- xor:\n    router: decide-proof\n    paths:\n      alpha:\n        description: Do the selected work\n        skill: work-proof\n      zeta:\n        description: Leave this path untouched\n        skill: review-proof\n").unwrap();
+    fixture.repo.stage_all();
+    fixture.repo.commit("Define the routed Graph");
     let output = fixture.run(&["--agent", "opencode", "graph", "choose", "--batch"]);
     assert!(
         output.status.success(),

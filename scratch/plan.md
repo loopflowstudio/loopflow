@@ -305,7 +305,7 @@ checks on both ends; LOO-913's fallback and wait rules.
    Not yet: the logins rows carry no last refusal (slice 4, with `--refused`);
    the probes have no timeout (slice 3 bounds them for the launch check);
    `lf machine credentials inspect` still answers service transfers (slice 4).
-3. **Launch check and rentals.** The harness login probe feeding the revoked-
+3. **Next. Launch check and rentals.** The harness login probe feeding the revoked-
    login path with the new advice; `logins` on on-demand templates;
    rental prepare signs in the list; delete the forward agent-
    login names and `read_for_rental`.

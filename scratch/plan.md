@@ -45,7 +45,7 @@ enum Run { Bare(Mode), Managed, Worker }   // replaces Holder x Place x Mode
 | command | state | mode | lives until |
 |---|---|---|---|
 | `lf`, `lf <skill>`, `lf graph <g>`, `lf -b ...`, with or without `--task`/`LF_AS`, in any checkout | Bare | interactive or headless | its terminal closes or its caller exits |
-| a Task, Wave or repository conversation: `lf resume [ID] --task/--wave`, a Session bound with `lf session bind`, a primary conversation | Managed | interactive | someone quits it; survives its viewer |
+| a Task, Wave or repository conversation: `lf resume --task/--wave`, `lf resume ID` of a Session bound with `lf session bind` or of a primary conversation | Managed | interactive | someone quits it; survives its viewer |
 | `lf task run` steps, landing's `ci-fix` run, Discord Wave answers | Worker | headless | the run ends; outlives the command that started it |
 
 Names chosen for review: `Worker`, not "detached", because lf already shows
@@ -162,6 +162,53 @@ lint results: `cd0977a62f:scratch/plan.md`. Current resume checks follow below.
 - `cargo nextest run -p loopflow -p loopflow-execution --lib --test session_launch_contract -E 'test(transport::launch_mode_tests::) | test(terminal_launch_and_resume_use_current_policy_and_preserve_native_identity) | test(pi_native_callbacks_retain_identity_final_output_and_usage)'`: 7 passed, 2026-11-17, inherited `LF_*` cleared; macOS libtest linking warned about `__eh_frame` size and succeeded.
 - `cargo nextest run -p loopflow --test integration -E 'test(documented_commands::)'`: 4 passed in the combined native/docs selection, 2026-11-17, inherited `LF_*` cleared.
 - `cargo fmt` and `cargo clippy --all-targets -- -D warnings`: passed, 2026-11-17, inherited `LF_*` cleared for Clippy.
+
+## Next implement: from concept review of `42a2b8c33d`
+
+The three states and the resume rule hold on the normal path, on an unreadable
+store and on reopen. Four places still say or carry the older model.
+
+1. **`docs/sessions.md` describes main.** It is the page people read and this
+   branch has not touched it.
+   - line 151, a Bare conversation: "Steers | arrive when it is next started
+     or resumed, not mid-turn". Line 180: "plain `lf -b <skill>` takes none".
+     Both contradict `a_bare_skill_in_a_task_checkout_takes_a_steer_and_asks_no_server`
+     (already on main) and the page's own "Each Session receives a steer at
+     its next supported provider boundary".
+   - the "Opened with / Runs in" table (lines 207-214) has no row for
+     `lf <skill> --task X` or `LF_AS`, which moved from the holder to your
+     terminal on purpose. Say it in the Bare row. Check the `lf task run` cell
+     in the holder row against `delegate_current`: its steps are Workers in a
+     process of their own.
+   - line 407 "managed launches and interactive conversations lf starts"
+     report turn ends; a Bare interactive one does not.
+   Use the three words once each where a person meets the difference; don't
+   add a glossary.
+2. **`--task` beside a Session ID on resume does nothing, and the code says
+   otherwise.** `SessionTarget::from_selectors` lets the ID win and `delegate`
+   reads the row, so `lf resume BARE_ID --task X` reopens Bare (table row
+   above corrected). `SessionConnectionArgs::work_flag` ("Naming one makes the
+   resume managed") and the append to `open_argv` in `session::prepared` are
+   the last of `named_work`. Confirm `open_argv` already names the Session id,
+   then delete both; `a_prepared_task_resume_opens_managed…` and
+   `a_task_pane_reopened_by_session_id…` assert on the id, not the trailing
+   flag. Whether the flag should be refused beside an ID is question 5 on
+   `scratch/concept-review.html`, not this PR.
+3. **`delegate(Run::Managed, …)` means "classify this resume".** Three callers
+   pass Managed and may get `Bare(Interactive)` back. Have `delegate_session`
+   and `delegate_prepared_session` read the row into `Run` (one small
+   function, same recording gap) and hand `delegate` the final value, so
+   `delegate` only carries out a `Run`.
+4. **A Graph's correction turn is a Worker.** `graph.rs` spawns
+   `lf --batch … session resume ID --message` with `LF_GRAPH_STEP=worker` in a
+   Task run, so `delegate_current` returns `Worker`, which is right: it is the
+   step's next turn. The transport, harness and server READMEs say
+   `resume … 'message'` is `Bare(Headless)` without that exception; add the
+   clause.
+
+`scratch/concept-review.html` now reviews every Session command and ends in six
+unanswered questions. None changes this PR: `--message` keeps main's behavior
+here, as above.
 
 ## Delete — do not maintain
 

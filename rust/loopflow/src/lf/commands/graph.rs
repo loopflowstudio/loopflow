@@ -873,18 +873,23 @@ impl RunningGraph<'_> {
         if let Some(step) = &step {
             self.reserve_step(step)?;
         }
-        let admission = loopflow_execution::store::admission::lock_task_checkouts(
-            &self.store.sqlite,
-            &[self.cwd],
-            self.task.as_ref(),
-        )?;
-        loopflow_execution::transport::configure_child(command.as_std_mut());
-        let output =
-            loopflow_execution::terminal_output::TerminalOutput::for_child(command.as_std_mut())?;
-        let mut child = match command.spawn() {
-            Ok(child) => child,
+        // Once reserved, the step ends with whatever stopped it from starting.
+        let spawned = (|| -> Result<_> {
+            let admission = loopflow_execution::store::admission::lock_task_checkouts(
+                &self.store.sqlite,
+                &[self.cwd],
+                self.task.as_ref(),
+            )?;
+            loopflow_execution::transport::configure_child(command.as_std_mut());
+            let output = loopflow_execution::terminal_output::TerminalOutput::for_child(
+                command.as_std_mut(),
+            )?;
+            let child = command.spawn().context("could not execute Graph step")?;
+            Ok((admission, output, child))
+        })();
+        let (admission, output, mut child) = match spawned {
+            Ok(spawned) => spawned,
             Err(error) => {
-                let error = anyhow::Error::new(error).context("could not execute Graph step");
                 if let Some(step) = &step {
                     self.store.sqlite.finish_run(
                         step,
@@ -919,12 +924,19 @@ impl RunningGraph<'_> {
         };
         drop(output);
         // A step that died before writing its end leaves what this Graph saw.
-        if let (Some(step), Ok(status)) = (&step, &status) {
+        if let Some(step) = &step {
+            let (code, error) = match &status {
+                Ok(status) => (status.code(), None),
+                Err(error) => (
+                    None,
+                    Some(format!("could not wait for Graph step: {error}")),
+                ),
+            };
             self.store.sqlite.finish_run(
                 step,
                 loopflow_storage::rows::now_unix(),
-                status.code(),
-                None,
+                code,
+                error.as_deref(),
             )?;
         }
         // A new installation can select a newer child. Never read its result

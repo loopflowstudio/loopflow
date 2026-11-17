@@ -282,8 +282,10 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
+            // Only a Graph step waits out a limit; any other lf has nothing to note.
             "INSERT INTO agent_limit_recoveries(lf_process_id,provider,reason,retry_at,agent,updated_at)
-             VALUES(?1,?2,?3,?4,?5,?6)
+             SELECT ?1,?2,?3,?4,?5,?6
+             WHERE EXISTS(SELECT 1 FROM graph_process_steps WHERE lf_process_id=?1)
              ON CONFLICT(lf_process_id) DO UPDATE SET provider=excluded.provider,
                 reason=excluded.reason,retry_at=excluded.retry_at,agent=excluded.agent,
                 updated_at=excluded.updated_at",
@@ -772,6 +774,16 @@ mod tests {
                 )
                 .unwrap();
         };
+        // A bare lf that hit a limit is no step: nothing to note, no error.
+        store
+            .record_agent_limit_recovery(
+                &loopflow_model::id::LfProcessId::default(),
+                "claude",
+                "limit",
+                Some(1),
+                None,
+            )
+            .unwrap();
         wait(0, 200);
         assert!(store.tasks_past_a_limit_wait(100).unwrap().is_empty());
         wait(1, 100);

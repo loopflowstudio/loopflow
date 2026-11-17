@@ -48,7 +48,7 @@ pub fn ended_step_recovery(
     let Some(step) = graph.latest() else {
         return Ok(None);
     };
-    if crate::journal::run_evidence(&step.run) != ProcessIdentityEvidence::Dead {
+    if crate::journal::step_evidence(&step.run, &graph.run) != ProcessIdentityEvidence::Dead {
         return Ok(None);
     }
     Ok(store

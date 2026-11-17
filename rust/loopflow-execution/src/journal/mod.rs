@@ -1301,6 +1301,19 @@ pub fn run_evidence(run: &loopflow_storage::graph_process::Run) -> ProcessIdenti
     }
 }
 
+/// Whether a Graph step is still running. A step its Graph reserved but has
+/// not started yet has no pid; it stands or falls with the Graph that would
+/// start it.
+pub fn step_evidence(
+    step: &loopflow_storage::graph_process::Run,
+    graph: &loopflow_storage::graph_process::Run,
+) -> ProcessIdentityEvidence {
+    if step.ended_at.is_none() && step.pid.is_none() {
+        return run_evidence(graph);
+    }
+    run_evidence(step)
+}
+
 pub(crate) fn lf_evidence(store: &SqliteStore, process: &LfProcessId) -> ProcessIdentityEvidence {
     let Ok(Some(record)) = store.lf_process(process) else {
         return ProcessIdentityEvidence::Unknown;
@@ -1681,6 +1694,33 @@ mod tests {
         assert_eq!(before, ProcessIdentityEvidence::Dead);
         assert_eq!(since, ProcessIdentityEvidence::Unknown);
         assert_eq!(unrecorded, ProcessIdentityEvidence::Unknown);
+    }
+
+    #[test]
+    fn a_reserved_step_ends_with_the_graph_that_would_start_it() {
+        let run = |ended_at: Option<i64>| loopflow_storage::graph_process::Run {
+            id: LfProcessId::default(),
+            started_at: 1,
+            ended_at,
+            pid: None,
+            os_started_at: None,
+            exit_code: None,
+            error: None,
+        };
+        let reserved = run(None);
+        let live_graph = loopflow_storage::graph_process::Run {
+            pid: Some(std::process::id()),
+            os_started_at: super::process_started_at(std::process::id()).unwrap(),
+            ..run(None)
+        };
+        assert_eq!(
+            super::step_evidence(&reserved, &run(Some(2))),
+            ProcessIdentityEvidence::Dead
+        );
+        assert_eq!(
+            super::step_evidence(&reserved, &live_graph),
+            ProcessIdentityEvidence::Live
+        );
     }
 
     #[test]

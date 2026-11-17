@@ -82,7 +82,9 @@ pub async fn execution_of_latest_graph(
         graph,
         entry.summary.state,
         crate::journal::run_evidence(&graph.run),
-        step.map_or(ProcessIdentityEvidence::Dead, crate::journal::run_evidence),
+        step.map_or(ProcessIdentityEvidence::Dead, |step| {
+            crate::journal::step_evidence(step, &graph.run)
+        }),
     );
     snapshot.captured = input.map(|(_, _, captured)| *captured);
     if let Some(recovery) = step.and_then(|step| facts.limit_recoveries.get(&step.id)) {

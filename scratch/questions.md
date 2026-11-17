@@ -102,3 +102,27 @@ order, both env variables, dev-only skew accepted).
 - `lf graph show <RUN_ID> --json` steps now carry `error` (DTO `GraphStepProcess.error`, Rust and Swift, fixtures and schema).
 - `lf task status` labelled the interrupted carrier (`lf task run`, a Process with no run row) "failed" from `processes.outcome`. Process lines now take their label from the row's end, exit and error by `RunResult::of`, so it reads `interrupted`; a Process line repeating a Graph run's line is omitted. `processes.outcome` itself and the remaining Process lines go with the Process-line slice.
 - Checks: `cargo test -p loopflow-storage --lib sqlite::graph_inventory::` (5), `cargo test -p loopflow --test integration dto_fixtures::` (52), `cargo test -p loopflow --lib server::schema::tests::` (8), `task_graph_launch_tests::an_interrupt_during_an_operation_stops_the_graph_before_its_next_step`, `scripts/test_desktop.sh --filter 'DTOFixtureTests|TaskGraphProofTests|DesktopHeadlessTests'` (82), clippy and fmt: passed.
+
+## Slice 2a review (2026-11-17)
+
+- Fixed: a reserved step whose start failed (admission, terminal output,
+  `configure_child`) or whose wait failed was left with no pid and no end, so
+  the Task read "liveness unknown" until another run. The spawner now ends it
+  with the error; `journal::step_evidence` takes a reserved step's liveness
+  from its Graph run, so a killed runner's reserved step reads dead.
+  Test: `journal::tests::a_reserved_step_ends_with_the_graph_that_would_start_it`.
+- Fixed: `agent_limit_recoveries` now has a foreign key to
+  `graph_process_steps` (`process_rows_on_owners.sql:51`). `_note_limit_recovery`
+  (`agent/mod.rs:289`) writes for any lf, so a bare `lf -b <skill>` hitting a
+  limit logs "could not note limit recovery" every time; the migration drops
+  the one such row in the live store (1 of 323). The note now inserts only
+  for a recorded step (released lf still logs the warning until it updates).
+- Open: the spawner's `finish_run(...)?` (step end and Task-run loop,
+  `graph.rs:240`) fails the Graph when the store is busy even after the child
+  succeeded. Same exposure as the old `process_mark`; candidate for warn-and-continue.
+- Minor: `GraphStepProcess.error` decodes a missing key (siblings do too);
+  step `outcome` is now `"unknown"` where it was `null`; `latest_task_graphs`
+  and `graphs_in` order by `graph_processes.rowid` (`ORDER BY started_at, rowid`
+  would say it).
+- Missing tests: spawner-written end for a child that died without writing
+  one; `graph_failure_cause` driving the repeated-failure stop.

@@ -226,8 +226,9 @@ one frame, with accepted and confirmed times beside it.
 ## Slices
 
 All in one PR; deepest first. Status after the fifth implement pass
-(2026-11-16; the third pass is described here, the fourth and fifth below it), which built concept review pass 2's four directions
-(`e323a0a227` has their text).
+(2026-11-16). The list below is the third pass, which built concept review
+pass 2's four directions (`e323a0a227` has their text); the fourth and fifth
+follow it.
 
 1. **Machine — built.** `journal::request::{after_reply, answer_first}`;
    `sync_after_save` and the claim's `assert_assignee` defer inside a served

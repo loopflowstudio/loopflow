@@ -154,7 +154,8 @@ impl Pipe {
             .unwrap_or_default();
         let said = String::from_utf8_lossy(&said);
         let name = self.machine.name();
-        let reason = match status.map(|status| status.code()) {
+        let status = status.map(|status| status.code());
+        let reason = match status {
             // Clap's usage error: this `lf` has no `server connect`.
             Ok(Some(2)) => {
                 return Error::new(ErrorCode::Incompatible, outdated(&self.machine)).into()
@@ -162,12 +163,19 @@ impl Pipe {
             Ok(Some(255) | None) => format!("could not reach {name} over SSH"),
             Ok(Some(0)) => format!("{name} closed the connection before answering"),
             Ok(Some(code)) => format!("lf on {name} exited with status {code} before answering"),
-            Err(error) => format!("ssh to {name} did not exit: {error}"),
+            Err(ref error) => format!("ssh to {name} did not exit: {error}"),
         };
-        let message = match said.trim() {
+        let mut message = match said.trim() {
             "" => reason,
             said => format!("{reason}; the destination said: {said}"),
         };
+        // The destination's `lf` ran and failed, most often starting its server.
+        if matches!(status, Ok(Some(code)) if code != 0) {
+            message.push_str(&format!(
+                "; check `ssh {} lf server status`",
+                self.machine.route
+            ));
+        }
         match code {
             ErrorCode::OutcomeUnknown => Error::outcome_unknown(&anyhow::anyhow!(message)),
             code => Error::new(code, message),

@@ -232,15 +232,9 @@ PR 1 is built on `main` at `e66b21801c`: `Connection::open_on` over
 `machine.write` (`server/wire.rs::MachineOperation`), which the server runs
 with `Write::run_here` in its checkout of the named repository.
 `server/stdio.rs`, `ssh::call` and the `prepare_launch` path are deleted.
-
-## Next implement direction (concept review, 2026-11-17)
-
-- The demo promises that an unstartable server on mini fails "naming mini,
-  the reason and `ssh mini lf server status`". `machine::ssh::Pipe::ended`
-  names mini and what the destination said, but not where to look. A
-  destination `lf` that exits non-zero (not 2, not 255) gets
-  "; check `ssh <route> lf server status`" in its message, with a test
-  beside `an_lf_that_dies_before`.
+A destination `lf` that exits non-zero (not 2, 255) adds "; check `ssh
+<route> lf server status`" (`machine::ssh::Pipe::ended`), the demo's third
+failure clause. The Done-when `rg` finds nothing.
 
 ## Open
 
@@ -250,8 +244,9 @@ with `Write::run_here` in its checkout of the named repository.
   PR 3's `Selection` on `Request` closes this.
 - The SSH carrier sets no read timeout; SSH bounds connecting, not a stalled
   destination.
-- PR #1956 CI reported every check SKIPPED, including `rust-test`. Not
-  investigated.
+- PR #1956 CI reports every check SKIPPED except `macos-inputs` and
+  `scratch-clear`, including `rust-test` (rechecked 2026-11-17 at
+  `836125fd5a`). Not investigated; gate must see the suites run.
 
 ## Built in #1956 (2026-11-16), before the redesign
 
@@ -264,7 +259,7 @@ with `Write::run_here` in its checkout of the named repository.
 
 ## Checks (PR 1)
 
-- `cargo nextest run -p loopflow --test integration -E 'test(served_ownership_routes_to_its_writer) | test(a_hold_for_a_task_mini_runs) | test(a_served_run_for_a_task_mini) | test(an_lf_without_the_entry) | test(an_lf_that_dies_before) | test(a_served_resume_opens_the_session_on_your)'`: 6 pass (mini's real server answers the hold and the claim).
+- `cargo nextest run -p loopflow --test integration -E 'test(served_ownership_routes_to_its_writer) | test(a_hold_for_a_task_mini_runs) | test(a_served_run_for_a_task_mini) | test(an_lf_without_the_entry) | test(an_lf_that_dies_before) | test(a_served_resume_opens_the_session_on_your)'`: 6 pass; the three SSH-entry ones rerun after the status hint, pass (mini's real server answers the hold and the claim).
 - `--lib` `machine::forward:: | machine::client:: | machine::ssh:: | server::schema:: | server::wire:: | lf::commands::write:: | lf::tests::`, `documented_commands::`: pass; clippy clean on both crates.
 - A stopped destination server started by the entry: QA, not automated (`ensure` registers a supervisor job).
 - Swift `ServerProtocolTests` against the regenerated schema: gate/CI.

@@ -4161,7 +4161,7 @@ fn an_lf_that_dies_before_answering_says_so_and_what_it_printed() {
     let error = String::from_utf8_lossy(&output.stderr);
     assert!(
         error.contains(
-            "lf on mini exited with status 101 before answering; the destination said: panicked at main.rs"
+            "lf on mini exited with status 101 before answering; the destination said: panicked at main.rs; check `ssh mini lf server status`"
         ),
         "{error}"
     );

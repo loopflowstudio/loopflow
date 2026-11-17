@@ -1,6 +1,6 @@
 # LOO-936: record only what the product reads, history apart from state
 
-Status: 2026-11-16, slices 1–4 committed (slice 4: "Turn table as built");
+Status: 2026-11-16, slices 1–4 committed (slice 4: "Turn table as built"; reviewed, see "Concept review after slice 4");
 merged with main through #1953 (`319bf49c30`). Remaining: slice 5. Process rows are LOO-953 ("Remove Process rows:
 liveness on Sessions and Graph runs", its own worktree); nothing here moves
 them.
@@ -165,8 +165,11 @@ sqlite3 -readonly ~/.lf/usage.db "select skill, sum(output_tokens), sum(ended_at
 5. Retention on the server's clock, the move pass for observation rows a
    released lf leaves in main (turn rows already convert, see below),
    `history`/`turns` revisions declared by their reads, `history.db` and
-   `usage.db` statistics, measurements, docs check (`data.md` "Loopflow keeps
-   no copy of the stream"; add `usage.db` everywhere `history.db` is named).
+   `usage.db` statistics (`ANALYZE` both, `store::query_plans` over the
+   `usage.turns` reads at load size), measurements, docs check (`data.md`
+   "Loopflow keeps no copy of the stream"; add `usage.db` everywhere
+   `history.db` is named; `lf doctor` reports both files' size and oldest
+   row), and the rename below.
 
 ## Delete — do not maintain
 
@@ -301,11 +304,17 @@ reads and writes while new Processes use the history file:
 - New readers of the resume reference, the independent flag and the latest
   transition see what the migration backfilled, plus what new Processes write.
 
-Open: whether install waits for, or names, released-lf Graph processes and
-Sessions still running (the 2026-11-04 incident: install cannot see live
-processes), or whether the new lf also answers old readers until they exit.
-The same holds for the turn table: a released lf keeps writing `usage` rows
-into `loopflow.db` until the move pass converts them.
+Settled in concept review after slice 4: the new lf does not answer old
+readers. `lf install` already names every live process on a superseded build
+before and after the promote (`binaries::report_before_promote`,
+`report_after_promote`: "still running the previous lf: …", with the
+`lf resume` remedy), which is the standing rule: "not having to worry too much
+about stable APIs or supporting old versions" (Jack Heart, 2026-10-07; detect
+the skew, say so, name the fix). What a superseded process writes into
+`loopflow.db` (observations, three-row turns) is carried over by slice 5's
+move pass on the server's clock. The PR body states the two costs while one
+runs: an old Graph step finds no `output` row and spends correction turns; an
+old `lf session resume` starts a fresh provider conversation.
 
 ## Direction after review, 2026-11-16 evening
 
@@ -440,3 +449,23 @@ Remaining from slice 4 (gate or slice 5):
 - Swift has no reader of turns; its `SessionEvent` kinds narrowed to
   `captured`/`observed` and its fixture test reads `events`.
 - Turn rows have no retention (questions.md).
+
+## Concept review after slice 4 (2026-11-16, headless)
+
+The built turn table matches "Turns, settled in concept review": one row,
+columns not JSON, resolved usage, readers on `usage.turns` only, one writer
+for both files, history narrowed to `observed`. Two things the design
+implies, for slice 5:
+
+- **Name the writer for what it is.** `HistoryFile` now writes `usage.db`
+  too (`HistoryFile::beside(&USAGE, …)` reads wrong). Rename it `JournalFile`
+  and the module `history.rs` → `journals.rs` (it holds `HISTORY`, `USAGE`,
+  `attach`, `open_writer`); `history_path`/`usage_path` stay. 11 uses, 15
+  importing files.
+- **Upgrade skew is detect-and-name**, settled above under "Upgrade skew";
+  no compat reads.
+
+Still open, none blocking slice 5: turn-row retention (one constant), and
+whether reports group by the values frozen at dispatch or follow later binds
+through the Session id (`questions.md`); "interrupted" for an unknown
+OpenCode completion.

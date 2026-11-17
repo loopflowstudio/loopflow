@@ -140,8 +140,7 @@ impl Carrier {
                 Ok(Socket {
                     reader: BufReader::with_capacity(capacity, Box::new(output)),
                     writer: Box::new(input),
-                    stream: None,
-                    pipe: Some(pipe),
+                    end: End::Pipe(pipe),
                 })
             }
         }
@@ -501,7 +500,9 @@ pub fn attach(path: &Path, session: &LfSessionId) -> Result<UnixStream> {
         None => anyhow::bail!("Loopflow server closed the connection before bridging"),
     }
     // Reading one byte at a time left nothing of the terminal's in a buffer.
-    let stream = socket.stream.take().expect("a local carrier has a socket");
+    let End::Socket(stream) = socket.end else {
+        unreachable!("a local carrier ends in a socket")
+    };
     stream.set_read_timeout(None)?;
     Ok(stream)
 }
@@ -533,17 +534,23 @@ fn connect(path: &Path) -> Result<UnixStream> {
 struct Socket {
     reader: BufReader<Box<dyn Read + Send>>,
     writer: Box<dyn Write + Send>,
-    /// The local socket, which bounds reads; SSH bounds its own.
-    stream: Option<UnixStream>,
-    /// SSH to another Machine, which says why it closed.
-    pipe: Option<super::ssh::Pipe>,
+    end: End,
+}
+
+/// The far end of a [`Socket`]'s byte streams.
+#[derive(Debug)]
+enum End {
+    /// This Machine's socket, which bounds reads.
+    Socket(UnixStream),
+    /// SSH to another Machine, which bounds its own connection and says why
+    /// it closed.
+    Pipe(super::ssh::Pipe),
 }
 
 impl std::fmt::Debug for Socket {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Socket")
-            .field("stream", &self.stream)
-            .field("pipe", &self.pipe)
+            .field("end", &self.end)
             .finish_non_exhaustive()
     }
 }
@@ -553,13 +560,12 @@ impl Socket {
         Ok(Self {
             writer: Box::new(stream.try_clone()?),
             reader: BufReader::with_capacity(capacity, Box::new(stream.try_clone()?)),
-            stream: Some(stream),
-            pipe: None,
+            end: End::Socket(stream),
         })
     }
 
     fn set_read_timeout(&self, timeout: Option<Duration>) -> Result<()> {
-        if let Some(stream) = &self.stream {
+        if let End::Socket(stream) = &self.end {
             stream.set_read_timeout(timeout)?;
         }
         Ok(())
@@ -567,9 +573,9 @@ impl Socket {
 
     /// Why the server closed before answering: SSH says, the socket cannot.
     fn ended(&mut self, local: &str, code: ErrorCode) -> anyhow::Error {
-        match &mut self.pipe {
-            Some(pipe) => pipe.ended(code),
-            None => anyhow::anyhow!("{local}"),
+        match &mut self.end {
+            End::Pipe(pipe) => pipe.ended(code),
+            End::Socket(_) => anyhow::anyhow!("{local}"),
         }
     }
 
@@ -645,7 +651,7 @@ mod tests {
     use std::os::unix::net::UnixListener;
     use std::time::Instant;
 
-    use super::{attach, hook_request, Connection, HANDSHAKE};
+    use super::{attach, hook_request, Connection, End, HANDSHAKE};
     use crate::machine::wire::{
         Limits, ServerMessage, Welcome, MAX_CONNECTIONS, MAX_MESSAGE, MIN_REVISION, REVISION,
     };
@@ -766,15 +772,9 @@ mod tests {
     fn a_welcomed_session_reads_without_a_bound() {
         let (_home, path) = silent_server(true);
         let connection = Connection::open_at(&path).unwrap();
-        assert_eq!(
-            connection
-                .socket
-                .stream
-                .as_ref()
-                .unwrap()
-                .read_timeout()
-                .unwrap(),
-            None
-        );
+        let End::Socket(stream) = &connection.socket.end else {
+            panic!("a local connection ends in a socket")
+        };
+        assert_eq!(stream.read_timeout().unwrap(), None);
     }
 }

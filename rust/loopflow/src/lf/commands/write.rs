@@ -56,21 +56,18 @@ macro_rules! writes {
             /// Run the shared operation where its Work lives and keep its
             /// declared result until serialization.
             pub(crate) fn run(&self) -> anyhow::Result<WriteResult> {
-                self.execute(true, &[])
+                self.execute(self.remote()?, &[])
             }
 
             /// Run the shared operation here, a launch it starts carrying
             /// `environment`: one that arrived from another Machine is never sent on.
             pub(crate) fn run_here(&self, environment: &[(String, String)]) -> anyhow::Result<WriteResult> {
-                self.execute(false, environment)
+                self.execute(None, environment)
             }
 
-            fn execute(&$this, routed: bool, $environment: &[(String, String)]) -> anyhow::Result<WriteResult> {
+            /// `remote` is the Machine a Task or Session write goes to instead.
+            fn execute(&$this, $remote: Option<Remote>, $environment: &[(String, String)]) -> anyhow::Result<WriteResult> {
                 let $directory = $this.directory();
-                let $remote = match routed {
-                    true => $this.remote()?,
-                    false => None,
-                };
                 let $task_repo = |issue: &str| loopflow_execution::ops::task::task_repository($directory, Some(issue));
                 match $this {
                     $(Self::$name { $($binding)* } => {

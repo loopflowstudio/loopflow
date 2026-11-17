@@ -2182,6 +2182,110 @@ mod metadata_tests {
     }
 
     #[test]
+    fn an_upgrade_moves_resume_references_and_the_latest_transition_onto_their_owners() {
+        use crate::migration_runner::{apply_before_migration, migration_section_sql};
+
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        apply_before_migration(
+            &crate::test_fixture::observers(),
+            &crate::test_fixture::build(),
+            &conn,
+            "history_apart_from_state",
+        );
+        let reference = |thread: &str, account: &str| {
+            format!(
+                r#"{{"source":"provider-session","evidence":{{"schema_version":1,"provider_session_id":"{thread}","account_id":{account}}}}}"#
+            )
+        };
+        let insert = |session: &str, kind: &str, receipt: &str, payload: &str| {
+            conn.execute(
+                "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES(?1,?2,?3,7,?4)",
+                rusqlite::params![session, kind, receipt, payload],
+            )
+            .unwrap();
+        };
+        conn.execute_batch(
+            "INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd)
+             VALUES('current','Current','human',1,0,'/repo'),('legacy','Legacy','human',1,0,'/repo');",
+        )
+        .unwrap();
+        insert("current", "captured", "first", "{}");
+        insert("current", "captured", "second", "{}");
+        insert(
+            "current",
+            "observed",
+            "first:provider-session:a",
+            &reference("old", "\"work\""),
+        );
+        insert(
+            "current",
+            "observed",
+            "first:provider-session:b",
+            &reference("new", "null"),
+        );
+        insert(
+            "current",
+            "observed",
+            "second:manifest.json",
+            r#"{"source":"manifest.json","evidence":{"flow":{"kind":"independent"}}}"#,
+        );
+        insert(
+            "legacy",
+            "observed",
+            "agent-session:1",
+            r#"{"type":"agent_session_selected","agent_process_id":"44444444-4444-4444-8444-444444444444","provider_thread":"earlier","next_provider_thread":"fork","source":"fork"}"#,
+        );
+        insert(
+            "current",
+            "observed",
+            "agent-session:2",
+            r#"{"type":"agent_session_selected","agent_process_id":"44444444-4444-4444-8444-444444444444","provider_thread":null,"next_provider_thread":"old","source":"new"}"#,
+        );
+        insert(
+            "current",
+            "observed",
+            "provider-transition:3",
+            r#"{"type":"provider_transition","source":"observed","transition":{"kind":"resumed","from_provider_session":"old","to_provider_session":"new","from_agent_process":null,"to_agent_process":"55555555-5555-4555-8555-555555555555","original_running":null,"seed":null,"observed_at":9}}"#,
+        );
+        conn.execute_batch(&migration_section_sql("history_apart_from_state"))
+            .unwrap();
+
+        let inputs: Vec<(String, Option<String>, Option<String>, Option<i64>)> = conn
+            .prepare("SELECT receipt_key,provider_thread,provider_account,independent FROM session_events WHERE kind='captured' ORDER BY seq")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            inputs,
+            [
+                ("first".into(), Some("new".into()), None, None),
+                ("second".into(), None, None, Some(1)),
+            ]
+        );
+        let transition = |session: &str| -> super::super::provider_transitions::ProviderTransition {
+            let json: String = conn
+                .query_row(
+                    "SELECT transition FROM agent_sessions WHERE id=?1",
+                    [session],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            serde_json::from_str(&json).unwrap()
+        };
+        assert_eq!(transition("current").to_provider_session, "new");
+        let legacy = transition("legacy");
+        assert_eq!(
+            legacy.kind,
+            super::super::provider_transitions::TransitionKind::Forked
+        );
+        assert_eq!(legacy.from_provider_session.as_deref(), Some("earlier"));
+        assert_eq!(legacy.seed.as_deref(), Some("native"));
+        assert_eq!(legacy.observed_at, 7);
+    }
+
+    #[test]
     fn a_released_tasks_primary_session_stays_its_conversation_here() {
         use crate::migration_runner::{apply_before_migration, migration_section_sql};
 

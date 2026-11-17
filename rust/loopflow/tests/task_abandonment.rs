@@ -112,12 +112,12 @@ fn task_abandonment_cli_saves_offline_and_preserves_unresolved_work() {
                 "{}",
                 String::from_utf8_lossy(&output.stderr)
             );
-            // A cancellation reaches the tracker as one `state` effect, kept
+            // A cancellation reaches the tracker as one `state` action, kept
             // across repeats; a Task with no tracker object queues none.
             let saved: Vec<(String, String, String)> = db
                 .prepare(
                     "SELECT id,json_extract(value_json,'$.value.planning_state'),phase
-                     FROM tracker_effects WHERE task_id=?1 AND kind='state'",
+                     FROM tracker_actions WHERE task_id=?1 AND kind='state'",
                 )
                 .unwrap()
                 .query_map([registered.task.id.as_str()], |row| {
@@ -129,7 +129,7 @@ fn task_abandonment_cli_saves_offline_and_preserves_unresolved_work() {
             assert_eq!(saved.len(), usize::from(connected));
             if let Some((_, target, phase)) = saved.first() {
                 assert_eq!(target, "canceled");
-                assert_eq!(phase, "pending");
+                assert_eq!(phase, "queued");
             }
             if let Some(prior) = &receipt {
                 assert_eq!(prior, &saved);

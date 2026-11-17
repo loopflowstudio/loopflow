@@ -323,7 +323,7 @@ async fn sync_scope(store: &Store, repository: &str, fresh_for: i64) -> bool {
     )
     .await
     {
-        tracing::debug!(%error, "tracker effects pending");
+        tracing::debug!(%error, "tracker actions pending");
     }
     changed
 }

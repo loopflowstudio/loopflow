@@ -6255,16 +6255,16 @@
     "PlanStatus": {
       "description": "What `repo.plan` answers: the transport, for Git the destinations with\ntheir import and publication evidence, and for a tracker its queue.",
       "properties": {
-        "destinations": {
+        "actions": {
+          "description": "Changes waiting for the tracker, in send order.",
           "items": {
-            "$ref": "#/$defs/PeerPlanningStatus"
+            "$ref": "#/$defs/QueuedAction"
           },
           "type": "array"
         },
-        "effects": {
-          "description": "Changes waiting for the tracker, in send order.",
+        "destinations": {
           "items": {
-            "$ref": "#/$defs/QueuedEffect"
+            "$ref": "#/$defs/PeerPlanningStatus"
           },
           "type": "array"
         },
@@ -6276,7 +6276,7 @@
       "required": [
         "transport",
         "destinations",
-        "effects"
+        "actions"
       ],
       "type": "object"
     },
@@ -7447,7 +7447,7 @@
       ],
       "type": "object"
     },
-    "QueuedEffect": {
+    "QueuedAction": {
       "description": "One change waiting for the tracker.",
       "properties": {
         "change": {
@@ -7455,7 +7455,7 @@
           "type": "string"
         },
         "error": {
-          "description": "Why the last request did not settle it.",
+          "description": "Why the last request did not confirm it.",
           "type": [
             "string",
             "null"

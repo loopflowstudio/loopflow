@@ -286,7 +286,7 @@
       "body": {
         "transport": "git",
         "destinations": [],
-        "effects": []
+        "actions": []
       }
     }
   }

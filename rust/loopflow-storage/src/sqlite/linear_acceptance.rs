@@ -1,6 +1,6 @@
 //! Accept supplied Linear facts and canonical Work in one SQL transaction.
 
-use super::tracker_effects::{self, EffectKind, Settlement, TrackerEffect};
+use super::tracker_actions::{self, ActionKind, Resolution, TrackerAction};
 use super::{self as sqlite, planning_write, SqliteStore};
 use crate::planning::{revision_nanos, TrackerItem, TrackerProject};
 use crate::work::edit::{Disposition, WorkValue as Edit};
@@ -572,7 +572,7 @@ fn project_accepted_planning(
         .collect::<StoreResult<Vec<_>>>()?;
     drop(query);
     for (external, observed_at, wave_id, revision, mut edits) in observations {
-        tracker_effects::attach_in(tx, repo, true, &external, revision.as_deref(), &edits)?;
+        tracker_actions::attach_in(tx, repo, true, &external, revision.as_deref(), &edits)?;
         let existing: Option<(String, WaveId)> = tx
             .query_row(
                 "SELECT id,wave_id FROM projects WHERE external_project_id=?1",
@@ -601,9 +601,9 @@ fn project_accepted_planning(
         if let Some(rank) = rank {
             edits.push(Edit::ProjectRank(rank));
         }
-        tracker_effects::reconcile_in(
+        tracker_actions::reconcile_in(
             tx,
-            &tracker_effects::EffectOwner::Project(id.clone()),
+            &tracker_actions::ActionOwner::Project(id.clone()),
             revision.as_deref(),
             &mut edits,
         )?;
@@ -644,7 +644,7 @@ fn project_accepted_planning(
         .collect::<Result<Vec<_>, _>>()?;
     drop(query);
     for (id, revision, edits) in observed {
-        tracker_effects::attach_in(tx, repo, false, &id, revision.as_deref(), &edits)?;
+        tracker_actions::attach_in(tx, repo, false, &id, revision.as_deref(), &edits)?;
     }
     // Admission and refresh share one accepted observation. Existing Tasks retain
     // their IDs, local order and pending disposition; new Tasks receive only Work.
@@ -717,13 +717,13 @@ fn project_accepted_planning(
         );
         edits.push(Edit::Disposition(disposition.clone()));
         if existing.is_some() {
-            let settled = tracker_effects::reconcile_in(
+            let resolved = tracker_actions::reconcile_in(
                 tx,
-                &tracker_effects::EffectOwner::Task(id.clone()),
+                &tracker_actions::ActionOwner::Task(id.clone()),
                 revision.as_deref(),
                 &mut edits,
             )?;
-            record_adoptions(tx, &id, &settled)?;
+            record_adoptions(tx, &id, &resolved)?;
             edits.retain(|edit| !matches!(edit, Edit::TaskRank(_)));
         }
         planning_write::create(
@@ -740,16 +740,16 @@ fn project_accepted_planning(
     Ok(())
 }
 
-/// What acceptance settled against local intent and the Task shows for it: an
+/// What acceptance resolved against local intent and the Task shows for it: an
 /// adopted state is a Task event; a removal the tracker undid restores the Task.
 fn record_adoptions(
     tx: &Transaction<'_>,
     task: &loopflow_model::durable::TaskId,
-    settled: &[(TrackerEffect, Settlement)],
+    resolved: &[(TrackerAction, Resolution)],
 ) -> StoreResult<()> {
-    for (effect, settlement) in settled {
-        match (effect.kind, settlement) {
-            (EffectKind::State, Settlement::Adopt { remote }) => {
+    for (action, resolution) in resolved {
+        match (action.kind, resolution) {
+            (ActionKind::State, Resolution::Conflicted { remote }) => {
                 let state = |value: &serde_json::Value| {
                     value["value"]["planning_state"]
                         .as_str()
@@ -761,16 +761,16 @@ fn record_adoptions(
                     task,
                     &crate::work::task::TaskEventKind::Progress {
                         summary: format!(
-                            "Adopted {} state {}; local intention {} remains in effect {}. Local Workflow unchanged.",
-                            effect.provider.display_name(),
+                            "Adopted {} state {}; local intention {} remains in action {}. Local Workflow unchanged.",
+                            action.provider.display_name(),
                             state(&remote["value"]),
-                            state(&effect.value),
-                            effect.id
+                            state(&action.value),
+                            action.id
                         ),
                     },
                 )?;
             }
-            (EffectKind::Delete, Settlement::Retire { .. }) => {
+            (ActionKind::Delete, Resolution::Retire { .. }) => {
                 planning_write::tracker(
                     tx,
                     &crate::work::edit::WorkEdit::for_target(

@@ -267,8 +267,8 @@ queue waits:
 ```text
 $ lf repo plan
 Planning: Linear. 3 changes waiting to send.
-  LOO-412  title     pending
-  LOO-412  comment   pending
+  LOO-412  title     queued
+  LOO-412  comment   queued
   LOO-398  complete  sent, waiting for Linear to confirm
 ```
 

@@ -40,7 +40,7 @@ pub mod task_run;
 pub mod telemetry;
 pub mod trace;
 pub mod tracker;
-pub mod tracker_observe;
+pub mod tracker_events;
 pub mod util;
 pub mod wave_lifecycle;
 pub mod wt;

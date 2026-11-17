@@ -1,9 +1,9 @@
 //! The repository's tracker, selected in `.lf/config.yaml` the way an agent
-//! harness is. A bridge carries the store's queued effects out (`send`), reads
+//! harness is. A tracker carries the store's queued actions out (`send`), reads
 //! an owner back after a lost reply (`look`), and answers what people changed
 //! there (`changes`, `observe_issue`), always in store words. Linear GraphQL
-//! lives in `linear/effects.rs`, Asana REST in `asana/effects.rs`. The drain
-//! owns pacing; `planning::rules` owns settlement.
+//! lives in `linear/actions.rs`, Asana REST in `asana/actions.rs`. The drain
+//! owns pacing; `planning::rules` owns resolution.
 
 pub mod drain;
 
@@ -16,7 +16,7 @@ use crate::store::Store;
 use loopflow_storage::planning::rules::Observed;
 use loopflow_storage::planning::{TrackerItem, TrackerObservation, TrackerProject};
 use loopflow_storage::provider::Provider;
-use loopflow_storage::sqlite::tracker_effects::{EffectKind, TrackerEffect};
+use loopflow_storage::sqlite::tracker_actions::{ActionKind, TrackerAction};
 use loopflow_storage::work::edit::{Disposition, WorkValue};
 
 use super::{OpsError, OpsResult};
@@ -32,25 +32,25 @@ pub enum Sent {
     Rejected(String),
     /// No reply: the provider may or may not have acted.
     Unknown(String),
-    /// The bridge has no form for this effect; it retires with the reason.
+    /// The tracker has no form for this action; it retires with the reason.
     Unsupported(String),
 }
 
 impl Sent {
     /// A failed request: a rate limit refused it; anything else may have landed.
-    pub(crate) fn failed(error: impl Into<BridgeError>) -> Self {
+    pub(crate) fn failed(error: impl Into<TrackerError>) -> Self {
         match error.into() {
-            error @ BridgeError::RateLimited { .. } => Self::Rejected(error.to_string()),
+            error @ TrackerError::RateLimited { .. } => Self::Rejected(error.to_string()),
             error => Self::Unknown(error.to_string()),
         }
     }
 }
 
-/// A bridge request that failed, in the tracker's terms. Saved delivery errors
+/// A tracker request that failed, in the tracker's terms. Saved delivery errors
 /// show this text, so it stays the same across retries.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
-pub enum BridgeError {
+pub enum TrackerError {
     /// Refused before acting; the reset time is logged where it is first seen.
     #[error("{tracker} rate limit reached; saved changes retry after it resets")]
     RateLimited {
@@ -61,9 +61,9 @@ pub enum BridgeError {
     Message(String),
 }
 
-pub type BridgeResult<T> = Result<T, BridgeError>;
+pub type TrackerResult<T> = Result<T, TrackerError>;
 
-impl From<crate::linear::LinearError> for BridgeError {
+impl From<crate::linear::LinearError> for TrackerError {
     fn from(error: crate::linear::LinearError) -> Self {
         match error {
             crate::linear::LinearError::RateLimited { reset_at_ms } => Self::RateLimited {
@@ -81,7 +81,7 @@ fn transport(repo: &Path) -> Option<PlanningConfig> {
     crate::config::load_planning_transport(repo).ok()
 }
 
-/// The configured bridge; Git planning has none.
+/// The configured tracker; Git planning has none.
 pub fn configured(repo: &Path) -> Option<Provider> {
     match transport(repo)? {
         PlanningConfig::Linear { .. } => Some(Provider::Linear),
@@ -121,7 +121,7 @@ fn repository_name(repo: &Path) -> String {
         .unwrap_or_else(|| "loopflow".into())
 }
 
-/// The configured bridge for one repository.
+/// The configured tracker for one repository.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum Tracker {
@@ -153,37 +153,37 @@ impl Tracker {
     /// A send carrying our own id cannot duplicate, so a lost reply repeats
     /// it: Linear comments take the id we give them, and every link reads
     /// what the provider holds before it adds anything.
-    pub fn idempotent(&self, kind: EffectKind) -> bool {
+    pub fn idempotent(&self, kind: ActionKind) -> bool {
         match self {
-            Self::Linear(_) => matches!(kind, EffectKind::Comment | EffectKind::Link),
-            Self::Asana(_) => kind == EffectKind::Link,
+            Self::Linear(_) => matches!(kind, ActionKind::Comment | ActionKind::Link),
+            Self::Asana(_) => kind == ActionKind::Link,
             #[cfg(test)]
             Self::Fake(fake) => fake.idempotent.contains(&kind),
         }
     }
 
-    pub async fn send(&self, store: &Store, repo: &Path, effect: &TrackerEffect) -> Sent {
+    pub async fn send(&self, store: &Store, repo: &Path, action: &TrackerAction) -> Sent {
         match self {
-            Self::Linear(client) => client.send_effect(store, repo, effect).await,
-            Self::Asana(client) => client.send_effect(store, repo, effect).await,
+            Self::Linear(client) => client.send_action(store, repo, action).await,
+            Self::Asana(client) => client.send_action(store, repo, action).await,
             #[cfg(test)]
-            Self::Fake(fake) => fake.send(effect),
+            Self::Fake(fake) => fake.send(action),
         }
     }
 
-    /// Read back the owner an effect addresses, accepting what the provider
+    /// Read back the owner an action addresses, accepting what the provider
     /// holds into the store. `Ok(None)`: the provider has no such object.
     pub async fn look(
         &self,
         store: &Store,
         repo: &Path,
-        effect: &TrackerEffect,
+        action: &TrackerAction,
     ) -> Result<Option<Observed>, String> {
         match self {
-            Self::Linear(client) => client.look_effect(store, repo, effect).await,
-            Self::Asana(client) => client.look_effect(store, repo, effect).await,
+            Self::Linear(client) => client.look_action(store, repo, action).await,
+            Self::Asana(client) => client.look_action(store, repo, action).await,
             #[cfg(test)]
-            Self::Fake(fake) => fake.look(effect),
+            Self::Fake(fake) => fake.look(action),
         }
     }
 
@@ -200,7 +200,7 @@ impl Tracker {
     pub(crate) async fn issue_ownership(
         &self,
         id: &str,
-    ) -> BridgeResult<Option<(TrackerItem, Option<TrackerProject>)>> {
+    ) -> TrackerResult<Option<(TrackerItem, Option<TrackerProject>)>> {
         match self {
             Self::Linear(client) => Ok(client.issue_ownership(id).await?),
             Self::Asana(client) => Ok(client.task(id).await?.map(|task| (task, None))),
@@ -211,7 +211,7 @@ impl Tracker {
 
     /// Whether the provider positively reports the item deleted: Linear's trash,
     /// Asana's missing task. A lookup that merely finds nothing is not evidence.
-    pub async fn removed(&self, id: &str) -> BridgeResult<bool> {
+    pub async fn removed(&self, id: &str) -> TrackerResult<bool> {
         match self {
             Self::Linear(client) => Ok(client
                 .issue_trash(id)
@@ -232,7 +232,7 @@ impl Tracker {
         through: &str,
         live: &[String],
         finished: &[String],
-    ) -> BridgeResult<Vec<(TrackerItem, Option<TrackerProject>, TrackerObservation)>> {
+    ) -> TrackerResult<Vec<(TrackerItem, Option<TrackerProject>, TrackerObservation)>> {
         let changes = match self {
             Self::Linear(client) => {
                 return Ok(client
@@ -249,12 +249,12 @@ impl Tracker {
             .collect())
     }
 
-    pub(crate) async fn observe_issue(&self, id: &str) -> BridgeResult<TrackerObservation> {
+    pub(crate) async fn observe_issue(&self, id: &str) -> TrackerResult<TrackerObservation> {
         match self {
             Self::Linear(client) => Ok(client.observe_issue(id).await?),
             Self::Asana(client) => client.observe(id).await,
             #[cfg(test)]
-            Self::Fake(_) => Err(BridgeError::Message("fake tracker".into())),
+            Self::Fake(_) => Err(TrackerError::Message("fake tracker".into())),
         }
     }
 }
@@ -290,20 +290,20 @@ pub(crate) fn visible_text(body: &str) -> String {
     text.trim().to_string()
 }
 
-// ---- Shared by both bridges: owners and observations in store words ----
+// ---- Shared by both trackers: owners and observations in store words ----
 
 pub(crate) fn message(error: impl std::fmt::Display) -> OpsError {
     OpsError::Message(error.to_string())
 }
 
-/// The value a `field` or `state` effect sets.
-pub(crate) fn value(effect: &TrackerEffect) -> OpsResult<WorkValue> {
-    serde_json::from_value(effect.value.clone()).map_err(message)
+/// The value a `field` or `state` action sets.
+pub(crate) fn value(action: &TrackerAction) -> OpsResult<WorkValue> {
+    serde_json::from_value(action.value.clone()).map_err(message)
 }
 
-/// The values a `create` effect starts its tracker object with.
-pub(crate) fn values(effect: &TrackerEffect) -> OpsResult<Vec<WorkValue>> {
-    serde_json::from_value(effect.value.clone()).map_err(message)
+/// The values a `create` action starts its tracker object with.
+pub(crate) fn values(action: &TrackerAction) -> OpsResult<Vec<WorkValue>> {
+    serde_json::from_value(action.value.clone()).map_err(message)
 }
 
 /// The uuid a creation carries as the provider id: the owner's own.
@@ -338,7 +338,7 @@ pub(crate) async fn remote_project(
     Ok(project.linear_id()?.as_str().to_owned())
 }
 
-/// What the provider holds for a Task, as the values a Task effect compares.
+/// What the provider holds for a Task, as the values a Task action compares.
 pub(crate) async fn observed_task(store: &Store, item: &TrackerItem) -> Observed {
     let project = match &item.project_id {
         Some(external) => store
@@ -466,14 +466,14 @@ pub(crate) mod fake {
     use std::sync::Mutex;
 
     use loopflow_storage::planning::rules::Observed;
-    use loopflow_storage::sqlite::tracker_effects::{EffectKind, TrackerEffect};
+    use loopflow_storage::sqlite::tracker_actions::{ActionKind, TrackerAction};
 
     use super::Sent;
 
     /// A provider that acknowledges every send and answers looks from `held`.
     #[derive(Debug)]
     pub struct Fake {
-        pub idempotent: Vec<EffectKind>,
+        pub idempotent: Vec<ActionKind>,
         pub held: Mutex<Option<Observed>>,
         pub requests: AtomicUsize,
     }
@@ -491,15 +491,15 @@ pub(crate) mod fake {
             self.requests.load(Ordering::SeqCst)
         }
 
-        pub(super) fn send(&self, effect: &TrackerEffect) -> Sent {
+        pub(super) fn send(&self, action: &TrackerAction) -> Sent {
             self.requests.fetch_add(1, Ordering::SeqCst);
             Sent::Acknowledged {
                 revision: Some("2026-11-16T00:00:00Z".into()),
-                remote_id: Some(format!("remote-{}", effect.id)),
+                remote_id: Some(format!("remote-{}", action.id)),
             }
         }
 
-        pub(super) fn look(&self, _effect: &TrackerEffect) -> Result<Option<Observed>, String> {
+        pub(super) fn look(&self, _action: &TrackerAction) -> Result<Option<Observed>, String> {
             self.requests.fetch_add(1, Ordering::SeqCst);
             Ok(self.held.lock().unwrap().clone())
         }

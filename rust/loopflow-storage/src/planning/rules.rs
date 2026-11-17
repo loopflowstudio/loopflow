@@ -1,14 +1,14 @@
-//! What a pass does with one unsettled effect, one function per kind, and the
+//! What a pass does with one unconfirmed action, one function per kind, and the
 //! single lost-reply rule every kind shares. Pure: the drain supplies what the
 //! provider holds; nothing here performs I/O.
 
 use serde_json::Value;
 
 use crate::planning::StateHistory;
-use crate::sqlite::tracker_effects::{EffectKind, EffectPhase, Settlement, TrackerEffect};
+use crate::sqlite::tracker_actions::{ActionKind, ActionPhase, Resolution, TrackerAction};
 use crate::work::edit::WorkValue;
 
-/// The provider's current copy of an effect's owner, in store words.
+/// The provider's current copy of an action's owner, in store words.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Observed {
     pub remote_id: Option<String>,
@@ -21,7 +21,7 @@ pub struct Observed {
     pub comments: Vec<String>,
     pub initiatives: Vec<String>,
     pub deleted: bool,
-    /// Whether the state moved since a state effect's base, when the provider
+    /// Whether the state moved since a state action's base, when the provider
     /// keeps that history. `None`: compare values only.
     pub state_history: Option<StateHistory>,
 }
@@ -29,12 +29,12 @@ pub struct Observed {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Decision {
     Send,
-    /// Wait without a request; the owner's later effects wait too.
+    /// Wait without a request; the owner's later actions wait too.
     Hold,
-    Settle(Settlement),
+    Resolve(Resolution),
 }
 
-/// What to do with an attempted effect before anything else on its owner.
+/// What to do with an attempted action before anything else on its owner.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LostReply {
     /// The send carries our id, so repeating it cannot duplicate.
@@ -44,39 +44,39 @@ pub enum LostReply {
     Wait,
 }
 
-/// An attempted effect is looked for at most once per `window` seconds; its
+/// An attempted action is looked for at most once per `window` seconds; its
 /// first look happens on the next pass. Idempotent sends repeat instead.
-pub fn lost_reply(effect: &TrackerEffect, idempotent: bool, now: i64, window: i64) -> LostReply {
+pub fn lost_reply(action: &TrackerAction, idempotent: bool, now: i64, window: i64) -> LostReply {
     if idempotent {
         return LostReply::Resend;
     }
-    match effect.looked_at {
+    match action.looked_at {
         Some(at) if now - at < window => LostReply::Wait,
         _ => LostReply::Look,
     }
 }
 
-/// Settle `effect` against what the provider holds (`None`: no such object).
-/// `parent_pending` is true while a Project this effect names has no remote id.
+/// Resolve `action` against what the provider holds (`None`: no such object).
+/// `parent_pending` is true while a Project this action names has no remote id.
 pub fn decide(
-    effect: &TrackerEffect,
+    action: &TrackerAction,
     observed: Option<&Observed>,
     parent_pending: bool,
 ) -> Decision {
-    match effect.kind {
-        EffectKind::Create => create(observed, parent_pending),
-        EffectKind::Field if parent_pending => Decision::Hold,
-        EffectKind::Field => field(effect, observed),
-        EffectKind::State => state(effect, observed),
-        EffectKind::Order => order(effect, observed),
-        EffectKind::Comment => comment(effect, observed),
-        EffectKind::Delete => delete(effect, observed),
-        EffectKind::Link => link(effect, observed),
+    match action.kind {
+        ActionKind::Create => create(observed, parent_pending),
+        ActionKind::Field if parent_pending => Decision::Hold,
+        ActionKind::Field => field(action, observed),
+        ActionKind::State => state(action, observed),
+        ActionKind::Order => order(action, observed),
+        ActionKind::Comment => comment(action, observed),
+        ActionKind::Delete => delete(action, observed),
+        ActionKind::Link => link(action, observed),
     }
 }
 
 fn acknowledged(observed: &Observed) -> Decision {
-    Decision::Settle(Settlement::Acknowledged {
+    Decision::Resolve(Resolution::Confirmed {
         revision: observed.revision.clone(),
         remote_id: observed.remote_id.clone(),
     })
@@ -109,9 +109,9 @@ fn same(a: &WorkValue, b: &WorkValue) -> bool {
 /// A sent value whose reply was lost is acknowledged when it is there, sent
 /// again when the provider still holds the baseline, and otherwise loses to
 /// the provider's newer value, which the store keeps beside it.
-fn field(effect: &TrackerEffect, observed: Option<&Observed>) -> Decision {
-    let Some(value) = work_value(&effect.value) else {
-        return Decision::Settle(Settlement::Retire {
+fn field(action: &TrackerAction, observed: Option<&Observed>) -> Decision {
+    let Some(value) = work_value(&action.value) else {
+        return Decision::Resolve(Resolution::Retire {
             reason: "unreadable saved value".into(),
         });
     };
@@ -124,10 +124,10 @@ fn field(effect: &TrackerEffect, observed: Option<&Observed>) -> Decision {
     if same(remote, &value) {
         return acknowledged(observed);
     }
-    if effect.phase == EffectPhase::Pending {
+    if action.phase == ActionPhase::Queued {
         return Decision::Send;
     }
-    match effect
+    match action
         .base
         .as_ref()
         .and_then(|base| work_value(&base["value"]))
@@ -138,7 +138,7 @@ fn field(effect: &TrackerEffect, observed: Option<&Observed>) -> Decision {
 }
 
 fn adopt(observed: &Observed, remote: &WorkValue) -> Decision {
-    Decision::Settle(Settlement::Adopt {
+    Decision::Resolve(Resolution::Conflicted {
         remote: serde_json::json!({"revision": observed.revision, "value": remote}),
     })
 }
@@ -146,26 +146,26 @@ fn adopt(observed: &Observed, remote: &WorkValue) -> Decision {
 /// State is a field, except that a provider keeping state history can say
 /// whether a lost write landed while the state now reads as its base: no
 /// history holds, an unchanged history re-sends, a changed one adopts.
-fn state(effect: &TrackerEffect, observed: Option<&Observed>) -> Decision {
+fn state(action: &TrackerAction, observed: Option<&Observed>) -> Decision {
     let history = observed.and_then(|observed| observed.state_history);
-    let (Some(observed), Some(history), EffectPhase::Attempted) = (observed, history, effect.phase)
+    let (Some(observed), Some(history), ActionPhase::Sent) = (observed, history, action.phase)
     else {
-        return field(effect, observed);
+        return field(action, observed);
     };
     let Some(remote) = observed
         .values
         .iter()
         .find(|v| matches!(v, WorkValue::Disposition(_)))
     else {
-        return field(effect, Some(observed));
+        return field(action, Some(observed));
     };
-    let at_base = effect
+    let at_base = action
         .base
         .as_ref()
         .and_then(|base| work_value(&base["value"]))
         .is_some_and(|base| same(&base, remote));
     if !at_base {
-        return field(effect, Some(observed));
+        return field(action, Some(observed));
     }
     match history {
         StateHistory::Unknown => Decision::Hold,
@@ -175,26 +175,26 @@ fn state(effect: &TrackerEffect, observed: Option<&Observed>) -> Decision {
 }
 
 /// Only a complete list says where Tasks are; without one nothing is sent.
-fn order(effect: &TrackerEffect, observed: Option<&Observed>) -> Decision {
+fn order(action: &TrackerAction, observed: Option<&Observed>) -> Decision {
     let Some(observed) = observed else {
         return Decision::Hold;
     };
     let Some(order) = &observed.order else {
         return Decision::Hold;
     };
-    let desired: Vec<String> = serde_json::from_value(effect.value.clone()).unwrap_or_default();
+    let desired: Vec<String> = serde_json::from_value(action.value.clone()).unwrap_or_default();
     if desired.iter().all(|id| order.contains(id)) && same_order(&desired, order) {
         return acknowledged(observed);
     }
-    if effect.phase == EffectPhase::Pending {
+    if action.phase == ActionPhase::Queued {
         return Decision::Send;
     }
-    let base: Option<Vec<String>> = effect
+    let base: Option<Vec<String>> = action
         .base
         .as_ref()
         .and_then(|base| serde_json::from_value(base["value"].clone()).ok());
     match base {
-        Some(base) if !same_order(&base, order) => Decision::Settle(Settlement::Adopt {
+        Some(base) if !same_order(&base, order) => Decision::Resolve(Resolution::Conflicted {
             remote: serde_json::json!({"revision": observed.revision, "value": order}),
         }),
         _ => Decision::Send,
@@ -209,12 +209,12 @@ pub fn same_order(left: &[String], right: &[String]) -> bool {
         .eq(right.iter().filter(|id| left.contains(id)))
 }
 
-fn comment(effect: &TrackerEffect, observed: Option<&Observed>) -> Decision {
-    let body = effect.value["value"]["body"].as_str();
+fn comment(action: &TrackerAction, observed: Option<&Observed>) -> Decision {
+    let body = action.value["value"]["body"].as_str();
     match observed {
         Some(observed)
             if observed.comments.iter().any(|seen| {
-                Some(seen.as_str()) == effect.subject.as_deref() || Some(seen.as_str()) == body
+                Some(seen.as_str()) == action.subject.as_deref() || Some(seen.as_str()) == body
             }) =>
         {
             acknowledged(observed)
@@ -223,12 +223,12 @@ fn comment(effect: &TrackerEffect, observed: Option<&Observed>) -> Decision {
     }
 }
 
-/// Removal settles on a trashed or missing object. An object active at a
+/// Removal is confirmed by a trashed or missing object. An object active at a
 /// revision newer than the one the deletion saw was restored by someone else,
 /// and that wins.
-fn delete(effect: &TrackerEffect, observed: Option<&Observed>) -> Decision {
+fn delete(action: &TrackerAction, observed: Option<&Observed>) -> Decision {
     let Some(observed) = observed else {
-        return Decision::Settle(Settlement::Acknowledged {
+        return Decision::Resolve(Resolution::Confirmed {
             revision: None,
             remote_id: None,
         });
@@ -237,7 +237,7 @@ fn delete(effect: &TrackerEffect, observed: Option<&Observed>) -> Decision {
         return acknowledged(observed);
     }
     let nanos = |revision: Option<&str>| crate::planning::revision_nanos(revision).ok().flatten();
-    let base = effect
+    let base = action
         .base
         .as_ref()
         .and_then(|base| base["revision"].as_str());
@@ -245,8 +245,8 @@ fn delete(effect: &TrackerEffect, observed: Option<&Observed>) -> Decision {
         (Some(base), Some(seen)) => seen > base,
         _ => false,
     };
-    if newer && effect.phase == EffectPhase::Attempted {
-        Decision::Settle(Settlement::Retire {
+    if newer && action.phase == ActionPhase::Sent {
+        Decision::Resolve(Resolution::Retire {
             reason: "restored in the tracker after this deletion".into(),
         })
     } else {
@@ -254,9 +254,9 @@ fn delete(effect: &TrackerEffect, observed: Option<&Observed>) -> Decision {
     }
 }
 
-fn link(effect: &TrackerEffect, observed: Option<&Observed>) -> Decision {
+fn link(action: &TrackerAction, observed: Option<&Observed>) -> Decision {
     let wanted: Vec<String> =
-        serde_json::from_value(effect.value["value"].clone()).unwrap_or_default();
+        serde_json::from_value(action.value["value"].clone()).unwrap_or_default();
     match observed {
         Some(observed) if wanted.iter().all(|id| observed.initiatives.contains(id)) => {
             acknowledged(observed)
@@ -270,18 +270,18 @@ mod tests {
     use super::{decide, lost_reply, Decision, LostReply, Observed};
     use crate::planning::StateHistory;
     use crate::provider::Provider;
-    use crate::sqlite::tracker_effects::{
-        EffectKind, EffectOwner, EffectPhase, Settlement, TrackerEffect,
+    use crate::sqlite::tracker_actions::{
+        ActionKind, ActionOwner, ActionPhase, Resolution, TrackerAction,
     };
     use crate::work::edit::{Disposition, WorkValue};
     use loopflow_model::durable::TaskId;
     use serde_json::json;
 
-    fn effect(kind: EffectKind, phase: EffectPhase, value: serde_json::Value) -> TrackerEffect {
-        TrackerEffect {
+    fn action(kind: ActionKind, phase: ActionPhase, value: serde_json::Value) -> TrackerAction {
+        TrackerAction {
             seq: 1,
-            id: "effect".into(),
-            owner: EffectOwner::Task(TaskId::new()),
+            id: "action".into(),
+            owner: ActionOwner::Task(TaskId::new()),
             subject: None,
             kind,
             value,
@@ -290,9 +290,9 @@ mod tests {
             phase,
             provider: Provider::Linear,
             remote_id: None,
-            acknowledged_revision: None,
+            confirmed_revision: None,
             error: None,
-            attempted_at: None,
+            sent_at: None,
             looked_at: None,
         }
     }
@@ -311,7 +311,7 @@ mod tests {
 
     #[test]
     fn a_lost_reply_is_looked_for_once_per_window() {
-        let mut sent = effect(EffectKind::Field, EffectPhase::Attempted, json!(null));
+        let mut sent = action(ActionKind::Field, ActionPhase::Sent, json!(null));
         assert_eq!(lost_reply(&sent, false, 1_000, 600), LostReply::Look);
         sent.looked_at = Some(900);
         assert_eq!(lost_reply(&sent, false, 1_000, 600), LostReply::Wait);
@@ -320,16 +320,16 @@ mod tests {
     }
 
     #[test]
-    fn a_lost_field_reply_settles_on_what_the_provider_holds() {
-        let mut sent = effect(
-            EffectKind::Field,
-            EffectPhase::Attempted,
+    fn a_lost_field_reply_resolves_on_what_the_provider_holds() {
+        let mut sent = action(
+            ActionKind::Field,
+            ActionPhase::Sent,
             serde_json::to_value(title("Mine")).unwrap(),
         );
         sent.base = Some(json!({"revision":"2026-11-01T00:00:00Z","value":title("Before")}));
         assert!(matches!(
             decide(&sent, Some(&holding(vec![title("Mine")], "r2")), false),
-            Decision::Settle(Settlement::Acknowledged { .. })
+            Decision::Resolve(Resolution::Confirmed { .. })
         ));
         assert_eq!(
             decide(&sent, Some(&holding(vec![title("Before")], "r1")), false),
@@ -338,12 +338,12 @@ mod tests {
         );
         assert_eq!(
             decide(&sent, Some(&holding(vec![title("Theirs")], "r3")), false),
-            Decision::Settle(Settlement::Adopt {
+            Decision::Resolve(Resolution::Conflicted {
                 remote: json!({"revision":"r3","value":title("Theirs")})
             }),
-            "a coworker's newer value wins and the effect keeps ours"
+            "a coworker's newer value wins and the action keeps ours"
         );
-        sent.phase = EffectPhase::Pending;
+        sent.phase = ActionPhase::Queued;
         assert_eq!(
             decide(&sent, Some(&holding(vec![title("Theirs")], "r3")), false),
             Decision::Send,
@@ -353,16 +353,12 @@ mod tests {
 
     #[test]
     fn a_deletion_restored_later_in_the_tracker_retires() {
-        let mut removal = effect(
-            EffectKind::Delete,
-            EffectPhase::Attempted,
-            json!({"value":true}),
-        );
+        let mut removal = action(ActionKind::Delete, ActionPhase::Sent, json!({"value":true}));
         removal.base = Some(json!({"revision":"2026-11-01T00:00:00Z","value":false}));
         let active = holding(vec![], "2026-11-02T00:00:00Z");
         assert!(matches!(
             decide(&removal, Some(&active), false),
-            Decision::Settle(Settlement::Retire { .. })
+            Decision::Resolve(Resolution::Retire { .. })
         ));
         let trashed = Observed {
             deleted: true,
@@ -370,11 +366,11 @@ mod tests {
         };
         assert!(matches!(
             decide(&removal, Some(&trashed), false),
-            Decision::Settle(Settlement::Acknowledged { .. })
+            Decision::Resolve(Resolution::Confirmed { .. })
         ));
         assert!(matches!(
             decide(&removal, None, false),
-            Decision::Settle(Settlement::Acknowledged { .. })
+            Decision::Resolve(Resolution::Confirmed { .. })
         ));
         let unchanged = holding(vec![], "2026-11-01T00:00:00Z");
         assert_eq!(decide(&removal, Some(&unchanged), false), Decision::Send);
@@ -382,7 +378,7 @@ mod tests {
 
     #[test]
     fn order_moves_only_on_complete_list_evidence() {
-        let sent = effect(EffectKind::Order, EffectPhase::Attempted, json!(["a", "b"]));
+        let sent = action(ActionKind::Order, ActionPhase::Sent, json!(["a", "b"]));
         let partial = holding(vec![], "r1");
         assert_eq!(decide(&sent, Some(&partial), false), Decision::Hold);
         let done = Observed {
@@ -391,7 +387,7 @@ mod tests {
         };
         assert!(matches!(
             decide(&sent, Some(&done), false),
-            Decision::Settle(Settlement::Acknowledged { .. })
+            Decision::Resolve(Resolution::Confirmed { .. })
         ));
         let other = Observed {
             order: Some(vec!["b".into(), "a".into()]),
@@ -402,16 +398,16 @@ mod tests {
 
     #[test]
     fn a_task_waits_for_its_projects_creation() {
-        let create = effect(EffectKind::Create, EffectPhase::Pending, json!([]));
+        let create = action(ActionKind::Create, ActionPhase::Queued, json!([]));
         assert_eq!(decide(&create, None, true), Decision::Hold);
         assert_eq!(decide(&create, None, false), Decision::Send);
     }
 
     #[test]
-    fn a_comment_settles_on_its_id_or_its_visible_text() {
-        let mut note = effect(
-            EffectKind::Comment,
-            EffectPhase::Attempted,
+    fn a_comment_resolves_on_its_id_or_its_visible_text() {
+        let mut note = action(
+            ActionKind::Comment,
+            ActionPhase::Sent,
             json!({"field":"comment_content","value":{"body":"first comment"}}),
         );
         note.subject = Some("comment-1".into());
@@ -421,7 +417,7 @@ mod tests {
         };
         assert!(matches!(
             decide(&note, Some(&by_text), false),
-            Decision::Settle(Settlement::Acknowledged { .. })
+            Decision::Resolve(Resolution::Confirmed { .. })
         ));
         assert_eq!(
             decide(&note, Some(&Observed::default()), false),
@@ -439,9 +435,9 @@ mod tests {
 
     #[test]
     fn a_lost_state_reply_at_its_base_follows_the_provider_history() {
-        let mut sent = effect(
-            EffectKind::State,
-            EffectPhase::Attempted,
+        let mut sent = action(
+            ActionKind::State,
+            ActionPhase::Sent,
             serde_json::to_value(disposition("completed")).unwrap(),
         );
         sent.base = Some(json!({"revision":"r1","value":disposition("unstarted")}));
@@ -459,7 +455,7 @@ mod tests {
         );
         assert!(matches!(
             decide(&sent, Some(&at_base(StateHistory::Changed)), false),
-            Decision::Settle(Settlement::Adopt { .. })
+            Decision::Resolve(Resolution::Conflicted { .. })
         ));
         assert_eq!(
             decide(

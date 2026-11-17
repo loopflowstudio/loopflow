@@ -140,7 +140,7 @@ async fn save_abandon(store: &SharedStore, task: &Task) -> OpsResult<()> {
     crate::ops::planning_sync::sync_after_save(
         store,
         &repository_for_task(store, task)?.to_string_lossy(),
-        &loopflow_storage::sqlite::tracker_effects::EffectOwner::Task(task.id.clone()),
+        &loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task.id.clone()),
     )
     .await;
     Ok(())
@@ -165,21 +165,21 @@ pub fn task_delete(repo: &Path, issue: &str) -> OpsResult<(String, bool)> {
         crate::ops::planning_sync::sync_after_save(
             &store,
             &repository_for_task(&store, &task)?.to_string_lossy(),
-            &loopflow_storage::sqlite::tracker_effects::EffectOwner::Task(task.id.clone()),
+            &loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task.id.clone()),
         )
         .await;
         let pending = store
             .sqlite
-            .tracker_effects_for(
-                &loopflow_storage::sqlite::tracker_effects::EffectOwner::Task(task.id.clone()),
+            .tracker_actions_for(
+                &loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task.id.clone()),
             )
             .map_err(task_error)?
             .iter()
-            .any(|effect| {
+            .any(|action| {
                 matches!(
-                    effect.phase,
-                    loopflow_storage::sqlite::tracker_effects::EffectPhase::Pending
-                        | loopflow_storage::sqlite::tracker_effects::EffectPhase::Attempted
+                    action.phase,
+                    loopflow_storage::sqlite::tracker_actions::ActionPhase::Queued
+                        | loopflow_storage::sqlite::tracker_actions::ActionPhase::Sent
                 )
             });
         Ok((task.identifier, pending))

@@ -526,7 +526,7 @@ pub fn remove(
         runtime.block_on(super::planning_sync::sync_after_save(
             &store,
             &repo_key,
-            &loopflow_storage::sqlite::tracker_effects::EffectOwner::Wave(ids[0].clone()),
+            &loopflow_storage::sqlite::tracker_actions::ActionOwner::Wave(ids[0].clone()),
         ));
     }
 

@@ -74,7 +74,7 @@ impl SqliteStore {
                         let mut conn = self.conn.lock().expect("store mutex poisoned");
                         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
                         let target = recover_filing_in(&tx, &intent)?;
-                        super::tracker_effects::retain_relation_in(
+                        super::tracker_actions::retain_relation_in(
                             &tx,
                             &TaskId::from_raw(source.clone()),
                             &intent.relation_id,
@@ -197,7 +197,7 @@ fn recover_filing_in(conn: &Connection, intent: &RetainedFiling) -> StoreResult<
                 |row| row.get::<_, String>(0),
             )
             .optional()?;
-        super::tracker_effects::retain_filing_create_in(
+        super::tracker_actions::retain_filing_create_in(
             conn,
             &task.id,
             &[
@@ -321,37 +321,37 @@ mod tests {
             .unwrap();
         // The creation may have reached Linear: it waits for a look, with the
         // intent's values, never today's Task.
-        let effects = store
-            .tracker_effects_for(&crate::sqlite::tracker_effects::EffectOwner::Task(
+        let actions = store
+            .tracker_actions_for(&crate::sqlite::tracker_actions::ActionOwner::Task(
                 child.id.clone(),
             ))
             .unwrap();
-        assert_eq!(effects.len(), 1);
+        assert_eq!(actions.len(), 1);
         assert_eq!(
-            effects[0].kind,
-            crate::sqlite::tracker_effects::EffectKind::Create
+            actions[0].kind,
+            crate::sqlite::tracker_actions::ActionKind::Create
         );
         assert_eq!(
-            effects[0].phase,
-            crate::sqlite::tracker_effects::EffectPhase::Attempted
+            actions[0].phase,
+            crate::sqlite::tracker_actions::ActionPhase::Sent
         );
-        assert_eq!(effects[0].value[0]["value"], json!(intent.title));
-        assert!(effects[0].error.as_deref().unwrap().contains("unknown"));
+        assert_eq!(actions[0].value[0]["value"], json!(intent.title));
+        assert!(actions[0].error.as_deref().unwrap().contains("unknown"));
         // The relation goes out on its source Task once, under the relation's
         // own id, aimed at the Task the filing made.
         let links = store
-            .tracker_effects_for(&crate::sqlite::tracker_effects::EffectOwner::Task(
+            .tracker_actions_for(&crate::sqlite::tracker_actions::ActionOwner::Task(
                 source.clone(),
             ))
             .unwrap()
             .into_iter()
-            .filter(|effect| effect.kind == crate::sqlite::tracker_effects::EffectKind::Link)
+            .filter(|action| action.kind == crate::sqlite::tracker_actions::ActionKind::Link)
             .collect::<Vec<_>>();
         assert_eq!(links.len(), 1);
         assert_eq!(links[0].id, intent.relation_id);
         assert_eq!(
             links[0].task_link(),
-            Some(crate::sqlite::tracker_effects::TaskLink::Relation {
+            Some(crate::sqlite::tracker_actions::TaskLink::Relation {
                 id: intent.relation_id.clone(),
                 target: child.id.clone(),
             })

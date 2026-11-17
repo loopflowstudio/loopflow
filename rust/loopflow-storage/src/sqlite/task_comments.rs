@@ -1,4 +1,4 @@
-//! One saved Task thread and its tracker effects, with or without a tracker.
+//! One saved Task thread and its tracker actions, with or without a tracker.
 
 use super::planning_write;
 use crate::work::edit::WorkValue as Edit;
@@ -66,29 +66,29 @@ pub(super) fn ingest_task_comment(
             return Ok(false);
         }
     }
-    let unsettled: Option<(String, String)> = conn
+    let unconfirmed: Option<(String, String)> = conn
         .query_row(
-            "SELECT id,json_extract(value_json,'$.value.body') FROM tracker_effects
-             WHERE task_id=?1 AND kind='comment' AND subject=?2 AND phase IN ('pending','attempted')
+            "SELECT id,json_extract(value_json,'$.value.body') FROM tracker_actions
+             WHERE task_id=?1 AND kind='comment' AND subject=?2 AND phase IN ('queued','sent')
              ORDER BY seq DESC LIMIT 1",
             params![task.as_str(), comment.id],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()?;
-    if let Some((effect, body)) = unsettled {
+    if let Some((action, body)) = unconfirmed {
         // The tracker holds this comment: ours arrived, or someone edited it
-        // there first, and then theirs wins and the effect keeps ours.
-        let settlement = if body == comment.body {
-            super::tracker_effects::Settlement::Acknowledged {
+        // there first, and then theirs wins and the action keeps ours.
+        let resolution = if body == comment.body {
+            super::tracker_actions::Resolution::Confirmed {
                 revision: comment.revision.clone(),
                 remote_id: Some(comment.id.clone()),
             }
         } else {
-            super::tracker_effects::Settlement::Adopt {
+            super::tracker_actions::Resolution::Conflicted {
                 remote: serde_json::json!({"revision": comment.revision, "value": comment}),
             }
         };
-        super::tracker_effects::settle_in(conn, &effect, &settlement)?;
+        super::tracker_actions::resolve_in(conn, &action, &resolution)?;
     }
     write_comment(
         conn,
@@ -196,9 +196,9 @@ impl SqliteStore {
         {
             let mut query = tx.prepare(
                 "SELECT c.id,c.body,c.author,c.created_at,
-                    EXISTS(SELECT 1 FROM tracker_effects e WHERE e.task_id=c.task_id AND e.kind='comment'
-                        AND e.subject=c.id AND e.phase IN ('pending','attempted')),
-                    (SELECT json_extract(e.value_json,'$.value.body') FROM tracker_effects e
+                    EXISTS(SELECT 1 FROM tracker_actions e WHERE e.task_id=c.task_id AND e.kind='comment'
+                        AND e.subject=c.id AND e.phase IN ('queued','sent')),
+                    (SELECT json_extract(e.value_json,'$.value.body') FROM tracker_actions e
                         WHERE e.task_id=c.task_id AND e.kind='comment' AND e.subject=c.id
                         AND e.conflict_json IS NOT NULL ORDER BY e.seq DESC LIMIT 1)
                  FROM task_comments c WHERE c.task_id=?1 ORDER BY c.created_at,c.id",
@@ -265,8 +265,8 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(
             "SELECT c.id,c.body,c.author,c.created_at FROM task_comments c
-             WHERE c.task_id=?1 AND EXISTS(SELECT 1 FROM tracker_effects e WHERE e.task_id=c.task_id
-                 AND e.kind='comment' AND e.subject=c.id AND e.phase IN ('pending','attempted'))
+             WHERE c.task_id=?1 AND EXISTS(SELECT 1 FROM tracker_actions e WHERE e.task_id=c.task_id
+                 AND e.kind='comment' AND e.subject=c.id AND e.phase IN ('queued','sent'))
              ORDER BY c.created_at,c.id",
         )?;
         let rows = query.query_map([task.as_str()], read_comment)?;
@@ -436,16 +436,16 @@ mod tests {
         assert_eq!(thread.conflicts[&original.id], original.body);
         assert!(thread.pending_sync.is_empty());
         assert!(store.pending_task_comments(&task).unwrap().is_empty());
-        let effect = store
-            .tracker_effects_for(&crate::sqlite::tracker_effects::EffectOwner::Task(
+        let action = store
+            .tracker_actions_for(&crate::sqlite::tracker_actions::ActionOwner::Task(
                 task.clone(),
             ))
             .unwrap()
             .remove(0);
-        assert_eq!(effect.value["value"]["body"], original.body);
+        assert_eq!(action.value["value"]["body"], original.body);
         assert_eq!(
             serde_json::from_value::<crate::planning::TrackerComment>(
-                effect.conflict.unwrap()["value"].clone()
+                action.conflict.unwrap()["value"].clone()
             )
             .unwrap(),
             observed

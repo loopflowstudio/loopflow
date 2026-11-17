@@ -21,22 +21,21 @@ fn project_with_sync(
     })
 }
 
-/// The owner's newest unsettled effect of `kind`.
-fn unsettled(
+/// The owner's newest unconfirmed action of `kind`.
+fn unconfirmed(
     store: &loopflow_storage::sqlite::SqliteStore,
-    owner: loopflow_storage::sqlite::tracker_effects::EffectOwner,
-    kind: loopflow_storage::sqlite::tracker_effects::EffectKind,
+    owner: loopflow_storage::sqlite::tracker_actions::ActionOwner,
+    kind: loopflow_storage::sqlite::tracker_actions::ActionKind,
 ) -> Option<String> {
-    use loopflow_storage::sqlite::tracker_effects::EffectPhase;
+    use loopflow_storage::sqlite::tracker_actions::ActionPhase;
     store
-        .tracker_effects_for(&owner)
+        .tracker_actions_for(&owner)
         .unwrap()
         .into_iter()
-        .rfind(|effect| {
-            effect.kind == kind
-                && matches!(effect.phase, EffectPhase::Pending | EffectPhase::Attempted)
+        .rfind(|action| {
+            action.kind == kind && matches!(action.phase, ActionPhase::Queued | ActionPhase::Sent)
         })
-        .map(|effect| effect.id)
+        .map(|action| action.id)
 }
 
 fn command(repo: &Path, home: &Path, args: &[&str]) -> Command {
@@ -1166,7 +1165,7 @@ fn project_creation_binding_and_activation_save_offline() {
                     .any(|change| change.id == state.id));
                 let conflict: Option<String> = db
                     .query_row(
-                        "SELECT conflict_json FROM tracker_effects WHERE id=?1",
+                        "SELECT conflict_json FROM tracker_actions WHERE id=?1",
                         [&state.id],
                         |row| row.get(0),
                     )
@@ -1848,12 +1847,12 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
         assert_eq!(pending.len(), if mapped || connected { 3 } else { 0 });
         assert!(store.pending_task_changes(&first).unwrap().is_empty());
         assert_eq!(
-            unsettled(
+            unconfirmed(
                 &store,
-                loopflow_storage::sqlite::tracker_effects::EffectOwner::Project(
+                loopflow_storage::sqlite::tracker_actions::ActionOwner::Project(
                     store.task(&second).unwrap().unwrap().project_id.unwrap()
                 ),
-                loopflow_storage::sqlite::tracker_effects::EffectKind::Order,
+                loopflow_storage::sqlite::tracker_actions::ActionKind::Order,
             )
             .is_some(),
             mapped
@@ -1990,7 +1989,7 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
             }
             let conflict: Option<String> = conn
                 .query_row(
-                    "SELECT conflict_json FROM tracker_effects WHERE id=?1",
+                    "SELECT conflict_json FROM tracker_actions WHERE id=?1",
                     [&pending[0].id],
                     |row| row.get(0),
                 )
@@ -2452,10 +2451,10 @@ fn deletion_saves_offline_and_retains_execution_and_retry_identity() {
         let before = store.task(&task_id).unwrap().unwrap();
         let work = loopflow_execution::durable::WorkRef::Task(task_id.clone());
         let execution = store.work_status(&work).unwrap();
-        // The removal and its effect are one save: a failed effect leaves the
-        // Task as it was. A Task with no tracker object queues no effect.
+        // The removal and its action are one save: a failed action leaves the
+        // Task as it was. A Task with no tracker object queues no action.
         if connected {
-            db.execute_batch("CREATE TRIGGER fail_removal BEFORE INSERT ON tracker_effects WHEN NEW.kind='delete' BEGIN SELECT RAISE(ABORT,'receipt failed'); END;").unwrap();
+            db.execute_batch("CREATE TRIGGER fail_removal BEFORE INSERT ON tracker_actions WHEN NEW.kind='delete' BEGIN SELECT RAISE(ABORT,'receipt failed'); END;").unwrap();
             assert!(!command(repo.path(), home.path(), &["task", "delete", id])
                 .output()
                 .unwrap()
@@ -2468,18 +2467,18 @@ fn deletion_saves_offline_and_retains_execution_and_retry_identity() {
         if connected {
             assert!(output.as_str().unwrap().contains("Pending Linear sync"));
         }
-        let changes = unsettled(
+        let changes = unconfirmed(
             &store,
-            loopflow_storage::sqlite::tracker_effects::EffectOwner::Task(task_id.clone()),
-            loopflow_storage::sqlite::tracker_effects::EffectKind::Delete,
+            loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task_id.clone()),
+            loopflow_storage::sqlite::tracker_actions::ActionKind::Delete,
         );
         assert_eq!(changes.is_some(), connected);
         lf(repo.path(), home.path(), &["task", "delete", id]);
         assert_eq!(
-            unsettled(
+            unconfirmed(
                 &store,
-                loopflow_storage::sqlite::tracker_effects::EffectOwner::Task(task_id.clone()),
-                loopflow_storage::sqlite::tracker_effects::EffectKind::Delete,
+                loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task_id.clone()),
+                loopflow_storage::sqlite::tracker_actions::ActionKind::Delete,
             ),
             changes
         );
@@ -2495,10 +2494,10 @@ fn deletion_saves_offline_and_retains_execution_and_retry_identity() {
         let reopened =
             loopflow_execution::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
         assert_eq!(
-            unsettled(
+            unconfirmed(
                 &reopened,
-                loopflow_storage::sqlite::tracker_effects::EffectOwner::Task(task_id.clone()),
-                loopflow_storage::sqlite::tracker_effects::EffectKind::Delete,
+                loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task_id.clone()),
+                loopflow_storage::sqlite::tracker_actions::ActionKind::Delete,
             ),
             changes
         );
@@ -3130,7 +3129,7 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
         }
     }
     // A pending membership save explains the difference without replacing content.
-    db.execute("INSERT INTO tracker_effects(id,task_id,subject,kind,value_json,phase,provider) VALUES('00000000-0000-4000-8000-0000000000aa',?1,'task_project','field',?2,'pending','linear')", rusqlite::params![id.as_str(),serde_json::to_string(&WorkValue::TaskProject(saved.project_id.as_ref().map(ToString::to_string))).unwrap()]).unwrap();
+    db.execute("INSERT INTO tracker_actions(id,task_id,subject,kind,value_json,phase,provider) VALUES('00000000-0000-4000-8000-0000000000aa',?1,'task_project','field',?2,'queued','linear')", rusqlite::params![id.as_str(),serde_json::to_string(&WorkValue::TaskProject(saved.project_id.as_ref().map(ToString::to_string))).unwrap()]).unwrap();
     assert_eq!(read()["plan_state"], "available");
     store
         .observe_pm_issue_change("provider-task", None, true)

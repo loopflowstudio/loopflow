@@ -1484,8 +1484,8 @@ pub(super) fn task_acquisitions_in(
              -- A pending membership move is sent last, so it wins over the
              -- observed Project and its team until delivery.
              (NOT (?2 AND EXISTS(
-                 SELECT 1 FROM tracker_effects e WHERE e.task_id=t.id AND e.subject='task_project'
-                 AND e.kind='field' AND e.phase IN ('pending','attempted')))
+                 SELECT 1 FROM tracker_actions e WHERE e.task_id=t.id AND e.subject='task_project'
+                 AND e.kind='field' AND e.phase IN ('queued','sent')))
               AND (i.project_id IS NOT p.external_project_id
                    OR CASE WHEN p.id IS NOT NULL AND i.team_id IS NOT NULL THEN
                           NOT EXISTS(SELECT 1 FROM json_each(p.planning_teams) WHERE value=i.team_id)
@@ -1773,8 +1773,8 @@ const TASK_COLUMNS: &str = "SELECT t.id,t.external_issue_id,
     COALESCE((SELECT json_object('state','pending','operation',
         CASE json_extract(e.value_json,'$.value.planning_state') WHEN 'completed' THEN 'complete_task' WHEN 'canceled' THEN 'cancel_task' ELSE 'reopen_task' END,
         'error',COALESCE(e.error,'Saved locally; pending planning synchronization'))
-        FROM tracker_effects e WHERE e.task_id=t.id AND e.subject IS NULL AND e.kind='state'
-            AND e.phase IN ('pending','attempted') AND t.external_issue_id IS NOT NULL
+        FROM tracker_actions e WHERE e.task_id=t.id AND e.subject IS NULL AND e.kind='state'
+            AND e.phase IN ('queued','sent') AND t.external_issue_id IS NOT NULL
         ORDER BY e.seq DESC LIMIT 1),
         json_object('state','current')),
     t.project_id, t.planning_revision, COALESCE(c.branch,''), COALESCE(c.base_commit,''), c.parent_pr_id,
@@ -1828,9 +1828,9 @@ fn ingest_linear_comment(
     )?;
     let id = comment_id.split_once('@').map_or(comment_id, |(id, _)| id);
     let own_echo: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM task_comments c JOIN tracker_effects e
+        "SELECT EXISTS(SELECT 1 FROM task_comments c JOIN tracker_actions e
          ON e.task_id=c.task_id AND e.subject=c.id AND e.kind='comment' WHERE c.id=?1 AND c.task_id=?2
-         AND e.phase='acknowledged' AND e.conflict_json IS NULL
+         AND e.phase='confirmed'
          AND json_extract(e.value_json,'$.value.body')=c.body)",
         params![id, task_id], |row| row.get(0),
     )?;

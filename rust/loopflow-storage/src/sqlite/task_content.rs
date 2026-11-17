@@ -1,4 +1,4 @@
-//! Task fields and the tracker effects they ask for commit together, before provider I/O.
+//! Task fields and the tracker actions they ask for commit together, before provider I/O.
 
 use super::planning_write;
 use crate::work::edit::WorkValue as Edit;
@@ -33,7 +33,7 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// The tombstone and its `delete` effect are one save; a repeat changes nothing.
+    /// The tombstone and its `delete` action are one save; a repeat changes nothing.
     pub fn delete_task(&self, id: &TaskId) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -58,9 +58,9 @@ impl SqliteStore {
 
     pub fn pending_task_changes(&self, task: &TaskId) -> StoreResult<Vec<PlanningChange>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        super::tracker_effects::pending_changes_in(
+        super::tracker_actions::pending_changes_in(
             &conn,
-            &super::tracker_effects::EffectOwner::Task(task.clone()),
+            &super::tracker_actions::ActionOwner::Task(task.clone()),
         )
     }
 

@@ -1,4 +1,4 @@
-//! A local Task decision reaches its tracker as a `state` effect, which the
+//! A local Task decision reaches its tracker as a `state` action, which the
 //! planning writer queues with the Disposition.
 
 use super::planning_write;

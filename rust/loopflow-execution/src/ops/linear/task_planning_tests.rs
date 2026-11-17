@@ -624,8 +624,8 @@ fn task_sync_publishes_saved_task_and_reuses_its_identity() {
 #[path = "planning_order_tests.rs"]
 mod planning_order_tests;
 
-#[path = "planning_effect_tests.rs"]
-mod planning_effect_tests;
+#[path = "planning_action_tests.rs"]
+mod planning_action_tests;
 
 async fn seed_finished_tasks(
     fixture: &Fixture,
@@ -670,10 +670,7 @@ fn linear_on_demand_shares_checks_and_excludes_finished_tasks() {
             conn.execute("DELETE FROM linear_team_checks", []).unwrap();
             state.lock().await.requests = 0;
             let results = futures_util::future::join_all((0..4).map(|_| {
-                crate::ops::tracker_observe::check_repository(
-                    &fixture.store,
-                    repo.to_str().unwrap(),
-                )
+                crate::ops::tracker_events::check_repository(&fixture.store, repo.to_str().unwrap())
             }))
             .await;
             for result in results {
@@ -686,7 +683,7 @@ fn linear_on_demand_shares_checks_and_excludes_finished_tasks() {
                 rusqlite::params![now(), task.id.as_str()],
             )
             .unwrap();
-            assert!(!crate::ops::tracker_observe::check_repository(
+            assert!(!crate::ops::tracker_events::check_repository(
                 &fixture.store,
                 repo.to_str().unwrap()
             )
@@ -707,11 +704,11 @@ fn linear_on_demand_acquires_comment_only_changes_and_completion() {
         runtime.block_on(async {
             let conn = rusqlite::Connection::open(&fixture.database).unwrap();
             conn.execute("DELETE FROM linear_team_checks", []).unwrap();
-            crate::ops::tracker_observe::check_repository(&fixture.store, repo.to_str().unwrap()).await.unwrap();
+            crate::ops::tracker_events::check_repository(&fixture.store, repo.to_str().unwrap()).await.unwrap();
             let timestamp = time::OffsetDateTime::now_utc().format(&time::format_description::well_known::Rfc3339).unwrap();
             state.lock().await.comments.push(json!({"id":"new-direction","body":"Keep the saved identity", "createdAt":timestamp,"updatedAt":timestamp,"user":{"id":"person-1","displayName":"Jack Heart","name":"Jack Heart"}}));
             conn.execute("UPDATE linear_team_checks SET attempted_at=0", []).unwrap();
-            crate::ops::tracker_observe::check_repository(&fixture.store, repo.to_str().unwrap()).await.unwrap();
+            crate::ops::tracker_events::check_repository(&fixture.store, repo.to_str().unwrap()).await.unwrap();
             assert!(fixture.store.task_steers(&task.id).await.unwrap().iter().any(|steer| steer.text.contains("Keep the saved identity")));
             {
                 let mut provider = state.lock().await;
@@ -719,7 +716,7 @@ fn linear_on_demand_acquires_comment_only_changes_and_completion() {
                 mark_issue_updated(&mut provider.issues[0]);
             }
             conn.execute("UPDATE linear_team_checks SET attempted_at=0", []).unwrap();
-            crate::ops::tracker_observe::check_repository(&fixture.store, repo.to_str().unwrap()).await.unwrap();
+            crate::ops::tracker_events::check_repository(&fixture.store, repo.to_str().unwrap()).await.unwrap();
             assert!(fixture.store.task_state(&task.id).await.unwrap().is_terminal());
         });
     });
@@ -731,7 +728,7 @@ fn linear_on_demand_failure_throttles_attempts_without_losing_changes() {
         runtime.block_on(async {
             let conn = rusqlite::Connection::open(&fixture.database).unwrap();
             conn.execute("DELETE FROM linear_team_checks", []).unwrap();
-            crate::ops::tracker_observe::check_repository(&fixture.store, repo.to_str().unwrap())
+            crate::ops::tracker_events::check_repository(&fixture.store, repo.to_str().unwrap())
                 .await
                 .unwrap();
             let through: String = conn
@@ -742,14 +739,14 @@ fn linear_on_demand_failure_throttles_attempts_without_losing_changes() {
             conn.execute("UPDATE linear_team_checks SET attempted_at=0", [])
                 .unwrap();
             state.lock().await.field_outage = true;
-            assert!(crate::ops::tracker_observe::check_repository(
+            assert!(crate::ops::tracker_events::check_repository(
                 &fixture.store,
                 repo.to_str().unwrap()
             )
             .await
             .is_err());
             let requests = state.lock().await.requests;
-            assert!(!crate::ops::tracker_observe::check_repository(
+            assert!(!crate::ops::tracker_events::check_repository(
                 &fixture.store,
                 repo.to_str().unwrap()
             )
@@ -771,7 +768,7 @@ fn linear_on_demand_failure_throttles_attempts_without_losing_changes() {
             }
             conn.execute("UPDATE linear_team_checks SET attempted_at=0", [])
                 .unwrap();
-            crate::ops::tracker_observe::check_repository(&fixture.store, repo.to_str().unwrap())
+            crate::ops::tracker_events::check_repository(&fixture.store, repo.to_str().unwrap())
                 .await
                 .unwrap();
             assert_eq!(
@@ -803,7 +800,7 @@ fn linear_on_demand_adopts_new_open_issues_without_allocating_execution() {
                 .unwrap()
                 .execute("DELETE FROM linear_team_checks", [])
                 .unwrap();
-            crate::ops::tracker_observe::check_repository(&fixture.store, repo.to_str().unwrap())
+            crate::ops::tracker_events::check_repository(&fixture.store, repo.to_str().unwrap())
                 .await
                 .unwrap();
             let adopted = fixture

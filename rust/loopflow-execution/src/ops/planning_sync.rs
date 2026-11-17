@@ -13,7 +13,7 @@ use std::time::Duration;
 use crate::planning_git::{PlanningGit, PlanningPublication, PlanningRevision};
 use crate::store::{open_store, sqlite::SqliteStore, StorageConfig, Store};
 use loopflow_storage::planning_exchange::PlanningSnapshot;
-use loopflow_storage::sqlite::tracker_effects::EffectOwner;
+use loopflow_storage::sqlite::tracker_actions::ActionOwner;
 
 use super::{OpsError, OpsResult};
 
@@ -70,7 +70,7 @@ enum Exchange {
 /// A short command saves first, then makes one foreground exchange attempt
 /// with the owner it saved ahead of older work. Failure leaves its successful
 /// local mutation and durable pending state intact.
-pub(crate) async fn sync_after_save(store: &Store, repo: &str, saved: &EffectOwner) {
+pub(crate) async fn sync_after_save(store: &Store, repo: &str, saved: &ActionOwner) {
     let attempt = async {
         let config = crate::config::load_config(Some(Path::new(repo)))
             .map_err(message)?
@@ -444,9 +444,9 @@ fn sync_directory(directory: &Path, refresh: bool) -> OpsResult<()> {
         .block_on(async {
             let store = planning_store().await?;
             if refresh {
-                super::tracker_observe::refresh_repository(&store, &repo).await;
+                super::tracker_events::refresh_repository(&store, &repo).await;
             } else {
-                super::tracker_observe::sync_repository(&store, &repo).await;
+                super::tracker_events::sync_repository(&store, &repo).await;
             }
             Ok(())
         })

@@ -11,64 +11,64 @@ use serde_json::{json, Value};
 use super::{completed, rich_text, AsanaClient, Task, IDENTITY_LABEL};
 use crate::ops::tracker::{
     creation_id, ingest_task, message, now, observed_task, remote_project, remote_task,
-    repository_scope, value, values, visible_text, BridgeError, Sent,
+    repository_scope, value, values, visible_text, Sent, TrackerError,
 };
 use crate::ops::OpsResult;
 use crate::store::Store;
 use loopflow_model::durable::{ProjectId, TaskId};
 use loopflow_storage::planning::rules::Observed;
 use loopflow_storage::planning::TrackerProject;
-use loopflow_storage::sqlite::tracker_effects::{EffectKind, EffectOwner, TaskLink, TrackerEffect};
+use loopflow_storage::sqlite::tracker_actions::{ActionKind, ActionOwner, TaskLink, TrackerAction};
 use loopflow_storage::work::edit::WorkValue;
 
 const PROJECT_EDITS: &str =
     "Asana mirrors a Project when it is created; later Project edits stay local";
 
 impl AsanaClient {
-    pub(crate) async fn send_effect(
+    pub(crate) async fn send_action(
         &self,
         store: &Store,
         repo: &Path,
-        effect: &TrackerEffect,
+        action: &TrackerAction,
     ) -> Sent {
-        let sent = match (&effect.owner, effect.kind) {
-            (EffectOwner::Task(task), EffectKind::Create) => {
-                self.create_task(store, repo, task, effect).await
+        let sent = match (&action.owner, action.kind) {
+            (ActionOwner::Task(task), ActionKind::Create) => {
+                self.create_task(store, repo, task, action).await
             }
-            (EffectOwner::Project(project), EffectKind::Create) => {
-                self.create_project(store, repo, project, effect).await
+            (ActionOwner::Project(project), ActionKind::Create) => {
+                self.create_project(store, repo, project, action).await
             }
-            (EffectOwner::Task(task), EffectKind::Field) => {
-                self.task_field(store, repo, task, effect).await
+            (ActionOwner::Task(task), ActionKind::Field) => {
+                self.task_field(store, repo, task, action).await
             }
-            (EffectOwner::Task(task), EffectKind::State) => self.state(store, task, effect).await,
-            (EffectOwner::Task(task), EffectKind::Comment) => {
-                self.task_comment(store, task, effect).await
+            (ActionOwner::Task(task), ActionKind::State) => self.state(store, task, action).await,
+            (ActionOwner::Task(task), ActionKind::Comment) => {
+                self.task_comment(store, task, action).await
             }
-            (EffectOwner::Task(task), EffectKind::Delete) => self.delete(store, task).await,
-            (EffectOwner::Task(task), EffectKind::Link) => match effect.task_link() {
-                Some(TaskLink::Pr { url }) => self.pr_link(store, task, &url, effect).await,
+            (ActionOwner::Task(task), ActionKind::Delete) => self.delete(store, task).await,
+            (ActionOwner::Task(task), ActionKind::Link) => match action.task_link() {
+                Some(TaskLink::Pr { url }) => self.pr_link(store, task, &url, action).await,
                 _ => Ok(Sent::Unsupported(
                     "Asana has no follow-up relations; the follow-up stays a comment".into(),
                 )),
             },
-            (EffectOwner::Project(_), _) => Ok(Sent::Unsupported(PROJECT_EDITS.into())),
+            (ActionOwner::Project(_), _) => Ok(Sent::Unsupported(PROJECT_EDITS.into())),
             (owner, kind) => Ok(Sent::Unsupported(format!(
-                "Asana carries no {} effect for {owner:?}",
+                "Asana carries no {} action for {owner:?}",
                 kind.as_str()
             ))),
         };
         sent.unwrap_or_else(|error| Sent::Rejected(error.to_string()))
     }
 
-    pub(crate) async fn look_effect(
+    pub(crate) async fn look_action(
         &self,
         store: &Store,
         repo: &Path,
-        effect: &TrackerEffect,
+        action: &TrackerAction,
     ) -> Result<Option<Observed>, String> {
-        let observed = match (&effect.owner, effect.kind) {
-            (EffectOwner::Task(task), EffectKind::Create) => {
+        let observed = match (&action.owner, action.kind) {
+            (ActionOwner::Task(task), ActionKind::Create) => {
                 self.look_task(
                     store,
                     repo,
@@ -76,15 +76,15 @@ impl AsanaClient {
                 )
                 .await
             }
-            (EffectOwner::Task(task), EffectKind::Comment) => {
-                self.look_comments(store, task, effect).await
+            (ActionOwner::Task(task), ActionKind::Comment) => {
+                self.look_comments(store, task, action).await
             }
-            (EffectOwner::Task(task), _) => match remote_task(store, task).await {
+            (ActionOwner::Task(task), _) => match remote_task(store, task).await {
                 Ok(external) => self.look_task(store, repo, &external).await,
                 Err(error) => Err(error),
             },
-            (EffectOwner::Project(project), EffectKind::Create) => {
-                self.look_created_project(store, repo, project, effect)
+            (ActionOwner::Project(project), ActionKind::Create) => {
+                self.look_created_project(store, repo, project, action)
                     .await
             }
             _ => Err(message(PROJECT_EDITS)),
@@ -99,12 +99,12 @@ impl AsanaClient {
         store: &Store,
         repo: &Path,
         task: &TaskId,
-        effect: &TrackerEffect,
+        action: &TrackerAction,
     ) -> OpsResult<Sent> {
         let id = creation_id(task.as_str())?;
         let mut data = json!({"external": {"gid": id}});
         let mut projects = vec![self.project().await.map_err(message)?.to_string()];
-        for value in values(effect)? {
+        for value in values(action)? {
             match value {
                 WorkValue::TaskProject(Some(project)) => {
                     projects.push(self.mirrored(store, &project).await?)
@@ -122,7 +122,7 @@ impl AsanaClient {
         data["projects"] = json!(projects);
         let created: Task = match self.send(Method::POST, "/tasks", Some(data)).await {
             Ok(created) => created,
-            Err(error) => return Ok(Sent::failed(BridgeError::from(error))),
+            Err(error) => return Ok(Sent::failed(TrackerError::from(error))),
         };
         self.accepted(store, repo, &id, created).await
     }
@@ -132,10 +132,10 @@ impl AsanaClient {
         store: &Store,
         repo: &Path,
         project: &ProjectId,
-        effect: &TrackerEffect,
+        action: &TrackerAction,
     ) -> OpsResult<Sent> {
         let id = creation_id(project.as_str())?;
-        let mirrored = mirrored_project(&id, &repository_scope(repo)?, None, effect)?;
+        let mirrored = mirrored_project(&id, &repository_scope(repo)?, None, action)?;
         let footer = format!("{IDENTITY_LABEL} {id}");
         let summary = mirrored.summary.trim();
         let notes = if summary.is_empty() {
@@ -152,7 +152,7 @@ impl AsanaClient {
             .await
         {
             Ok(created) => created,
-            Err(error) => return Ok(Sent::failed(BridgeError::from(error))),
+            Err(error) => return Ok(Sent::failed(TrackerError::from(error))),
         };
         let mirrored = TrackerProject {
             revision: created.modified_at,
@@ -170,11 +170,11 @@ impl AsanaClient {
         store: &Store,
         repo: &Path,
         task: &TaskId,
-        effect: &TrackerEffect,
+        action: &TrackerAction,
     ) -> OpsResult<Sent> {
         let external = remote_task(store, task).await?;
         let path = format!("/tasks/external:{external}");
-        let updated: Result<Task, super::AsanaFailure> = match value(effect)? {
+        let updated: Result<Task, super::AsanaFailure> = match value(action)? {
             WorkValue::TaskProject(project) => {
                 let target = match project {
                     Some(project) => Some(self.mirrored(store, &project).await?),
@@ -182,7 +182,7 @@ impl AsanaClient {
                 };
                 let current: Task = match self.send(Method::GET, &path, None).await {
                     Ok(current) => current,
-                    Err(error) => return Ok(Sent::Rejected(BridgeError::from(error).to_string())),
+                    Err(error) => return Ok(Sent::Rejected(TrackerError::from(error).to_string())),
                 };
                 match self.set_project(&current, target).await {
                     Ok(()) => self.send(Method::GET, &path, None).await,
@@ -197,19 +197,19 @@ impl AsanaClient {
         };
         match updated {
             Ok(updated) => self.accepted(store, repo, &external, updated).await,
-            Err(error) => Ok(Sent::failed(BridgeError::from(error))),
+            Err(error) => Ok(Sent::failed(TrackerError::from(error))),
         }
     }
 
     /// Asana has open and completed tasks; a canceled Task is closed there too.
-    async fn state(&self, store: &Store, task: &TaskId, effect: &TrackerEffect) -> OpsResult<Sent> {
+    async fn state(&self, store: &Store, task: &TaskId, action: &TrackerAction) -> OpsResult<Sent> {
         let external = remote_task(store, task).await?;
-        let WorkValue::Disposition(disposition) = value(effect)? else {
-            return Err(message("state effect holds no Disposition"));
+        let WorkValue::Disposition(disposition) = value(action)? else {
+            return Err(message("state action holds no Disposition"));
         };
         let target = disposition
             .planning_state
-            .ok_or_else(|| message("state effect names no state"))?;
+            .ok_or_else(|| message("state action names no state"))?;
         match self.set_state(&external, &target).await {
             Ok(item) => Ok(Sent::Acknowledged {
                 revision: item.revision,
@@ -224,19 +224,19 @@ impl AsanaClient {
         &self,
         store: &Store,
         task: &TaskId,
-        effect: &TrackerEffect,
+        action: &TrackerAction,
     ) -> OpsResult<Sent> {
         let external = remote_task(store, task).await?;
-        let body = effect.value["value"]["body"]
+        let body = action.value["value"]["body"]
             .as_str()
-            .ok_or_else(|| message("comment effect holds no body"))?;
+            .ok_or_else(|| message("comment action holds no body"))?;
         match self
             .sync_comment(&external, &super::comment_markdown(&visible_text(body)))
             .await
         {
             Ok(()) => Ok(Sent::Acknowledged {
                 revision: None,
-                remote_id: effect.subject.clone(),
+                remote_id: action.subject.clone(),
             }),
             Err(error) => Ok(Sent::failed(error)),
         }
@@ -249,11 +249,11 @@ impl AsanaClient {
         store: &Store,
         task: &TaskId,
         url: &str,
-        effect: &TrackerEffect,
+        action: &TrackerAction,
     ) -> OpsResult<Sent> {
         let external = remote_task(store, task).await?;
-        let number = &effect.value["number"];
-        let state = effect.value["state"].as_str().unwrap_or("Open");
+        let number = &action.value["number"];
+        let state = action.value["state"].as_str().unwrap_or("Open");
         let body = format!("[GitHub PR #{number}]({url}) — {state}");
         match self
             .sync_comment(&external, &super::comment_markdown(&body))
@@ -322,17 +322,17 @@ impl AsanaClient {
         &self,
         store: &Store,
         task: &TaskId,
-        effect: &TrackerEffect,
+        action: &TrackerAction,
     ) -> OpsResult<Option<Observed>> {
         let external = remote_task(store, task).await?;
-        let claimed = effect.value["value"]["body"]
+        let claimed = action.value["value"]["body"]
             .as_str()
             .map(|body| super::comment_markdown(&visible_text(body)));
         let observation = self.observe(&external).await.map_err(message)?;
         let mut comments = Vec::new();
         for comment in observation.comments {
             if Some(&comment.body) == claimed.as_ref() {
-                comments.extend(effect.subject.clone());
+                comments.extend(action.subject.clone());
             }
             comments.push(comment.body);
         }
@@ -348,13 +348,13 @@ impl AsanaClient {
         store: &Store,
         repo: &Path,
         project: &ProjectId,
-        effect: &TrackerEffect,
+        action: &TrackerAction,
     ) -> OpsResult<Option<Observed>> {
         let id = creation_id(project.as_str())?;
         let Some(revision) = self.project_revision(&id).await.map_err(message)? else {
             return Ok(None);
         };
-        let mirrored = mirrored_project(&id, &repository_scope(repo)?, revision, effect)?;
+        let mirrored = mirrored_project(&id, &repository_scope(repo)?, revision, action)?;
         accept_mirror(store, project, &mirrored).await?;
         Ok(Some(Observed {
             remote_id: Some(id),
@@ -385,7 +385,7 @@ fn mirrored_project(
     id: &str,
     team: &str,
     revision: Option<String>,
-    effect: &TrackerEffect,
+    action: &TrackerAction,
 ) -> OpsResult<TrackerProject> {
     let mut project = TrackerProject {
         id: id.to_owned(),
@@ -400,7 +400,7 @@ fn mirrored_project(
         initiative_ids: vec![team.to_owned()],
         team_ids: vec![team.to_owned()],
     };
-    for value in values(effect)? {
+    for value in values(action)? {
         match value {
             WorkValue::ProjectName(Some(name)) => {
                 project.slug = loopflow_storage::planning::project_slug(&name);

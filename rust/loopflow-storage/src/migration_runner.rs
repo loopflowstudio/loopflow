@@ -2580,13 +2580,13 @@ mod tests {
         // The pending completion reaches the tracker queue still unconfirmed.
         let pending: (String, String) = conn
             .query_row(
-                "SELECT json_extract(value_json,'$.value.planning_state'),phase FROM tracker_effects
+                "SELECT json_extract(value_json,'$.value.planning_state'),phase FROM tracker_actions
                  WHERE task_id='single' AND kind='state'",
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(pending, ("completed".into(), "attempted".into()));
+        assert_eq!(pending, ("completed".into(), "sent".into()));
         // Released `ship_it` dropped positions short of `end`; their next run
         // takes up a Graph without retaining that earlier execution.
         let execution: i64 = conn

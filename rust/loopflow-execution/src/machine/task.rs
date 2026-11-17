@@ -79,7 +79,7 @@ pub async fn resolve_task_source(
     if let Some(repo) = repo {
         if crate::ops::tracker::connected(&repo.to_string_lossy()) {
             if let Some(task) = store.get_task_by_issue(selector).await? {
-                let owner = loopflow_storage::sqlite::tracker_effects::EffectOwner::Task(task.id);
+                let owner = loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task.id);
                 if let Err(error) = crate::ops::tracker::drain::drain_repository(
                     &store,
                     &repo.to_string_lossy(),

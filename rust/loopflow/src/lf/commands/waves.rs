@@ -605,7 +605,7 @@ async fn read_status(
     };
     let wave = loopflow_execution::work::wave::context::resolve_in(&store, directory, wave).await?;
     if observe {
-        loopflow_execution::ops::tracker_observe::sync_repository(&store, wave.repo()).await;
+        loopflow_execution::ops::tracker_events::sync_repository(&store, wave.repo()).await;
     }
     Ok(Some(wave_detail(&store, &wave).await?))
 }
@@ -845,7 +845,7 @@ async fn show_roadmap(
         let mut checked = std::collections::HashSet::new();
         for wave in &waves {
             if checked.insert(wave.repo()) {
-                loopflow_execution::ops::tracker_observe::sync_repository(store, wave.repo()).await;
+                loopflow_execution::ops::tracker_events::sync_repository(store, wave.repo()).await;
             }
         }
     }

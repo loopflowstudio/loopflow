@@ -86,3 +86,29 @@
 - Wire `linear_id` → a neutral name crosses Rust, Swift and ~10 DTO fixtures.
   Filed as LOO-942, which opens with this question: is a neutral name
   wanted at all while Linear is the only tracker in use?
+
+## Vocabulary (2026-11-16, at demo)
+
+Jack Heart: "i feel like there a re a lot of overworking words arounf work,
+tracker, plan, etc can we standardize and simplify".
+
+
+Jack Heart's answers, word for word:
+- Scope: "This PR's words; Task for rest" (chosen option).
+- Inbound name: "event".
+- Outbound: "event inbound, action or update outbound?" Agent recommended
+  action (update collides with Task updates, `lf wave update`, update-plan).
+- "git is a tracker (work tracker?)". Agent recommended plain "tracker".
+
+Built (glossary in `docs/dev/planning.md` "Words"; renames in
+`tracker-mirror.md` "Vocabulary pass"). Calls taken headless:
+- "tracker" over "work tracker"; phases `queued · sent · confirmed ·
+  conflicted · retired`, with `conflicted` a phase of its own rather than
+  `confirmed` plus `conflict_json`.
+- The generic verb for leaving the queue is "resolve" (`Resolution`,
+  `Decision::Resolve`); "unsettled" became "unconfirmed".
+- `TrackerObservation` and `rules::Observed` keep their names: each is a
+  tracker's current copy, not one incoming change, so "event" would misname
+  them. `ops/tracker_observe.rs` became `ops/tracker_events.rs`.
+- Rename scope is lines this PR added; older prose ("settled", "pending
+  effects", observation/acquisition) is LOO-955.

@@ -14,9 +14,9 @@ use super::SqliteStore;
 impl SqliteStore {
     pub fn pending_project_changes(&self, project: &ProjectId) -> StoreResult<Vec<PlanningChange>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        super::tracker_effects::pending_changes_in(
+        super::tracker_actions::pending_changes_in(
             &conn,
-            &super::tracker_effects::EffectOwner::Project(project.clone()),
+            &super::tracker_actions::ActionOwner::Project(project.clone()),
         )
     }
 
@@ -122,7 +122,7 @@ mod tests {
             serde_json::to_value(&change.base).unwrap(),
             serde_json::json!({"revision":"2026-10-10T12:00:00Z", "value":{"field":"project_name","value":"Product"}})
         );
-        assert!(store.attempt_tracker_effect(&change.id).unwrap());
+        assert!(store.attempt_tracker_action(&change.id).unwrap());
         assert_eq!(store.project(&project.id).unwrap().unwrap().name, "Renamed");
         let retained: (String, i64) = store
             .conn
@@ -184,7 +184,7 @@ mod tests {
         let conn = store.conn.lock().unwrap();
         let (conflict, base): (Option<String>, String) = conn
             .query_row(
-                "SELECT conflict_json,base_json FROM tracker_effects WHERE id=?1",
+                "SELECT conflict_json,base_json FROM tracker_actions WHERE id=?1",
                 [&change.id],
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )

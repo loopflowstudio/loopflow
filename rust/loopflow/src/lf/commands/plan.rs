@@ -133,12 +133,12 @@ pub(crate) struct PlanStatus {
     transport: String,
     destinations: Vec<loopflow_execution::store::PeerPlanningStatus>,
     /// Changes waiting for the tracker, in send order.
-    effects: Vec<QueuedEffect>,
+    actions: Vec<QueuedAction>,
 }
 
 /// One change waiting for the tracker.
 #[derive(Debug, serde::Serialize, schemars::JsonSchema)]
-pub(crate) struct QueuedEffect {
+pub(crate) struct QueuedAction {
     /// Send order across the repository.
     seq: i64,
     /// `task`, `project` or `wave`.
@@ -156,19 +156,19 @@ pub(crate) struct QueuedEffect {
     phase: String,
     /// The tracker it is addressed to.
     provider: String,
-    /// Why the last request did not settle it.
+    /// Why the last request did not confirm it.
     error: Option<String>,
 }
 
-/// What an effect changes, as a person names it: `title`, `complete`, `comment`.
-fn change(effect: &loopflow_execution::store::sqlite::tracker_effects::TrackerEffect) -> String {
-    use loopflow_execution::store::sqlite::tracker_effects::EffectKind;
-    match (effect.kind, effect.subject.as_deref()) {
-        (EffectKind::Field, Some(field)) => field
+/// What an action changes, as a person names it: `title`, `complete`, `comment`.
+fn change(action: &loopflow_execution::store::sqlite::tracker_actions::TrackerAction) -> String {
+    use loopflow_execution::store::sqlite::tracker_actions::ActionKind;
+    match (action.kind, action.subject.as_deref()) {
+        (ActionKind::Field, Some(field)) => field
             .trim_start_matches("task_")
             .trim_start_matches("project_")
             .to_owned(),
-        (EffectKind::State, _) => match effect.value["value"]["planning_state"].as_str() {
+        (ActionKind::State, _) => match action.value["value"]["planning_state"].as_str() {
             Some("completed") => "complete",
             Some("canceled") => "cancel",
             _ => "reopen",
@@ -181,7 +181,7 @@ fn change(effect: &loopflow_execution::store::sqlite::tracker_effects::TrackerEf
 /// Where a repository's planning is exchanged.
 enum Status {
     /// The tracker its config names, and what waits to reach it.
-    Remote(&'static str, Vec<QueuedEffect>),
+    Remote(&'static str, Vec<QueuedAction>),
     Git(Vec<loopflow_execution::store::PeerPlanningStatus>),
 }
 
@@ -189,26 +189,26 @@ impl Status {
     /// What `lf repo plan --json` prints.
     fn report(self) -> PlanStatus {
         match self {
-            Self::Remote(provider, effects) => PlanStatus {
+            Self::Remote(provider, actions) => PlanStatus {
                 transport: provider.to_ascii_lowercase(),
                 destinations: Vec::new(),
-                effects,
+                actions,
             },
             Self::Git(destinations) => PlanStatus {
                 transport: "git".to_owned(),
                 destinations,
-                effects: Vec::new(),
+                actions: Vec::new(),
             },
         }
     }
 }
 
-fn queued(store: &Store, repo: &str) -> Result<Vec<QueuedEffect>> {
-    use loopflow_execution::store::sqlite::tracker_effects::EffectOwner;
+fn queued(store: &Store, repo: &str) -> Result<Vec<QueuedAction>> {
+    use loopflow_execution::store::sqlite::tracker_actions::ActionOwner;
     let mut queued = Vec::new();
-    for effect in store.sqlite.unsettled_tracker_effects(repo)? {
-        let (owner_kind, owner_id, owner) = match &effect.owner {
-            EffectOwner::Task(id) => (
+    for action in store.sqlite.unconfirmed_tracker_actions(repo)? {
+        let (owner_kind, owner_id, owner) = match &action.owner {
+            ActionOwner::Task(id) => (
                 "task",
                 id.to_string(),
                 store
@@ -216,7 +216,7 @@ fn queued(store: &Store, repo: &str) -> Result<Vec<QueuedEffect>> {
                     .task(id)?
                     .map_or_else(|| id.to_string(), |task| task.identifier),
             ),
-            EffectOwner::Project(id) => (
+            ActionOwner::Project(id) => (
                 "project",
                 id.to_string(),
                 store
@@ -224,19 +224,19 @@ fn queued(store: &Store, repo: &str) -> Result<Vec<QueuedEffect>> {
                     .project(id)?
                     .map_or_else(|| id.to_string(), |project| project.name),
             ),
-            EffectOwner::Wave(id) => ("wave", id.to_string(), id.to_string()),
+            ActionOwner::Wave(id) => ("wave", id.to_string(), id.to_string()),
         };
-        queued.push(QueuedEffect {
-            seq: effect.seq,
+        queued.push(QueuedAction {
+            seq: action.seq,
             owner_kind: owner_kind.to_owned(),
             owner_id,
             owner,
-            kind: effect.kind.as_str().to_owned(),
-            change: change(&effect),
-            subject: effect.subject,
-            phase: effect.phase.as_str().to_owned(),
-            provider: effect.provider.as_str().to_owned(),
-            error: effect.error,
+            kind: action.kind.as_str().to_owned(),
+            change: change(&action),
+            subject: action.subject,
+            phase: action.phase.as_str().to_owned(),
+            provider: action.provider.as_str().to_owned(),
+            error: action.error,
         });
     }
     Ok(queued)
@@ -262,11 +262,11 @@ pub(crate) fn read_status(directory: &Path) -> Result<PlanStatus> {
 /// Stored status only: an exchange binds the configured destination.
 async fn status(store: Option<&Store>, repo: &str) -> Result<Status> {
     if let Some(provider) = remote_transport(repo)? {
-        let effects = match store {
+        let actions = match store {
             Some(store) => queued(store, repo)?,
             None => Vec::new(),
         };
-        return Ok(Status::Remote(provider, effects));
+        return Ok(Status::Remote(provider, actions));
     }
     Ok(Status::Git(match store {
         Some(store) => loopflow_execution::ops::planning_sync::peer_status(store, repo).await?,
@@ -289,26 +289,26 @@ async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
         return Ok(());
     }
     let destinations = match status {
-        Status::Remote(provider, effects) => {
-            if effects.is_empty() {
+        Status::Remote(provider, actions) => {
+            if actions.is_empty() {
                 println!("Planning: {provider}. Nothing waiting to send.");
                 return Ok(());
             }
             println!(
                 "Planning: {provider}. {} change{} waiting to send.",
-                effects.len(),
-                if effects.len() == 1 { "" } else { "s" }
+                actions.len(),
+                if actions.len() == 1 { "" } else { "s" }
             );
-            let width = effects.iter().map(|e| e.owner.len()).max().unwrap_or(0);
-            for effect in &effects {
-                let state = if effect.phase == "attempted" {
+            let width = actions.iter().map(|e| e.owner.len()).max().unwrap_or(0);
+            for action in &actions {
+                let state = if action.phase == "sent" {
                     format!("sent, waiting for {provider} to confirm")
                 } else {
-                    "pending".to_owned()
+                    "queued".to_owned()
                 };
-                println!("  {:width$}  {:9} {state}", effect.owner, effect.change);
+                println!("  {:width$}  {:9} {state}", action.owner, action.change);
             }
-            let mut errors: Vec<&str> = effects.iter().filter_map(|e| e.error.as_deref()).collect();
+            let mut errors: Vec<&str> = actions.iter().filter_map(|e| e.error.as_deref()).collect();
             errors.sort_unstable();
             errors.dedup();
             for error in errors {

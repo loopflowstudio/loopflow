@@ -40,7 +40,7 @@ kernel locks                 live local exclusion authority
 
 | Owner | Tables | Purpose |
 | --- | --- | --- |
-| Planning | `waves`, `projects`, `project_events`, `tasks`, `task_creation_intents`, `task_comments`, `task_issue_identities`, `task_deletions`, `task_events`, `tracker_effects` | Stored plans and definitions, optional provider links, stable Work identity, creation records, comments, deletion recovery and the outbound tracker queue |
+| Planning | `waves`, `projects`, `project_events`, `tasks`, `task_creation_intents`, `task_comments`, `task_issue_identities`, `task_deletions`, `task_events`, `tracker_actions` | Stored plans and definitions, optional provider links, stable Work identity, creation records, comments, deletion recovery and the outbound tracker queue |
 | Submitted creations | `creation_receipts` | Request IDs, content fingerprints, original resource identities and server-owned outcomes for Task creation and new Session threads |
 | Execution | `agent_sessions`, `session_events`, `session_activity` | Conversations, selected captures, observed provider transitions, native completions, turn receipts and the current observations availability is judged from |
 | Graph processes | `graph_processes`, `graph_process_steps` | One append-only row per Graph process and per step it started |

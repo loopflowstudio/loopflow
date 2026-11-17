@@ -75,7 +75,7 @@ pub async fn update_plan(
     super::planning_sync::sync_after_save(
         &store,
         wave.repo(),
-        &loopflow_storage::sqlite::tracker_effects::EffectOwner::Project(project.id.clone()),
+        &loopflow_storage::sqlite::tracker_actions::ActionOwner::Project(project.id.clone()),
     )
     .await;
     read_saved(&store, &project.id)
@@ -262,7 +262,7 @@ pub async fn edit(
     super::planning_sync::sync_after_save(
         &store,
         wave.repo(),
-        &loopflow_storage::sqlite::tracker_effects::EffectOwner::Project(project.id.clone()),
+        &loopflow_storage::sqlite::tracker_actions::ActionOwner::Project(project.id.clone()),
     )
     .await;
     read_saved(&store, &project.id)

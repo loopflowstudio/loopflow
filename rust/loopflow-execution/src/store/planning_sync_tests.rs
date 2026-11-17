@@ -36,15 +36,15 @@ fn disconnected_planning_keeps_uncertain_and_conflicting_receipts() {
         let completed = r#"{"field":"disposition","value":{"planning_state":"completed","planning_completed":true,"planning_completed_at":null}}"#;
         let started = r#"{"revision":"r2","value":{"field":"disposition","value":{"planning_state":"started","planning_completed":false,"planning_completed_at":null}}}"#;
         for (id, phase, conflict) in [
-            ("00000000-0000-4000-8000-000000000001", "attempted", None),
+            ("00000000-0000-4000-8000-000000000001", "sent", None),
             (
                 "00000000-0000-4000-8000-000000000002",
-                "acknowledged",
+                "conflicted",
                 Some(started),
             ),
-            ("00000000-0000-4000-8000-000000000003", "pending", None),
+            ("00000000-0000-4000-8000-000000000003", "queued", None),
         ] {
-            conn.execute("INSERT INTO tracker_effects(id,task_id,kind,value_json,phase,provider,conflict_json) VALUES(?1,?2,'state',?3,?4,'linear',?5)", rusqlite::params![id, task.id.as_str(), completed, phase, conflict]).unwrap();
+            conn.execute("INSERT INTO tracker_actions(id,task_id,kind,value_json,phase,provider,conflict_json) VALUES(?1,?2,'state',?3,?4,'linear',?5)", rusqlite::params![id, task.id.as_str(), completed, phase, conflict]).unwrap();
         }
     }
     let receipts = store.sqlite.task_planning_receipts(&task.id).unwrap();

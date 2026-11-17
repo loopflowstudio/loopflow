@@ -1365,13 +1365,13 @@ mod tests {
                 .unwrap();
             assert!(store
                 .sqlite
-                .tracker_effects_for(
-                    &loopflow_storage::sqlite::tracker_effects::EffectOwner::Task(task.id.clone())
+                .tracker_actions_for(
+                    &loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task.id.clone())
                 )
                 .unwrap()
                 .iter()
-                .all(|effect| effect.kind
-                    != loopflow_storage::sqlite::tracker_effects::EffectKind::State));
+                .all(|action| action.kind
+                    != loopflow_storage::sqlite::tracker_actions::ActionKind::State));
             store
                 .sqlite
                 .reopen_task(&task.id, Some("New scope"))

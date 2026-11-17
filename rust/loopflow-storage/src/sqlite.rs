@@ -106,7 +106,7 @@ pub use task_retirement::{TaskRetirement, ViewerHold, WORKSPACE_GRACE};
 pub mod task_history;
 mod task_state;
 pub mod task_work;
-pub mod tracker_effects;
+pub mod tracker_actions;
 pub mod wave_definitions;
 mod wave_lifecycle;
 

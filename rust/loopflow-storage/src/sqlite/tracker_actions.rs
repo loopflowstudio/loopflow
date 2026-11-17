@@ -1,6 +1,6 @@
-//! The outbound tracker queue: one row per change a bridge carries, in the
+//! The outbound tracker queue: one row per change a tracker carries, in the
 //! store's words. Writers enqueue inside their own transaction; the drain reads
-//! unsettled rows in `seq` order and records what the provider answered.
+//! unconfirmed rows in `seq` order and records what the provider answered.
 
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde_json::Value;
@@ -16,7 +16,7 @@ use loopflow_model::id::WaveId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
-pub enum EffectKind {
+pub enum ActionKind {
     Create,
     Field,
     Order,
@@ -26,7 +26,7 @@ pub enum EffectKind {
     Link,
 }
 
-impl EffectKind {
+impl ActionKind {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Create => "create",
@@ -53,7 +53,7 @@ impl EffectKind {
         })
     }
 
-    /// The effect a local change to `value` makes; `None` for values no bridge
+    /// The action a local change to `value` makes; `None` for values no tracker
     /// carries (bindings, ranks, execution facts). Order and creation are
     /// enqueued by their writers: neither is one field's value.
     pub fn of(value: &WorkValue) -> Option<Self> {
@@ -84,32 +84,37 @@ impl EffectKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum EffectPhase {
-    Pending,
-    Attempted,
-    Acknowledged,
+pub enum ActionPhase {
+    Queued,
+    /// Sent with no answer yet; looked for before anything else on its owner.
+    Sent,
+    Confirmed,
+    /// The tracker's value won; `conflict` holds it and `value` the local loser.
+    Conflicted,
     Retired,
 }
 
-impl EffectPhase {
+impl ActionPhase {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Pending => "pending",
-            Self::Attempted => "attempted",
-            Self::Acknowledged => "acknowledged",
+            Self::Queued => "queued",
+            Self::Sent => "sent",
+            Self::Confirmed => "confirmed",
+            Self::Conflicted => "conflicted",
             Self::Retired => "retired",
         }
     }
 
     fn parse(value: &str) -> StoreResult<Self> {
         Ok(match value {
-            "pending" => Self::Pending,
-            "attempted" => Self::Attempted,
-            "acknowledged" => Self::Acknowledged,
+            "queued" => Self::Queued,
+            "sent" => Self::Sent,
+            "confirmed" => Self::Confirmed,
+            "conflicted" => Self::Conflicted,
             "retired" => Self::Retired,
             other => {
                 return Err(StoreError::InvalidData(format!(
-                    "unknown tracker effect phase {other}"
+                    "unknown tracker action phase {other}"
                 )))
             }
         })
@@ -118,13 +123,13 @@ impl EffectPhase {
 
 /// The tracker object a request addresses.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum EffectOwner {
+pub enum ActionOwner {
     Wave(WaveId),
     Project(ProjectId),
     Task(TaskId),
 }
 
-impl EffectOwner {
+impl ActionOwner {
     fn column(&self) -> &'static str {
         match self {
             Self::Wave(_) => "wave_id",
@@ -143,26 +148,26 @@ impl EffectOwner {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct TrackerEffect {
+pub struct TrackerAction {
     pub seq: i64,
     pub id: String,
-    pub owner: EffectOwner,
+    pub owner: ActionOwner,
     pub subject: Option<String>,
-    pub kind: EffectKind,
+    pub kind: ActionKind,
     pub value: Value,
     /// `{revision, value}` as the provider held it at enqueue.
     pub base: Option<Value>,
     pub conflict: Option<Value>,
-    pub phase: EffectPhase,
+    pub phase: ActionPhase,
     pub provider: Provider,
     pub remote_id: Option<String>,
-    pub acknowledged_revision: Option<String>,
+    pub confirmed_revision: Option<String>,
     pub error: Option<String>,
-    pub attempted_at: Option<i64>,
+    pub sent_at: Option<i64>,
     pub looked_at: Option<i64>,
 }
 
-/// What a Task's `link` effect connects it to, named by its subject.
+/// What a Task's `link` action connects it to, named by its subject.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TaskLink {
     /// A follow-up relation to another Task, sent once both have tracker objects.
@@ -174,10 +179,10 @@ pub enum TaskLink {
 const RELATION: &str = "relation:";
 const PR: &str = "pr:";
 
-impl TrackerEffect {
-    /// The link a Task `link` effect carries; `None` for every other effect.
+impl TrackerAction {
+    /// The link a Task `link` action carries; `None` for every other action.
     pub fn task_link(&self) -> Option<TaskLink> {
-        if self.kind != EffectKind::Link || !matches!(self.owner, EffectOwner::Task(_)) {
+        if self.kind != ActionKind::Link || !matches!(self.owner, ActionOwner::Task(_)) {
             return None;
         }
         let subject = self.subject.as_deref()?;
@@ -194,16 +199,16 @@ impl TrackerEffect {
     }
 }
 
-/// What a pass decided for one effect. `Send` and `Hold` leave it unsettled.
+/// How an action leaves the queue.
 #[derive(Debug, Clone, PartialEq)]
-pub enum Settlement {
-    Acknowledged {
+pub enum Resolution {
+    Confirmed {
         revision: Option<String>,
         remote_id: Option<String>,
     },
     /// The provider's value won: `remote` is `{revision, value}` as it held
-    /// it; the effect keeps the local value that lost.
-    Adopt {
+    /// it; the action keeps the local value that lost.
+    Conflicted {
         remote: Value,
     },
     Retire {
@@ -212,43 +217,43 @@ pub enum Settlement {
 }
 
 const COLUMNS: &str = "e.seq,e.id,e.wave_id,e.project_id,e.task_id,e.subject,e.kind,e.value_json,
-    e.base_json,e.conflict_json,e.phase,e.provider,e.remote_id,e.acknowledged_revision,e.error,
-    e.attempted_at,e.looked_at";
+    e.base_json,e.conflict_json,e.phase,e.provider,e.remote_id,e.confirmed_revision,e.error,
+    e.sent_at,e.looked_at";
 
-// Every effect owner reaches its repository through one of these joins. Each
-// is a lookup per unsettled row, so a pass costs its queue, not the repository's
+// Every action owner reaches its repository through one of these joins. Each
+// is a lookup per unconfirmed row, so a pass costs its queue, not the repository's
 // Task count.
 const IN_REPO: &str = "(EXISTS(SELECT 1 FROM tasks t JOIN repository_plans r ON r.id=t.repository_id WHERE t.id=e.task_id AND r.repo=?1)
     OR EXISTS(SELECT 1 FROM projects p JOIN waves w ON w.id=p.wave_id WHERE p.id=e.project_id AND w.repo=?1)
     OR EXISTS(SELECT 1 FROM waves w WHERE w.id=e.wave_id AND w.repo=?1))";
 
-/// A row and its owner; the effect is `Err` for a kind a later lf wrote.
-fn read_effect(row: &Row<'_>) -> StoreResult<Result<TrackerEffect, EffectOwner>> {
+/// A row and its owner; the action is `Err` for a kind a later lf wrote.
+fn read_action(row: &Row<'_>) -> StoreResult<Result<TrackerAction, ActionOwner>> {
     let wave: Option<String> = row.get(2)?;
     let project: Option<String> = row.get(3)?;
     let task: Option<String> = row.get(4)?;
     let owner = match (wave, project, task) {
-        (Some(id), None, None) => EffectOwner::Wave(
+        (Some(id), None, None) => ActionOwner::Wave(
             WaveId::parse(&id)
                 .map_err(|_| StoreError::InvalidData(format!("invalid Wave id {id}")))?,
         ),
-        (None, Some(id), None) => EffectOwner::Project(ProjectId::from_raw(id)),
-        (None, None, Some(id)) => EffectOwner::Task(TaskId::from_raw(id)),
+        (None, Some(id), None) => ActionOwner::Project(ProjectId::from_raw(id)),
+        (None, None, Some(id)) => ActionOwner::Task(TaskId::from_raw(id)),
         _ => {
             return Err(StoreError::InvalidData(
-                "tracker effect has no single owner".into(),
+                "tracker action has no single owner".into(),
             ))
         }
     };
     let kind: String = row.get(6)?;
-    let Some(kind) = EffectKind::parse(&kind) else {
-        tracing::debug!(%kind, ?owner, "tracker effect of an unknown kind holds its owner");
+    let Some(kind) = ActionKind::parse(&kind) else {
+        tracing::debug!(%kind, ?owner, "tracker action of an unknown kind holds its owner");
         return Ok(Err(owner));
     };
     let base: Option<String> = row.get(8)?;
     let conflict: Option<String> = row.get(9)?;
     let provider: String = row.get(11)?;
-    Ok(Ok(TrackerEffect {
+    Ok(Ok(TrackerAction {
         seq: row.get(0)?,
         id: row.get(1)?,
         owner,
@@ -259,26 +264,26 @@ fn read_effect(row: &Row<'_>) -> StoreResult<Result<TrackerEffect, EffectOwner>>
         conflict: conflict
             .map(|conflict| serde_json::from_str(&conflict))
             .transpose()?,
-        phase: EffectPhase::parse(&row.get::<_, String>(10)?)?,
+        phase: ActionPhase::parse(&row.get::<_, String>(10)?)?,
         provider: provider
             .parse()
             .map_err(|_| StoreError::InvalidData(format!("unknown tracker {provider}")))?,
         remote_id: row.get(12)?,
-        acknowledged_revision: row.get(13)?,
+        confirmed_revision: row.get(13)?,
         error: row.get(14)?,
-        attempted_at: row.get(15)?,
+        sent_at: row.get(15)?,
         looked_at: row.get(16)?,
     }))
 }
 
-/// The bridge an owner's effects go to: its binding's, else its pending
+/// The tracker an owner's actions go to: its binding's, else its pending
 /// creation's. An owner with neither enqueues nothing.
 pub(crate) fn owner_tracker(
     conn: &Connection,
-    owner: &EffectOwner,
+    owner: &ActionOwner,
 ) -> StoreResult<Option<Provider>> {
     let bound: Option<Option<String>> = match owner {
-        EffectOwner::Task(id) => conn
+        ActionOwner::Task(id) => conn
             .query_row(
                 "SELECT (SELECT o.provider FROM pm_items o JOIN repository_plans r ON r.repo=o.repo
                     WHERE r.id=t.repository_id AND o.id=t.external_issue_id LIMIT 1)
@@ -287,7 +292,7 @@ pub(crate) fn owner_tracker(
                 |row| row.get(0),
             )
             .optional()?,
-        EffectOwner::Project(id) => conn
+        ActionOwner::Project(id) => conn
             .query_row(
                 "SELECT (SELECT o.provider FROM pm_projects o JOIN waves w ON w.repo=o.repo
                     WHERE w.id=p.wave_id AND o.id=p.external_project_id LIMIT 1)
@@ -296,15 +301,15 @@ pub(crate) fn owner_tracker(
                 |row| row.get(0),
             )
             .optional()?,
-        EffectOwner::Wave(_) => None,
+        ActionOwner::Wave(_) => None,
     };
     let provider = match bound {
-        // A binding acquired before observations recorded their bridge.
+        // A binding acquired before observations recorded their tracker.
         Some(provider) => Some(provider.unwrap_or_else(|| "linear".into())),
         None => conn
             .query_row(
                 &format!(
-                    "SELECT provider FROM tracker_effects WHERE {}=?1 AND kind='create'
+                    "SELECT provider FROM tracker_actions WHERE {}=?1 AND kind='create'
                      AND phase!='retired' ORDER BY seq DESC LIMIT 1",
                     owner.column()
                 ),
@@ -322,13 +327,13 @@ pub(crate) fn owner_tracker(
         .transpose()
 }
 
-/// Add one effect for a bound or creating owner, retiring older unsent values
-/// of the same subject. Returns the effect id, or `None` when no bridge carries
+/// Add one action for a bound or creating owner, retiring older unsent values
+/// of the same subject. Returns the action id, or `None` when no tracker carries
 /// this owner.
 pub(crate) fn enqueue(
     conn: &Connection,
-    owner: &EffectOwner,
-    kind: EffectKind,
+    owner: &ActionOwner,
+    kind: ActionKind,
     subject: Option<&str>,
     value: &Value,
     base: Option<&Value>,
@@ -339,7 +344,7 @@ pub(crate) fn enqueue(
     insert(conn, owner, kind, subject, value, base, provider).map(Some)
 }
 
-/// Queue what a local save of `value` on `table`/`id` asks a bridge to do.
+/// Queue what a local save of `value` on `table`/`id` asks a tracker to do.
 /// The planning writer calls this for every value a `Local` write changed.
 pub(crate) fn enqueue_local(
     conn: &Connection,
@@ -347,12 +352,12 @@ pub(crate) fn enqueue_local(
     id: &str,
     value: &WorkValue,
 ) -> StoreResult<()> {
-    let Some(kind) = EffectKind::of(value) else {
+    let Some(kind) = ActionKind::of(value) else {
         return Ok(());
     };
     let (owner, subject) = match table {
-        "tasks" => (EffectOwner::Task(TaskId::from_raw(id)), None),
-        "projects" => (EffectOwner::Project(ProjectId::from_raw(id)), None),
+        "tasks" => (ActionOwner::Task(TaskId::from_raw(id)), None),
+        "projects" => (ActionOwner::Project(ProjectId::from_raw(id)), None),
         // A comment goes out on its Task, behind the Task's creation.
         "task_comments" => {
             let task: String = conn.query_row(
@@ -360,21 +365,21 @@ pub(crate) fn enqueue_local(
                 [id],
                 |row| row.get(0),
             )?;
-            (EffectOwner::Task(TaskId::from_raw(task)), Some(id))
+            (ActionOwner::Task(TaskId::from_raw(task)), Some(id))
         }
         _ => return Ok(()),
     };
-    if kind == EffectKind::Delete && withdraw_unsent(conn, &owner)? {
+    if kind == ActionKind::Delete && withdraw_unsent(conn, &owner)? {
         return Ok(());
     }
     let subject = match kind {
-        EffectKind::Field => Some(value.field()),
+        ActionKind::Field => Some(value.field()),
         _ => subject,
     };
     let base = match kind {
-        EffectKind::Field => field_baseline(conn, &owner, value)?,
-        EffectKind::State => state_baseline(conn, &owner)?,
-        EffectKind::Delete => observed_revision(conn, &owner)?.map(|revision| PlanningBaseline {
+        ActionKind::Field => field_baseline(conn, &owner, value)?,
+        ActionKind::State => state_baseline(conn, &owner)?,
+        ActionKind::Delete => observed_revision(conn, &owner)?.map(|revision| PlanningBaseline {
             revision,
             value: Some(WorkValue::TaskDeletedAt(None)),
         }),
@@ -392,24 +397,24 @@ pub(crate) fn enqueue_local(
 }
 
 /// Deleting an owner whose creation never left: the tracker has nothing to
-/// trash, so its unsent effects retire instead of creating it to delete it.
+/// trash, so its unsent actions retire instead of creating it to delete it.
 /// A creation already attempted may exist there, so its deletion still goes.
-fn withdraw_unsent(conn: &Connection, owner: &EffectOwner) -> StoreResult<bool> {
+fn withdraw_unsent(conn: &Connection, owner: &ActionOwner) -> StoreResult<bool> {
     let unbound = match owner {
-        EffectOwner::Task(_) => {
+        ActionOwner::Task(_) => {
             "NOT EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND external_issue_id IS NOT NULL)"
         }
-        EffectOwner::Project(_) => {
+        ActionOwner::Project(_) => {
             "NOT EXISTS(SELECT 1 FROM projects WHERE id=?1 AND external_project_id IS NOT NULL)"
         }
-        EffectOwner::Wave(_) => return Ok(false),
+        ActionOwner::Wave(_) => return Ok(false),
     };
     let column = owner.column();
     let unsent: bool = conn.query_row(
         &format!(
             "SELECT {unbound}
-                AND EXISTS(SELECT 1 FROM tracker_effects WHERE {column}=?1 AND kind='create' AND phase='pending')
-                AND NOT EXISTS(SELECT 1 FROM tracker_effects WHERE {column}=?1 AND kind='create' AND phase<>'pending' AND phase<>'retired')"
+                AND EXISTS(SELECT 1 FROM tracker_actions WHERE {column}=?1 AND kind='create' AND phase='queued')
+                AND NOT EXISTS(SELECT 1 FROM tracker_actions WHERE {column}=?1 AND kind='create' AND phase<>'queued' AND phase<>'retired')"
         ),
         [owner.id()],
         |row| row.get(0),
@@ -417,8 +422,8 @@ fn withdraw_unsent(conn: &Connection, owner: &EffectOwner) -> StoreResult<bool> 
     if unsent {
         conn.execute(
             &format!(
-                "UPDATE tracker_effects SET phase='retired',error='deleted before it was sent'
-                 WHERE {column}=?1 AND phase='pending'"
+                "UPDATE tracker_actions SET phase='retired',error='deleted before it was sent'
+                 WHERE {column}=?1 AND phase='queued'"
             ),
             [owner.id()],
         )?;
@@ -427,26 +432,26 @@ fn withdraw_unsent(conn: &Connection, owner: &EffectOwner) -> StoreResult<bool> 
 }
 
 /// The owner's provider observation, joined from its binding.
-fn observation_source(owner: &EffectOwner) -> Option<&'static str> {
+fn observation_source(owner: &ActionOwner) -> Option<&'static str> {
     match owner {
-        EffectOwner::Task(_) => Some(
+        ActionOwner::Task(_) => Some(
             "tasks t JOIN repository_plans w ON w.id=t.repository_id
              JOIN pm_items o ON o.repo=w.repo AND o.provider IN ('linear','asana') AND o.id=t.external_issue_id
              WHERE t.id=?1",
         ),
-        EffectOwner::Project(_) => Some(
+        ActionOwner::Project(_) => Some(
             "projects p JOIN waves w ON w.id=p.wave_id
              JOIN pm_projects o ON o.repo=w.repo AND o.provider IN ('linear','asana') AND o.id=p.external_project_id
              WHERE p.id=?1",
         ),
-        EffectOwner::Wave(_) => None,
+        ActionOwner::Wave(_) => None,
     }
 }
 
 /// `Some(revision)` when the owner has an observation at all.
 fn observed_revision(
     conn: &Connection,
-    owner: &EffectOwner,
+    owner: &ActionOwner,
 ) -> StoreResult<Option<Option<String>>> {
     let Some(source) = observation_source(owner) else {
         return Ok(None);
@@ -460,8 +465,8 @@ fn observed_revision(
         .optional()?)
 }
 
-fn state_baseline(conn: &Connection, owner: &EffectOwner) -> StoreResult<Option<PlanningBaseline>> {
-    let EffectOwner::Task(id) = owner else {
+fn state_baseline(conn: &Connection, owner: &ActionOwner) -> StoreResult<Option<PlanningBaseline>> {
+    let ActionOwner::Task(id) = owner else {
         return Ok(None);
     };
     Ok(conn
@@ -489,7 +494,7 @@ fn state_baseline(conn: &Connection, owner: &EffectOwner) -> StoreResult<Option<
 // an explicitly null membership is distinct from an omitted observation.
 fn field_baseline(
     conn: &Connection,
-    owner: &EffectOwner,
+    owner: &ActionOwner,
     edit: &WorkValue,
 ) -> StoreResult<Option<PlanningBaseline>> {
     let Some(source) = observation_source(owner) else {
@@ -548,8 +553,8 @@ fn field_baseline(
 
 fn insert(
     conn: &Connection,
-    owner: &EffectOwner,
-    kind: EffectKind,
+    owner: &ActionOwner,
+    kind: ActionKind,
     subject: Option<&str>,
     value: &Value,
     base: Option<&Value>,
@@ -559,8 +564,8 @@ fn insert(
     if kind.coalesces() {
         conn.execute(
             &format!(
-                "UPDATE tracker_effects SET phase='retired',error='superseded by a later save'
-                 WHERE {column}=?1 AND kind=?2 AND subject IS ?3 AND phase='pending'"
+                "UPDATE tracker_actions SET phase='retired',error='superseded by a later save'
+                 WHERE {column}=?1 AND kind=?2 AND subject IS ?3 AND phase='queued'"
             ),
             params![owner.id(), kind.as_str(), subject],
         )?;
@@ -568,8 +573,8 @@ fn insert(
     let id = uuid::Uuid::new_v4().to_string();
     conn.execute(
         &format!(
-            "INSERT INTO tracker_effects(id,{column},subject,kind,value_json,base_json,phase,provider)
-             VALUES(?1,?2,?3,?4,?5,?6,'pending',?7)"
+            "INSERT INTO tracker_actions(id,{column},subject,kind,value_json,base_json,phase,provider)
+             VALUES(?1,?2,?3,?4,?5,?6,'queued',?7)"
         ),
         params![
             id,
@@ -584,9 +589,9 @@ fn insert(
     Ok(id)
 }
 
-fn creation_baseline(conn: &Connection, owner: &EffectOwner) -> StoreResult<Vec<WorkValue>> {
+fn creation_baseline(conn: &Connection, owner: &ActionOwner) -> StoreResult<Vec<WorkValue>> {
     Ok(match owner {
-        EffectOwner::Task(id) => {
+        ActionOwner::Task(id) => {
             let task = super::children::task_on(conn, id)?.ok_or(StoreError::NotFound)?;
             vec![
                 WorkValue::TaskTitle(Some(task.title)),
@@ -596,7 +601,7 @@ fn creation_baseline(conn: &Connection, owner: &EffectOwner) -> StoreResult<Vec<
                 WorkValue::TaskProject(task.project_id.as_ref().map(ToString::to_string)),
             ]
         }
-        EffectOwner::Project(id) => {
+        ActionOwner::Project(id) => {
             let project = super::children::project_in(conn, id)?;
             vec![
                 WorkValue::ProjectName(Some(project.name)),
@@ -607,69 +612,73 @@ fn creation_baseline(conn: &Connection, owner: &EffectOwner) -> StoreResult<Vec<
                 WorkValue::MetricTargets(project.metric_targets),
             ]
         }
-        EffectOwner::Wave(_) => {
+        ActionOwner::Wave(_) => {
             return Err(StoreError::InvalidData(
-                "a Wave is connected, never created, by a bridge".into(),
+                "a Wave is connected, never created, by a tracker".into(),
             ))
         }
     })
 }
 
-/// Settle an unsettled effect; false when it settled already.
-pub(crate) fn settle_in(conn: &Connection, id: &str, settlement: &Settlement) -> StoreResult<bool> {
-    let changed = match settlement {
-        Settlement::Acknowledged {
+/// Resolve an unconfirmed action; false when it resolved already.
+pub(crate) fn resolve_in(
+    conn: &Connection,
+    id: &str,
+    resolution: &Resolution,
+) -> StoreResult<bool> {
+    let changed = match resolution {
+        Resolution::Confirmed {
             revision,
             remote_id,
         } => conn.execute(
-            "UPDATE tracker_effects SET phase='acknowledged',acknowledged_revision=?2,
+            "UPDATE tracker_actions SET phase='confirmed',confirmed_revision=?2,
              remote_id=COALESCE(?3,remote_id),error=NULL
-             WHERE id=?1 AND phase IN ('pending','attempted')",
+             WHERE id=?1 AND phase IN ('queued','sent')",
             params![id, revision, remote_id],
         )?,
-        Settlement::Adopt { remote } => conn.execute(
-            "UPDATE tracker_effects SET phase='acknowledged',conflict_json=?2,error=NULL
-             WHERE id=?1 AND phase IN ('pending','attempted')",
+        Resolution::Conflicted { remote } => conn.execute(
+            "UPDATE tracker_actions SET phase='conflicted',conflict_json=?2,error=NULL
+             WHERE id=?1 AND phase IN ('queued','sent')",
             params![id, remote.to_string()],
         )?,
-        Settlement::Retire { reason } => conn.execute(
-            "UPDATE tracker_effects SET phase='retired',error=?2
-             WHERE id=?1 AND phase IN ('pending','attempted')",
+        Resolution::Retire { reason } => conn.execute(
+            "UPDATE tracker_actions SET phase='retired',error=?2
+             WHERE id=?1 AND phase IN ('queued','sent')",
             params![id, reason],
         )?,
     };
     Ok(changed == 1)
 }
 
-/// An owner's unsettled effects in send order, inside the caller's transaction.
-pub(crate) fn unsettled_for_in(
+/// An owner's unconfirmed actions in send order, inside the caller's transaction.
+pub(crate) fn unconfirmed_for_in(
     conn: &Connection,
-    owner: &EffectOwner,
-) -> StoreResult<Vec<TrackerEffect>> {
+    owner: &ActionOwner,
+) -> StoreResult<Vec<TrackerAction>> {
     let mut query = conn.prepare(&format!(
-        "SELECT {COLUMNS} FROM tracker_effects e WHERE e.{}=?1
-         AND e.phase IN ('pending','attempted') ORDER BY e.seq",
+        "SELECT {COLUMNS} FROM tracker_actions e WHERE e.{}=?1
+         AND e.phase IN ('queued','sent') ORDER BY e.seq",
         owner.column()
     ))?;
-    let rows = query.query_and_then([owner.id()], read_effect)?;
+    let rows = query.query_and_then([owner.id()], read_action)?;
     rows.filter_map(|row| row.map(Result::ok).transpose())
         .collect()
 }
 
-/// The newest unsettled value of each field an owner has queued.
+/// The newest unconfirmed value of each field an owner has queued.
 pub(crate) fn pending_changes_in(
     conn: &Connection,
-    owner: &EffectOwner,
+    owner: &ActionOwner,
 ) -> StoreResult<Vec<crate::planning_sync::PlanningChange>> {
     let mut changes: Vec<crate::planning_sync::PlanningChange> = Vec::new();
-    for effect in unsettled_for_in(conn, owner)? {
-        if effect.kind != EffectKind::Field {
+    for action in unconfirmed_for_in(conn, owner)? {
+        if action.kind != ActionKind::Field {
             continue;
         }
         let change = crate::planning_sync::PlanningChange {
-            id: effect.id,
-            value: serde_json::from_value(effect.value)?,
-            base: effect.base.map(serde_json::from_value).transpose()?,
+            id: action.id,
+            value: serde_json::from_value(action.value)?,
+            base: action.base.map(serde_json::from_value).transpose()?,
         };
         changes.retain(|older| older.value.field() != change.value.field());
         changes.push(change);
@@ -678,22 +687,22 @@ pub(crate) fn pending_changes_in(
 }
 
 /// Acceptance of the provider's copy of `owner` at `revision`, before it is
-/// written: attempted effects the copy answers settle (the rule the drain
-/// uses), unsent values rebase onto it, and every unsettled value replaces the
-/// observed one in `edits`, so the write keeps local intent until it settles.
-/// Returns the settlements made, so the caller can tell what was adopted.
+/// written: attempted actions the copy answers resolve (the rule the drain
+/// uses), unsent values rebase onto it, and every unconfirmed value replaces the
+/// observed one in `edits`, so the write keeps local intent until it resolves.
+/// Returns the resolutions made, so the caller can tell what was adopted.
 pub(crate) fn reconcile_in(
     conn: &Connection,
-    owner: &EffectOwner,
+    owner: &ActionOwner,
     revision: Option<&str>,
     edits: &mut [WorkValue],
-) -> StoreResult<Vec<(TrackerEffect, Settlement)>> {
-    let effects: Vec<TrackerEffect> = unsettled_for_in(conn, owner)?
+) -> StoreResult<Vec<(TrackerAction, Resolution)>> {
+    let actions: Vec<TrackerAction> = unconfirmed_for_in(conn, owner)?
         .into_iter()
-        .filter(|effect| {
+        .filter(|action| {
             matches!(
-                effect.kind,
-                EffectKind::Field | EffectKind::State | EffectKind::Delete
+                action.kind,
+                ActionKind::Field | ActionKind::State | ActionKind::Delete
             )
         })
         .collect();
@@ -703,35 +712,36 @@ pub(crate) fn reconcile_in(
         ..Default::default()
     };
     let seen = crate::planning::revision_nanos(revision)?;
-    let mut settled = Vec::new();
-    for effect in &effects {
-        if effect.phase != EffectPhase::Attempted {
+    let mut resolved = Vec::new();
+    for action in &actions {
+        if action.phase != ActionPhase::Sent {
             continue;
         }
-        // An older copy than the one the effect was based on says nothing.
-        let base = effect
+        // An older copy than the one the action was based on says nothing.
+        let base = action
             .base
             .as_ref()
             .and_then(|base| base["revision"].as_str());
         if seen < crate::planning::revision_nanos(base)? {
             continue;
         }
-        if let crate::planning::rules::Decision::Settle(settlement) =
-            crate::planning::rules::decide(effect, Some(&observed), false)
+        if let crate::planning::rules::Decision::Resolve(resolution) =
+            crate::planning::rules::decide(action, Some(&observed), false)
         {
-            if settle_in(conn, &effect.id, &settlement)? {
-                settled.push((effect.clone(), settlement));
+            if resolve_in(conn, &action.id, &resolution)? {
+                resolved.push((action.clone(), resolution));
             }
         }
     }
-    // The newest unsettled value of each field is the one local intent holds.
+    // The newest unconfirmed value of each field is the one local intent holds.
     let mut overlaid = std::collections::HashSet::new();
-    for effect in effects.iter().rev() {
-        if settled.iter().any(|(done, _)| done.id == effect.id) || effect.kind == EffectKind::Delete
+    for action in actions.iter().rev() {
+        if resolved.iter().any(|(done, _)| done.id == action.id)
+            || action.kind == ActionKind::Delete
         {
             continue;
         }
-        let Ok(value) = serde_json::from_value::<WorkValue>(effect.value.clone()) else {
+        let Ok(value) = serde_json::from_value::<WorkValue>(action.value.clone()) else {
             continue;
         };
         if !overlaid.insert(value.field()) {
@@ -743,16 +753,16 @@ pub(crate) fn reconcile_in(
         if *edit == value {
             continue;
         }
-        let base = effect
+        let base = action
             .base
             .as_ref()
             .and_then(|base| serde_json::from_value::<WorkValue>(base["value"].clone()).ok());
-        if effect.phase == EffectPhase::Pending && base.as_ref() != Some(edit) {
+        if action.phase == ActionPhase::Queued && base.as_ref() != Some(edit) {
             // The unsent value now replaces what the provider holds.
             conn.execute(
-                "UPDATE tracker_effects SET base_json=?2 WHERE id=?1",
+                "UPDATE tracker_actions SET base_json=?2 WHERE id=?1",
                 params![
-                    effect.id,
+                    action.id,
                     serde_json::to_string(&PlanningBaseline {
                         revision: revision.map(str::to_owned),
                         value: Some(edit.clone()),
@@ -762,13 +772,13 @@ pub(crate) fn reconcile_in(
         }
         *edit = value;
     }
-    Ok(settled)
+    Ok(resolved)
 }
 
 /// Called by every ingestion path before it can allocate a new local identity.
 /// An observation of an id this store created claims the owner whose `create`
-/// was sent with it (both bridges carry the owner's uuid): the creation
-/// settles, effects queued behind it take its values as their base, and the
+/// was sent with it (both trackers carry the owner's uuid): the creation
+/// resolves, actions queued behind it take its values as their base, and the
 /// owner binds. Ordinary title matches do nothing.
 pub(crate) fn attach_in(
     conn: &Connection,
@@ -783,12 +793,12 @@ pub(crate) fn attach_in(
     };
     let sql = if project {
         "SELECT o.id,e.id,e.value_json FROM projects o JOIN waves w ON w.id=o.wave_id
-         JOIN tracker_effects e ON e.project_id=o.id AND e.kind='create' AND e.phase='attempted'
+         JOIN tracker_actions e ON e.project_id=o.id AND e.kind='create' AND e.phase='sent'
          WHERE w.repo=?1 AND o.external_project_id IS NULL AND substr(o.id,6)=?2
          ORDER BY e.seq DESC LIMIT 1"
     } else {
         "SELECT o.id,e.id,e.value_json FROM tasks o JOIN repository_plans w ON w.id=o.repository_id
-         JOIN tracker_effects e ON e.task_id=o.id AND e.kind='create' AND e.phase='attempted'
+         JOIN tracker_actions e ON e.task_id=o.id AND e.kind='create' AND e.phase='sent'
          WHERE w.repo=?1 AND o.external_issue_id IS NULL AND substr(o.id,6)=?2
          ORDER BY e.seq DESC LIMIT 1"
     };
@@ -797,36 +807,36 @@ pub(crate) fn attach_in(
             Ok((row.get(0)?, row.get(1)?, row.get(2)?))
         })
         .optional()?;
-    let Some((id, effect, baseline)) = created else {
+    let Some((id, action, baseline)) = created else {
         return Ok(());
     };
     let owner = if project {
-        EffectOwner::Project(ProjectId::from_raw(id.clone()))
+        ActionOwner::Project(ProjectId::from_raw(id.clone()))
     } else {
-        EffectOwner::Task(TaskId::from_raw(id.clone()))
+        ActionOwner::Task(TaskId::from_raw(id.clone()))
     };
-    settle_in(
+    resolve_in(
         conn,
-        &effect,
-        &Settlement::Acknowledged {
+        &action,
+        &Resolution::Confirmed {
             revision: revision.map(str::to_owned),
             remote_id: Some(external.to_owned()),
         },
     )?;
     let column = owner.column();
-    let mut bases: Vec<(EffectKind, Option<&str>, WorkValue)> = Vec::new();
+    let mut bases: Vec<(ActionKind, Option<&str>, WorkValue)> = Vec::new();
     let baseline: Vec<WorkValue> = serde_json::from_str(&baseline)?;
     for value in &baseline {
-        bases.push((EffectKind::Field, Some(value.field()), value.clone()));
+        bases.push((ActionKind::Field, Some(value.field()), value.clone()));
     }
     if let Some(state) = observed
         .iter()
         .find(|value| matches!(value, WorkValue::Disposition(_)))
     {
-        bases.push((EffectKind::State, None, state.clone()));
+        bases.push((ActionKind::State, None, state.clone()));
     }
     if !project {
-        bases.push((EffectKind::Delete, None, WorkValue::TaskDeletedAt(None)));
+        bases.push((ActionKind::Delete, None, WorkValue::TaskDeletedAt(None)));
     }
     for (kind, subject, value) in bases {
         let base = PlanningBaseline {
@@ -835,8 +845,8 @@ pub(crate) fn attach_in(
         };
         conn.execute(
             &format!(
-                "UPDATE tracker_effects SET base_json=?4 WHERE {column}=?1 AND kind=?2 AND subject IS ?3
-                 AND base_json IS NULL AND phase IN ('pending','attempted')"
+                "UPDATE tracker_actions SET base_json=?4 WHERE {column}=?1 AND kind=?2 AND subject IS ?3
+                 AND base_json IS NULL AND phase IN ('queued','sent')"
             ),
             params![id, kind.as_str(), subject, serde_json::to_string(&base)?],
         )?;
@@ -860,15 +870,15 @@ pub(crate) fn retain_filing_create_in(
 ) -> StoreResult<()> {
     let id = insert(
         conn,
-        &EffectOwner::Task(task.clone()),
-        EffectKind::Create,
+        &ActionOwner::Task(task.clone()),
+        ActionKind::Create,
         None,
         &serde_json::to_value(baseline)?,
         None,
         Provider::Linear,
     )?;
     conn.execute(
-        "UPDATE tracker_effects SET phase='attempted',attempted_at=?2,
+        "UPDATE tracker_actions SET phase='sent',sent_at=?2,
          error='Historical creation outcome is unknown; awaiting exact provider readback'
          WHERE id=?1",
         params![id, now_unix()],
@@ -886,8 +896,8 @@ pub(crate) fn retain_relation_in(
     target: &str,
 ) -> StoreResult<()> {
     conn.execute(
-        "INSERT OR IGNORE INTO tracker_effects(id,task_id,subject,kind,value_json,phase,provider)
-         SELECT lower(?2),?1,'relation:'||lower(?2),'link',json_object('target',t.id),'pending','linear'
+        "INSERT OR IGNORE INTO tracker_actions(id,task_id,subject,kind,value_json,phase,provider)
+         SELECT lower(?2),?1,'relation:'||lower(?2),'link',json_object('target',t.id),'queued','linear'
          FROM tasks t WHERE (t.id=?3 OR t.external_issue_id=?3 OR t.id='task_'||replace(lower(?3),'-',''))
             AND t.planning_deleted_at IS NULL
             AND NOT EXISTS(SELECT 1 FROM task_events c WHERE c.task_id=?1
@@ -900,17 +910,17 @@ pub(crate) fn retain_relation_in(
 }
 
 /// Unbound local Projects, then Tasks, in `repo` with no live `create`.
-fn uncreated(conn: &Connection, repo: &str) -> StoreResult<Vec<EffectOwner>> {
+fn uncreated(conn: &Connection, repo: &str) -> StoreResult<Vec<ActionOwner>> {
     let mut query = conn.prepare_cached(
         "SELECT 'project',p.id FROM projects p JOIN waves w ON w.id=p.wave_id
          WHERE w.repo=?1 AND p.external_project_id IS NULL
          AND EXISTS(SELECT 1 FROM project_transitions c WHERE c.successor_id=p.id AND c.local_plan_json IS NOT NULL)
-         AND NOT EXISTS(SELECT 1 FROM tracker_effects e WHERE e.project_id=p.id AND e.kind='create' AND e.phase!='retired')
+         AND NOT EXISTS(SELECT 1 FROM tracker_actions e WHERE e.project_id=p.id AND e.kind='create' AND e.phase!='retired')
          UNION ALL
          SELECT 'task',t.id FROM tasks t JOIN repository_plans r ON r.id=t.repository_id
          WHERE r.repo=?1 AND t.external_issue_id IS NULL AND t.planning_deleted_at IS NULL
          AND EXISTS(SELECT 1 FROM task_creation_intents c WHERE c.task_id=t.id)
-         AND NOT EXISTS(SELECT 1 FROM tracker_effects e WHERE e.task_id=t.id AND e.kind='create' AND e.phase!='retired')",
+         AND NOT EXISTS(SELECT 1 FROM tracker_actions e WHERE e.task_id=t.id AND e.kind='create' AND e.phase!='retired')",
     )?;
     let rows = query.query_map([repo], |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
@@ -918,9 +928,9 @@ fn uncreated(conn: &Connection, repo: &str) -> StoreResult<Vec<EffectOwner>> {
     rows.map(|row| {
         let (kind, id) = row?;
         Ok(if kind == "project" {
-            EffectOwner::Project(ProjectId::from_raw(id))
+            ActionOwner::Project(ProjectId::from_raw(id))
         } else {
-            EffectOwner::Task(TaskId::from_raw(id))
+            ActionOwner::Task(TaskId::from_raw(id))
         })
     })
     .collect()
@@ -944,13 +954,13 @@ impl SqliteStore {
             insert(
                 &tx,
                 owner,
-                EffectKind::Create,
+                ActionKind::Create,
                 None,
                 &baseline,
                 None,
                 provider,
             )?;
-            if let EffectOwner::Task(task) = owner {
+            if let ActionOwner::Task(task) = owner {
                 // A creation opens the item; a Task already started or done
                 // before the tracker was connected says so next.
                 let moved = super::planning_write::read(&tx, "tasks", task.as_str())?
@@ -969,7 +979,7 @@ impl SqliteStore {
                     insert(
                         &tx,
                         owner,
-                        EffectKind::State,
+                        ActionKind::State,
                         None,
                         &serde_json::to_value(disposition)?,
                         None,
@@ -993,7 +1003,7 @@ impl SqliteStore {
                     insert(
                         &tx,
                         owner,
-                        EffectKind::Comment,
+                        ActionKind::Comment,
                         Some(&comment),
                         &serde_json::to_value(content)?,
                         None,
@@ -1007,8 +1017,8 @@ impl SqliteStore {
     }
 
     /// Show the Task's pull request in its tracker: `state` is what the PR
-    /// line says (Open, Merged, Abandoned). Returns the effect id, or `None`
-    /// when no bridge carries the Task. A later state replaces an unsent one.
+    /// line says (Open, Merged, Abandoned). Returns the action id, or `None`
+    /// when no tracker carries the Task. A later state replaces an unsent one.
     pub fn enqueue_pr_link(
         &self,
         task: &TaskId,
@@ -1026,8 +1036,8 @@ impl SqliteStore {
         });
         let id = enqueue(
             &tx,
-            &EffectOwner::Task(task.clone()),
-            EffectKind::Link,
+            &ActionOwner::Task(task.clone()),
+            ActionKind::Link,
             Some(&format!("{PR}{url}")),
             &value,
             None,
@@ -1036,118 +1046,118 @@ impl SqliteStore {
         Ok(id)
     }
 
-    /// One effect by id, settled or not.
-    pub fn tracker_effect(&self, id: &str) -> StoreResult<Option<TrackerEffect>> {
+    /// One action by id, resolved or not.
+    pub fn tracker_action(&self, id: &str) -> StoreResult<Option<TrackerAction>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let effect = conn
+        let action = conn
             .query_row(
-                &format!("SELECT {COLUMNS} FROM tracker_effects e WHERE e.id=?1"),
+                &format!("SELECT {COLUMNS} FROM tracker_actions e WHERE e.id=?1"),
                 [id],
-                |row| Ok(read_effect(row)),
+                |row| Ok(read_action(row)),
             )
             .optional()?
             .transpose()?;
-        Ok(effect.and_then(Result::ok))
+        Ok(action.and_then(Result::ok))
     }
 
-    /// Unsettled effects for `repo` in send order.
-    pub fn unsettled_tracker_effects(&self, repo: &str) -> StoreResult<Vec<TrackerEffect>> {
+    /// Unconfirmed actions for `repo` in send order.
+    pub fn unconfirmed_tracker_actions(&self, repo: &str) -> StoreResult<Vec<TrackerAction>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(&format!(
-            "SELECT {COLUMNS} FROM tracker_effects e
-             WHERE e.phase IN ('pending','attempted') AND {IN_REPO} ORDER BY e.seq"
+            "SELECT {COLUMNS} FROM tracker_actions e
+             WHERE e.phase IN ('queued','sent') AND {IN_REPO} ORDER BY e.seq"
         ))?;
         // An owner with a row this lf cannot read waits from that row on, for
         // the lf that wrote it; other owners drain.
         let mut held = std::collections::HashSet::new();
-        let mut effects = Vec::new();
-        for row in query.query_and_then([repo], read_effect)? {
+        let mut actions = Vec::new();
+        for row in query.query_and_then([repo], read_action)? {
             match row? {
-                Ok(effect) if !held.contains(&effect.owner) => effects.push(effect),
+                Ok(action) if !held.contains(&action.owner) => actions.push(action),
                 Ok(_) => {}
                 Err(owner) => {
                     held.insert(owner);
                 }
             }
         }
-        Ok(effects)
+        Ok(actions)
     }
 
-    /// Every effect for one owner, oldest first, settled ones included.
-    pub fn tracker_effects_for(&self, owner: &EffectOwner) -> StoreResult<Vec<TrackerEffect>> {
+    /// Every action for one owner, oldest first, resolved ones included.
+    pub fn tracker_actions_for(&self, owner: &ActionOwner) -> StoreResult<Vec<TrackerAction>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(&format!(
-            "SELECT {COLUMNS} FROM tracker_effects e WHERE e.{}=?1 ORDER BY e.seq",
+            "SELECT {COLUMNS} FROM tracker_actions e WHERE e.{}=?1 ORDER BY e.seq",
             owner.column()
         ))?;
-        let effects = query.query_and_then([owner.id()], read_effect)?;
-        effects
+        let actions = query.query_and_then([owner.id()], read_action)?;
+        actions
             .filter_map(|row| row.map(Result::ok).transpose())
             .collect()
     }
 
-    /// Mark an unsettled effect sent before its request leaves. Returns false
-    /// when it settled meanwhile.
-    pub fn attempt_tracker_effect(&self, id: &str) -> StoreResult<bool> {
+    /// Mark an unconfirmed action sent before its request leaves. Returns false
+    /// when it resolved meanwhile.
+    pub fn attempt_tracker_action(&self, id: &str) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn.execute(
-            "UPDATE tracker_effects SET phase='attempted',attempted_at=?2,error=NULL
-             WHERE id=?1 AND phase IN ('pending','attempted')",
+            "UPDATE tracker_actions SET phase='sent',sent_at=?2,error=NULL
+             WHERE id=?1 AND phase IN ('queued','sent')",
             params![id, now_unix()],
         )? == 1)
     }
 
-    /// A request the provider rejected before acting leaves the effect unsent.
-    pub fn reject_tracker_effect(&self, id: &str, error: &str) -> StoreResult<()> {
+    /// A request the provider rejected before acting leaves the action unsent.
+    pub fn reject_tracker_action(&self, id: &str, error: &str) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "UPDATE tracker_effects SET phase='pending',error=?2 WHERE id=?1 AND phase='attempted'",
+            "UPDATE tracker_actions SET phase='queued',error=?2 WHERE id=?1 AND phase='sent'",
             params![id, error],
         )?;
         Ok(())
     }
 
-    /// Record why the last request did not settle, keeping the phase.
-    pub fn tracker_effect_error(&self, id: &str, error: &str) -> StoreResult<()> {
+    /// Record why the last request did not confirm it, keeping the phase.
+    pub fn tracker_action_error(&self, id: &str, error: &str) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "UPDATE tracker_effects SET error=?2 WHERE id=?1
-             AND phase IN ('pending','attempted') AND error IS NOT ?2",
+            "UPDATE tracker_actions SET error=?2 WHERE id=?1
+             AND phase IN ('queued','sent') AND error IS NOT ?2",
             params![id, error],
         )?;
         Ok(())
     }
 
-    /// Part of a multi-request effect landed: what the provider now holds is
+    /// Part of a multi-request action landed: what the provider now holds is
     /// the base the rest of it, or a lost reply, is judged against.
-    pub fn rebase_tracker_effect(&self, id: &str, base: &Value) -> StoreResult<()> {
+    pub fn rebase_tracker_action(&self, id: &str, base: &Value) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "UPDATE tracker_effects SET base_json=?2 WHERE id=?1 AND phase IN ('pending','attempted')",
+            "UPDATE tracker_actions SET base_json=?2 WHERE id=?1 AND phase IN ('queued','sent')",
             params![id, base.to_string()],
         )?;
         Ok(())
     }
 
-    /// Record a look in the provider for an attempted effect's lost reply.
-    pub fn look_tracker_effect(&self, id: &str, at: i64) -> StoreResult<()> {
+    /// Record a look in the provider for an attempted action's lost reply.
+    pub fn look_tracker_action(&self, id: &str, at: i64) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "UPDATE tracker_effects SET looked_at=?2 WHERE id=?1 AND phase='attempted'",
+            "UPDATE tracker_actions SET looked_at=?2 WHERE id=?1 AND phase='sent'",
             params![id, at],
         )?;
         Ok(())
     }
 
-    pub fn settle_tracker_effect(&self, id: &str, settlement: &Settlement) -> StoreResult<bool> {
+    pub fn resolve_tracker_action(&self, id: &str, resolution: &Resolution) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        settle_in(&conn, id, settlement)
+        resolve_in(&conn, id, resolution)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{EffectKind, EffectOwner, EffectPhase, Settlement};
+    use super::{ActionKind, ActionOwner, ActionPhase, Resolution};
     use crate::provider::Provider;
     use crate::sqlite::SqliteStore;
     use crate::work::edit::WorkValue;
@@ -1189,13 +1199,13 @@ mod tests {
     fn enqueue(
         store: &SqliteStore,
         task: &TaskId,
-        kind: EffectKind,
+        kind: ActionKind,
         subject: &str,
     ) -> Option<String> {
         let conn = store.conn.lock().unwrap();
         super::enqueue(
             &conn,
-            &EffectOwner::Task(task.clone()),
+            &ActionOwner::Task(task.clone()),
             kind,
             Some(subject),
             &json!({"field":"task_title","value":subject}),
@@ -1205,7 +1215,7 @@ mod tests {
     }
 
     #[test]
-    fn a_local_save_queues_what_a_bridge_carries_and_a_tracker_fact_queues_nothing() {
+    fn a_local_save_queues_what_a_tracker_carries_and_a_tracker_fact_queues_nothing() {
         let (_dir, store) = store();
         let task = task(&store, true);
         let save = |origin, values: &[WorkValue]| {
@@ -1229,56 +1239,59 @@ mod tests {
             crate::sqlite::planning_write::WriteOrigin::Tracker,
             &[WorkValue::TaskDescription(Some("Theirs".into()))],
         );
-        let effects: Vec<_> = store
-            .tracker_effects_for(&EffectOwner::Task(task))
+        let actions: Vec<_> = store
+            .tracker_actions_for(&ActionOwner::Task(task))
             .unwrap()
             .into_iter()
-            .map(|effect| (effect.kind, effect.subject))
+            .map(|action| (action.kind, action.subject))
             .collect();
         assert_eq!(
-            effects,
+            actions,
             [
-                (EffectKind::Field, Some("task_title".into())),
-                (EffectKind::Delete, None)
+                (ActionKind::Field, Some("task_title".into())),
+                (ActionKind::Delete, None)
             ]
         );
     }
 
     #[test]
-    fn an_owner_no_bridge_carries_enqueues_nothing() {
+    fn an_owner_no_tracker_carries_enqueues_nothing() {
         let (_dir, store) = store();
         let task = task(&store, false);
         assert_eq!(
-            enqueue(&store, &task, EffectKind::Field, "task_title"),
+            enqueue(&store, &task, ActionKind::Field, "task_title"),
             None
         );
-        assert!(store.unsettled_tracker_effects("/repo").unwrap().is_empty());
+        assert!(store
+            .unconfirmed_tracker_actions("/repo")
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
     fn a_later_save_retires_the_unsent_value_and_keeps_the_attempted_one() {
         let (_dir, store) = store();
         let task = task(&store, true);
-        let sent = enqueue(&store, &task, EffectKind::Field, "task_title").unwrap();
-        assert!(store.attempt_tracker_effect(&sent).unwrap());
-        let unsent = enqueue(&store, &task, EffectKind::Field, "task_title").unwrap();
-        let latest = enqueue(&store, &task, EffectKind::Field, "task_title").unwrap();
-        let comment = enqueue(&store, &task, EffectKind::Comment, "c1").unwrap();
-        let again = enqueue(&store, &task, EffectKind::Comment, "c1").unwrap();
+        let sent = enqueue(&store, &task, ActionKind::Field, "task_title").unwrap();
+        assert!(store.attempt_tracker_action(&sent).unwrap());
+        let unsent = enqueue(&store, &task, ActionKind::Field, "task_title").unwrap();
+        let latest = enqueue(&store, &task, ActionKind::Field, "task_title").unwrap();
+        let comment = enqueue(&store, &task, ActionKind::Comment, "c1").unwrap();
+        let again = enqueue(&store, &task, ActionKind::Comment, "c1").unwrap();
         let phases: Vec<_> = store
-            .tracker_effects_for(&EffectOwner::Task(task))
+            .tracker_actions_for(&ActionOwner::Task(task))
             .unwrap()
             .into_iter()
-            .map(|effect| (effect.id, effect.phase))
+            .map(|action| (action.id, action.phase))
             .collect();
         assert_eq!(
             phases,
             vec![
-                (sent, EffectPhase::Attempted),
-                (unsent, EffectPhase::Retired),
-                (latest, EffectPhase::Pending),
-                (comment, EffectPhase::Pending),
-                (again, EffectPhase::Pending),
+                (sent, ActionPhase::Sent),
+                (unsent, ActionPhase::Retired),
+                (latest, ActionPhase::Queued),
+                (comment, ActionPhase::Queued),
+                (again, ActionPhase::Queued),
             ]
         );
     }
@@ -1301,16 +1314,16 @@ mod tests {
             0,
             "a second pass queues nothing new"
         );
-        let effects = store.unsettled_tracker_effects("/repo").unwrap();
-        assert_eq!(effects.len(), 1);
-        assert_eq!(effects[0].owner, EffectOwner::Task(earlier.clone()));
-        assert_eq!(effects[0].kind, EffectKind::Create);
-        assert_eq!(effects[0].provider, Provider::Asana);
-        assert_eq!(effects[0].value[0]["field"], "task_title");
-        // The creating owner now carries later edits to the same bridge.
-        assert!(enqueue(&store, &earlier, EffectKind::Field, "task_title").is_some());
+        let actions = store.unconfirmed_tracker_actions("/repo").unwrap();
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].owner, ActionOwner::Task(earlier.clone()));
+        assert_eq!(actions[0].kind, ActionKind::Create);
+        assert_eq!(actions[0].provider, Provider::Asana);
+        assert_eq!(actions[0].value[0]["field"], "task_title");
+        // The creating owner now carries later edits to the same tracker.
+        assert!(enqueue(&store, &earlier, ActionKind::Field, "task_title").is_some());
         assert!(store
-            .tracker_effects_for(&EffectOwner::Task(bound))
+            .tracker_actions_for(&ActionOwner::Task(bound))
             .unwrap()
             .is_empty());
     }
@@ -1332,16 +1345,16 @@ mod tests {
         store
             .enqueue_tracker_creations("/repo", Provider::Linear)
             .unwrap();
-        let kinds = |task: &TaskId| -> Vec<EffectKind> {
+        let kinds = |task: &TaskId| -> Vec<ActionKind> {
             store
-                .tracker_effects_for(&EffectOwner::Task(task.clone()))
+                .tracker_actions_for(&ActionOwner::Task(task.clone()))
                 .unwrap()
                 .into_iter()
-                .map(|effect| effect.kind)
+                .map(|action| action.kind)
                 .collect()
         };
-        assert_eq!(kinds(&done), [EffectKind::Create, EffectKind::State]);
-        assert_eq!(kinds(&open), [EffectKind::Create]);
+        assert_eq!(kinds(&done), [ActionKind::Create, ActionKind::State]);
+        assert_eq!(kinds(&open), [ActionKind::Create]);
     }
 
     #[test]
@@ -1362,39 +1375,42 @@ mod tests {
             .unwrap();
         }
         let phases: Vec<_> = store
-            .tracker_effects_for(&EffectOwner::Task(task))
+            .tracker_actions_for(&ActionOwner::Task(task))
             .unwrap()
             .into_iter()
-            .map(|effect| (effect.kind, effect.phase))
+            .map(|action| (action.kind, action.phase))
             .collect();
-        assert_eq!(phases, [(EffectKind::Create, EffectPhase::Retired)]);
+        assert_eq!(phases, [(ActionKind::Create, ActionPhase::Retired)]);
     }
 
     #[test]
-    fn a_settled_effect_leaves_the_queue_and_keeps_its_answer() {
+    fn a_resolved_action_leaves_the_queue_and_keeps_its_answer() {
         let (_dir, store) = store();
         let task = task(&store, true);
-        let id = enqueue(&store, &task, EffectKind::Field, "task_title").unwrap();
+        let id = enqueue(&store, &task, ActionKind::Field, "task_title").unwrap();
         assert!(store
-            .settle_tracker_effect(
+            .resolve_tracker_action(
                 &id,
-                &Settlement::Adopt {
+                &Resolution::Conflicted {
                     remote: json!("theirs")
                 }
             )
             .unwrap());
         assert!(!store
-            .settle_tracker_effect(
+            .resolve_tracker_action(
                 &id,
-                &Settlement::Retire {
+                &Resolution::Retire {
                     reason: "late".into()
                 }
             )
             .unwrap());
-        assert!(store.unsettled_tracker_effects("/repo").unwrap().is_empty());
-        let effect = &store.tracker_effects_for(&EffectOwner::Task(task)).unwrap()[0];
-        assert_eq!(effect.phase, EffectPhase::Acknowledged);
-        assert_eq!(effect.conflict, Some(json!("theirs")));
+        assert!(store
+            .unconfirmed_tracker_actions("/repo")
+            .unwrap()
+            .is_empty());
+        let action = &store.tracker_actions_for(&ActionOwner::Task(task)).unwrap()[0];
+        assert_eq!(action.phase, ActionPhase::Conflicted);
+        assert_eq!(action.conflict, Some(json!("theirs")));
     }
 }
 
@@ -1410,41 +1426,41 @@ mod upgrade_tests {
     }
 
     #[test]
-    fn tracker_effects_upgrade_moves_every_unsettled_receipt_once() {
+    fn tracker_actions_upgrade_moves_every_unconfirmed_receipt_once() {
         let conn = Connection::open_in_memory().unwrap();
         let observers = crate::test_fixture::observers();
         let build = crate::test_fixture::build();
-        apply_before_migration(&observers, &build, &conn, "tracker_effects");
+        apply_before_migration(&observers, &build, &conn, "tracker_actions");
         conn.execute_batch(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/tests/fixtures/migrations/tracker_effects.sql"
+            "/tests/fixtures/migrations/tracker_actions.sql"
         )))
         .unwrap();
-        upgrade_from_migration(&observers, &build, &conn, "tracker_effects");
+        upgrade_from_migration(&observers, &build, &conn, "tracker_actions");
         assert_eq!(
             rows(
                 &conn,
                 "SELECT coalesce(project_id,task_id)||' '||kind||' '||coalesce(subject,'-')||' '||phase||' '||provider
-                 FROM tracker_effects ORDER BY seq"
+                 FROM tracker_actions ORDER BY seq"
             ),
             [
-                "project-new create - attempted linear",
-                "project-new link initiative pending linear",
-                "task-new create - attempted linear",
-                "task-bound field task_title attempted linear",
-                "task-bound field task_title pending linear",
-                "task-bound delete - pending linear",
-                "project-bound field project_name pending linear",
-                "project-bound order - attempted linear",
-                "task-bound state - pending linear",
-                "task-bound comment comment-proof attempted linear",
-                "task-bound link relation:0b7c8f0e-1d2a-4e3b-9c4d-5e6f7a8b9c0d pending linear",
+                "project-new create - sent linear",
+                "project-new link initiative queued linear",
+                "task-new create - sent linear",
+                "task-bound field task_title sent linear",
+                "task-bound field task_title queued linear",
+                "task-bound delete - queued linear",
+                "project-bound field project_name queued linear",
+                "project-bound order - sent linear",
+                "task-bound state - queued linear",
+                "task-bound comment comment-proof sent linear",
+                "task-bound link relation:0b7c8f0e-1d2a-4e3b-9c4d-5e6f7a8b9c0d queued linear",
             ]
         );
         assert_eq!(
             rows(
                 &conn,
-                "SELECT value_json FROM tracker_effects WHERE kind IN ('create','state','comment') ORDER BY seq"
+                "SELECT value_json FROM tracker_actions WHERE kind IN ('create','state','comment') ORDER BY seq"
             )[1..],
             [
                 r#"[{"field":"task_title","value":"New"}]"#,

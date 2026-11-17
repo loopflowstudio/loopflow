@@ -334,8 +334,8 @@ mod tests {
         )
         .unwrap();
         conn.execute(
-            "INSERT INTO tracker_effects(id,task_id,kind,value_json,phase,provider,error)
-             VALUES(?1,?2,'state','{}','attempted','linear','rate limited')",
+            "INSERT INTO tracker_actions(id,task_id,kind,value_json,phase,provider,error)
+             VALUES(?1,?2,'state','{}','sent','linear','rate limited')",
             params![delivery, task.as_str()],
         )
         .unwrap();
@@ -378,7 +378,7 @@ mod tests {
         assert_eq!(
             planning_moved(
                 &conn,
-                "UPDATE tracker_effects SET error='rate limited' WHERE id=?1",
+                "UPDATE tracker_actions SET error='rate limited' WHERE id=?1",
                 &delivery
             ),
             0,
@@ -387,7 +387,7 @@ mod tests {
         assert_eq!(
             planning_moved(
                 &conn,
-                "UPDATE tracker_effects SET error='denied' WHERE id=?1",
+                "UPDATE tracker_actions SET error='denied' WHERE id=?1",
                 &delivery
             ),
             1,
@@ -422,7 +422,7 @@ mod tests {
             "tasks",
             "task_changes",
             "task_state_deliveries",
-            "tracker_effects",
+            "tracker_actions",
         ] {
             let trigger: String = conn
                 .query_row(

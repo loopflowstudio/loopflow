@@ -1031,7 +1031,7 @@ impl SkillExecutor for &RunningGraph<'_> {
         if let Some(step) = self.stopped_landing()? {
             return Ok(SkillOutcome::Unapproved(step));
         }
-        loopflow_execution::ops::tracker_observe::sync_repository(
+        loopflow_execution::ops::tracker_events::sync_repository(
             &self.store,
             &self.cwd.to_string_lossy(),
         )
@@ -1145,7 +1145,7 @@ impl SkillExecutor for &RunningGraph<'_> {
         if let Some(step) = self.stopped_landing()? {
             return Ok(SkillOutcome::Unapproved(step));
         }
-        loopflow_execution::ops::tracker_observe::sync_repository(
+        loopflow_execution::ops::tracker_events::sync_repository(
             &self.store,
             &self.cwd.to_string_lossy(),
         )

@@ -1,4 +1,4 @@
--- Released receipts, one unsettled row of each kind, plus rows the queue drops.
+-- Released receipts, one unconfirmed row of each kind, plus rows the queue drops.
 INSERT INTO repository_plans(id,repo,selected) VALUES('repo-proof','/repo',1);
 INSERT INTO waves(id,name,repo,created_at) VALUES('wave-proof','proof','/repo',1);
 INSERT INTO projects(id,wave_id,external_project_id,created_at,project_name,status)

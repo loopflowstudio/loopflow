@@ -1,7 +1,7 @@
 //! The planning write boundary shared by local operations, tracker
 //! observations and Git imports. Callers own their transaction; this writer
 //! changes planning columns, journals local and tracker writes for Git peers,
-//! and queues a tracker effect for each value a local write changed.
+//! and queues a tracker action for each value a local write changed.
 use crate::planning_exchange::PlanningMutation;
 use crate::work::edit::{CommentContent, Disposition, WorkEdit, WorkValue};
 use crate::{StoreError, StoreResult};
@@ -223,7 +223,7 @@ fn read_record(
     decode(rows.next()?.ok_or(StoreError::NotFound)?)
 }
 
-/// `queue`: whether a `Local` write's changes are effects. A record created in
+/// `queue`: whether a `Local` write's changes are actions. A record created in
 /// this write is not edited by it: its tracker learns it through `create`.
 fn write_record(
     conn: &Connection,
@@ -302,7 +302,7 @@ fn write_record(
     }
     if origin == WriteOrigin::Local && queue {
         for change in changes {
-            super::tracker_effects::enqueue_local(conn, table, id, change)?;
+            super::tracker_actions::enqueue_local(conn, table, id, change)?;
         }
     }
     if matches!(origin, WriteOrigin::Local | WriteOrigin::Tracker) {
@@ -549,12 +549,12 @@ pub(crate) fn write(
 }
 
 /// Save local Work in the caller's transaction, including its causal identity
-/// and the tracker effects it asks for.
+/// and the tracker actions it asks for.
 pub(crate) fn local(conn: &Connection, edits: &[WorkEdit]) -> StoreResult<bool> {
     write(conn, edits, WriteOrigin::Local)
 }
 
-/// Save what the tracker holds, which it needs no effect to learn.
+/// Save what the tracker holds, which it needs no action to learn.
 pub(crate) fn tracker(conn: &Connection, edits: &[WorkEdit]) -> StoreResult<bool> {
     write(conn, edits, WriteOrigin::Tracker)
 }
@@ -582,7 +582,7 @@ pub(crate) fn create(
                 // already holds it. A new Task or Project is a `create`.
                 if origin == WriteOrigin::Local && table == "task_comments" {
                     for value in values {
-                        super::tracker_effects::enqueue_local(conn, table, id, &value.change)?;
+                        super::tracker_actions::enqueue_local(conn, table, id, &value.change)?;
                     }
                 }
             }
@@ -1022,7 +1022,7 @@ mod tests {
                 "session_events",
                 "session_activity",
                 "task_graphs",
-                "tracker_effects",
+                "tracker_actions",
             ]
             .into_iter()
             .map(|table| {
@@ -1121,9 +1121,9 @@ mod tests {
             )
         );
         // A Git peer's decision reaches this store through the journal, never
-        // as a tracker effect of its own.
+        // as a tracker action of its own.
         assert_eq!(
-            conn.query_row("SELECT count(*) FROM tracker_effects", [], |r| r
+            conn.query_row("SELECT count(*) FROM tracker_actions", [], |r| r
                 .get::<_, i64>(0))
                 .unwrap(),
             0

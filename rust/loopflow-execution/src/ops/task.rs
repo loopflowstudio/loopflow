@@ -1837,7 +1837,7 @@ pub fn task_create(
             super::planning_sync::sync_after_save(
                 &store,
                 &main.to_string_lossy(),
-                &loopflow_storage::sqlite::tracker_effects::EffectOwner::Task(task.id.clone()),
+                &loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task.id.clone()),
             )
             .await;
             return store
@@ -1891,7 +1891,7 @@ pub fn task_create(
         super::planning_sync::sync_after_save(
             &store,
             &main.to_string_lossy(),
-            &loopflow_storage::sqlite::tracker_effects::EffectOwner::Task(task.id.clone()),
+            &loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task.id.clone()),
         )
         .await;
         store
@@ -2125,7 +2125,7 @@ pub struct TaskStatus {
 pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
     block_on_task(async {
         let store = task_store().await?;
-        super::tracker_observe::sync_repository(&store, &repo.to_string_lossy()).await;
+        super::tracker_events::sync_repository(&store, &repo.to_string_lossy()).await;
         let mut task = match issue {
             Some(issue) => {
                 super::planning_sync::find_task(&store, &repo.to_string_lossy(), issue).await?
@@ -2299,7 +2299,7 @@ pub fn task_reopen(issue: &str, note: Option<&str>) -> OpsResult<Task> {
         super::planning_sync::sync_after_save(
             &store,
             &repo.to_string_lossy(),
-            &loopflow_storage::sqlite::tracker_effects::EffectOwner::Task(task.id.clone()),
+            &loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task.id.clone()),
         )
         .await;
         Ok(task)
@@ -2337,7 +2337,7 @@ pub fn task_sync(issue: &str, retry_updates: bool) -> OpsResult<String> {
             ));
         };
         // The person's explicit look: an uncertain reply is looked for now, and
-        // with `--retry-updates` an attempted effect the provider lacks is resent.
+        // with `--retry-updates` an attempted action the provider lacks is resent.
         let bound = super::tracker::drain::Bound {
             windows: !retry_updates,
             ..super::tracker::drain::Bound::NOW
@@ -2345,8 +2345,8 @@ pub fn task_sync(issue: &str, retry_updates: bool) -> OpsResult<String> {
         let project = task
             .project_id
             .clone()
-            .map(loopflow_storage::sqlite::tracker_effects::EffectOwner::Project);
-        let owner = loopflow_storage::sqlite::tracker_effects::EffectOwner::Task(task.id.clone());
+            .map(loopflow_storage::sqlite::tracker_actions::ActionOwner::Project);
+        let owner = loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task.id.clone());
         for owner in project.iter().chain([&owner]) {
             super::tracker::drain::drain_repository(
                 &store,
@@ -2447,7 +2447,7 @@ async fn settle_completion(store: &SharedStore, task: &mut Task, request: i64) -
         super::planning_sync::sync_after_save(
             store,
             &repo.to_string_lossy(),
-            &loopflow_storage::sqlite::tracker_effects::EffectOwner::Task(task.id.clone()),
+            &loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task.id.clone()),
         )
         .await;
         // Cleanup retains live work and unpublished artifacts independently of status.
@@ -2474,9 +2474,9 @@ fn pr_link_state_label(pr: &TaskPr) -> String {
 }
 
 /// Show the PR on the Task's tracker item: a queued `link`, drained now with
-/// the Task first. A link that has not settled leaves its reason in
+/// the Task first. A link that has not resolved leaves its reason in
 /// `linear_link_error` and the GitHub result intact; the next pass retries it.
-/// Does nothing for a PR with no GitHub URL yet or a Task no bridge carries.
+/// Does nothing for a PR with no GitHub URL yet or a Task no tracker carries.
 pub(super) async fn link_pr_to_planning(store: &SharedStore, task: &Task, pr: &mut TaskPr) {
     let Some(github) = pr.github().cloned() else {
         return;
@@ -2496,7 +2496,7 @@ pub(super) async fn link_pr_to_planning(store: &SharedStore, task: &Task, pr: &m
         else {
             return Ok(None);
         };
-        let owner = loopflow_storage::sqlite::tracker_effects::EffectOwner::Task(task.id.clone());
+        let owner = loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task.id.clone());
         super::tracker::drain::drain_repository(
             store,
             &repo.to_string_lossy(),
@@ -2504,15 +2504,18 @@ pub(super) async fn link_pr_to_planning(store: &SharedStore, task: &Task, pr: &m
             super::tracker::drain::Bound::PASS,
         )
         .await?;
-        let effect = store.sqlite.tracker_effect(&id).map_err(task_error)?;
-        Ok::<_, OpsError>(match effect {
-            Some(effect)
-                if effect.phase
-                    == loopflow_storage::sqlite::tracker_effects::EffectPhase::Acknowledged =>
+        let action = store.sqlite.tracker_action(&id).map_err(task_error)?;
+        Ok::<_, OpsError>(match action {
+            Some(action)
+                if matches!(
+                    action.phase,
+                    loopflow_storage::sqlite::tracker_actions::ActionPhase::Confirmed
+                        | loopflow_storage::sqlite::tracker_actions::ActionPhase::Conflicted
+                ) =>
             {
                 None
             }
-            Some(effect) => Some(effect.error.unwrap_or_else(|| {
+            Some(action) => Some(action.error.unwrap_or_else(|| {
                 "PR link is waiting to be sent; `lf repo plan` lists it".into()
             })),
             None => None,
@@ -2646,7 +2649,7 @@ pub fn task_edit(
         super::planning_sync::sync_after_save(
             &store,
             &repository_for_task(&store, &task)?.to_string_lossy(),
-            &loopflow_storage::sqlite::tracker_effects::EffectOwner::Task(task.id.clone()),
+            &loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task.id.clone()),
         )
         .await;
         Ok(TaskEdit {
@@ -2699,7 +2702,7 @@ pub fn task_move_membership(repo: &Path, issue: &str, wave: Option<&str>) -> Ops
         super::planning_sync::sync_after_save(
             &store,
             &repository_for_task(&store, &task)?.to_string_lossy(),
-            &loopflow_storage::sqlite::tracker_effects::EffectOwner::Task(task.id.clone()),
+            &loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task.id.clone()),
         )
         .await;
         Ok(TaskEdit {
@@ -2982,7 +2985,7 @@ pub(crate) async fn task_comment_async(
     let refresh_error = if message.is_none() && task.linear_id.is_some() {
         match tokio::time::timeout(
             std::time::Duration::from_secs(5),
-            super::tracker_observe::refresh_task_comments(&store, &task),
+            super::tracker_events::refresh_task_comments(&store, &task),
         )
         .await
         {
@@ -3010,7 +3013,7 @@ pub(crate) async fn append_task_comment_async(
     super::planning_sync::sync_after_save(
         store,
         &repository_for_task(store, task)?.to_string_lossy(),
-        &loopflow_storage::sqlite::tracker_effects::EffectOwner::Task(task.id.clone()),
+        &loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task.id.clone()),
     )
     .await;
     Ok(id)

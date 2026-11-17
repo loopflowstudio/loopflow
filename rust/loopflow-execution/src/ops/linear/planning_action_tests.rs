@@ -1,17 +1,17 @@
 //! Lost replies and conflicts on the Linear stand-in, end to end through the
-//! queue: a save, a send whose reply is lost, and the look that settles it.
+//! queue: a save, a send whose reply is lost, and the look that confirms it.
 
 use std::path::Path;
 
 use super::{mark_issue_updated, with_planning_task};
 use crate::store::Store;
-use loopflow_storage::sqlite::tracker_effects::{
-    EffectKind, EffectOwner, EffectPhase, TrackerEffect,
+use loopflow_storage::sqlite::tracker_actions::{
+    ActionKind, ActionOwner, ActionPhase, TrackerAction,
 };
 use loopflow_storage::work::task::{Task, TaskUpdate};
 
 async fn deliver(store: &Store, repo: &Path, task: &Task) {
-    let owner = EffectOwner::Task(task.id.clone());
+    let owner = ActionOwner::Task(task.id.clone());
     crate::ops::tracker::drain::drain_repository(
         store,
         &repo.to_string_lossy(),
@@ -37,13 +37,13 @@ fn rename(store: &Store, task: &Task, title: &str) {
         .unwrap();
 }
 
-fn effect(store: &Store, task: &Task, kind: EffectKind) -> TrackerEffect {
+fn action(store: &Store, task: &Task, kind: ActionKind) -> TrackerAction {
     store
         .sqlite
-        .tracker_effects_for(&EffectOwner::Task(task.id.clone()))
+        .tracker_actions_for(&ActionOwner::Task(task.id.clone()))
         .unwrap()
         .into_iter()
-        .rfind(|effect| effect.kind == kind)
+        .rfind(|action| action.kind == kind)
         .unwrap()
 }
 
@@ -54,14 +54,14 @@ fn a_lost_field_reply_is_found_by_one_look_and_not_sent_again() {
             state.lock().await.field_reply_lost = true;
             rename(&fixture.store, task, "Renamed");
             deliver(&fixture.store, repo, task).await;
-            let sent = effect(&fixture.store, task, EffectKind::Field);
-            assert_eq!(sent.phase, EffectPhase::Attempted);
+            let sent = action(&fixture.store, task, ActionKind::Field);
+            assert_eq!(sent.phase, ActionPhase::Sent);
             state.lock().await.field_reads_blocked = false;
             deliver(&fixture.store, repo, task).await;
             assert_eq!(state.lock().await.field_writes, 1);
-            let settled = effect(&fixture.store, task, EffectKind::Field);
-            assert_eq!(settled.phase, EffectPhase::Acknowledged);
-            assert_eq!(settled.conflict, None);
+            let resolved = action(&fixture.store, task, ActionKind::Field);
+            assert_eq!(resolved.phase, ActionPhase::Confirmed);
+            assert_eq!(resolved.conflict, None);
         });
     });
 }
@@ -81,10 +81,10 @@ fn a_coworkers_newer_edit_wins_and_the_losing_value_stays_visible() {
             }
             deliver(&fixture.store, repo, task).await;
             assert_eq!(state.lock().await.field_writes, 1);
-            let settled = effect(&fixture.store, task, EffectKind::Field);
-            assert_eq!(settled.phase, EffectPhase::Acknowledged);
-            assert_eq!(settled.value["value"], "Mine");
-            assert_eq!(settled.conflict.unwrap()["value"]["value"], "Theirs");
+            let resolved = action(&fixture.store, task, ActionKind::Field);
+            assert_eq!(resolved.phase, ActionPhase::Conflicted);
+            assert_eq!(resolved.value["value"], "Mine");
+            assert_eq!(resolved.conflict.unwrap()["value"]["value"], "Theirs");
             let saved = fixture.store.sqlite.task(&task.id).unwrap().unwrap();
             assert_eq!(saved.title, "Theirs");
         });
@@ -99,8 +99,8 @@ fn a_deletion_restored_in_linear_after_a_lost_reply_retires() {
             fixture.store.sqlite.delete_task(&task.id).unwrap();
             deliver(&fixture.store, repo, task).await;
             assert_eq!(
-                effect(&fixture.store, task, EffectKind::Delete).phase,
-                EffectPhase::Attempted
+                action(&fixture.store, task, ActionKind::Delete).phase,
+                ActionPhase::Sent
             );
             {
                 let mut provider = state.lock().await;
@@ -110,8 +110,8 @@ fn a_deletion_restored_in_linear_after_a_lost_reply_retires() {
             deliver(&fixture.store, repo, task).await;
             assert_eq!(state.lock().await.deletion_writes, 1);
             assert_eq!(
-                effect(&fixture.store, task, EffectKind::Delete).phase,
-                EffectPhase::Retired
+                action(&fixture.store, task, ActionKind::Delete).phase,
+                ActionPhase::Retired
             );
         });
     });

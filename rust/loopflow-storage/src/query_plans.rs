@@ -496,7 +496,7 @@ mod tests {
                 store
                     .enqueue_tracker_creations("/elsewhere", crate::provider::Provider::Linear)
                     .unwrap();
-                store.unsettled_tracker_effects("/elsewhere").unwrap();
+                store.unconfirmed_tracker_actions("/elsewhere").unwrap();
             })
         });
         let scans = growing_scans(&store, &traced);

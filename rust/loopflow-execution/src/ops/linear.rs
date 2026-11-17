@@ -714,7 +714,7 @@ pub(crate) async fn inspect_task_planning_async(
         || (existing.state == PlanningState::Available
             && refresh == LinearRefresh::Auto
             && (age.is_some_and(|age| age < LINEAR_SOFT_STALE_SECS)
-                || super::tracker_observe::team_current(&store, &scope).await))
+                || super::tracker_events::team_current(&store, &scope).await))
     {
         return Ok(TaskPlanningInspection {
             observation: existing,

@@ -1,9 +1,9 @@
 //! Rank edits reorder siblings within a Project or the repository's standalone
-//! Tasks. A Project's new order is one `order` effect: the desired list, which
-//! its bridge turns into moves against the provider's complete list.
+//! Tasks. A Project's new order is one `order` action: the desired list, which
+//! its tracker turns into moves against the provider's complete list.
 
 use super::planning_write::{self, WriteOrigin};
-use super::tracker_effects::{self, EffectKind, EffectOwner};
+use super::tracker_actions::{self, ActionKind, ActionOwner};
 use crate::work::edit::WorkValue as Edit;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::json;
@@ -30,10 +30,10 @@ pub(super) fn reorder_in(conn: &Connection, task: &Task, rank: u32) -> StoreResu
     if previous != desired {
         if let Some(project) = project {
             let base = observed_order(conn, project)?.map(|value| json!({"value":value}));
-            tracker_effects::enqueue(
+            tracker_actions::enqueue(
                 conn,
-                &EffectOwner::Project(project.clone()),
-                EffectKind::Order,
+                &ActionOwner::Project(project.clone()),
+                ActionKind::Order,
                 None,
                 &json!(desired),
                 base.as_ref(),
@@ -93,27 +93,27 @@ pub(crate) fn observe_in(
         params![repo, "linear", external, serde_json::to_string(&observed)?],
     )?;
     // The provider's complete list answers an attempted order the way the
-    // drain's look would; the newest unsettled order is local intent.
-    for effect in unsettled_orders(conn, project)? {
-        if effect.phase == tracker_effects::EffectPhase::Attempted {
+    // drain's look would; the newest unconfirmed order is local intent.
+    for action in unconfirmed_orders(conn, project)? {
+        if action.phase == tracker_actions::ActionPhase::Sent {
             let seen = crate::planning::rules::Observed {
                 order: Some(observed.clone()),
                 ..Default::default()
             };
-            if let crate::planning::rules::Decision::Settle(settlement) =
-                crate::planning::rules::decide(&effect, Some(&seen), false)
+            if let crate::planning::rules::Decision::Resolve(resolution) =
+                crate::planning::rules::decide(&action, Some(&seen), false)
             {
-                tracker_effects::settle_in(conn, &effect.id, &settlement)?;
+                tracker_actions::resolve_in(conn, &action.id, &resolution)?;
             }
         }
     }
-    let pending = unsettled_orders(conn, project)?.pop();
+    let pending = unconfirmed_orders(conn, project)?.pop();
     let order = match pending {
-        Some(effect) => include_members(
+        Some(action) => include_members(
             &current_members(
                 conn,
                 project,
-                &serde_json::from_value::<Vec<String>>(effect.value)?,
+                &serde_json::from_value::<Vec<String>>(action.value)?,
             )?,
             &observed,
         ),
@@ -123,14 +123,14 @@ pub(crate) fn observe_in(
     Ok(true)
 }
 
-fn unsettled_orders(
+fn unconfirmed_orders(
     conn: &Connection,
     project: &ProjectId,
-) -> StoreResult<Vec<tracker_effects::TrackerEffect>> {
+) -> StoreResult<Vec<tracker_actions::TrackerAction>> {
     Ok(
-        tracker_effects::unsettled_for_in(conn, &EffectOwner::Project(project.clone()))?
+        tracker_actions::unconfirmed_for_in(conn, &ActionOwner::Project(project.clone()))?
             .into_iter()
-            .filter(|effect| effect.kind == EffectKind::Order)
+            .filter(|action| action.kind == ActionKind::Order)
             .collect(),
     )
 }

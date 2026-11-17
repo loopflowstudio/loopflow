@@ -1,6 +1,6 @@
-//! Linear's half of the tracker queue. Each effect, in store words, becomes
+//! Linear's half of the tracker queue. Each action, in store words, becomes
 //! the GraphQL request that carries it, and a look reads its owner back. This
-//! is the only place an effect turns into Linear input (`teamId`, `stateId`,
+//! is the only place an action turns into Linear input (`teamId`, `stateId`,
 //! `assigneeId`, sort keys).
 
 use std::path::Path;
@@ -18,47 +18,47 @@ use loopflow_model::durable::{ProjectId, TaskId};
 use loopflow_model::id::WaveId;
 use loopflow_storage::planning::rules::Observed;
 use loopflow_storage::planning::{StateHistory, TrackerProject};
-use loopflow_storage::sqlite::tracker_effects::{
-    EffectKind, EffectOwner, EffectPhase, TaskLink, TrackerEffect,
+use loopflow_storage::sqlite::tracker_actions::{
+    ActionKind, ActionOwner, ActionPhase, TaskLink, TrackerAction,
 };
 use loopflow_storage::work::edit::WorkValue;
 
 impl LinearClient {
-    pub(crate) async fn send_effect(
+    pub(crate) async fn send_action(
         &self,
         store: &Store,
         repo: &Path,
-        effect: &TrackerEffect,
+        action: &TrackerAction,
     ) -> Sent {
-        let sent = match (&effect.owner, effect.kind) {
-            (EffectOwner::Task(task), EffectKind::Create) => {
-                self.create_task(store, repo, task, effect).await
+        let sent = match (&action.owner, action.kind) {
+            (ActionOwner::Task(task), ActionKind::Create) => {
+                self.create_task(store, repo, task, action).await
             }
-            (EffectOwner::Project(project), EffectKind::Create) => {
-                self.create_project(store, repo, project, effect).await
+            (ActionOwner::Project(project), ActionKind::Create) => {
+                self.create_project(store, repo, project, action).await
             }
-            (EffectOwner::Task(task), EffectKind::Field) => {
-                self.task_field(store, repo, task, effect).await
+            (ActionOwner::Task(task), ActionKind::Field) => {
+                self.task_field(store, repo, task, action).await
             }
-            (EffectOwner::Project(project), EffectKind::Field) => {
-                self.project_field(store, repo, project, effect).await
+            (ActionOwner::Project(project), ActionKind::Field) => {
+                self.project_field(store, repo, project, action).await
             }
-            (EffectOwner::Task(task), EffectKind::State) => self.state(store, task, effect).await,
-            (EffectOwner::Task(task), EffectKind::Comment) => {
-                self.task_comment(store, task, effect).await
+            (ActionOwner::Task(task), ActionKind::State) => self.state(store, task, action).await,
+            (ActionOwner::Task(task), ActionKind::Comment) => {
+                self.task_comment(store, task, action).await
             }
-            (EffectOwner::Task(task), EffectKind::Delete) => self.delete(store, task).await,
-            (EffectOwner::Project(project), EffectKind::Order) => {
-                self.order(store, project, effect).await
+            (ActionOwner::Task(task), ActionKind::Delete) => self.delete(store, task).await,
+            (ActionOwner::Project(project), ActionKind::Order) => {
+                self.order(store, project, action).await
             }
-            (EffectOwner::Project(project), EffectKind::Link) => {
+            (ActionOwner::Project(project), ActionKind::Link) => {
                 self.link(store, repo, project).await
             }
-            (EffectOwner::Task(task), EffectKind::Link) => {
-                self.task_link(store, task, effect).await
+            (ActionOwner::Task(task), ActionKind::Link) => {
+                self.task_link(store, task, action).await
             }
             (owner, kind) => Err(message(format!(
-                "Linear carries no {} effect for {owner:?}",
+                "Linear carries no {} action for {owner:?}",
                 kind.as_str()
             ))),
         };
@@ -66,29 +66,29 @@ impl LinearClient {
         sent.unwrap_or_else(|error| Sent::Rejected(error.to_string()))
     }
 
-    pub(crate) async fn look_effect(
+    pub(crate) async fn look_action(
         &self,
         store: &Store,
         repo: &Path,
-        effect: &TrackerEffect,
+        action: &TrackerAction,
     ) -> Result<Option<Observed>, String> {
-        let observed = match (&effect.owner, effect.kind) {
-            (EffectOwner::Task(task), EffectKind::Create) => {
+        let observed = match (&action.owner, action.kind) {
+            (ActionOwner::Task(task), ActionKind::Create) => {
                 self.look_created_task(store, repo, task).await
             }
-            (EffectOwner::Project(project), EffectKind::Create) => {
+            (ActionOwner::Project(project), ActionKind::Create) => {
                 self.look_created_project(store, repo, project).await
             }
-            (EffectOwner::Task(task), EffectKind::Delete) => {
+            (ActionOwner::Task(task), ActionKind::Delete) => {
                 self.look_deletion(store, repo, task).await
             }
-            (EffectOwner::Task(task), EffectKind::Comment) => self.look_comments(store, task).await,
-            (EffectOwner::Task(task), _) => self.look_task(store, repo, task, effect).await,
-            (EffectOwner::Project(project), EffectKind::Order) => {
+            (ActionOwner::Task(task), ActionKind::Comment) => self.look_comments(store, task).await,
+            (ActionOwner::Task(task), _) => self.look_task(store, repo, task, action).await,
+            (ActionOwner::Project(project), ActionKind::Order) => {
                 self.look_order(store, repo, project).await
             }
-            (EffectOwner::Project(project), _) => self.look_project(store, repo, project).await,
-            (EffectOwner::Wave(_), _) => Err(message("Linear Initiatives are not queued")),
+            (ActionOwner::Project(project), _) => self.look_project(store, repo, project).await,
+            (ActionOwner::Wave(_), _) => Err(message("Linear Initiatives are not queued")),
         };
         observed.map_err(|error| error.to_string())
     }
@@ -100,11 +100,11 @@ impl LinearClient {
         store: &Store,
         repo: &Path,
         task: &TaskId,
-        effect: &TrackerEffect,
+        action: &TrackerAction,
     ) -> OpsResult<Sent> {
         let team = repository_scope(repo)?;
         let mut input = json!({"id": creation_id(task.as_str())?, "teamId": team});
-        for value in values(effect)? {
+        for value in values(action)? {
             match value {
                 WorkValue::TaskTitle(title) => input["title"] = json!(title),
                 WorkValue::TaskDescription(description) => {
@@ -138,14 +138,14 @@ impl LinearClient {
         store: &Store,
         repo: &Path,
         project: &ProjectId,
-        effect: &TrackerEffect,
+        action: &TrackerAction,
     ) -> OpsResult<Sent> {
         let (wave, initiative) = project_scope(store, repo, project).await?;
         let team = repository_scope(repo)?;
         let id = creation_id(project.as_str())?;
         let mut input = json!({"id": id, "teamIds": [team], "useDefaultTemplate": false});
         let (mut description, mut krs, mut targets) = (String::new(), Vec::new(), Vec::new());
-        for value in values(effect)? {
+        for value in values(action)? {
             match value {
                 WorkValue::ProjectName(name) => input["name"] = json!(name),
                 WorkValue::ProjectSummary(summary) => input["description"] = json!(summary),
@@ -211,10 +211,10 @@ impl LinearClient {
         store: &Store,
         repo: &Path,
         task: &TaskId,
-        effect: &TrackerEffect,
+        action: &TrackerAction,
     ) -> OpsResult<Sent> {
         let external = remote_task(store, task).await?;
-        let input = match value(effect)? {
+        let input = match value(action)? {
             WorkValue::TaskTitle(title) => json!({"title": title}),
             WorkValue::TaskDescription(description) => json!({"description": description}),
             WorkValue::TaskAssignee(assignee) => json!({"assigneeId": assignee}),
@@ -240,7 +240,7 @@ impl LinearClient {
         store: &Store,
         repo: &Path,
         project: &ProjectId,
-        effect: &TrackerEffect,
+        action: &TrackerAction,
     ) -> OpsResult<Sent> {
         let external = remote_project(store, project).await?;
         // Prose, KRs and targets share the Project's one content document.
@@ -249,7 +249,7 @@ impl LinearClient {
             .await
             .map_err(message)?;
         let input = self
-            .project_field_input(&value(effect)?, &content)
+            .project_field_input(&value(action)?, &content)
             .await
             .map_err(message)?;
         let observed = match self.deliver_planning_field(&external, true, input).await {
@@ -269,14 +269,14 @@ impl LinearClient {
 
     // Linear has no expected-revision guard here: a reopening between the
     // look and this mutation can be overwritten.
-    async fn state(&self, store: &Store, task: &TaskId, effect: &TrackerEffect) -> OpsResult<Sent> {
+    async fn state(&self, store: &Store, task: &TaskId, action: &TrackerAction) -> OpsResult<Sent> {
         let external = remote_task(store, task).await?;
-        let WorkValue::Disposition(disposition) = value(effect)? else {
-            return Err(message("state effect holds no Disposition"));
+        let WorkValue::Disposition(disposition) = value(action)? else {
+            return Err(message("state action holds no Disposition"));
         };
         let target = disposition
             .planning_state
-            .ok_or_else(|| message("state effect names no state"))?;
+            .ok_or_else(|| message("state action names no state"))?;
         let state = self
             .item_state_id(&external, &target)
             .await
@@ -295,16 +295,16 @@ impl LinearClient {
         &self,
         store: &Store,
         task: &TaskId,
-        effect: &TrackerEffect,
+        action: &TrackerAction,
     ) -> OpsResult<Sent> {
         let external = remote_task(store, task).await?;
-        let id = effect
+        let id = action
             .subject
             .as_deref()
-            .ok_or_else(|| message("comment effect names no comment"))?;
-        let body = effect.value["value"]["body"]
+            .ok_or_else(|| message("comment action names no comment"))?;
+        let body = action.value["value"]["body"]
             .as_str()
-            .ok_or_else(|| message("comment effect holds no body"))?;
+            .ok_or_else(|| message("comment action holds no body"))?;
         match self.sync_comment(id, &external, body).await {
             Ok(()) => Ok(Sent::Acknowledged {
                 revision: None,
@@ -326,16 +326,16 @@ impl LinearClient {
     }
 
     /// Move Tasks one at a time toward the saved order, each move against the
-    /// list it read. A confirmed move becomes the effect's base, so a reply
+    /// list it read. A confirmed move becomes the action's base, so a reply
     /// lost later in the sequence is judged against the order it was sent from.
     async fn order(
         &self,
         store: &Store,
         project: &ProjectId,
-        effect: &TrackerEffect,
+        action: &TrackerAction,
     ) -> OpsResult<Sent> {
         let external = remote_project(store, project).await?;
-        let desired: Vec<String> = serde_json::from_value(effect.value.clone()).map_err(message)?;
+        let desired: Vec<String> = serde_json::from_value(action.value.clone()).map_err(message)?;
         let mut issues = self.ordered_items(&external).await.map_err(message)?;
         loop {
             let mut observed = Vec::new();
@@ -369,7 +369,7 @@ impl LinearClient {
             };
             store
                 .sqlite
-                .rebase_tracker_effect(&effect.id, &json!({"value": after}))
+                .rebase_tracker_action(&action.id, &json!({"value": after}))
                 .map_err(message)?;
             let Some(moved) = issues
                 .iter_mut()
@@ -405,10 +405,10 @@ impl LinearClient {
         &self,
         store: &Store,
         task: &TaskId,
-        effect: &TrackerEffect,
+        action: &TrackerAction,
     ) -> OpsResult<Sent> {
         let issue = remote_task(store, task).await?;
-        match effect.task_link() {
+        match action.task_link() {
             Some(TaskLink::Relation { id, target }) => {
                 let related = remote_task(store, &target).await?;
                 match self.ensure_follow_up_relation(&issue, &related, &id).await {
@@ -423,16 +423,19 @@ impl LinearClient {
             Some(TaskLink::Pr { url }) => {
                 let posted = store
                     .sqlite
-                    .tracker_effects_for(&effect.owner)
+                    .tracker_actions_for(&action.owner)
                     .map_err(message)?
                     .iter()
                     .any(|earlier| {
-                        earlier.subject == effect.subject
-                            && earlier.phase == EffectPhase::Acknowledged
+                        earlier.subject == action.subject
+                            && matches!(
+                                earlier.phase,
+                                ActionPhase::Confirmed | ActionPhase::Conflicted
+                            )
                     });
-                Ok(super::urgent(self.pr_link(task, &issue, &url, effect, posted)).await)
+                Ok(super::urgent(self.pr_link(task, &issue, &url, action, posted)).await)
             }
-            None => Err(message("link effect names nothing to link")),
+            None => Err(message("link action names nothing to link")),
         }
     }
 
@@ -444,15 +447,15 @@ impl LinearClient {
         task: &TaskId,
         issue: &str,
         url: &str,
-        effect: &TrackerEffect,
+        action: &TrackerAction,
         posted: bool,
     ) -> Sent {
-        let (number, state) = (&effect.value["number"], &effect.value["state"]);
+        let (number, state) = (&action.value["number"], &action.value["state"]);
         let state = state.as_str().unwrap_or("Open");
         let title = format!("GitHub PR #{number}");
         let body = format!("[GitHub PR #{number}]({url}) — {state}");
         // An earlier lf recorded the id Linear gave its comment.
-        let recorded = effect.value["comment_id"].as_str();
+        let recorded = action.value["comment_id"].as_str();
         let comment = match recorded {
             Some(id) => id.to_owned(),
             None => match pr_comment_id(task, url) {
@@ -481,7 +484,7 @@ impl LinearClient {
         }
     }
 
-    /// A Task response is accepted into Work, which settles a creation by its id.
+    /// A Task response is accepted into Work, which confirms a creation by its id.
     async fn accepted(
         &self,
         store: &Store,
@@ -542,7 +545,7 @@ impl LinearClient {
         store: &Store,
         repo: &Path,
         task: &TaskId,
-        effect: &TrackerEffect,
+        action: &TrackerAction,
     ) -> OpsResult<Option<Observed>> {
         let external = remote_task(store, task).await?;
         let Some((item, project)) = self.issue_ownership(&external).await.map_err(message)? else {
@@ -550,21 +553,21 @@ impl LinearClient {
         };
         ingest_task(store, repo, &item, project.as_ref(), now()).await?;
         let mut observed = observed_task(store, &item).await;
-        if effect.kind == EffectKind::State {
-            observed.state_history = Some(self.state_history(&external, effect, &item).await);
+        if action.kind == ActionKind::State {
+            observed.state_history = Some(self.state_history(&external, action, &item).await);
         }
         Ok(Some(observed))
     }
 
-    /// Whether the state moved since the effect's base, when it reads as its
+    /// Whether the state moved since the action's base, when it reads as its
     /// base now: a write that landed and was undone looks the same as none.
     async fn state_history(
         &self,
         external: &str,
-        effect: &TrackerEffect,
+        action: &TrackerAction,
         item: &loopflow_storage::planning::TrackerItem,
     ) -> StateHistory {
-        let base = effect.base.as_ref();
+        let base = action.base.as_ref();
         let revision = base.and_then(|base| base["revision"].as_str());
         let state = base.and_then(|base| base["value"]["value"]["planning_state"].as_str());
         let (Some(revision), Some(state)) = (revision, state) else {
@@ -843,7 +846,7 @@ mod tests {
     use crate::ops::tracker::Sent;
     use crate::store::Store;
     use loopflow_model::durable::TaskId;
-    use loopflow_storage::sqlite::tracker_effects::Settlement;
+    use loopflow_storage::sqlite::tracker_actions::Resolution;
 
     const URL: &str = "https://github.com/acme/repo/pull/7";
 
@@ -852,7 +855,7 @@ mod tests {
     }
 
     /// Queue the PR link in `state` and send it through a Linear stand-in that
-    /// answers `comment`; returns what the bridge said and the request bodies.
+    /// answers `comment`; returns what the tracker said and the request bodies.
     async fn send(
         store: &Store,
         task: &TaskId,
@@ -864,7 +867,7 @@ mod tests {
             .enqueue_pr_link(task, URL, 7, state, None)
             .unwrap()
             .unwrap();
-        let effect = store.sqlite.tracker_effect(&id).unwrap().unwrap();
+        let action = store.sqlite.tracker_action(&id).unwrap().unwrap();
         let (base, requests) = test_server::spawn(vec![
             reply(json!({"attachmentLinkURL": {"attachment": {"id": "att-1"}}})),
             reply(json!({"attachmentUpdate": {"attachment": {"id": "att-1"}}})),
@@ -873,7 +876,7 @@ mod tests {
         .await;
         let client = LinearClient::with_base_url("secret".into(), None, base);
         let sent = client
-            .send_effect(store, std::path::Path::new("/repo"), &effect)
+            .send_action(store, std::path::Path::new("/repo"), &action)
             .await;
         if let Sent::Acknowledged {
             revision,
@@ -882,9 +885,9 @@ mod tests {
         {
             store
                 .sqlite
-                .settle_tracker_effect(
+                .resolve_tracker_action(
                     &id,
-                    &Settlement::Acknowledged {
+                    &Resolution::Confirmed {
                         revision: revision.clone(),
                         remote_id: remote_id.clone(),
                     },

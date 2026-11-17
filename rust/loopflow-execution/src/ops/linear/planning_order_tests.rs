@@ -7,8 +7,8 @@ use super::{mark_issue_updated, seed_provider_task, with_planning_task, Planning
 use crate::ops::linear::refresh_wave;
 use crate::ops::linear::test_fixture::Fixture;
 use crate::store::Store;
-use loopflow_storage::sqlite::tracker_effects::{
-    EffectKind, EffectOwner, EffectPhase, TrackerEffect,
+use loopflow_storage::sqlite::tracker_actions::{
+    ActionKind, ActionOwner, ActionPhase, TrackerAction,
 };
 use loopflow_storage::work::task::Task;
 use loopflow_storage::work::task::TaskUpdate;
@@ -95,7 +95,7 @@ async fn remote_order(state: &Arc<tokio::sync::Mutex<PlanningState>>) -> Vec<Str
 }
 
 async fn deliver(store: &Store, repo: &Path, task: &Task) -> crate::ops::OpsResult<()> {
-    let owner = EffectOwner::Project(task.project_id.clone().unwrap());
+    let owner = ActionOwner::Project(task.project_id.clone().unwrap());
     crate::ops::tracker::drain::drain_repository(
         store,
         &repo.to_string_lossy(),
@@ -106,19 +106,19 @@ async fn deliver(store: &Store, repo: &Path, task: &Task) -> crate::ops::OpsResu
     .map(|_| ())
 }
 
-/// The Project's unsettled order effect.
-fn order_effect(
+/// The Project's unconfirmed order action.
+fn order_action(
     store: &Store,
     project: &loopflow_model::durable::ProjectId,
-) -> Option<TrackerEffect> {
+) -> Option<TrackerAction> {
     store
         .sqlite
-        .tracker_effects_for(&EffectOwner::Project(project.clone()))
+        .tracker_actions_for(&ActionOwner::Project(project.clone()))
         .unwrap()
         .into_iter()
-        .rfind(|effect| {
-            effect.kind == EffectKind::Order
-                && matches!(effect.phase, EffectPhase::Pending | EffectPhase::Attempted)
+        .rfind(|action| {
+            action.kind == ActionKind::Order
+                && matches!(action.phase, ActionPhase::Queued | ActionPhase::Sent)
         })
 }
 
@@ -126,7 +126,7 @@ fn assert_no_conflicts(fixture: &Fixture) {
     let conn = rusqlite::Connection::open(&fixture.database).unwrap();
     let conflicts: i64 = conn
         .query_row(
-            "SELECT count(*) FROM tracker_effects WHERE kind='order' AND conflict_json IS NOT NULL",
+            "SELECT count(*) FROM tracker_actions WHERE kind='order' AND conflict_json IS NOT NULL",
             [],
             |r| r.get(0),
         )
@@ -182,28 +182,28 @@ fn planning_order_new_member_survives_pending_reorder() {
                     .collect::<Vec<_>>(),
                 ["issue-4", "issue-1", "issue-2", "issue-3"]
             );
-            assert!(order_effect(&fixture.store, tasks[0].project_id.as_ref().unwrap()).is_none());
+            assert!(order_action(&fixture.store, tasks[0].project_id.as_ref().unwrap()).is_none());
             assert_no_conflicts(fixture);
         });
     });
 }
 
 #[test]
-fn a_saved_reorder_reaches_linear_and_settles() {
+fn a_saved_reorder_reaches_linear_and_resolves() {
     with_order(|runtime, fixture, repo, tasks, state| {
         runtime.block_on(async {
             reorder(&fixture.store, &tasks[3], 0);
             let project = tasks[0].project_id.as_ref().unwrap();
             assert_eq!(
-                order_effect(&fixture.store, project).unwrap().phase,
-                EffectPhase::Pending
+                order_action(&fixture.store, project).unwrap().phase,
+                ActionPhase::Queued
             );
             deliver(&fixture.store, repo, &tasks[0]).await.unwrap();
             assert_eq!(
                 local_order(&fixture.store, &tasks),
                 remote_order(&state).await
             );
-            assert!(order_effect(&fixture.store, project).is_none());
+            assert!(order_action(&fixture.store, project).is_none());
             assert_no_conflicts(fixture);
         });
     });
@@ -218,8 +218,8 @@ fn a_lost_order_reply_is_looked_for_and_not_repeated() {
             state.lock().await.field_reply_lost = true;
             deliver(&fixture.store, repo, &tasks[0]).await.unwrap();
             assert_eq!(
-                order_effect(&fixture.store, project).unwrap().phase,
-                EffectPhase::Attempted
+                order_action(&fixture.store, project).unwrap().phase,
+                ActionPhase::Sent
             );
             let writes = state.lock().await.field_writes;
             state.lock().await.field_reads_blocked = false;
@@ -229,7 +229,7 @@ fn a_lost_order_reply_is_looked_for_and_not_repeated() {
                 writes,
                 "the move landed, so nothing is sent again"
             );
-            assert!(order_effect(&fixture.store, project).is_none());
+            assert!(order_action(&fixture.store, project).is_none());
             assert_eq!(
                 local_order(&fixture.store, &tasks),
                 remote_order(&state).await

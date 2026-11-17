@@ -1,5 +1,5 @@
 //! What a Project or Task has waiting for its tracker, and what the tracker
-//! won, read from the effect queue.
+//! won, read from the action queue.
 use std::collections::HashMap;
 
 use rusqlite::{Connection, Row};
@@ -34,7 +34,7 @@ impl SqliteStore {
             |row| row.get(0),
         )?;
         let ids = ids_json([project.as_str()]);
-        let changes = effects(&tx, "project_id", &ids, false)?;
+        let changes = actions(&tx, "project_id", &ids, false)?;
         tx.commit()?;
         Ok(PlanningSyncReceipts {
             repo,
@@ -68,8 +68,8 @@ pub(super) fn task_planning_receipts_in(
             .iter()
             .filter_map(|(_, _, project)| project.as_deref()),
     );
-    let mut task_fields = by_owner(effects(conn, "task_id", &task_ids, false)?);
-    let project_fields = by_owner(effects(conn, "project_id", &project_ids, true)?);
+    let mut task_fields = by_owner(actions(conn, "task_id", &task_ids, false)?);
+    let project_fields = by_owner(actions(conn, "project_id", &project_ids, true)?);
     let mut statuses = HashMap::new();
     for (task, repo, project) in owners {
         let mut changes = task_fields.remove(&task).unwrap_or_default();
@@ -97,9 +97,9 @@ fn by_owner(
     owners
 }
 
-/// Unsettled effects of every owner in `ids` (a JSON array), and each
-/// subject's latest conflict until a later save of it settles, with owners.
-fn effects(
+/// Unconfirmed actions of every owner in `ids` (a JSON array), and each
+/// subject's latest conflict until a later save of it resolves, with owners.
+fn actions(
     conn: &Connection,
     owner: &str,
     ids: &str,
@@ -115,20 +115,20 @@ fn effects(
                 WHEN 'state' THEN json_quote(json_extract(e.value_json,'$.value.planning_state'))
                 WHEN 'comment' THEN json_extract(e.value_json,'$.value')
                 WHEN 'delete' THEN 'true' ELSE e.value_json END,
-            e.phase='attempted',e.error,
+            e.phase='sent',e.error,
             CASE WHEN e.conflict_json IS NOT NULL THEN CASE e.kind
                 WHEN 'field' THEN json_quote(json_extract(e.conflict_json,'$.value.value'))
                 WHEN 'state' THEN json_quote(json_extract(e.conflict_json,'$.value.value.planning_state'))
                 WHEN 'comment' THEN json_extract(e.conflict_json,'$.value')
                 ELSE json_quote(json_extract(e.conflict_json,'$.value')) END END,
             e.{owner}
-         FROM tracker_effects e WHERE e.{owner} IN (SELECT value FROM json_each(?1)) {filter} AND
-         -- A creation for an owner already bound waits only to be settled.
+         FROM tracker_actions e WHERE e.{owner} IN (SELECT value FROM json_each(?1)) {filter} AND
+         -- A creation for an owner already bound waits only to be resolved.
          NOT (e.kind='create' AND (EXISTS(SELECT 1 FROM tasks t WHERE t.id=e.task_id AND t.external_issue_id IS NOT NULL)
              OR EXISTS(SELECT 1 FROM projects p WHERE p.id=e.project_id AND p.external_project_id IS NOT NULL))) AND
-         (e.phase IN ('pending','attempted') OR (e.conflict_json IS NOT NULL AND NOT EXISTS(
-             SELECT 1 FROM tracker_effects later WHERE later.{owner}=e.{owner} AND later.kind=e.kind
-             AND later.subject IS e.subject AND later.seq>e.seq AND later.phase='acknowledged')))
+         (e.phase IN ('queued','sent') OR (e.phase='conflicted' AND NOT EXISTS(
+             SELECT 1 FROM tracker_actions later WHERE later.{owner}=e.{owner} AND later.kind=e.kind
+             AND later.subject IS e.subject AND later.seq>e.seq AND later.phase IN ('confirmed','conflicted'))))
          ORDER BY e.seq"), ids)?;
     Ok(changes)
 }

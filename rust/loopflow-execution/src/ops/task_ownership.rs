@@ -68,7 +68,7 @@ pub fn change(repo: &Path, issue: &str, change: OwnershipChange) -> OpsResult<Ta
         super::planning_sync::sync_after_save(
             &store,
             &repository.to_string_lossy(),
-            &loopflow_storage::sqlite::tracker_effects::EffectOwner::Task(task.id.clone()),
+            &loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task.id.clone()),
         )
         .await;
         crate::store::ownership::task_ownership(&store.sqlite, &task.id).map_err(message)

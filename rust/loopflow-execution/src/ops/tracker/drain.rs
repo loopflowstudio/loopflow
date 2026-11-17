@@ -1,6 +1,6 @@
 //! One bounded pass over the outbound queue. Owners go in order of their
-//! oldest unsettled effect; within an owner effects go strictly in `seq`
-//! order, so an owner whose head waits holds its later effects and no one
+//! oldest unconfirmed action; within an owner actions go strictly in `seq`
+//! order, so an owner whose head waits holds its later actions and no one
 //! else's. A pass stops after its request or time budget, whichever is first.
 
 use std::collections::HashSet;
@@ -12,8 +12,8 @@ use std::time::{Duration, Instant};
 use futures_util::StreamExt;
 use loopflow_storage::planning::rules::{self, Decision, LostReply, Observed};
 use loopflow_storage::provider::Provider;
-use loopflow_storage::sqlite::tracker_effects::{
-    EffectKind, EffectOwner, EffectPhase, Settlement, TaskLink, TrackerEffect,
+use loopflow_storage::sqlite::tracker_actions::{
+    ActionKind, ActionOwner, ActionPhase, Resolution, TaskLink, TrackerAction,
 };
 use loopflow_storage::work::edit::WorkValue;
 
@@ -57,7 +57,7 @@ impl Bound {
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Pass {
     pub requests: usize,
-    pub settled: usize,
+    pub resolved: usize,
 }
 
 /// Which owners a pass drains.
@@ -65,13 +65,13 @@ pub struct Pass {
 pub enum Scope<'a> {
     All,
     /// The owner just saved goes ahead of older work.
-    First(&'a EffectOwner),
+    First(&'a ActionOwner),
     /// `lf task sync <id>`: this owner only.
-    Only(&'a EffectOwner),
+    Only(&'a ActionOwner),
 }
 
-/// One bounded pass for `repo` when it has a tracker. With nothing unsettled
-/// it asks the provider nothing, not even to build the bridge.
+/// One bounded pass for `repo` when it has a tracker. With nothing unconfirmed
+/// it asks the provider nothing, not even to build the tracker.
 pub(crate) async fn drain_repository(
     store: &Store,
     repo: &str,
@@ -81,15 +81,15 @@ pub(crate) async fn drain_repository(
     let Some(provider) = super::configured(Path::new(repo)) else {
         return Ok(Pass::default());
     };
-    let effects = queued(store, repo, provider)?;
-    if effects.is_empty() {
+    let actions = queued(store, repo, provider)?;
+    if actions.is_empty() {
         return Ok(Pass::default());
     }
     // Only a creation puts an item in the repository's Team, which Linear
     // validates once per process; edits address items that already name it.
-    let tracker = if effects
+    let tracker = if actions
         .iter()
-        .any(|effect| effect.kind == EffectKind::Create)
+        .any(|action| action.kind == ActionKind::Create)
     {
         Tracker::for_repository(Path::new(repo)).await
     } else {
@@ -97,63 +97,63 @@ pub(crate) async fn drain_repository(
     };
     let tracker = match tracker {
         Ok(tracker) => tracker,
-        // Offline or signed out: the queue keeps every effect and says why.
+        // Offline or signed out: the queue keeps every action and says why.
         Err(error) => {
-            for effect in &effects {
+            for action in &actions {
                 store
                     .sqlite
-                    .tracker_effect_error(&effect.id, &error.to_string())
+                    .tracker_action_error(&action.id, &error.to_string())
                     .map_err(message)?;
             }
             return Ok(Pass::default());
         }
     };
-    drain(store, repo, &tracker, effects, scope, bound).await
+    drain(store, repo, &tracker, actions, scope, bound).await
 }
 
-/// The repository's unsettled effects for `provider`, after queueing a
-/// creation for each owner made before the tracker was connected. An effect
-/// queued for another tracker retires here, before any bridge is built, so a
+/// The repository's unconfirmed actions for `provider`, after queueing a
+/// creation for each owner made before the tracker was connected. An action
+/// queued for another tracker retires here, before any tracker is built, so a
 /// switched repository that is offline or signed out does not keep it.
-fn queued(store: &Store, repo: &str, provider: Provider) -> OpsResult<Vec<TrackerEffect>> {
+fn queued(store: &Store, repo: &str, provider: Provider) -> OpsResult<Vec<TrackerAction>> {
     store
         .sqlite
         .enqueue_tracker_creations(repo, provider)
         .map_err(message)?;
-    let (effects, elsewhere): (Vec<_>, Vec<_>) = store
+    let (actions, elsewhere): (Vec<_>, Vec<_>) = store
         .sqlite
-        .unsettled_tracker_effects(repo)
+        .unconfirmed_tracker_actions(repo)
         .map_err(message)?
         .into_iter()
-        .partition(|effect| effect.provider == provider);
-    for effect in elsewhere {
+        .partition(|action| action.provider == provider);
+    for action in elsewhere {
         let reason = format!(
             "queued for {}, but this repository uses {}",
-            effect.provider.display_name(),
+            action.provider.display_name(),
             provider.display_name()
         );
         store
             .sqlite
-            .settle_tracker_effect(&effect.id, &Settlement::Retire { reason })
+            .resolve_tracker_action(&action.id, &Resolution::Retire { reason })
             .map_err(message)?;
     }
-    Ok(effects)
+    Ok(actions)
 }
 
-/// Drain `effects` to `tracker` within `bound`.
+/// Drain `actions` to `tracker` within `bound`.
 async fn drain(
     store: &Store,
     repo: &str,
     tracker: &Tracker,
-    effects: Vec<TrackerEffect>,
+    actions: Vec<TrackerAction>,
     scope: Scope<'_>,
     bound: Bound,
 ) -> OpsResult<Pass> {
-    let creating: HashSet<String> = effects
+    let creating: HashSet<String> = actions
         .iter()
-        .filter(|effect| effect.kind == EffectKind::Create)
-        .filter_map(|effect| match &effect.owner {
-            EffectOwner::Project(id) => Some(id.to_string()),
+        .filter(|action| action.kind == ActionKind::Create)
+        .filter_map(|action| match &action.owner {
+            ActionOwner::Project(id) => Some(id.to_string()),
             _ => None,
         })
         .collect();
@@ -170,43 +170,43 @@ async fn drain(
             0
         },
         used: AtomicUsize::new(0),
-        settled: AtomicUsize::new(0),
+        resolved: AtomicUsize::new(0),
     };
-    pass.round(grouped(effects, scope), bound.concurrency).await;
+    pass.round(grouped(actions, scope), bound.concurrency).await;
     // Owners run concurrently, so a Task can wait on a Project created in the
-    // same round; those get one more turn once the round has settled it.
+    // same round; those get one more turn once the round has resolved it.
     if !pass.creating.is_empty() {
         let mut owners = grouped(
             store
                 .sqlite
-                .unsettled_tracker_effects(repo)
+                .unconfirmed_tracker_actions(repo)
                 .map_err(message)?,
             scope,
         );
         owners.retain(|(_, queued)| {
-            queued.iter().any(|effect| {
-                parent_named(effect).is_some_and(|project| pass.creating.contains(&project))
-                    && !pass.parent_pending(effect)
+            queued.iter().any(|action| {
+                parent_named(action).is_some_and(|project| pass.creating.contains(&project))
+                    && !pass.parent_pending(action)
             })
         });
         pass.round(owners, bound.concurrency).await;
     }
     Ok(Pass {
         requests: pass.used.load(Ordering::SeqCst),
-        settled: pass.settled.load(Ordering::SeqCst),
+        resolved: pass.resolved.load(Ordering::SeqCst),
     })
 }
 
-/// Effects by owner, owners in order of their oldest effect, narrowed to `scope`.
+/// Actions by owner, owners in order of their oldest action, narrowed to `scope`.
 fn grouped(
-    effects: Vec<TrackerEffect>,
+    actions: Vec<TrackerAction>,
     scope: Scope<'_>,
-) -> Vec<(EffectOwner, Vec<TrackerEffect>)> {
-    let mut owners: Vec<(EffectOwner, Vec<TrackerEffect>)> = Vec::new();
-    for effect in effects {
-        match owners.iter_mut().find(|(owner, _)| *owner == effect.owner) {
-            Some((_, queued)) => queued.push(effect),
-            None => owners.push((effect.owner.clone(), vec![effect])),
+) -> Vec<(ActionOwner, Vec<TrackerAction>)> {
+    let mut owners: Vec<(ActionOwner, Vec<TrackerAction>)> = Vec::new();
+    for action in actions {
+        match owners.iter_mut().find(|(owner, _)| *owner == action.owner) {
+            Some((_, queued)) => queued.push(action),
+            None => owners.push((action.owner.clone(), vec![action])),
         }
     }
     match scope {
@@ -223,16 +223,16 @@ fn grouped(
 }
 
 /// The Project a Task creation or membership edit names.
-fn parent_named(effect: &TrackerEffect) -> Option<String> {
-    match effect.kind {
-        EffectKind::Create => values(effect)
+fn parent_named(action: &TrackerAction) -> Option<String> {
+    match action.kind {
+        ActionKind::Create => values(action)
             .ok()?
             .into_iter()
             .find_map(|value| match value {
                 WorkValue::TaskProject(project) => project,
                 _ => None,
             }),
-        EffectKind::Field => match value(effect).ok()? {
+        ActionKind::Field => match value(action).ok()? {
             WorkValue::TaskProject(project) => project,
             _ => None,
         },
@@ -241,25 +241,25 @@ fn parent_named(effect: &TrackerEffect) -> Option<String> {
 }
 
 /// The tracker id an owner is bound to.
-fn bound(store: &Store, owner: &EffectOwner) -> OpsResult<Option<String>> {
+fn bound(store: &Store, owner: &ActionOwner) -> OpsResult<Option<String>> {
     Ok(match owner {
-        EffectOwner::Task(id) => store
+        ActionOwner::Task(id) => store
             .sqlite
             .task(id)
             .map_err(message)?
             .and_then(|task| task.linear_id)
             .map(|id| id.as_str().to_owned()),
-        EffectOwner::Project(id) => store
+        ActionOwner::Project(id) => store
             .sqlite
             .project(id)
             .map_err(message)?
             .and_then(|project| project.linear_id)
             .map(|id| id.as_str().to_owned()),
-        EffectOwner::Wave(_) => None,
+        ActionOwner::Wave(_) => None,
     })
 }
 
-/// Serialize provider effects only; saves and acquisition never take this lock.
+/// Serialize provider actions only; saves and acquisition never take this lock.
 /// The file stays in place so another connection always locks the same inode.
 pub(crate) fn lock_delivery(path: &Path) -> std::io::Result<Option<File>> {
     std::fs::create_dir_all(path.parent().expect("delivery lock has a parent directory"))?;
@@ -276,10 +276,10 @@ pub(crate) fn lock_delivery(path: &Path) -> std::io::Result<Option<File>> {
     }
 }
 
-/// What one effect left its owner's pass to do next.
+/// What one action left its owner's pass to do next.
 enum Step {
     Done,
-    /// This effect waits; later effects on its subject wait with it.
+    /// This action waits; later actions on its subject wait with it.
     Wait,
     /// The pass's budget is spent.
     Spent,
@@ -297,18 +297,18 @@ struct Drain<'a> {
     /// Seconds between looks for one lost reply; 0 looks now.
     window: i64,
     used: AtomicUsize,
-    settled: AtomicUsize,
+    resolved: AtomicUsize,
 }
 
 impl Drain<'_> {
-    async fn round(&self, owners: Vec<(EffectOwner, Vec<TrackerEffect>)>, concurrency: usize) {
+    async fn round(&self, owners: Vec<(ActionOwner, Vec<TrackerAction>)>, concurrency: usize) {
         let results: Vec<OpsResult<()>> = futures_util::stream::iter(owners)
             .map(|(owner, queued)| self.owner(owner, queued))
             .buffer_unordered(concurrency.max(1))
             .collect()
             .await;
         for error in results.into_iter().filter_map(Result::err) {
-            tracing::debug!(%error, "tracker effect pending");
+            tracing::debug!(%error, "tracker action pending");
         }
     }
 
@@ -323,9 +323,9 @@ impl Drain<'_> {
                 .is_ok()
     }
 
-    /// Whether this effect names a Project being created that has no remote id yet.
-    fn parent_pending(&self, effect: &TrackerEffect) -> bool {
-        let Some(project) = parent_named(effect).filter(|project| self.creating.contains(project))
+    /// Whether this action names a Project being created that has no remote id yet.
+    fn parent_pending(&self, action: &TrackerAction) -> bool {
+        let Some(project) = parent_named(action).filter(|project| self.creating.contains(project))
         else {
             return false;
         };
@@ -337,21 +337,21 @@ impl Drain<'_> {
             .is_none_or(|project| project.linear_id.is_none())
     }
 
-    /// Whether this effect relates its Task to one with no tracker object yet.
-    fn target_pending(&self, effect: &TrackerEffect) -> bool {
-        let Some(TaskLink::Relation { target, .. }) = effect.task_link() else {
+    /// Whether this action relates its Task to one with no tracker object yet.
+    fn target_pending(&self, action: &TrackerAction) -> bool {
+        let Some(TaskLink::Relation { target, .. }) = action.task_link() else {
             return false;
         };
-        !matches!(bound(self.store, &EffectOwner::Task(target)), Ok(Some(_)))
+        !matches!(bound(self.store, &ActionOwner::Task(target)), Ok(Some(_)))
     }
 
     // Another lf on this store may be sending for the same object; the lock
     // file keeps the two from interleaving requests.
-    fn lock(&self, owner: &EffectOwner) -> OpsResult<Option<File>> {
+    fn lock(&self, owner: &ActionOwner) -> OpsResult<Option<File>> {
         let (kind, id) = match owner {
-            EffectOwner::Task(id) => ("task", id.to_string()),
-            EffectOwner::Project(id) => ("project", id.to_string()),
-            EffectOwner::Wave(id) => ("wave", id.to_string()),
+            ActionOwner::Task(id) => ("task", id.to_string()),
+            ActionOwner::Project(id) => ("project", id.to_string()),
+            ActionOwner::Wave(id) => ("wave", id.to_string()),
         };
         let path = self
             .store
@@ -363,21 +363,21 @@ impl Drain<'_> {
         Ok(lock_delivery(&path)?)
     }
 
-    async fn owner(&self, owner: EffectOwner, queued: Vec<TrackerEffect>) -> OpsResult<()> {
+    async fn owner(&self, owner: ActionOwner, queued: Vec<TrackerAction>) -> OpsResult<()> {
         let Some(_lock) = self.lock(&owner)? else {
             return Ok(());
         };
-        // Everything on an owner waits behind its unsettled creation; otherwise
-        // only effects on the same subject wait behind each other.
+        // Everything on an owner waits behind its unconfirmed creation; otherwise
+        // only actions on the same subject wait behind each other.
         let mut waiting = HashSet::new();
-        for effect in queued {
-            let key = (effect.kind, effect.subject.clone());
+        for action in queued {
+            let key = (action.kind, action.subject.clone());
             if waiting.contains(&key) {
                 continue;
             }
-            match self.effect(effect).await? {
+            match self.action(action).await? {
                 Step::Done => {}
-                Step::Wait if key.0 == EffectKind::Create => return Ok(()),
+                Step::Wait if key.0 == ActionKind::Create => return Ok(()),
                 Step::Wait => {
                     waiting.insert(key);
                 }
@@ -387,90 +387,90 @@ impl Drain<'_> {
         Ok(())
     }
 
-    async fn effect(&self, effect: TrackerEffect) -> OpsResult<Step> {
+    async fn action(&self, action: TrackerAction) -> OpsResult<Step> {
         // An owner bound some other way (adopted, linked by hand) already has its
         // tracker object; sending the creation would make a second one.
-        if effect.kind == EffectKind::Create {
-            if let Some(remote) = bound(self.store, &effect.owner)? {
-                let settlement = Settlement::Acknowledged {
+        if action.kind == ActionKind::Create {
+            if let Some(remote) = bound(self.store, &action.owner)? {
+                let resolution = Resolution::Confirmed {
                     revision: None,
                     remote_id: Some(remote),
                 };
-                self.settle(&effect, &settlement)?;
+                self.resolve(&action, &resolution)?;
                 return Ok(Step::Done);
             }
         }
-        let parent = self.parent_pending(&effect) || self.target_pending(&effect);
-        let looked = match effect.phase {
-            EffectPhase::Attempted => {
+        let parent = self.parent_pending(&action) || self.target_pending(&action);
+        let looked = match action.phase {
+            ActionPhase::Sent => {
                 let now = loopflow_storage::rows::now_unix();
-                let idempotent = self.tracker.idempotent(effect.kind);
-                match rules::lost_reply(&effect, idempotent, now, self.window) {
+                let idempotent = self.tracker.idempotent(action.kind);
+                match rules::lost_reply(&action, idempotent, now, self.window) {
                     LostReply::Wait => return Ok(Step::Wait),
                     LostReply::Resend => None,
-                    LostReply::Look => Some(self.look(&effect).await?),
+                    LostReply::Look => Some(self.look(&action).await?),
                 }
             }
             _ if parent => return Ok(Step::Wait),
             // Moving Tasks needs the provider's complete list first.
-            _ if effect.kind == EffectKind::Order => Some(self.look(&effect).await?),
+            _ if action.kind == ActionKind::Order => Some(self.look(&action).await?),
             _ => None,
         };
         let decision = match looked {
             None => Decision::Send,
-            Some(Ok(observed)) => rules::decide(&effect, observed.as_ref(), parent),
+            Some(Ok(observed)) => rules::decide(&action, observed.as_ref(), parent),
             Some(Err(step)) => return Ok(step),
         };
         match decision {
             Decision::Hold => return Ok(Step::Wait),
-            Decision::Settle(settlement) => self.settle(&effect, &settlement)?,
-            Decision::Send => return self.send(&effect).await,
+            Decision::Resolve(resolution) => self.resolve(&action, &resolution)?,
+            Decision::Send => return self.send(&action).await,
         }
         Ok(Step::Done)
     }
 
-    /// Read back the owner `effect` addresses. A look at a lost reply starts
-    /// its window; a failed look saves its error and the effect waits.
-    async fn look(&self, effect: &TrackerEffect) -> OpsResult<Result<Option<Observed>, Step>> {
+    /// Read back the owner `action` addresses. A look at a lost reply starts
+    /// its window; a failed look saves its error and the action waits.
+    async fn look(&self, action: &TrackerAction) -> OpsResult<Result<Option<Observed>, Step>> {
         if !self.take() {
             return Ok(Err(Step::Spent));
         }
         let observed = tokio::time::timeout(
             REQUEST_DEADLINE,
-            self.tracker.look(self.store, self.repo, effect),
+            self.tracker.look(self.store, self.repo, action),
         )
         .await
-        .unwrap_or_else(|_| Err("Look timed out; the effect waits for the next pass".into()));
-        if effect.phase == EffectPhase::Attempted {
+        .unwrap_or_else(|_| Err("Look timed out; the action waits for the next pass".into()));
+        if action.phase == ActionPhase::Sent {
             self.store
                 .sqlite
-                .look_tracker_effect(&effect.id, loopflow_storage::rows::now_unix())
+                .look_tracker_action(&action.id, loopflow_storage::rows::now_unix())
                 .map_err(message)?;
         }
         match observed {
             Ok(observed) => Ok(Ok(observed)),
             Err(error) => {
-                self.error(effect, &error)?;
+                self.error(action, &error)?;
                 Ok(Err(Step::Wait))
             }
         }
     }
 
-    async fn send(&self, effect: &TrackerEffect) -> OpsResult<Step> {
+    async fn send(&self, action: &TrackerAction) -> OpsResult<Step> {
         if !self.take() {
             return Ok(Step::Spent);
         }
         if !self
             .store
             .sqlite
-            .attempt_tracker_effect(&effect.id)
+            .attempt_tracker_action(&action.id)
             .map_err(message)?
         {
             return Ok(Step::Done);
         }
         let sent = tokio::time::timeout(
             REQUEST_DEADLINE,
-            self.tracker.send(self.store, self.repo, effect),
+            self.tracker.send(self.store, self.repo, action),
         )
         .await
         .unwrap_or_else(|_| Sent::Unknown("Request timed out; its reply is unknown".into()));
@@ -478,9 +478,9 @@ impl Drain<'_> {
             Sent::Acknowledged {
                 revision,
                 remote_id,
-            } => self.settle(
-                effect,
-                &Settlement::Acknowledged {
+            } => self.resolve(
+                action,
+                &Resolution::Confirmed {
                     revision,
                     remote_id,
                 },
@@ -488,34 +488,34 @@ impl Drain<'_> {
             Sent::Rejected(error) => {
                 self.store
                     .sqlite
-                    .reject_tracker_effect(&effect.id, &error)
+                    .reject_tracker_action(&action.id, &error)
                     .map_err(message)?;
                 return Ok(Step::Wait);
             }
             Sent::Unknown(error) => {
-                self.error(effect, &error)?;
+                self.error(action, &error)?;
                 return Ok(Step::Wait);
             }
-            Sent::Unsupported(reason) => self.settle(effect, &Settlement::Retire { reason })?,
+            Sent::Unsupported(reason) => self.resolve(action, &Resolution::Retire { reason })?,
         }
         Ok(Step::Done)
     }
 
-    fn error(&self, effect: &TrackerEffect, error: &str) -> OpsResult<()> {
+    fn error(&self, action: &TrackerAction, error: &str) -> OpsResult<()> {
         self.store
             .sqlite
-            .tracker_effect_error(&effect.id, error)
+            .tracker_action_error(&action.id, error)
             .map_err(message)
     }
 
-    fn settle(&self, effect: &TrackerEffect, settlement: &Settlement) -> OpsResult<()> {
+    fn resolve(&self, action: &TrackerAction, resolution: &Resolution) -> OpsResult<()> {
         if self
             .store
             .sqlite
-            .settle_tracker_effect(&effect.id, settlement)
+            .resolve_tracker_action(&action.id, resolution)
             .map_err(message)?
         {
-            self.settled.fetch_add(1, Ordering::SeqCst);
+            self.resolved.fetch_add(1, Ordering::SeqCst);
         }
         Ok(())
     }
@@ -527,7 +527,7 @@ mod tests {
 
     use loopflow_model::durable::TaskId;
     use loopflow_storage::provider::Provider;
-    use loopflow_storage::sqlite::tracker_effects::{EffectOwner, EffectPhase};
+    use loopflow_storage::sqlite::tracker_actions::{ActionOwner, ActionPhase};
     use loopflow_storage::work::edit::WorkValue;
     use serde_json::json;
 
@@ -596,7 +596,7 @@ mod tests {
         fn title(&self, task: &TaskId, value: &str, phase: &str, looked_at: Option<i64>) {
             let looked = looked_at.map(|at| at.to_string()).unwrap_or_default();
             self.sql(
-                "INSERT INTO tracker_effects(id,task_id,subject,kind,value_json,base_json,phase,provider,looked_at)
+                "INSERT INTO tracker_actions(id,task_id,subject,kind,value_json,base_json,phase,provider,looked_at)
                  VALUES(?1,?2,'task_title','field',?3,?4,?5,'linear',NULLIF(?6,''))",
                 &[
                     &uuid::Uuid::new_v4().to_string(),
@@ -614,12 +614,12 @@ mod tests {
         }
 
         async fn drain(&self, scope: Scope<'_>) -> Pass {
-            let effects = queued(&self.store, "/repo", Provider::Linear).unwrap();
+            let actions = queued(&self.store, "/repo", Provider::Linear).unwrap();
             drain(
                 &self.store,
                 "/repo",
                 &self.tracker,
-                effects,
+                actions,
                 scope,
                 Bound::PASS,
             )
@@ -627,13 +627,13 @@ mod tests {
             .unwrap()
         }
 
-        fn phases(&self, task: &TaskId) -> Vec<EffectPhase> {
+        fn phases(&self, task: &TaskId) -> Vec<ActionPhase> {
             self.store
                 .sqlite
-                .tracker_effects_for(&EffectOwner::Task(task.clone()))
+                .tracker_actions_for(&ActionOwner::Task(task.clone()))
                 .unwrap()
                 .into_iter()
-                .map(|effect| effect.phase)
+                .map(|action| action.phase)
                 .collect()
         }
 
@@ -647,7 +647,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_pass_with_nothing_unsettled_sends_no_request() {
+    async fn a_pass_with_nothing_unconfirmed_sends_no_request() {
         let f = fixture();
         f.bound_task();
         assert_eq!(f.pass().await, Pass::default());
@@ -659,7 +659,7 @@ mod tests {
         let f = fixture();
         for _ in 0..100 {
             let task = f.bound_task();
-            f.title(&task, "Renamed", "pending", None);
+            f.title(&task, "Renamed", "queued", None);
         }
         let pass = f.pass().await;
         assert_eq!(f.fake.requests(), 20);
@@ -667,13 +667,13 @@ mod tests {
             pass,
             Pass {
                 requests: 20,
-                settled: 20
+                resolved: 20
             }
         );
         assert_eq!(
             f.store
                 .sqlite
-                .unsettled_tracker_effects("/repo")
+                .unconfirmed_tracker_actions("/repo")
                 .unwrap()
                 .len(),
             80
@@ -685,14 +685,14 @@ mod tests {
         let f = fixture();
         for _ in 0..30 {
             let task = f.bound_task();
-            f.title(&task, "Older", "pending", None);
+            f.title(&task, "Older", "queued", None);
         }
         let saved = f.bound_task();
-        f.title(&saved, "Just saved", "pending", None);
-        let owner = EffectOwner::Task(saved.clone());
+        f.title(&saved, "Just saved", "queued", None);
+        let owner = ActionOwner::Task(saved.clone());
         f.drain(Scope::First(&owner)).await;
         assert_eq!(f.fake.requests(), 20);
-        assert_eq!(f.phases(&saved), [EffectPhase::Acknowledged]);
+        assert_eq!(f.phases(&saved), [ActionPhase::Confirmed]);
     }
 
     #[tokio::test]
@@ -700,46 +700,43 @@ mod tests {
         let f = fixture();
         let waiting = f.bound_task();
         let now = loopflow_storage::rows::now_unix();
-        f.title(&waiting, "Sent", "attempted", Some(now));
-        f.title(&waiting, "Later", "pending", None);
+        f.title(&waiting, "Sent", "sent", Some(now));
+        f.title(&waiting, "Later", "queued", None);
         let other = f.bound_task();
-        f.title(&other, "Other", "pending", None);
+        f.title(&other, "Other", "queued", None);
         f.pass().await;
         assert_eq!(f.fake.requests(), 1, "only the other owner sends");
-        assert_eq!(
-            f.phases(&waiting),
-            [EffectPhase::Attempted, EffectPhase::Pending]
-        );
-        assert_eq!(f.phases(&other), [EffectPhase::Acknowledged]);
+        assert_eq!(f.phases(&waiting), [ActionPhase::Sent, ActionPhase::Queued]);
+        assert_eq!(f.phases(&other), [ActionPhase::Confirmed]);
     }
 
     #[tokio::test]
-    async fn a_lost_reply_found_in_the_tracker_settles_with_one_look() {
+    async fn a_lost_reply_found_in_the_tracker_resolves_with_one_look() {
         let f = fixture();
         let task = f.bound_task();
-        f.title(&task, "Sent", "attempted", None);
+        f.title(&task, "Sent", "sent", None);
         f.hold("Sent");
         f.pass().await;
         assert_eq!(f.fake.requests(), 1);
-        assert_eq!(f.phases(&task), [EffectPhase::Acknowledged]);
+        assert_eq!(f.phases(&task), [ActionPhase::Confirmed]);
     }
 
     #[tokio::test]
     async fn a_conflict_adopts_the_tracker_and_keeps_the_losing_value() {
         let f = fixture();
         let task = f.bound_task();
-        f.title(&task, "Mine", "attempted", None);
+        f.title(&task, "Mine", "sent", None);
         f.hold("Theirs");
         f.pass().await;
-        let effect = &f
+        let action = &f
             .store
             .sqlite
-            .tracker_effects_for(&EffectOwner::Task(task))
+            .tracker_actions_for(&ActionOwner::Task(task))
             .unwrap()[0];
-        assert_eq!(effect.phase, EffectPhase::Acknowledged);
-        assert_eq!(effect.value, json!({"field":"task_title","value":"Mine"}));
+        assert_eq!(action.phase, ActionPhase::Conflicted);
+        assert_eq!(action.value, json!({"field":"task_title","value":"Mine"}));
         assert_eq!(
-            effect.conflict,
+            action.conflict,
             Some(
                 json!({"revision":"2026-11-02T00:00:00Z","value":{"field":"task_title","value":"Theirs"}})
             )
@@ -757,15 +754,15 @@ mod tests {
         );
         let relation = uuid::Uuid::new_v4().to_string();
         f.sql(
-            "INSERT INTO tracker_effects(id,task_id,subject,kind,value_json,phase,provider)
-             VALUES(?1,?2,'relation:'||?1,'link',json_object('target',?3),'pending','linear')",
+            "INSERT INTO tracker_actions(id,task_id,subject,kind,value_json,phase,provider)
+             VALUES(?1,?2,'relation:'||?1,'link',json_object('target',?3),'queued','linear')",
             &[&relation, source.as_str(), target.as_str()],
         );
-        f.title(&source, "Renamed", "pending", None);
+        f.title(&source, "Renamed", "queued", None);
         f.pass().await;
         assert_eq!(
             f.phases(&source),
-            [EffectPhase::Pending, EffectPhase::Acknowledged]
+            [ActionPhase::Queued, ActionPhase::Confirmed]
         );
         f.sql(
             "UPDATE tasks SET external_issue_id=?2 WHERE id=?1",
@@ -776,18 +773,18 @@ mod tests {
         assert_eq!(f.fake.requests(), before + 1);
         assert_eq!(
             f.phases(&source),
-            [EffectPhase::Acknowledged, EffectPhase::Acknowledged]
+            [ActionPhase::Confirmed, ActionPhase::Confirmed]
         );
     }
 
     #[tokio::test]
-    async fn an_effect_for_another_tracker_retires_without_a_request() {
+    async fn an_action_for_another_tracker_retires_without_a_request() {
         let f = fixture();
         let task = f.bound_task();
-        f.title(&task, "Renamed", "pending", None);
-        f.sql("UPDATE tracker_effects SET provider='asana'", &[]);
+        f.title(&task, "Renamed", "queued", None);
+        f.sql("UPDATE tracker_actions SET provider='asana'", &[]);
         f.pass().await;
         assert_eq!(f.fake.requests(), 0);
-        assert_eq!(f.phases(&task), [EffectPhase::Retired]);
+        assert_eq!(f.phases(&task), [ActionPhase::Retired]);
     }
 }

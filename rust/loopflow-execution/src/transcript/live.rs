@@ -21,14 +21,16 @@ const FIRST: u64 = 128 * 1024;
 /// visible part.
 const TAIL: u64 = 8 * 1024 * 1024;
 
-/// Claude and Codex rows that can carry a turn boundary, model or usage;
-/// others are not parsed. Every Pi row is: its entries chain through parents.
-pub(crate) const MARKERS: [&[u8]; 5] = [
+/// Turn boundaries, usage and assistant prose; user/context payloads in Codex
+/// response_item rows are skipped before parsing. Every Pi row is parsed:
+/// its entries chain through parents.
+pub(crate) const MARKERS: [&[u8]; 6] = [
     b"\"type\":\"user\"",
     b"\"type\":\"assistant\"",
     b"\"type\":\"system\"",
     b"\"type\":\"event_msg\"",
     b"\"type\":\"turn_context\"",
+    b"\"role\":\"assistant\"",
 ];
 
 fn markers(harness: HarnessKind) -> &'static [&'static [u8]] {
@@ -154,8 +156,47 @@ fn tokens(count: u64) -> String {
 
 /// The current or last turn of `source`; `None` when it shows none or cannot
 /// be read.
-pub(crate) fn read_turn(harness: HarnessKind, source: &Source) -> Option<SessionTurn> {
-    last_turns(harness, source).pop().map(SessionTurn::of)
+#[cfg(test)]
+fn read_turn(harness: HarnessKind, source: &Source) -> Option<SessionTurn> {
+    read_current(harness, source).map(|reading| reading.turn)
+}
+
+/// One shared transcript read supplies both turn state and native response
+/// identity. The filesystem watch already invalidates this reading. Text is
+/// bounded and never written back into the store.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CurrentTurn {
+    pub turn: SessionTurn,
+    pub response: Option<(String, i64)>,
+}
+
+pub(crate) fn read_current(harness: HarnessKind, source: &Source) -> Option<CurrentTurn> {
+    let turn = last_turns(harness, source).pop()?;
+    let response = if harness == HarnessKind::Codex {
+        let text = turn.items.iter().find_map(|item| match item {
+            super::TurnItem::Agent(loopflow_model::chat::types::ConversationItem::Message {
+                text,
+                ..
+            }) if !text.trim().is_empty() => Some(text.chars().take(64).collect::<String>()),
+            _ => None,
+        });
+        text.and_then(|text| {
+            let modified = fs::metadata(source.path())
+                .ok()?
+                .modified()
+                .ok()?
+                .duration_since(std::time::UNIX_EPOCH)
+                .ok()?
+                .as_secs();
+            Some((text, i64::try_from(modified).ok()?))
+        })
+    } else {
+        None
+    };
+    Some(CurrentTurn {
+        turn: SessionTurn::of(turn),
+        response,
+    })
 }
 
 /// The turns at the end of `source`, through its last one: for a file, as
@@ -335,6 +376,34 @@ mod tests {
                 output_tokens: 500,
             })
         );
+    }
+
+    #[test]
+    fn native_response_identity_comes_only_from_the_current_assistant_turn() {
+        let transcript = tempfile::NamedTempFile::new().unwrap();
+        let rows = [
+            serde_json::json!({"type":"event_msg","payload":{"type":"task_started","turn_id":"old"}}),
+            serde_json::json!({"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Old answer"}]}}),
+            serde_json::json!({"type":"event_msg","payload":{"type":"task_complete","turn_id":"old"}}),
+            serde_json::json!({"type":"event_msg","payload":{"type":"task_started","turn_id":"new"}}),
+            serde_json::json!({"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Echoed question"}]}}),
+        ];
+        let mut text = rows
+            .iter()
+            .map(|row| format!("{row}\n"))
+            .collect::<String>();
+        fs::write(transcript.path(), &text).unwrap();
+        let before = read_current(HarnessKind::Codex, &file(transcript.path())).unwrap();
+        assert_eq!(before.turn.id.as_deref(), Some("new"));
+        assert_eq!(before.response, None);
+        text.push_str(&format!("{}\n", serde_json::json!({"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Tungsten ".repeat(20)}]}})));
+        fs::write(transcript.path(), text).unwrap();
+        let after = read_current(HarnessKind::Codex, &file(transcript.path())).unwrap();
+        assert_eq!(after.turn.id.as_deref(), Some("new"));
+        let (response, at) = after.response.unwrap();
+        assert!(response.starts_with("Tungsten "));
+        assert_eq!(response.chars().count(), 64);
+        assert!(at > 0);
     }
 
     #[test]

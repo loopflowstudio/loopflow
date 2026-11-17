@@ -61,8 +61,8 @@ struct LoopflowApp: App {
 
     init() {
         NSWindow.allowsAutomaticWindowTabbing = false
-        Perf.begin(Perf.coldStart, "launch", id: "launch",
-                   detail: "pre_main_ms=\(Int(PerfClock.millisecondsSinceProcessStart() ?? -1))")
+        if AppTestMode.current() == nil { Perf.startRecording() }
+        Perf.begin(.coldStart, "process_start_to_typing", id: "launch")
         Perf.begin(Perf.workspaceCurrent, "launch", id: "launch")
         if AppTestMode.current() == nil {
             DesktopLog.home.begin()
@@ -135,6 +135,7 @@ struct LoopflowApp: App {
                     .keyboardShortcut("o", modifiers: [.command, .shift])
             }
             CommandGroup(replacing: .help) {
+                Button("Enable Visual Timing…") { InteractionFrame.requestAccess() }
                 Button("Keyboard Shortcuts") { openWindow(id: "keyboard-shortcuts") }
                 Button("Snapshot for Review") {
                     snapshotCurrentWindow()

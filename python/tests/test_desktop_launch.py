@@ -20,6 +20,39 @@ def _rows(path: Path) -> list[tuple]:
         return db.execute("select title from tasks order by title").fetchall()
 
 
+def test_launch_report_keeps_observed_timings_without_unvalidated_budgets() -> None:
+    report = launch.summarize(
+        [
+            {
+                "scenario": "saved",
+                "pre_main": 100,
+                "restored": 150,
+                "first_frame": 200,
+                "usable": 250,
+                "fresh": None,
+                "rss_mb": 80,
+                "cpu_s": 0.5,
+                "reads": [],
+                "reached": False,
+                "cache": "saved",
+                "usable_source": "saved",
+                "lf_calls": {},
+                "lf_refused": {},
+                "saved_workspace_kept": True,
+            }
+        ],
+        {"source": "test-build", "lf": "test-lf", "host": "test-host", "database_mb": 1},
+    )
+
+    rendered = launch.render(report)
+
+    assert "| usable ms | 1 | 250 | — | 250 |" in rendered
+    assert "1 launches, 0 reached the endpoint" in rendered
+    assert "Milliseconds from kernel process start; p95 needs 20 samples." in rendered
+    assert "budgets_ms" not in report
+    assert "budget" not in rendered.lower()
+
+
 def test_snapshot_copies_a_live_home_including_its_write_ahead_log(tmp_path: Path) -> None:
     source = tmp_path / "live home"
     source.mkdir()

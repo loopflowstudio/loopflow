@@ -252,7 +252,13 @@ struct WaveStandupBoard: View {
         let shown = model.boardSection(view)
         return VStack(alignment: .leading, spacing: Spacing.md) {
             HStack(alignment: .center, spacing: Spacing.lg) {
-                Picker("Section", selection: Binding(get: { shown }, set: { model.navigation.boardSections[view] = $0 })) {
+                Picker("Section", selection: Binding(get: { shown }, set: { section in
+                    Perf.userAction(Perf.hierarchyInteraction, scenario: "board_\(shown.rawValue)_to_\(section.rawValue)", id: "board_section:\(section.rawValue)",
+                                    repository: model.repoPath, liveSessions: model.liveSessionCount, owner: model.navigation.performanceOwner) {
+                        model.navigation.boardSections[view] = section
+                        Perf.acknowledged(Perf.hierarchyInteraction, id: "board_section:\(section.rawValue)", owner: model.navigation.performanceOwner)
+                    }
+                })) {
                     ForEach(WaveBoardSection.allCases, id: \.self) { item in
                         Text("\(item.title) · \(standup.rows(item).count)").tag(item)
                     }
@@ -265,8 +271,14 @@ struct WaveStandupBoard: View {
             WaveBoardList(rows: standup.rows(shown), people: shown != .backlog && standup.showsPeople) { row in
                 withAnimation(FocusSizing.animation) { model.enter(.task(id: row.id), from: view) }
             }
+            .onChange(of: standup.rows(shown).map(\.id)) { before, after in
+                Perf.rowsChanged(from: before, to: after, owner: model.navigation.performanceOwner)
+            }
             .id(shown)
             .accessibilityIdentifier("wave-section-\(shown.rawValue)")
+            .onChange(of: shown) { _, section in
+                Perf.stateObserved(Perf.hierarchyInteraction, id: "board_section:\(section.rawValue)", owner: model.navigation.performanceOwner)
+            }
         }
     }
 }

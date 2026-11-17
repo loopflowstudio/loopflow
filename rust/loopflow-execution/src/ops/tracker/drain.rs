@@ -681,11 +681,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_creation_refused_before_any_request_costs_the_pass_nothing() {
+    async fn a_blocked_creation_costs_the_pass_nothing() {
+        const NO_INITIATIVE: &str = "Wave has no Linear Initiative; its Projects stay local";
         let mut fake = Fake::new();
-        fake.refuse = |action| {
-            matches!(action.owner, ActionOwner::Project(_))
-                .then(|| "Wave has no Linear Initiative; its Projects stay local".into())
+        fake.blocked = |action| {
+            matches!(action.owner, ActionOwner::Project(_)).then(|| NO_INITIATIVE.into())
         };
         let mut f = fixture();
         f.fake = Arc::new(fake);
@@ -697,7 +697,7 @@ mod tests {
                 &format!("project-{at}"),
             );
         }
-        // The creations queue ahead of the edit, so a charged refusal would
+        // The creations queue ahead of the edit, so a charged block would
         // spend the pass before the edit's turn.
         f.store
             .sqlite
@@ -709,14 +709,11 @@ mod tests {
         assert_eq!(f.fake.requests(), 1);
         assert_eq!(pass.requests, 1);
         assert_eq!(f.phases(&task), [ActionPhase::Confirmed]);
-        let refused: Vec<_> = f.store.sqlite.unconfirmed_tracker_actions("/repo").unwrap();
-        assert_eq!(refused.len(), 21);
-        assert!(refused
-            .iter()
-            .all(|action| action.phase == ActionPhase::Queued
-                && action.error.as_deref()
-                    == Some("Wave has no Linear Initiative; its Projects stay local")
-                && action.sent_at.is_none()));
+        let blocked: Vec<_> = f.store.sqlite.unconfirmed_tracker_actions("/repo").unwrap();
+        assert_eq!(blocked.len(), 21);
+        assert!(blocked.iter().all(|action| action.phase == ActionPhase::Queued
+            && action.error.as_deref() == Some(NO_INITIATIVE)
+            && action.sent_at.is_none()));
         // A later pass decides the same block without writing the rows again.
         let revision = f.store.sqlite.revisions().unwrap().planning;
         let pass = f.pass().await;

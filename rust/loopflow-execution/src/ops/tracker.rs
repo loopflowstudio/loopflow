@@ -177,7 +177,7 @@ impl Tracker {
             Self::Linear(client) => client.blocked_action(store, repo, action).await,
             Self::Asana(_) => None,
             #[cfg(test)]
-            Self::Fake(fake) => (fake.refuse)(action),
+            Self::Fake(fake) => (fake.blocked)(action),
         }
     }
 
@@ -519,7 +519,7 @@ pub(crate) mod fake {
         pub held: Mutex<Option<Observed>>,
         pub requests: AtomicUsize,
         /// Blocks these actions before any request, with the reason.
-        pub refuse: fn(&TrackerAction) -> Option<String>,
+        pub blocked: fn(&TrackerAction) -> Option<String>,
     }
 
     impl Fake {
@@ -528,7 +528,7 @@ pub(crate) mod fake {
                 idempotent: Vec::new(),
                 held: Mutex::new(None),
                 requests: AtomicUsize::new(0),
-                refuse: |_| None,
+                blocked: |_| None,
             }
         }
 

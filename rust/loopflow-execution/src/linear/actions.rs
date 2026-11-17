@@ -36,9 +36,8 @@ impl LinearClient {
         else {
             return None;
         };
-        let project = store.get_project(project).await.ok()??;
-        let wave = store.get_wave(&project.wave_id).await.ok()??;
-        crate::ops::linear::read_initiative(repo, wave.slug())
+        let (_, slug) = project_wave(store, project).await.ok()?;
+        crate::ops::linear::read_initiative(repo, &slug)
             .is_none()
             .then(|| NO_INITIATIVE.to_string())
     }
@@ -706,6 +705,14 @@ async fn project_scope(
     repo: &Path,
     project: &ProjectId,
 ) -> OpsResult<(WaveId, String)> {
+    let (wave, slug) = project_wave(store, project).await?;
+    let initiative =
+        crate::ops::linear::read_initiative(repo, &slug).ok_or_else(|| message(NO_INITIATIVE))?;
+    Ok((wave, initiative))
+}
+
+/// The Wave a Project belongs to, with its slug.
+async fn project_wave(store: &Store, project: &ProjectId) -> OpsResult<(WaveId, String)> {
     let project = store
         .get_project(project)
         .await
@@ -716,9 +723,7 @@ async fn project_scope(
         .await
         .map_err(message)?
         .ok_or_else(|| message("Project Wave is missing"))?;
-    let initiative = crate::ops::linear::read_initiative(repo, wave.slug())
-        .ok_or_else(|| message(NO_INITIATIVE))?;
-    Ok((project.wave_id, initiative))
+    Ok((project.wave_id, wave.slug().to_owned()))
 }
 
 fn accept_project(

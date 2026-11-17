@@ -225,80 +225,44 @@ one frame, with accepted and confirmed times beside it.
 
 ## Slices
 
-All in one PR; deepest first. Status after the second implement pass
-(2026-11-16), which built the concept review's seven directions
-(`54b1ad9a87` has their text).
+All in one PR; deepest first. Status after the third implement pass
+(2026-11-16), which built concept review pass 2's four directions
+(`e323a0a227` has their text).
 
 1. **Machine — built.** `journal::request::{after_reply, answer_first}`;
    `sync_after_save` and the claim's `assert_assignee` defer inside a served
    write. `Revisions` on `response`/`error`, `read_at` on frames; `request_id`
    with `command_answers` (`server/answers.rs`, one migration); protocol 7/7.
-2. **Shared Swift — built except Desktop's saved `task_list`.**
-   `PendingChanges` (one per Machine) owns the change path: `make` and
-   `request` send under the request ID through the app's send closure, resend
-   while `ServerLink.lostLink` holds, post the Notice, and hold the link
-   (connected, blip, away after 10 s; away posts one condition Notice to every
-   reporting `NoticeCenter`; `acceptsChanges` greys controls). Planning rows
-   take every command (`RoadmapTask` fields are `internal(set)`): Complete
-   marks a row done, Abandon removes it, Move adds the row to the target Wave
-   from the inventory. `Reading<Value>` (value, readAt, failure, `yields(to:)`)
-   replaces `WorkReading`, `TaskListReading`, `MobileTaskReading`.
-   `SavedReadings` keeps wire bytes per (Machine, subscription); the phone
-   uses it. `NoticeCenter` holds conditions by key under one event.
-3. **Desktop — mostly built.** Every command in the table goes through
-   `PendingChanges.thisMachine` (shared by windows; tests get their own).
-   Start, Auto-Ship and Stop Auto-Ship post "requested" in the click. Session
-   rename closes its edit and patches titles (`sessions` reads `sessionsRead`
-   through the patches). The Work observation feeds the link; Task controls
-   disable while away. Outside-the-plan is a condition Notice per open Wave
-   with Copy recovery. `CreationRecoveryView` is gone: `CreationRecovery`
-   posts condition Notices and opens its inspector from the action
-   (`CreationNotices`). Left: the four items under "Next implement
-   direction" below. `WorkModel.change`/`request` (`WorkModel.swift:2743,
-   2753`) are the two-line bindings to `PendingChanges.make`/`request`;
-   `sidebarTaskRows` (`WorkModel.swift:2167`) still falls back to `visibleTasks`.
-4. **Phone — built except tests.** `TaskFeed` holds `Reading<[RepositoryTasks]>`
-   from `SavedReadings` and changes through `PendingChanges` (so it resends);
-   controls disable while away. Left: `TaskFeedTests`, which needs a
-   `ServerCarrier` stand-in speaking hello/subscribe/frames; the shared
-   behavior is covered by `PendingChangesTests` on macOS.
+   `ViewPlan.viewer` (required, nullable): who a Claim there names, from the
+   claim's own `claimant` in `store/ownership.rs`, filled in `prepare_plan`.
+2. **Shared Swift — built.** `PendingChanges` (one per Machine) makes,
+   requests and resends; `make` takes the refusal Notice's action (Show).
+   `.claim(task:owner:)` carries the reading's `viewer` onto planning rows.
+   `NoticeCenter.read` is the one read-failure rule: a transition into failure
+   posts one event keyed by part, recovery clears it, a lost link posts none.
+   `WorkViewPlan` decodes and encodes every key, nulls included.
+   `SavedReadings.load` is synchronous; callers move it off the main thread.
+3. **Desktop — built.** Every reading assignment passes `WorkModel.reported`
+   (property observers on each reading store; the `task` part reports once,
+   for its row, work, comments and runs). Inline load-failure banners, text,
+   stale badges and Retry buttons are deleted (`WorkDisclosureHeading` lost
+   `failure`/`retry`; `WorkReadingStatus.progress` drops failures from the
+   sidebar). `sidebarTaskRows` reads only the started list: `task_list` frames
+   save through `SavedReadings` beside the workspace cache and restore at
+   launch; before either, the sidebar is empty. Refusals carry Show (selects).
+4. **Phone — built.** `TaskFeed.tasks` reports through `NoticeCenter.read`
+   (action Try again); Complete's refusal Show opens the workspace.
+   `TaskFeedTests` drive it through a stand-in `ServerCarrier`;
+   `RemoteMobileClient` takes its `ServerEndpoint`.
 5. **Journey — not started** (demo step).
 
-Checks: `swift test --filter 'PendingChangesTests|WorkModelTests|WorkNavigationTests|SessionRenameTests|WaveStandupTests|DesktopHeadlessTests|WorkCLISubscriptionTests|DashboardWorkspaceTests|SessionRefreshTests|DTOFixtureTests|CreationSubmissionTests|SessionControlsTests|SessionsStoreTests|WorkDestinationTests'`
-passed; `scripts/test_ios.py -only-testing:LoopflowiOSTests/MobileTaskCreationTests`
-19 passed; `documented_commands::` 4 passed. `WorkNavigationProofTests` (display) edited for rename in the
-click, not run here: gate/CI. Rust unchanged since the first pass.
-
-## Next implement direction (concept review, pass 2, 2026-11-16)
-
-The seven directions are built. Four places still miss the brief; none is a
-product choice.
-
-1. **Claim shows its owner.** The brief: "Move, Claim, Unassign, Reopen and
-   Session rename show their result in the click." Section-only Claim shows
-   nothing for an unstarted Task. The Machine knows who a claim names (the
-   repository's Git identity, `TaskOwner`); the client must not guess it. The
-   repository's `task_list` reading gains `viewer: TaskOwner?` (required,
-   nullable: null when Git has no identity), Rust resolving it with the claim's
-   own resolver in `task_ownership.rs`. Claim sets `runtime.owner = viewer` on the
-   repository's planning rows (list rows carry states only); with no viewer,
-   the section move only. DTO fixture and
-   each language's fixture test take the field. `docs/surfaces.md` "your name
-   as owner" then holds.
-2. **Read failures post from one place.** The ~50 inline sites go together:
-   every part's reading on Desktop is assigned through one `WorkModel`
-   function that posts an event Notice keyed by the part on a transition into
-   failure, and none while `pendingChanges.link == .away` (the away condition
-   already says it). Views read `.value` and show the last good reading or
-   empty. The phone's `TaskFeed` does the same through the same rule.
-3. **The planning-rows bridge goes.** `sidebarTaskRows`' fallback to
-   `visibleTasks` is the second list evaluator the plan forbids. Desktop saves
-   `task_list` readings through `SavedReadings` and draws the first frame from
-   them; before any reading, the sidebar is empty.
-4. **The refusal Notice carries "Show".** `make` takes the action; Desktop's
-   selects the Task, the phone's opens its workspace.
-
-Then `TaskFeedTests` with a `ServerCarrier` stand-in, as planned.
+Checks (third pass): `scripts/test_desktop.sh --filter 'PendingChangesTests|WorkModelTests|WorkNavigationTests|SessionRenameTests|WaveStandupTests|DesktopHeadlessTests|WorkCLISubscriptionTests|DashboardWorkspaceTests|SessionRefreshTests|DTOFixtureTests|CreationSubmissionTests|SessionControlsTests|SessionsStoreTests|WorkDestinationTests|WorkSelectionTests|WorkCacheTests|TaskRowMetadataTests|WaveDetailReadingTests'`
+390 passed; `scripts/test_ios.py -only-testing:LoopflowiOSTests/TaskFeedTests -only-testing:LoopflowiOSTests/MobileTaskCreationTests`
+21 passed; `cargo test -p loopflow --test integration dto_fixtures::` 52 passed;
+`cargo test -p loopflow --lib server::schema::tests::` 8 passed;
+`cargo test -p loopflow-execution --lib store::selections::tests::` 26 passed;
+`documented_commands::` 4 passed; fmt and clippy clean; acceptance rg no matches.
+`TaskHistoryProofTests` (display) edited for the Notice, not run here: gate/CI.
 
 ## Acceptance at gate (headless)
 

@@ -21,14 +21,15 @@ the workspace saved at `<Machine>/desktop-cache/workspace.json` and shows
 and navigate; Graph process state, Task condition, Session state and every action except
 opening a Session wait for the fresh read. The Portfolio window opens from the
 same saved workspace. With no known Task name yet, a row says **Loading Task…**
-until its first read answers. The working Task list shows loading until it has
-answered; an empty result then says there are no working Tasks. Newly created
+until its first read answers. The working Task list opens on the list saved at
+the last launch, else shows loading until it has answered; an empty result then
+says there are no working Tasks. Newly created
 and reopened Tasks use their locally recorded names while tracker updates are
 pending.
 
 **Last known** describes the reading supplying the displayed name. A read that
-starts failing raises one Notice for its part, with **Retry**; the view keeps
-its last good reading. A Task without a description has no summary line.
+starts failing raises one Notice for its part; the view keeps its last good
+reading, or stays empty, and the Notice goes when a read succeeds. A Task without a description has no summary line.
 If no name is known, the failed row says
 **Task unavailable**. Desktop reconnects automatically. A successful replacement
 updates the rows, retaining the selected workspace, panes and drafts.

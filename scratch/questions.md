@@ -34,3 +34,16 @@
   send/answer/refuse switch lives only in `PendingChanges`.
 - `outcome_unknown` without revisions counts as refused: the row returns and
   the Notice carries the message; the next reading shows what happened.
+- Read failures left inline, each outside a `WorkModel` reading: the Graph
+  step's on-demand history (`GraphRunStep`, no model), the telemetry window's
+  doctor read, and action errors (`controlError` "Control failed",
+  `taskSessionErrors`, `conversationError`). Planned: leave; they are not
+  readings of a part. Moving them is one `model.reported` call each.
+- `WaveDetailReading.failure` is now read only by its tests and the mock
+  Wave fixture; delete with that fixture.
+- A failed read no longer disables Task controls; only away and a saved,
+  unconfirmed workspace do.
+- `RemoteMobileClient(savedMachine:endpoint:)`: the endpoint is where control
+  connections open, which `TaskFeedTests` replace with a stand-in carrier.
+- `viewer` takes the display name from `participant_name()` as the claim does
+  (the server's cwd), not `participant_name_in(repo)`.

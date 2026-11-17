@@ -147,7 +147,7 @@ Work that ends in its own PR is a Task; wait for it with `lf task wait`.
 ## Steer
 
 ```bash
-lf steer INF-123 "keep the public API"   # every Session on the Task; joins its thread
+lf steer INF-123 "keep the public API"   # every Session on the Task; wakes its conversation; joins its thread
 lf steer SESSION "skip the vendored code"   # one conversation
 lf --wave parser steer "tokenizer first"    # every Session on the Wave
 lf --repo . steer "hold merges"             # every Session in the repository
@@ -164,6 +164,9 @@ to that Session. Repository and Wave steers currently remain Machine-local.
 
 A running Session reads a steer after its next tool call. An idle one the
 Machine server holds is woken; an idle bare one reads it at its next prompt.
+A stopped interactive Session a steer names, or a Task's stopped conversation
+under a Task steer, is started again by the Machine server to read it. `lf -b
+steer SESSION TEXT` runs that turn here instead and prints the reply.
 Each new Session receives applicable steers at launch; continuing or compacting
 the same Session keeps what it has read. The context stays bounded, with
 complete sources available for excerpts.

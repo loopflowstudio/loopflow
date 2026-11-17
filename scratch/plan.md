@@ -202,3 +202,17 @@ is saved. `lf -b steer` exits with the turn's failure.
 `open` vs `resume`, selectors, `session restart`/`fork` verbs, `move` words,
 `--prepare`: later slices, each designed first. Waking on `--machine` routing
 runs wherever the command already runs; no new routing.
+
+## Docs written (write-docs)
+
+`docs/sessions.md` (Steer without interrupting, One more turn here, the bare
+and crash tables), `docs/agent-api.md` (Steer), `docs/config.md`,
+`docs/dev/execution.md`, `docs/dev/planning.md`, `docs/dev/reference-models.md`,
+`rust/loopflow/src/server/README.md` (Starting a stopped conversation),
+`.lf/qa/provider-switching.md`. `lf steer`'s Clap help is still to change in
+slice 3 with the code.
+
+Open: Pi and OpenCode have no idle wake, so a started stopped Pi or OpenCode
+Session never reads its steer through the idle path. Does the held start pass
+the steer as the resumed conversation's first input for those harnesses (the
+slice 2 fallback), or do steers start only Claude and Codex Sessions?

@@ -394,8 +394,9 @@ the phone's `view.select` Task list and its creation destinations all read it.
   nothing, and a start whose holder reply was lost is reconciled against the
   holder's inventory first; a start that could not be reconciled answers
   `outcome_unknown`, and repeating the same `request` settles it. It creates
-  a process and, with `session.continue`, the only operation here that does;
-  attaching never does.
+  a process and, with `session.continue` and the wake watcher's start of a
+  stopped conversation, the only operation here that does; attaching never
+  does.
 - `session.continue {session, request, rows, cols}` starts `lf session resume`
   of exactly that Session in a held terminal, in its recorded directory, with
   the server's environment and its own `LF_HOME` and `LF_BIN`, for a client
@@ -639,6 +640,25 @@ Claude inbox leaves its news unclaimed. After a failed send the steers arrive
 again. Bare Sessions are never woken. No
 process or clock runs per Session: the watcher's only clock is the change
 signal's 60 s fallback for a missed checkpoint or a Machine's sleep.
+
+### Starting a stopped conversation
+
+The same reading finds a third case: an interactive Session with a pending
+steer that names it, or names its Task when it is the Task's primary
+conversation, and no live AgentProcess. The watcher starts it with
+`session.continue`'s launch (`lf session resume` in a held terminal, in its
+recorded directory, refused through `run_refusal` when the Session is
+already running), with the steer's ID as the start's `request`. Once the
+resumed conversation yields, the idle path above delivers every unread steer
+in one message. Nothing else starts a Session for a steer: `lf steer` and
+`session.steer` only save it.
+
+A steer starts its Session at most once; the steer row records the start.
+A server restart, a Machine reboot or an upgrade therefore starts nothing for
+a steer that already started its Session, and a start that fails is a line in
+`logs/lf.log` with the steer left pending. A Run (a non-interactive Session)
+is never started: only its own Graph continues it, through `lf -b steer`.
+Wave and repository steers and Task updates start nothing.
 
 A managed launch's agent starts only once the server answers. The launch
 opens a connection to the server, as a hook does; when nothing answers it runs `lf install server`

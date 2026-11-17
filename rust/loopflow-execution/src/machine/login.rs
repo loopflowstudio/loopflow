@@ -25,6 +25,9 @@ use loopflow_model::durable::Machine;
 const APPROVAL_DEADLINE: Duration = Duration::from_secs(15 * 60);
 /// How long the login may take to print its approval page, SSH included.
 const PAGE_DEADLINE: Duration = Duration::from_secs(60);
+/// How long Claude may take to exit after complaining about the code; past
+/// it, the login is waiting for another paste.
+const REJECTION_GRACE: Duration = Duration::from_secs(1);
 
 /// Sign `machine` in to `provider`. A Machine whose route is `local` is this one.
 pub async fn login(
@@ -86,7 +89,8 @@ fn claude(machine: &Machine, approver: Option<&Approver>, batch: bool) -> Result
         bail!("no code given; {name} was not signed in to Claude");
     }
     login.answer(code)?;
-    login.finish(code)?;
+    // A malformed code makes Claude complain on stderr and wait for another.
+    login.finish(code, true)?;
     match confirm(machine, Provider::Claude, LoginState::SignedIn, "login")? {
         Some(account) => println!("{name}: Claude signed in as {account}"),
         None => println!("{name}: Claude signed in"),
@@ -121,7 +125,7 @@ fn codex(machine: &Machine, approver: Option<&Approver>) -> Result<()> {
             return Err(error);
         }
     }
-    login.finish(&code)?;
+    login.finish(&code, false)?;
     let account = confirm(machine, Provider::Codex, LoginState::SignedIn, "login")?;
     println!(
         "{name}: Codex signed in ({})",
@@ -619,7 +623,8 @@ struct Login {
 impl Login {
     fn start(machine: &Machine, provider: Provider, argv: &[&str]) -> Result<Self> {
         let target = name(machine);
-        let mut child = command(machine, argv)?
+        let tied = [&["sh", "-c", TIED_TO_STDIN, "sh"], argv].concat();
+        let mut child = command(machine, &tied)?
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -682,18 +687,32 @@ impl Login {
         }
     }
 
+    /// Writes the code; stdin stays open, since closing it stops the login.
     fn answer(&mut self, code: &str) -> Result<()> {
-        let mut stdin = self.child.stdin.take().expect("piped login stdin");
+        let stdin = self.child.stdin.as_mut().expect("piped login stdin");
         stdin
             .write_all(format!("{code}\n").as_bytes())
+            .and_then(|()| stdin.flush())
             .with_context(|| format!("send the code to {}", self.target))
     }
 
-    /// Waits for the login to exit successfully, killing it at the deadline.
-    fn finish(&mut self, code: &str) -> Result<()> {
+    /// Waits for the login to exit successfully, killing it at the deadline,
+    /// or, when `rejects_on_stderr`, a second after its first stderr line if
+    /// it has not exited by then.
+    fn finish(&mut self, code: &str, rejects_on_stderr: bool) -> Result<()> {
+        let mut rejected: Option<SystemTime> = None;
         loop {
             while let Ok(line) = self.lines.try_recv() {
+                if rejects_on_stderr && line.0 && rejected.is_none() {
+                    rejected = Some(SystemTime::now());
+                }
                 self.remember(line);
+            }
+            if rejected.is_some_and(|at| at.elapsed().unwrap_or_default() > REJECTION_GRACE)
+                && matches!(self.child.try_wait(), Ok(None))
+            {
+                self.kill();
+                return Err(self.failure(None, code));
             }
             if let Some(status) = self.child.try_wait()? {
                 if status.success() {
@@ -764,6 +783,8 @@ impl Login {
     }
 
     fn kill(&mut self) {
+        // Closing stdin stops the login wherever it runs (`TIED_TO_STDIN`).
+        drop(self.child.stdin.take());
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
@@ -792,6 +813,19 @@ fn not_installed(provider: Provider, target: &str) -> anyhow::Error {
 
 // ---------------------------------------------------------------------------
 // Running a client on the target
+
+/// Runs a login (`"$@"`) that stops when its stdin closes: when lf finishes,
+/// is interrupted or loses the connection. Closing an SSH exchange without a
+/// PTY signals nothing remote, and `claude auth login` would keep waiting for
+/// its localhost callback. The login reads stdin through a FIFO; the reader
+/// copying stdin into it kills the login at EOF.
+const TIED_TO_STDIN: &str = r#"d=$(mktemp -d) && mkfifo "$d/in" || exit 1
+"$@" <"$d/in" & login=$!
+exec 3>"$d/in" 4<&0
+rm -rf "$d"
+{ cat <&4 >&3; kill "$login"; } >/dev/null 2>&1 &
+exec 3>&- 4<&-
+wait "$login""#;
 
 /// `argv` on `machine`: a child here, one SSH exchange without a PTY there.
 /// `BROWSER=true` keeps the client from opening a window of its own.
@@ -837,7 +871,10 @@ pub(crate) fn name(machine: &Machine) -> String {
 
 fn strip_ansi(line: &str) -> String {
     static ANSI: once_cell::sync::Lazy<regex::Regex> = once_cell::sync::Lazy::new(|| {
-        regex::Regex::new("\x1b\\[[0-9;?]*[ -/]*[@-~]").expect("valid ANSI pattern")
+        // CSI styling, and OSC sequences such as the OSC 8 hyperlink Claude
+        // Code wraps its URL in: `ESC ] 8 ;; <url> BEL <text> ESC ] 8 ;; BEL`.
+        regex::Regex::new("\x1b\\[[0-9;?]*[ -/]*[@-~]|\x1b\\][^\x07\x1b]*(?:\x07|\x1b\\\\)")
+            .expect("valid ANSI pattern")
     });
     ANSI.replace_all(line, "").into_owned()
 }
@@ -850,6 +887,13 @@ mod tests {
     fn approval_urls_survive_colored_output() {
         assert_eq!(
             strip_ansi("\x1b[1mvisit:\x1b[0m https://claude.com/cai/oauth/authorize?a=1"),
+            "visit: https://claude.com/cai/oauth/authorize?a=1"
+        );
+        // Claude Code 2.1.326 in a terminal that supports hyperlinks.
+        assert_eq!(
+            strip_ansi(
+                "visit: \x1b]8;;https://claude.com/cai/oauth/authorize?a=1\x07https://claude.com/cai/oauth/authorize?a=1\x1b]8;;\x07"
+            ),
             "visit: https://claude.com/cai/oauth/authorize?a=1"
         );
     }

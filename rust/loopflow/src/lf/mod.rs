@@ -2986,12 +2986,15 @@ pub enum MachineCommand {
     /// Sign Machines out through each provider's own logout; with no Machine
     /// named, this one
     Logout {
+        /// claude, codex, github, linear, asana, notion, doppler or opencode
         provider: loopflow_execution::provider_auth::Provider,
+        /// Added Machines to sign out
         machines: Vec<String>,
     },
     /// What a Machine is signed in to, asked of its own clients; with no
     /// Machine named, this one
     Logins {
+        /// An added Machine
         machine: Option<String>,
         #[arg(long)]
         json: bool,

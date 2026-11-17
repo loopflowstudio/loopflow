@@ -59,7 +59,11 @@ async fn sign_in(provider: Provider, chrome_profile: Option<&str>) -> Result<()>
     .await;
     service.abort_pending(provider).await;
     result?;
-    println!("Connected local {}", provider.display_name());
+    println!(
+        "{}: {} signed in",
+        crate::store::ownership::local_label(),
+        provider.display_name()
+    );
     Ok(())
 }
 

@@ -127,10 +127,10 @@ pub async fn connect(
         _ => bail!("machine login supports github, opencode and linear"),
     };
     send(machine, &credential)?;
-    eprintln!(
-        "Connected {} on {}{verified}",
-        provider.display_name(),
-        crate::machine::login::name(machine)
+    println!(
+        "{}: {} signed in{verified}",
+        crate::machine::login::name(machine),
+        provider.display_name()
     );
     Ok(())
 }
@@ -181,15 +181,25 @@ pub(crate) fn require_foreground(batch: bool) -> Result<()> {
 }
 
 /// Whether the target's own `lf machine logins` already shows `login`.
+/// Whether `machine` already reads signed in to `provider` as `login`; says so
+/// when it does, since nothing is sent.
 async fn remote_has(machine: &Machine, provider: Provider, login: &str) -> Result<bool> {
-    Ok(crate::machine::login::logins(machine)
+    let has = crate::machine::login::logins(machine)
         .await?
         .into_iter()
         .any(|row| {
             row.provider == provider
                 && row.state == crate::machine::login::LoginState::SignedIn
                 && row.account.as_deref() == Some(login)
-        }))
+        });
+    if has {
+        println!(
+            "{}: {} already signed in as {login}",
+            crate::machine::login::name(machine),
+            provider.display_name()
+        );
+    }
+    Ok(has)
 }
 
 pub(crate) fn remote_command(
@@ -230,7 +240,11 @@ pub(crate) fn remote_command(
         let stderr = String::from_utf8_lossy(&output.stderr);
         let reason = stderr
             .lines()
-            .find_map(|line| line.strip_prefix("Error: "))
+            // `Error:` from lf, `error:` from Clap when the remote lf is older.
+            .find_map(|line| {
+                line.strip_prefix("Error: ")
+                    .or(line.strip_prefix("error: "))
+            })
             .map(|line| format!(": {}", line.trim()))
             .unwrap_or_else(|| crate::os_process::exit_reason(&stderr));
         bail!(

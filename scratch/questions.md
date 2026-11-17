@@ -76,3 +76,9 @@ Choices made headless for review; the plan says what each passed over.
   the viewer id; a mismatch renews and sends, and the receiving end decides.
 - Slice 4: `lf account …` now reads as a skill name ("skill or graph not
   found: account"); no moved-command hint names `lf machine login`.
+- QA: `--refused` covers added Machines only, so this Machine reading Codex
+  refused is not selected; `lf machine login codex` signs it in. Passed over:
+  including this Machine.
+- QA: after a code, a Claude login still running 1 s after its first stderr line ends as rejected
+  (a malformed code makes it complain and wait for another paste). Passed
+  over: reading another code from the person.

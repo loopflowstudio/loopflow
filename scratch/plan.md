@@ -214,7 +214,10 @@ Linear/Asana/Notion/Doppler/OpenCode). Kept because retiring
 - Approval not finished in 15 minutes (Codex's code lifetime; Claude uses the
   same deadline): kill the login, say so.
 - Ctrl-C: kill the local child or close the SSH session; the remote login dies
-  with it.
+  with it. Closing a PTY-less exchange signals nothing remote (QA found
+  `claude auth login` still waiting on mini), so the login runs under
+  `TIED_TO_STDIN`: it reads stdin through a FIFO and dies at its EOF, and lf
+  keeps stdin open until the login exits.
 
 ## Constraints held
 

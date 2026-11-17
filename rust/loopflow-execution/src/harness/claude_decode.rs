@@ -285,14 +285,10 @@ impl ReaderState {
         let Some(usage) = message.get("usage") else {
             return;
         };
-        let input = [
-            "input_tokens",
-            "cache_read_input_tokens",
-            "cache_creation_input_tokens",
-        ]
-        .into_iter()
-        .filter_map(|key| usage.get(key).and_then(Value::as_u64))
-        .sum();
+        let usage = super::claude::usage(usage);
+        let input = usage.input_tokens.unwrap_or(0)
+            + usage.cache_read_tokens.unwrap_or(0)
+            + usage.cache_write_tokens.unwrap_or(0);
         self.peak_input_by_model
             .entry(model.to_string())
             .and_modify(|peak| *peak = (*peak).max(input))
@@ -308,30 +304,19 @@ impl ReaderState {
         if self.assistant_usage.contains_key(id) {
             return None;
         }
-        total_input(message.get("usage")?)
+        super::claude::usage(message.get("usage")?).total_input_tokens
     }
 
     fn observe_assistant_usage(&mut self, value: &Value) -> Option<TurnUsage> {
         let message = value.get("message")?;
         let message_id = message.get("id").and_then(Value::as_str)?;
         let usage = message.get("usage")?;
-        let input_tokens = usage.get("input_tokens").and_then(Value::as_u64);
-        let cache_read_tokens = usage.get("cache_read_input_tokens").and_then(Value::as_u64);
-        let cache_write_tokens = usage
-            .get("cache_creation_input_tokens")
-            .and_then(Value::as_u64);
         let receipt = TurnUsage {
-            input_tokens,
-            total_input_tokens: total_input(usage),
-            output_tokens: usage.get("output_tokens").and_then(Value::as_u64),
-            reasoning_tokens: usage.get("reasoning_tokens").and_then(Value::as_u64),
-            cache_read_tokens,
-            cache_write_tokens,
             model: message
                 .get("model")
                 .and_then(Value::as_str)
                 .map(ToString::to_string),
-            ..TurnUsage::default()
+            ..super::claude::usage(usage)
         };
         if !receipt.is_reported() {
             return None;
@@ -400,16 +385,6 @@ fn turn_rejection(value: &Value) -> Option<String> {
             .or_else(|| info.get("rateLimitType"))
             .and_then(Value::as_str)
             .map_or_else(|| status.to_owned(), |kind| format!("{status}: {kind}")),
-    )
-}
-
-/// A request's whole input: fresh tokens plus cache reads and writes.
-fn total_input(usage: &Value) -> Option<u64> {
-    let tokens = |key: &str| usage.get(key).and_then(Value::as_u64);
-    Some(
-        tokens("input_tokens")?
-            + tokens("cache_read_input_tokens").unwrap_or(0)
-            + tokens("cache_creation_input_tokens").unwrap_or(0),
     )
 }
 
@@ -597,30 +572,12 @@ fn add_optional(total: &mut Option<u64>, value: Option<u64>) {
 }
 
 fn map_turn_usage(event: &Value, state: &mut ReaderState) -> Option<TurnUsage> {
-    let input_tokens = event.pointer("/usage/input_tokens").and_then(Value::as_u64);
-    let cache_read_tokens = event
-        .pointer("/usage/cache_read_input_tokens")
-        .and_then(Value::as_u64);
-    let cache_write_tokens = event
-        .pointer("/usage/cache_creation_input_tokens")
-        .and_then(Value::as_u64);
     let (peak_input_tokens, context_window_tokens) = state
         .take_peak_pressure(event)
         .map_or((None, None), |(input, window)| (Some(input), Some(window)));
     let receipt = TurnUsage {
-        input_tokens,
-        output_tokens: event
-            .pointer("/usage/output_tokens")
-            .and_then(Value::as_u64),
-        total_input_tokens: input_tokens
-            .map(|input| input + cache_read_tokens.unwrap_or(0) + cache_write_tokens.unwrap_or(0)),
         peak_input_tokens,
         context_window_tokens,
-        reasoning_tokens: event
-            .pointer("/usage/reasoning_tokens")
-            .and_then(Value::as_u64),
-        cache_read_tokens,
-        cache_write_tokens,
         model: event
             .get("model")
             .and_then(Value::as_str)
@@ -629,6 +586,7 @@ fn map_turn_usage(event: &Value, state: &mut ReaderState) -> Option<TurnUsage> {
             .get("cost_usd")
             .or_else(|| event.get("total_cost_usd"))
             .and_then(Value::as_f64),
+        ..super::claude::usage(&event["usage"])
     };
     receipt.is_reported().then_some(receipt)
 }

@@ -108,10 +108,9 @@ final class TaskFeed {
         waiting = requested ?? Perf.begin("find_work", scenario: filter.rawValue)
         requested = nil
         // The last reading under each filter, shown at once while the Machine answers.
-        let subscription = subscription
-        let wire = await saved.load(subscription)
+        let (subscription, saved) = (subscription, saved)
         let restored = await Task.detached(priority: .userInitiated) {
-            wire.flatMap { try? RemoteTaskObservation.decode(frame: RawJSON($0)).reading }
+            saved.load(subscription).flatMap { try? RemoteTaskObservation.decode(frame: RawJSON($0)).reading }
         }.value
         guard current == generation else { return }
         if let restored, restored.failure == nil {

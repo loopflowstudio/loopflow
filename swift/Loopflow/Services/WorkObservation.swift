@@ -179,6 +179,8 @@ public struct WorkFrame: Sendable {
         public let roadmap: String?
         public let waves: String?
         public let sessionPage: String?
+        /// A Task list frame's whole line, which `SavedReadings` keeps.
+        public let taskList: Data?
     }
 
     public init(sequence: Int, answers: Int?, unavailable: String?, content: Content, wire: Wire?, readAt: Revisions? = nil) {
@@ -258,13 +260,14 @@ public struct WorkFrame: Sendable {
                 .sorted { ($0["repo"] as? String ?? "", $0["name"] as? String ?? "")
                     < ($1["repo"] as? String ?? "", $1["name"] as? String ?? "") }
             return frame(read, .planning(Planning(roadmap: roadmap, waves: waves)),
-                         wire: Wire(roadmap: text(raw), waves: text(rows), sessionPage: nil))
+                         wire: Wire(roadmap: text(raw), waves: text(rows), sessionPage: nil, taskList: nil))
         case .selections:
             let read = try envelope([WorkViewPlan].self)
             return frame(read, .selections(read.body))
         case .taskList:
             let read = try envelope(WorkViewPlan.self)
-            return frame(read, .taskList(read.body))
+            return frame(read, .taskList(read.body),
+                         wire: Wire(roadmap: nil, waves: nil, sessionPage: nil, taskList: read.body == nil ? nil : line))
         case .peerPlanning:
             let read = try envelope(PeerPlanningReading.self)
             return frame(read, .peerPlanning(read.body.map {
@@ -276,7 +279,8 @@ public struct WorkFrame: Sendable {
             return frame(read, .sessions(read.body.map {
                 Sessions(repo: scope.repo ?? "", includesHeadless: scope.headless, entries: $0)
             }), wire: Wire(roadmap: nil, waves: nil,
-                           sessionPage: entries.flatMap { text(["entries": $0, "next": NSNull()] as [String: Any]) }))
+                           sessionPage: entries.flatMap { text(["entries": $0, "next": NSNull()] as [String: Any]) },
+                           taskList: nil))
         case .task:
             let read = try envelope(TaskStatusReading.self)
             guard let task = scope.task, let status = read.body else { return frame(read, .task(nil)) }

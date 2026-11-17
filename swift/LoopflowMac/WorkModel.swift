@@ -1431,6 +1431,28 @@ final class WorkModel {
         showsSavedPlanning || savedSessionRepos.contains(repositoryReadingKey(repoPath ?? ""))
     }
 
+    /// Task lists saved beside the workspace, per Machine; none without a cache.
+    private func savedReadings(_ machine: String?) -> SavedReadings? {
+        guard let cache, let machine else { return nil }
+        return SavedReadings(machine: machine, directory: cache.directory)
+    }
+
+    static func taskListSubscription(repo: String, wave: String?) -> String {
+        "task_list-\(repo.normalizedFilePath)-\(wave ?? "")"
+    }
+
+    /// The sidebar's first frame: the started list saved for `repo` under the
+    /// scope its navigation opens with.
+    private func restoreTaskList(repo: String, saved: SavedReadings) {
+        let wave: String? = if case .wave(let id) = navigationByRepo[repo]?.sidebarScope { id } else { nil }
+        let scope = WorkScope(repo: repo, headless: false, task: nil, activity: nil, taskListWave: wave)
+        guard let line = saved.load(Self.taskListSubscription(repo: repo, wave: wave)),
+              let frame = try? WorkFrame.decode(part: .taskList, scope: scope, sequence: 0, line: line),
+              case .taskList(let plan?) = frame.content else { return }
+        taskListReadings[RepositoryReadingKey(machineId: saved.machine, repository: repo)] =
+            (wave, .available(plan, readAt: frame.readAt))
+    }
+
     /// Show the saved workspace before any read. Text that no longer decodes is skipped.
     private func restore(_ saved: WorkSnapshot) {
         savedMachineId = saved.machineId
@@ -1451,6 +1473,11 @@ final class WorkModel {
             navigation.selection = entry.selection
             navigationByRepo[repo] = navigation
             pendingChanges.report(to: navigation.notices)
+        }
+        if let readings = savedReadings(saved.machineId) {
+            for repo in Set(saved.repositories.keys).union(repoPath.map { [$0] } ?? []) {
+                restoreTaskList(repo: repo, saved: readings)
+            }
         }
     }
 
@@ -1757,7 +1784,11 @@ final class WorkModel {
             if body != nil { await refreshSelectedView() }
         case .taskList(let body):
             guard answers >= max(planningFloor, scopeFloor) else { return }
-            applyTaskList(body, wave: sentScope?.taskListWave, reason: reason, readAt: frame.readAt)
+            let wave = sentScope?.taskListWave
+            applyTaskList(body, wave: wave, reason: reason, readAt: frame.readAt)
+            if let line = frame.wire?.taskList, let repoPath {
+                savedReadings(workMachine ?? savedMachineId)?.save(line, Self.taskListSubscription(repo: repoPath, wave: wave))
+            }
         case .peerPlanning(let body):
             guard answers >= max(planningFloor, scopeFloor), let repoPath else { return }
             guard let body else {
@@ -2197,17 +2228,8 @@ final class WorkModel {
     }
 
     /// Planning rows bridge the first list read, including when planning refreshes before the list.
-    private var sidebarTaskRows: [(id: String, states: [WorkSelectionState])] {
-        if let taskList { return taskRows(taskList) }
-        return visibleTasks.compactMap { task in
-            if case .wave(let wave) = navigation.sidebarScope, task.task.waveId != wave { return nil }
-            switch task.section {
-            case .working: return (task.id, [.working])
-            case .autonomous: return (task.id, [.autonomous])
-            default: return nil
-            }
-        }
-    }
+    /// The started list as last read, else as saved at the last launch; empty before either.
+    private var sidebarTaskRows: [(id: String, states: [WorkSelectionState])] { taskRows(taskList) }
 
     /// The repository or Wave's Working Tasks from the started list, or a
     /// Dashboard's; the filter reads each Task's states as the phone does.

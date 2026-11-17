@@ -54,9 +54,9 @@ public struct SavedReadings: Sendable {
         self.directory = directory
     }
 
-    public func load(_ subscription: String) async -> Data? {
-        let url = url(subscription)
-        return await Task.detached(priority: .userInitiated) { try? Data(contentsOf: url) }.value
+    /// The reading saved for `subscription`; read it off the main thread where it can be large.
+    public func load(_ subscription: String) -> Data? {
+        try? Data(contentsOf: url(subscription))
     }
 
     public func save(_ wire: Data, _ subscription: String) {

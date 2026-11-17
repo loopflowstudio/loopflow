@@ -425,6 +425,40 @@ struct WorkModelStreamTests {
         #expect(model.observingMachineId == "machine-local")
     }
 
+    @Test("The sidebar lists nothing before a started list is read, and launches from the saved one")
+    func sidebarStartsFromTheSavedList() async throws {
+        let fixture = try WorkTestFixture.load()
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let cache = WorkCache(directory: directory)
+        cache.saveSelection(nil, repo: "/src/loopflow")
+        cache.confirmMachine("machine-a")
+        cache.flush()
+        let feed = WorkFeed()
+        let first = WorkModel(query: fixture.streaming(feed), repoPath: "/src/loopflow", cache: cache)
+        first.confirmMachine("machine-a")
+        let keeping = Task { await first.keepWorkCurrent() }
+        defer { keeping.cancel() }
+        try await feed.opened(1)
+        let scope = try await feed.request(1)
+        await feed.send(try fixture.planningFrame(sequence: 1, answers: scope.id))
+        try await eventually { first.roadmap.value != nil }
+        // Planning rows are not a second list: only the started list fills the sidebar.
+        #expect(first.sidebarTaskIDs.isEmpty)
+        var row = fixtureViewContent(work: .init(repository: "repo", kind: .task, id: "issue-now"), title: "Now")
+        row.states = [.open, .working]
+        let plan = fixtureViewPlan(owner: .init(repository: "repo", kind: .repository, id: "repo"), members: [row])
+        let body = String(decoding: try JSONEncoder().encode(plan), as: UTF8.self)
+        await feed.send(try fixture.frame("task_list", sequence: 2, answers: scope.id, body: body))
+        try await eventually { first.sidebarTaskIDs == ["issue-now"] }
+        let saved = { (try? FileManager.default.contentsOfDirectory(atPath: directory.path))?
+            .contains { $0.hasPrefix("readings-machine-a-task_list") } == true }
+        try await eventually { saved() }
+        // The next launch draws the list before anything is read.
+        let next = WorkModel(query: fixture.streaming(WorkFeed()), repoPath: "/src/loopflow", cache: cache)
+        #expect(next.sidebarTaskIDs == ["issue-now"])
+    }
+
     @Test("Failed or truncated planning retains saved rows, selection, panes and cache")
     func incompletePlanningRetainsSavedWork() async throws {
         let fixture = try WorkTestFixture.load()
@@ -1366,9 +1400,9 @@ struct TaskPlanningReadabilityTests {
         let record = try #require(model.task(id: "issue-now")?.task)
         let member = WorkViewPlan.Content(paneRevision: nil, face: nil,
             work: .init(repository: "repo", kind: .task, id: record.runtime?.workId ?? record.id),
-            title: record.task.name, states: [.working], identifier: record.task.identifier,
+            title: record.task.name, states: shipping ? [.autonomous] : [.working], identifier: record.task.identifier,
             primarySession: nil, location: nil, argv: nil, unavailable: [])
-        if !shipping { model.applyTaskList(fixtureViewPlan(owner: key, members: [member]), wave: nil, reason: "") }
+        model.applyTaskList(fixtureViewPlan(owner: key, members: [member]), wave: nil, reason: "")
         let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
         #expect(try navigator.inspect().find(text: record.task.name).string() == record.task.name)
         #expect(throws: (any Error).self) { try navigator.inspect().find(text: "Loading planning…") }
@@ -1460,7 +1494,7 @@ struct TaskPlanningReadabilityTests {
         #expect(try navigator.inspect().find(text: "No working Tasks in this list").string() == "No working Tasks in this list")
     }
 
-    @Test("Saved rows survive a roadmap refresh until the independent list answers")
+    @Test("Saved planning rows never fill the sidebar; only the started list does")
     func savedIdentity() async throws {
         let fixture = try WorkTestFixture.load()
         let feed = WorkFeed()
@@ -1471,9 +1505,8 @@ struct TaskPlanningReadabilityTests {
         cache.flush()
         let model = WorkModel(query: fixture.streaming(feed), repoPath: "/src/loopflow", cache: cache)
         #expect(model.workStatus == .updating)
-        let expected = model.visibleTasks.filter { $0.section == .working }.map(\.id)
-        #expect(!expected.isEmpty)
-        #expect(model.sidebarTaskIDs == expected)
+        #expect(model.visibleTasks.contains { $0.section == .working })
+        #expect(model.sidebarTaskIDs.isEmpty)
         let record = try #require(model.task(id: "issue-now")?.task)
         #expect(model.taskPresentation(id: record.id).title == record.task.name)
         #expect(model.taskPresentation(id: record.id).context == "Updating…")
@@ -1484,12 +1517,13 @@ struct TaskPlanningReadabilityTests {
         await feed.send(try fixture.frame("planning", sequence: 1, answers: scope.id, body: savedRoadmap(fixture)))
         try await eventually { !model.showsSavedPlanning }
         #expect(model.taskListReading.isLoading)
-        #expect(model.sidebarTaskIDs == expected, "fresh planning must not hide rows before the list answers")
+        #expect(model.sidebarTaskIDs.isEmpty, "planning is not a second list")
         let content = WorkViewPlan.Content(paneRevision: nil, face: nil,
             work: .init(repository: "repo", kind: .task, id: record.runtime?.workId ?? record.id),
             title: "Fresh local name", states: [.working], identifier: record.task.identifier,
             primarySession: nil, location: nil, argv: nil, unavailable: [])
         model.applyTaskList(fixtureViewPlan(owner: key, members: [content]), wave: nil, reason: "")
+        #expect(model.sidebarTaskIDs == [record.id])
         #expect(model.taskPresentation(id: record.id).title == record.task.name, "current roadmap identity keeps priority")
         model.applyTaskList(fixtureViewPlan(owner: key, members: []), wave: nil, reason: "")
         #expect(model.sidebarTaskIDs.isEmpty, "a fresh empty list supersedes saved membership")
@@ -1515,9 +1549,8 @@ struct TaskPlanningReadabilityTests {
             #expect(try crumbs.inspect().find(text: own.task.name).string() == own.task.name)
             #expect(try crumbs.inspect().find(text: "Updating…").string() == "Updating…")
             #expect(model.workStatus == .updating)
-            // ⌘1–9 and `lf desktop ls` reach the saved rows before any list answers.
+            // ⌘1–9 and `lf desktop ls` follow the sidebar's list: none is saved here.
             #expect(model.desktopList(repository: "repo").map(\.title) == model.sidebarTaskIDs.map { model.taskPresentation(id: $0).title })
-            #expect(model.desktopList(repository: "repo").contains { $0.title == own.task.name })
             for other in windows where other !== model {
                 for task in other.visibleTasks {
                     #expect(model.task(id: task.id) == nil)

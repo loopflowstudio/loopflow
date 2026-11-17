@@ -42,8 +42,8 @@ kill -9 <pid of a Task conversation's claude>
 lf task status LOO-12   # conversation: died 12:01 (exit 137) · started again 12:01
 ```
 
-A watcher thread beside `wake.rs` reads the store on every change signal and
-at least once a minute. The server writes nothing on the way down; every fact
+A watcher thread (`recovery.rs`) reads the store when its planning, Session or
+process revisions move, and at least once a minute. The server writes nothing on the way down; every fact
 the pass needs is written before it is needed (`meta.json`, the holder's
 `exit.json`, Session and Graph-run rows with pid and OS start time). Its
 first reading after start is the restart and reboot case. Each reading:
@@ -52,10 +52,11 @@ first reading after start is the restart and reboot case. Each reading:
    continues limit waits and checks rentals. Reads no longer do this.
 2. **Starts Task conversations.** A Task's primary Session starts again when
    the Task is open, claimed and checked out here, no agent or pending holder
-   serves it, and its last agent did not end by the person: exit 0 or 130, or
-   `agent_stopped_at`, which every lf command that stops an agent writes
-   before it signals. It starts through `session.continue`'s path with
-   request `recover:<session>:<ended agent>`, so one death starts one
+   serves it, and its last agent did not end by the person (exit 0 or 130).
+   An unfinished agent whose recorded process is gone died too. The store
+   counts the start (`agent_sessions.recovery_attempts`, `recovered_at`)
+   before it goes through `session.continue`'s path with request
+   `recover:<session>:<ended agent>:<attempt>`, so one death starts one
    provider across server restarts. `lf task run`, `lf ship` and
    `lf task checkout` only prepare the Session; this pass starts it.
 3. **Carries Task runs.** A shipping or moving Task whose recorded carrier is

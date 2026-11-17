@@ -1466,8 +1466,13 @@ fn init_tracing(verbose: bool) {
             .init();
         return;
     }
+    // Creation and conversation setup steps are timings a Start's report reads.
     tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::new("warn,loopflow::server=info"))
+        .with_env_filter(EnvFilter::new(
+            "warn,loopflow::server=info,loopflow::lf::commands::task_create=info,\
+             loopflow_execution::engine::creation=info,\
+             loopflow_execution::ops::human_session::setup=info",
+        ))
         .with_ansi(false)
         .with_writer(|| loopflow_execution::diagnostic_log::DiagnosticLog)
         .event_format(loopflow_execution::diagnostic_log::IdentifiedLines)

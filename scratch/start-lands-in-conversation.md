@@ -126,7 +126,8 @@ and `session.attach` at once; drop the `task:<id>` view-plan read before it.
 **Journal**: `timings.py` reads `task_creation`/`creation_step` spans from
 `logs/lf.log` by request ID (the interaction observation ID) and nests them
 under the Start sample; setup lines in the conversation log their own spans
-(`conversation_setup` step=checkout|graph|provider). Perf records the Machine
+(`conversation_setup` step=checkout|graph; the provider's start is the rest of
+the sample). Perf records the Machine
 kind (local, remote) on `start_task`; the report splits by it.
 
 ## Risks checked
@@ -297,11 +298,38 @@ detached entry at the ready path, so `wt list`, placement inference and
 the continuation can run before the take (or before the conversation is ever
 opened) and would find the old one still there.
 
-Remaining, in order: the `-a` fixture and fix (below); slice 5's local half
-(conversation setup spans, `timings.py` nesting, Machine kind); slice 4; slice
-5's remote sample. origin/main has #1953 (native Claude/Codex logins) and #1955
-since this branch's base; both touch launch code the `-a` fix and slice 4 edit,
-so sync before them.
+Synced with origin/main (#1953, #1955) at 3ced22521; main dropped
+`SessionRecord.blocked`, so `task_create_receipt.json` lost it too.
+
+`-a` built: `TaskCreation.agent` rides the held argv (`lf --agent X session
+resume ID`, `primary::hold_task_conversation`), and setup's `lf task run` takes
+the held process's command-line agent. The conversation already ran X: the
+Session row's provider comes from `resolve_task_agent`, which reads the
+invocation. Only the Graph lost it. Desktop's served `task.create` has no agent
+field and sends none.
+
+The `task_create_` fixtures registered a keepalive launchd server per temp home
+(any launch without a server runs `lf install server`); 55 had piled up. Each
+fixture that starts a Task now holds `Service`, whose drop waits for the
+store's unfinished processes except `lf holder run`.
+
+Slice 5's local half built. lf.log's filter (`warn,loopflow::server=info`) had
+dropped every `creation_step` line, which is why the baseline never saw them; it
+now keeps INFO for `engine::creation`, `human_session::setup` and
+`lf::commands::task_create`. Setup's steps are `conversation_setup{request_id,
+step}` with "Setup step finished elapsed_ms=". `timings.py` reads
+`<home>/logs/lf.log` into each attempt's `machine_steps` (by lower-case request
+ID) and per-group medians, and keys groups by `context.machine`; Desktop's
+Start (both scenarios) records `machine: local|remote` from
+`WorkModel.machineKind`. No `provider` step: lf cannot see when the provider
+takes typing; the remainder of the sample is it.
+
+Exec cost, one Start on a scratch home (debug build, load ≈ 50): checkout
+1.73 s, graph 0.58 s; `fresh_launch_selected` → the exec'd `-i`'s
+`prompt_begin` 0.58 s; prompt build 1.49 s; prompt end → provider exec 0.84 s.
+Slice 4 removes the 0.58 s; prompt build is the larger cost.
+
+Remaining, in order: slice 4; slice 5's remote sample.
 
 Concept review of e01c813a0a found the ready checkout's owner split (only
 setup replaced it, so a backlog `lf task run` that took it left none) and a
@@ -367,11 +395,12 @@ LfProcess becoming the launcher's).
 
 ## Checks
 
-- `cargo test -p loopflow --test integration task_create_` — 8 passed after the take-replaces fix. `task_create_request_recovers_lost_replies_without_repeating_start` raced setup (repeat read `started` or `admitted`); it now waits for the receipt's `started` before repeating. `loopflow-execution --lib git::worktrees::` 22, `ops::task::tests::` 33 passed; clippy clean. Rerun after slice 4; gate.
+- `loopflow-execution --lib git::worktrees::` 22, `ops::task::tests::` 33 passed (slice 3). Rerun `task_create_` after slice 4; gate.
 - `swift test --package-path swift --filter 'WorkDestinationTests|NewTaskTests|MobileTaskCreationTests|DTOFixtureTests|LaunchJournalTests|InteractionTests'` — 152 passed (Mac).
 - `cargo test -p loopflow --test integration dto_fixtures::task_create` and `task_create_tests::task_create_without_recovery_keeps_the_existing_receipt_and_exit_status` (real row is Working) — passed; `cargo test -p loopflow-storage --lib` 365 passed; `loopflow-execution --lib store::tests::` 47 passed; `server::schema::tests::` 8 passed; clippy clean. Gate: `binary(two_people)`, `test(performance_tests::)`, `test(ops::task::tests::)` for the Task state SQL.
 - `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/MobileTaskCreationTests` — 21 passed; full iOS suite at gate.
-- `uv run pytest python/tests/test_desktop_timings.py` — slice 5; gate.
+- `uv run pytest python/tests/test_desktop_timings.py` — 16 passed (nesting and Machine split).
+- `cargo test -p loopflow --test integration task_create_` — 9 passed after the sync, `-a` and timing assertions; no launchd server left behind. Swift Mac filter (with `InteractionTests`) 153 passed; clippy clean.
 - Live Start → typing, local and remote Machine — qa (remote needs a rented or
   tailnet Machine; not a gate requirement).
 

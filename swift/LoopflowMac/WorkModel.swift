@@ -2515,8 +2515,8 @@ final class WorkModel {
     /// refusal is kept on that Task's draft and changes nothing else.
     func startTaskFromInput(_ graph: String?, from step: String? = nil, task: RoadmapTask) {
         let owner = navigation.performanceOwner
-        Perf.userAction(.startTask, scenario: "start_to_typing", id: task.id,
-                        repository: repoPath, liveSessions: liveSessionCount, owner: owner) {
+        Perf.userAction(.startTask, scenario: "start_to_typing", id: task.id, repository: repoPath,
+                        machine: machineKind, liveSessions: liveSessionCount, owner: owner) {
             Perf.acknowledged(.startTask, id: task.id, owner: owner)
             Task {
                 let accepted = await startTask(graph, from: step, task: task)
@@ -2660,6 +2660,13 @@ final class WorkModel {
     }
 
     var localMachineId: String? { workspaceRegistry?.localMachineId }
+
+    /// `local` when this window's Work runs on this Mac's Machine, `remote` when
+    /// on another; unknown until both are read. Start's timings split by it.
+    var machineKind: String? {
+        guard let observed = observingMachineId, let local = localMachineId else { return nil }
+        return observed == local ? "local" : "remote"
+    }
 
     /// The Machine the target runs on, from planning. A Wave without its own
     /// default runs here; a started Task without one is unknown.

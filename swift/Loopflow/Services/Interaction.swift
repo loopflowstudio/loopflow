@@ -125,10 +125,13 @@ public final class Interaction {
         public let thermalState: Int
         public let liveSessions: Int?
         public let repository: String?
-        public init(thermalState: Int, liveSessions: Int?, repository: String? = nil) {
+        /// `local` or `remote`: whether the Work runs on this device's Machine.
+        public let machine: String?
+        public init(thermalState: Int, liveSessions: Int?, repository: String? = nil, machine: String? = nil) {
             self.thermalState = thermalState
             self.liveSessions = liveSessions
             self.repository = repository
+            self.machine = machine
         }
     }
     public struct Record: Encodable, Sendable {
@@ -175,7 +178,8 @@ public final class Interaction {
     /// Launch learns its repository only after the restored window is identified.
     public func identifyLaunch(repository: String?, liveSessions: Int?) {
         guard name == "open_app", !terminal else { return }
-        context = Context(thermalState: context.thermalState, liveSessions: liveSessions, repository: repository)
+        context = Context(thermalState: context.thermalState, liveSessions: liveSessions, repository: repository,
+                          machine: context.machine)
     }
 
     public func acknowledged(at uptime: TimeInterval, evidence: Evidence) {

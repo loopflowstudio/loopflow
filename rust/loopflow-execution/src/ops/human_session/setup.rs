@@ -25,15 +25,17 @@ pub(super) async fn finish(
         println!("{request}");
     }
     let started = Instant::now();
-    let session = checkout(store, session)
-        .instrument(tracing::info_span!("conversation_setup", step = "checkout"))
+    let session = step(request_id, "checkout", checkout(store, session))
         .await
         .inspect_err(|error| println!("Checkout failed: {error:#}"))?;
     println!("Checkout ready  {:.1} s", started.elapsed().as_secs_f64());
     // The agent starts once the checkout exists, whatever happens to the Graph.
-    match start_graph(store, &session, request_id)
-        .instrument(tracing::info_span!("conversation_setup", step = "graph"))
-        .await
+    match step(
+        request_id,
+        "graph",
+        start_graph(store, &session, request_id),
+    )
+    .await
     {
         Ok(graph) => println!("Graph {graph} started"),
         Err(error) => {
@@ -42,6 +44,25 @@ pub(super) async fn finish(
         }
     }
     Ok(session)
+}
+
+/// One setup step, timed under its creation's request ID so a Start's report
+/// nests it beside the server's creation steps. Never records request text.
+async fn step<T>(
+    request_id: &str,
+    name: &'static str,
+    run: impl std::future::Future<Output = T>,
+) -> T {
+    let span = tracing::info_span!("conversation_setup", request_id, step = name);
+    let started = Instant::now();
+    let result = run.instrument(span.clone()).await;
+    span.in_scope(|| {
+        tracing::info!(
+            elapsed_ms = started.elapsed().as_secs_f64() * 1000.0,
+            "Setup step finished"
+        )
+    });
+    result
 }
 
 /// Check the Task out from local refs, taking the repository's ready checkout

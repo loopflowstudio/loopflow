@@ -281,6 +281,26 @@ fn task_create_answers_and_its_conversation_checks_out_without_the_network() {
         )
         .unwrap();
     assert_eq!(milestone, "started");
+    // A Start's report reads the server's and the conversation's steps by
+    // request ID.
+    let log = fs::read_to_string(task.home.path().join("logs/lf.log")).unwrap();
+    let timed = |span: &str, step: &str| {
+        log.lines().any(|line| {
+            line.contains(&format!("request_id=\"{id}\""))
+                && line.contains(&format!("{span}{{"))
+                && line.contains(&format!("step=\"{step}\""))
+                && line.contains("elapsed_ms=")
+        })
+    };
+    for step in ["file_task", "hold_conversation", "read_answer"] {
+        assert!(timed("creation_step", step), "no {step} timing:\n{log}");
+    }
+    for step in ["checkout", "graph"] {
+        assert!(
+            timed("conversation_setup", step),
+            "no {step} timing:\n{log}"
+        );
+    }
 }
 
 #[test]

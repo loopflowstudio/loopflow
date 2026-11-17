@@ -13,10 +13,6 @@
 - Docs say `lf wt prune` leaves `<repo>.ready` alone, `--all` included, and
   that deleting it by hand is safe. The simpler reading of "check cleanup leaves
   it alone"; `--all` removing it would also be defensible.
-- `lf -a X task create --run`: reading the code, the override does not reach
-  the held conversation or its Graph. Steer (Jack Heart: "ok, check it"): a
-  fixture with a non-default stand-in, then carry the choice in the request
-  and the held argv.
 - `lf wt create ready` would plan the ready checkout's path. Not guarded;
   `WorktreeSegment` could reserve `ready` if it matters.
 - The ready replacement is a background `git worktree add` from setup; if the
@@ -28,4 +24,6 @@ Answer on the "one `lf` start" choice (Jack Heart, 2026-11-16): "I guess this is
 
 Answer on `lf wt prune --all` (Jack Heart, 2026-11-16): "Yeah that seesm right".
 Answer on `lf -a X task create --run` (Jack Heart, 2026-11-16): "ok, check it".
-  Reading of the code at 8dafb8c4b7: `-a` lands in `settings::invocation_values()` (in memory), not `LF_AGENT_OVERRIDE`. `hold` builds `lf session resume <id>` with no `--agent`, and `transport::start_held` copies only `std::env::vars_os()` plus the Wave ID. `start_in_background` gates on `config.agent()`, which ignores the override. So the choice looks lost for the held conversation and its Graph; a served `task.create` (Desktop) has no override in its environment at all. Needs a fixture that runs `lf -a <other> task create --run` and asserts the Session's provider, then the fix.
+  Checked: the conversation ran X (its Session row's provider); the Graph did not. Fixed for the CLI. Desktop's served `task.create` carries no agent; adding one waits for a picker that sends it.
+- Slice 4 removes about 0.58 s (debug, loaded Machine) of exec between setup and the `-i` launch; the prompt build after it costs 1.49 s. Order kept as planned (slice 4 next); prompt build is a candidate for its own Task.
+- Phone Start records no Machine kind; every phone Machine is remote to the phone.

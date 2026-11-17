@@ -107,33 +107,30 @@ pub fn require_store(store: Option<SharedStore>) -> Result<SharedStore> {
 /// every turn, so a commit to `history.db` or `usage.db` reads again only the
 /// subscriptions that name `history.*` or `usage.*`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Watch {
-    pub history: bool,
-    pub turns: bool,
-}
-
-impl Watch {
+pub enum Watch {
     /// State in `loopflow.db` only.
-    pub const STATE: Self = Self {
-        history: false,
-        turns: false,
-    };
+    State,
     /// State, Session history and turns.
-    pub const JOURNALS: Self = Self {
-        history: true,
-        turns: true,
-    };
+    Journals,
 }
 
 /// Whether a commit that moved revisions from `old` to `new` can change a
 /// result of a read that watches `watch`.
 fn changed(watch: Watch, old: StoreRevisions, new: StoreRevisions) -> bool {
-    let seen = |revisions: StoreRevisions| StoreRevisions {
-        history: if watch.history { revisions.history } else { 0 },
-        turns: if watch.turns { revisions.turns } else { 0 },
-        ..revisions
-    };
-    seen(old) != seen(new)
+    match watch {
+        Watch::Journals => old != new,
+        Watch::State => {
+            StoreRevisions {
+                history: 0,
+                turns: 0,
+                ..old
+            } != StoreRevisions {
+                history: 0,
+                turns: 0,
+                ..new
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -865,7 +862,7 @@ mod tests {
             let (sender, wakes) = mpsc::channel();
             let directory = repo.path().to_owned();
             let subscription = start_pull(
-                Watch::STATE,
+                Watch::State,
                 (),
                 move |_, ()| {
                     let directory = directory.clone();
@@ -927,7 +924,7 @@ mod tests {
         let counted = reads.clone();
         let directory = checkout.clone();
         let subscription = start_pull(
-            Watch::STATE,
+            Watch::State,
             (),
             move |_, ()| {
                 counted.fetch_add(1, Ordering::Relaxed);
@@ -1039,7 +1036,7 @@ mod tests {
         let directory = repo.path().to_owned();
         let personal = home.path().to_owned();
         let subscription = start_pull(
-            Watch::STATE,
+            Watch::State,
             (),
             move |_, ()| {
                 let (directory, personal) = (directory.clone(), personal.clone());
@@ -1090,7 +1087,7 @@ mod tests {
         );
         let (sender, wakes) = mpsc::channel();
         let subscription = start_pull(
-            Watch::JOURNALS,
+            Watch::Journals,
             (),
             |store, ()| async move {
                 let store = super::require_store(store)?;
@@ -1123,10 +1120,10 @@ mod tests {
             turns: 9,
             ..old
         };
-        assert!(!changed(Watch::STATE, old, turn));
-        assert!(changed(Watch::JOURNALS, old, turn));
+        assert!(!changed(Watch::State, old, turn));
+        assert!(changed(Watch::Journals, old, turn));
         assert!(changed(
-            Watch::STATE,
+            Watch::State,
             old,
             StoreRevisions {
                 processes: 2,

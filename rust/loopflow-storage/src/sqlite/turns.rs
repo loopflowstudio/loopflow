@@ -403,8 +403,8 @@ impl SqliteStore {
 /// Threads converted per pass of [`convert_turn_rows`].
 const CONVERT_BATCH: i64 = 1_000;
 
-/// One `started`, `usage` or `completed` row an earlier lf kept, from either
-/// `loopflow.db` or `history.db`.
+/// One `started`, `usage` or `completed` row an earlier lf kept in
+/// `loopflow.db`.
 #[derive(Debug)]
 struct LegacyRow {
     turn: String,
@@ -418,28 +418,24 @@ struct LegacyRow {
     payload: Value,
 }
 
-/// Turn every `started`, `usage` and `completed` row an earlier lf kept,
-/// in `loopflow.db` or `history.db`, into one `usage.turns` row per turn,
-/// then delete the rows it converted; returns how many turns it wrote. A
-/// turn that already has a row keeps what it has. Safe to run again: a pass
-/// cut short converts the rest next time.
+/// Turn every `started`, `usage` and `completed` row an earlier lf kept in
+/// `loopflow.db` into one `usage.turns` row per turn, then delete the rows it
+/// converted; returns how many turns it wrote. A turn that already has a row
+/// keeps what it has. Safe to run again: a pass cut short converts the rest
+/// next time.
 ///
 /// # Errors
-/// When the store or a journal cannot be opened, read or written.
+/// When the store or `usage.db` cannot be opened, read or written.
 pub fn convert_turn_rows(database: &std::path::Path) -> StoreResult<u64> {
     let conn = rusqlite::Connection::open(database)?;
     conn.busy_timeout(std::time::Duration::from_secs(15))?;
-    crate::journals::attach(&conn, database);
-    let history = crate::journals::JournalFile::beside(&crate::journals::HISTORY, Some(database));
     let usage = crate::journals::JournalFile::beside(&crate::journals::USAGE, Some(database));
     let mut converted = 0;
     loop {
         let threads: Vec<(String, String)> = conn
             .prepare(
-                "SELECT session_id,provider_thread FROM session_events
-                     WHERE kind IN ('started','usage','completed') AND provider_thread IS NOT NULL
-                 UNION SELECT session_id,provider_thread FROM history.session_history
-                     WHERE kind IN ('started','usage','completed') AND provider_thread IS NOT NULL
+                "SELECT DISTINCT session_id,provider_thread FROM session_events
+                 WHERE kind IN ('started','usage','completed') AND provider_thread IS NOT NULL
                  LIMIT ?1",
             )?
             .query_map([CONVERT_BATCH], |row| Ok((row.get(0)?, row.get(1)?)))?
@@ -450,16 +446,6 @@ pub fn convert_turn_rows(database: &std::path::Path) -> StoreResult<u64> {
         for (session, thread) in &threads {
             converted += convert_thread(&conn, &usage, session, thread)?;
         }
-        let delete = "DELETE FROM session_history WHERE kind IN ('started','usage','completed')
-             AND session_id=?1 AND provider_thread=?2";
-        history
-            .write("turn conversion", |tx| {
-                for (session, thread) in &threads {
-                    tx.execute(delete, params![session, thread])?;
-                }
-                Ok(())
-            })
-            .ok_or_else(|| StoreError::InvalidData("history.db is unavailable".into()))?;
         let tx =
             rusqlite::Transaction::new_unchecked(&conn, rusqlite::TransactionBehavior::Immediate)?;
         for (session, thread) in &threads {
@@ -480,38 +466,27 @@ fn convert_thread(
     session: &str,
     thread: &str,
 ) -> StoreResult<u64> {
-    let mut rows: Vec<LegacyRow> = Vec::new();
-    for table in ["session_events", "history.session_history"] {
-        let mut query = conn.prepare(&format!(
+    let rows: Vec<LegacyRow> = conn
+        .prepare(
             "SELECT COALESCE(provider_turn,''),kind,observed_at,lf_process_id,agent_process_id,
-                    task_id,wave_id,captured_event,payload,seq
-             FROM {table} WHERE session_id=?1 AND provider_thread=?2
-               AND kind IN ('started','usage','completed') ORDER BY seq"
-        ))?;
-        let found = query.query_map(params![session, thread], |row| {
-            Ok((
-                LegacyRow {
-                    turn: row.get(0)?,
-                    kind: row.get(1)?,
-                    observed_at: row.get(2)?,
-                    lf_process_id: row.get(3)?,
-                    agent_process_id: row.get(4)?,
-                    task_id: row.get(5)?,
-                    wave_id: row.get(6)?,
-                    captured_event: row.get(7)?,
-                    payload: Value::Null,
-                },
-                row.get::<_, String>(8)?,
-            ))
-        })?;
-        for row in found {
-            let (mut row, payload) = row?;
-            row.payload = serde_json::from_str(&payload).unwrap_or(Value::Null);
-            rows.push(row);
-        }
-    }
-    // Rows of two files have no shared sequence; time orders the thread.
-    rows.sort_by_key(|row| row.observed_at);
+                    task_id,wave_id,captured_event,payload
+             FROM session_events WHERE session_id=?1 AND provider_thread=?2
+               AND kind IN ('started','usage','completed') ORDER BY seq",
+        )?
+        .query_map(params![session, thread], |row| {
+            Ok(LegacyRow {
+                turn: row.get(0)?,
+                kind: row.get(1)?,
+                observed_at: row.get(2)?,
+                lf_process_id: row.get(3)?,
+                agent_process_id: row.get(4)?,
+                task_id: row.get(5)?,
+                wave_id: row.get(6)?,
+                captured_event: row.get(7)?,
+                payload: serde_json::from_str(&row.get::<_, String>(8)?).unwrap_or(Value::Null),
+            })
+        })?
+        .collect::<Result<_, _>>()?;
     let mut turns: Vec<&str> = Vec::new();
     for row in &rows {
         if !row.turn.is_empty() && !turns.contains(&row.turn.as_str()) {
@@ -864,26 +839,13 @@ mod tests {
         assert_eq!(turns, ["first", "after"]);
     }
 
-    /// A released lf kept a turn as `started`, `usage` and `completed` rows,
-    /// in `loopflow.db` or (on a branch build) `history.db`. Conversion makes
-    /// each one turn and reads what the three rows said.
+    /// A released lf kept a turn as `started`, `usage` and `completed` rows
+    /// in `loopflow.db`. Conversion makes each one turn and reads what the
+    /// three rows said.
     #[test]
     fn earlier_turn_rows_become_one_turn_each() {
         let home = tempfile::tempdir().unwrap();
         let database = home.path().join("loopflow.db");
-        // A history file from before turns moved out, which kept them.
-        rusqlite::Connection::open(crate::journals::history_path(&database))
-            .unwrap()
-            .execute_batch(
-                "CREATE TABLE session_history (seq INTEGER PRIMARY KEY, session_id TEXT NOT NULL,
-                    provider_thread TEXT, provider_turn TEXT,
-                    kind TEXT NOT NULL CHECK(kind IN ('started','usage','completed','observed')),
-                    receipt_key TEXT NOT NULL, lf_process_id TEXT, agent_process_id TEXT,
-                    task_id TEXT, wave_id TEXT, captured_event INTEGER,
-                    observed_at INTEGER NOT NULL, payload TEXT NOT NULL);
-                 PRAGMA user_version=1;",
-            )
-            .unwrap();
         let store = crate::test_fixture::open(&database).unwrap();
         let input = crate::session_record::new_artifact_key();
         let session = store.test_session("conversation", &input);
@@ -921,13 +883,13 @@ mod tests {
                 r#"{"status":"failed"}"#.to_owned(),
             ),
         ];
-        let insert = "INSERT INTO {t}(session_id,provider_thread,provider_turn,kind,receipt_key,
-                captured_event,observed_at,payload) VALUES('conversation','thread',?1,?2,'',?3,?4,?5)";
         {
             let conn = store.conn.lock().unwrap();
-            for (turn, kind, observed, payload) in &rows[..3] {
+            for (turn, kind, observed, payload) in &rows {
                 conn.execute(
-                    &insert.replace("{t}", "session_events"),
+                    "INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,
+                        receipt_key,captured_event,observed_at,payload)
+                     VALUES('conversation','thread',?1,?2,'',?3,?4,?5)",
                     rusqlite::params![
                         turn,
                         kind,
@@ -938,20 +900,6 @@ mod tests {
                 )
                 .unwrap();
             }
-        }
-        for (turn, kind, observed, payload) in &rows[3..] {
-            store
-                .execute_history(
-                    &insert.replace("{t}", "session_history"),
-                    rusqlite::params![
-                        turn,
-                        kind,
-                        (*kind == "started").then_some(session.captured),
-                        observed,
-                        payload
-                    ],
-                )
-                .unwrap();
         }
 
         assert_eq!(super::convert_turn_rows(&database).unwrap(), 2);
@@ -1012,13 +960,17 @@ mod tests {
                 .unwrap(),
             Some((at + 60, Some("failed".to_owned())))
         );
-        // What was converted is gone from both files.
-        let conn = store.conn.lock().unwrap();
-        let left = |sql: &str| -> i64 { conn.query_row(sql, [], |row| row.get(0)).unwrap() };
-        assert_eq!(
-            left("SELECT count(*) FROM session_events WHERE kind!='captured'"),
-            0
-        );
-        assert_eq!(left("SELECT count(*) FROM history.session_history"), 0);
+        // What was converted is gone.
+        let left: i64 = store
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT count(*) FROM session_events WHERE kind!='captured'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(left, 0);
     }
 }

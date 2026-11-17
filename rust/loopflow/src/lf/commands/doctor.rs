@@ -142,24 +142,27 @@ fn check_running_binaries() -> Check {
 
 const CONTENTION_WINDOW_SECONDS: i64 = 86_400;
 
-/// Who waited on the store's write lock and who held it, by binary, from lf.log.
 /// `history.db` and `usage.db` grow with use: their sizes and oldest rows. A
 /// history row past retention means no prune has run on this Machine.
 fn check_journals(database: &Path, now: i64) -> Check {
     const NAME: &str = "journals";
+    let retained = now - (loopflow_storage::sqlite::retention::HISTORY_DAYS + 2) * 86_400;
+    // Each journal, its oldest row and the oldest a pruned Machine keeps.
     let journals = [
         (
             loopflow_storage::journals::history_path(database),
             "SELECT MIN(observed_at) FROM session_history",
+            Some(retained),
         ),
         (
             loopflow_storage::journals::usage_path(database),
             "SELECT MIN(COALESCE(started_at,ended_at)) FROM turns",
+            None,
         ),
     ];
     let mut parts = Vec::new();
     let mut stale = false;
-    for (path, oldest) in journals {
+    for (path, oldest, floor) in journals {
         let name = path.file_name().unwrap_or_default().to_string_lossy();
         let Ok(metadata) = std::fs::metadata(&path) else {
             parts.push(format!("{name} absent"));
@@ -171,16 +174,10 @@ fn check_journals(database: &Path, now: i64) -> Check {
         )
         .and_then(|conn| conn.query_row(oldest, [], |row| row.get(0)))
         .unwrap_or(None);
+        stale |= oldest.zip(floor).is_some_and(|(at, floor)| at < floor);
         let since = oldest
             .and_then(|at| time::OffsetDateTime::from_unix_timestamp(at).ok())
             .map_or("empty".into(), |at| format!("oldest {}", at.date()));
-        if name == "history.db"
-            && oldest.is_some_and(|at| {
-                at < now - (loopflow_storage::sqlite::retention::HISTORY_DAYS + 2) * 86_400
-            })
-        {
-            stale = true;
-        }
         parts.push(format!(
             "{name} {:.1} MB, {since}",
             metadata.len() as f64 / 1_000_000.0
@@ -197,6 +194,7 @@ fn check_journals(database: &Path, now: i64) -> Check {
     }
 }
 
+/// Who waited on the store's write lock and who held it, by binary, from lf.log.
 fn check_contention(log: &Path, since: i64) -> Check {
     const NAME: &str = "contention";
     let binaries = match read_contention(log, since) {

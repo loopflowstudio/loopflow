@@ -162,16 +162,12 @@ impl Journal {
     }
 }
 
-/// One row of `history.session_history`.
-#[derive(Debug, Clone, Default)]
+/// One observation appended to `history.session_history`.
+#[derive(Debug, Clone)]
 pub(crate) struct Row {
     pub session_id: String,
-    pub provider_thread: Option<String>,
-    pub provider_turn: Option<String>,
-    pub kind: &'static str,
     pub receipt_key: String,
     pub lf_process_id: Option<String>,
-    pub agent_process_id: Option<String>,
     pub task_id: Option<String>,
     pub wave_id: Option<String>,
     pub captured_event: Option<i64>,
@@ -191,12 +187,13 @@ impl Row {
     ) -> Self {
         Self {
             session_id: session.into(),
-            kind: "observed",
             receipt_key,
+            lf_process_id: None,
+            task_id: None,
+            wave_id: None,
             captured_event,
             observed_at,
             payload,
-            ..Self::default()
         }
     }
 }
@@ -207,15 +204,9 @@ pub(crate) fn append_in(tx: &Connection, row: &Row) -> StoreResult<i64> {
     let kept: Option<(i64, String)> = tx
         .query_row(
             "SELECT seq,payload FROM session_history WHERE session_id=?1
-             AND COALESCE(provider_thread,'')=COALESCE(?2,'') AND COALESCE(provider_turn,'')=COALESCE(?3,'')
-             AND kind=?4 AND receipt_key=?5",
-            rusqlite::params![
-                row.session_id,
-                row.provider_thread,
-                row.provider_turn,
-                row.kind,
-                row.receipt_key
-            ],
+             AND COALESCE(provider_thread,'')='' AND COALESCE(provider_turn,'')=''
+             AND kind='observed' AND receipt_key=?2",
+            rusqlite::params![row.session_id, row.receipt_key],
             |found| Ok((found.get(0)?, found.get(1)?)),
         )
         .optional()?;
@@ -224,22 +215,18 @@ pub(crate) fn append_in(tx: &Connection, row: &Row) -> StoreResult<i64> {
             return Ok(seq);
         }
         return Err(crate::StoreError::InvalidData(format!(
-            "conflicting {} {} receipt for Session {}",
-            row.kind, row.receipt_key, row.session_id
+            "conflicting {} receipt for Session {}",
+            row.receipt_key, row.session_id
         )));
     }
     tx.execute(
-        "INSERT INTO session_history(session_id,provider_thread,provider_turn,kind,receipt_key,
-            lf_process_id,agent_process_id,task_id,wave_id,captured_event,observed_at,payload)
-         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+        "INSERT INTO session_history(session_id,kind,receipt_key,lf_process_id,task_id,wave_id,
+            captured_event,observed_at,payload)
+         VALUES(?1,'observed',?2,?3,?4,?5,?6,?7,?8)",
         rusqlite::params![
             row.session_id,
-            row.provider_thread,
-            row.provider_turn,
-            row.kind,
             row.receipt_key,
             row.lf_process_id,
-            row.agent_process_id,
             row.task_id,
             row.wave_id,
             row.captured_event,

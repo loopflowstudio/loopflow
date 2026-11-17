@@ -113,6 +113,6 @@ tables and whether Process rows are needed are in LOO-953's
   theirs. This is how "30 days for finished Processes" was read.
 - The server runs the store part of `lf process prune` only (no receipt
   removal, no agent reaping), hourly.
-- `Watch::JOURNALS` for the Session list, `lf history` and the Task
-  view/status; everything else `Watch::STATE`. A journal write wakes a
+- `Watch::Journals` for the Session list, `lf history` and the Task
+  view/status; everything else `Watch::State`. A journal write wakes a
   watching subscription within the 1 s revision check, not by file event.

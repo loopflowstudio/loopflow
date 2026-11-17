@@ -55,12 +55,13 @@ pub fn prune(
     // per-row foreign-key probes would scan session_events for each delete.
     conn.execute_batch("PRAGMA foreign_keys = OFF;")?;
     crate::journals::attach(&conn, database);
+    let history = crate::journals::JournalFile::beside(&crate::journals::HISTORY, Some(database));
     let closed_processes = close_dead_processes(&conn, dead)?;
     let cutoff = now - HISTORY_DAYS * 86_400;
     let mut forgotten_history = forget_unread_rows(&conn, cutoff)?;
-    let moved_observations = move_observations(&conn, database)?;
+    let moved_observations = move_observations(&conn, &history)?;
     let converted_turns = super::turns::convert_turn_rows(database)?;
-    forgotten_history += forget_old_history(database, cutoff)?;
+    forgotten_history += forget_old_history(&history, database, cutoff)?;
     Ok(RetentionReport {
         closed_processes,
         forgotten_processes: forget_processes(&conn)?,
@@ -144,8 +145,10 @@ fn forget_unread_rows(conn: &Connection, cutoff: i64) -> StoreResult<u64> {
 /// Move the observations left in `loopflow.db` into `history.db`, oldest
 /// first: each batch is written there, then deleted here, so a pass cut short
 /// moves the rest next time and a row already moved is not written twice.
-fn move_observations(conn: &Connection, database: &Path) -> StoreResult<u64> {
-    let history = crate::journals::JournalFile::beside(&crate::journals::HISTORY, Some(database));
+fn move_observations(
+    conn: &Connection,
+    history: &crate::journals::JournalFile,
+) -> StoreResult<u64> {
     let mut moved = 0;
     loop {
         let last: Option<i64> = conn.query_row(
@@ -178,8 +181,11 @@ fn move_observations(conn: &Connection, database: &Path) -> StoreResult<u64> {
 }
 
 /// Forget Session history observed before `cutoff`, then return its pages.
-fn forget_old_history(database: &Path, cutoff: i64) -> StoreResult<u64> {
-    let history = crate::journals::JournalFile::beside(&crate::journals::HISTORY, Some(database));
+fn forget_old_history(
+    history: &crate::journals::JournalFile,
+    database: &Path,
+    cutoff: i64,
+) -> StoreResult<u64> {
     let mut forgotten = 0;
     loop {
         let deleted = history

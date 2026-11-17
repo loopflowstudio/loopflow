@@ -116,7 +116,7 @@ pub(crate) fn subscribe_status(
 ) -> Result<Option<loopflow_execution::read_stream::Subscription>> {
     let repo_key = repo.to_string_lossy().into_owned();
     loopflow_execution::read_stream::start(
-        loopflow_execution::read_stream::Watch::STATE,
+        loopflow_execution::read_stream::Watch::State,
         (),
         move |store, ()| {
             let repo_key = repo_key.clone();

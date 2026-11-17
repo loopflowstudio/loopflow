@@ -1002,7 +1002,7 @@ fn follow(cli: &crate::lf::Cli, session: &str, args: &WorkspaceArgs) -> Result<(
     println!("Loopflow workspace\nNewly started Tasks appear without taking focus. Close this tab to stop following.");
     let subscribed = repository.clone();
     let subscribing = loopflow_execution::read_stream::start(
-        loopflow_execution::read_stream::Watch::STATE,
+        loopflow_execution::read_stream::Watch::State,
         selected.clone(),
         move |store, selected| {
             let repository = subscribed.clone();

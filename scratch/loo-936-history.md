@@ -389,8 +389,8 @@ before and after; a locked `usage.db` makes a gap, not a failed turn.
   `SqliteStore` holds `history` and `usage` writers; every store connection
   attaches both read-only (`history`, `usage`), each with an empty in-memory
   stand-in when unreachable. `history.db` is `user_version` 2: fresh files
-  CHECK `kind='observed'`; a version-1 file keeps its wider CHECK and its two
-  turn indexes (a journal only adds), and its turn rows convert.
+  CHECK `kind='observed'`; a version-1 file (branch builds only) keeps its
+  wider CHECK, and its turn rows are not converted: retention forgets them.
 - `usage.turns` (`sqlite/turns.rs`): one row per (Session, thread, turn).
   `record_turn_start`, `record_session_turn_origin` (freezes Task, Wave,
   Project, repository, skill, provider, Graph and step label at dispatch),
@@ -416,8 +416,9 @@ before and after; a locked `usage.db` makes a gap, not a failed turn.
 - `StoreRevisions.turns` reads `usage.turns_revision`; `changed()` ignores it
   like `history` (no read declares either yet: slice 5).
 - `convert_turn_rows` (run by `lf process prune`, reported as
-  `converted_turns`) turns `started`/`usage`/`completed` rows from main and
-  `history.db` into turn rows per Session thread, then deletes them.
+  `converted_turns`) turns `started`/`usage`/`completed` rows in main into
+  turn rows per Session thread, then deletes them. Compress cut its
+  `history.db` arm: only branch builds wrote turns there.
 - Not kept from old completion payloads: `result_id`, `subtype`,
   `total_cost_usd`, `started_at`/`completed_at` in the payload (no reader).
 
@@ -458,8 +459,8 @@ OpenCode completion.
 
 The build matches the design: three files, one rule per fact, one writer
 type (`JournalFile`), retention and the move pass on the server's hourly
-clock in 10,000-row transactions, reads declaring `Watch::JOURNALS` or
-`STATE`. Nothing the design implies is left to build. Carried to the PR body,
+clock in 10,000-row transactions, reads declaring `Watch::Journals` or
+`State`. Nothing the design implies is left to build. Carried to the PR body,
 not blocking: turn-row retention (none until one constant is chosen),
 report grouping frozen at dispatch versus later binds (no report reads it
 yet; `lf usage` grouping is separate work), "interrupted" for an unknown
@@ -482,7 +483,7 @@ OpenCode completion, and the two skew costs under "Upgrade skew".
   only until 30 days after it finished. Turns: no retention.
 - A released lf's transitions moved by the pass do not update
   `agent_sessions.transition` (the summary's latest); detect-and-name skew.
-- `read_stream::Watch` (`STATE`, `JOURNALS`) is an argument of
+- `read_stream::Watch` (`State`, `Journals`) is an argument of
   `start`/`run`; Session list, `lf history` (Desktop Session History) and the
   Task view/status watch journals, every other subscription state only.
 - `lf doctor` `journals` check: both files' size and oldest row; warns when
@@ -519,3 +520,11 @@ released lf).
 Check results: storage `retention`/`turns`/`journals`/`revisions`/forget
 tests 20 passed; storage+execution `retention`, `read_stream::tests`,
 forget tests 13 passed; `documented_commands::` 4 passed; `cargo clippy --all-targets -- -D warnings` clean. Gate: `binary(served_reads)` (server maintenance), `test(store::query_plans::tests::)`, `test(session_cli_tests::)`.
+
+Compress (2026-11-16): turn conversion reads `loopflow.db` only; `journals::Row`
+carries only the columns an observation sets; prune shares one history writer;
+`Watch` is an enum (`State`, `Journals`); `check_journals` no longer took
+`check_contention`'s doc comment. `cargo nextest run -p loopflow-storage -p
+loopflow-execution -p loopflow --lib` on `turns`, `journals`, `retention`,
+`read_stream`, `provider_transitions`, `session_events`, `doctor`: 34 passed;
+clippy clean.

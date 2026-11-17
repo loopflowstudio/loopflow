@@ -639,7 +639,7 @@ pub const CLOSED_TASK_PAGE: usize = 50;
 /// changes. The subscription reads the store; it does not observe the tracker.
 pub fn subscribe_status(wave: Option<String>) -> Result<()> {
     loopflow_execution::read_stream::run(
-        loopflow_execution::read_stream::Watch::STATE,
+        loopflow_execution::read_stream::Watch::State,
         (),
         |store, ()| {
             let wave = wave.clone();
@@ -740,7 +740,7 @@ pub fn subscribe_show(
     transport: loopflow_execution::read_stream::Transport,
 ) -> Result<Option<loopflow_execution::read_stream::Subscription>> {
     loopflow_execution::read_stream::start(
-        loopflow_execution::read_stream::Watch::STATE,
+        loopflow_execution::read_stream::Watch::State,
         (),
         move |store, ()| {
             let (wave, task, directory) = (wave.clone(), task.clone(), directory.clone());
@@ -917,7 +917,7 @@ pub fn list_tasks(repo: &Path, query: &TaskListArgs, json: bool) -> Result<()> {
 /// `lf task list --subscribe`: `lf task list --json` now and each time it changes.
 pub fn subscribe_tasks(repo: &Path, args: TaskListArgs) -> Result<()> {
     loopflow_execution::read_stream::run(
-        loopflow_execution::read_stream::Watch::STATE,
+        loopflow_execution::read_stream::Watch::State,
         args,
         |store, args| {
             let repo = repo.to_owned();
@@ -979,7 +979,7 @@ where
 {
     let repo = repo.to_owned();
     loopflow_execution::read_stream::start(
-        loopflow_execution::read_stream::Watch::JOURNALS,
+        loopflow_execution::read_stream::Watch::Journals,
         TaskStatusArgs { issue },
         move |store, args| {
             let repo = repo.to_owned();

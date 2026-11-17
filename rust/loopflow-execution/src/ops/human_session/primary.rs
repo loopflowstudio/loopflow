@@ -372,7 +372,6 @@ fn repository_session(repo: &crate::repository::CanonicalRepo) -> Result<LfSessi
     })
 }
 
-/// Prepare the workspace; connecting owns input reservation and provider launch.
 /// A new Task's conversation as a client opens it, read without preparing
 /// its workspace: its own setup makes the checkout.
 pub(crate) async fn admitted_record(store: &SharedStore, id: &str) -> Result<SessionRecord> {
@@ -383,6 +382,7 @@ pub(crate) async fn admitted_record(store: &SharedStore, id: &str) -> Result<Ses
     surface(store, &session).await
 }
 
+/// Prepare the workspace; connecting owns input reservation and provider launch.
 async fn prepare(store: &SharedStore, id: &str) -> Result<SessionRecord> {
     let lock_id = id.to_string();
     let _launch =

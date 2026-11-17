@@ -395,6 +395,12 @@ Leftover `LF_HUMAN_SESSION`/`LF_HUMAN_SESSION_RUN` strips (fixtures,
 that set the old token are deleted (120175ea3e); docs/dev/environment.md lists
 both as removed.
 
+Compress after 9c930e4fb5: `session::run` dispatches Resume/New (which may
+return a launch) apart from `run_command` (the rest), so no `.map(|()| None)`
+chain; setup reads the Task once; `launch_conversation`'s Work env is one
+guard. `task_create_tests::` 9/9, `session_cli_tests::` 24/24, transport
+`piped_resume_json_runs_here_and_returns_once` ok (local, debug).
+
 Remaining: slice 5's remote sample (qa).
 
 ## Slices

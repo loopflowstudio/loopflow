@@ -6,6 +6,7 @@
 use std::time::Instant;
 
 use anyhow::{Context, Result};
+use loopflow_storage::work::task::Task;
 use tracing::Instrument;
 
 use super::primary;
@@ -26,7 +27,7 @@ pub(super) async fn finish(
         println!("{request}");
     }
     let started = Instant::now();
-    let session = step(request_id, "checkout", checkout(store, session))
+    let (session, task) = step(request_id, "checkout", checkout(store, session))
         .await
         .inspect_err(|error| println!("Checkout failed: {error:#}"))?;
     println!("Checkout ready  {:.1} s", started.elapsed().as_secs_f64());
@@ -34,7 +35,7 @@ pub(super) async fn finish(
     match step(
         request_id,
         "graph",
-        start_graph(store, &session, request_id, agent),
+        start_graph(store, &session, &task, request_id, agent),
     )
     .await
     {
@@ -70,7 +71,7 @@ async fn step<T>(
 /// Check the Task out from local refs, taking the repository's ready checkout
 /// when one is waiting, move the conversation into it, and start the next ready
 /// checkout.
-async fn checkout(store: &SharedStore, session: LfSession) -> Result<LfSession> {
+async fn checkout(store: &SharedStore, session: LfSession) -> Result<(LfSession, Task)> {
     let task = session
         .task_id
         .as_ref()
@@ -96,7 +97,7 @@ async fn checkout(store: &SharedStore, session: LfSession) -> Result<LfSession> 
         Ok(())
     })
     .await??;
-    primary::admit_workspace(store, session).await
+    Ok((primary::admit_workspace(store, session).await?, task))
 }
 
 /// Start the Task's run the way a terminal would, detached, and record the
@@ -105,17 +106,10 @@ async fn checkout(store: &SharedStore, session: LfSession) -> Result<LfSession> 
 async fn start_graph(
     store: &SharedStore,
     session: &LfSession,
+    task: &Task,
     request_id: &str,
     agent: Option<&str>,
 ) -> Result<String> {
-    let task = session
-        .task_id
-        .as_ref()
-        .context("the conversation has no Task")?;
-    let task = store
-        .get_task(task)
-        .await?
-        .context("the Task is unavailable")?;
     let row = crate::store::task_work::task_graph_row(&store.sqlite, &task.id)?
         .context("the Task has no Graph")?;
     let launch = match &row.run {

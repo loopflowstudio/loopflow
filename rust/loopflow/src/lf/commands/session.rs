@@ -21,38 +21,12 @@ pub fn run(
     command: &SessionCommand,
     cli: &crate::lf::Cli,
 ) -> anyhow::Result<Option<ConversationLaunch>> {
-    if let SessionCommand::Card { id, .. } = command {
-        return super::screens::print(super::read::Read::SessionCard { id: id.clone() })
-            .map(|()| None);
-    }
-    if let SessionCommand::List(args) = command {
-        return list_sessions(args).map(|()| None);
-    }
-    if let SessionCommand::Usage(args) = command {
-        return super::history::usage(args).map(|()| None);
-    }
-    if let SessionCommand::Retention { json } = command {
-        return super::history_transcript::retention(*json).map(|()| None);
-    }
-    match command {
-        SessionCommand::History { cmd: Some(cmd), .. } => {
-            return super::history::run(cmd).map(|()| None)
-        }
-        SessionCommand::History {
-            id: None,
-            feed,
-            cmd: None,
-            ..
-        } => return super::activity::run(feed).map(|()| None),
-        _ => {}
-    }
-    let runtime = tokio::runtime::Runtime::new()?;
     match command {
         SessionCommand::Resume {
             id,
             connection,
             fork,
-        } => runtime.block_on(resume(
+        } => tokio::runtime::Runtime::new()?.block_on(resume(
             cli,
             connection,
             connection.target(cli, id.as_deref())?,
@@ -62,13 +36,32 @@ pub fn run(
             id,
             connection,
             request_id,
-        } => runtime.block_on(new_thread(
+        } => tokio::runtime::Runtime::new()?.block_on(new_thread(
             cli,
             connection,
             connection.target(cli, id.as_deref())?,
             request_id.as_deref(),
         )),
-        _ => runtime.block_on(run_async(command, cli)).map(|()| None),
+        _ => run_command(command, cli).map(|()| None),
+    }
+}
+
+fn run_command(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()> {
+    match command {
+        SessionCommand::Card { id, .. } => {
+            super::screens::print(super::read::Read::SessionCard { id: id.clone() })
+        }
+        SessionCommand::List(args) => list_sessions(args),
+        SessionCommand::Usage(args) => super::history::usage(args),
+        SessionCommand::Retention { json } => super::history_transcript::retention(*json),
+        SessionCommand::History { cmd: Some(cmd), .. } => super::history::run(cmd),
+        SessionCommand::History {
+            id: None,
+            feed,
+            cmd: None,
+            ..
+        } => super::activity::run(feed),
+        _ => tokio::runtime::Runtime::new()?.block_on(run_async(command, cli)),
     }
 }
 

@@ -570,29 +570,28 @@ fn launch_conversation(
     // The provider starts on this thread, so its agent is selected here.
     let _settings = loopflow_execution::config::settings::select_invocation(cli.setting_values()?);
     let _cwd = CwdGuard::enter(&cwd)?;
-    let mut _declaration = None;
-    let mut _wave = None;
-    let binding = match work {
+    // Work reaches the provider's environment as `lf --task X -i` hands it.
+    let (_work_env, binding) = match work {
         Some(mut binding) if matches!(binding.work, WorkRef::Task(_)) => {
-            _declaration = Some(EnvGuard::set(
+            let declaration = EnvGuard::set(
                 loopflow_execution::ops::WORK_DECLARATION_ENV,
                 format!("task:{}", binding.work.id()),
-            ));
+            );
             cli.wave = binding.wave_name.clone();
             binding.cwd = cwd;
-            Some(binding)
+            (Some(declaration), Some(binding))
         }
         Some(binding) => {
-            _wave = binding.wave_id.as_ref().map(|wave| {
+            cli.wave = binding.wave_name;
+            let wave = binding.wave_id.map(|wave| {
                 EnvGuard::set(
                     loopflow_execution::work::wave::context::WAVE_ID_ENV,
                     wave.to_string(),
                 )
             });
-            cli.wave = binding.wave_name;
-            None
+            (wave, None)
         }
-        None => None,
+        None => (None, None),
     };
     let result = resolve_cli_target(&mut cli).and_then(|selected| match selected {
         Some((target, message)) => {

@@ -1404,7 +1404,6 @@ fn terminal_first_launch_and_failed_startup_reopen_the_same_conversation() {
     let store = loopflow_execution::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     let session = store.session(&id).unwrap().unwrap();
     assert_eq!(session.id.as_str(), id);
-    let history = store.session_history(&id, 0, 1000).unwrap();
     // Failed and exited starts are retained as their own AgentProcess records.
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     for (state, minimum) in [("spawn_failed", 1), ("exited", 1)] {

@@ -1161,7 +1161,7 @@ struct TaskLifecycleCapture {
     }
 
     func taskPart() throws -> WorkFrame.TaskPart {
-        let line: [String: Any] = ["answers": NSNull(), "unavailable": NSNull(), "body": status]
+        let line: [String: Any] = ["answers": NSNull(), "unavailable": NSNull(), "body": status, "read_at": NSNull()]
         let frame = try WorkFrame.decode(
             part: .task, scope: WorkScope(repo: nil, headless: false, task: "FIX-1", activity: nil, taskListWave: nil),
             sequence: 1, line: JSONSerialization.data(withJSONObject: line))

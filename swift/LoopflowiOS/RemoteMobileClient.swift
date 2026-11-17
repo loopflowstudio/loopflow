@@ -6,12 +6,17 @@ import Loopflow
 @MainActor
 final class RemoteMobileClient: MobileTaskCreationClient {
     let savedMachine: SavedMachine
+    /// Where its control connections open.
+    private let endpoint: ServerEndpoint
     private var opening: Task<ServerLink, any Error>?
 
     /// How long a request may wait for its answer.
     static let requestDeadline = Duration.seconds(15)
 
-    init(savedMachine: SavedMachine) { self.savedMachine = savedMachine }
+    init(savedMachine: SavedMachine, endpoint: ServerEndpoint) {
+        self.savedMachine = savedMachine
+        self.endpoint = endpoint
+    }
 
     static func connect(endpoint: URL, replacing: SavedMachine? = nil) async throws -> SavedMachine {
         let link = try await ServerLink.open(.machine(endpoint))
@@ -47,8 +52,10 @@ final class RemoteMobileClient: MobileTaskCreationClient {
     }
 
     /// Every repository's Tasks matching `expression`, kept current.
-    func observeTasks(expression: String) -> RemoteTaskObservation {
-        RemoteTaskObservation(query: .viewSelect(expression: expression)) { [self] in try await connection() }
+    func observeTasks(expression: String, saved: SavedReadings, subscription: String) -> RemoteTaskObservation {
+        RemoteTaskObservation(query: .viewSelect(expression: expression), saved: saved, subscription: subscription) { [self] in
+            try await connection()
+        }
     }
 
     /// The Machine's Waves that are still in use.
@@ -158,7 +165,7 @@ final class RemoteMobileClient: MobileTaskCreationClient {
         if let opening, let live = try? await opening.value, await !live.isClosed {
             link = live
         } else {
-            let endpoint = ServerEndpoint.machine(savedMachine.endpoint)
+            let endpoint = endpoint
             let task = Task { try await ServerLink.open(endpoint) }
             opening = task
             do { link = try await task.value } catch {
@@ -171,6 +178,11 @@ final class RemoteMobileClient: MobileTaskCreationClient {
             throw RegistryQueryError("This address now identifies a different Machine. Forget this connection and scan its code again.")
         }
         return link
+    }
+
+    /// A Task change under its request ID; a repeat after a lost answer runs nothing.
+    func change(_ change: ServedWrite, requestID: String) async throws -> Revisions? {
+        try await connection().write(change, requestID: requestID).revisions
     }
 
     private func request(_ operation: ServerOperation) async throws -> RawJSON {

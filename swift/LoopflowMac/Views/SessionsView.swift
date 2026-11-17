@@ -1565,14 +1565,14 @@ private struct SessionsReconciler: View {
                 guard model.repoPath?.normalizedFilePath == store.repoPath.normalizedFilePath,
                       let records else { return }
                 store.reconcile(records)
-                if model.sessions.errorMessage == nil {
+                if model.sessions.failure == nil {
                     if let selection = workspaces.reconcileMembership(records) { model.select(selection) }
                     model.openWarmConversations()
                 }
             }
             .onChange(of: model.roadmap.value) { _, _ in
                 guard model.repoPath?.normalizedFilePath == store.repoPath.normalizedFilePath,
-                      model.roadmap.errorMessage == nil, model.sessions.errorMessage == nil else { return }
+                      model.roadmap.failure == nil, model.sessions.failure == nil else { return }
                 model.openWarmConversations()
             }
     }
@@ -1596,8 +1596,6 @@ struct SessionsContentView: View {
     private let workspaces: SessionsWorkspaceRegistry
     private let query: RegistryQuery
     private let store: SessionsStore
-    @State private var launchError: String?
-    @State private var launchErrorTitle = "Could not start conversation"
     @State private var actionTaskID: String?
     @Environment(\.palette) private var palette
 
@@ -1672,7 +1670,7 @@ struct SessionsContentView: View {
                 if navigation.showsNavigator {
                     SidebarColumn(navigation: navigation, availableWidth: geometry.size.width) {
                         WorkNavigator(model: model, onOpenSession: openSession, onNewTaskSession: { id in
-                            newTaskSessionFromInput(id)
+                            model.newTaskSession(id, open: newTaskSession)
                         })
                         .equatable()
                     }
@@ -1687,7 +1685,6 @@ struct SessionsContentView: View {
                         ProviderTransitionRow(transition: transition)
                     }
                     mainPane
-                    CreationRecoveryView()
                 }
             }
         }
@@ -1710,7 +1707,7 @@ struct SessionsContentView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     TaskActionItems(model: model, task: found.task, wave: found.wave?.wave,
                         newConversation: {
-                            newTaskSessionFromInput(id)
+                            model.newTaskSession(id, open: newTaskSession)
                         }, openSession: openSession)
                 }.padding(12).onExitCommand { actionTaskID = nil }
             }
@@ -1777,12 +1774,6 @@ struct SessionsContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .openSessions)) { _ in
             navigation.content = .terminals
         }
-        .alert(launchErrorTitle, isPresented: Binding(
-            get: { launchError != nil },
-            set: { if !$0 { launchError = nil } }
-        )) {
-            Button("OK") { launchError = nil }
-        } message: { Text(launchError ?? "") }
         .accessibilityIdentifier("sessions-surface")
     }
 
@@ -1900,6 +1891,7 @@ struct SessionsContentView: View {
 
     private func prepareTaskWorkspace() {
         guard let task = fileTask else { return }
+        let notices = navigation.notices
         Task { @MainActor in
             do {
                 let repo = store.repoPath
@@ -1907,8 +1899,7 @@ struct SessionsContentView: View {
                 let path = try await LocalWaveAgentLauncher.checkoutTask(repoPath: repo, issue: issue)
                 navigation.preparedTaskWorktrees[task.task.id] = path
             } catch {
-                launchErrorTitle = "Could not prepare checkout"
-                launchError = error.localizedDescription
+                notices.post(Notice("\(task.task.task.identifier) Could not prepare checkout: \(error.localizedDescription)"))
             }
         }
     }
@@ -1945,21 +1936,6 @@ struct SessionsContentView: View {
     /// An independent conversation with Task context in the Task's checkout.
     /// Resolving the checkout prepares Task Work only; it never starts a
     /// Graph or replaces another Session.
-    private func newTaskSessionFromInput(_ taskId: String) {
-        let owner = navigation.performanceOwner
-        Perf.userAction(.newConversation, scenario: "new_session_to_typing", id: taskId,
-                        repository: store.repoPath, liveSessions: model.liveSessionCount, owner: owner) {
-            Perf.acknowledged(.newConversation, id: taskId, owner: owner)
-            Task {
-                do { try await newTaskSession(taskId) }
-                catch {
-                    Perf.finish(.newConversation, id: taskId, owner: owner, outcome: .failed)
-                    launchError = error.localizedDescription
-                }
-            }
-        }
-    }
-
     private func newTaskSession(_ taskId: String) async throws {
         guard let found = model.task(id: taskId) else { return }
         let origin = navigation
@@ -2008,8 +1984,7 @@ struct SessionsContentView: View {
     }
 
     private func actionFailed(_ error: Error) {
-        launchErrorTitle = "Could not complete the action"
-        launchError = error.localizedDescription
+        navigation.notices.post(Notice("Could not complete the action: \(error.localizedDescription)"))
     }
 }
 

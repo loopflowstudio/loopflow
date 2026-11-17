@@ -5,12 +5,48 @@ import SwiftUI
 /// Desktop shows beside it open over it.
 struct TaskWorkspaceView: View {
     let client: RemoteMobileClient
+    let feed: TaskFeed
     let task: MobileTask
     let theme: ThemeDefinition
     @Binding var draft: String
     @State private var showsChanges = false
 
     var body: some View {
+        content
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) { action.disabled(!feed.pendingChanges.acceptsChanges) }
+            }
+            .overlay { NoticeView(center: feed.notices) }
+    }
+
+    /// The feed's row for this Task, with pending changes made; a Task opened
+    /// from its creation answer has none until the feed lists it.
+    private var row: WorkViewPlan.Content? {
+        feed.shownRepositories.lazy.flatMap(\.tasks).first { $0.work.id == task.id }
+    }
+
+    /// Start a Task not started, Auto-Ship a Working one, stop an Autonomous one.
+    @ViewBuilder private var action: some View {
+        if let row {
+            if row.states.contains(.autonomous) {
+                Button("Stop Auto-Ship", systemImage: "pause.circle") {
+                    feed.request("Stop Auto-Ship", row) { .taskHold(directory: $0, issue: $1) }
+                }
+            } else if row.states.contains(.unstarted) {
+                Button("Start", systemImage: "play.fill") {
+                    feed.request("Start", row) {
+                        .taskRun(directory: $0, issue: $1, graph: nil, from: nil, agent: nil, approve: false)
+                    }
+                }
+            } else if row.states.contains(.working) {
+                Button("Auto-Ship", systemImage: "paperplane") {
+                    feed.request("Auto-Ship", row) { .taskShip(directory: $0, issue: $1) }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private var content: some View {
         if let session = task.primarySession {
             SessionView(client: client, task: task, session: session, theme: theme, draft: $draft)
                 .toolbar {

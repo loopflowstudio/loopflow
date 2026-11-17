@@ -26,7 +26,7 @@ pub fn plan_selection(
             &reading.values,
         )? {
             let mut plan = result;
-            prepare_plan(&mut plan);
+            prepare_plan(store, &mut plan)?;
             return Ok(plan);
         }
     }
@@ -44,7 +44,7 @@ pub fn all_view_plans(
         {
             let mut plans = result;
             for plan in &mut plans {
-                prepare_plan(plan);
+                prepare_plan(store, plan)?;
             }
             return Ok(plans);
         }
@@ -62,7 +62,7 @@ pub fn selection_plans(
         {
             let mut plans = result;
             for plan in &mut plans {
-                prepare_plan(plan);
+                prepare_plan(store, plan)?;
             }
             return Ok(plans);
         }
@@ -195,7 +195,12 @@ pub fn reorder_dashboard(
     )
 }
 
-fn prepare_plan(plan: &mut ViewPlan) {
+fn prepare_plan(store: &SqliteStore, plan: &mut ViewPlan) -> StoreResult<()> {
+    plan.viewer = crate::store::ownership::viewer(
+        store,
+        &RepositoryId::from_raw(plan.repository.clone()),
+        std::path::Path::new(&plan.repo_path),
+    )?;
     use loopflow_storage::work::selection::PaneIntent;
     for content in plan.contents.iter_mut().filter(|content| {
         content.work.kind == loopflow_storage::work::selection::WorkWorkspaceKind::Task
@@ -225,6 +230,7 @@ fn prepare_plan(plan: &mut ViewPlan) {
             }
         }
     }
+    Ok(())
 }
 
 /// Prepare without a write lock; SQL checks the saved revision at commit.

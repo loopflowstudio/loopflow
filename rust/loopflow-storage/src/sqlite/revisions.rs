@@ -2,6 +2,8 @@
 //! the writer's own transaction whenever a displayed row changes, so a reader
 //! learns what changed without scanning history. No call site bumps one.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::StoreResult;
@@ -39,6 +41,38 @@ pub struct StoreRevisions {
     pub usage: i64,
 }
 
+/// Every domain's revision, by name, as clients see them: a write's answer
+/// carries the domains it advanced, a reading the domains it was read at. A
+/// domain added to `store_revisions` appears here without a type change.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(transparent)]
+pub struct Revisions(pub BTreeMap<String, i64>);
+
+impl Revisions {
+    /// The domains `self` advanced past `before`, at their value in `self`.
+    pub fn advanced_since(&self, before: &Self) -> Self {
+        Self(
+            self.0
+                .iter()
+                .filter(|(domain, revision)| before.0.get(*domain) < Some(revision))
+                .map(|(domain, revision)| (domain.clone(), *revision))
+                .collect(),
+        )
+    }
+
+    /// The wake test's fixed domains; a domain not yet created reads 0.
+    pub fn to_store_revisions(&self) -> StoreRevisions {
+        let domain = |name: &str| self.0.get(name).copied().unwrap_or(0);
+        StoreRevisions {
+            planning: domain("planning"),
+            sessions: domain("sessions"),
+            graphs: domain("graphs"),
+            processes: domain("processes"),
+            usage: domain("usage"),
+        }
+    }
+}
+
 impl SqliteStore {
     /// Workflow observation excludes transcript, usage and ordinary tool traffic.
     pub fn task_update_revision(&self) -> StoreResult<i64> {
@@ -67,28 +101,16 @@ impl SqliteStore {
     }
 
     pub fn revisions(&self) -> StoreResult<StoreRevisions> {
+        Ok(self.revision_map()?.to_store_revisions())
+    }
+
+    pub fn revision_map(&self) -> StoreResult<Revisions> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut revisions = StoreRevisions {
-            planning: 0,
-            sessions: 0,
-            graphs: 0,
-            processes: 0,
-            usage: 0,
-        };
         let mut query = conn.prepare("SELECT domain,revision FROM store_revisions")?;
-        let mut rows = query.query([])?;
-        while let Some(row) = rows.next()? {
-            let revision = row.get(1)?;
-            match row.get::<_, String>(0)?.as_str() {
-                "planning" => revisions.planning = revision,
-                "sessions" => revisions.sessions = revision,
-                "graphs" => revisions.graphs = revision,
-                "processes" => revisions.processes = revision,
-                "usage" => revisions.usage = revision,
-                _ => {}
-            }
-        }
-        Ok(revisions)
+        let revisions = query
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(Revisions(revisions))
     }
 }
 
@@ -104,6 +126,8 @@ mod tests {
     /// Tables no workspace surface reads. A new table belongs here or in a
     /// domain; `session_events` is covered except for transcript and usage rows.
     const NEVER_DISPLAYED: &[&str] = &[
+        // Request-ID memory for served commands; the commands' own rows move domains.
+        "command_answers",
         "creation_receipts",
         "access_profiles",
         "pm_project_name_cutover",

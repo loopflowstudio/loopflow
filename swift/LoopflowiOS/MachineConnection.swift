@@ -137,7 +137,7 @@ final class MachineSocket: ServerCarrier {
 
     private func connectionError(_ error: any Error) -> any Error {
         if Task.isCancelled { return CancellationError() }
-        if timedOut { return RegistryQueryError("The Machine did not respond in time") }
+        if timedOut { return RegistryQueryError(ServerLink.unanswered) }
         if let response = socket.response as? HTTPURLResponse, response.statusCode == 403 {
             #if targetEnvironment(simulator)
             return RegistryQueryError("Connect from a different device signed in to the Machine owner’s Tailscale account. A Simulator on the Machine itself shares its identity and cannot use this connection.")
@@ -145,7 +145,7 @@ final class MachineSocket: ServerCarrier {
             return RegistryQueryError("Connect with the Machine owner’s Tailscale account, then try again.")
             #endif
         }
-        if closed { return RegistryQueryError("Machine connection closed") }
+        if closed { return RegistryQueryError(ServerLink.disconnected) }
         return error
     }
 }
@@ -161,7 +161,7 @@ extension MachineSocket {
             try await socket.send(try JSONEncoder().encode(ServerClientMessage.attach(ticket: ticket)))
             switch try ServerMessage(line: try await socket.receiveText()) {
             case .bridged: return socket
-            case .error(_, let code, let message, let data): throw ServerError(code: code, message: message, data: data)
+            case .error(_, let code, let message, let data, _): throw ServerError(code: code, message: message, data: data)
             default: throw RegistryQueryError("The Machine did not attach the Session")
             }
         } catch { socket.close(); throw error }

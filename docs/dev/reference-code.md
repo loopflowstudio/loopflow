@@ -42,6 +42,7 @@ kernel locks                 live local exclusion authority
 | --- | --- | --- |
 | Planning | `waves`, `projects`, `project_changes`, `project_events`, `tasks`, `task_creation_intents`, `task_changes`, `task_comments`, `task_comment_deliveries`, `task_state_deliveries`, `task_issue_identities`, `task_deletions`, `task_events` | Stored plans and definitions, optional provider links, stable Work identity, creation receipts, comments and deletion recovery |
 | Submitted creations | `creation_receipts` | Request IDs, content fingerprints, original resource identities and server-owned outcomes for Task creation and new Session threads |
+| Served command answers | `command_answers` | Request IDs, content fingerprints and first answers retained for one day so a lost reply can be retrieved without repeating the write |
 | Execution | `agent_sessions`, `session_events`, `session_activity` | Conversations, selected captures, observed provider transitions, native completions, turn receipts and the current observations availability is judged from |
 | Graph processes | `graph_processes`, `graph_process_steps` | One append-only row per Graph process and per step it started |
 | Task graphs | `task_graphs` | The graph a Task took up, the step it stands at and the run carrying it |

@@ -21,18 +21,18 @@ the workspace saved at `<Machine>/desktop-cache/workspace.json` and shows
 and navigate; Graph process state, Task condition, Session state and every action except
 opening a Session wait for the fresh read. The Portfolio window opens from the
 same saved workspace. With no known Task name yet, a row says **Loading Task…**
-until its first read answers. The working Task list shows loading until it has
-answered; an empty result then says there are no working Tasks. Newly created
+until its first read answers. The working Task list opens on the list saved at
+the last launch, else shows loading until it has answered; an empty result then
+says there are no working Tasks. Newly created
 and reopened Tasks use their locally recorded names while tracker updates are
 pending.
 
-**Last known** describes the reading supplying the displayed name. Other read
-failures remain visible beside **Retry**, combining shared failures into one
-notice. A Task without a description has no summary line.
+**Last known** describes the reading supplying the displayed name. A read that
+starts failing raises one Notice for its part; the view keeps its last good
+reading, or stays empty, and the Notice goes when a read succeeds. A Task without a description has no summary line.
 If no name is known, the failed row says
-**Task unavailable**. Desktop reconnects automatically; choose **Retry** beside
-the failure to request another read. A successful replacement clears the notice
-and updates the rows, retaining the selected workspace, panes and drafts.
+**Task unavailable**. Desktop reconnects automatically. A successful replacement
+updates the rows, retaining the selected workspace, panes and drafts.
 Repeated identical Session errors leave the displayed reading unchanged; failed
 per-Wave or truncated replacements keep previously readable planning, including
 its saved copy. Delete the cache file to start from **Loading workspace…**.
@@ -288,7 +288,8 @@ Source and license notices ship offline with the catalogue.
 It sits at the right end of the Workflow bar under the jump bar, beside the Task's
 stages as dots (click them for each stage) and what is running now. While the
 handoff exists, the same spot holds Stop Auto-Ship, including while it is
-restarting or waiting for assignment; the toast's Undo is Stop Auto-Ship.
+restarting or waiting for assignment. Clicking it raises the Notice
+"LOO-5 Auto-Ship requested · Undo"; Undo is Stop Auto-Ship.
 Open a Dashboard with `state:shipping` to watch Tasks executing autonomously.
 
 ```text
@@ -464,7 +465,7 @@ readable without granting completion authority. Failed provider starts offer rec
 
 Search Work names and identifiers with **⌘K**. The repository name opens its
 conversation. Unscoped Sessions remain available through `lf session list --orphan`.
-Missing planning or selection readings retain known Work and show the read error.
+Missing planning or selection readings retain known Work and raise a Notice.
 **Task details** opens the description, comments and Run history.
 
 Opening a Task enters its retained panes and opens its conversation.
@@ -487,8 +488,9 @@ or running edge is marked. The labels of the edges leaving the current node
 are buttons; each runs `lf -b task run` as a child of the app. No edge is offered while one runs. An edge whose Graph stopped holds the
 Task, is drawn stopped, and is offered again with the others leaving its
 node. **Move to** changes Workflow position; `end` requests completion.
-**Complete** changes Task status independently. **Retry completion** retries a
-failed request without replaying the Graph.
+**Complete** changes Task status independently: the row leaves the list in the
+click and the next Task opens. A refused completion brings the row back with a
+Notice saying why; completing again never replays the Graph.
 Linear completion leaves the displayed Workflow and live Processes intact.
 Loading or unavailable Workflow readings remain explicit; a failed refresh keeps
 the last recorded graph with its actions disabled. Only a successful Task reading
@@ -522,8 +524,8 @@ The toolbar above the workspace shows its Work ancestry. On the left it drills
 Wave → Task → Session: Wave and Task crumbs return to their details; the Task's
 issue ID links to Linear. The Task crumb keeps the exact conversation name
 without a sibling picker. Repository/Wave crumbs can choose among their Sessions. The pencil renames the Session in place through `lf session
-rename`; the shown name is the shared readback, and a rejected name stays in the
-field with its error. A remote Graph Session's name lives on its Machine and is not
+rename`; the new name shows when you save, and a rejected name returns with a
+Notice saying why. A remote Graph Session's name lives on its Machine and is not
 renamed here. Outside Task navigation, the Session shows its Graph membership
 beside the name. Task navigation keeps that provenance in inspection. On the right sit
 the Task's read-only worktree location and the Activity glyph.
@@ -895,8 +897,17 @@ Task run and ship dispatch detached execution under existing Graph owners.
 Terminal launches and remote Task file streams retain their CLI transports;
 Desktop's UI automation remains app-owned.
 
-Canceling releases the client's wait, but an admitted mutation may still complete.
-After a lost response, refresh authoritative state before another deliberate edit.
+Task changes answer once their write commits; planning sync to Linear runs
+after the reply. Each answer carries the store revisions it moved, and each
+reading carries the revisions it read at. `PendingChanges` patches shown rows
+(the table in [Changes show at once](../docs/surfaces.md#changes-show-at-once))
+until a reading at or past the answer's revisions arrives; it drops a patch on a
+refusal, never by comparing values or on a timer. Each change carries a request
+ID; a repeat within a day returns the stored answer without running again.
+`PendingChanges` is one per Machine (Desktop's windows share one), sends each
+change under its request ID, resends while the link is lost and holds the link
+state: a blip keeps changes in memory, away greys out change controls and
+stands one condition Notice. Readings are `Reading<Value>`, carrying `readAt`.
 Task creation (including Session adoption) and new Session threads additionally
 have creation receipts. `CreationSubmissions` saves the exact submitted payload,
 request ID, original Machine and protocol version before sending; the payload

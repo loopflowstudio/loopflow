@@ -228,7 +228,7 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     public let waveId: String?
     public let workPath: String?
     public let actions: [SessionAction]
-    public let title: String
+    public var title: String
     public let titleSource: SessionTitleSource
     public let graphMembership: SessionGraphMembership
     public let detail: String

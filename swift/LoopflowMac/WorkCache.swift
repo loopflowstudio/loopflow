@@ -47,6 +47,8 @@ final class WorkCache: @unchecked Sendable {
     }
 
     private let url: URL
+    /// Where the cache lives; saved Task list readings sit beside it.
+    let directory: URL
     private let queue = DispatchQueue(label: "studio.loopflow.workspace-cache", qos: .utility)
     private var snapshot = WorkSnapshot()
     /// Whether `snapshot` already holds this process's view of the file.
@@ -55,6 +57,7 @@ final class WorkCache: @unchecked Sendable {
     private var lastInput: [String: Int] = [:]
 
     init(directory: URL) {
+        self.directory = directory
         // Keep the stored filename and envelope readable across presentation renames.
         url = directory.appendingPathComponent("workspace.json", isDirectory: false)
     }

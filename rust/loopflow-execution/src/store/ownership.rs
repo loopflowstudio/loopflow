@@ -1,7 +1,9 @@
 //! Acquire configuration outside SQL and retry commands whose saved scope changed.
 use crate::durable::{OwningMachineSource, TaskExecutionRoute, TaskExecutionSource};
 use crate::store::{StoreError, StoreResult};
-use loopflow_model::durable::{MachineId, MachineSetting, TaskId, TaskOwnershipEntry};
+use loopflow_model::durable::{
+    MachineId, MachineRef, MachineSetting, RepositoryId, TaskId, TaskOwner, TaskOwnershipEntry,
+};
 use loopflow_storage::sqlite::scope_defaults::TaskScope;
 use loopflow_storage::sqlite::task_ownership::{label_owner, OwnershipFacts, Person};
 use loopflow_storage::sqlite::SqliteStore;
@@ -28,6 +30,35 @@ pub fn acquire(store: &SqliteStore, scope: TaskScope) -> StoreResult<OwnershipFa
     prepare(store, scope).map(|(facts, _)| facts)
 }
 
+/// The person a claim in `repo` names: your display name and Git `user.email`.
+fn claimant(repo: &Path, id: Option<String>) -> StoreResult<Person> {
+    Ok(Person {
+        name: crate::config::participant_name().map_err(invalid)?,
+        key: crate::config::participant_email(repo),
+        id,
+    })
+}
+
+/// Who a Claim in `repo` names as owner: you, on this Machine. `None` without
+/// a Git `user.email`, which claiming needs.
+pub fn viewer(
+    store: &SqliteStore,
+    repository: &RepositoryId,
+    repo: &Path,
+) -> StoreResult<Option<TaskOwner>> {
+    let scope = store.placement_scope(None, Some(repository))?;
+    let person = claimant(repo, scope.person_id)?;
+    Ok(person.key.map(|key| TaskOwner {
+        person: person.name,
+        person_key: Some(key),
+        person_id: person.id,
+        machine: MachineRef {
+            id: Some(scope.local_machine),
+            label: Some(local_label()),
+        },
+    }))
+}
+
 fn prepare(
     store: &SqliteStore,
     scope: TaskScope,
@@ -43,11 +74,7 @@ fn prepare(
         crate::store::placement::owning_machine(&home, &scope.placement, MachineSetting::Tasks)?;
     Ok((
         OwnershipFacts {
-            person: Person {
-                name: crate::config::participant_name().map_err(invalid)?,
-                key: crate::config::participant_email(Path::new(repo)),
-                id: scope.placement.person_id.clone(),
-            },
+            person: claimant(Path::new(repo), scope.placement.person_id.clone())?,
             planning_connected: crate::ops::planning_client::connected(repo),
             declared_machines: machine_names(store)?,
             local_label: local_label(),

@@ -85,6 +85,21 @@ UPDATE waves SET (project_activation_ended_at,project_activation_exit_code,proje
     SELECT completed_at,exit_code,error FROM processes WHERE id=waves.project_activation_lf_process_id)
 WHERE project_activation_lf_process_id IS NOT NULL;
 
+-- A CI repair's run is on its incident: when it started and the OS process
+-- it runs as until the attempt is settled. A ci-fix run that died unsettled
+-- reads dead from its pid.
+ALTER TABLE ci_incidents ADD COLUMN repair_started_at INTEGER;
+ALTER TABLE ci_incidents ADD COLUMN repair_pid INTEGER;
+ALTER TABLE ci_incidents ADD COLUMN repair_os_started_at INTEGER;
+UPDATE ci_incidents SET (repair_started_at,repair_pid,repair_os_started_at)=(
+    SELECT started_at,CASE WHEN completed_at IS NULL THEN pid END,
+        CASE WHEN completed_at IS NULL THEN os_started_at END
+    FROM processes WHERE id=ci_incidents.repair_lf_process_id)
+WHERE repair_lf_process_id IS NOT NULL AND repair_finished_at IS NULL;
+UPDATE ci_incidents SET repair_started_at=(
+    SELECT started_at FROM processes WHERE id=ci_incidents.repair_lf_process_id)
+WHERE repair_lf_process_id IS NOT NULL AND repair_finished_at IS NOT NULL;
+
 CREATE INDEX graph_processes_task ON graph_processes(task_id) WHERE task_id IS NOT NULL;
 CREATE INDEX graph_process_steps_graph ON graph_process_steps(graph_lf_process_id, seq);
 
@@ -198,4 +213,16 @@ BEGIN
     UPDATE waves SET project_activation_ended_at=NEW.completed_at,
         project_activation_exit_code=NEW.exit_code,project_activation_error=NEW.error
     WHERE project_activation_lf_process_id=NEW.id AND project_activation_ended_at IS NULL;
+END;
+-- A released lf reserves or hands off a repair by id alone, after that id's
+-- Process row; its run's start and OS process come from that row.
+CREATE TRIGGER ci_repair_start_from_process AFTER UPDATE OF repair_lf_process_id ON ci_incidents
+WHEN NEW.repair_lf_process_id IS NOT NULL AND NEW.repair_lf_process_id IS NOT OLD.repair_lf_process_id
+    AND NEW.repair_started_at IS OLD.repair_started_at AND NEW.repair_pid IS OLD.repair_pid
+BEGIN
+    UPDATE ci_incidents SET (repair_started_at,repair_pid,repair_os_started_at)=(
+        SELECT started_at,CASE WHEN completed_at IS NULL THEN pid END,
+            CASE WHEN completed_at IS NULL THEN os_started_at END
+        FROM processes WHERE id=NEW.repair_lf_process_id)
+    WHERE identity=NEW.identity;
 END;

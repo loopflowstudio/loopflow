@@ -17,3 +17,11 @@ VALUES('activation-done','trace','/repo',20,25,'failed',1,'provider unavailable'
       ('activation-live','trace','/repo',42,NULL,NULL,NULL,NULL);
 INSERT INTO waves(id,name,repo,created_at,project_activation_lf_process_id)
 VALUES('wave-done','done','/repo',1,'activation-done'),('wave-live','live','/repo',1,'activation-live');
+-- A settled CI repair, and a live one a released launcher still holds.
+INSERT INTO processes(id,trace_id,cwd,started_at,completed_at,outcome,exit_code,pid,os_started_at)
+VALUES('repair-done','trace','/repo',60,70,'succeeded',0,NULL,NULL),
+      ('repair-live','trace','/repo',80,NULL,NULL,NULL,5001,79),
+      ('repair-worker','trace','/repo',90,NULL,NULL,NULL,5002,89);
+INSERT INTO ci_incidents(identity,repo,pr_number,failed_head_sha,failure_set_json,poll_observed_at,created_at,updated_at,repair_lf_process_id,repair_finished_at)
+VALUES('incident-done','/repo',1,'head','[]',1,1,1,'repair-done',71),
+      ('incident-live','/repo',1,'head','[]',1,1,1,'repair-live',NULL);

@@ -125,12 +125,32 @@ pub fn spawn(mut command: Command, inherit: &dyn Fn(&mut Command)) -> Result<Lau
     })
 }
 
+/// A detached lf that acknowledged its start: the id it records itself under
+/// and the OS process it runs as.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Started {
+    pub id: LfProcessId,
+    pub pid: u32,
+    pub os_started_at: Option<i64>,
+}
+
+impl Started {
+    /// Whether it still runs: one OS lookup against its pid and start.
+    pub fn evidence(&self) -> crate::journal::ProcessIdentityEvidence {
+        match self.os_started_at {
+            Some(at) => crate::journal::process_identity_evidence(self.pid, at),
+            None => crate::journal::ProcessIdentityEvidence::Unknown,
+        }
+    }
+}
+
 impl Launched {
-    /// The child's LfProcess, once it is admitted. Its child is reaped in the
-    /// background; this process no longer waits on it.
-    pub fn acknowledged(mut self) -> Result<LfProcessId> {
+    /// The child, once it is admitted. Its child is reaped in the background;
+    /// this process no longer waits on it.
+    pub fn acknowledged(mut self) -> Result<Started> {
         let mut line = String::new();
         let read = self.lines.read_line(&mut line);
+        let pid = self.child.id();
         let mut child = self.child;
         std::thread::spawn(move || {
             let _ = child.wait();
@@ -140,8 +160,16 @@ impl Launched {
                 "The process exited before acknowledging execution; delivery is unknown, do not replay"
             );
         }
-        LfProcessId::parse(line.trim())
-            .with_context(|| format!("The process acknowledged {:?}, not a Process", line.trim()))
+        let id = LfProcessId::parse(line.trim()).with_context(|| {
+            format!("The process acknowledged {:?}, not a Process", line.trim())
+        })?;
+        // The shell execs lf, so the child's pid is lf's.
+        let os_started_at = crate::journal::process_started_at(pid).ok().flatten();
+        Ok(Started {
+            id,
+            pid,
+            os_started_at,
+        })
     }
 }
 
@@ -255,7 +283,7 @@ pub(crate) fn start_lf(
     argv: &[String],
     env: &[(&str, &str)],
     inherit: &dyn Fn(&mut std::process::Command),
-) -> Result<LfProcessId> {
+) -> Result<Started> {
     let context = execution_context()?;
     let environment = launch_environment(env, &context);
     let environment = environment
@@ -384,7 +412,7 @@ mod tests {
             &|_| {},
         )
         .unwrap();
-        assert_eq!(launched.acknowledged().unwrap(), id);
+        assert_eq!(launched.acknowledged().unwrap().id, id);
     }
 
     #[test]
@@ -407,7 +435,7 @@ mod tests {
             &|_| {},
         )
         .unwrap();
-        assert_eq!(launched.acknowledged().unwrap(), id);
+        assert_eq!(launched.acknowledged().unwrap().id, id);
     }
 
     #[test]

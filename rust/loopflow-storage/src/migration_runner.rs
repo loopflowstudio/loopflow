@@ -1946,7 +1946,7 @@ mod tests {
     }
 
     #[test]
-    fn graph_runs_and_steps_carry_their_process_lifecycle_after_upgrade() {
+    fn run_owners_carry_their_process_lifecycle_after_upgrade() {
         let conn = open();
         apply_before_migration(&observers(), &build(), &conn, "process_rows_on_owners");
         conn.execute_batch(include_str!(concat!(
@@ -2057,7 +2057,8 @@ mod tests {
             [],
         )
         .unwrap();
-        let activations: Vec<(String, Option<i64>, Option<i64>, Option<String>)> = conn
+        type Ending = (String, Option<i64>, Option<i64>, Option<String>);
+        let activations: Vec<Ending> = conn
             .prepare(
                 "SELECT id,project_activation_ended_at,project_activation_exit_code,
                     project_activation_error FROM waves WHERE id LIKE 'wave-%' ORDER BY id",
@@ -2080,6 +2081,39 @@ mod tests {
                 ),
                 ("wave-live".into(), Some(45), Some(0), None),
             ]
+        );
+
+        // A repair's run is on its incident; a released launcher's handoff
+        // brings the worker's start and pid from its Process row.
+        type Repair = (String, Option<i64>, Option<i64>, Option<i64>);
+        let repairs = || -> Vec<Repair> {
+            conn.prepare(
+                "SELECT identity,repair_started_at,repair_pid,repair_os_started_at
+                 FROM ci_incidents ORDER BY identity",
+            )
+            .unwrap()
+            .query_map([], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap()
+        };
+        assert_eq!(
+            repairs(),
+            [
+                ("incident-done".into(), Some(60), None, None),
+                ("incident-live".into(), Some(80), Some(5001), Some(79)),
+            ]
+        );
+        conn.execute(
+            "UPDATE ci_incidents SET repair_lf_process_id='repair-worker' WHERE identity='incident-live'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            repairs()[1],
+            ("incident-live".into(), Some(90), Some(5002), Some(89))
         );
         validate_foreign_keys(&conn).unwrap();
     }

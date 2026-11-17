@@ -43,8 +43,8 @@ still be opening or show an attachment error; `--focus` only reveals it. After
 correcting an attachment failure, repeat the opening command.
 
 A conversation whose provider runs in a client lf cannot share, such as one
-started in a plain terminal before, still refuses a second opener with
-"controlled elsewhere"; quit it there or use Desktop's **Take back**.
+started in a plain terminal before, is taken over: that client ends and the
+conversation continues in the new view.
 
 `--focus` reports **Not open** when no view exists, including while Desktop is
 still resolving an opening before creating its pane. A view the host cannot

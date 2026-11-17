@@ -522,7 +522,6 @@ pub struct DesktopOpening {
 pub enum DesktopOpeningStatus {
     Opening,
     Usable,
-    Elsewhere,
     Failed,
 }
 
@@ -3554,7 +3553,6 @@ mod tests {
             DesktopOpeningStatus::Opening,
             DesktopOpeningStatus::Usable,
             DesktopOpeningStatus::Failed,
-            DesktopOpeningStatus::Elsewhere,
         ] {
             let mut reading: DesktopInspection = serde_json::from_str(include_str!(
                 "../../../../../tests/fixtures/dto/desktop_inspection.json"

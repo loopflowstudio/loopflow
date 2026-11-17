@@ -646,14 +646,11 @@ Desktop keeps views open for visible Tasks and a bounded recent set of
 unfinished conversations, so those hold their checkouts; leaving the set,
 Close and window close detach them.
 
-Desktop's automatic opening: working Tasks use Start, which permits
-first-thread creation; other Work uses reveal, which requires existing history.
-Their prepared commands keep that distinction through launch. Either attaches
-one more view beside any already open. **Take back** is for a Session whose
-provider runs outside a held terminal, in a native client lf cannot share:
-that Session refuses a second opener ("controlled elsewhere") until Take back
-resumes it here. Try again on a consumed first launch resumes a Session no
-client holds. The live relay announces native input readiness to Desktop after
+Desktop opens a conversation the way `lf resume` does: it attaches one more
+view beside any already open, resumes an ended provider from history, and
+takes over a Session whose provider runs outside a held terminal, in a native
+client lf cannot share. Try again on a consumed first launch gives its request
+another attempt. The live relay announces native input readiness to Desktop after
 the server acknowledges the native client; saved screen bytes never provide
 that announcement. A successful automatic attach records its Desktop terminal
 association after the handshake.

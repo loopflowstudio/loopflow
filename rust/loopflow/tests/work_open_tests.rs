@@ -822,7 +822,6 @@ fn available_conversations_need_no_question_and_are_never_taken_over() {
     let started = time::OffsetDateTime::now_utc().unix_timestamp();
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
-    let bin = tempfile::tempdir().unwrap();
     let _env = EnvGuard::with_lf_home(&[], home.path());
     let registered = register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
     let empty = lf(
@@ -924,35 +923,10 @@ fn available_conversations_need_no_question_and_are_never_taken_over() {
         side["fallback_argv"],
         serde_json::json!(["lf", "open", "--session", secondary])
     );
-
-    if cfg!(target_os = "macos") {
-        // A caller inside a Desktop addresses that Desktop by id; nothing here
-        // is installed, so the Machine's own Loopflow.app never answers.
-        let opened = host(bin.path(), "open", "", 0);
-        let output = lf_with(
-            home.path(),
-            repo.path(),
-            Some(bin.path()),
-            &[("LF_DESKTOP", "com.loopflow.mac.test")],
-            &["open", "--available", "--host", "desktop", "--json"],
-        );
-        let report: Value = serde_json::from_slice(&output.stdout).unwrap();
-        let statuses: Vec<&str> = report["receipts"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|receipt| receipt["status"].as_str().unwrap())
-            .collect();
-        assert_eq!(statuses, ["elsewhere", "elsewhere"], "{report}");
-        assert!(
-            !opened.exists(),
-            "opening available conversations never steals input"
-        );
-    }
 }
 
 #[test]
-fn ordinary_open_reports_the_view_and_only_explicit_focus_reveals_it() {
+fn focus_reveals_the_existing_view_and_creates_nothing() {
     let provider = Provider::start();
     let started = time::OffsetDateTime::now_utc().unix_timestamp();
     let repo = TestRepo::new();
@@ -983,18 +957,6 @@ fn ordinary_open_reports_the_view_and_only_explicit_focus_reveals_it() {
     let url = format!("loopflow://{}/task/INF-123", folder(repo.path()));
 
     let log = host(bin.path(), "tmux", "", 0);
-    let ordinary = json(&lf(
-        home.path(),
-        repo.path(),
-        Some(bin.path()),
-        &["open", &url, "--json"],
-    ));
-    assert_eq!(ordinary["receipts"][0]["status"], "elsewhere");
-    assert!(ordinary["receipts"][0]["reason"]
-        .as_str()
-        .unwrap()
-        .contains("--focus"));
-    assert!(!log.exists());
     let report = json(&lf(
         home.path(),
         repo.path(),
@@ -2001,7 +1963,7 @@ fn own_session_and_same_rex_open_report_identity_without_creating_or_focusing() 
             &[("LF_AGENT_CALLER", &caller)],
             &args,
         ));
-        assert_eq!(report["receipts"][0]["status"], "elsewhere");
+        assert_eq!(report["receipts"][0]["status"], "usable");
         assert_eq!(report["receipts"][0]["host"], "rex");
         assert!(report["receipts"][0]["reason"]
             .as_str()
@@ -2350,7 +2312,10 @@ fn desktop_conversation_attachment_retry_and_focus_keep_the_retained_view() {
     assert!(!log.exists());
     let failed = open();
     assert!(!failed.status.success(), "{failed:?}");
-    assert!(String::from_utf8_lossy(&failed.stdout).contains("Attachment failed"));
+    assert!(
+        String::from_utf8_lossy(&failed.stdout).contains("Attachment failed"),
+        "{failed:?}"
+    );
     std::fs::write(&corrected, "").unwrap();
     assert_eq!(json(&open())["receipts"][0]["status"], "usable");
     let focused = focus();
@@ -2371,7 +2336,10 @@ fn desktop_conversation_attachment_retry_and_focus_keep_the_retained_view() {
     assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(), 2);
     let pending_focus = focus();
     assert!(!pending_focus.status.success());
-    assert!(String::from_utf8_lossy(&pending_focus.stdout).contains("Not open"));
+    assert!(
+        String::from_utf8_lossy(&pending_focus.stdout).contains("Not open"),
+        "{pending_focus:?}"
+    );
     reading["windows"] = serde_json::json!([]);
     std::fs::write(&reading_path, reading.to_string()).unwrap();
     let absent = focus();

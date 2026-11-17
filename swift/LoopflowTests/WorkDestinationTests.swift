@@ -35,7 +35,7 @@ struct WorkDestinationTests {
                                             work: waveScoped ? .wave(id: wave.wave.id) : nil)
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let (model, registry) = destinationModel(query: RegistryQuery { args, _ in
-            if args.starts(with: ["session", "resume"]), args.contains(record.id), args.contains("--start-if-free") { return encoded }
+            if args.starts(with: ["session", "resume"]), args.contains(record.id), args.contains("--prepare") { return encoded }
             throw RegistryQueryError("Only the exact conversation may be prepared")
         }, repoPath: wave.wave.repo)
         model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
@@ -99,33 +99,27 @@ struct WorkDestinationTests {
         #expect(model.navigation.content == .terminals)
     }
 
-    @Test("Sidebar initializes missing history without taking a competing claim", arguments: [false, true])
-    func sidebarOpeningPreservesInputHolder(occupied: Bool) async throws {
+    @Test("Sidebar opening prepares the Task's conversation, taking over one a native client holds", arguments: [false, true])
+    func sidebarOpeningPreparesTheConversation(occupied: Bool) async throws {
         let data = try workingFixture()
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
         let task = try #require(snapshot.tasks.items.first)
-        let record = try revealedConversation(task, occupied: occupied,
-            reason: occupied ? nil : "No saved provider history; start this conversation explicitly")
+        let record = try revealedConversation(task, occupied: occupied)
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let query = RegistryQuery { args, _ in
-            if args.starts(with: ["session", "resume"]), args.contains("--start-if-free") { return encoded }
+            if args.starts(with: ["session", "resume"]), args.contains("--prepare") { return encoded }
             if args.starts(with: ["plan", "list"]) { return data }
-            throw RegistryQueryError("Navigation must use non-replacing startup")
+            throw RegistryQueryError("Navigation prepares only the conversation")
         }
         let (model, registry) = destinationModel(query: query, repoPath: task.task.repo)
         model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
         await model.openTaskConversation(task.id)
         let store = registry.sessionStore(repository: "repo", repoPath: task.task.repo, query: query)
         let item = try #require(store.sessions.first)
-        if occupied {
-            #expect(item.surface == nil)
-            #expect(item.state == .elsewhere)
-            #expect(item.record.action(.moveHere) != nil)
-        } else {
-            #expect(item.state == .prepared)
-            #expect(item.surface != nil)
-            #expect(item.launchArguments.contains("--start-if-free"))
-        }
+        #expect(item.state == .prepared)
+        #expect(item.surface != nil)
+        #expect(item.launchArguments == ["lf", "session", "resume", record.id])
+        #expect(item.record.action?.label == (occupied ? "Take over" : "Open here"))
     }
 
     @Test("Close and eviction discard a late sidebar preparation", arguments: [false, true])
@@ -137,7 +131,7 @@ struct WorkDestinationTests {
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let barrier = LinkedDestinationBarrier()
         let query = RegistryQuery { args, _ in
-            if args.starts(with: ["session", "resume"]), args.contains("--start-if-free") {
+            if args.starts(with: ["session", "resume"]), args.contains("--prepare") {
                 await barrier.wait("prepare")
                 return encoded
             }
@@ -167,16 +161,11 @@ struct WorkDestinationTests {
         #expect(registry.sessionStore(repository: "repo", repoPath: task.task.repo, query: query).sessions.isEmpty)
     }
 
-    private func revealedConversation(_ task: RoadmapTask, occupied: Bool = false, reason: String? = nil) throws -> SessionRecord {
+    private func revealedConversation(_ task: RoadmapTask, occupied: Bool = false) throws -> SessionRecord {
         let record = try renameFixtureRecord("revealed", title: "Conversation", work: .task(id: #require(task.runtime?.workId)))
         var wire = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as? [String: Any])
-        var actions = sessionActionFixture(state: occupied ? "active" : "closed")
-        if let reason {
-            let reveal = try #require(actions.firstIndex { $0["kind"] as? String == "reveal" })
-            actions[reveal]["unavailable_reason"] = reason
-        }
-        wire["actions"] = actions
-        wire["open_argv"] = ["lf", "session", "resume", record.id, "--start-if-free"]
+        wire["action"] = sessionActionFixture(state: occupied ? "active" : "closed")
+        wire["open_argv"] = ["lf", "session", "resume", record.id]
         wire["workspace"] = ["machine_id": "machine-local", "worktree": "/src/task",
                              "task_id": task.runtime?.workId ?? task.id]
         return try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: wire))
@@ -464,43 +453,37 @@ struct WorkDestinationTests {
         #expect(registry.visibleWork.contains(tile.key))
     }
 
-    @Test("A finished tile without history offers Rust's Start after its refused reveal, in place")
-    func finishedTileOffersStartAfterRefusedReveal() async throws {
+    @Test("A finished tile without a Session opens one in place only when asked")
+    func finishedTileOpensWhenAsked() async throws {
         let planning = try fixture()
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(planning.utf8))
         let task = try #require(snapshot.tasks.items.first { $0.isCompleted && $0.runtime?.workId != nil })
-        #expect(task.conversationIntent == .reveal && !task.awaitsStart)
+        #expect(!task.opensConversationAutomatically && !task.awaitsStart)
         let location = WorkspaceIdentity(machineId: "machine-local", worktree: "/src/task")
         let record = try tileRecord(task, at: location)
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let query = RegistryQuery { args, _ in
             if args.starts(with: ["plan", "list"]) { return planning }
             if args.starts(with: ["--repo-id", "repo", "task", "location"]) { return try tileLocation(args, task: task, location: location) }
-            if args.prefix(2) == ["session", "resume"], args.contains("--explain") { return taskConversationStartOfferFixture() }
-            if args.prefix(2) == ["session", "resume"], args.contains("--start-if-free") { return encoded }
-            if args.prefix(2) == ["session", "resume"] { throw RegistryQueryError("No existing conversation; start one explicitly") }
+            if args.prefix(2) == ["session", "resume"], args.contains("--prepare") { return encoded }
             throw RegistryQueryError("Opening in a tile reads nothing else")
         }
         let (model, registry, tile, placeholder) = dashboardTile(task, snapshot: snapshot, query: query, location: location)
-        try placeholder.inspect().find(viewWithAccessibilityIdentifier: "open-conversation").button().tap()
-        for _ in 0..<200 where tile.conversationStart == nil || tile.openingConversation {
-            try await Task.sleep(for: .milliseconds(10))
-        }
-        #expect(tile.conversationError == "No existing conversation; start one explicitly")
-        let start = try placeholder.inspect().find(viewWithAccessibilityIdentifier: "open-conversation").button()
-        #expect(try start.labelView().text().string() == "Start conversation")
-        #expect(model.navigation.destination == .workingTasks)
-        try start.tap()
+        #expect(registry.preparationCount == 0)
+        #expect(tile.multiplexer.pane(forSessionId: record.id) == nil)
+        let open = try placeholder.inspect().find(viewWithAccessibilityIdentifier: "open-conversation").button()
+        #expect(try open.labelView().text().string() == "Open conversation")
+        try open.tap()
         for _ in 0..<200 where tile.multiplexer.pane(forSessionId: record.id) == nil {
             try await Task.sleep(for: .milliseconds(10))
         }
         #expect(tile.multiplexer.pane(forSessionId: record.id) != nil)
-        #expect(tile.conversationError == nil && tile.conversationStart == nil)
+        #expect(tile.conversationError == nil)
         #expect(model.navigation.destination == .workingTasks)
         #expect(registry.visibleWork == [tile.key])
     }
 
-    @Test("Task entry exposes Take back without taking over the external terminal", arguments: [false, true])
+    @Test("Task entry takes over a conversation another client holds", arguments: [false, true])
     func taskConversationActiveElsewhere(explicitSession: Bool) async throws {
         let data = try fixture()
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
@@ -530,23 +513,7 @@ struct WorkDestinationTests {
         let store = registry.sessionStore(repository: "repo", repoPath: wave.wave.repo, query: query)
         #expect(workspace.multiplexer.focusedPane.sessionId == record.id)
         #expect(workspace.conversationError == nil)
-        #expect(model.taskOpening?.status == .elsewhere)
-        #expect(model.taskOpening?.reason?.contains("another client") == true)
-        #expect(store.sessions.first?.state == .elsewhere)
-        #expect(store.sessions.first?.surface == nil)
-        // Inspect the production placeholder directly: ViewInspector cannot resolve
-        // Observation environment objects while descending the workspace tree.
-        let view = SessionPaneView(pane: workspace.multiplexer.focusedPane, isFocused: true,
-            sessions: store, workspace: workspace, model: model, onFocus: { _, _ in })
-            ._sessionPlaceholder(try #require(store.sessions.first))
-        let move = try view.inspect().find(viewWithAccessibilityIdentifier: "session-move-here-\(record.id)").button()
-        #expect(!move.isDisabled())
-        #expect(throws: Never.self) {
-            try view.inspect().find(text: try #require(record.action(.moveHere)?.help))
-        }
-        try move.tap()
-        let deadline = ContinuousClock.now + .seconds(3)
-        while store.sessions.first?.state != .prepared, ContinuousClock.now < deadline { await Task.yield() }
+        #expect(model.taskOpening?.status == .opening)
         #expect(store.sessions.first?.state == .prepared)
         #expect(store.sessions.first?.surface?.id == record.id)
         #expect(store.sessions.first?.launchArguments == ["lf", "session", "resume", record.id])
@@ -561,7 +528,7 @@ struct WorkDestinationTests {
         let task = try #require(wave.tasks.items.first)
         var record = try renameFixtureRecord("primary", title: "Conversation", work: .task(id: #require(task.runtime?.workId)))
         var wire = try JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as! [String: Any]
-        wire["actions"] = sessionActionFixture(state: "closed")
+        wire["action"] = sessionActionFixture(state: "closed")
         record = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: wire))
         record.workspace = try JSONDecoder().decode(SessionWorkspace.self, from: JSONSerialization.data(withJSONObject: [
             "machine_id": "machine-local", "worktree": "/src/task", "task_id": task.runtime?.workId ?? task.id
@@ -569,8 +536,7 @@ struct WorkDestinationTests {
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let barrier = LinkedDestinationBarrier()
         let query = RegistryQuery { args, _ in
-            // A Task with no runtime is not yet working, so opening it only reveals history.
-            if (args.starts(with: ["session", "resume"]) && args.contains("--task") && args.contains(unprepared ? "--reveal-existing" : "--start-if-free")) { await barrier.wait("prepare"); return encoded }
+            if (args.starts(with: ["session", "resume"]) && args.contains("--task") && args.contains("--prepare")) { await barrier.wait("prepare"); return encoded }
             if args.starts(with: ["plan", "list"]) { await barrier.wait("planning"); return data }
             throw RegistryQueryError("Unexpected opening operation")
         }
@@ -622,7 +588,7 @@ struct WorkDestinationTests {
         let task = try #require(wave.tasks.items.first)
         var record = try renameFixtureRecord("primary", title: "Task conversation", work: .task(id: #require(task.runtime?.workId)))
         var wire = try JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as! [String: Any]
-        wire["actions"] = sessionActionFixture(state: "closed")
+        wire["action"] = sessionActionFixture(state: "closed")
         record = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: wire))
         record.workspace = try JSONDecoder().decode(SessionWorkspace.self, from: JSONSerialization.data(withJSONObject: [
             "machine_id": "machine-local", "worktree": "/src/task", "task_id": task.runtime?.workId ?? task.id
@@ -744,12 +710,11 @@ struct WorkDestinationTests {
         #expect(entry.multiplexer.sessionPane?.sessionId == nil)
     }
 
-    @Test("A failed automatic Start shows its failure, never a Start offer")
+    @Test("A failed automatic opening shows its failure")
     func failedAutomaticStartKeepsItsReason() async throws {
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(try workingFixture().utf8))
-        let task = try #require(snapshot.tasks.items.first { $0.conversationIntent == .start })
-        let query = RegistryQuery { args, _ in
-            if args.contains("--explain") { return taskConversationStartOfferFixture() }
+        let task = try #require(snapshot.tasks.items.first { $0.opensConversationAutomatically })
+        let query = RegistryQuery { _, _ in
             throw RegistryQueryError("Claude account unavailable")
         }
         let (model, registry) = destinationModel(query: query, repoPath: task.task.repo)
@@ -758,27 +723,6 @@ struct WorkDestinationTests {
         await model.openTaskConversation(task.id)
         let entry = try #require(registry.retained(model.workspaceKey(for: .task(id: task.id), repository: "repo")))
         #expect(entry.conversationError == "Claude account unavailable")
-        #expect(entry.conversationStart == nil)
-        #expect(entry.conversationIntent == .start)
-    }
-
-    @Test("A requested reveal stays reveal on a working Task and may offer Start")
-    func requestedRevealIsHonored() async throws {
-        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(try workingFixture().utf8))
-        let task = try #require(snapshot.tasks.items.first { $0.conversationIntent == .start })
-        let query = RegistryQuery { args, _ in
-            if args.contains("--explain") { return taskConversationStartOfferFixture() }
-            if args.contains("--reveal-existing") { throw RegistryQueryError("No saved provider history") }
-            throw RegistryQueryError("A requested reveal cannot start a conversation")
-        }
-        let (model, registry) = destinationModel(query: query, repoPath: task.task.repo)
-        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
-
-        await model.openTaskConversation(task.id, intent: .reveal)
-        let entry = try #require(registry.retained(model.workspaceKey(for: .task(id: task.id), repository: "repo")))
-        #expect(entry.conversationError == "No saved provider history")
-        #expect(entry.conversationStart?.label == "Start conversation")
-        #expect(entry.conversationIntent == .reveal)
     }
 
     @Test(arguments: [false, true])
@@ -868,7 +812,7 @@ struct WorkDestinationTests {
         var surface = try JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as! [String: Any]
         // Its agent runs on the peer with no terminal showing it.
         surface["state"] = "detached"
-        surface["actions"] = sessionActionFixture(state: "detached")
+        surface["action"] = sessionActionFixture(state: "detached")
         surface["open_argv"] = ["ssh", "-tt", "peer", "owned-fixture"]
         record = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: surface))
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
@@ -912,7 +856,7 @@ struct WorkDestinationTests {
         if outcome == "recorded" {
             let opened = try #require(workspaceRegistry.selectedWork.flatMap(workspaceRegistry.retained))
             let pane = try #require(opened.multiplexer.layout.allPanes.first { $0.sessionId == record.id })
-            let request = LinkedSession(generation: 0, record: record, task: task, location: pane.executionLocation)
+            let request = LinkedSession(generation: 0, record: record, task: task, location: pane.executionLocation, prepared: false)
             #expect(request.record.id == record.id)
             #expect(request.location?.machineID == "peer")
             #expect(model.selection == .task(id: task.id))
@@ -1190,17 +1134,6 @@ struct WorkDestinationTests {
         #expect(attachment(in: ready.layout) == .usable)
     }
 
-    @Test("A conversation held elsewhere never confirms local attachment")
-    func conversationAttachmentElsewhere() async throws {
-        let (model, registry, record, url, query) = try openingFixture(outcome: "elsewhere")
-        await model.openTaskLink(url)
-        try await waitForOpening(model)
-        let store = registry.sessionStore(repository: "repo", repoPath: try #require(model.repoPath), query: query)
-        #expect(store.attachment(record.id) == .elsewhere)
-        #expect(model.taskOpening?.status == .elsewhere)
-        #expect(model.taskOpening?.reason?.contains("another client") == true)
-    }
-
     @Test func unavailableWorkspaceMachineDoesNotConnect() async throws {
         let (model, _, _, url, query) = try openingFixture(outcome: "usable")
         let registry = SessionsWorkspaceRegistry()
@@ -1242,8 +1175,8 @@ struct WorkDestinationTests {
             "machine_id": identity.machineId, "worktree": identity.worktree, "task_id": try #require(task.runtime?.workId)
         ]))
         var sessionJSON = try JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as! [String: Any]
-        sessionJSON["state"] = outcome == "elsewhere" ? "active" : "detached"
-        sessionJSON["actions"] = sessionActionFixture(state: outcome == "elsewhere" ? "active" : "detached")
+        sessionJSON["state"] = "detached"
+        sessionJSON["action"] = sessionActionFixture(state: "detached")
         record = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: sessionJSON))
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let sessionID = record.id
@@ -1279,7 +1212,7 @@ struct WorkDestinationTests {
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let barrier = LinkedDestinationBarrier()
         let (model, _) = destinationModel(query: RegistryQuery { args, _ in
-            guard (args.starts(with: ["session", "resume"]) && args.contains("--task") && args.contains("--start-if-free")) else { throw RegistryQueryError("Canceled preparation must not read or open another Task") }
+            guard (args.starts(with: ["session", "resume"]) && args.contains("--task") && args.contains("--prepare")) else { throw RegistryQueryError("Canceled preparation must not read or open another Task") }
             await barrier.wait("ensure")
             return encoded
         }, repoPath: wave.wave.repo)
@@ -1400,8 +1333,7 @@ struct WorkDestinationTests {
         #expect(model.showsSavedWork)
         await model.openTaskLink(TaskLink(issue: task.task.identifier, repo: task.task.repo, session: record.id))
         #expect(installedSession(model, registry)?.id == record.id)
-        #expect(model.taskOpening?.status == .elsewhere)
-        #expect(model.taskOpening?.reason?.contains("another client") == true)
+        #expect(model.taskOpening?.status == .opening)
     }
 
     @Test func historicalTaskSurvivesCurrentPlanRefresh() async throws {
@@ -1608,7 +1540,7 @@ struct WorkDestinationTests {
         #expect(report.task?.roadmapGeneratedAt == snapshot.generatedAt)
         #expect(report.task?.conditionObservedAt == task.condition.observedAt)
         #expect(report.session?.reading == "loading")
-        #expect(report.session?.actions == nil)
+        #expect(report.session?.action == nil)
         #expect(report.session?.observedAt == nil)
         #expect(workspaces.inspect().isEmpty)
     }
@@ -1682,7 +1614,7 @@ struct WorkDestinationTests {
         let registry = SessionsWorkspaceRegistry()
         let first = model.inspectDesktop(repository: "plan", window: UUID(), workspaces: registry)
         #expect(first.session?.reading == "current")
-        #expect(first.session?.actions == record.actions)
+        #expect(first.session?.action == record.action)
         #expect(first.session?.machineId == record.workspace?.machineId)
         #expect(first.task == nil)
         await model.refreshSessions()
@@ -1690,7 +1622,7 @@ struct WorkDestinationTests {
         #expect(failed.session?.id == record.id)
         #expect(failed.session?.reading == "unavailable")
         #expect(failed.session?.reason == "Session source disconnected")
-        #expect(failed.session?.actions == nil)
+        #expect(failed.session?.action == nil)
         #expect(model.navigation.selectedSessionId == record.id)
         #expect(registry.inspect().isEmpty)
     }
@@ -1715,13 +1647,13 @@ struct WorkDestinationTests {
         while !(await barrier.contains("last-page")) { await Task.yield() }
         let partial = model.inspectDesktop(repository: "plan", window: UUID(), workspaces: SessionsWorkspaceRegistry())
         #expect(partial.session?.reading == "updating")
-        #expect(partial.session?.actions == nil)
+        #expect(partial.session?.action == nil)
         #expect(model.sessions.value?.contains { $0.id == record.id } == true)
         await barrier.release("last-page")
         await refreshing.value
         let removed = model.inspectDesktop(repository: "plan", window: UUID(), workspaces: SessionsWorkspaceRegistry())
         #expect(removed.session?.reading == "unavailable")
-        #expect(removed.session?.actions == nil)
+        #expect(removed.session?.action == nil)
         #expect(model.navigation.selectedSessionId == record.id)
     }
 

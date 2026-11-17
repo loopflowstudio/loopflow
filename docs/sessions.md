@@ -32,22 +32,18 @@ lf resume <session>                # an exact conversation
 lf session list --available        # conversations available for your next turn, across this repository
 ```
 
-`lf resume` reconnects to the conversation's running provider or continues its
-saved thread after safe replacement.
-
-A live turn or pending request keeps its provider. Replacing an idle provider
-discards unsent input, just as quitting it does. If attachment fails,
-resume reports the failure and leaves that work intact. Returning does not
-resend input.
+`lf resume` opens the conversation in this terminal. `lf open`, Desktop and
+overview tabs all open conversations the same way.
 
 | The conversation is… | `lf resume` |
 |---|---|
-| running with no terminal showing it (listed as `detached`) | reattaches |
-| shown in another lf terminal | opens one more view here; the other stays open and both type |
-| running in a provider client lf started elsewhere | reconnects to retained work; continues from history when the client can safely be replaced |
-| started with `lf <skill>` and still running in another terminal | starts a second agent on the same thread; the first keeps running |
-| ended or crashed | continues the same provider thread from its history |
 | missing for this scope | starts one and says so |
+| running in an lf terminal, shown or not | opens one more view here; other views stay open and all of them type |
+| ended or crashed | continues the same provider thread from its history |
+| running in a client lf can't share (`lf <skill>` in another terminal, say) | takes it over and says so: that client ends and the conversation continues here; unsent text there is lost |
+
+If attachment fails, resume reports the failure and leaves that work intact.
+Returning does not resend input.
 
 Each scope (repository, Wave, Task) has one ongoing conversation, with that
 scope's operating instructions.
@@ -270,8 +266,8 @@ input or restarts the Task's Graph. Preparing the view is only the first step;
 input stays paused until the conversation can accept it.
 
 If the provider runs in a client lf cannot share (started in a plain terminal,
-say), the pane offers **Take back** to resume it here; Refresh leaves that
-client running. If the provider has ended, use the offered resume action to continue the same
+say), opening the pane takes it over: that client ends and the conversation
+continues here. If the provider has ended, use the offered resume action to continue the same
 Session from history; an ended provider's unsent editor contents cannot be
 restored from history.
 

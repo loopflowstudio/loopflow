@@ -1337,7 +1337,6 @@ fn session_resume_explain_shares_explicit_native_and_inferred_selection_without_
         .unwrap(),
     );
     assert!(text.contains("Resume saved provider history"), "{text}");
-    assert!(text.contains("Open here: Open this Session in a terminal"), "{text}");
     assert!(text.contains("Nothing was executed"));
     db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
     assert_eq!(before, fs::read(db_path).unwrap());
@@ -1392,7 +1391,7 @@ fn session_resume_explain_preserves_missing_and_stale_evidence() {
     fs::write(&receipt, serde_json::json!({"schema_version":1,"pid":std::process::id(),"terminal_id":"stale","started_at":"2000-01-01T00:00:00Z"}).to_string()).unwrap();
     let stale = read(&session.id);
     assert_eq!(stale["state"], "unknown");
-    assert_eq!(stale["opening"]["label"], "Open here");
+    assert_eq!(stale["opening"]["label"], "Try again");
     fs::write(&receipt, "unreadable receipt").unwrap();
     let invalid = read(&session.id);
     // Native receipt corruption does not replace recorded Process evidence.

@@ -74,3 +74,11 @@
 - Jack Heart: "desktop should also just always take back rather than rendering the option"
 - Jack Heart, on `lf -b resume --message` (Graph schema-correction caller): "I see / I guess this is fine". Stays on resume.
 - Jack Heart, on `lf resume --prepare` (Desktop pane opening, repo_operate, QA): "Ok sure". Stays on resume for this pass.
+
+## Picks made headless (lf resume, 2026-11-17)
+
+- **`lf open --focus` stays a read**: it looks the Session up through `existing_connection` (shared with `--explain`) and creates nothing; only opening resolves through `select_connection`, which creates.
+- **`--explain` names a held terminal `view`**, keeping `take_over` for a native client that ends.
+- **A Session record carries one `action`** (label, help) instead of a kind-tagged list; nothing sets an unavailable reason now.
+- **Desktop's automatic opening keeps its lifecycle gate** (`opensConversationAutomatically`, from `lifecycle.isWorking`): a Task opens by itself only when its pane names a Session, it is working, selected, or a remembered visit. Selecting a finished Task with no conversation now starts one.
+- **A consumed first launch** ("Try again") is opened like any other by Desktop's warm opening, so its request gets one more attempt per Desktop start. A flag on the wire would be needed to hold it back; none added.

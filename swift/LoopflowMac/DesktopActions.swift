@@ -583,14 +583,6 @@ struct DesktopAction {
             }
             return DesktopActionOutcome(pane: pane.id, tab: nil)
         },
-        DesktopAction("take-back-session", "Take Back Session", scope: .pane) { context in
-            let (workspace, pane) = try context.addressed
-            guard let id = pane.sessionId else {
-                throw DesktopTargetError("Address a Session pane to take back its input; nothing changed.")
-            }
-            Task { @MainActor in await context.workspaces.takeBackSession(id, in: workspace) }
-            return DesktopActionOutcome(pane: pane.id, tab: nil)
-        },
         DesktopAction("switch", "Switch Conversation", scope: .pane,
             arguments: [.init(name: "session", kind: .string, required: true)]) { context in
             let (workspace, _) = try context.addressed

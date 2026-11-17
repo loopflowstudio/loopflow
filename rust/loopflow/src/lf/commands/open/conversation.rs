@@ -117,7 +117,7 @@ fn present(target: &mut Resolved, args: &OpenArgs, focus_new: bool) -> Result<Op
                 && destination.is_some_and(|(host, _)| host == OpenHost::Desktop));
         if focus_existing {
             let (host, destination) = destination.context(
-                "Open only in views lf cannot focus; lf open without --focus adds a view here",
+                "Not open in a view lf can focus; lf open without --focus adds a view here",
             )?;
             focus_destination(host, destination).with_context(|| view.reason.clone())?;
             return Ok(target.receipt(
@@ -127,10 +127,12 @@ fn present(target: &mut Resolved, args: &OpenArgs, focus_new: bool) -> Result<Op
                 Some(view.reason),
             ));
         }
-        // Desktop shows a conversation once, and a native client lf cannot share
-        // keeps it; a held terminal takes another view.
-        let stays = (mode == Mode::Desktop && view.in_desktop) || !view.held;
-        if stays && view.retains_attachment() {
+        // Desktop shows a conversation once, and an agent is already in its own;
+        // anywhere else, opening adds a view or takes it over from a client lf
+        // can't share.
+        let own = loopflow_execution::journal::agent_caller()
+            .is_some_and(|caller| target.conversation() == Some(caller.session_id.as_str()));
+        if ((mode == Mode::Desktop && view.in_desktop) || own) && view.retains_attachment() {
             return Ok(target.receipt(
                 destination.map(|(host, _)| host),
                 view.placement.clone(),
@@ -206,14 +208,6 @@ fn desktop_open(target: &mut Resolved, focus: bool) -> Result<OpenReceipt> {
                         None,
                         OpenStatus::Usable,
                         None,
-                    ))
-                }
-                DesktopOpeningStatus::Elsewhere => {
-                    return Ok(target.receipt(
-                        Some(OpenHost::Desktop),
-                        None,
-                        OpenStatus::Elsewhere,
-                        opening.reason,
                     ))
                 }
                 DesktopOpeningStatus::Failed => anyhow::bail!(

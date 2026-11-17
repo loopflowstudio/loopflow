@@ -184,6 +184,9 @@ public struct WorkLink: Codable, Equatable, Sendable {
 
 public enum SessionResumeIntent: String, Codable, Equatable, Sendable {
     case start, resume
+    /// A live held terminal gains a view.
+    case view
+    /// A provider running in a native client lf can't share; that client ends.
     case takeOver = "take_over"
     case newThread = "new_thread"
 }
@@ -206,9 +209,31 @@ public struct SessionResumeExplanation: Codable, Equatable, Sendable {
     public let resolution: ContextExplanation
     public let action: SessionResumeAction?
     public let state: SessionState?
-    public let actions: [SessionAction]
+    /// What opening it does; nil when it can't open.
+    public let opening: SessionAction?
     public let impediments: [String]
     public let unavailable: [String]
+
+    enum CodingKeys: String, CodingKey { case resolution, action, state, opening, impediments, unavailable }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        resolution = try values.decode(ContextExplanation.self, forKey: .resolution)
+        action = try values.decode(SessionResumeAction?.self, forKey: .action)
+        state = try values.decode(SessionState?.self, forKey: .state)
+        opening = try values.decode(SessionAction?.self, forKey: .opening)
+        impediments = try values.decode([String].self, forKey: .impediments)
+        unavailable = try values.decode([String].self, forKey: .unavailable)
+    }
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(resolution, forKey: .resolution)
+        try values.encode(action, forKey: .action)
+        try values.encode(state, forKey: .state)
+        try values.encode(opening, forKey: .opening)
+        try values.encode(impediments, forKey: .impediments)
+        try values.encode(unavailable, forKey: .unavailable)
+    }
 }
 
 public enum TaskPlanningAction: Codable, Equatable, Sendable {

@@ -1,6 +1,6 @@
 # LOO-935: remove what the product no longer uses, and keep it removed
 
-Status (2026-11-17): `lf task view`, `lf open --diff`, the Rex follower and Task widening are gone (6fb8816a4e, 1efd501812); every view of a held terminal types (Rust, Swift, docs, tests done). Concept review's doc repairs are done; next is gate.
+Status (2026-11-17): `lf resume` does one thing (Rust, Swift, docs done); before it, `lf task view`, `lf open --diff`, the Rex follower and Task widening went and every view of a held terminal types. Next is gate.
 
 ## Demo
 
@@ -260,3 +260,38 @@ sessions".
 
 `lf open` keeps calling `lf session resume`; what `lf open` itself does is the
 next conversation, not this pass.
+
+Built (Rust, 08656b77af and after): `human_session::open` is the one path;
+`open_without_replacing`, `SessionOpenIntent`, both flags, `session.resume`'s
+`intent`, `transport::attach_existing` and its `LF_RELAY_SESSION` reveal hook
+are gone. A running bare `lf <skill>` agent is stopped, not run beside.
+`SessionRecord.action: Option<SessionAction{label, help}>` replaces
+`actions` (Open / Take back / Show conversation; `kind` and
+`unavailable_reason` gone): Reconnect, Open here, Take over, Try again, Start
+conversation. `--explain` reports `opening` and a `view` intent for a held
+terminal; `take_over` now means a native client ends. `lf open` no longer
+reports "Already open" for a native client: it takes over too, so
+`OpenStatus::Elsewhere` and `DesktopOpeningStatus::Elsewhere` are gone, and
+`take-back-session` leaves the Desktop action catalog. `lf open --focus` still
+creates nothing: it reads through `existing_connection`, which `--explain` shares.
+An agent's `lf open` of its own Session reports where it is (`usable`) instead
+of taking itself over. Swift: `SessionOpenIntent`, `startOffer`, Take back,
+`.elsewhere` and `heldElsewhere` are gone; `WorkCache.version` is 3; automatic
+opening keeps its lifecycle gate (`opensConversationAutomatically`).
+
+Checks (resume pass): `cargo clippy --all-targets -- -D warnings`,
+`check_architecture.py`; nextest `ops::human_session::`, `transport::viewer_tests::`,
+`server::schema::tests::`, `dto_fixtures::`, `lf::tests::`, `documented_commands::`,
+`commands::open::`, `commands::desktop::`, and integration `work_open_tests::`,
+`machine_commands::`, `session_cli_tests::`, `cli_discovery::`, `served_reads`,
+`session_launch_contract`, `global_commands` session_resume rows: pass (six failed
+only in the loaded `-j 6` run and passed alone at load ~60-115:
+`snapshot_preview_resume_provider_failure_restores_terminal`,
+`opencode_terminal_setup_failure_stops_the_private_server`,
+`a_closed_terminal_finishes_a_bare_launchs_agent`,
+`served_ownership_routes_to_its_writer_and_never_falls_back_locally`,
+`opening_an_unplaced_task_places_it_and_starts_its_conversation`; and
+`desktop_conversation_attachment_retry_and_focus_keep_the_retained_view` once
+missed "Attachment failed"; gate/CI decides). Swift: `swift build --build-tests`
+and `test_desktop.sh --skip-build` over 20 session/workspace/DTO suites (309):
+pass; display suites left to gate/CI.

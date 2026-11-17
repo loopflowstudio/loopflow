@@ -3920,7 +3920,7 @@ fn watch_for(home: &Path, terminal: &str, line: String) -> std::thread::JoinHand
         .write_all(
             format!(
                 "{}\n",
-                serde_json::json!({"terminal": terminal, "revision": 3})
+                serde_json::json!({"terminal": terminal, "revision": loopflow_execution::transport::registry::REVISION})
             )
             .as_bytes(),
         )

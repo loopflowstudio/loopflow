@@ -189,8 +189,8 @@ one each.
 Built. A held terminal has no controlling view:
 
 - **Input.** Every view can type. There is no takeover token or **Move
-  here**. A native client running outside a held terminal still offers
-  **Take back**: lf cannot share that terminal.
+  here**. Opening a Session whose provider runs in a native client outside a
+  held terminal takes it over: lf cannot share that terminal.
 - **Size.** The live view with the latest attach, input or focus sets the
   terminal size; other views render that grid. When it detaches, the size
   goes to the remaining view that most recently did one of those. Views

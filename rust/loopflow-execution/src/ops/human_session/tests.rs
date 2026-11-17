@@ -774,7 +774,10 @@ fn preparing_a_consumed_first_launch_offers_try_again_and_changes_nothing() {
         )
         .await
         .unwrap();
-        assert_eq!(first.open_argv, super::human_session_argv(&record.id).unwrap());
+        assert_eq!(
+            first.open_argv,
+            super::human_session_argv(&record.id).unwrap()
+        );
         for refreshed in [
             super::surface(&store, &before).await.unwrap(),
             listed_session(&store, &record.id),

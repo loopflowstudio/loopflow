@@ -426,7 +426,7 @@ struct TaskGraphProofTests {
             renameFixtureRecord("design", title: "review-design", work: reviewed)
         )) as? [String: Any])
         session["state"] = "active"
-        session["actions"] = sessionActionFixture(state: "active")
+        session["action"] = sessionActionFixture(state: "active")
         session["terminal_ids"] = [shells[0]]
         session["open_argv"] = ["must-not-launch"]
         let source = try GraphSource(session: JSONSerialization.data(withJSONObject: [session]))

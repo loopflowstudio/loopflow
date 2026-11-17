@@ -833,8 +833,7 @@ fn desktop_opening_distinguishes_launch_acceptance_from_usable_and_failed() {
         vec![
             DesktopOpeningStatus::Opening,
             DesktopOpeningStatus::Usable,
-            DesktopOpeningStatus::Failed,
-            DesktopOpeningStatus::Elsewhere
+            DesktopOpeningStatus::Failed
         ]
     );
     assert!(readings[0].reason.is_none());
@@ -1386,7 +1385,6 @@ fn opening_receipts_distinguish_focus_from_attachment() {
             OpenStatus::Opening,
             OpenStatus::Usable,
             OpenStatus::Focused,
-            OpenStatus::Elsewhere,
             OpenStatus::Failed
         ]
     );

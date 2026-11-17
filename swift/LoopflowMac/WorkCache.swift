@@ -34,7 +34,7 @@ struct WorkSnapshot: Codable, Equatable, Sendable {
 }
 
 final class WorkCache: @unchecked Sendable {
-    static let version = 2
+    static let version = 3
     /// Most-recently saved repositories kept; older ones are dropped.
     static let maxRepositories = 8
     /// One read larger than this is not kept; the launch reads it instead.
@@ -206,8 +206,8 @@ final class WorkCache: @unchecked Sendable {
         return quiet.count == pages.count ? quiet : nil
     }
 
-    /// Every Session becomes `unknown` and keeps only its open action; `lf`
-    /// decides whether opening is still possible.
+    /// Every Session becomes `unknown`; its saved action stays, and `lf`
+    /// decides what opening does now.
     static func quietSessionPage(_ text: String) -> String? {
         rewrite(text) { value in
             guard var page = value as? [String: Any], let entries = page["entries"] as? [[String: Any]] else { return value }
@@ -216,9 +216,6 @@ final class WorkCache: @unchecked Sendable {
                 entry["state"] = SessionState.unknown.rawValue
                 entry["availability"] = NSNull()
                 entry["program_status"] = NSNull()
-                entry["actions"] = (entry["actions"] as? [[String: Any]] ?? []).filter {
-                    $0["kind"] as? String == SessionActionKind.open.rawValue
-                }
                 return entry
             }
             return page

@@ -76,8 +76,8 @@ pane regains focus when input is ready. Switching Tasks is unnecessary.
 
 While **Opening… Input paused** or **Reconnecting…** appears, the screen may be
 readable before typing is available. Other views of the conversation never
-block typing here: every view types. **Take back** appears only when the
-provider runs in a client lf cannot share; Refresh leaves that client running.
+block typing here: every view types. A provider running in a client lf cannot
+share is taken over when the pane opens; that client ends.
 If the provider has ended, use the offered resume action to continue its history.
 Refresh never repeats a submitted message or restarts the Task's Graph.
 

@@ -106,9 +106,7 @@ struct WorkCLISubscriptionTests {
         let session = try #require(store.sessions.first { $0.record.taskPrimary })
         #expect(session.state == .prepared)
         #expect(session.record.workspace?.identity == location)
-        #expect(session.launchArguments.contains("--start-if-free"))
-        #expect(workspace.conversationStart == nil)
-        #expect(await query.startOffer(refused: .reveal, issue: id, cwd: fixture.repo.path) == nil)
+        #expect(session.record.action != nil)
         let recorded = try await query.sessionPage(cwd: fixture.repo.path).entries
         #expect(recorded.filter(\.taskPrimary).map(\.id) == [session.id])
         #expect(recorded.filter { $0.primaryScope == "repository" }.count == 1)

@@ -119,8 +119,6 @@ pub enum OpenStatus {
     Usable,
     /// An existing view was revealed; this does not establish attachment.
     Focused,
-    /// Another client holds the conversation; nothing new was opened.
-    Elsewhere,
     Failed,
 }
 
@@ -952,9 +950,6 @@ struct ConversationView {
     attachment: super::desktop::DesktopOpeningStatus,
     /// Desktop shows it, even before its pane exists.
     in_desktop: bool,
-    /// A held terminal serves it, so another view may attach. Otherwise a native
-    /// client lf cannot share has it, and opening reports where it is.
-    held: bool,
 }
 
 impl ConversationView {
@@ -966,7 +961,7 @@ impl ConversationView {
         if self.attachment == super::desktop::DesktopOpeningStatus::Opening {
             OpenStatus::Opening
         } else {
-            OpenStatus::Elsewhere
+            OpenStatus::Usable
         }
     }
 }
@@ -985,13 +980,11 @@ fn conversation_view(target: &Resolved) -> Result<Option<ConversationView>> {
                     placement: None,
                     attachment,
                     in_desktop: true,
-                    held: true,
                 });
             };
             let description = match attachment {
                 DesktopOpeningStatus::Opening => "Still opening",
                 DesktopOpeningStatus::Usable => "Already open",
-                DesktopOpeningStatus::Elsewhere => "Conversation held elsewhere; view retained",
                 DesktopOpeningStatus::Failed => "Attachment failed or ended; view retained",
             };
             Ok(ConversationView {
@@ -999,7 +992,6 @@ fn conversation_view(target: &Resolved) -> Result<Option<ConversationView>> {
                 placement: Some(format!("desktop:{}", serde_json::to_string(&view)?)),
                 attachment,
                 in_desktop: true,
-                held: true,
             })
         }).transpose()?;
     if desktop
@@ -1049,7 +1041,6 @@ fn conversation_view(target: &Resolved) -> Result<Option<ConversationView>> {
             DesktopOpeningStatus::Opening
         },
         in_desktop: false,
-        held: held.is_some(),
     }))
 }
 
@@ -1449,7 +1440,6 @@ fn print_report(report: OpenReport, json: bool) -> Result<()> {
                     OpenStatus::Opening => "Opening",
                     OpenStatus::Focused => "Focused",
                     OpenStatus::Usable => "Attached",
-                    OpenStatus::Elsewhere => "Already open",
                     OpenStatus::Failed => "Opening failed",
                 })
             );

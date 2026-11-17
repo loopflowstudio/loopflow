@@ -349,3 +349,5 @@ journal for both Machines.
   table; anything subtler waits for the reading.
 - Notice spam from load failures on a flapping Machine: transitions only,
   keyed by part, and away is one condition Notice instead of N failures.
+
+Sync check (2026-11-17): `swift test --package-path swift --filter ServerProtocolTests` — 23 passed after combining main's account/skill contracts with request IDs and revisions; remaining suites run at gate/CI.

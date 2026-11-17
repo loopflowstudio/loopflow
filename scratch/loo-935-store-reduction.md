@@ -1,6 +1,6 @@
 # LOO-935: remove what the product no longer uses, and keep it removed
 
-Status (2026-11-17): `lf resume` does one thing (Rust, Swift, docs done) and main through #1960 is merged (conflict notes in `questions.md`); before it, `lf task view`, `lf open --diff`, the Rex follower and Task widening went and every view of a held terminal types. One resume decision (`resume_intent`) drives labels, `--explain`, `primary::prepare` and `open`'s dispatch; remaining: `open` launches through one path under the launch lock, then gate.
+Status (2026-11-17): `lf resume` does one thing (Rust, Swift, docs done) and main through #1960 is merged (conflict notes in `questions.md`); before it, `lf task view`, `lf open --diff`, the Rex follower and Task widening went and every view of a held terminal types. One resume decision (`resume_intent`) drives labels, `--explain`, `primary::prepare` and `open`'s dispatch; `open` launches through one path under the launch lock; remaining: gate.
 
 ## Demo
 
@@ -326,16 +326,6 @@ Checks: `cargo test -p loopflow-execution --lib ops::human_session::` (47),
 `--test integration dto_fixtures::session_ session_cli_uses_one_truthful_resolution_contract` (5),
 clippy execution: pass.
 
-Concept review (2026-11-17): `open` still has two launchers for one intent.
-Its tail (`NativeSession::of`, `require_provider_session_process`,
-`stop_session_agent`, `native_session::resume_session`) resumes without the
-launch lock (released when `admit_workspace` returns) and without
-`LF_HUMAN_SESSION`, while `open_waiting` → `resume_native_session` resumes the
-same history under the lock with the token, and also covers Codex's failed
-bootstrap. Which one runs depends on `captured.is_none()` and
-`input_provider_session`, reads beside the summary. TakeOver with no capture
-yet goes to `open_waiting` without stopping the holder.
-
 Done (implement, 2026-11-17): `open` takes the launch lock once and holds
 it through `open_waiting_locked`; TakeOver stops the holder under it;
 View and NewThread release it first. `transport::delegate_session` takes the
@@ -346,6 +336,8 @@ moved from `open_waiting_locked` into `open_waiting`.
 Check: `cargo nextest run -p loopflow-execution --lib -E 'test(ops::human_session::) | test(ops::run::) | test(transport::viewer_tests::)'`: 70 pass, including
 `resuming_an_ended_conversation_launches_its_provider_as_the_session`; clippy
 on execution: clean. Gate runs the session_cli truthful-resolution test.
+Concept review after it (2026-11-17): nothing further; a View whose terminal
+is gone by the query falls through to resume under the same lock.
 
 Then gate.
 

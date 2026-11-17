@@ -225,8 +225,8 @@ one frame, with accepted and confirmed times beside it.
 
 ## Slices
 
-All in one PR; deepest first. Status after the third implement pass
-(2026-11-16), which built concept review pass 2's four directions
+All in one PR; deepest first. Status after the fourth implement pass
+(2026-11-16; the third pass is described here, the fourth below it), which built concept review pass 2's four directions
 (`e323a0a227` has their text).
 
 1. **Machine — built.** `journal::request::{after_reply, answer_first}`;
@@ -311,8 +311,11 @@ Also merge the two copies of `openWorktree` (Warp URL and Notice) in
 These stay: `conversationError`, `completionPending`, the retained-Task
 banner, sheet input validation (`saveError`, `CreateWaveSheet`,
 `NewWaveRow`), the "Workspace unavailable" content view (it is the page),
-and the on-demand reads that have no `WorkModel` (`ProjectHistoryView`,
-`GraphRunStep`, telemetry).
+the on-demand reads that have no `WorkModel` (`ProjectHistoryView`,
+`GraphRunStep`, telemetry), the "Move blocked Sessions" confirmation, and two
+phone alerts outside the Task feed: Keychain pairing
+(`MachineConnectionView.swift:52`) and the timing capture tool
+(`TaskListView.swift:368`).
 
 Done looks like this:
 - `rg -n 'launchError|shellError' swift` finds nothing.

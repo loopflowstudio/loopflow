@@ -102,8 +102,11 @@ struct WorkNavigator: View {
                         VStack(alignment: .leading, spacing: 5) {
                             Text("Open Task is outside this list")
                             Button("Show working tasks") {
-                                model.navigation.sidebarFilter = .working
-                                model.navigation.sidebarWaveID = nil
+                                Perf.userAction(Perf.hierarchyInteraction, scenario: "sidebar_working", id: "outline:\(WorkNavigation.SidebarFilter.working.rawValue)",
+                                                repository: model.repoPath, liveSessions: model.liveSessionCount, owner: model.navigation.performanceOwner) {
+                                    model.navigation.sidebarFilter = .working
+                                    model.navigation.sidebarWaveID = nil
+                                }
                             }
                         }.font(Typography.body(11)).padding(10)
                     }
@@ -134,12 +137,14 @@ struct WorkNavigator: View {
         }
         .onChange(of: rowOrder.isEmpty, initial: true) { _, empty in
             guard !empty else { return }
-            Perf.endAfterCommit(Perf.coldStart, id: "launch")
             let source = model.showsSavedWork ? "saved" : "fresh"
             DispatchQueue.main.async { LaunchJournal.home.mark(.usable, ["source": source]) }
         }
-        .onChange(of: model.navigation.sidebarFilter) { _, _ in
-            Perf.endAfterCommit(Perf.hierarchyInteraction, id: "outline")
+        .onChange(of: model.sidebarTaskIDs + model.sidebarAutonomousTaskIDs) { before, after in
+            Perf.rowsChanged(from: before, to: after, owner: model.navigation.performanceOwner)
+        }
+        .onChange(of: model.navigation.sidebarFilter) { _, filter in
+            Perf.stateObserved(Perf.hierarchyInteraction, id: "outline:\(filter.rawValue)", owner: model.navigation.performanceOwner)
         }
         .onChange(of: model.navigation.sidebarFocusRequested, initial: true) { _, requested in
             guard requested else { return }
@@ -150,7 +155,9 @@ struct WorkNavigator: View {
         }
         .onKeyPress(.return) {
             guard let focusedWork else { return .ignored }
-            model.select(focusedWork)
+            Perf.userAction(Perf.taskWorkspaceReady, scenario: focusedWork.kind == .task ? "task" : "wave",
+                            id: focusedWork.id, repository: model.repoPath, liveSessions: model.liveSessionCount,
+                            owner: model.navigation.performanceOwner) { model.select(focusedWork) }
             return .handled
         }
         .renderFlash()
@@ -196,13 +203,16 @@ struct WorkNavigator: View {
         let state: SidebarSelection = pressedScope == scope || model.navigation.destination == .work(reference) ? .shown
             : model.navigation.sidebarScope == scope ? .containing : .none
         return Button {
-            // The click darkens the row first; it moves once that has landed.
-            guard !reduceMotion else { model.select(reference); return }
-            withAnimation(.easeOut(duration: 0.12)) { pressedScope = scope }
-            Task {
-                try? await Task.sleep(for: .milliseconds(120))
-                model.select(reference)
-                pressedScope = nil
+            Perf.userAction(Perf.taskWorkspaceReady, scenario: "wave", id: reference?.id ?? "repository",
+                            repository: model.repoPath, liveSessions: model.liveSessionCount, owner: model.navigation.performanceOwner) {
+                // Keep the input timestamp through the deliberate selection animation.
+                guard !reduceMotion else { model.select(reference); return }
+                withAnimation(.easeOut(duration: 0.12)) { pressedScope = scope }
+                Task {
+                    try? await Task.sleep(for: .milliseconds(120))
+                    model.select(reference)
+                    pressedScope = nil
+                }
             }
         } label: {
             HStack {
@@ -275,7 +285,12 @@ struct WorkNavigator: View {
         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
         .foregroundStyle(selected ? palette.workSelectedText : muted ? palette.textSecondary : palette.text)
         .background {
-            Button { model.select(.task(id: id)) } label: {
+            Button {
+                Perf.userAction(Perf.taskWorkspaceReady, scenario: "task", id: id,
+                                repository: model.repoPath, liveSessions: model.liveSessionCount, owner: model.navigation.performanceOwner) {
+                    model.select(.task(id: id))
+                }
+            } label: {
                 SidebarSelectionShape(state: selected ? .shown : .none)
                     .contentShape(Rectangle())
             }.buttonStyle(.plain).focused($focusedWork, equals: .task(id: id)).accessibilityLabel(title)

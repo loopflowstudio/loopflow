@@ -14,8 +14,36 @@ pub type ClientMessage = loopflow_execution::machine::wire::ClientMessage<Operat
 #[serde(untagged)]
 pub enum Operation {
     Server(ServerOperation),
+    Measured(MeasuredOperation),
     Read(Read),
     Write(Write),
+}
+
+impl Operation {
+    pub(super) fn is_write(&self) -> bool {
+        matches!(
+            self,
+            Self::Write(_) | Self::Measured(MeasuredOperation::Write { .. })
+        )
+    }
+}
+
+/// The ordinary operation and its per-request work receipt in one response.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", deny_unknown_fields)]
+pub enum MeasuredOperation {
+    #[serde(rename = "performance.read")]
+    #[schemars(extend("x-result" = generator.subschema_for::<MeasuredResult>()))]
+    Read { query: Read },
+    #[serde(rename = "performance.write")]
+    #[schemars(extend("x-result" = generator.subschema_for::<MeasuredResult>()))]
+    Write { change: Write },
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct MeasuredResult {
+    pub result: serde_json::Value,
+    pub work: loopflow_storage::instrumentation::SqlReceipt,
 }
 
 #[cfg(test)]
@@ -25,6 +53,12 @@ mod tests {
     #[test]
     fn shared_client_fixtures_decode_and_round_trip_without_defaults() {
         for raw in [
+            include_str!(
+                "../../../loopflow-execution/tests/fixtures/dto/server/performance_write.json"
+            ),
+            include_str!(
+                "../../../loopflow-execution/tests/fixtures/dto/server/performance_read.json"
+            ),
             include_str!("../../../loopflow-execution/tests/fixtures/dto/server/hello.json"),
             include_str!(
                 "../../../loopflow-execution/tests/fixtures/dto/server/status_request.json"

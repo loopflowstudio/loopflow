@@ -9,7 +9,9 @@ use std::sync::mpsc::{self, Sender};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use loopflow_storage::instrumentation::{CONNECTIONS, ENABLED, ROWS, STATEMENTS};
+use loopflow_storage::instrumentation::{
+    CONNECTIONS, ENABLED, ROWS, SQL_NANOS, SQL_PROFILES, STATEMENTS,
+};
 
 /// One receipt stream per actual CLI process, including nested CLI invocations.
 /// Missing final records expose interruption rather than implying zero work.
@@ -89,6 +91,9 @@ fn record(file: &mut File, event: &str, started: Instant) -> std::io::Result<()>
         "connections": CONNECTIONS.load(Ordering::Relaxed),
         "statements": STATEMENTS.load(Ordering::Relaxed),
         "rows": ROWS.load(Ordering::Relaxed),
+        "interaction": std::env::var("LF_PERF_INTERACTION").ok(),
+        "sql_profiles": SQL_PROFILES.load(Ordering::Relaxed),
+        "sql_ms": SQL_NANOS.load(Ordering::Relaxed) as f64 / 1_000_000.0,
     });
     writeln!(file, "{value}")
 }

@@ -1,7 +1,7 @@
 # LOO-924: four launch kinds and a parsed agent choice
 
-The launch design and implementation are in PR #1966. The remaining work is
-gate and live demo. The concept review at `f07616744f:scratch/plan.md` records
+The launch design and implementation are in PR #1966. Nothing in the design
+is left to build; gate remains. The concept review at `f07616744f:scratch/plan.md` records
 the last implementation slice and all earlier decisions and checks.
 `scratch/launch-states.html` preserves the original discussion and prior art.
 
@@ -93,9 +93,8 @@ name launch kinds rather than places or lifetimes.
 ## Remaining checks
 
 Concept review of `275a936bbb`: the delete list is gone from `rust/` and `docs/`,
-`Delegation::Here` carries `LaunchKind`, and nothing in the design is left to
-build. Next: gate.
-
+and `Delegation::Here` carries `LaunchKind`. Realign found no upstream change
+since merge-base `2593c489d7`.
 
 Gate owns the broader transport, configuration and Task performance checks.
 QA on 2026-11-17 drove both demo checks live with a stand-in Claude
@@ -116,7 +115,7 @@ exercises all four harnesses against stand-in providers.
 - Focused `cargo nextest run -p loopflow -p loopflow-execution --lib --test integration` with the launch matrix, transport classification, launch policy, Claude and Pi hooks, credential and transcript checks, and documented commands passed all 23 tests. macOS linked with the previously observed compact-unwind warning.
 - `uv run python scripts/check_architecture.py` and `uv run --extra test pytest -q tests/test_portable_architecture.py` from `website/` passed. The portable HTML was regenerated.
 - `cargo clippy --all-targets -- -D warnings` and `git diff --check` passed.
-- `cargo nextest run -p loopflow-execution --lib -E 'test(harness::agent_process) | test(transport::registry)'` passed all 31 after correcting the batch and bound-session fixtures and checking interrupted paste bytes at the child. The earlier paste failure passed in isolation before the fixture edit. That run predates merging main at `14149fac0c` (#1960, which touched `harness/server_connection.js` and `harness/testdata/pi_rpc.py` but no launch path); gate reruns the suites on the merged tree. Gate and live demo remain.
+- `cargo nextest run -p loopflow-execution --lib -E 'test(harness::agent_process) | test(transport::registry)'` passed all 31 after correcting the batch and bound-session fixtures and checking interrupted paste bytes at the child. The earlier paste failure passed in isolation before the fixture edit. That run predates merging main at `14149fac0c` (#1960, which touched `harness/server_connection.js` and `harness/testdata/pi_rpc.py` but no launch path); gate reruns the suites on the merged tree.
 - Compress: `lf session list --on` and `lf session move -a` parse through `config::Agent::parse` (deleted `SessionOn`); the four `Capabilities` literals are rustfmt-formatted again. `cargo nextest run -p loopflow-execution --lib -E 'test(human_session::) | test(moves_bulk) | test(harness::tests)'` passed 48/48; execution clippy clean. No test exercises `--on`; the predicate is unchanged.
 
 ## Review answers, 2026-11-17, second review (`scratch/concept-review.html`)
@@ -133,4 +132,5 @@ sees and say a Session can change kind.
 
 Not in this PR, handed to LOO-958: the refusal text "`ID is a Run (…); lf
 resume takes only Sessions`", and checking whether a work session that is
-neither bound nor primary reopens from a terminal as a chat.
+neither bound nor primary reopens from a terminal as a chat. Both were
+steered into LOO-958, along with the `LaunchKind` rename underneath it.

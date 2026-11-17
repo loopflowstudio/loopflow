@@ -210,14 +210,18 @@ impl Native {
 // Opening
 // ---------------------------------------------------------------------------
 
-pub(super) fn run(cli: &crate::lf::Cli, args: &OpenArgs, host: OpenHost) -> Result<()> {
-    let target = super::overview(cli, &args.selection)?;
+pub(super) fn run(
+    cli: &crate::lf::Cli,
+    args: &OpenArgs,
+    target: &Resolved,
+    host: OpenHost,
+) -> Result<()> {
     loopflow_execution::store::read_existing_registry()?.context("Work registry is unavailable")?;
     let store = loopflow_execution::store::open_sqlite(
         &loopflow_execution::store::database_path_from_env()?,
     )?;
-    let report = open_machines(&store, host, &target, args).unwrap_or_else(|error| OpenReport {
-        receipts: vec![failed(&target, host, format!("{error:#}"))],
+    let report = open_machines(&store, host, target, args).unwrap_or_else(|error| OpenReport {
+        receipts: vec![failed(target, host, format!("{error:#}"))],
         unknown: Vec::new(),
     });
     if args.selection.json || cli.json {

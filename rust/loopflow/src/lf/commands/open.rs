@@ -1309,11 +1309,11 @@ pub(crate) fn run_workspace(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<()>
     if args.available {
         return open_available(cli, args);
     }
+    let target = overview(cli, &args.selection)?;
     let host = route(args.selection.host)
         .host
         .expect("host selection always names a host");
     if host == OpenHost::Desktop {
-        let target = overview(cli, &args.selection)?;
         let url = desktop_workspace_url(&target.repository_path, target.wave.as_deref());
         let receipt = match open_desktop(url.as_str(), !args.no_focus) {
             Ok(()) => target.receipt(Some(host), None, OpenStatus::Opening, None),
@@ -1334,14 +1334,14 @@ pub(crate) fn run_workspace(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<()>
     }
     anyhow::ensure!(
         matches!(host, OpenHost::Rex | OpenHost::Herdr | OpenHost::Cmux),
-        "{} does not support workspaces; use lf open without --workspace or lf diff",
+        "{} does not support workspaces; use lf open without --workspace",
         host.label()
     );
     anyhow::ensure!(
         args.selection.server.is_none() || host == OpenHost::Rex,
         "--server selects a Rex server"
     );
-    workspace::run(cli, args, host)
+    workspace::run(cli, args, &target, host)
 }
 
 /// Every available conversation, each opened as one conversation.

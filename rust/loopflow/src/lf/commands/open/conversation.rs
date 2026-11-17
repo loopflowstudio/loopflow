@@ -115,8 +115,9 @@ fn present(target: &mut Resolved, args: &OpenArgs, focus_new: bool) -> Result<Op
                 && view.attachment == DesktopOpeningStatus::Usable
                 && destination.is_some_and(|(host, _)| host == OpenHost::Desktop));
         if focus_existing {
-            let (host, destination) = destination
-                .with_context(|| format!("Not open in a focusable view; {}", view.reason))?;
+            let (host, destination) = destination.context(
+                "Open only in views lf cannot focus; lf open without --focus adds a view here",
+            )?;
             focus_destination(host, destination).with_context(|| view.reason.clone())?;
             return Ok(target.receipt(
                 Some(host),

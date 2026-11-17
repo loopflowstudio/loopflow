@@ -274,6 +274,18 @@ fn task_link_resolves_by_folder_name_without_preparing_anything() {
         serde_json::json!(["lf", "open", "--workspace", wave_url]),
         "an overview's fallback reopens the overview, not the conversation"
     );
+    let task_overview = lf(
+        home.path(),
+        elsewhere.path(),
+        None,
+        &["open", "--workspace", &url],
+    );
+    let stderr = String::from_utf8_lossy(&task_overview.stderr);
+    assert!(
+        !task_overview.status.success()
+            && stderr.contains("INF-123 is a Task; --workspace opens a Wave or repository"),
+        "a Task overview names the Wave or repository on any host: {stderr}"
+    );
     assert_eq!(sessions(home.path()), 0, "a link never creates a Session");
 
     let text = lf(

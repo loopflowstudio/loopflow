@@ -945,7 +945,7 @@ struct SessionPaneView: View {
             .tint(theme.palette.text)
             .foregroundStyle(theme.palette.text)
             .disabled(!retry && action.unavailableReason != nil)
-            .help(retry ? "Open the conversation without taking another terminal’s input" : action.unavailableReason ?? action.help)
+            .help(retry ? "Open the conversation again" : action.unavailableReason ?? action.help)
             .accessibilityIdentifier("session-open-here-\(item.id)")
         }
     }

@@ -380,7 +380,7 @@ fn held_actions(session: &crate::session::SessionSummary) -> Vec<SessionAction> 
         SessionAction {
             kind: SessionActionKind::Reveal,
             label: "Show conversation".to_string(),
-            help: "Continue existing history without taking another terminal's input".to_string(),
+            help: "Continue existing history in another view".to_string(),
             unavailable_reason: None,
         },
     ]

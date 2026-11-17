@@ -1,59 +1,106 @@
-<!doctype html><meta charset="utf-8"><title>LOO-935 QA: lf open --workspace</title>
-<style>body{font:15px/1.5 -apple-system,sans-serif;max-width:900px;margin:2em auto;padding:0 1em}pre{background:#f4f4f4;padding:.6em;overflow-x:auto;font-size:12px}h2{margin-top:1.6em}td,th{padding:.3em .6em;border-bottom:1px solid #ddd;text-align:left;vertical-align:top}</style>
-<h1>LOO-935 QA, 2026-11-16 (second pass: the fold into <code>lf open</code>)</h1>
-<p>Branch lf 0.16.0+dca1f1d84, then rebuilt with the fixes below. Private HOME/LF_HOME in <code>/tmp/lf-qa-935w</code>, a git-planning repository with a local bare origin, a stand-in <code>claude</code>, a private <code>rex server run</code> and a private <code>herdr --session qa server</code>. Load average was 45–58. The first pass (upgrade, Dashboards, Rex Task tabs) is at <code>git show 2abae87d9b:scratch/qa.html</code>; the migration did not change since then.</p>
+<!doctype html>
+<meta charset="utf-8">
+<title>LOO-935 QA, third pass: every view types</title>
+<style>body{font:14px/1.5 -apple-system,sans-serif;max-width:960px;margin:2em auto;padding:0 1em}pre{background:#f4f4f4;padding:.6em;overflow-x:auto;font-size:12px}h2{margin-top:1.6em}td,th{padding:.3em .6em;border-bottom:1px solid #ddd;text-align:left;vertical-align:top}</style>
+<h1>LOO-935 QA, 2026-11-17 (third pass: every view types)</h1>
+<p>Branch <code>lf</code> 0.16.0+0062a70376, rebuilt with the fixes below. Private Machine from
+<code>lf-world build one-task</code> under <code>/tmp/lf-qa-935v</code> (isolated <code>HOME</code>,
+<code>LF_HOME</code>, provider homes, <code>LF_*</code>/<code>REX_*</code> unset), branch <code>lf server run</code>
+in the foreground, stand-in <code>claude</code> extended to print <code>size</code> on request and
+<code>winch R C</code> on SIGWINCH. Views are real PTYs running <code>lf session resume</code> /
+<code>lf open --here</code>; Rex is a private headless <code>rex server run</code>.
+The second pass (Rex/Herdr overviews, <code>--available</code>) is <code>git show 6e82d34aba:scratch/qa.html</code>.</p>
 
-<h2>1. The command surface</h2>
-<pre>lf workspace                     → error: skill or graph not found: workspace …
-lf open --workspace --tab        → error: '--workspace' cannot be used with '--tab'
-lf open --available --here       → error: '--available' cannot be used with '--here'
-lf open --workspace --focus …    → error: '--workspace' cannot be used with '--focus'</pre>
-<p><code>lf open --help</code> lists <code>--workspace</code>, <code>--available</code>, <code>--no-focus</code> and ends with "A Task opens its Wave's overview, else its repository's, with the Task among them."</p>
+<h2>1. Removed commands</h2>
+<pre>$ lf task view 6661b2
+error: unrecognized subcommand 'view'
+$ lf workspace
+error: skill or graph not found: workspace. …
+$ lf open --diff --task 6661b2
+error: a value is required for '--diff &lt;DIFF&gt;' …     (the global context flag; lf open has no --diff)
+$ lf open --workspace --task 6661b2          (plain terminal, before the fix)
+Error: a terminal does not support workspaces; use lf open without --workspace or lf diff
+$ lf open --workspace --task 6661b2 --host rex
+Error: 6661b2 is a Task; --workspace opens a Wave or repository. Run lf open --wave search --workspace, or lf open --task 6661b2 without --workspace</pre>
+<p>The helpful Task error only appeared on overview hosts; in an ordinary terminal the host check ran
+first and pointed at <code>lf diff</code>. <b>Fixed</b>: the overview target resolves before the host check,
+and the stale <code>lf diff</code> hint is gone. Now, in any terminal:</p>
+<pre>$ lf open --workspace --task 6661b2
+Error: 6661b2 is a Task; --workspace opens a Wave or repository. Run lf open --wave search --workspace, or lf open --task 6661b2 without --workspace
+$ lf open --workspace
+Error: a terminal does not support workspaces; use lf open without --workspace</pre>
 
-<h2>2. Rex</h2>
+<h2>2. Two editable views of one held conversation</h2>
+<p>View A 30×100 and view B 24×80, both <code>lf session resume &lt;session&gt;</code>, driven by
+<code>views.py</code> (answers <code>ESC[6n</code>/<code>ESC[5n</code> like a terminal). Two full runs, unique markers each run:</p>
 <table>
-<tr><th>Command</th><th>Rex shows</th></tr>
-<tr><td><code>lf open --workspace --task &lt;unstarted&gt;</code></td><td>new session "repo": Task &amp; workflow ("Task: unstarted · Checkout: unknown") + Workspace follower</td></tr>
-<tr><td><code>lf checkout</code>, then <code>lf open --task … --tab</code></td><td>session "Workspace QA · 541e38": one Conversation block, <code>STANDIN_CLAUDE … in repo.541e38-workspace-qa</code></td></tr>
-<tr><td><code>lf open --workspace</code> from the checkout, <code>--diff --no-focus</code></td><td>Task &amp; workflow + Workspace; reason "Focus preserved"; no Changes block (see below)</td></tr>
-<tr><td><code>lf open --workspace loopflow://repo/task/541e38</code></td><td>the repository overview with that Task</td></tr>
-<tr><td><code>lf open --workspace --task &lt;Wave Task&gt;</code></td><td>URL widens to <code>loopflow://repo/wave/product</code>, Task tab + follower</td></tr>
-<tr><td><code>lf open --workspace --wave product</code></td><td>follower only (no started Wave Tasks)</td></tr>
-<tr><td><code>lf open --wave product --tab</code></td><td>"repo · product Wave": the Wave's conversation (stand-in in the Wave checkout)</td></tr>
-<tr><td><code>lf open --available</code> after an OSC 7501 <code>state=idle</code></td><td>"Already open at rex:{…}; reveal it with <code>lf open --session … --focus</code>"; input left alone</td></tr>
+<tr><th>Check</th><th>Result</th></tr>
+<tr><td>A attaches, provider resumes</td><td>pass</td></tr>
+<tr><td>B attaches and sees the screen</td><td>pass</td></tr>
+<tr><td>A types <code>draft-from-A-…</code> without Enter; B shows the draft</td><td>pass</td></tr>
+<tr><td>B types <code>-plus-B⏎</code>; both show <code>reply …: draft-from-A-…-plus-B</code></td><td>pass</td></tr>
+<tr><td>B types <code>size</code> → <code>size 24 80</code>; A types it → <code>size 30 100</code></td><td>pass</td></tr>
+<tr><td>Focus-in (<code>ESC[I</code>) from B → <code>winch 24 80</code>; from A → <code>winch 30 100</code></td><td>pass</td></tr>
+<tr><td>Focus reports never reach the provider (it did not enable 1004)</td><td>pass (no <code>[I</code> in any reply)</td></tr>
+<tr><td>Relays enable DEC 1004 on their terminal</td><td>pass (<code>ESC[?1004h</code> in each view's output)</td></tr>
+<tr><td>Closing B (the sizing view) gives the size back to A → <code>winch 30 100</code></td><td>pass</td></tr>
+<tr><td>A resizes to 40×120 → <code>winch 40 120</code>; A keeps typing</td><td>pass</td></tr>
 </table>
+<p>A first run reported one false failure: <code>wait_for</code> matched <code>size 24 80</code> in replayed
+scrollback from the previous run. The driver now waits only on output after its mark.</p>
 
-<h2>3. Herdr</h2>
-<pre>lf open --workspace --task &lt;Wave Task&gt; --host herdr → w1 "Task &amp; workflow" (Task view, checkout, conversation listed)
-lf open --task &lt;Wave Task&gt; --tab --host herdr        → w2 "Conversation": STANDIN_CLAUDE in repo.755c53-wave-task-2</pre>
+<h2>3. <code>lf open --here</code> beside an existing view, and <code>--focus</code></h2>
+<p>With A attached, a second PTY ran <code>lf open --task 6661b2 --here</code>: it attached (no "already open,
+opened nothing") and its typed line got a reply in A. <code>lf session list --json --all</code> offered
+<b>Open here</b> and <b>Show conversation</b>, no Take back.</p>
+<p>Two leftovers of the input claim, <b>fixed</b>:</p>
+<ul>
+<li>Held-terminal <b>Show conversation</b> help read "Continue existing history without taking another
+terminal's input"; now "Continue existing history in another view". The native-client branch keeps its
+wording: Take back still exists there.</li>
+<li>Desktop's retry tooltip said "Open the conversation without taking another terminal’s input"; now
+"Open the conversation again".</li>
+</ul>
+<p><code>lf open --task 6661b2 --focus</code> with only PTY views open told the person to run
+<code>lf open --session … --focus</code>, the command they had just run. <b>Fixed</b>:</p>
+<pre>Search Session transcripts · 6661b2: Open only in views lf cannot focus; lf open without --focus adds a view here; retry with lf open loopflow://repo/task/6661b2</pre>
 
-<h2>Fixed</h2>
-<p><b>Overview links reopened the conversation.</b> <code>lf open --workspace --link</code> printed <code>lf open loopflow://repo/wave/product</code>, and every overview receipt's <code>fallback_argv</code> was the same. Since the fold, that command opens the Wave's conversation, not its overview. <code>Resolved</code> now records <code>overview</code> (set by <code>overview()</code>), and its fallback carries <code>--workspace</code>:</p>
-<pre>repo                 lf open --workspace loopflow://repo
-repo · product Wave  lf open --workspace loopflow://repo/wave/product
-Wave task 2 · 755c53 lf open loopflow://repo/task/755c53        (single conversation: unchanged)
-541e38 · Workspace QA | lf open --workspace loopflow://repo      (Task tab receipt in an overview)</pre>
-<p><b>Empty <code>lf open --available</code> printed nothing</b> and exited 0; <code>--link</code> already said "No available conversations." Now both say it (JSON stays <code>{"receipts":[],"unknown":[]}</code>).</p>
-<p>Tests: <code>task_link_resolves_by_folder_name_without_preparing_anything</code> asserts the overview fallback; <code>available_conversations_need_no_question_and_are_never_taken_over</code> asserts the empty open's text.</p>
+<h2>4. Rex overview tabs hold the Task's conversation</h2>
+<pre>$ lf open --workspace --host rex --server unix:///tmp/lf-qa-935v/rex/rex.sock --no-focus
+6661b2 · Search Session transcripts: Created a new Task tab; Focus preserved (window:…)</pre>
+<ul>
+<li>One block, labelled <b>Conversation</b>, running <code>lf --task task_6661… open --here</code>; its capture shows the
+running conversation's screen.</li>
+<li>With a PTY view attached too: <code>rex block send</code> typed <code>rexdraft-…</code>, the PTY showed the draft,
+the PTY finished the line, and both Rex's capture and the PTY showed the reply.</li>
+<li>Sending <code>quit</code> from Rex ended the provider and closed the block. Re-running the overview started the
+provider again in the new tab (<code>resumed 1e861793…: 4 lines</code>; one stand-in process).</li>
+<li>No follower process: after the overview only the tab's <code>lf open --here</code> and its
+<code>lf session attach</code> run.</li>
+</ul>
 
 <h2>Checks</h2>
-<table>
-<tr><td><code>nextest work_open_tests::</code> at <code>-j 4</code></td><td>27 of 33; the failures (cmux ×2, tmux, the link test before its fix, a SIGKILL) passed run serially, except <code>task_location_uses_the_named_plan_outside_a_checkout</code>, which the plan records as failing without this diff</td></tr>
-<tr><td>the 7 touched/failed tests at <code>-j 1</code></td><td>pass</td></tr>
-<tr><td><code>cargo clippy -p loopflow --all-targets -- -D warnings</code>, <code>cargo fmt</code></td><td>pass</td></tr>
-<tr><td>Swift, full suites</td><td>left to gate/CI</td></tr>
-</table>
+<ul>
+<li><code>nextest -p loopflow --test integration</code> <code>work_open_tests::task_link_resolves_by_folder_name_without_preparing_anything</code>
+(now asserts the Task error from a plain terminal) and two <code>files_</code> rows: pass. With the host check moved back
+ahead of target resolution, the new assertion fails (<code>Error: mutated</code>); restored.</li>
+<li><code>cargo fmt</code>, <code>cargo clippy -p loopflow -p loopflow-execution --all-targets -- -D warnings</code>: pass.</li>
+<li>Swift: one help string changed; not rebuilt here (gate/CI).</li>
+</ul>
 
 <h2>Not reached</h2>
 <ul>
-<li>Desktop: <code>--workspace --host desktop</code> opens a <code>loopflow://open?view=</code> URL, which here would reach the installed Loopflow.app; not run. No Swift changed since the first pass.</li>
-<li>cmux is not installed; its tabs are covered only by the integration tests.</li>
-<li>Remote Machines (<code>--local-workspace</code> peers) were not exercised.</li>
+<li>Desktop window: no Dev app launched. Removal of Move here / Take back for held terminals, and Ghostty sending
+focus reports from a real pane, need a display check (gate or a person).</li>
+<li>Herdr and cmux overviews this pass (Herdr walked in the second pass; cmux not installed).</li>
+<li>Real Claude: a stand-in only, so real Claude's own DEC 1004 handling (focus reports forwarded when it enables the mode) is unchecked.</li>
 </ul>
 
 <h2>Still wrong, worst first</h2>
-<ol>
-<li><code>--workspace --diff</code> in Rex/Herdr shows no Changes, even with a real commit on the branch: the block runs <code>lf task diff &lt;id&gt; --base parent</code>, which prints and exits, and the host removes it. Same on main. <code>lf open --task … --diff</code> off Desktop refuses instead, so <code>--diff</code> now means two things off Desktop. Whether native overviews keep a Changes tab (a shell left open after the diff) or <code>--diff</code> becomes Desktop-only everywhere is a product call.</li>
-<li>Each <code>lf open --workspace</code> from outside Rex makes a new Rex session, even when one for that overview exists (as the docs say: "a new container").</li>
-<li><code>lf --wave product task create …</code> silently creates a Task without a Wave (the global flag is context; <code>task create --wave</code> works). Not this branch.</li>
-</ol>
+<ul>
+<li>Re-running <code>lf open --workspace --host rex</code> creates a second overview window with another view of each
+conversation. Harmless now that every view types, but people may expect the existing overview to come forward.
+Behavior choice, not changed here.</li>
+<li>With a directory named <code>rex</code> in a <code>PATH</code> entry and no Rex binary, the receipt says
+"cannot run Rex: Permission denied (os error 13)" rather than "Rex is not installed". QA artefact; rare.</li>
+</ul>

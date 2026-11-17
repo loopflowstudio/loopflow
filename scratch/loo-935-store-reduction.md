@@ -215,6 +215,7 @@ editable viewers into the same terminal, so you see drafts from A in B", then
 - `nextest -p loopflow-execution --lib transport::` (69; two registry tests time out at load ~128 and pass alone), `-p loopflow --lib` open/lf/schema rows, integration `work_open_tests::` (33; three 2 s host deadlines fail only at `-j 2`, pass alone), `dto_fixtures::`, `cli_discovery::`, `documented_commands::`, `binary(transport_tests)` (40), `cargo clippy --all-targets -- -D warnings`, `check_architecture.py`: pass.
 - Swift: `scripts/test_desktop.sh --filter 'OwnerStreamTests|ServerConnectionTests|ProviderTransitionTests|DTOFixtureTests|WorkDestinationTests'` and `test_ios.py SessionTerminalTests`: pass. `GhosttyTerminalInputTests` needs a display (gate/CI); no test covers focus reports reaching the relay.
 - Compress: revision bump; `nextest -p loopflow-execution --lib transport::registry` (12): pass.
+- QA (every view types, `scratch/qa.html`): two PTY views share drafts, input and size by latest attach/input/focus; Rex overview tabs hold the conversation and restart an ended provider. Fixed: `--workspace` on a Task names the Wave in any terminal; stale input-claim help and `--focus` hint. `work_open_tests::task_link_resolves_by_folder_name_without_preparing_anything`, clippy: pass.
 - `lf open` keeps its "already open" report for a Session a native client holds outside a held terminal (and for a Desktop pane in Desktop mode).
 
 ## Concept review repairs (2026-11-17, done)

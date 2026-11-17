@@ -64,7 +64,7 @@ pub fn check_lineage(events: &[ProcessEntry], repairable: usize) -> Check {
     );
     if repairable > 0 {
         detail.push_str(&format!(
-            "; {repairable} AgentProcess parent(s) were never recorded, and `lf monitor prune` repairs them"
+            "; {repairable} AgentProcess parent(s) were never recorded, and the server's recovery pass repairs them"
         ));
     }
     Check::fail("lineage", detail)

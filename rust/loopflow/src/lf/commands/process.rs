@@ -22,25 +22,6 @@ pub enum ProcessCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Reap orphan providers, remove dead receipts, forget finished Process rows and release unrecorded AgentProcess ancestry
-    Prune {
-        /// Show exact targets without changing processes, receipts or the store
-        #[arg(long)]
-        dry_run: bool,
-        /// Emit the versioned prune report as JSON
-        #[arg(long)]
-        json: bool,
-    },
-}
-
-impl ProcessCommand {
-    /// Whether this command changes state, and so records a Process.
-    pub fn changes_work(&self) -> bool {
-        match self {
-            Self::List { .. } | Self::Top | Self::Show { .. } => false,
-            Self::Prune { dry_run, .. } => !dry_run,
-        }
-    }
 }
 
 pub fn run(command: &ProcessCommand) -> anyhow::Result<()> {
@@ -51,6 +32,5 @@ pub fn run(command: &ProcessCommand) -> anyhow::Result<()> {
         ProcessCommand::List { json, .. } => super::top::run_ps(*json),
         ProcessCommand::Top => super::top::run_top(),
         ProcessCommand::Show { id, json } => super::graph_inventory::inspect(id, *json),
-        ProcessCommand::Prune { dry_run, json } => super::top::run_prune(*json, *dry_run),
     }
 }

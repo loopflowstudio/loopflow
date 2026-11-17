@@ -1,5 +1,6 @@
-//! The recovery pass: this Machine's work settles, and Task conversations
-//! that died, or were prepared and never started, come back. One watcher reads
+//! The recovery pass: this Machine's work settles, its store keeps only what
+//! is needed, and Task conversations that died, or were prepared and never
+//! started, come back. One watcher reads
 //! the store when its planning, Session or process revisions move, and at
 //! least every minute for backoffs and deaths nothing recorded. Each due
 //! conversation is started the way `session.continue` starts one, in a held
@@ -23,6 +24,9 @@ const UNREAD: Duration = Duration::from_secs(60);
 /// The shortest time between two settlements: each one writes what it
 /// settles, which moves the revisions the watcher reads.
 const SETTLE_EVERY: Duration = Duration::from_secs(10);
+/// The shortest time between two retention passes over the store. The first
+/// reading runs one; each is a few short transactions and, rarely, a VACUUM.
+const RETAIN_EVERY: Duration = Duration::from_secs(60 * 60);
 /// The longest one start holds the next: after a reboot, conversations come
 /// back one at a time rather than all at once.
 const PACE: Duration = Duration::from_secs(3);
@@ -53,13 +57,14 @@ fn watch(terminals: &Registry) {
     }
 }
 
-/// The watcher's store, what it read last and when, when it last settled,
-/// and whether a due conversation's terminal was still ending.
+/// The watcher's store, what it read last and when, when it last settled
+/// and retained, and whether a due conversation's terminal was still ending.
 #[derive(Default)]
 struct Watcher {
     store: Option<SqliteStore>,
     seen: Option<(StoreRevisions, SystemTime)>,
     settled: Option<SystemTime>,
+    retained: Option<SystemTime>,
     ending: bool,
 }
 
@@ -94,10 +99,7 @@ impl Watcher {
             return;
         }
         self.seen = Some((revisions, now));
-        if self.settled.is_none_or(|at| {
-            now.duration_since(at)
-                .is_ok_and(|since| since >= SETTLE_EVERY)
-        }) {
+        if due(self.settled, now, SETTLE_EVERY) {
             self.settled = Some(now);
             loopflow_execution::ops::recovery::settle();
         }
@@ -121,6 +123,11 @@ impl Watcher {
                 tracing::warn!(error = %format!("{error:#}"), "recovery pass failed; it runs again at the next change");
             }
         }
+        // After the starts, so a VACUUM never holds a conversation back.
+        if due(self.retained, now, RETAIN_EVERY) {
+            self.retained = Some(now);
+            loopflow_execution::ops::recovery::retain();
+        }
     }
 }
 
@@ -140,6 +147,11 @@ fn pace(store: &SqliteStore, conversation: &RecoverableConversation) {
         }
         std::thread::sleep(Duration::from_millis(100));
     }
+}
+
+/// Whether `every` has passed since `last`, or it never ran.
+fn due(last: Option<SystemTime>, now: SystemTime, every: Duration) -> bool {
+    last.is_none_or(|at| now.duration_since(at).is_ok_and(|since| since >= every))
 }
 
 fn unix(at: SystemTime) -> i64 {

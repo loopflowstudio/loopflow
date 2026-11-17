@@ -146,3 +146,14 @@ worker, bare+typing = chat, bare+headless = batch. Slice 4 docs use them.
   person's run are the same command.
 - The died line reuses `waiting` (documented for limit waits) while a restart
   is due, and `blocked` after giving up.
+
+## Prune into the pass (implement, 2026-11-17)
+
+- Retention runs at most hourly, starting with the pass's first reading. This
+  Machine's store has never been pruned on a schedule (185,716 `processes`), so
+  the first retention after this ships may VACUUM; it runs after that
+  reading's conversation starts, but it holds the recovery thread until done.
+  Not timed at this Machine's size.
+- `lf process prune --dry-run` had no replacement: there is no way to preview
+  what the pass will settle. `lf machine doctor`'s lineage line still counts
+  repairable ancestry.

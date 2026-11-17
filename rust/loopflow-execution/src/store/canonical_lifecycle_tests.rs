@@ -173,14 +173,14 @@ fn canonical_ids_pruning_uses_retained_receipt_owner_and_requires_completion() {
     conn.execute("UPDATE processes SET completed_at=NULL", [])
         .unwrap();
     assert_eq!(
-        crate::journal::prune_process_receipts_at(home.path(), &[std::process::id()]).unwrap(),
+        crate::journal::remove_dead_process_receipts_at(home.path()).unwrap(),
         0
     );
     assert!(path.exists());
     conn.execute("UPDATE processes SET completed_at=2", [])
         .unwrap();
     assert_eq!(
-        crate::journal::prune_process_receipts_at(home.path(), &[std::process::id()]).unwrap(),
+        crate::journal::remove_dead_process_receipts_at(home.path()).unwrap(),
         1
     );
     assert!(!path.exists());

@@ -6,20 +6,19 @@ use std::path::Path;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
 use loopflow_execution::journal::{
-    prune_process_receipts_at, read_process_receipts_at, recorded_process_evidence,
-    recorded_process_receipt, OsProcess, ProcessIdentityEvidence, ProcessReceipt,
+    recorded_process_evidence, recorded_process_receipt, OsProcess, ProcessIdentityEvidence,
+    ProcessReceipt,
 };
 use loopflow_execution::output::truncate;
 use loopflow_model::id::LfProcessId;
 use loopflow_storage::rows::unix_to_datetime;
 use loopflow_storage::sqlite::SqliteStore;
 
-const SCHEMA_VERSION: u32 = 1;
 const COMMAND_WIDTH: usize = 82;
 const REFRESH_INTERVAL: Duration = Duration::from_secs(2);
 
@@ -71,21 +70,6 @@ pub struct ActivityNode {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 pub struct ActivitySnapshot {
     pub nodes: Vec<ActivityNode>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ProcessPruneReport {
-    pub schema_version: u32,
-    pub observed_at: i64,
-    pub dry_run: bool,
-    pub stale_process_receipt_pids: Vec<u32>,
-    pub removed_process_receipts: u32,
-    pub orphaned_agent_process_groups: Vec<u32>,
-    pub reaped_agent_process_groups: u32,
-    pub agent_process_records: Vec<loopflow_execution::harness::agent_process::AgentProcessCleanup>,
-    /// Store retention; absent on a dry run or before the store exists.
-    pub store: Option<loopflow_storage::sqlite::retention::RetentionReport>,
-    pub errors: u32,
 }
 
 /// Missing identity and failed sampling remain visible without granting control.
@@ -154,83 +138,6 @@ pub fn subscribe_ps(
         },
         transport,
     )
-}
-
-pub fn run_prune(json: bool, dry_run: bool) -> Result<()> {
-    let now = OffsetDateTime::now_utc().unix_timestamp();
-    let lf_home = loopflow_execution::store::lf_home_dir();
-    let processes = OsProcess::sample(now)?;
-    let receipts =
-        read_process_receipts_at(&lf_home).context("failed to read live Process receipts")?;
-    // Attached LfProcess death is proven from Process receipts, so reap before
-    // pruning them.
-    let agents = loopflow_execution::harness::agent_process::prune_agent_processes(dry_run)?;
-    for error in &agents.errors {
-        tracing::warn!(%error, "failed to clean up AgentProcess");
-    }
-    let mut report = ProcessPruneReport {
-        schema_version: SCHEMA_VERSION,
-        observed_at: now,
-        dry_run,
-        stale_process_receipt_pids: stale_process_receipt_pids(&processes, &receipts),
-        removed_process_receipts: 0,
-        orphaned_agent_process_groups: agents.orphaned,
-        reaped_agent_process_groups: agents.reaped,
-        agent_process_records: agents.records,
-        store: None,
-        errors: u32::try_from(agents.errors.len()).unwrap_or(u32::MAX),
-    };
-    if !dry_run {
-        // Retention closes rows from receipt evidence, so it runs before
-        // their receipts go.
-        let database = loopflow_execution::store::database_path_from_env()?;
-        if database.exists() {
-            match loopflow_execution::store::retention::prune(&database, now) {
-                Ok(store) => report.store = Some(store),
-                Err(error) => {
-                    tracing::warn!(%error, "failed to apply store retention");
-                    report.errors += 1;
-                }
-            }
-        }
-        match prune_process_receipts_at(&lf_home, &report.stale_process_receipt_pids) {
-            Ok(removed) => report.removed_process_receipts = removed,
-            Err(error) => {
-                tracing::warn!(error = %error, "failed to prune stale Process receipts");
-                report.errors += 1;
-            }
-        }
-    }
-
-    if json {
-        println!("{}", serde_json::to_string_pretty(&report)?);
-    } else {
-        print!("{}", render_prune_report(&report));
-    }
-    if report.errors == 0 {
-        Ok(())
-    } else {
-        Err(anyhow!(
-            "process prune completed with {} errors",
-            report.errors
-        ))
-    }
-}
-
-fn stale_process_receipt_pids(processes: &[OsProcess], receipts: &[ProcessReceipt]) -> Vec<u32> {
-    let process_by_pid = processes
-        .iter()
-        .map(|process| (process.pid, process))
-        .collect::<HashMap<_, _>>();
-    let mut stale_process_receipt_pids = receipts
-        .iter()
-        .filter(|receipt| !receipt_matches_live_process(receipt, &process_by_pid))
-        .map(|receipt| receipt.pid)
-        .collect::<Vec<_>>();
-    stale_process_receipt_pids.sort_unstable();
-    stale_process_receipt_pids.dedup();
-
-    stale_process_receipt_pids
 }
 
 pub(crate) fn load_snapshot() -> Result<ActivitySnapshot> {
@@ -389,15 +296,6 @@ fn agent_command_label(command: Option<&str>) -> String {
     }
 }
 
-fn receipt_matches_live_process(
-    receipt: &ProcessReceipt,
-    processes: &HashMap<u32, &OsProcess>,
-) -> bool {
-    processes
-        .get(&receipt.pid)
-        .is_some_and(|process| process.matches_start(receipt.pid, receipt.started_at))
-}
-
 fn os_activity_state(process: &OsProcess) -> ActivityState {
     match process.kernel_state.chars().next() {
         Some('R') => ActivityState::Working,
@@ -525,61 +423,6 @@ fn render_snapshot(snapshot: &ActivitySnapshot) -> String {
                 render_node(root, "", None, &tree, &mut output);
             }
         }
-    }
-    output
-}
-
-fn render_prune_report(report: &ProcessPruneReport) -> String {
-    let action = if report.dry_run { "PREVIEW" } else { "PRUNED" };
-    let mut output = format!("LOOPFLOW PROCESS PRUNE · {action}\n");
-    output.push_str(&format!(
-        "{} stale Process receipt PIDs · {} orphaned AgentProcess process groups · {} errors\n",
-        report.stale_process_receipt_pids.len(),
-        report.orphaned_agent_process_groups.len(),
-        report.errors,
-    ));
-    if !report.stale_process_receipt_pids.is_empty() {
-        output.push_str(&format!(
-            "Process receipt PIDs (unfinished receipts retained): {}\n",
-            report
-                .stale_process_receipt_pids
-                .iter()
-                .map(u32::to_string)
-                .collect::<Vec<_>>()
-                .join(", ")
-        ));
-    }
-    if !report.orphaned_agent_process_groups.is_empty() {
-        output.push_str(&format!(
-            "AgentProcess groups: {}\n",
-            report
-                .orphaned_agent_process_groups
-                .iter()
-                .map(u32::to_string)
-                .collect::<Vec<_>>()
-                .join(", ")
-        ));
-    }
-    for record in &report.agent_process_records {
-        output.push_str(&format!(
-            "{}: {} — {}\n",
-            record.id, record.action, record.reason
-        ));
-    }
-    if !report.dry_run {
-        output.push_str(&format!(
-            "removed {} receipts · reaped {} process groups\n",
-            report.removed_process_receipts, report.reaped_agent_process_groups,
-        ));
-    }
-    if let Some(store) = &report.store {
-        output.push_str(&format!(
-            "store: compacted {} usage rows · closed {} dead Processes · forgot {} finished{}\n",
-            store.usage_rows,
-            store.closed_processes,
-            store.forgotten_processes,
-            if store.vacuumed { " · vacuumed" } else { "" },
-        ));
     }
     output
 }

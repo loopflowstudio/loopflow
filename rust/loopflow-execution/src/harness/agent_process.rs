@@ -499,29 +499,21 @@ pub struct AgentProcessReapReport {
     pub records: Vec<AgentProcessCleanup>,
 }
 
-/// Exact bookkeeping disposition, including records that remain unresolved.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+/// What settlement did with one AgentProcess, including records it kept.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentProcessCleanup {
     pub id: loopflow_model::id::AgentProcessId,
     pub action: String,
     pub reason: String,
 }
 
-pub fn reap_agent_processes(dry_run: bool) -> Result<AgentProcessReapReport> {
+/// The recovery pass's AgentProcess settlement: reap orphans, then release
+/// ancestry it can prove was never recorded.
+pub fn settle_agent_processes() -> Result<AgentProcessReapReport> {
     let store = crate::store::open_sqlite(&crate::store::database_path_from_env()?)?;
-    Ok(reap_in(&store, dry_run)?)
-}
-
-/// `lf monitor prune`'s AgentProcess pass: reap orphans, then release ancestry
-/// it can prove was never recorded. The server's recovery pass only reaps.
-pub fn prune_agent_processes(dry_run: bool) -> Result<AgentProcessReapReport> {
-    let store = crate::store::open_sqlite(&crate::store::database_path_from_env()?)?;
-    let mut report = reap_in(&store, dry_run)?;
-    let repaired = repair_unrecorded_ancestry_in(
-        &store,
-        crate::journal::current_lf_process_id().as_ref(),
-        dry_run,
-    )?;
+    let mut report = reap_in(&store)?;
+    let repaired =
+        repair_unrecorded_ancestry_in(&store, crate::journal::current_lf_process_id().as_ref())?;
     report.records.extend(repaired.records);
     report.errors.extend(repaired.errors);
     Ok(report)
@@ -530,32 +522,29 @@ pub fn prune_agent_processes(dry_run: bool) -> Result<AgentProcessReapReport> {
 fn repair_unrecorded_ancestry_in(
     store: &SqliteStore,
     repairer: Option<&LfProcessId>,
-    dry_run: bool,
 ) -> StoreResult<AgentProcessReapReport> {
     let mut report = AgentProcessReapReport::default();
     for agent in store.unrecorded_agent_ancestry()? {
         let mut record = AgentProcessCleanup {
             id: agent.agent_process_id.clone(),
-            action: "would_repair".into(),
+            action: "repaired".into(),
             reason: format!(
                 "parent LfProcess {} was never recorded",
                 agent.parent_lf_process_id
             ),
         };
-        if !dry_run {
-            match attachment::release_unrecorded_ancestry(store, &agent, repairer) {
-                Ok(true) => record.action = "repaired".into(),
-                Ok(false) => {
-                    record.action = "retained".into();
-                    record.reason = "ancestry changed during repair".into();
-                }
-                Err(error) => {
-                    record.action = "retained".into();
-                    record.reason = error.to_string();
-                    report
-                        .errors
-                        .push(format!("AgentProcess {}: {error}", agent.agent_process_id));
-                }
+        match attachment::release_unrecorded_ancestry(store, &agent, repairer) {
+            Ok(true) => {}
+            Ok(false) => {
+                record.action = "retained".into();
+                record.reason = "ancestry changed during repair".into();
+            }
+            Err(error) => {
+                record.action = "retained".into();
+                record.reason = error.to_string();
+                report
+                    .errors
+                    .push(format!("AgentProcess {}: {error}", agent.agent_process_id));
             }
         }
         report.records.push(record);
@@ -563,7 +552,7 @@ fn repair_unrecorded_ancestry_in(
     Ok(report)
 }
 
-fn reap_in(store: &SqliteStore, dry_run: bool) -> StoreResult<AgentProcessReapReport> {
+fn reap_in(store: &SqliteStore) -> StoreResult<AgentProcessReapReport> {
     let agents = store.agent_processes()?;
     let mut counts = HashMap::new();
     for agent in &agents {
@@ -589,28 +578,23 @@ fn reap_in(store: &SqliteStore, dry_run: bool) -> StoreResult<AgentProcessReapRe
                 .or(agent.process.parent_lf_process_id.as_ref());
             if agent.spawn_reserved && owner.is_some_and(dead_lf) {
                 record.reason = "launch never requested and owning LfProcess is dead".into();
-                record.action = "would_settle".into();
-                if !dry_run {
-                    match attachment::settle_agent_process(store, agent, || {
-                        if !owner.is_some_and(dead_lf) {
-                            return Err(StoreError::InvalidAuthority(
-                                "reservation owner death changed".into(),
-                            ));
-                        }
-                        Ok(())
-                    }) {
-                        Ok(true) => record.action = "settled".into(),
-                        Ok(false) => {
-                            record.action = "retained".into();
-                            record.reason = "reservation changed during cleanup".into();
-                        }
-                        Err(error) => {
-                            record.action = "retained".into();
-                            record.reason = error.to_string();
-                            report
-                                .errors
-                                .push(format!("AgentProcess {}: {error}", agent.process.id));
-                        }
+                match attachment::settle_agent_process(store, agent, || {
+                    if !owner.is_some_and(dead_lf) {
+                        return Err(StoreError::InvalidAuthority(
+                            "reservation owner death changed".into(),
+                        ));
+                    }
+                    Ok(())
+                }) {
+                    Ok(true) => record.action = "settled".into(),
+                    Ok(false) => {
+                        record.reason = "reservation changed during cleanup".into();
+                    }
+                    Err(error) => {
+                        record.reason = error.to_string();
+                        report
+                            .errors
+                            .push(format!("AgentProcess {}: {error}", agent.process.id));
                     }
                 }
             }
@@ -652,15 +636,7 @@ fn reap_in(store: &SqliteStore, dry_run: bool) -> StoreResult<AgentProcessReapRe
             "live provider or unresolved ownership"
         }
         .into();
-        record.action = if dead {
-            "would_settle"
-        } else if orphaned {
-            "would_reap"
-        } else {
-            "retained"
-        }
-        .into();
-        if dry_run || (!dead && !orphaned) {
+        if !dead && !orphaned {
             report.records.push(record);
             continue;
         }
@@ -863,7 +839,7 @@ mod tests {
     }
 
     #[test]
-    fn prune_releases_unrecorded_ancestry_and_the_session_resumes() {
+    fn settlement_releases_unrecorded_ancestry_and_the_session_resumes() {
         let home = tempfile::tempdir().unwrap();
         let database = home.path().join("db");
         let store = crate::store::opening::open_ephemeral(&database).unwrap();
@@ -891,19 +867,16 @@ mod tests {
         .is_err());
         let check = lineage(&store);
         assert!(
-            check.detail.contains("`lf monitor prune` repairs"),
+            check.detail.contains("the server's recovery pass repairs"),
             "{check:?}"
         );
-
-        let preview = super::repair_unrecorded_ancestry_in(&store, None, true).unwrap();
-        assert_eq!(preview.records.len(), 1);
-        assert_eq!(preview.records[0].id, agent);
-        assert_eq!(preview.records[0].action, "would_repair");
-        assert!(preview.records[0].reason.contains(ghost.as_str()));
         assert_eq!(events(&sql), before);
 
-        let applied = super::repair_unrecorded_ancestry_in(&store, Some(&resumer), false).unwrap();
+        let applied = super::repair_unrecorded_ancestry_in(&store, Some(&resumer)).unwrap();
+        assert_eq!(applied.records.len(), 1);
+        assert_eq!(applied.records[0].id, agent);
         assert_eq!(applied.records[0].action, "repaired");
+        assert!(applied.records[0].reason.contains(ghost.as_str()));
         assert!(applied.errors.is_empty());
         let fact: serde_json::Value = sql
             .query_row(
@@ -920,7 +893,7 @@ mod tests {
         assert_eq!(events(&sql), before + 1);
         assert!(lineage(&store).status == crate::process::diagnosis::Status::Ok);
 
-        let rerun = super::repair_unrecorded_ancestry_in(&store, Some(&resumer), false).unwrap();
+        let rerun = super::repair_unrecorded_ancestry_in(&store, Some(&resumer)).unwrap();
         assert!(rerun.records.is_empty());
 
         // The Session resumes through the ordinary claim with native history intact.
@@ -941,7 +914,7 @@ mod tests {
     }
 
     #[test]
-    fn prune_leaves_pruned_parents_live_agents_and_recorded_owners_failing_doctor() {
+    fn settlement_leaves_pruned_parents_live_agents_and_recorded_owners_failing_doctor() {
         let home = tempfile::tempdir().unwrap();
         let database = home.path().join("db");
         let store = crate::store::opening::open_ephemeral(&database).unwrap();
@@ -964,11 +937,11 @@ mod tests {
             [&live],
         )
         .unwrap();
-        let report = super::repair_unrecorded_ancestry_in(&store, None, false).unwrap();
+        let report = super::repair_unrecorded_ancestry_in(&store, None).unwrap();
         assert!(report.records.is_empty());
         let check = lineage(&store);
         assert!(check.status == crate::process::diagnosis::Status::Fail);
-        assert!(!check.detail.contains("lf monitor prune"), "{check:?}");
+        assert!(!check.detail.contains("recovery pass repairs"), "{check:?}");
     }
 
     #[test]
@@ -1249,7 +1222,7 @@ mod tests {
     }
 
     #[test]
-    fn prune_retires_only_unlaunched_reservations_with_dead_owners() {
+    fn settlement_retires_only_unlaunched_reservations_with_dead_owners() {
         let ledger = crate::journal::TestLedgerGuard::new();
         let _ambient = crate::test_ambient::EnvGuard::new();
         let database = ledger.home().join("loopflow.db");
@@ -1283,25 +1256,7 @@ mod tests {
             .unwrap();
             expected.push((attachment.agent_process_id, name == "retired"));
         }
-        let preview = super::reap_in(&store, true).unwrap();
-        assert!(preview.errors.is_empty());
-        assert_eq!(
-            preview
-                .records
-                .iter()
-                .filter(|r| r.action == "would_settle")
-                .count(),
-            1
-        );
-        for (id, _) in &expected {
-            assert!(store
-                .agent_process(id)
-                .unwrap()
-                .unwrap()
-                .completed_at
-                .is_none());
-        }
-        let applied = super::reap_in(&store, false).unwrap();
+        let applied = super::reap_in(&store).unwrap();
         assert!(applied.errors.is_empty());
         assert_eq!(
             applied
@@ -1316,7 +1271,7 @@ mod tests {
             assert_eq!(process.completed_at.is_some(), *retired);
             assert!(process.pid.is_none());
         }
-        let retry = super::reap_in(&store, false).unwrap();
+        let retry = super::reap_in(&store).unwrap();
         assert!(retry.records.iter().all(|r| r.action == "retained"));
         assert_eq!(retry.records.len(), 3);
         assert!(store.session("retired").unwrap().is_some());
@@ -1357,7 +1312,7 @@ mod tests {
             .unwrap();
             child.wait().unwrap();
             // No launcher exit receipt: the reaper must observe the OS death.
-            let report = super::reap_in(&store, false).unwrap();
+            let report = super::reap_in(&store).unwrap();
             assert!(report.errors.is_empty());
             assert!(report.orphaned.is_empty());
             assert_eq!(report.reaped, 0);
@@ -1698,6 +1653,96 @@ mod tests {
         }
     }
 
+    /// Only the portable reader invokes ps; macOS observes the kernel directly.
+    /// A failed reading, of the leader or only of its descendants, leaves the
+    /// orphan running and its records untouched.
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn failed_sampling_reaps_nothing_and_reports_why() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _lock = crate::journal::test_env_lock();
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        let home = tempfile::tempdir().unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
+        let mut child = Command::new("/bin/sh")
+            .args([
+                "-c",
+                "sleep 60 & wait; :",
+                "codex",
+                "app-server",
+                "--listen",
+                "fixture",
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        let start = crate::journal::process_started_at(pid).unwrap().unwrap();
+        let session = store.test_session("orphan", &crate::session_record::new_artifact_key());
+        rusqlite::Connection::open(home.path().join("db"))
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET provider='codex',interactive=0 WHERE id=?1",
+                [&session.id],
+            )
+            .unwrap();
+        let attached = attachment::claim_session_attachment(
+            &store,
+            &session.id,
+            None,
+            &store.test_lf_process(),
+            true,
+        )
+        .unwrap();
+        store
+            .record_agent_process_identity(&session.id, &attached, pid, start)
+            .unwrap();
+        store
+            .release_session_attachment(&session.id, &attached)
+            .unwrap();
+        let before = store.agent_process(&attached.agent_process_id).unwrap();
+        let bin = home.path().join("bin");
+        std::fs::create_dir(&bin).unwrap();
+        let ps = bin.join("ps");
+        let previous = std::env::var_os("PATH");
+        // Exact leader observation succeeds in the second reading, but
+        // descendant inventory fails: the reaper refuses before signaling.
+        for forward in ["", "if [ \"$1\" = -p ]; then exec /bin/ps \"$@\"; fi\n"] {
+            std::fs::write(
+                &ps,
+                format!("#!/bin/sh\n{forward}printf 'fixture sampling unavailable' >&2\nexit 2\n"),
+            )
+            .unwrap();
+            std::fs::set_permissions(&ps, std::fs::Permissions::from_mode(0o755)).unwrap();
+            std::env::set_var("PATH", format!("{}:/usr/bin:/bin", bin.display()));
+            let report = super::reap_in(&store);
+            match &previous {
+                Some(path) => std::env::set_var("PATH", path),
+                None => std::env::remove_var("PATH"),
+            }
+            let report = report.unwrap();
+            assert!(
+                report
+                    .errors
+                    .iter()
+                    .any(|error| error.contains("fixture sampling unavailable")),
+                "{report:?}"
+            );
+            assert_eq!(report.reaped, 0);
+            assert!(child.try_wait().unwrap().is_none());
+            assert_eq!(
+                store.agent_process(&attached.agent_process_id).unwrap(),
+                before
+            );
+        }
+        let _ = crate::os_process::terminate_process_group(pid);
+        let _ = child.wait();
+    }
+
     fn reap_detached(provider: &str, argv: &[&str]) {
         let home = tempfile::tempdir().unwrap();
         let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
@@ -1732,7 +1777,7 @@ mod tests {
                 .release_session_attachment(&session.id, &attached)
                 .unwrap();
         }
-        let conflict = super::reap_in(&store, false).unwrap();
+        let conflict = super::reap_in(&store).unwrap();
         assert!(conflict.errors.is_empty());
         assert_eq!(conflict.reaped, 0);
         assert!(child.try_wait().unwrap().is_none());
@@ -1744,7 +1789,7 @@ mod tests {
                 [],
             )
             .unwrap();
-        let report = super::reap_in(&store, false).unwrap();
+        let report = super::reap_in(&store).unwrap();
         // Always clean up this fixture's own group before assertions.
         let _ = crate::os_process::terminate_process_group(pid);
         let _ = child.wait();

@@ -58,7 +58,7 @@ pub fn report() -> Result<DoctorReport> {
         Some(error) => Check::fail("store", error.clone()),
         None => Check::ok("store", "selected database is compatible with this build"),
     }];
-    // The remedy hint counts exactly what `lf monitor prune` would repair.
+    // The remedy hint counts exactly what the recovery pass's ancestry repair releases.
     let events = match loopflow_storage::sqlite::SqliteStore::open_processes_read_only(
         &database_path,
         loopflow_execution::store::token_key::encryption_key,

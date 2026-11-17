@@ -470,13 +470,22 @@ Must survive:
    groups, so killing the launcher's group kills nothing that matters. A
    SIGKILLed Graph under a live carrier is now retried by that carrier.
 
-   Left: `lf process prune` / `lf monitor prune`. `settle()` reaps agents only;
-   prune also repairs unrecorded agent ancestry, applies store retention
-   (`close_dead_processes`, `forget_processes`, usage compaction, reclaim)
-   and removes stale receipts. Moving those into the pass, then deleting the
-   command, its report, `process_ownership_tests`' sampling-failure check
-   (move it to a reaper unit test), the `monitor prune` alias and the hints in
-   `doctor.rs`, `process/diagnosis.rs`, `install.rs` and `docs/dev/*`, is next.
+   Then prune went into the pass:
+   - `settle()` runs `settle_agent_processes()` (reap, then release unrecorded
+     ancestry; one entry point, no dry run);
+   - `ops::recovery::retain()`, at most hourly and on the first reading, after
+     the starts: store retention (`close_dead_processes`, `forget_processes`,
+     usage compaction, reclaim), then `remove_dead_process_receipts_at`
+     (was `prune_process_receipts_at`; the PID pre-filter went, the Dead check
+     already covers it);
+   - deleted: `lf process prune`, `run_prune`, `ProcessPruneReport`, its
+     renderer, the `monitor prune` alias, `read_process_receipts_at`, the two
+     `process_ownership_tests` that drove prune (including one that still
+     expected `task list` to settle, dead since slice 2), and the hints in
+     doctor, install, diagnosis, agent_process and `docs/dev/*`;
+   - tests: `ops::recovery::tests::retain_settles_proven_dead_processes_and_keeps_unknown_ones`,
+     `harness::agent_process::tests::failed_sampling_reaps_nothing_and_reports_why`
+     (non-macOS only; runs in CI).
 
 4. **Surfaces.** Pieces:
    - the Session and Task status DTO fields and fixtures, and `conversation`
@@ -503,7 +512,12 @@ Must survive:
 - `cargo test -p loopflow --lib task_graph_launch_tests::a_task_run_whose_carrier_died`,
   `…::a_killed_graph_is_started_again_by_its_carrier`, `ship::tests::` (4),
   `task_graph_launch_tests::task_ship_` and `server::schema::tests::` (21): pass (implement, slice 3).
-  Main `2593c489d7` merged after them (`a1568e4c59`, 194 files, no conflicts); not re-run since.
+  Main `2593c489d7` merged after them (`a1568e4c59`, 194 files, no conflicts).
+- On the merged tree with prune deleted (implement): `server::recovery::tests::` (7),
+  `ship::tests::`, `ops::recovery::tests::`, `harness::agent_process::tests::`,
+  journal and diagnosis tests (62 pass); `binary(process_ownership_tests)`,
+  `lf::tests::`, `cli_discovery::` (83 pass); `documented_commands::` (4 pass);
+  clippy clean. The non-macOS sampling-failure test runs in CI.
 - Gate: `test(performance_tests::)` and `test(store::query_plans::tests::)` (new
   `local_task_runs` read over `task_graphs`), `binary(served_reads)` (server startup changed), `test(session_cli_tests::)`,
   `test(process_ownership_tests::)` and `test(documented_commands::)` (docs edited).

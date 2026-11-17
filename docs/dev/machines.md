@@ -480,14 +480,13 @@ no signal authority.
 ```bash
 lf process list --json
 lf process top
-lf process prune --dry-run
 ```
 
 The outer command journal records command receipts. `lf process list` and `lf process top` join
 those receipts to current OS process facts. Completed processes disappear from
 the live view. This is observation, not a durable lifecycle model.
 
-`lf process prune` removes dead command receipts only after their terminal outcome
+The server's recovery pass removes dead command receipts only after their terminal outcome
 is recorded, and may reap only AgentProcesses whose recorded identity is live
 and whose attached LfProcess is provably dead. Receipts use Process IDs, so PID reuse cannot overwrite an
 unfinished Process’s identity. Failed terminal writes and interrupt cleanup retain

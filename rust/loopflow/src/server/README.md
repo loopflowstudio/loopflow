@@ -48,9 +48,10 @@ the pass needs is written before it is needed (`meta.json`, the holder's
 `exit.json`, Session and Graph-run rows with pid and OS start time). Its
 first reading after start is the restart and reboot case. Each reading:
 
-1. **Settles**, at most every 10 seconds: reaps orphan agents, starts the
-   ship process of a shipping Task whose ship exited, continues limit waits
-   and checks rentals (`ops::recovery::settle`). Reads no longer do this.
+1. **Settles**, at most every 10 seconds: reaps orphan agents, releases
+   AgentProcess ancestry whose parent was never recorded, carries Task runs
+   (step 3), continues limit waits and checks rentals
+   (`ops::recovery::settle`). Reads never do this.
 2. **Starts Task conversations.** A Task's primary Session starts again when
    the Task is open, claimed and checked out here, no agent or pending holder
    serves it, and it never had an agent or its last agent did not end by the
@@ -65,8 +66,12 @@ first reading after start is the restart and reboot case. Each reading:
    back at once; its terminal holds later passes off.
 3. **Carries Task runs.** A shipping or moving Task whose recorded carrier is
    dead gets `lf --task <ID> ship` or `lf task run <ID>` again, from its
-   checkpoint. A carrier that exits on its own clears itself, so a named dead
-   carrier died.
+   checkpoint. A carrier that exits on its own writes an outcome on its
+   process row; a dead carrier with none died.
+4. **Retains**, at most every hour: closes Process rows whose OS process is
+   gone, forgets finished ones nothing references, merges per-receipt usage,
+   reclaims pages, then removes receipts of Processes proven dead
+   (`ops::recovery::retain`).
 
 One start is in flight at a time: the next begins when the last one's
 agent attaches, or after 3 seconds, most recently updated Task first. Sessions

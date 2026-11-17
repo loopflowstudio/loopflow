@@ -1553,13 +1553,6 @@ fn clear_context() {
     });
 }
 
-pub fn read_process_receipts_at(lf_home: &Path) -> Result<Vec<ProcessReceipt>, std::io::Error> {
-    Ok(read_process_receipt_files_at(lf_home)?
-        .into_iter()
-        .map(|(_, receipt)| receipt)
-        .collect())
-}
-
 fn read_process_receipt_files_at(
     lf_home: &Path,
 ) -> Result<Vec<(PathBuf, ProcessReceipt)>, std::io::Error> {
@@ -1586,10 +1579,9 @@ fn read_process_receipt_files_at(
     Ok(receipts)
 }
 
-pub fn prune_process_receipts_at(lf_home: &Path, pids: &[u32]) -> Result<u32, std::io::Error> {
-    if pids.is_empty() {
-        return Ok(0);
-    }
+/// Remove the receipts of Processes proven dead whose row, if any, recorded
+/// its end. Returns how many went.
+pub fn remove_dead_process_receipts_at(lf_home: &Path) -> Result<u32, std::io::Error> {
     let store = SqliteStore::open_processes_read_only(
         &lf_home.join("loopflow.db"),
         crate::store::token_key::encryption_key,
@@ -1597,9 +1589,7 @@ pub fn prune_process_receipts_at(lf_home: &Path, pids: &[u32]) -> Result<u32, st
     .map_err(std::io::Error::other)?;
     let mut removed = 0;
     for (path, receipt) in read_process_receipt_files_at(lf_home)? {
-        if !pids.contains(&receipt.pid)
-            || receipt.process_evidence() != ProcessIdentityEvidence::Dead
-        {
+        if receipt.process_evidence() != ProcessIdentityEvidence::Dead {
             continue;
         }
         let retained = match path.file_stem().and_then(|stem| stem.to_str()) {
@@ -2242,11 +2232,12 @@ mod tests {
             LfEventType::Started,
             started_fields(&command, &worktree, "runtime"),
         );
-        let receipts = super::read_process_receipts_at(guard.home()).expect("read live receipt");
+        let receipts =
+            super::read_process_receipt_files_at(guard.home()).expect("read live receipt");
         assert_eq!(receipts.len(), 1);
-        assert_eq!(receipts[0].pid, std::process::id());
+        assert_eq!(receipts[0].1.pid, std::process::id());
         assert_eq!(
-            receipts[0].lf_process_id,
+            receipts[0].1.lf_process_id,
             std::env::var(super::LF_PROCESS_ID_ENV).expect("current Process id")
         );
 
@@ -2256,7 +2247,7 @@ mod tests {
             LfEventType::Completed,
             LfEventFields::default(),
         );
-        assert!(super::read_process_receipts_at(guard.home())
+        assert!(super::read_process_receipt_files_at(guard.home())
             .expect("read terminal receipt state")
             .is_empty());
     }
@@ -2392,7 +2383,7 @@ mod tests {
         let live = receipt(born, None);
 
         assert_eq!(
-            super::prune_process_receipts_at(guard.home(), &[pid]).unwrap(),
+            super::remove_dead_process_receipts_at(guard.home()).unwrap(),
             2
         );
         assert!(!completed.exists());
@@ -2445,7 +2436,7 @@ mod tests {
             super::write_process_receipt(&replacement).unwrap();
             super::remove_process_receipt(&replacement);
             assert_eq!(
-                super::prune_process_receipts_at(guard.home(), &[std::process::id()]).unwrap(),
+                super::remove_dead_process_receipts_at(guard.home()).unwrap(),
                 0
             );
             assert_eq!(
@@ -2457,7 +2448,7 @@ mod tests {
             let previous_path = std::env::var_os("PATH");
             std::env::set_var("PATH", guard.home().join("no-programs"));
             let without_path = super::lf_evidence(&store, &context.lf_process_id);
-            let pruned = super::prune_process_receipts_at(guard.home(), &[std::process::id()]);
+            let pruned = super::remove_dead_process_receipts_at(guard.home());
             match previous_path {
                 Some(path) => std::env::set_var("PATH", path),
                 None => std::env::remove_var("PATH"),
@@ -2481,7 +2472,7 @@ mod tests {
                 ProcessIdentityEvidence::Dead
             );
             assert_eq!(
-                super::prune_process_receipts_at(guard.home(), &[std::process::id()]).unwrap(),
+                super::remove_dead_process_receipts_at(guard.home()).unwrap(),
                 0
             );
             assert_eq!(

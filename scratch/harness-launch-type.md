@@ -57,7 +57,7 @@ recognition are answered by the owning harness. Shared context helpers keep
 hook persistence; they do not dispatch by provider name. Claude stream syntax
 and usage decoding each have one implementation.
 
-## Slice 6 (2026-11-16)
+## Slice 6 (implemented, bad53639ec)
 
 The launch carries its resolved harness. `Start` alone selects a driver's
 resume thread; `AgentConfig::resume_token` remains retry state read at the
@@ -110,6 +110,9 @@ These stay, with the reason:
   change, not a launch change.
 - `loopflow-storage` (`Provider` parsing, `session_record::native_usage_key`)
   sits below execution and reads recorded payloads; it cannot ask a harness.
+- `machine/credentials.rs` filters `opencode auth export` entries by
+  `integrationID == HarnessKind::OpenCode.as_str()`: that compares OpenCode's
+  own JSON field inside OpenCode credential reading, not a harness decision.
 - A harness file comparing its own name (`codex.rs::resolve_model`, process
   recognition) is the owner answering.
 

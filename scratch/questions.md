@@ -42,39 +42,12 @@ them were not in `lf ps` (inherited children: `browse` 50, python 24,
 `codex-code-mode-host` 15, `claude` 10, `codex` 10, `uv` 4). Read from an
 agent's Bash with no sandbox; a sandboxed read is untested.
 
-## Open choices (headless calls; reversible)
+## Settled earlier (history in `git show e38387f2d2:scratch/questions.md`)
 
-See the plan's "Decisions" for the calls made at kickoff.
-
-## Raised while writing docs
-
-All three settled in the plan's concept review after slice 2a.
-
-- `lf top` refreshed in place; the docs give `lf ps` no refresh mode, only
-  `lf ps --subscribe --json` (a served read). Should `lf ps` keep a refreshing
-  terminal view, or is `--subscribe` enough?
-- Does `lf ps` list `idle` conversations held by the holder (agent alive,
-  waiting for a person), or only Sessions mid-turn and Graph runs? Docs list
-  them, with state `idle`.
-- `lf graph show <NAME>` inspects an authored Graph today; docs make it also
-  take a run id. A run id and a Graph name can't collide (UUID vs slug), but
-  `lf graph runs show <RUN>` would keep the two apart. Docs use
-  `lf graph show <RUN_ID>`.
-
-## Raised while building slice 2a
-
-Settled in the plan's concept review after slice 2a (step-first cause
-order, both env variables, dev-only skew accepted).
-
-- Failure cause order: the plan says "the Graph run's error, else its last
-  failed step's error"; built the other way (step first), matching the old
-  deepest-error walk so a repeated step failure still reads as one cause.
-- Child adoption of a minted id: `LF_RUN_ID` (new variable) rather than
-  reusing `LF_PROCESS_ID`, which still carries the parent while the journal
-  records Process rows. Collapse when the journal stops recording.
-- A new runner spawning an older installed lf (branch build in development):
-  the old child ignores `LF_RUN_ID`, so the step row has only the spawner's
-  exit code and no error, and its Session input is not found under the step id.
+Doc-writing questions (`lf ps` refresh, idle Sessions, `lf graph show
+<RUN_ID>`) and slice 2a calls (step-first failure cause, a separate
+adopt-this-id variable, dev-only skew accepted) are settled in the plan's
+concept review after slice 2a.
 
 ## Sync checks (2026-11-16)
 
@@ -117,9 +90,8 @@ order, both env variables, dev-only skew accepted).
   limit logs "could not note limit recovery" every time; the migration drops
   the one such row in the live store (1 of 323). The note now inserts only
   for a recorded step (released lf still logs the warning until it updates).
-- Open: the spawner's `finish_run(...)?` (step end and Task-run loop,
-  `graph.rs:240`) fails the Graph when the store is busy even after the child
-  succeeded. Same exposure as the old `process_mark`; candidate for warn-and-continue.
+- The spawner's `finish_run(...)?` failing a Graph on a busy store: settled
+  as warn-and-continue in the plan's concept review after the owner slices.
 - Minor: `GraphStepProcess.error` decodes a missing key (siblings do too);
   step `outcome` is now `"unknown"` where it was `null`; `latest_task_graphs`
   and `graphs_in` order by `graph_processes.rowid` (`ORDER BY started_at, rowid`

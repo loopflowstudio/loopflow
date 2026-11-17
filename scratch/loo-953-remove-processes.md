@@ -1,14 +1,27 @@
 # LOO-953: no Process table; liveness on Sessions and Graph runs
 
-Status 2026-11-17 (later): built on this branch: the Execution renames,
-Project activation on `waves.project_activation_{ended_at,exit_code,error}`
-(the activating lf owns its run; `finish_run` writes the Wave), and CI
-repair runs on `ci_incidents.repair_{started_at,pid,os_started_at}`
-(reserve and handoff write them, settlement clears them; liveness by
-`run_evidence`). `detached::start_lf` returns `Started { id, pid,
-os_started_at }`, so `engine::launch` waits on the child without the store.
-Next: the concept-review items below, then Task-run and ship carriers,
-then the Session slice.
+## Status (2026-11-17, realigned at `cea000fd54`)
+
+Stacked on LOO-936 (PR #1965, open and unmerged 2026-11-17) and merged with
+main at `2593c489d7`; that merge touched nothing this plan depends on.
+
+Built: slice 2a ("Slice 2a as built", QA in `scratch/qa.html`); the
+renames to `Execution`, `ExecutionResult`, `ExecutionStart`,
+`GraphExecution`, `LF_EXECUTION_ID` ("Direction from neighbouring Tasks");
+Project activation's end on `waves.project_activation_{ended_at,exit_code,error}`
+(`finish_run`, `graph_inventory.rs:473`, falls through to `waves` after
+`RUN_OWNERS`); CI repair runs on `ci_incidents.repair_{started_at,pid,os_started_at}`
+(reserve and handoff write them, settlement clears them, liveness by
+`run_evidence`); `detached::start_lf` returns `Started { id, pid,
+os_started_at }`, so `engine::launch` waits on its child without the store.
+
+Next, in order: the three items of "Concept review after the owner
+slices"; the Task-run and ship carriers; the Session slice (slice 3, with
+the retirement-by-terminal gap); the expand migration's foreign-key
+rebuild together with stopping the journal writer; slices 4–6. When
+LOO-936 merges: rebase, rerun `python3 -I scratch/process_sql_scan.py rust`
+and reconcile the inventory. Quotes and the OS-scan measurement:
+`questions.md`.
 
 **Carriers, as found 2026-11-17.** `task_state_sql` reads "moving/shipping"
 from the carrier's `processes.completed_at`. Plan: `task_graphs.run_pid,
@@ -17,7 +30,9 @@ run_os_started_at` written by `start_run_in` from the caller's
 arm on `task_graphs.lf_process_id`; the carrier calls `mark_run_owner`.
 Ship events: `task_ship_events_append_only` blocks every UPDATE, so the
 migration replaces it with a launch-columns-immutable trigger (as for Graph
-runs), `revisions.rs:187` special-cases its update, and the `finish_run` arm
+runs), the trigger-coverage test in `revisions.rs` drops its update
+exemption for a `store_revision_task_ship_events_update` trigger, and the
+`finish_run` arm
 writes `ended_at/exit_code/error` by `task_ship_events_process`. The
 `open_processes` arm of `task_state_sql` stays until the Session slice.
 
@@ -49,7 +64,9 @@ direction.** Settled by the design; build before the carriers.
   `lf/commands/graph.rs:240` and `:940` still fails a Graph whose child
   succeeded when the store is busy. Both become warn-and-continue (the
   journal's warn-once gap); the child's own end write and the liveness pass
-  cover a missed one. Closes the 2a review's open item.
+  cover a missed one. Closes the 2a review's open item. Still untested
+  from that review: the spawner-written end for a child that died without
+  writing one, and `graph_failure_cause` driving the repeated-failure stop.
 
 **Correction: foreign keys come off in the expand, not the contract.** Once
 the journal stops writing rows (approach 2), every column still declaring
@@ -61,27 +78,6 @@ keys (a rebuild keeping every column is additive), in the same change that
 stops the journal writer. Until then the two tests above insert the
 journal's row for the referenced id. Slice 6 keeps only the drops of
 `processes`, the bridge triggers and dead columns.
-
-Status 2026-11-17: stacked on LOO-936's branch
-(`jack/loo-936-record-only-what-the-product-reads-apart-from`, PR #1965,
-"close to landing") and merged with it; the remaining slices build now on
-top of it. Next: the renames under "Direction from neighbouring Tasks", then
-the Session slice.
-
-Status 2026-11-16 (realigned after syncing main at `4852348e5c`): slice 2a
-(Graph runs and steps) is built, merged with main and passed QA
-(`scratch/qa.html`); the QA fixes (`lf graph show <RUN_ID>`, step `error` in
-its JSON, Process lines labelled by `RunResult::of`) are committed. LOO-936 is
-still moving (at `qa`, no PR, origin/main `4852348e5c` has no LOO-936 commit,
-2026-11-16 late) on `processes.rs`, `sessions.rs`,
-`session_events.rs`, `retention.rs`; the Session, ship, CI-repair and
-activation slices wait for it to merge. The renames under "Concept review
-after slice 2a" are built: `Run`, `GraphRun`, `GraphStep`, `record_graph(…,
-repo, cwd)`, `finish_run` over `RUN_OWNERS`; the `graph::process` re-export
-is deleted. The end-write and bridge items there ship with the journal-writer
-removal (approach 2). After LOO-936 merges: rebase,
-rerun `python3 -I scratch/process_sql_scan.py rust` and reconcile the
-inventory. Quotes and the OS-scan measurement: `questions.md`.
 
 ### Slice 2a as built
 
@@ -123,15 +119,9 @@ for the table rebuild.
 
 Settled by the design (no product choice involved):
 
-- **One record type for "one lf run".** `GraphRun` is also every step's
-  record, and ship events, CI repairs and activations will carry the same
-  columns. Rename the shared struct `Run` (id, start, end, pid, OS start,
-  exit, error; `Run::result()`), `GraphProcess` → `GraphRun`,
-  `GraphProcessStep` → `GraphStep` (27 Rust uses, 10 files; tables keep
-  their names until LOO-937). `RunStart` drops `repo`/`cwd`: only the Graph
-  run has them, so they are arguments of `record_graph`.
-  `finish_graph_run(id)` writes whichever of run or step owns the id; name it
-  `finish_run` and keep one writer per owner table as owners are added.
+- **One record type for "one lf run"** (built, then renamed `Execution`):
+  ship events, CI repairs and activations carry the same columns; one
+  writer per owner table as owners are added.
 - **Two env variables, two directions.** `LF_RUN_ID` (adopt this id, read
   once) and `LF_PROCESS_ID` (the lf you were launched under, read by
   agent-issued commands for the attachment fence) answer different
@@ -163,17 +153,11 @@ Settled by the design (no product choice involved):
   authored Graph's name, a run id is the only other thing it could take
   ("what else would it accept"); UUID and slug cannot collide.
 
-Order unchanged: the renames and the 2a fixes above can land now; Session,
-ship, CI-repair and activation slices still wait for LOO-936 (moving at `qa`,
-no PR, 2026-11-16). Concept review after the renames: nothing further
-is buildable before LOO-936 merges; `RecordKind::GraphProcess*` in
-`machine_records.rs` names tables, not structs, and goes with the
-export in slice 4.
-Concept review after the QA fixes (`fd5869740a`): nothing further.
-The wire names still saying Process (`GraphStepProcess`,
+Wire names still saying Process (`GraphStepProcess`,
 `work.graph_processes`, module `graph_process.rs`) rename with the
-Process-line slice, in one DTO change across Rust, Swift and fixtures,
-not piecemeal. LOO-936 still at `qa`, no PR (2026-11-16 late).
+Process-line slice, in one DTO change across Rust, Swift and fixtures, not
+piecemeal. `RecordKind::GraphProcess*` in `machine_records.rs` names tables
+and goes with the export in slice 4.
 
 ## Problem and outcome
 
@@ -186,7 +170,8 @@ ran. After: each owner record carries its own pid, OS start time and result;
 ## Demo
 
 ```bash
-lf ps                         # live Sessions and Graph runs, each OS-confirmed; no call tree
+lf session list               # live Sessions, each OS-confirmed; no call tree
+lf graph list                 # Graph runs, live ones marked from their own pid
 lf task status LOO-953 --json # Graph state from graph_processes' own pid and exit
 sqlite3 -readonly ~/.lf/loopflow.db "select count(*) from processes"   # stops growing except bridged rows
 lf machine doctor             # "strays": OS processes with LF_* vars no live row claims
@@ -502,8 +487,8 @@ two live agents on one Session; a `Legacy*` type.
 - `python3 -I scratch/process_sql_scan.py rust` → only the expand migration's
   bridge and fixtures name `processes`.
 - A fixture Task run end to end (`lf task run` with stand-in provider) leaves
-  zero `processes` rows; `lf task status --json`, `lf session list --json`,
-  `lf ps --json` agree on what is live.
+  zero `processes` rows; `lf task status --json`, `lf session list --json` and
+  `lf graph list --json` agree on what is live.
 - `store::query_plans`: every repointed read plans `SEARCH`.
 - Measure on a `.backup` copy of the real store: rows into `processes` per
   hour before/after the migration (3,067 + 1,144/day before; bridged only
@@ -555,5 +540,9 @@ Disk, Stray agent processes, Many lf processes), `docs/getting-started.md`,
 `docs/glossary.md`, `docs/security.md`, `docs/lf-reference.md` preamble;
 builtin skills `repo_operate.md`, `task_operate.md`, `wave_operate.md`.
 `docs/dev/*` still describe the Process table; slice 4 updates them with the
-code. The `lf ps` text sample in telemetry.md is the column set slice 4 builds
-(scope, kind, harness or graph, title or step, pid, state, age).
+code. These docs predate the 2026-11-17 call to delete `lf ps`: 16 mentions
+in 11 files (`docs/{work,ops,lf-reference,troubleshooting,agent-api,surfaces,getting-started,sessions}.md`
+and the three operate skills; `grep -rn "lf ps" docs rust/loopflow-definitions/src/builtins`)
+still describe a new `lf ps`, and the telemetry.md sample's columns (scope,
+kind, harness or graph, title or step, pid, state, age) have no command to
+belong to. Slice 4 moves them to `lf session list` / `lf graph list`.

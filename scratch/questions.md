@@ -64,3 +64,4 @@
   one viewer holds input; others attach read-only with **Move here**; `lf open`
   reports an already-open conversation instead of attaching; `lf resume` moves
   input. Overview tabs run `lf task view` (#1814, layout era).
+- Jack Heart: "but we should change the ViewerPolicy", "in this diff." See "Every view of a managed Session is editable" in loo-935-store-reduction.md.

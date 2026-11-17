@@ -168,5 +168,29 @@ holds input; an ended Session resumes its provider).
 - Check whether anything else existed only for `lf task view` or the copied
   layouts (e.g. `swift/Loopflow/Models/MultiplexerLayout.swift`'s `.task`
   case, `waves::subscribe_task_pane`) and delete it in the same diff.
-- The input policy itself (many editable viewers per managed Session) is not
-  this Task; see questions.md "Task tabs and viewers".
+
+## Every view of a managed Session is editable (2026-11-17)
+
+Jack Heart, word for word: "a task tab was meant to be the task session, with
+an editable input. i think our policy for managed sessions is just you get many
+editable viewers into the same terminal, so you see drafts from A in B", then
+"but we should change the ViewerPolicy", "in this diff."
+
+- Every view of a held terminal sends input. There is no input claim: delete
+  `control`/`replace`/`own` input semantics in the attach protocol, read-only
+  views, **Move here** / **Take back** (Desktop and docs), the
+  claim/`viewer_hold` paths in the holder, server and `transport/`, and the
+  "already open, opened nothing" branch of `lf open` (`--here`/`--tab` attach
+  another view; `--focus` still reveals an existing one).
+- `lf resume <session>` opens that Session here; it no longer "moves input".
+- Terminal size, a choice made for review: the view that most recently sent
+  input or attached sets the size (tmux's "latest"). Passed over: smallest
+  view (wastes the big screen), first view (stale after it walks away).
+- A held terminal that is Busy (a person typing in a native client the server
+  can't share) is the one case to check by reading the code: keep whatever
+  makes a native client's input safe, and say what in the PR.
+- Delete the `held_terminals.viewer_hold/_at/viewed` reads and writes too if
+  nothing else needs them, and mark them `-- leaving:` for LOO-954.
+- Docs: transport/README.md, docs/sessions.md, docs/surfaces.md,
+  docs/security.md (a connection is a full editor; access is per person),
+  docs/server.md, docs/troubleshooting.md, docs/workspaces.md.

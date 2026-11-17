@@ -329,16 +329,6 @@ Exec cost, one Start on a scratch home (debug build, load ≈ 50): checkout
 `prompt_begin` 0.58 s; prompt build 1.49 s; prompt end → provider exec 0.84 s.
 Slice 4 removes the 0.58 s; prompt build is the larger cost.
 
-Remaining, in order: one timing target; slice 4 (as settled below); slice 5's remote sample.
-
-Slice 4's reset check (read in `bin/lf.rs` main, not built): the exec'd `lf -i`
-redoes per-process startup that an in-process launch must do itself or drop:
-`journal::admit_process` (a new LfProcess after `finish_before_exec` closed the
-resume's), `select_invocation(cli.setting_values())`, home canonicalization,
-`--task` Work binding, and the env reads `prepared_artifact_key` and
-`active_session_token` make (each removes its variable). `transport::HANDOFF`
-and tracing are already set in the resume process.
-
 Concept review of e01c813a0a found the ready checkout's owner split (only
 setup replaced it, so a backlog `lf task run` that took it left none) and a
 hand-deleted one never returning (its registration made plain `worktree add`
@@ -348,34 +338,9 @@ exit 128). Fixed: a successful `take_ready_checkout` calls
 stays for a repository with none. The ready-checkout fixture deletes it by hand
 and checks the next Start makes another.
 
-Agent choice (steer, Jack Heart: "ok, check it"): `lf -a X task create --run`
-holds `lf session resume <id>` with no agent; `-a` lives in
-`settings::invocation_values()` in memory, not `LF_AGENT_OVERRIDE`, and
-`transport::start_held` copies only process env, so the conversation and its
-Graph likely run the configured agent. The choice travels in the creation
-request and the held argv, not ambient env.
-
-Slice order: slice 5's local half before slice 4. Jack Heart on the one-start
-count: "I guess this is fine, im not sure what the one lf start goal is about".
-Slice 4's case is deleting the exec carriers (`pass_launch_lock`,
-`LAUNCH_LOCK_ENV`, `inherited_launch_lock`, `carry_across_exec` in
-`serve_locked`) against a crate inversion; the spans say what the exec costs
-first. Its test becomes "the provider's parent is the held `session resume`",
-not a count of `lf` starts.
-
-Slice 4 shape (read, not built): `serve_locked`
-(`ops/human_session.rs`) builds `lf -i --agent … --cwd … [--task X] : <turn>`
-and execs it; the `-i` path is parsed and assembled in the application
-(`lf/commands/run.rs` → `harness::native_session::launch_session`), a layer
-above execution. Calling it in-process from `serve_locked` would invert the
-crates. Candidate: `serve_locked` returns the launch (args, the two env
-values, the held launch lock) to the application's `session resume` handler,
-which runs it through its own `-i` entry in-process; `pass_launch_lock`,
-`LAUNCH_LOCK_ENV`, `inherited_launch_lock`'s env read and both
-`carry_across_exec` go with the exec. Check first: what the exec resets that
-the provider relies on (`HUMAN_SESSION_ENV`/`PREPARED_CAPTURE_ENV` read from
-process env, `journal::finish_before_exec`, the `lf session resume`
-LfProcess becoming the launcher's).
+Jack Heart on the one-start count: "I guess this is fine, im not sure what the
+one lf start goal is about". Slice 4's test is "the provider's parent is the
+held `session resume`", not a count of `lf` starts.
 
 Concept review of 1122563065 and 3d582e361b: `-a` and the spans hold. Settled
 for the next implement pass, in this order:
@@ -394,7 +359,9 @@ for the next implement pass, in this order:
   the `-i` entry in `lf/commands/run.rs` without a Clap re-parse or `set_var`.
   `active_session_token`/`prepared_artifact_key` take it from the launch on
   this path; `run_native_session` already takes `launch_lock: Option<File>`, so
-  the lock goes there directly.
+  the lock goes there directly. The `-i` entry also did per-process startup
+  the in-process path must do or drop: `select_invocation(cli.setting_values())`,
+  home canonicalization and `--task` Work binding (read in `bin/lf.rs` main).
 - **One LfProcess.** The exec kept the PID and recorded two LfProcesses for it
   (`finish_before_exec` closed the resume's, the `-i` admitted another). In
   process, the held `session resume` LfProcess is the launcher;
@@ -416,6 +383,8 @@ for the next implement pass, in this order:
   creation Start and on a plain `lf session resume` of a prepared Session; the
   `-a` fixture stays green (the Graph's provider is X).
 
+Remaining, in order: one timing target; slice 4; slice 5's remote sample.
+
 ## Slices
 
 1. **Admission + conversation setup (Rust).** One transaction, held
@@ -434,9 +403,9 @@ for the next implement pass, in this order:
 3. **Ready checkout.** Make, take, replace; check cleanup leaves it alone.
    Test: second Start in a fixture repo moves the ready worktree into place
    (same inode), no `worktree add` on the request, a new `.ready` appears.
-4. **Provider in-process.** Drop the exec. Test: an `LF_BIN` wrapper counting
-   invocations sees exactly one `lf` start (held `session resume`) between
-   `task.create` and the stub provider, warm holder.
+4. **Provider in-process.** Drop the exec (shape in Status). Test: the stub
+   provider's parent is the held `session resume`, on a creation Start and on
+   a plain resume of a prepared Session; the `-a` fixture stays green.
 5. **Journal.** Spans in the report, Machine kind split; record Start → typing
    on the live Machine and on a remote Machine.
 

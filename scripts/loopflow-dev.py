@@ -44,6 +44,7 @@ from pathlib import Path
 import boto3
 import botocore.exceptions
 from app_bundle import install_app_executable
+from bundle_version import read_build_revision, read_release_version, stamp_bundle_version
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SWIFT_DIR = REPO_ROOT / "swift"
@@ -791,6 +792,9 @@ def _install_dev_app() -> None:
     # The dev plist names the executable `Loopflow Dev`, so install against it.
     shutil.copy(SWIFT_DIR / "LoopflowMac" / "Info.plist", app_dir)
     _apply_dev_identity(app_dir / "Info.plist")
+    stamp_bundle_version(
+        app_dir / "Info.plist", read_release_version(REPO_ROOT), read_build_revision(REPO_ROOT)
+    )
     install_app_executable(SWIFT_DIR / ".build" / "debug", app_dir / "Info.plist", app_dir)
     shutil.copy(SWIFT_DIR / "LoopflowMac" / "AppIcon.icns", app_dir / "Resources")
     _copy_bundled_tools(macos_dir)

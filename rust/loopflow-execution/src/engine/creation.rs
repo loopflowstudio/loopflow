@@ -2,6 +2,7 @@
 use std::fs::{File, OpenOptions};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Instant;
 
 use anyhow::{Context, Result};
 use fs2::FileExt;
@@ -71,40 +72,60 @@ pub fn lookup(id: &str) -> Result<Option<CreationReceipt>> {
     Ok(store.sqlite.creation_receipt(id)?)
 }
 
+/// Bounded creation stages are visible under the served request's trace. Never
+/// record the request text, title, generated prompt or provider output.
+fn step<T>(name: &'static str, run: impl FnOnce() -> T) -> T {
+    tracing::info_span!("creation_step", step = name).in_scope(|| {
+        let started = Instant::now();
+        let result = run();
+        tracing::info!(
+            elapsed_ms = started.elapsed().as_secs_f64() * 1000.0,
+            "Creation step finished"
+        );
+        result
+    })
+}
+
 pub fn create(id: &str, mut input: TaskCreation) -> Result<TaskCreateReceipt> {
+    let _creation = tracing::info_span!("task_creation", request_id = id).entered();
     // CLI and served callers may spell the same checkout through different paths.
-    input.directory = crate::repo::require_repo_root(&input.directory, "task create")?;
+    input.directory = step("resolve_repository", || {
+        crate::repo::require_repo_root(&input.directory, "task create")
+    })?;
     let identity = identity("task.create", id, &input, input.run)?;
-    let _lock = lock(id)?;
-    let store = Arc::new(
-        tokio::runtime::Runtime::new()?.block_on(open_store(&storage_config_from_env()?))?,
-    );
-    store
-        .sqlite
-        .check_creation(&identity)
-        .map_err(|error| match error {
+    let _lock = step("creation_lock", || lock(id))?;
+    let store = step("open_store", || -> Result<_> {
+        Ok(Arc::new(
+            tokio::runtime::Runtime::new()?.block_on(open_store(&storage_config_from_env()?))?,
+        ))
+    })?;
+    step("check_receipt", || store.sqlite.check_creation(&identity)).map_err(
+        |error| match error {
             crate::store::StoreError::Stale(message) => anyhow::Error::from(
                 Error::new(ErrorCode::Conflict, message).with(serde_json::json!({"request_id":id})),
             ),
             other => other.into(),
-        })?;
+        },
+    )?;
     let recorded = match store.sqlite.creation_receipt(id)? {
         Some(receipt) => receipt,
         None => {
             if let Some(graph) = input.graph.as_deref() {
                 crate::ops::task::load_graph(graph, "", &input.directory)?;
             }
-            crate::ops::task::task_create(
-                &input.directory,
-                input.wave.as_deref(),
-                input.title.clone(),
-                input.request.clone(),
-                crate::ops::task::TaskAdoptionOptions {
-                    session: input.session.clone(),
-                    worktree: input.worktree.clone(),
-                },
-                Some(identity),
-            )?;
+            step("file_task", || {
+                crate::ops::task::task_create(
+                    &input.directory,
+                    input.wave.as_deref(),
+                    input.title.clone(),
+                    input.request.clone(),
+                    crate::ops::task::TaskAdoptionOptions {
+                        session: input.session.clone(),
+                        worktree: input.worktree.clone(),
+                    },
+                    Some(identity),
+                )
+            })?;
             store
                 .sqlite
                 .creation_receipt(id)?
@@ -127,8 +148,8 @@ pub fn create(id: &str, mut input: TaskCreation) -> Result<TaskCreateReceipt> {
     let session_id = if input.approve {
         None
     } else {
-        Some(
-            tokio::runtime::Runtime::new()?
+        Some(step("prepare_primary_session", || -> Result<_> {
+            Ok(tokio::runtime::Runtime::new()?
                 .block_on(crate::ops::human_session::primary::ensure_task(
                     &store,
                     &input.directory,
@@ -136,8 +157,8 @@ pub fn create(id: &str, mut input: TaskCreation) -> Result<TaskCreateReceipt> {
                     input.request.clone(),
                 ))?
                 .0
-                .id,
-        )
+                .id)
+        })?)
     };
     // The projection permits either the first launch or finishing its result.
     if recorded.milestone == "filed" {
@@ -152,8 +173,9 @@ pub fn create(id: &str, mut input: TaskCreation) -> Result<TaskCreateReceipt> {
         args.extend(["task".into(), "run".into(), receipt.task.identifier.clone()]);
         args.extend(input.graph.iter().cloned());
         args.push("--json".into());
-        let launched: super::task::TaskRun =
-            super::launch::start_creation(&input.directory, &args, id)?;
+        let launched: super::task::TaskRun = step("launch_graph", || {
+            super::launch::start_creation(&input.directory, &args, id)
+        })?;
         store
             .sqlite
             .record_creation_launch(id, &serde_json::to_value(launched)?)?;
@@ -164,11 +186,14 @@ pub fn create(id: &str, mut input: TaskCreation) -> Result<TaskCreateReceipt> {
     receipt.graph = Some(graph);
     receipt.session_id = session_id;
     receipt.milestone = if input.approve { "started" } else { "admitted" }.into();
-    store.sqlite.advance_creation(
-        id,
-        &receipt.milestone,
-        Some(&serde_json::to_value(&receipt)?),
-    )?;
+    step("admit_receipt", || -> Result<()> {
+        store.sqlite.advance_creation(
+            id,
+            &receipt.milestone,
+            Some(&serde_json::to_value(&receipt)?),
+        )?;
+        Ok(())
+    })?;
     Ok(receipt)
 }
 

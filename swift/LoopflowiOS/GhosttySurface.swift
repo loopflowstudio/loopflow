@@ -240,6 +240,8 @@ final class GhosttySurfaceView: UIView {
         ghostty_surface_free(surface)
     }
 
+    func prepareFrame() { if let surface { ghostty_surface_draw(surface) } }
+
     func feed(_ bytes: Data) {
         guard !bytes.isEmpty else { return }
         guard let surface else {

@@ -73,7 +73,7 @@ Session (`no PTY left: 511 in use (kern.tty.ptmx_max)`) and retries on the
 same backoff. Wave, repository and bare conversations are reported, never
 started.
 
-## Local protocol, revision 5
+## Local protocol, revisions 5–6
 
 One connection per client over the same-user Unix socket. Every message is one
 JSON object per line (`serde_json` never emits a raw newline). Control messages
@@ -156,10 +156,14 @@ unavailable or uninitialized) and limits. The negotiated revision is the whole
 compatibility check: a server that speaks it offers every operation below, so
 no capability list travels. With no revision in
 common it answers `error {code: incompatible}` naming the side to update in
-its message and in `data.update` (`client` or `server`), then closes. This build speaks revision 5 only; the shape lets a later server speak
+its message and in `data.update` (`client` or `server`), then closes. This build speaks revisions 5–6; the shape lets a later server speak
 two. A revision-1 client's four-byte length prefix starts below `0x20`; the
 server answers it a revision-1 framed `incompatible` error carrying `instance`
 and closes. That sniff is the whole compatibility layer and goes with revision 1.
+
+Revision 6 adds per-request SQL receipts (`performance.read`, `performance.write`) and subscription
+SQL evaluation IDs. Revision 5 clients retain ordinary reads without attributed
+SQL receipts.
 
 Revision 5 combines bulk/upload tickets, mobile access, shared subscription
 readers and typed events. Control messages are limited to 1 MiB; ticketed

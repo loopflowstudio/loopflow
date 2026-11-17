@@ -262,13 +262,13 @@ fn task_link_resolves_by_folder_name_without_preparing_anything() {
     );
     assert_eq!(link["target"]["task_id"], registered.task.id.as_str());
     assert_eq!(link["conversation"], "unknown");
+    let wave_url = format!("loopflow://{}/wave/task-pr-tests", folder(repo.path()));
     let overview = json(&lf(
         home.path(),
         elsewhere.path(),
         None,
-        &["open", "--workspace", &url, "--link", "--json"],
+        &["open", "--workspace", &wave_url, "--link", "--json"],
     ));
-    let wave_url = format!("loopflow://{}/wave/task-pr-tests", folder(repo.path()));
     assert_eq!(
         overview[0]["fallback_argv"],
         serde_json::json!(["lf", "open", "--workspace", wave_url]),
@@ -497,8 +497,10 @@ fn opening_an_unplaced_task_places_it_and_starts_its_conversation() {
 
 /// `--workspace` from a Task opens its repository's overview, which shows the
 /// Task even before it starts, and places nothing.
+/// A Task is one conversation: `--workspace` names the overview to open instead
+/// and creates nothing.
 #[test]
-fn workspace_from_an_unstarted_task_opens_its_repository_overview() {
+fn workspace_from_a_task_names_its_repository_overview() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     let bin = tempfile::tempdir().unwrap();
@@ -510,9 +512,9 @@ fn workspace_from_an_unstarted_task_opens_its_repository_overview() {
         &["task", "create", "--title", "Fresh work", "--json"],
     ))["task"]
         .clone();
-    let id = created["id"].as_str().unwrap();
+    let identifier = created["identifier"].as_str().unwrap();
     let log = host(bin.path(), "cmux", "OK workspace_group:G-1 workspace:7", 0);
-    let report = json(&lf(
+    let output = lf(
         home.path(),
         repo.path(),
         Some(bin.path()),
@@ -520,35 +522,22 @@ fn workspace_from_an_unstarted_task_opens_its_repository_overview() {
             "open",
             "--workspace",
             "--task",
-            id,
+            identifier,
             "--host",
             "cmux",
-            "--json",
         ],
-    ));
-    let receipt = &report["receipts"][0];
-    assert_eq!(receipt["status"], "opening", "{report}");
-    assert_eq!(receipt["container"], "workspace_group:G-1", "{report}");
-    assert!(
-        receipt["label"].as_str().unwrap().ends_with("Fresh work"),
-        "{report}"
     );
-    let calls = std::fs::read_to_string(log).unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        calls.contains(&format!(
-            "workspace-group create --name {}",
+        stderr.contains(&format!(
+            "Run lf open --workspace loopflow://{}",
             folder(repo.path())
         )),
-        "the repository gets its own group: {calls}"
+        "{stderr}"
     );
-    assert!(calls.contains(r"'task' 'view'"), "{calls}");
-    assert!(!calls.contains("resume"), "{calls}");
+    assert!(!log.exists(), "nothing was opened");
     assert_eq!(sessions(home.path()), 0);
-    let placed: i64 = rusqlite::Connection::open(home.path().join("loopflow.db"))
-        .unwrap()
-        .query_row("SELECT COUNT(*) FROM task_checkouts", [], |row| row.get(0))
-        .unwrap();
-    assert_eq!(placed, 0);
 }
 
 #[test]
@@ -1261,10 +1250,6 @@ fn rex_each_open_launches_a_fresh_task_tab_without_finding_earlier_ones() {
     assert_eq!(created.lines().count(), 2, "{created}");
     for request in created.lines() {
         assert!(request.contains("resume"));
-        assert!(
-            !request.contains("Task & workflow"),
-            "Only the Task's conversation opens"
-        );
     }
     // Opening neither searches for nor touches an earlier native workspace.
     assert!(!bin.path().join("session.list.requests").exists());
@@ -1414,11 +1399,9 @@ fn rex_reply(bin: &Path, method: &str, reply: Value) {
     std::fs::write(bin.join(format!("{method}.reply")), reply.to_string()).unwrap();
 }
 
-/// One follower produces every Machine's arrivals. A Machine with nothing open gets
-/// its container on the first arrival; later arrivals append to the handle the
-/// follower holds; an uncertain creation is never followed by another.
+/// Another Machine opens its own Tasks of the overview; nothing falls back here.
 #[test]
-fn rex_follower_places_remote_arrivals_in_one_container_per_machine() {
+fn a_remote_machine_opens_its_part_of_an_overview() {
     use loopflow_execution::durable::MachineId;
 
     let repo = TestRepo::new();
@@ -1441,77 +1424,12 @@ fn rex_follower_places_remote_arrivals_in_one_container_per_machine() {
         )
         .unwrap();
     rex_peer(bin.path());
-    rex_reply(
-        bin.path(),
-        "session.list",
-        serde_json::json!({"sessions":[{"session_id":"session:fixture"}]}),
-    );
     let url = format!("loopflow://{}", folder(repo.path()));
     let receipt = serde_json::json!({"receipts":[{
         "label":"INF-123 · Task","url":format!("{url}/task/INF-123"),"host":"rex",
         "destination":"window:remote","container":"session:remote","status":"opening",
         "reason":"Created","fallback_argv":[]}],"unknown":[]});
     let requests = host(bin.path(), "ssh", &receipt.to_string(), 0);
-    let follow = |remote: Option<String>| {
-        let mut args = vec![
-            "open".to_owned(),
-            "--workspace".into(),
-            url.clone(),
-            "--host".into(),
-            "rex".into(),
-            "--server".into(),
-            "unix:///fixture/rex.sock".into(),
-            "--follow".into(),
-            "session:fixture".into(),
-        ];
-        args.extend(
-            remote
-                .into_iter()
-                .flat_map(|value| ["--remote".into(), value]),
-        );
-        let args: Vec<&str> = args.iter().map(String::as_str).collect();
-        let output = lf(home.path(), repo.path(), Some(bin.path()), &args);
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let sent = std::fs::read_to_string(&requests).unwrap_or_default();
-        let _ = std::fs::remove_file(&requests);
-        (sent, String::from_utf8_lossy(&output.stdout).into_owned())
-    };
-
-    let (sent, stdout) = follow(None);
-    assert!(
-        sent.contains("--arrive-task")
-            && sent.contains(registered.task.id.as_str())
-            && sent.contains("--local-workspace")
-            && sent.contains("--no-focus"),
-        "{sent}"
-    );
-    assert!(
-        !sent.contains("--into"),
-        "the first arrival creates: {sent}"
-    );
-    assert!(stdout.contains("Added INF-123"), "{stdout}");
-
-    let (sent, _) = follow(Some(format!("{peer}=session:remote")));
-    assert!(sent.contains("'--into' 'session:remote'"), "{sent}");
-
-    let (sent, _) = follow(Some(format!("{peer}=")));
-    assert!(
-        sent.is_empty(),
-        "uncertain creation is not followed: {sent}"
-    );
-
-    assert!(
-        !bin.path().join("session.new_window.requests").exists(),
-        "no local fallback"
-    );
-    assert!(!bin.path().join("session.create.requests").exists());
-
-    // A broad launch hands the peer's container and opened Tasks to its one
-    // follower; the peer starts no follower of its own.
     let launch = lf(
         home.path(),
         repo.path(),
@@ -1532,46 +1450,21 @@ fn rex_follower_places_remote_arrivals_in_one_container_per_machine() {
         "{}",
         String::from_utf8_lossy(&launch.stderr)
     );
-    let sent = std::fs::read_to_string(&requests).unwrap();
-    assert!(
-        sent.contains("'--local-workspace'") && !sent.contains("--arrive-task"),
-        "{sent}"
-    );
-    let workspace =
-        std::fs::read_to_string(bin.path().join("session.new_window.requests")).unwrap();
-    assert!(
-        workspace.contains(&format!("{peer}=session:remote"))
-            && workspace.contains(registered.task.id.as_str()),
-        "{workspace}"
-    );
-    // From the Task, the peer is asked for the same overview with the Task selected.
-    let _ = std::fs::remove_file(&requests);
-    let selected = lf(
-        home.path(),
-        repo.path(),
-        Some(bin.path()),
-        &[
-            "open",
-            "--workspace",
-            "--task",
-            "INF-123",
-            "--host",
-            "rex",
-            "--server",
-            "unix:///fixture/rex.sock",
-            "--json",
-        ],
-    );
-    assert!(
-        selected.status.success(),
-        "{}",
-        String::from_utf8_lossy(&selected.stderr)
+    let report: Value = serde_json::from_slice(&launch.stdout).unwrap();
+    assert_eq!(
+        report["receipts"][0]["destination"], "window:remote",
+        "{report}"
     );
     let sent = std::fs::read_to_string(&requests).unwrap();
     assert!(
-        sent.contains(&format!("'--task' '{}'", registered.task.id)),
+        sent.contains("'--local-workspace'") && !sent.contains("'--task'"),
         "{sent}"
     );
+    assert!(
+        !bin.path().join("session.new_window.requests").exists(),
+        "no local fallback"
+    );
+    assert!(!bin.path().join("session.create.requests").exists());
 }
 
 #[test]
@@ -1806,8 +1699,7 @@ fn rex_unavailable_context_never_falls_through_to_desktop() {
 /// Installed-host acceptance stays opt-in; CI and ordinary tests use bounded peers.
 #[test]
 #[ignore = "requires the installed Rex CLI; creates and destroys an isolated local server"]
-fn rex_native_fresh_launches_keep_earlier_arrangements_and_task_directories() {
-    use std::os::unix::fs::PermissionsExt;
+fn rex_native_fresh_launches_keep_earlier_arrangements() {
     use std::time::{Duration, Instant};
     let root = tempfile::Builder::new()
         .prefix("rex498-")
@@ -1817,7 +1709,7 @@ fn rex_native_fresh_launches_keep_earlier_arrangements_and_task_directories() {
     let home = root.path().join("lf");
     std::fs::create_dir(&home).unwrap();
     let _env = EnvGuard::with_lf_home(&[], &home);
-    let registered = register_task_without_pr(&home, repo.path(), "main", &repo.head_sha());
+    register_task_without_pr(&home, repo.path(), "main", &repo.head_sha());
     let bin = root.path().join("bin");
     std::fs::create_dir(&bin).unwrap();
     host(
@@ -1826,19 +1718,8 @@ fn rex_native_fresh_launches_keep_earlier_arrangements_and_task_directories() {
         "Desktop is excluded from this isolated Rex test",
         1,
     );
-    // Record the actual launch directory, then run the real viewer. Rex's
-    // background process snapshot can retain the initial login process.
-    let viewer = bin.join("lf-viewer");
-    std::fs::write(
-        &viewer,
-        format!(
-            "#!/bin/sh\nif [ \"$3\" = task ] && [ \"$4\" = view ]; then\n pwd -P > '{}/cwd-'\"$5\".pending\n mv '{}/cwd-'\"$5\".pending '{}/cwd-'\"$5\"\nfi\nexec '{}' \"$@\"\n",
-            root.path().display(), root.path().display(), root.path().display(), env!("CARGO_BIN_EXE_lf"),
-        ),
-    )
-    .unwrap();
-    std::fs::set_permissions(&viewer, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let server = IsolatedRex::start(root.path(), &bin, &viewer);
+    let viewer = Path::new(env!("CARGO_BIN_EXE_lf"));
+    let server = IsolatedRex::start(root.path(), &bin, viewer);
     let endpoint = server.endpoint.clone();
     let args = [
         "open", "--tab", "--task", "INF-123", "--host", "rex", "--server", &endpoint, "--json",
@@ -1934,148 +1815,6 @@ fn rex_native_fresh_launches_keep_earlier_arrangements_and_task_directories() {
             .iter()
             .any(|candidate| candidate["window_id"] == inside),
         "a Task opened inside Rex joins the caller's session"
-    );
-    let existing: Vec<Value> = call("session.list", serde_json::json!({}))["sessions"]
-        .as_array()
-        .unwrap()
-        .clone();
-    let repository_url = format!("loopflow://{}", folder(repo.path()));
-    json(&lf(
-        &home,
-        repo.path(),
-        None,
-        &[
-            "open",
-            "--workspace",
-            &repository_url,
-            "--host",
-            "rex",
-            "--server",
-            &endpoint,
-            "--no-focus",
-            "--json",
-        ],
-    ));
-    let inventory = call("session.list", serde_json::json!({}));
-    let workspace = inventory["sessions"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|session| !existing.contains(session))
-        .unwrap_or_else(|| panic!("repository opening created no session: {inventory}"))
-        ["session_id"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-    let deadline = Instant::now() + Duration::from_secs(15);
-    let before_arrival = loop {
-        let view = call("session.view", serde_json::json!({"session_id":workspace}));
-        if view["windows"]
-            .as_array()
-            .is_some_and(|windows| windows.iter().any(|window| window["label"] == "Workspace"))
-        {
-            break view;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "follower tab did not appear: {view}"
-        );
-        std::thread::sleep(Duration::from_millis(50));
-    };
-    let sibling = repo.create_named_worktree("arriving-task");
-    let sibling_task =
-        support::register_sibling_task(&registered, "INF-124", "arriving-task", &sibling);
-    let deadline = Instant::now() + Duration::from_secs(15);
-    let arrived = loop {
-        let current = call("session.view", serde_json::json!({"session_id":workspace}));
-        if current["windows"].as_array().unwrap().len()
-            > before_arrival["windows"].as_array().unwrap().len()
-        {
-            break current;
-        }
-        if Instant::now() >= deadline {
-            let follower = current["windows"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .find(|window| window["label"] == "Workspace")
-                .map(|window| window["layers"][0]["blocks"][0]["block_id"].clone());
-            panic!(
-                "Started Task did not arrive in the native session: {current}\nfollower: {}",
-                follower.map_or(Value::Null, |block| call(
-                    "com.superlogical.terminal.format",
-                    serde_json::json!({"session_id":workspace,"block_id":block,"args":{"format":"text"}}),
-                ))
-            );
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    };
-    assert_eq!(
-        before_arrival["active_window_id"], arrived["active_window_id"],
-        "arrivals never take focus"
-    );
-    let arrival = arrived["windows"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|window| {
-            window["label"]
-                .as_str()
-                .is_some_and(|label| label.contains("INF-124") || label.contains("arriving"))
-                || !before_arrival["windows"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .any(|old| old["window_id"] == window["window_id"])
-        })
-        .unwrap()
-        .clone();
-    let labels: Vec<&Value> = arrival["layers"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .flat_map(|layer| layer["blocks"].as_array().unwrap())
-        .map(|block| &block["label"])
-        .collect();
-    assert_eq!(
-        labels,
-        [&Value::from("Task & workflow")],
-        "an arriving Task shows only its Task view: {arrival}"
-    );
-    let deadline = Instant::now() + Duration::from_secs(5);
-    let arrival_cwd = loop {
-        if let Ok(cwd) =
-            std::fs::read_to_string(root.path().join(format!("cwd-{}", sibling_task.id)))
-        {
-            break cwd;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "Arriving Task view did not record its directory"
-        );
-        std::thread::sleep(Duration::from_millis(50));
-    };
-    assert_eq!(
-        std::fs::canonicalize(arrival_cwd.trim()).unwrap(),
-        std::fs::canonicalize(&sibling).unwrap(),
-        "The arriving Task view must execute in its Task checkout, not the repository root"
-    );
-    assert_eq!(
-        sessions(&home),
-        1,
-        "overviews and arrivals start no conversation"
-    );
-    // A closed arrival stays closed while the follower runs.
-    call(
-        "session.close_window",
-        serde_json::json!({"session_id":workspace,"window_id":arrival["window_id"]}),
-    );
-    std::thread::sleep(Duration::from_secs(3));
-    let after_close = call("session.view", serde_json::json!({"session_id":workspace}));
-    assert_eq!(
-        after_close["windows"].as_array().unwrap().len(),
-        before_arrival["windows"].as_array().unwrap().len(),
-        "{after_close}"
     );
     for session in call("session.list", serde_json::json!({}))["sessions"]
         .as_array()
@@ -2339,7 +2078,6 @@ fn repository_and_wave_open_one_conversation_independent_of_layout() {
     for request in created.lines() {
         let request: Value = serde_json::from_str(request).unwrap();
         assert_eq!(request["layout"]["block"]["label"], "Conversation");
-        assert!(!request.to_string().contains("Task & workflow"));
         assert!(!request.to_string().contains("--follow"));
     }
     assert_eq!(sessions(home.path()), 2);
@@ -2410,7 +2148,7 @@ fn failed_attachment_returns_failure_and_the_same_command_can_retry() {
 
 #[cfg(target_os = "macos")]
 #[test]
-fn desktop_workspace_and_default_view_widen_a_task_to_its_wave() {
+fn desktop_workspace_and_default_view_name_a_tasks_wave_overview() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     let bin = tempfile::tempdir().unwrap();
@@ -2421,26 +2159,23 @@ fn desktop_workspace_and_default_view_widen_a_task_to_its_wave() {
         vec!["open", "--workspace", "--host", "desktop"],
         vec!["desktop", "view"],
     ] {
-        let args = [command.as_slice(), &["--task", "INF-123", "--json"]].concat();
-        let report = json(&lf_with(
+        let args = [command.as_slice(), &["--task", "INF-123"]].concat();
+        let output = lf_with(
             home.path(),
             repo.path(),
             Some(bin.path()),
             &[("LF_DESKTOP", "com.loopflow.mac.test")],
             &args,
-        ));
-        assert_eq!(report["receipts"][0]["status"], "opening", "{report}");
-        assert_eq!(sessions(home.path()), 0);
+        );
+        assert!(!output.status.success());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("Run lf open --wave task-pr-tests --workspace"),
+            "{stderr}"
+        );
     }
-    let requests = std::fs::read_to_string(opened).unwrap();
-    assert_eq!(requests.lines().count(), 2, "{requests}");
-    assert!(
-        requests.lines().all(
-            |line| line.contains("view=wave%3Atask-pr-tests+state%3Aworking")
-                && !line.contains("session=")
-        ),
-        "{requests}"
-    );
+    assert!(!opened.exists(), "Desktop was not asked to open anything");
+    assert_eq!(sessions(home.path()), 0);
 }
 
 #[test]
@@ -2625,34 +2360,18 @@ fn desktop_conversation_attachment_retry_and_focus_keep_the_retained_view() {
     assert!(focused.status.success(), "focus retained view: {focused:?}");
     assert_eq!(json(&focused)["receipts"][0]["status"], "focused");
     assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(), 2);
-    let companion = lf_with(
-        home.path(),
-        repo.path(),
-        Some(bin.path()),
-        &env,
-        &[
-            "open",
-            "--session",
-            &session,
-            "--host",
-            "desktop",
-            "--diff",
-            "--json",
-        ],
-    );
-    assert_eq!(json(&companion)["receipts"][0]["status"], "usable");
     let mut reading: Value =
         serde_json::from_str(&std::fs::read_to_string(&reading_path).unwrap()).unwrap();
     reading["windows"][0]["workspaces"][0]["layout"]["children"][0]["attachment"] =
         "opening".into();
     std::fs::write(&reading_path, reading.to_string()).unwrap();
     assert_eq!(json(&open())["receipts"][0]["status"], "opening");
-    assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(), 3);
+    assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(), 2);
     reading["windows"][0]["workspaces"] = serde_json::json!([]);
     reading["windows"][0]["opening"]["status"] = "opening".into();
     std::fs::write(&reading_path, reading.to_string()).unwrap();
     assert_eq!(json(&open())["receipts"][0]["status"], "opening");
-    assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(), 3);
+    assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(), 2);
     let pending_focus = focus();
     assert!(!pending_focus.status.success());
     assert!(String::from_utf8_lossy(&pending_focus.stdout).contains("Not open"));

@@ -951,8 +951,6 @@ fn open_explain_reads_a_plain_repository_without_initializing_or_launching() {
     let folder = repo.path().file_name().unwrap().to_str().unwrap();
     assert_eq!(plain["links"][0]["url"], format!("loopflow://{folder}"));
     assert!(plain["links"][0]["target"]["repo_id"].is_null());
-    let invalid = run(&["open", "--diff", "--explain", "--json"]);
-    assert!(String::from_utf8_lossy(&invalid.stderr).contains("--diff needs a Task"));
     assert!(success(run(&["open", "--explain"])).contains("Nothing was executed"));
     assert!(!home.path().join(".lf").exists());
     assert!(!repo.path().join(".lf/tmp").exists());
@@ -987,14 +985,11 @@ fn open_explain_preserves_state_and_matches_explicit_and_inferred_work() {
         serde_json::from_str::<serde_json::Value>(&success(run(args))).unwrap()["links"][0]["url"]
             .clone()
     };
-    let explicit = url(&["--task", "INF-123", "open", "--diff", "--explain", "--json"]);
-    let inferred = url(&["open", "--diff", "--explain", "--json"]);
+    let explicit = url(&["--task", "INF-123", "open", "--explain", "--json"]);
+    let inferred = url(&["open", "--explain", "--json"]);
     assert_eq!(explicit, inferred);
     let folder = repo.path().file_name().unwrap().to_str().unwrap();
-    assert_eq!(
-        explicit,
-        format!("loopflow://{folder}/task/INF-123?diff=true")
-    );
+    assert_eq!(explicit, format!("loopflow://{folder}/task/INF-123"));
     assert!(
         !run(&["open", "--session", "missing", "--explain", "--json"])
             .status

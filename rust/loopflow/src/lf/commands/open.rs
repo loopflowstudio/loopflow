@@ -1,6 +1,6 @@
 //! Conversation selection and host presentation. `open` reaches one Session;
-//! `open --workspace` opens Task tabs and overviews and follows Task arrivals. Both use the shared
-//! non-replacing Session connection; explicit resume owns input takeover.
+//! `open --workspace` opens a Wave's or repository's started Tasks as tabs, each
+//! the Task's Session.
 
 use loopflow_execution::store::session_projection;
 mod cmux;
@@ -98,7 +98,6 @@ pub struct WorkLinkTarget {
     pub wave: Option<String>,
     /// An explicit Session selection; ordinary Work links leave it absent.
     pub session: Option<String>,
-    pub diff: bool,
     /// The execution owner when it is another Machine.
     pub execution_machine: Option<String>,
 }
@@ -273,7 +272,6 @@ impl Resolved {
                 task_id: self.task.as_ref().map(|task| task.id.to_string()),
                 wave: self.wave.clone(),
                 session: self.session.clone(),
-                diff: self.url.diff,
                 execution_machine: self.execution_machine.clone(),
             },
             conversation,
@@ -412,7 +410,6 @@ fn describe(
     store: Option<&Store>,
     context: &ContextExplanation,
     session: Option<String>,
-    diff: bool,
     session_cwd: Option<PathBuf>,
 ) -> Result<Resolved> {
     if let ContextFact::Unavailable { reason } = &context.task {
@@ -450,10 +447,6 @@ fn describe(
         }
         _ => None,
     };
-    anyhow::ensure!(
-        !diff || task.is_some(),
-        "--diff needs a Task; select --task or a Task-associated --session. Nothing was opened."
-    );
     let execution_machine = match (&task, &context.execution_machine, &context.machine) {
         (
             Some(_),
@@ -461,7 +454,7 @@ fn describe(
             ContextFact::Bound { value: local, .. },
             // The owner creates its checkout when the routed connect arrives.
         ) if owner != local => Some(owner.clone()),
-        (Some(_), ContextFact::Unavailable { reason }, _) if session.is_some() || diff => {
+        (Some(_), ContextFact::Unavailable { reason }, _) if session.is_some() => {
             bail!("Task execution location unavailable: {reason}. Nothing was opened.");
         }
         _ => None,
@@ -493,7 +486,6 @@ fn describe(
     let mut url = WorkUrl::new(short_name.clone(), target);
     url.qualifier = own.and_then(|own| qualifier_for(&registered, own, &short_name));
     url.session = session.clone();
-    url.diff = diff;
     let (primary, primary_machine) = match store {
         Some(store) => {
             let scope = match (&task, &context.wave) {
@@ -780,7 +772,6 @@ fn available_target(
         Some(store),
         &context,
         exact.clone(),
-        false,
         exact.as_ref().map(|_| session.cwd.clone()),
     )?;
     if exact.is_some() {
@@ -1096,9 +1087,6 @@ pub struct OpenSelection {
     /// Open this exact Session rather than its scope's primary
     #[arg(long)]
     pub session: Option<String>,
-    /// Show the Task's Changes browser beside its conversation (Desktop)
-    #[arg(long)]
-    pub diff: bool,
     /// Print a link without opening or preparing anything
     #[arg(long)]
     pub link: bool,
@@ -1113,7 +1101,7 @@ pub struct OpenSelection {
 
 #[derive(Debug, Clone, clap::Args)]
 #[command(
-    after_help = "Direct CLI calls attach here; agent calls open a sibling tab. An already-open conversation stays where it is: use --focus to reveal it, or lf resume to move input. --workspace opens the repository or Wave overview instead: its started, unfinished Tasks as tabs. A Task opens its Wave's overview, else its repository's, with the Task among them."
+    after_help = "Direct CLI calls attach here; agent calls open a sibling tab. An already-open conversation stays where it is: use --focus to reveal it, or lf resume to move input. --workspace opens the repository or Wave overview instead: its started, unfinished Tasks as tabs, each the Task's conversation."
 )]
 pub struct OpenArgs {
     #[command(flatten)]
@@ -1128,7 +1116,7 @@ pub struct OpenArgs {
     #[arg(long, conflicts_with_all = ["workspace", "available"])]
     pub focus: bool,
     /// Present original files in an attached Desktop Files view
-    #[arg(long = "file", value_name = "PATH", conflicts_with_all = ["session", "diff", "link", "here", "tab", "focus", "workspace", "available"])]
+    #[arg(long = "file", value_name = "PATH", conflicts_with_all = ["session", "link", "here", "tab", "focus", "workspace", "available"])]
     pub files: Vec<PathBuf>,
     /// Open the repository or Wave overview: started, unfinished Tasks as tabs
     #[arg(long)]
@@ -1139,18 +1127,9 @@ pub struct OpenArgs {
     /// Keep the host's current selection
     #[arg(long)]
     pub no_focus: bool,
-    #[arg(long, hide = true, requires_all = ["server", "workspace"])]
-    pub follow: Option<String>,
-    #[arg(long, hide = true, requires = "follow", value_delimiter = ',')]
-    pub seen: Vec<String>,
+    /// Another Machine's overview request: open only that Machine's Tasks.
     #[arg(long, hide = true, requires = "workspace")]
     pub local_workspace: bool,
-    #[arg(long, hide = true, requires = "local_workspace", value_delimiter = ',')]
-    pub arrive_task: Vec<String>,
-    #[arg(long, hide = true, requires = "arrive_task")]
-    pub into: Option<String>,
-    #[arg(long = "remote", hide = true, requires = "follow")]
-    pub remote: Vec<String>,
 }
 
 impl OpenArgs {
@@ -1165,12 +1144,7 @@ impl OpenArgs {
             workspace: true,
             available: false,
             no_focus: false,
-            follow: None,
-            seen: Vec::new(),
             local_workspace: false,
-            arrive_task: Vec::new(),
-            into: None,
-            remote: Vec::new(),
         }
     }
 
@@ -1200,11 +1174,11 @@ fn target(cli: &crate::lf::Cli, args: &OpenSelection) -> Result<Resolved> {
                 cli.task.is_none() && cli.wave.is_none(),
                 "select Work with either a link or --task/--wave, not both"
             );
-            url_target(store, &std::env::current_dir()?, text, session, args.diff)?
+            url_target(store, &std::env::current_dir()?, text, session)?
         }
         None => {
             let context = selected_context(cli, session.as_deref())?;
-            describe(store, &context, session, args.diff, None)?
+            describe(store, &context, session, None)?
         }
     };
     Ok(resolved)
@@ -1216,11 +1190,9 @@ fn url_target(
     directory: &Path,
     text: &str,
     session: Option<String>,
-    diff: bool,
 ) -> Result<Resolved> {
     let url = WorkUrl::parse(text)?;
     let session = session.or_else(|| url.session.clone());
-    let diff = diff || url.diff;
     let repository = repository_for(store, &url, directory)?;
     let (task, wave) = match &url.target {
         WorkTarget::Task(id) => (Some(id.as_str()), None),
@@ -1233,13 +1205,13 @@ fn url_target(
         context.task = ContextFact::Unbound;
         context.wave = ContextFact::Unbound;
     }
-    describe(store, &context, session, diff, None)
+    describe(store, &context, session, None)
 }
 
 /// What `lf --cwd <directory> open <url> --link --json` prints.
 pub fn url_links(directory: &Path, url: &str) -> Result<Vec<WorkLink>> {
     let store = loopflow_execution::store::read_existing_registry()?;
-    let target = url_target(store.as_ref(), directory, url, None, false)?;
+    let target = url_target(store.as_ref(), directory, url, None)?;
     let presentation = if loopflow_execution::journal::agent_caller().is_some() {
         route(OpenHost::Auto)
     } else {
@@ -1329,7 +1301,7 @@ pub(crate) fn run_workspace(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<()>
         .host
         .expect("host selection always names a host");
     if host == OpenHost::Desktop {
-        let target = overview(cli, &args.selection)?.target;
+        let target = overview(cli, &args.selection)?;
         let url = desktop_workspace_url(&target.repository_path, target.wave.as_deref());
         let receipt = match open_desktop(url.as_str(), !args.no_focus) {
             Ok(()) => target.receipt(Some(host), None, OpenStatus::Opening, None),
@@ -1350,7 +1322,7 @@ pub(crate) fn run_workspace(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<()>
     }
     anyhow::ensure!(
         matches!(host, OpenHost::Rex | OpenHost::Herdr | OpenHost::Cmux),
-        "{} does not support workspaces; use lf open without --workspace, lf task view or lf diff",
+        "{} does not support workspaces; use lf open without --workspace or lf diff",
         host.label()
     );
     anyhow::ensure!(
@@ -1379,51 +1351,38 @@ fn open_available(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<()> {
     print_report(OpenReport { receipts, unknown }, json)
 }
 
-/// What `--workspace` opens: a Wave or repository, and the Task it was widened
-/// from, which the overview shows even before it starts.
-struct Overview {
-    target: Resolved,
-    selected: Option<loopflow_model::durable::TaskId>,
-}
-
-/// A Task or Session widens to its scope: its Wave, else its repository.
-fn overview(cli: &crate::lf::Cli, args: &OpenSelection) -> Result<Overview> {
+/// What `--workspace` opens: a Wave or repository. A Task or one Session is a
+/// single conversation, so naming one is an error that names the overview.
+fn overview(cli: &crate::lf::Cli, args: &OpenSelection) -> Result<Resolved> {
     let mut target = target(cli, args)?;
-    target.overview = true;
-    if target.task.is_none() && target.session.is_none() {
-        return Ok(Overview {
-            target,
-            selected: None,
-        });
-    }
-    let store = loopflow_execution::store::read_existing_registry()?;
-    let wave = match &target.task {
-        Some(task) => match &task.wave_id {
-            Some(id) => Some(
-                store
-                    .as_ref()
-                    .context("Wave records are unavailable on this Machine")?
-                    .sqlite
-                    .get_wave(id)?
-                    .context("Wave is no longer recorded")?
-                    .slug()
-                    .to_owned(),
-            ),
+    if let Some(task) = &target.task {
+        let wave = match &task.wave_id {
+            Some(id) => loopflow_execution::store::read_existing_registry()?
+                .context("Wave records are unavailable on this Machine")?
+                .sqlite
+                .get_wave(id)?
+                .map(|wave| wave.slug().to_owned()),
             None => None,
-        },
-        None => target.wave.clone(),
-    };
-    let mut context = work_context(&target.repository_path, None, wave.as_deref(), None)?;
-    if wave.is_none() {
-        context.task = ContextFact::Unbound;
-        context.wave = ContextFact::Unbound;
+        };
+        let instead = match wave {
+            Some(wave) => format!("lf open --wave {wave} --workspace"),
+            None => format!(
+                "lf open --workspace {}",
+                WorkUrl::new(target.url.repository.clone(), WorkTarget::Repository)
+            ),
+        };
+        bail!(
+            "{} is a Task; --workspace opens a Wave or repository. Run {instead}, or lf open --task {} without --workspace",
+            task.identifier,
+            task.identifier
+        );
     }
-    let mut widened = describe(store.as_ref(), &context, None, false, None)?;
-    widened.overview = true;
-    Ok(Overview {
-        target: widened,
-        selected: target.task.map(|task| task.id),
-    })
+    anyhow::ensure!(
+        target.session.is_none(),
+        "--workspace opens a Wave or repository, not one Session; drop --session"
+    );
+    target.overview = true;
+    Ok(target)
 }
 
 fn workspace_targets(
@@ -1433,7 +1392,7 @@ fn workspace_targets(
     if args.available {
         available(cli)
     } else {
-        Ok((vec![overview(cli, &args.selection)?.target], Vec::new()))
+        Ok((vec![overview(cli, &args.selection)?], Vec::new()))
     }
 }
 

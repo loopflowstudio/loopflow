@@ -65,3 +65,14 @@
   reports an already-open conversation instead of attaching; `lf resume` moves
   input. Overview tabs run `lf task view` (#1814, layout era).
 - Jack Heart: "but we should change the ViewerPolicy", "in this diff." See "Every view of a managed Session is editable" in loo-935-store-reduction.md.
+- Jack Heart, on ended Sessions in an overview: "opening 12 agents is fine. start provider right away"
+
+## Picks made headless (2026-11-17)
+
+- **`--local-workspace` stays** (hidden) though the follower steer listed it:
+  another Machine's part of an overview is requested as `lf open --workspace
+  --local-workspace`, which stops it asking peers in turn. The other five
+  follower flags are gone.
+- **`lf desktop view --task X`** errors like `lf open --workspace --task X`: it
+  is the same overview path.
+- **`--workspace --session S`** is an error too: one Session is one conversation.

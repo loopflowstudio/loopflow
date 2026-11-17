@@ -91,10 +91,6 @@ fn present(target: &mut Resolved, args: &OpenArgs, focus_new: bool) -> Result<Op
         args.selection.server.is_none() || host == OpenHost::Rex,
         "--server requires --tab --host rex"
     );
-    anyhow::ensure!(
-        !target.url.diff || mode == Mode::Desktop,
-        "--diff requires --host desktop; use lf diff for terminal changes"
-    );
     if mode == Mode::Here
         && args.selection.host != OpenHost::Auto
         && args.selection.host != OpenHost::Terminal
@@ -113,13 +109,8 @@ fn present(target: &mut Resolved, args: &OpenArgs, focus_new: bool) -> Result<Op
     resolve(target, false)?;
     if let Some(view) = conversation_view(target)? {
         let destination = view.placement.as_deref().and_then(super::placement_host);
-        // Changes needs its own opening even when the conversation is ready.
-        let companion = mode == Mode::Desktop
-            && target.url.diff
-            && view.attachment == DesktopOpeningStatus::Usable;
         let focus_existing = mode == Mode::Focus
             || (mode == Mode::Desktop
-                && !companion
                 && focus_new
                 && view.attachment == DesktopOpeningStatus::Usable
                 && destination.is_some_and(|(host, _)| host == OpenHost::Desktop));
@@ -134,7 +125,7 @@ fn present(target: &mut Resolved, args: &OpenArgs, focus_new: bool) -> Result<Op
                 Some(view.reason),
             ));
         }
-        if view.retains_attachment() && !companion {
+        if view.retains_attachment() {
             return Ok(target.receipt(
                 destination.map(|(host, _)| host),
                 view.placement.clone(),

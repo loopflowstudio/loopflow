@@ -68,38 +68,33 @@ reach a Task's recorded Machine; Herdr and cmux workspaces stay local.
 
 ```bash
 lf open --wave product --workspace  # Product's started, unfinished Tasks
-lf open --workspace                 # this checkout's Wave or repository
-lf open --task ENG-123 --workspace  # ENG-123's Wave or repository, ENG-123 among them
+lf open --workspace                 # this repository's started, unfinished Tasks
 lf open --available                 # conversations ready for your next turn
-lf task view ENG-123                # only the Task brief and workflow
 lf diff ENG-123                     # only its changes
 ```
 
 Without `--workspace`, `lf open --wave product` attaches the Wave's
 conversation. With it, a repository or Wave opens as an overview of its
-started, unfinished Tasks. A Task has no overview of its own: with
-`--workspace` it opens its Wave's, else its repository's, and appears there even
-from backlog. Without it, `lf open --task ENG-123` is its conversation.
+started, unfinished Tasks, once: a Task started later opens with
+`lf open --task <task>`. A Task has no overview of its own, so `--workspace`
+with a Task names the Wave or repository overview to open instead.
 Desktop shows its board, while Rex, Herdr and cmux arrange native Task tabs.
-Use `lf open --task <task>` to enter a conversation from an overview. Overviews
-and automatic arrivals start no agents and leave existing conversation input
-where it is.
+Each Task tab is the Task's conversation: an ended one starts its provider
+when the tab opens, so an overview of twelve Tasks runs twelve agents.
 
 An overview gets a new Rex session, Herdr workspace or cmux group. A single
 conversation's tab (`--tab`) joins the current one; cmux uses the current group,
 or the window if there is no group. External hosts own these arrangements: use their controls to
 rearrange, rename, close and restore them. `--host` selects a host;
 `--no-focus` keeps the current tab selected. Hosts without workspace support
-report that limitation; drop `--workspace`, or use `lf task view` or `lf diff`,
-for a single activity.
+report that limitation; drop `--workspace`, or use `lf diff`, for a single
+activity.
 
 ## What a Task tab holds
 
-Each Task tab in an overview shows Task & workflow; `--diff` adds the Task's
-Changes beside it when its checkout is on this Machine. `lf open --task ENG-123
---tab` opens the conversation itself, with the same Session resolution and
-attachment rules as `lf open`: if it is already open elsewhere, the tab reports
-where instead of moving input.
+Each Task tab in an overview holds the Task's Session, opened as
+`lf open --task ENG-123 --here` would. Every view of a Session can type into
+it, and you see drafts from one view in the others.
 
 Add shells, editors or splits with the host's own controls; LF builds no layout
 in Rex, Herdr or cmux, and nothing it does there changes Desktop. Desktop
@@ -110,31 +105,13 @@ background tabs remain in Desktop.
 Opening a conversation does not start the Task's Graph or replay its prompt.
 
 ```bash
-lf task view ENG-123                        # the Task brief, workflow and recorded runs
 lf diff ENG-123 --base parent --difftool    # the Task's changes in your diff tool
 ```
 
-In Task & workflow, `n` and `p` select a step and `l` reads its log. Viewing
-starts no work.
-
-## Follow newly started Tasks
-
-A repository or Wave opened with `lf open --workspace` in Rex includes a Workspace tab.
-Keep it running to add newly started Tasks without taking focus or adding backlog
-Tasks. A Task tab you close stays closed while that Workspace tab runs.
-
-New arrivals show Task & workflow information without attaching
-conversations. They leave input in your existing terminals. Run
-`lf open --task <task>` when you want to resume that conversation.
-
-Following includes remote Tasks on their recorded Machines. Starting a Task does
-not reopen a closed host app. Single-Task opens do not follow sibling Tasks;
-Herdr and cmux do not support following.
-
 ## Split in the directory you are using
 
-Use your terminal app's normal Split shortcut. From a Conversation or Task tool,
-the new shell starts in the Task worktree. From a shell, it follows that shell's
+Use your terminal app's normal Split shortcut. From a Conversation tab, the new
+shell starts in the Task worktree. From a shell, it follows that shell's
 current directory, including changes made with `cd`.
 
 ```bash

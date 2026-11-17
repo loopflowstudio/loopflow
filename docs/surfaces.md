@@ -14,7 +14,7 @@ lf open --task LOO-12 --tab                  # attach in a sibling tab
 lf open --task LOO-12 --focus                # reveal its existing view
 lf open --wave product                      # the product Wave's conversation
 lf open --wave product --workspace          # the Wave's Task overview
-lf open --task LOO-12 --host desktop --diff   # conversation and Changes in Desktop
+lf open --task LOO-12 --host desktop         # the conversation in Desktop
 ```
 
 Direct CLI opening attaches in the current terminal, including inside Rex.
@@ -29,8 +29,7 @@ open yourself. `--host desktop|rex|cmux|herdr|tmux|terminal` chooses a host; a
 failure never falls through to another.
 
 `lf open` resolves one conversation; `lf open --workspace` opens a repository
-or Wave overview instead;
-`lf task view` inspects workflow. Opening a conversation does not advance a Graph
+or Wave overview instead. Opening a conversation does not advance a Graph
 or replay its prompt. Success means the conversation attached; attachment
 failure reaches the opening command and can be retried.
 

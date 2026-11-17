@@ -602,12 +602,11 @@ fn open_is_one_root_command_and_keeps_pr_open_explicit() {
         "open",
         "--session",
         "session-exact",
-        "--diff",
         "--json",
     ])
     .unwrap();
     assert!(
-        matches!(&composed.command, Some(Commands::Open(args)) if args.selection.session.as_deref() == Some("session-exact") && args.selection.diff && args.selection.json)
+        matches!(&composed.command, Some(Commands::Open(args)) if args.selection.session.as_deref() == Some("session-exact") && args.selection.json)
     );
     assert!(Cli::command()
         .find_subcommand("desktop")

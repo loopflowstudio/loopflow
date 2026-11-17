@@ -183,9 +183,14 @@ editable viewers into the same terminal, so you see drafts from A in B", then
   "already open, opened nothing" branch of `lf open` (`--here`/`--tab` attach
   another view; `--focus` still reveals an existing one).
 - `lf resume <session>` opens that Session here; it no longer "moves input".
-- Terminal size, a choice made for review: the view that most recently sent
-  input or attached sets the size (tmux's "latest"). Passed over: smallest
-  view (wastes the big screen), first view (stale after it walks away).
+- Terminal size: the view that most recently attached, sent input or gained
+  focus sets it (Jack Heart: "cna we also have re-focusing an old view re-takes
+  the size").
+  When that view detaches, the size goes back to the remaining view that most
+  recently did one of those ("or at the very least closing the new view gives
+  teh size back to the old view").
+  No geometry owner, no `own: request|take`. Jack Heart, after a Rex-style
+  owner was proposed instead: "actually keep that".
 - A held terminal that is Busy (a person typing in a native client the server
   can't share) is the one case to check by reading the code: keep whatever
   makes a native client's input safe, and say what in the PR.
@@ -194,3 +199,14 @@ editable viewers into the same terminal, so you see drafts from A in B", then
 - Docs: transport/README.md, docs/sessions.md, docs/surfaces.md,
   docs/security.md (a connection is a full editor; access is per person),
   docs/server.md, docs/troubleshooting.md, docs/workspaces.md.
+
+## --workspace on a Task, and --diff (2026-11-17)
+
+- Jack Heart: "--workspace on task should be rejected or ignored". Chosen:
+  rejected, with an error naming `--wave`/`--repository`. Task widening goes.
+- Jack Heart: "lets just remove this flag for now. i am interested in bringing
+  it back but not now." `lf open --diff` is removed; `lf diff` and Desktop's
+  Changes pane stay.
+- Jack Heart: "i think we can drop the whoel workspace follower tab concept".
+  The Rex Workspace follower, automatic arrivals and the six hidden `lf open`
+  flags go; an overview opens its tabs once.

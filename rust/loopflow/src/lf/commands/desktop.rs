@@ -853,7 +853,6 @@ fn view_plan(
             url: None,
             host: super::open::OpenHost::Desktop,
             session: None,
-            diff: false,
             link: false,
             format: None,
             json,

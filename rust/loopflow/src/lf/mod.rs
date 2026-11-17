@@ -1161,7 +1161,6 @@ impl TaskCommand {
             | Self::Location { .. }
             | Self::WatchFiles { .. }
             | Self::Status { .. }
-            | Self::View { .. }
             | Self::Diff { .. }
             | Self::Changes { .. }
             | Self::Context { .. }
@@ -2326,13 +2325,6 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
         #[command(flatten)]
         selection: crate::lf::Selection,
     },
-    /// Browse the Task brief, workflow and recorded runs without starting work
-    View {
-        issue: Option<String>,
-        /// Print once, including when stdout is a terminal
-        #[arg(long)]
-        once: bool,
-    },
     /// Show this Task's patch
     Diff {
         issue: String,
@@ -2513,7 +2505,6 @@ impl TaskCommand {
             Self::List { .. } | Self::Create { .. } | Self::Sweep { .. } => None,
             Self::Retire { issue }
             | Self::Status { issue, .. }
-            | Self::View { issue, .. }
             | Self::Abandon { issue, .. }
             | Self::Run { issue, .. }
             | Self::Hold { issue, .. }
@@ -2548,7 +2539,6 @@ impl TaskCommand {
             Self::List { .. } | Self::Create { .. } | Self::Sweep { .. } => None,
             Self::Retire { issue }
             | Self::Status { issue, .. }
-            | Self::View { issue, .. }
             | Self::Abandon { issue, .. }
             | Self::Run { issue, .. }
             | Self::Hold { issue, .. }

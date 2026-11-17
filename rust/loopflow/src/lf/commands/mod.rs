@@ -39,7 +39,6 @@ pub mod ssh;
 pub mod task_create;
 pub mod task_diff;
 pub mod task_row;
-pub mod task_view;
 pub mod tokens;
 pub mod top;
 pub mod usage;

@@ -1091,9 +1091,6 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             )?;
             Ok(())
         }
-        TaskCommand::View { issue, once } => {
-            loopflow::lf::commands::task_view::run(repo, issue.as_deref(), *once)
-        }
         TaskCommand::Status {
             issue,
             json,

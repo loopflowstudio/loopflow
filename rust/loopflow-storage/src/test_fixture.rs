@@ -201,7 +201,6 @@ pub fn unpublished_conversation(
         title: "Investigation".into(),
         title_source: TitleSource::Generated,
         request: None,
-        ready_summary: None,
         completed_at: None,
         created_at,
     }
@@ -338,7 +337,6 @@ pub fn conversation(
         title: "Implementation".into(),
         title_source: crate::session::TitleSource::Generated,
         request: None,
-        ready_summary: None,
         completed_at: None,
         created_at: 100,
     }
@@ -461,9 +459,7 @@ pub fn record_captured_start(store: &SqliteStore, session: &str, turn: &str) {
                 .unwrap()
         });
     let origin = store.session_turn_origin(session, &attachment).unwrap();
-    store
-        .record_session_turn_origin(&"thread".into(), turn, &origin)
-        .unwrap();
+    store.record_session_turn_origin(&"thread".into(), turn, &origin);
 }
 
 pub fn retirement() -> (

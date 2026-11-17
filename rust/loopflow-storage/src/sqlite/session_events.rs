@@ -178,27 +178,30 @@ impl SqliteStore {
             .optional()?)
     }
 
-    /// Record that `turn` of `thread` ended at `at` with `status` as the
-    /// newest ended turn of input `captured`. A turn that ended earlier than
-    /// the one kept leaves it. The turn's own error replaces the row's; a
-    /// turn that ended without one keeps the error lf saw on the stream,
-    /// unless it completed.
-    pub fn record_input_turn_end(
+    /// Record that `turn` of `thread`, answering input `captured`, ended at
+    /// `at` with the provider's `detail`, as the input's newest ended turn. A
+    /// turn that ended earlier than the one kept leaves it. The turn's own
+    /// error replaces the row's; a turn that ended without one keeps the error
+    /// lf saw on the stream, unless it completed.
+    pub fn record_answered_turn_end(
         &self,
         captured: i64,
         thread: &AgentSessionId,
         turn: &str,
         at: i64,
-        status: Option<&str>,
-        error: Option<&str>,
+        detail: &Value,
     ) -> StoreResult<()> {
+        let error = super::turns::turn_error(detail).map(|error| match error.as_str() {
+            Some(text) => text.to_owned(),
+            None => error.to_string(),
+        });
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
             "UPDATE session_events SET turn_thread=?2,turn_id=?3,turn_ended_at=?4,turn_status=?5,
                 turn_error=CASE WHEN ?6 IS NOT NULL THEN ?6
                                 WHEN ?5='completed' THEN NULL ELSE turn_error END
              WHERE seq=?1 AND kind='captured' AND (turn_ended_at IS NULL OR turn_ended_at<=?4)",
-            params![captured, thread, turn, at, status, error],
+            params![captured, thread, turn, at, detail["status"].as_str(), error],
         )?;
         Ok(())
     }
@@ -289,7 +292,7 @@ impl SqliteStore {
         let mut query = conn.prepare(
             "SELECT e.payload FROM session_events c
              JOIN history.session_history e ON c.seq=e.captured_event AND c.kind='captured' AND c.receipt_key=?1
-             WHERE substr(e.receipt_key,1,length(?1)+14)=?1||':events.jsonl:'
+             WHERE e.kind='events'
              ORDER BY CAST(substr(e.receipt_key,length(?1)+15) AS INTEGER),e.seq",
         )?;
         let rows = query.query_map([input], |row| row.get::<_, String>(0))?;
@@ -304,7 +307,7 @@ impl SqliteStore {
             "SELECT json_extract(e.payload,'$.evidence.since'),json_extract(e.payload,'$.evidence.observed_at')
              FROM session_events c
              JOIN history.session_history e ON c.seq=e.captured_event AND c.kind='captured' AND c.receipt_key=?1
-             WHERE substr(e.receipt_key,1,length(?1)+9)=?1||':silence:'
+             WHERE e.kind='silence'
              ORDER BY CAST(substr(e.receipt_key,length(?1)+10) AS INTEGER),e.seq",
         )?;
         let rows = query.query_map([input], |row| Ok((row.get(0)?, row.get(1)?)))?;
@@ -666,7 +669,7 @@ impl SqliteStore {
              FROM history.session_history e
              WHERE e.session_id=?8 AND e.seq>?2
              AND (?4 IS NULL OR substr(e.receipt_key,1,length(?4)+1)=?4||':')
-             AND (CASE WHEN json_valid(e.payload) THEN json_extract(e.payload,'$.source') END IN ('manifest.json','runs','terminal.json') OR (
+             AND (e.kind IN ('manifest','runs','terminal') OR (
                  (?5 IS NULL OR e.wave_id IN (SELECT id FROM wave_addresses WHERE id=?9 OR slug=?5))
                  AND (?6 IS NULL OR e.task_id IN (SELECT t.id FROM projects p CROSS JOIN tasks t ON t.project_id=p.id
                          WHERE p.id=?10 OR p.project_slug=?6 OR p.external_project_id=?11))
@@ -753,15 +756,13 @@ mod tests {
         let store = crate::test_fixture::open(&home.path().join("store.db")).unwrap();
         store.test_session("conversation", &crate::session_record::new_artifact_key());
         let record = |turn: &str, status: &str| {
-            store
-                .record_turn_completion(
-                    "conversation",
-                    &"Provider-Thread".into(),
-                    turn,
-                    1,
-                    &json!({ "status": status }),
-                )
-                .unwrap()
+            store.record_turn_completion(
+                "conversation",
+                &"Provider-Thread".into(),
+                turn,
+                1,
+                &json!({ "status": status }),
+            )
         };
         for turn in 0..100 {
             record(&turn.to_string(), "completed");
@@ -853,14 +854,6 @@ mod tests {
                 .unwrap(),
             None
         );
-        assert_eq!(
-            store
-                .session("conversation")
-                .unwrap()
-                .unwrap()
-                .ready_summary,
-            None
-        );
         assert_eq!(store.input_answered_turn(&input).unwrap(), None);
 
         // What this lf writes goes to the history file and is read from it.
@@ -870,24 +863,20 @@ mod tests {
                 .unwrap();
         }
         crate::test_fixture::record_captured_start(&store, "conversation", "new");
-        store
-            .record_turn_usage(
-                "conversation",
-                &old,
-                "new",
-                2,
-                &json!({"total": {"inputTokens": 1}}),
-            )
-            .unwrap();
-        store
-            .record_turn_completion(
-                "conversation",
-                &old,
-                "new",
-                3,
-                &json!({"status": "completed"}),
-            )
-            .unwrap();
+        store.record_turn_usage(
+            "conversation",
+            &old,
+            "new",
+            2,
+            &json!({"total": {"inputTokens": 1}}),
+        );
+        store.record_turn_completion(
+            "conversation",
+            &old,
+            "new",
+            3,
+            &json!({"status": "completed"}),
+        );
         assert_eq!(left_in_store(), 7);
         let kinds: Vec<SessionEventKind> = store
             .session_history("conversation", 0, 0)
@@ -1078,28 +1067,24 @@ mod tests {
                 },
             )
             .unwrap();
-        store
-            .record_session_turn_origin(
-                &"thread".into(),
-                "turn",
-                &store.session_turn_origin(&session.id, &attachment).unwrap(),
-            )
-            .unwrap();
+        store.record_session_turn_origin(
+            &"thread".into(),
+            "turn",
+            &store.session_turn_origin(&session.id, &attachment).unwrap(),
+        );
         let mut replacement = session.clone();
         replacement.artifact_key = Some(crate::session_record::new_artifact_key());
         store
             .replace_session_input_prepared(session.captured, replacement.clone(), None, None)
             .unwrap();
         for turn in ["turn", "unknown"] {
-            store
-                .record_turn_usage(
-                    &session.id,
-                    &"thread".into(),
-                    turn,
-                    2,
-                    &json!({"total":{"inputTokens":20,"outputTokens":5}}),
-                )
-                .unwrap();
+            store.record_turn_usage(
+                &session.id,
+                &"thread".into(),
+                turn,
+                2,
+                &json!({"total":{"inputTokens":20,"outputTokens":5}}),
+            );
         }
         let none = (None, None);
         let turns = store

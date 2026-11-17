@@ -553,7 +553,6 @@ fn bind_preserves_prior_work_and_usage_while_assigning_future_work() {
             title: id.to_string(),
             title_source: crate::session::TitleSource::Generated,
             request: None,
-            ready_summary: None,
             completed_at: None,
             created_at: 1,
         };
@@ -590,15 +589,13 @@ fn bind_preserves_prior_work_and_usage_while_assigning_future_work() {
     let elsewhere = open("elsewhere", Some(other_wave));
     let old_runs = store.session_inputs("orphan").unwrap();
     store.record_turn_start("orphan", &"thread".into(), "active", 1);
-    store
-        .record_turn_usage(
-            "orphan",
-            &"thread".into(),
-            "active",
-            2,
-            &serde_json::json!({"usage": {"input_tokens": 20}}),
-        )
-        .unwrap();
+    store.record_turn_usage(
+        "orphan",
+        &"thread".into(),
+        "active",
+        2,
+        &serde_json::json!({"usage": {"input_tokens": 20}}),
+    );
     let earlier = store.session_history("orphan", 0, 0).unwrap();
     assert!(
         crate::store::sessions::bind_session(&store, "orphan", first.captured, &task_id).is_err()
@@ -622,15 +619,13 @@ fn bind_preserves_prior_work_and_usage_while_assigning_future_work() {
         bound
     );
     // A late observation belongs to the old turn, never the new bind.
-    store
-        .record_turn_completion(
-            "orphan",
-            &"thread".into(),
-            "active",
-            3,
-            &serde_json::json!({"status": "completed"}),
-        )
-        .unwrap();
+    store.record_turn_completion(
+        "orphan",
+        &"thread".into(),
+        "active",
+        3,
+        &serde_json::json!({"status": "completed"}),
+    );
     // Attribution freezes when the attached LfProcess sends the request.
     let process = loopflow_model::id::LfProcessId::new();
     store
@@ -645,9 +640,7 @@ fn bind_preserves_prior_work_and_usage_while_assigning_future_work() {
     let attachment =
         attachment::claim_session_attachment(&store, "orphan", None, &process, false).unwrap();
     let origin = store.session_turn_origin("orphan", &attachment).unwrap();
-    store
-        .record_session_turn_origin(&"thread".into(), "future", &origin)
-        .unwrap();
+    store.record_session_turn_origin(&"thread".into(), "future", &origin);
     let events = store.session_history("orphan", 0, 0).unwrap();
     let turns = store.session_turns("orphan").unwrap();
     let turn = |id: &str| turns.iter().find(|turn| turn.turn == id).unwrap();

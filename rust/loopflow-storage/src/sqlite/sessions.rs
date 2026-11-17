@@ -177,16 +177,16 @@ const TURN_LIVE: &str = "EXISTS(SELECT 1 FROM session_activity act
                 WHERE json_extract(r.value,'$.state') IN ('idle','blocked','done')))))";
 
 const SESSION_SELECT: &str = concat!("SELECT s.id,c.receipt_key AS artifact_key,s.title,s.title_source,
-    (SELECT json_extract(feedback.payload,'$.summary') FROM history.session_history feedback WHERE feedback.session_id=s.id AND feedback.receipt_key='legacy_review_feedback') AS feedback_summary,s.completed_at,s.created_at,s.request,s.interactive,s.repo,
+    s.completed_at,s.created_at,s.request,s.interactive,s.repo,
     s.task_id,s.wave_id,", session_graph!(), " AS graph_lf_process_id,s.work_source,s.bound_at,
     s.input_published,s.cwd,s.skill,s.provider,s.model,", session_step!("node"), " AS node,", session_step!("iterations"), " AS iterations,json_extract(c.payload,'$.caller_key') AS caller_artifact_key,s.current_capture FROM agent_sessions s LEFT JOIN session_events c ON c.seq=s.current_capture");
 
 fn read_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<LfSession>> {
     Ok((|| {
         Ok(LfSession {
-            captured: row.get(23)?,
+            captured: row.get(22)?,
             caller_artifact_key: row
-                .get::<_, Option<String>>(22)?
+                .get::<_, Option<String>>(21)?
                 .map(|id| crate::session_record::parse_artifact_key(&id))
                 .transpose()
                 .map_err(invalid)?,
@@ -198,36 +198,35 @@ fn read_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<LfSessi
                 .map_err(invalid)?,
             title: row.get(2)?,
             title_source: serde_json::from_value(serde_json::Value::String(row.get(3)?))?,
-            ready_summary: row.get(4)?,
-            completed_at: row.get(5)?,
-            created_at: row.get(6)?,
-            request: row.get(7)?,
-            interactive: row.get(8)?,
-            repo: row.get(9)?,
+            completed_at: row.get(4)?,
+            created_at: row.get(5)?,
+            request: row.get(6)?,
+            interactive: row.get(7)?,
+            repo: row.get(8)?,
             task_id: row
-                .get::<_, Option<String>>(10)?
+                .get::<_, Option<String>>(9)?
                 .map(|id| TaskId::parse(&id))
                 .transpose()
                 .map_err(invalid)?,
             wave_id: row
-                .get::<_, Option<String>>(11)?
+                .get::<_, Option<String>>(10)?
                 .map(|id| loopflow_model::id::WaveId::parse(&id))
                 .transpose()
                 .map_err(invalid)?,
-            graph_lf_process_id: row.get(12)?,
+            graph_lf_process_id: row.get(11)?,
             work_source: row
-                .get::<_, Option<String>>(13)?
+                .get::<_, Option<String>>(12)?
                 .map(|source| serde_json::from_value(serde_json::Value::String(source)))
                 .transpose()?,
-            bound_at: row.get(14)?,
-            input_published: row.get(15)?,
-            cwd: row.get::<_, String>(16)?.into(),
-            skill: row.get(17)?,
-            provider: row.get(18)?,
-            model: row.get(19)?,
-            node: row.get(20)?,
+            bound_at: row.get(13)?,
+            input_published: row.get(14)?,
+            cwd: row.get::<_, String>(15)?.into(),
+            skill: row.get(16)?,
+            provider: row.get(17)?,
+            model: row.get(18)?,
+            node: row.get(19)?,
             iterations: row
-                .get::<_, Option<String>>(21)?
+                .get::<_, Option<String>>(20)?
                 .map(|value| serde_json::from_str(&value))
                 .transpose()?,
         })
@@ -354,17 +353,25 @@ fn inventory_query(
 
 // Preserve the existing filters/order. Materialize only the selected metadata
 // before joining Graph/Work labels; no request or historical payload is selected.
-const SUMMARY_SELECT: &str = concat!("SELECT s.id,c.receipt_key AS artifact_key,s.title,s.title_source,
-    (SELECT json_extract(feedback.payload,'$.summary') FROM history.session_history feedback WHERE feedback.session_id=s.id AND feedback.receipt_key='legacy_review_feedback') AS feedback_summary,s.completed_at,s.interactive,s.task_id,s.wave_id,
-    ", session_graph!(), " AS graph_lf_process_id,s.cwd,s.skill,s.provider,s.model,", session_step!("node"), " AS node,", session_step!("iterations"), " AS iterations,s.current_capture
-    FROM agent_sessions s LEFT JOIN session_events c ON c.seq=s.current_capture");
+const SUMMARY_SELECT: &str = concat!(
+    "SELECT s.id,c.receipt_key AS artifact_key,s.title,s.title_source,
+    s.completed_at,s.interactive,s.task_id,s.wave_id,
+    ",
+    session_graph!(),
+    " AS graph_lf_process_id,s.cwd,s.skill,s.provider,s.model,",
+    session_step!("node"),
+    " AS node,",
+    session_step!("iterations"),
+    " AS iterations,s.current_capture
+    FROM agent_sessions s LEFT JOIN session_events c ON c.seq=s.current_capture"
+);
 
 fn summary_query(page: &str, by_id: bool, now: i64) -> String {
     let available = available_sql("a", now);
     let order = if by_id { "s.id" } else { "s.title,s.id" };
     // A Graph is the Graph process above the step that captured the current input.
     format!("WITH page AS MATERIALIZED ({page})
-        SELECT s.id,s.artifact_key,s.title,s.title_source,s.feedback_summary,s.completed_at,s.interactive,s.task_id,s.wave_id,s.graph_lf_process_id,s.cwd,s.skill,s.provider,s.model,s.node,s.iterations,s.current_capture,graph_process.id,graph.graph,graph_process.outcome,graph_process.completed_at,step.started_at,
+        SELECT s.id,s.artifact_key,s.title,s.title_source,s.completed_at,s.interactive,s.task_id,s.wave_id,s.graph_lf_process_id,s.cwd,s.skill,s.provider,s.model,s.node,s.iterations,s.current_capture,graph_process.id,graph.graph,graph_process.outcome,graph_process.completed_at,step.started_at,
         (gs.seq=(SELECT MAX(later.seq) FROM graph_process_steps later WHERE later.graph_lf_process_id=gs.graph_lf_process_id)),
         w.slug,
         COALESCE(captured.independent=1,0),
@@ -402,40 +409,40 @@ fn read_summary(
 ) -> rusqlite::Result<StoreResult<crate::session::SessionSummary>> {
     Ok((|| {
         let task_id = row
-            .get::<_, Option<String>>(7)?
+            .get::<_, Option<String>>(6)?
             .map(|id| TaskId::parse(&id))
             .transpose()
             .map_err(invalid)?;
         let wave_id = row
-            .get::<_, Option<String>>(8)?
+            .get::<_, Option<String>>(7)?
             .map(|id| loopflow_model::id::WaveId::parse(&id))
             .transpose()
             .map_err(invalid)?;
-        let graph = match row.get::<_, Option<String>>(17)? {
+        let graph = match row.get::<_, Option<String>>(16)? {
             Some(graph_process) => {
-                let completed: Option<i64> = row.get(20)?;
-                let name: String = row.get(18)?;
+                let completed: Option<i64> = row.get(19)?;
+                let name: String = row.get(17)?;
                 Some(crate::session::GraphProcessSummary {
                     id: graph_process,
                     name,
                     state: crate::session::GraphProcessSummaryState::of_process(
-                        row.get::<_, Option<String>>(19)?.as_deref(),
+                        row.get::<_, Option<String>>(18)?.as_deref(),
                         completed,
                     ),
                     task_id: task_id.clone(),
                     wave_id: wave_id.clone(),
                     updated_at: match completed {
                         Some(completed) => completed,
-                        None => row.get(21)?,
+                        None => row.get(20)?,
                     },
                 })
             }
             None => None,
         };
-        let agent_process_id: Option<loopflow_model::id::AgentProcessId> = row.get(31)?;
+        let agent_process_id: Option<loopflow_model::id::AgentProcessId> = row.get(30)?;
         let agent_process_evidence = projection.evidence(agent_process_id.as_ref());
         let live = agent_process_evidence == crate::ProcessIdentityEvidence::Live;
-        let unviewed: bool = row.get(34)?;
+        let unviewed: bool = row.get(33)?;
         let task_identifier = task_id
             .as_ref()
             .map(|id| super::children::cached_short_task_id(conn, labels, id))
@@ -443,31 +450,31 @@ fn read_summary(
             .flatten();
         Ok(crate::session::SessionSummary {
             transition: super::provider_transitions::latest_in(conn, &row.get::<_, String>(0)?)?,
-            has_provider_history: row.get(36)?,
+            has_provider_history: row.get(35)?,
             preview: row
-                .get::<_, Option<String>>(33)?
+                .get::<_, Option<String>>(32)?
                 .map(|json| serde_json::from_str(&json))
                 .transpose()?
                 .filter(|_| live),
             // A terminal no viewer occupies is gone, whatever its launch recorded.
             terminal_id: row
-                .get::<_, Option<String>>(32)?
+                .get::<_, Option<String>>(31)?
                 .filter(|_| live && !unviewed),
             unviewed,
-            held: live && row.get(37)?,
-            task_ids: serde_json::from_str(&row.get::<_, String>(25)?)?,
-            primary_scope: row.get(26)?,
+            held: live && row.get(36)?,
+            task_ids: serde_json::from_str(&row.get::<_, String>(24)?)?,
+            primary_scope: row.get(25)?,
             agent_process_evidence,
-            available: live && row.get(27)?,
+            available: live && row.get(26)?,
             program_status: row
-                .get::<_, Option<String>>(30)?
+                .get::<_, Option<String>>(29)?
                 .map(|json| serde_json::from_str(&json))
                 .transpose()?
                 .filter(|_| live),
             agent_process_id,
-            task_terminal: row.get(28)?,
-            task_primary: row.get(29)?,
-            captured: row.get(16)?,
+            task_terminal: row.get(27)?,
+            task_primary: row.get(28)?,
+            captured: row.get(15)?,
             id: row.get(0)?,
             artifact_key: row
                 .get::<_, Option<String>>(1)?
@@ -476,31 +483,30 @@ fn read_summary(
                 .map_err(invalid)?,
             title: row.get(2)?,
             title_source: serde_json::from_value(serde_json::Value::String(row.get(3)?))?,
-            ready_summary: row.get(4)?,
-            completed_at: row.get(5)?,
-            interactive: row.get(6)?,
+            completed_at: row.get(4)?,
+            interactive: row.get(5)?,
             task_id,
             wave_id,
-            graph_lf_process_id: row.get(9)?,
-            cwd: row.get::<_, String>(10)?.into(),
-            skill: row.get(11)?,
-            provider: row.get(12)?,
+            graph_lf_process_id: row.get(8)?,
+            cwd: row.get::<_, String>(9)?.into(),
+            skill: row.get(10)?,
+            provider: row.get(11)?,
             account: row
-                .get::<_, Option<String>>(35)?
+                .get::<_, Option<String>>(34)?
                 .map(|id| crate::ProviderAccountId::parse(&id))
                 .transpose()
                 .map_err(invalid)?,
-            model: row.get(13)?,
-            node: row.get(14)?,
+            model: row.get(12)?,
+            node: row.get(13)?,
             iterations: row
-                .get::<_, Option<String>>(15)?
+                .get::<_, Option<String>>(14)?
                 .map(|raw| serde_json::from_str(&raw))
                 .transpose()?,
             graph,
-            graph_step_latest: row.get::<_, Option<bool>>(22)?.unwrap_or(false),
-            wave_name: row.get(23)?,
+            graph_step_latest: row.get::<_, Option<bool>>(21)?.unwrap_or(false),
+            wave_name: row.get(22)?,
             task_identifier,
-            independent: row.get::<_, Option<bool>>(24)?.unwrap_or(false),
+            independent: row.get::<_, Option<bool>>(23)?.unwrap_or(false),
         })
     })())
 }
@@ -1098,10 +1104,9 @@ impl SqliteStore {
                     WHERE ?7 IS NULL AND task_id=?3
                 UNION SELECT captured_event FROM history.turns WHERE ?7 IS NULL AND task_id=?3
                 UNION SELECT +seq FROM session_events WHERE ?7 IS NULL AND ?3 IS NULL AND kind='captured' AND observed_at>=?5
-                UNION SELECT +c.seq FROM history.session_history o CROSS JOIN session_events c ON c.kind='captured'
-                    AND c.receipt_key=substr(o.receipt_key,1,length(o.receipt_key)-14)
-                    WHERE ?7 IS NULL AND ?3 IS NULL AND ?5>0 AND substr(o.receipt_key,-14) IN (':manifest.json',':terminal.json')
-                    AND o.observed_at>=?5 AND (?6 OR substr(o.receipt_key,-14)=':manifest.json')
+                UNION SELECT +o.captured_event FROM history.session_history o
+                    WHERE ?7 IS NULL AND ?3 IS NULL AND ?5>0 AND o.kind IN ('manifest','terminal')
+                    AND o.observed_at>=?5 AND (?6 OR o.kind='manifest')
                 UNION SELECT +captured_event FROM history.turns
                     WHERE ?7 IS NULL AND ?3 IS NULL AND ?5>0 AND ?6 AND ended_at>=?5 AND +captured_event IS NOT NULL
                 UNION SELECT +ran.seq FROM processes exited CROSS JOIN session_events ran ON ran.lf_process_id=exited.id
@@ -2124,7 +2129,6 @@ impl SqliteStore {
                 title: "Retained".into(),
                 title_source: TitleSource::Human,
                 request: None,
-                ready_summary: None,
                 completed_at: None,
                 created_at: 1,
             },

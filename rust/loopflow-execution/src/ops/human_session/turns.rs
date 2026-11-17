@@ -203,7 +203,6 @@ fn record(
         model: turn.as_ref().and_then(|turn| turn.model.clone()),
         cwd: cwd.display().to_string(),
         state: SessionState::Active,
-        ready_summary: None,
         open_argv: Vec::new(),
         terminal_ids: Vec::new(),
         turn,

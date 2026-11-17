@@ -271,15 +271,13 @@ mod tests {
         // It ran in the account's own home, before every launch shared one.
         store.record_account_home_conversation(route, thread, provider);
         store.record_turn_start(id, &thread.into(), "turn-1", at);
-        store
-            .record_turn_completion(
-                id,
-                &thread.into(),
-                "turn-1",
-                at,
-                &serde_json::json!({"status":"completed"}),
-            )
-            .unwrap();
+        store.record_turn_completion(
+            id,
+            &thread.into(),
+            "turn-1",
+            at,
+            &serde_json::json!({"status":"completed"}),
+        );
     }
 
     fn written(path: &std::path::Path, body: &str, at: i64) {

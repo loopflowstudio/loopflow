@@ -24,13 +24,11 @@ fn native_usage_survives_attachment_and_input_replacement_without_double_countin
     }
     let attachment =
         attachment::claim_session_attachment(&store, &session.id, None, &first, false).unwrap();
-    store
-        .record_session_turn_origin(
-            &"thread".into(),
-            "turn",
-            &store.session_turn_origin(&session.id, &attachment).unwrap(),
-        )
-        .unwrap();
+    store.record_session_turn_origin(
+        &"thread".into(),
+        "turn",
+        &store.session_turn_origin(&session.id, &attachment).unwrap(),
+    );
     let counts = |input, output| {
         json!({"inputTokens":input,"outputTokens":output,
             "cachedInputTokens":2,"reasoningOutputTokens":1})
@@ -47,24 +45,20 @@ fn native_usage_survives_attachment_and_input_replacement_without_double_countin
     attachment::claim_session_attachment(&store, &session.id, Some(&attachment), &second, true)
         .unwrap();
     // The replacement AgentProcess observes the first one's surviving turn.
-    store
-        .record_turn_usage(
-            &session.id,
-            &"thread".into(),
-            "turn",
-            2,
-            &json!({"total":counts(20,5),"last":counts(20,5)}),
-        )
-        .unwrap();
-    store
-        .record_turn_completion(
-            &session.id,
-            &"thread".into(),
-            "turn",
-            2,
-            &json!({"status":"completed"}),
-        )
-        .unwrap();
+    store.record_turn_usage(
+        &session.id,
+        &"thread".into(),
+        "turn",
+        2,
+        &json!({"total":counts(20,5),"last":counts(20,5)}),
+    );
+    store.record_turn_completion(
+        &session.id,
+        &"thread".into(),
+        "turn",
+        2,
+        &json!({"status":"completed"}),
+    );
     // Start, usage and completion are one turn, attributed at its start.
     let turns = store.session_turns(&session.id).unwrap();
     assert_eq!(turns.len(), 1);
@@ -109,15 +103,13 @@ fn native_usage_survives_attachment_and_input_replacement_without_double_countin
     assert_eq!(old.usage.cost_usd, None);
     assert_eq!(old.usage.final_streams, 0);
     // An unobserved start cannot borrow the replacement's input or attribution.
-    store
-        .record_turn_usage(
-            &session.id,
-            &"thread".into(),
-            "unknown",
-            2,
-            &json!({"total":counts(100,50),"last":counts(10,5)}),
-        )
-        .unwrap();
+    store.record_turn_usage(
+        &session.id,
+        &"thread".into(),
+        "unknown",
+        2,
+        &json!({"total":counts(100,50),"last":counts(10,5)}),
+    );
     let current =
         crate::store::sessions::input_history(&store, replacement.input_key().unwrap()).unwrap();
     assert_eq!(current.usage.input_tokens, None);
@@ -133,22 +125,18 @@ fn native_usage_survives_attachment_and_input_replacement_without_double_countin
     );
     // Even with a start, a late first usage snapshot is a lower bound, not the thread total.
     let current = store.session_attachment(&session.id).unwrap().unwrap();
-    store
-        .record_session_turn_origin(
-            &"thread".into(),
-            "partial",
-            &store.session_turn_origin(&session.id, &current).unwrap(),
-        )
-        .unwrap();
-    store
-        .record_turn_usage(
-            &session.id,
-            &"thread".into(),
-            "partial",
-            2,
-            &json!({"total":counts(100,50),"last":counts(10,5)}),
-        )
-        .unwrap();
+    store.record_session_turn_origin(
+        &"thread".into(),
+        "partial",
+        &store.session_turn_origin(&session.id, &current).unwrap(),
+    );
+    store.record_turn_usage(
+        &session.id,
+        &"thread".into(),
+        "partial",
+        2,
+        &json!({"total":counts(100,50),"last":counts(10,5)}),
+    );
     let partial =
         crate::store::sessions::input_history(&store, replacement.input_key().unwrap().as_str())
             .unwrap();

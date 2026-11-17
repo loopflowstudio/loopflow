@@ -168,3 +168,30 @@ Page: `scratch/concept-review.html` (five numbered questions). Jack Heart: "1b 2
   retention pass drops attempt rows keyed `attempt-1` (start, and a finish
   that completed), completed terminal receipts and completed turn rows.
 - Store retention is `lf machine prune`, beside `lf machine doctor`.
+
+## Concept review of `5e98f52d69` (2026-11-17, page `scratch/concept-review.html`)
+
+Four questions asked (state reads of history; departure and fork lineage; how
+long the final message copy is kept; a `kind` column on `session_history`).
+Jack Heart replied, to the whole page: "ideally we would have one db for
+everything the product really needs (usage and history commands dont count,
+im ean the core work orchestration)".
+
+Read as (the operator's reading, not his words): questions 1 and 2 go to
+`loopflow.db` in this PR, with the test. Questions 3 and 4 are unanswered.
+He then asked "what woudl we have to move from history to loopflow" and
+added: "and light duplication between loopflow and history is ok".
+On questions 3 and 4 he replied: "3a 4b i think?" (3a: the final message copy
+is kept as long as the turn row, as built; 4b: add a real `kind` column to
+`session_history` now, before the file exists on any Machine).
+He then said: "ok, we've gne back and forth enough. you drive it to landing
+from here." and set the goal "Get this landed".
+
+## Built from that direction (compress step, headless choices)
+
+- `session_history.kind` is a `STORED` generated column over the receipt key,
+  so the vocabulary lives once in the schema and no writer can forget it.
+  Attempts and conversation records share kind `events` (their type is in the
+  payload, and no reader filters on it); splitting them is one `WHEN` each.
+- Departure state is on `agent_sessions` (`departed_attachment`, `departure`)
+  rather than `processes`, which LOO-953 removes.

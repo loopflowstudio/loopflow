@@ -487,15 +487,13 @@ mod tests {
         session(&store, "conversation");
         let before = store.revisions().unwrap();
         store.record_turn_start("conversation", &"thread".into(), "turn", 1);
-        store
-            .record_turn_completion(
-                "conversation",
-                &"thread".into(),
-                "turn",
-                2,
-                &serde_json::json!({"status": "completed"}),
-            )
-            .unwrap();
+        store.record_turn_completion(
+            "conversation",
+            &"thread".into(),
+            "turn",
+            2,
+            &serde_json::json!({"status": "completed"}),
+        );
         store.append_history(
             "observation",
             &[crate::history::Row::observed(

@@ -2,7 +2,8 @@
 
 Status: 2026-11-17, the five changes from the concept review of the built
 change are built (see "Shape after the concept review"), with the three
-repairs from the review of `f326e99cbb`. Remaining: gate.
+repairs from the review of `f326e99cbb` and the six items of "Everything
+orchestration reads is in `loopflow.db`". Remaining: QA, then gate.
 Process rows are LOO-953 ("Remove Process rows: liveness on Sessions and
 Graph runs", its own worktree); nothing here moves them.
 
@@ -104,10 +105,51 @@ Session list sees.
 
 A turn end writes its own error; without one, a non-`completed` end keeps
 the row's error (the recorder's stream error, written in either order); a
-`completed` end clears it (`record_input_turn_end`; test
+`completed` end clears it (`record_answered_turn_end`; test
 `a_failed_turn_keeps_the_stream_error_and_a_completed_retry_clears_it`).
 The recorder keeps the history row before the main write, and a failed main
 write is its telemetry warning; its store field is `store`.
+
+## Everything orchestration reads is in `loopflow.db` (2026-11-17, built)
+
+Reply quoted in `questions.md`. `history.db` is read only by the history and
+usage commands and views; nothing that decides what the product does next
+reads it. Found at `5e98f52d69`:
+
+1. **Task state.** `task_open_process_pairs` (behind `task_state_sql` and
+   `graph_execution_facts`) drops its `history.session_history` and
+   `history.turns` arms. Live store, 7 days: of 8,038 Process-and-Session
+   pairs named by history kinds, 329 were known only there and none was an
+   unfinished Process.
+2. **Session list.** `SUMMARY_SELECT` and `SESSION_SELECT` drop the
+   `legacy_review_feedback` read (no writer; 23 rows, newest early October),
+   and `ready_summary` goes with it through the DTO and clients.
+3. **Where a moved conversation went.** `agent_sessions.departed_attachment`
+   and `departure`, written by `SessionAttachment::finish` in the write that
+   ends the attachment; `attachment_departure` reads them. History keeps the
+   `attachment:<token>:exit` row as a copy.
+4. **Fork lineage.** `session_events.provider_lineage` on the input's
+   captured row, written by `record_provider_lineage`; `observe_in` reads it
+   and clears it with the first transition it seeds. History keeps a copy.
+5. **The rule, checked.** `store/state_without_history_tests.rs`: Session
+   summaries, the Session, routing's answered turn, the failed-step read,
+   the turn end and the transition, equal with `history.db` present and
+   deleted.
+6. **A history row's kind is a column.** `session_history.kind` is a
+   `STORED` generated column over the receipt key (`history.rs` `SCHEMA`), so
+   every insert, the retention mover's included, writes it and the
+   vocabulary lives once: transition, lineage, departure, manifest,
+   terminal, events, silence, gap, runs, other. Indexes
+   `session_history_outcome_window` and `session_history_kind` use it, as do
+   `input_events`, `input_silences`, `read_history`, `provider_transitions`
+   and `pending_inputs`. Attempts and conversation records stay inside
+   `events` (their type is in the payload; nothing filters on it).
+
+Left to LOO-953, noted there: `process_session` (ci-fix finds the Session a
+finished Process ran), `task_of_process` and `lf_process_ids` read history
+by Process id; about 4% of pairs are known only from history rows, so
+removing those arms here loses data. `turns.final_message` is kept as long
+as its turn row, as built.
 
 ## Acceptance at gate (headless, private `LF_HOME`)
 
@@ -127,10 +169,12 @@ write is its telemetry warning; its store field is `store`.
 
 Done in this pass: `usage.db`, `USAGE`/`Journal`/`JOURNALS`,
 `journals.rs` (now `history.rs`), `write_usage`, `execute_usage`,
-`StoreRevisions::turns`, `Watch::Journals`, `session_history.kind`, the
+`StoreRevisions::turns`, `Watch::Journals`, the
 routing fallback (`unrecorded_answer`, `AnsweredTurn::captured_at`), the
 Graph's `turn_events`, the Task view's `input_events` loop, the store part
-of `lf process prune` (`ProcessPruneReport::store`). Earlier passes removed
+of `lf process prune` (`ProcessPruneReport::store`), `ready_summary` (Rust
+DTOs, Swift `readySummary`, fixtures) with the `legacy_review_feedback`
+read, the history arms of `task_open_process_pairs`. Earlier passes removed
 `compact_usage`, the cursor files, `provider_session_from_history`,
 `ProviderFact::Output`, `SessionEventKind::Output`, `legacy_review_feedback`
 writes and `process_history`.
@@ -189,6 +233,7 @@ carrying `last_agent_message`.
 - execution `transcript|read_stream|store|session_record|harness::{fact_writer,dispatch_tests,conformance_tests}|human_session|native_exit`: 385 passed after fixes; `canonical_ids_commands_read_the_upgraded_work_and_native_history` timed out at 300 s in the run and passed alone in 249 s at load ~55 (CI).
 - loopflow lib `lf::tests|doctor|top|maintenance|graph|task_view|activity|boundary|subscription_measurement|session::tests`: 89 passed; `documented_commands::` 4 passed; `public_history_discovers_unlinked_native_receipts…` passed; `cargo clippy --all-targets -D warnings` clean.
 - Turn error repairs: storage `turns::` 6 passed, execution `session_record` 34 passed, clippy (storage, execution) clean.
+- Compress and the six items (load ~140): storage lib 374 passed; execution `transcript|fact_writer|agent_process|store|session_record|human_session::tests` passed but 13 load failures that pass as a set (46 passed) and `task_work_lifecycle_tests` updated for item 1; app `integration -- dto_fixtures session_cli_tests` 75 passed, one "provider never started" that passed alone; `historical_sessions_are_not_live_availability` passed; `cargo clippy --all-targets -D warnings` clean; `server_schema.json` regenerated. Swift (`readySummary` removed) builds in gate/CI.
 - Gate: `test(graph::)` and `test(task_graph_launch_tests::)` (failed-step read now from the input row), `test(world_recipes::)`, `binary(served_reads)`, `test(session_cli_tests::)`, `binary(session_lifecycle_tests)`, `test(store::query_plans::tests::)`; rerun the locked-history QA scenario.
 
 ## Follow-ups, not this PR

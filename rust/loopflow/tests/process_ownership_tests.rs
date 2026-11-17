@@ -897,7 +897,6 @@ fn reserve_session(store: &SqliteStore, session_id: &str, repo: &Path) {
             title: "AgentProcess ownership".into(),
             title_source: TitleSource::Generated,
             request: None,
-            ready_summary: None,
             completed_at: None,
             created_at: 1,
         },
@@ -986,7 +985,7 @@ async fn monitor_prune_settles_proven_dead_processes_and_keeps_unknown_ones() {
 }
 
 #[tokio::test]
-async fn historical_feedback_is_not_live_availability() {
+async fn historical_sessions_are_not_live_availability() {
     let home = tempfile::tempdir().unwrap();
     let database = home.path().join("loopflow.db");
     let _store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
@@ -1005,12 +1004,6 @@ async fn historical_feedback_is_not_live_availability() {
     )
     .unwrap();
     let connection = rusqlite::Connection::open(&database).unwrap();
-    store
-        .execute_history(
-            r#"INSERT INTO session_history(session_id,receipt_key,observed_at,payload) VALUES('waiting','legacy_review_feedback',1,'{"type":"legacy_review_feedback","summary":"Review the API"}')"#,
-            [],
-        )
-        .unwrap();
     connection
         .execute(
             "UPDATE agent_sessions SET completed_at=2 WHERE id='legacy_finished'",

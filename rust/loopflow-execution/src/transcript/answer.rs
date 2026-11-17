@@ -59,13 +59,10 @@ pub fn input_final_answer(store: &SqliteStore, input: &str) -> Result<Option<Str
 /// # Errors
 /// When the transcript cannot answer and history kept no copy.
 pub fn input_final_answer_for_people(store: &SqliteStore, input: &str) -> Result<Option<String>> {
-    match input_final_answer(store, input) {
-        Ok(answer) => Ok(answer),
-        Err(error) => match store.input_recorded_answer(input)? {
-            Some(answer) => Ok(Some(answer)),
-            None => Err(error),
-        },
-    }
+    input_final_answer(store, input).or_else(|error| {
+        let kept = store.input_recorded_answer(input)?;
+        kept.map(Some).ok_or(error)
+    })
 }
 
 /// What the agent said last in turn `turn` of a transcript, one reader per
@@ -75,7 +72,7 @@ pub fn input_final_answer_for_people(store: &SqliteStore, input: &str) -> Result
 ///
 /// # Errors
 /// When the transcript cannot be read or holds no such turn.
-pub fn last_assistant_message(
+fn last_assistant_message(
     harness: HarnessKind,
     source: &Source,
     turn: &str,

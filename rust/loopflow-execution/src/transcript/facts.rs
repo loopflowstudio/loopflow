@@ -17,7 +17,6 @@ use serde_json::{json, Value};
 use super::live::TurnState;
 use super::{seconds, Source, Turn};
 use crate::harness::HarnessKind;
-use crate::store::StoreResult;
 use loopflow_model::id::AgentSessionId;
 use loopflow_storage::sqlite::SqliteStore;
 
@@ -55,7 +54,7 @@ fn record_current(store: &SqliteStore, session: &str, moment: Moment) -> anyhow:
     };
     let thread = &conversation.thread;
     Ok(match moment {
-        Moment::TurnEnd => record_ended(store, session, harness, thread, &source)?,
+        Moment::TurnEnd => record_ended(store, session, harness, thread, &source),
         Moment::Exit => record(store, session, harness, thread, &source)?,
     })
 }
@@ -71,14 +70,14 @@ fn record_ended(
     harness: HarnessKind,
     thread: &AgentSessionId,
     source: &Source,
-) -> StoreResult<usize> {
+) -> usize {
     let mut written = 0;
     for turn in super::live::last_turns(harness, source) {
         if let (Some(_), Some(ended)) = (&turn.started_at, seconds(&turn.ended_at)) {
-            written += usize::from(usage(store, session, thread, &turn, ended)?);
+            written += usize::from(usage(store, session, thread, &turn, ended));
         }
     }
-    Ok(written)
+    written
 }
 
 /// Record the usage of every turn in `thread`'s transcript, and the
@@ -99,14 +98,14 @@ fn record(
         let (Some(id), Some(ended)) = (&turn.id, seconds(&turn.ended_at).or_else(last_row)) else {
             continue;
         };
-        let mut wrote = usage(store, session, thread, turn, ended)?;
+        let mut wrote = usage(store, session, thread, turn, ended);
         let started = seconds(&turn.started_at);
         if !recorded
             .iter()
             .any(|(known, at)| known == id || covers(&turns, known, *at, started, ended))
         {
             let completed = completion(harness, turn, started, ended);
-            store.record_turn_completion(session, thread, id, ended, &completed)?;
+            store.record_turn_completion(session, thread, id, ended, &completed);
             wrote = true;
         }
         written += usize::from(wrote);
@@ -120,16 +119,16 @@ fn usage(
     thread: &AgentSessionId,
     turn: &Turn,
     ended: i64,
-) -> StoreResult<bool> {
+) -> bool {
     let Some(id) = &turn.id else {
-        return Ok(false);
+        return false;
     };
     if let Some(message) = super::answer::final_message(turn) {
         store.record_turn_final_message(session, thread, id, &message);
     }
     match &turn.receipt.usage {
         usage @ Value::Object(_) => store.record_turn_usage(session, thread, id, ended, usage),
-        _ => Ok(false),
+        _ => false,
     }
 }
 
@@ -284,11 +283,11 @@ mod tests {
         // Still running: nothing yet.
         let running = whole.lines().take(6).collect::<Vec<_>>().join("\n");
         std::fs::write(&path, format!("{running}\n")).unwrap();
-        assert_eq!(ended(&path).unwrap(), 0);
+        assert_eq!(ended(&path), 0);
 
         std::fs::write(&path, &whole).unwrap();
-        assert_eq!(ended(&path).unwrap(), 1);
-        assert_eq!(ended(&path).unwrap(), 0);
+        assert_eq!(ended(&path), 1);
+        assert_eq!(ended(&path), 0);
         let read = usage(&store);
         assert_eq!(read.len(), 1);
         assert_eq!(
@@ -331,10 +330,10 @@ mod tests {
                 &Source::File(path.clone()),
             )
         };
-        assert_eq!(ended().unwrap(), 1);
+        assert_eq!(ended(), 1);
         assert_eq!(usage(&store)[0].0, "turn-1");
         std::fs::write(&path, &whole).unwrap();
-        assert_eq!(ended().unwrap(), 1);
+        assert_eq!(ended(), 1);
         assert_eq!(usage(&store)[1].0, "turn-2");
     }
 
@@ -372,15 +371,13 @@ mod tests {
         let (_home, store) = store();
         let thread = AgentSessionId::from("0199a213-81c0-7800-8aa1-bbab2a035a53");
         // The live stream recorded the first turn's end, under its own id.
-        store
-            .record_turn_completion(
-                "conversation",
-                &thread,
-                "turn-1",
-                1_794_327_609,
-                &json!({"status":"completed"}),
-            )
-            .unwrap();
+        store.record_turn_completion(
+            "conversation",
+            &thread,
+            "turn-1",
+            1_794_327_609,
+            &json!({"status":"completed"}),
+        );
         let written = record(
             &store,
             "conversation",

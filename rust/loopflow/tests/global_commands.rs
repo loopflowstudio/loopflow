@@ -1212,7 +1212,6 @@ fn connection_session(home: &Path, cwd: &Path) -> loopflow_execution::session::L
             title: "Connection proof".into(),
             title_source: loopflow_execution::session::TitleSource::Human,
             request: None,
-            ready_summary: None,
             completed_at: None,
             created_at: 1,
         },

@@ -954,7 +954,6 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
             ),
             title_source: loopflow_execution::session::TitleSource::Human,
             request: None,
-            ready_summary: None,
             completed_at: None,
             created_at: 1,
         };

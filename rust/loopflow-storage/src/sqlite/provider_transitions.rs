@@ -126,11 +126,16 @@ pub(crate) fn observe_in(
     if is_latest(previous.as_ref(), &process, thread) {
         return Ok(None);
     }
-    let lineage: Option<String> = conn.query_row(
-        "SELECT e.payload FROM history.session_history e JOIN agent_sessions s ON s.id=e.session_id
-         WHERE s.id=?1 AND e.captured_event=s.current_capture AND (CASE WHEN json_valid(e.payload) THEN json_extract(e.payload,'$.type') END)='provider_lineage'
-         AND NOT EXISTS(SELECT 1 FROM history.session_history changed WHERE changed.session_id=s.id AND changed.captured_event=s.current_capture AND (CASE WHEN json_valid(changed.payload) THEN json_extract(changed.payload,'$.type') END)='provider_transition')
-         ORDER BY e.seq DESC LIMIT 1", [session], |row| row.get(0)).optional()?;
+    // The lineage seeds only the input's first transition, which takes it.
+    let lineage: Option<String> = conn
+        .query_row(
+            "SELECT c.provider_lineage FROM agent_sessions s
+             JOIN session_events c ON c.seq=s.current_capture WHERE s.id=?1",
+            [session],
+            |row| row.get(0),
+        )
+        .optional()?
+        .flatten();
     let lineage: Option<ProviderLineage> = lineage.map(|s| serde_json::from_str(&s)).transpose()?;
     let from_thread = lineage
         .as_ref()
@@ -166,6 +171,13 @@ pub(crate) fn observe_in(
         "UPDATE agent_sessions SET transition=?2 WHERE id=?1",
         params![session, serde_json::to_string(&transition)?],
     )?;
+    if lineage.is_some() {
+        conn.execute(
+            "UPDATE session_events SET provider_lineage=NULL
+             WHERE seq=(SELECT current_capture FROM agent_sessions WHERE id=?1)",
+            [session],
+        )?;
+    }
     let (attached, captured): (Option<String>, Option<i64>) = conn.query_row(
         "SELECT p.attached_lf_process_id,s.current_capture FROM agent_sessions s
          JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?1",
@@ -194,9 +206,8 @@ impl SqliteStore {
     pub fn provider_transitions(&self, session: &str) -> StoreResult<Vec<ProviderTransition>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare(
-            "SELECT payload,observed_at FROM history.session_history WHERE session_id=?1
-             AND (receipt_key GLOB 'provider-transition:*' OR receipt_key GLOB 'agent-session:*')
-             ORDER BY seq",
+            "SELECT payload,observed_at FROM history.session_history
+             WHERE session_id=?1 AND kind='transition' ORDER BY seq",
         )?;
         let rows = statement.query_map([session], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
@@ -215,17 +226,23 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let mut payload = serde_json::to_value(source)?;
         payload["type"] = "provider_lineage".into();
-        let captured: Option<i64> = self
-            .conn
-            .lock()
-            .expect("store mutex poisoned")
-            .query_row(
-                "SELECT current_capture FROM agent_sessions WHERE id=?1",
-                [&next.id],
-                |row| row.get(0),
-            )
-            .optional()?
-            .ok_or(crate::StoreError::NotFound)?;
+        let payload = serde_json::to_string(&payload)?;
+        let captured: Option<i64> = {
+            let conn = self.conn.lock().expect("store mutex poisoned");
+            let captured = conn
+                .query_row(
+                    "SELECT current_capture FROM agent_sessions WHERE id=?1",
+                    [&next.id],
+                    |row| row.get(0),
+                )
+                .optional()?
+                .ok_or(crate::StoreError::NotFound)?;
+            conn.execute(
+                "UPDATE session_events SET provider_lineage=?2 WHERE seq=?1 AND kind='captured'",
+                params![captured, payload],
+            )?;
+            captured
+        };
         self.append_history(
             "provider lineage",
             &[crate::history::Row::observed(
@@ -236,7 +253,7 @@ impl SqliteStore {
                 ),
                 captured,
                 crate::rows::now_unix(),
-                serde_json::to_string(&payload)?,
+                payload,
             )],
         );
         Ok(())

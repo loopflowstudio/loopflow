@@ -241,7 +241,6 @@ fn session_metadata_keeps_unknown_position_visible() {
         artifact_key: Some(crate::session_record::new_artifact_key()),
         title: "Retained conversation".into(),
         title_source: crate::session::TitleSource::Human,
-        ready_summary: None,
         completed_at: None,
         interactive: true,
         task_id: Some(task.clone()),
@@ -313,12 +312,9 @@ fn session_metadata_keeps_unknown_position_visible() {
         super::summary_surface(&summary).graph_membership,
         super::SessionGraphMembership::Independent
     );
-    summary.ready_summary = Some("Exact retained feedback".into());
     let row = super::summary_surface(&summary);
     assert_eq!(row.state, super::SessionState::Unknown);
-    assert_eq!(row.ready_summary, summary.ready_summary);
     assert_eq!(row.availability, None);
-    summary.ready_summary = None;
     summary.completed_at = Some(1);
     assert_eq!(
         super::session_state(&summary),
@@ -573,7 +569,6 @@ async fn session_work_labels_follow_stable_ancestry_without_a_roadmap() {
         title: "Conversation".into(),
         title_source: crate::session::TitleSource::Generated,
         request: None,
-        ready_summary: None,
         completed_at: None,
         created_at: 1,
     };

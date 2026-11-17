@@ -150,7 +150,7 @@ impl FactWriter {
                             .insert((turn.thread.clone(), turn.turn.clone()), captured);
                     }
                     self.store
-                        .record_session_turn_origin(&turn.thread, &turn.turn, &origin)?;
+                        .record_session_turn_origin(&turn.thread, &turn.turn, &origin);
                 }
             }
             ProviderFact::TurnCompleted { turn, detail, .. } => {
@@ -187,7 +187,7 @@ impl FactWriter {
                         &turn.turn,
                         at,
                         &detail,
-                    )?;
+                    );
                 }
             }
             &ProviderFact::AvailabilityReading {
@@ -1145,15 +1145,13 @@ mod tests {
             }
             assert_eq!(store.session_turns("conversation").unwrap(), before);
             // The turn's usage row comes from its rollout, under the same id.
-            store
-                .record_turn_usage(
-                    "conversation",
-                    &"thread".into(),
-                    "late",
-                    0,
-                    &json!({"total":{"inputTokens":12},"last":{"inputTokens":12}}),
-                )
-                .unwrap();
+            store.record_turn_usage(
+                "conversation",
+                &"thread".into(),
+                "late",
+                0,
+                &json!({"total":{"inputTokens":12},"last":{"inputTokens":12}}),
+            );
             hear(
                 &mut decoder,
                 &mut writer_for(&first),

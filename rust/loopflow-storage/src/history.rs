@@ -35,20 +35,33 @@ CREATE TABLE IF NOT EXISTS {p}session_history (
     captured_event INTEGER,
     observed_at INTEGER NOT NULL,
     payload TEXT NOT NULL,
+    -- What the row records, named once from its receipt key: every writer,
+    -- and the retention pass moving old rows, write it by inserting.
+    kind TEXT GENERATED ALWAYS AS (CASE
+        WHEN receipt_key GLOB 'provider-transition:*' OR receipt_key GLOB 'agent-session:*'
+            THEN 'transition'
+        WHEN receipt_key GLOB 'lineage:*' THEN 'lineage'
+        WHEN receipt_key GLOB 'attachment:*:exit' THEN 'departure'
+        WHEN receipt_key GLOB '*:manifest.json' THEN 'manifest'
+        WHEN receipt_key GLOB '*:terminal.json' THEN 'terminal'
+        WHEN receipt_key GLOB '*:events.jsonl:*' THEN 'events'
+        WHEN receipt_key GLOB '*:silence:*' THEN 'silence'
+        WHEN receipt_key GLOB '*:store-gap:*' THEN 'gap'
+        WHEN receipt_key GLOB '*:runs' THEN 'runs'
+        ELSE 'other' END) STORED,
     UNIQUE(session_id, receipt_key)
 );
 CREATE INDEX IF NOT EXISTS {p}session_history_order ON session_history(session_id, seq);
 CREATE INDEX IF NOT EXISTS {p}session_history_input ON session_history(captured_event)
     WHERE captured_event IS NOT NULL;
 CREATE INDEX IF NOT EXISTS {p}session_history_outcome_window ON session_history(observed_at)
-    WHERE substr(receipt_key,-14) IN (':manifest.json',':terminal.json');
+    WHERE kind IN ('manifest','terminal');
 CREATE INDEX IF NOT EXISTS {p}session_history_window ON session_history(observed_at);
 CREATE INDEX IF NOT EXISTS {p}session_history_process ON session_history(lf_process_id, session_id)
     WHERE lf_process_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS {p}session_history_task ON session_history(task_id)
     WHERE task_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS {p}session_history_transitions ON session_history(session_id, seq)
-    WHERE receipt_key GLOB 'provider-transition:*';
+CREATE INDEX IF NOT EXISTS {p}session_history_kind ON session_history(session_id, kind, seq);
 
 CREATE TABLE IF NOT EXISTS {p}turns (
     id INTEGER PRIMARY KEY,

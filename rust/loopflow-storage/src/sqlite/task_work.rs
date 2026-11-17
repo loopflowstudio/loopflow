@@ -635,7 +635,8 @@ fn set_step_in(tx: &rusqlite::Transaction<'_>, task: &TaskId, step: &str) -> Sto
     )? > 0)
 }
 
-/// Match unfinished Processes through checkout, Session history and attachments.
+/// Match unfinished Processes through checkout, captured inputs and
+/// attachments; state only, never `history.db`.
 /// Start from the small unfinished inventory and retain the attachment partial index.
 pub(super) fn task_open_process_ids(selector: &str, filter: &str) -> String {
     format!(
@@ -654,8 +655,6 @@ pub(super) fn task_open_process_pairs(selector: &str, filter: &str) -> String {
             WHERE p.completed_at IS NULL AND ({filter})),
         sessions AS (SELECT DISTINCT se.lf_process_id AS process,se.session_id AS session
             FROM open CROSS JOIN session_events se ON se.lf_process_id=open.id
-            UNION SELECT h.lf_process_id,h.session_id FROM open CROSS JOIN history.session_history h ON h.lf_process_id=open.id
-            UNION SELECT t.lf_process_id,t.session_id FROM open CROSS JOIN history.turns t ON t.lf_process_id=open.id
             UNION SELECT p.attached_lf_process_id,p.agent_session_id FROM open CROSS JOIN processes p INDEXED BY agent_process_attachment ON p.attached_lf_process_id=open.id WHERE p.kind='agent'
             UNION SELECT id,agent_session_id FROM open WHERE agent_session_id IS NOT NULL)
         SELECT tw.id AS task_id,open.id AS process FROM open JOIN task_scope tw ON {}

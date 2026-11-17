@@ -101,6 +101,30 @@ WHERE t.session_id=s.id AND t.newest=1;
 CREATE INDEX session_capture_provider_thread ON session_events(provider_thread)
     WHERE kind='captured' AND provider_thread IS NOT NULL;
 
+-- Where a moved conversation went is state the next attachment reads. It is
+-- keyed by the attachment that ended, so a later one never answers for it.
+ALTER TABLE agent_sessions ADD COLUMN departed_attachment TEXT;
+ALTER TABLE agent_sessions ADD COLUMN departure TEXT;
+UPDATE agent_sessions AS s SET departed_attachment=d.token,departure=d.departure
+FROM (SELECT session_id,json_extract(payload,'$.attachment_token') AS token,
+        json_extract(payload,'$.departure') AS departure,
+        ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY seq DESC) AS newest
+    FROM session_events WHERE kind='observed' AND receipt_key GLOB 'attachment:*:exit'
+      AND json_valid(payload) AND json_extract(payload,'$.departure') IS NOT NULL) AS d
+WHERE d.session_id=s.id AND d.newest=1;
+
+-- A fork's lineage seeds the first transition of the input it launched: state
+-- on the input's captured row until that transition takes it.
+ALTER TABLE session_events ADD COLUMN provider_lineage TEXT;
+UPDATE session_events AS c SET provider_lineage=l.payload
+FROM (SELECT captured_event,payload,
+        ROW_NUMBER() OVER (PARTITION BY captured_event ORDER BY seq DESC) AS newest
+    FROM session_events l WHERE kind='observed' AND receipt_key GLOB 'lineage:*'
+      AND captured_event IS NOT NULL AND json_valid(payload)
+      AND NOT EXISTS(SELECT 1 FROM session_events t WHERE t.captured_event=l.captured_event
+          AND t.kind='observed' AND t.receipt_key GLOB 'provider-transition:*')) AS l
+WHERE c.kind='captured' AND c.seq=l.captured_event AND l.newest=1;
+
 -- Turns live in history.db, whose own revision row counts them.
 DROP TRIGGER store_revision_usage_insert;
 

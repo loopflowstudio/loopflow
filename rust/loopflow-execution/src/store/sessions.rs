@@ -384,7 +384,6 @@ mod tests {
             title: "Conversation".into(),
             title_source: TitleSource::Human,
             request: None,
-            ready_summary: None,
             completed_at: None,
             created_at: 1,
         }

@@ -497,7 +497,6 @@ fn prepare_conversation(
             title: title.into(),
             title_source: loopflow_execution::session::TitleSource::Generated,
             request: Some(title.into()),
-            ready_summary: None,
             completed_at: None,
             created_at: 1,
         },

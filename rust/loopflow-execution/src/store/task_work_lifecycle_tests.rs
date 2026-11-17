@@ -412,13 +412,15 @@ fn task_work_includes_checkout_binding_and_mechanical_history_without_granting_o
         store.execute_history(
 "INSERT INTO session_history(session_id,receipt_key,lf_process_id,observed_at,payload) VALUES('history','open',?1,1,'{}')", [&unfinished]).unwrap();
     }
+    // Task state reads only `loopflow.db`: a Process history alone names is
+    // not one of its open Processes.
     let open = store.task_open_processes(&task).unwrap();
-    assert_eq!(open.len(), 3);
-    assert!(open
+    assert_eq!(open.len(), 2);
+    assert!(!open
         .iter()
         .any(|process| process.id() == unfinished.as_str()));
-    // With every Process unfinished, each membership path agrees: checkout,
-    // Session event and attachment.
+    // With every Process unfinished, each membership path in state agrees:
+    // checkout, Session event and attachment.
     store
         .conn
         .lock()
@@ -438,7 +440,12 @@ fn task_work_includes_checkout_binding_and_mechanical_history_without_granting_o
         .unwrap()
         .processes);
     assert_eq!(all.len(), 5);
-    assert_eq!(ids(store.task_open_processes(&task).unwrap()), all);
+    let in_state: Vec<_> = all
+        .iter()
+        .filter(|id| ![unfinished.as_str(), bound_process.as_str()].contains(&id.as_str()))
+        .cloned()
+        .collect();
+    assert_eq!(ids(store.task_open_processes(&task).unwrap()), in_state);
     store.conn.lock().unwrap().execute_batch(
         "UPDATE processes SET completed_at=(SELECT completed_at FROM finished WHERE finished.id=processes.id);
          DROP TABLE finished;",

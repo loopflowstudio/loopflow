@@ -982,7 +982,6 @@ struct DTOFixtureTests {
         #expect(session.actions.map(\.kind) == [.open, .reveal])
         #expect(session.actions.allSatisfy { $0.unavailableReason == nil })
         #expect(session.statusLabel == "Available")
-        #expect(session.readySummary == "The design now reflects Jack's requested changes.")
         #expect(session.openArgv.suffix(3) == [
             "session", "resume", "task_00000000000000000000000000000001:task-design:review_kickoff:0"
         ])

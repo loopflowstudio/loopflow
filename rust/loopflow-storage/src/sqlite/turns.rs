@@ -150,6 +150,13 @@ fn ensure_turn(
     )?)
 }
 
+/// The error a provider's completion `detail` reports, under either name.
+pub(crate) fn turn_error(detail: &Value) -> Option<&Value> {
+    [&detail["errors"], &detail["error"]]
+        .into_iter()
+        .find(|error| !error.is_null())
+}
+
 fn conflict(what: &str, session: &str, turn: &str) -> StoreError {
     StoreError::InvalidData(format!(
         "a second, different {what} for turn {turn} of Session {session}; the first is kept"
@@ -158,29 +165,22 @@ fn conflict(what: &str, session: &str, turn: &str) -> StoreError {
 
 /// Write `usage` onto the turn `id`; a turn keeps the reading it has, and a
 /// different one is a conflict. Returns whether it wrote.
-pub(crate) fn write_usage_in(
+fn write_usage_in(
     tx: &Transaction<'_>,
     id: i64,
     usage: &RecordedUsage,
     provider: Option<&str>,
 ) -> StoreResult<bool> {
-    let kept: Option<Option<i64>> = tx
-        .query_row("SELECT usage_at FROM turns WHERE id=?1", [id], |row| {
-            row.get(0)
-        })
-        .optional()?;
-    if kept.flatten().is_some() {
-        let turn = tx.query_row(
-            &format!("SELECT {} FROM turns t WHERE t.id=?1", turn_columns("t")),
-            [id],
-            read_turn,
-        )??;
-        let same = turn.usage.as_ref().is_some_and(|kept| {
-            kept.usage == usage.usage
-                && kept.partial == usage.partial
-                && kept.final_reading == usage.final_reading
-        });
-        if same {
+    let turn = tx.query_row(
+        &format!("SELECT {} FROM turns t WHERE t.id=?1", turn_columns("t")),
+        [id],
+        read_turn,
+    )??;
+    if let Some(kept) = &turn.usage {
+        if kept.usage == usage.usage
+            && kept.partial == usage.partial
+            && kept.final_reading == usage.final_reading
+        {
             return Ok(false);
         }
         return Err(conflict("usage reading", &turn.session_id, &turn.turn));
@@ -216,12 +216,7 @@ pub(crate) fn write_usage_in(
 
 /// Write a completion `detail` observed at `at` onto the turn `id`. A turn
 /// keeps its first end; another with a different status is a conflict.
-pub(crate) fn write_completion_in(
-    tx: &Transaction<'_>,
-    id: i64,
-    at: i64,
-    detail: &Value,
-) -> StoreResult<()> {
+fn write_completion_in(tx: &Transaction<'_>, id: i64, at: i64, detail: &Value) -> StoreResult<()> {
     let status = detail["status"].as_str();
     let kept: Option<(Option<String>, String, String)> = tx
         .query_row(
@@ -240,11 +235,7 @@ pub(crate) fn write_completion_in(
         Some(context) if !context.is_null() => Some(serde_json::from_value(context.clone())?),
         _ => None,
     };
-    let error = [&detail["errors"], &detail["error"]]
-        .into_iter()
-        .find(|error| !error.is_null())
-        .map(serde_json::to_string)
-        .transpose()?;
+    let error = turn_error(detail).map(serde_json::to_string).transpose()?;
     let count = |count: Option<u64>| count.map(|count| count as i64);
     tx.execute(
         "UPDATE turns SET ended_at=?2,status=?3,duration_ms=?4,error=?5,first_request_tokens=?6,
@@ -291,7 +282,7 @@ impl SqliteStore {
         thread: &AgentSessionId,
         turn: &str,
         origin: &SessionTurnOrigin,
-    ) -> StoreResult<()> {
+    ) {
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
         self.write_history("turn origin", |tx| {
             let id = ensure_turn(tx, &origin.session_id, thread, turn)?;
@@ -345,7 +336,6 @@ impl SqliteStore {
                 }
             }
         });
-        Ok(())
     }
 
     /// Record `turn`'s usage as its provider read it, dated `at`, resolved to
@@ -358,17 +348,16 @@ impl SqliteStore {
         turn: &str,
         at: i64,
         reading: &Value,
-    ) -> StoreResult<bool> {
+    ) -> bool {
         let usage = crate::session_record::resolve_usage(reading, None, at);
-        Ok(self
-            .write_history("turn usage", |tx| {
-                let usage = usage.as_ref().ok_or_else(|| {
-                    StoreError::InvalidData(format!("unreadable usage reading for turn {turn}"))
-                })?;
-                let id = ensure_turn(tx, session, thread, turn)?;
-                write_usage_in(tx, id, usage, reading["provider"].as_str())
-            })
-            .unwrap_or(false))
+        self.write_history("turn usage", |tx| {
+            let usage = usage.as_ref().ok_or_else(|| {
+                StoreError::InvalidData(format!("unreadable usage reading for turn {turn}"))
+            })?;
+            let id = ensure_turn(tx, session, thread, turn)?;
+            write_usage_in(tx, id, usage, reading["provider"].as_str())
+        })
+        .unwrap_or(false)
     }
 
     /// Record that `turn` ended at `at`, with the provider's `detail`: its
@@ -380,39 +369,11 @@ impl SqliteStore {
         turn: &str,
         at: i64,
         detail: &Value,
-    ) -> StoreResult<()> {
+    ) {
         self.write_history("turn completion", |tx| {
             let id = ensure_turn(tx, session, thread, turn)?;
             write_completion_in(tx, id, at, detail)
         });
-        Ok(())
-    }
-
-    /// Record that `turn`, answering input `captured`, ended at `at` with the
-    /// provider's `detail`: state on the input's captured row.
-    pub fn record_answered_turn_end(
-        &self,
-        captured: i64,
-        thread: &AgentSessionId,
-        turn: &str,
-        at: i64,
-        detail: &Value,
-    ) -> StoreResult<()> {
-        let error = [&detail["errors"], &detail["error"]]
-            .into_iter()
-            .find(|error| !error.is_null())
-            .map(|error| match error.as_str() {
-                Some(text) => text.to_owned(),
-                None => error.to_string(),
-            });
-        self.record_input_turn_end(
-            captured,
-            thread,
-            turn,
-            at,
-            detail["status"].as_str(),
-            error.as_deref(),
-        )
     }
 
     /// Keep what the agent said last in `turn`, for people reading it after
@@ -780,19 +741,16 @@ mod tests {
                 "turn",
                 12,
                 &json!({"provider":"claude","final":true,"usage":{"input_tokens":3,"output_tokens":4,"model":"opus"}}),
-            )
-            .unwrap();
-        store
-            .record_turn_completion(
-                "conversation",
-                &thread,
-                "turn",
-                12,
-                &json!({"status":"completed","context":{"first_request_tokens":3,
+            );
+        store.record_turn_completion(
+            "conversation",
+            &thread,
+            "turn",
+            12,
+            &json!({"status":"completed","context":{"first_request_tokens":3,
                     "peak_request_tokens":3,"tool_results":1,"tool_output_tokens":5,
                     "compactions":0,"compaction_tokens":null}}),
-            )
-            .unwrap();
+        );
         let ended = store.session_turns("conversation").unwrap();
         assert_eq!(ended.len(), 1, "start, usage and end are one row");
         let turn = &ended[0];
@@ -837,8 +795,7 @@ mod tests {
                     "last":{"inputTokens":60,"cachedInputTokens":30,"outputTokens":15,"reasoningOutputTokens":3},
                     "modelContextWindow":1000,"peakInputTokens":60
                 }),
-            )
-            .unwrap();
+            );
         let usage = store.session_turns("conversation").unwrap()[0]
             .usage
             .clone()
@@ -857,11 +814,8 @@ mod tests {
         let (_home, store) = store();
         let thread = "thread".into();
         let reading = |tokens: u64| json!({"final":true,"usage":{"output_tokens":tokens}});
-        let write = |tokens| {
-            store
-                .record_turn_usage("conversation", &thread, "turn", 1, &reading(tokens))
-                .unwrap()
-        };
+        let write =
+            |tokens| store.record_turn_usage("conversation", &thread, "turn", 1, &reading(tokens));
         assert!(write(5));
         assert!(!write(5));
         assert!(!store.history.gap_open());
@@ -914,15 +868,13 @@ mod tests {
             .transaction_with_behavior(rusqlite::TransactionBehavior::Exclusive)
             .unwrap();
         store.record_turn_start("conversation", &thread, "missed", 2);
-        assert!(store
-            .record_turn_completion(
-                "conversation",
-                &thread,
-                "first",
-                3,
-                &json!({"status":"completed"})
-            )
-            .is_ok());
+        store.record_turn_completion(
+            "conversation",
+            &thread,
+            "first",
+            3,
+            &json!({"status":"completed"}),
+        );
         assert!(store.history.gap_open());
         // The input's row keeps the turn's end while history is locked.
         let captured = store

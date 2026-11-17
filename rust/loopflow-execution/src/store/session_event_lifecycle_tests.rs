@@ -35,21 +35,13 @@ fn delayed_origin_preserves_pre_bind_assignment_through_a_conflicting_repeat() {
     let before = store.session_turn_origin(&session.id, &attachment).unwrap();
     crate::store::sessions::bind_session(&store, &session.id, session.captured, &task).unwrap();
     let after = store.session_turn_origin(&session.id, &attachment).unwrap();
-    store
-        .record_session_turn_origin(&"thread".into(), "late", &before)
-        .unwrap();
+    store.record_session_turn_origin(&"thread".into(), "late", &before);
     let revisions = store.revisions().unwrap();
-    store
-        .record_session_turn_origin(&"thread".into(), "late", &before)
-        .unwrap();
+    store.record_session_turn_origin(&"thread".into(), "late", &before);
     assert_eq!(store.revisions().unwrap(), revisions);
     // A conflicting repeat is a recording gap; the turn keeps its origin.
-    store
-        .record_session_turn_origin(&"thread".into(), "late", &after)
-        .unwrap();
-    store
-        .record_session_turn_origin(&"thread".into(), "new", &after)
-        .unwrap();
+    store.record_session_turn_origin(&"thread".into(), "late", &after);
+    store.record_session_turn_origin(&"thread".into(), "new", &after);
     let turns = store.session_turns(&session.id).unwrap();
     let late = turns.iter().find(|turn| turn.turn == "late").unwrap();
     let new = turns.iter().find(|turn| turn.turn == "new").unwrap();
@@ -59,12 +51,8 @@ fn delayed_origin_preserves_pre_bind_assignment_through_a_conflicting_repeat() {
     assert_eq!(new.wave_id.as_deref(), Some(wave.as_str()));
     store.move_task(&task, Some(&project), None).unwrap();
     let detached = store.session_turn_origin(&session.id, &attachment).unwrap();
-    store
-        .record_session_turn_origin(&"thread".into(), "dispatched-before-move", &after)
-        .unwrap();
-    store
-        .record_session_turn_origin(&"thread".into(), "dispatched-after-move", &detached)
-        .unwrap();
+    store.record_session_turn_origin(&"thread".into(), "dispatched-before-move", &after);
+    store.record_session_turn_origin(&"thread".into(), "dispatched-after-move", &detached);
     let turns = store.session_turns(&session.id).unwrap();
     let before_move = turns
         .iter()
@@ -301,15 +289,13 @@ fn completed_turn_does_not_complete_the_conversation() {
         &loopflow_storage::session_record::new_artifact_key(),
     );
     store.record_turn_start(&session.id, &"thread".into(), "turn", 1);
-    store
-        .record_turn_completion(
-            &session.id,
-            &"thread".into(),
-            "turn",
-            2,
-            &json!({"status": "completed"}),
-        )
-        .unwrap();
+    store.record_turn_completion(
+        &session.id,
+        &"thread".into(),
+        "turn",
+        2,
+        &json!({"status": "completed"}),
+    );
     for _ in 0..2 {
         let rows = crate::store::session_projection::session_summaries(
             &store,
@@ -347,15 +333,13 @@ fn stopped_turn_and_stale_attachment_cannot_retire_a_resumed_conversation() {
     let original =
         attachment::claim_session_attachment(&store, &session.id, None, &first, true).unwrap();
     record_captured_start(&store, &session.id, "turn");
-    store
-        .record_turn_completion(
-            &session.id,
-            &"thread".into(),
-            "turn",
-            2,
-            &json!({"status":"interrupted"}),
-        )
-        .unwrap();
+    store.record_turn_completion(
+        &session.id,
+        &"thread".into(),
+        "turn",
+        2,
+        &json!({"status":"interrupted"}),
+    );
     assert!(store
         .session(&session.id)
         .unwrap()
@@ -403,9 +387,7 @@ fn recovered_completion_keeps_missing_start_and_usage_and_its_first_answer() {
     store.test_session("conversation", "run_00000000000000000000000000000001");
     let completed = json!({"status":"completed", "error":null, "started_at":10, "completed_at":20, "duration_ms":10000});
     let record = |payload: &serde_json::Value| {
-        store
-            .record_turn_completion("conversation", &"thread".into(), "turn", 20, payload)
-            .unwrap()
+        store.record_turn_completion("conversation", &"thread".into(), "turn", 20, payload)
     };
     record(&completed);
     record(&completed);
@@ -452,15 +434,13 @@ fn recovered_completion_keeps_missing_start_and_usage_and_its_first_answer() {
     store
         .record_agent_process_identity("conversation", &original, 12345, 12)
         .unwrap();
-    store
-        .record_session_turn_origin(
-            &"thread".into(),
-            "later",
-            &store
-                .session_turn_origin("conversation", &original)
-                .unwrap(),
-        )
-        .unwrap();
+    store.record_session_turn_origin(
+        &"thread".into(),
+        "later",
+        &store
+            .session_turn_origin("conversation", &original)
+            .unwrap(),
+    );
     let replacement = attachment::claim_session_attachment(
         &store,
         "conversation",
@@ -493,15 +473,13 @@ fn recovered_completion_keeps_missing_start_and_usage_and_its_first_answer() {
         .record_agent_process_identity("conversation", &original, 12346, 13)
         .is_err());
     for turn in ["later", "unobserved"] {
-        store
-            .record_turn_usage(
-                "conversation",
-                &"thread".into(),
-                turn,
-                30,
-                &json!({"total":{"inputTokens":40}}),
-            )
-            .unwrap();
+        store.record_turn_usage(
+            "conversation",
+            &"thread".into(),
+            turn,
+            30,
+            &json!({"total":{"inputTokens":40}}),
+        );
     }
     let turns = store.session_turns("conversation").unwrap();
     let turn = |id: &str| turns.iter().find(|turn| turn.turn == id).unwrap();

@@ -185,13 +185,19 @@ impl SessionTransfer<'_> {
         }
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
         // Only a departure has a reader: the next attachment asks where the
-        // conversation went. An exit without one leaves no history.
+        // conversation went, from the Session. History keeps a copy for
+        // people; an exit without one leaves none.
         let exit = departure
             .map(|departure| -> StoreResult<crate::history::Row> {
+                let departure = serde_json::to_value(departure)
+                    .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+                tx.execute(
+                    "UPDATE agent_sessions SET departed_attachment=?2,departure=?3 WHERE id=?1",
+                    params![session, expected.token.to_string(), departure.to_string()],
+                )?;
                 let payload = serde_json::json!({
                     "type": "attachment_exit", "outcome": outcome, "attachment_token": expected.token,
-                    "departure": serde_json::to_value(departure)
-                        .map_err(|error| StoreError::InvalidData(error.to_string()))?,
+                    "departure": departure,
                 });
                 let captured: Option<i64> = tx.query_row(
                     "SELECT current_capture FROM agent_sessions WHERE id=?1",
@@ -1636,7 +1642,7 @@ impl SqliteStore {
     }
 
     /// Where the conversation went when `attachment` ended, if a mover said.
-    /// The exit receipt is keyed by the ended token, so a later attachment
+    /// The Session keeps it under the ended token, so a later attachment
     /// never answers for an earlier one.
     pub fn attachment_departure(
         &self,
@@ -1645,28 +1651,18 @@ impl SqliteStore {
     ) -> StoreResult<Option<crate::process::Departure>> {
         let canonical = loopflow_model::id::canonical_session(session);
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let payload = conn
+        let departure = conn
             .query_row(
-                "SELECT payload FROM history.session_history WHERE session_id=?1
-                 AND receipt_key=?2",
-                params![
-                    canonical.as_str(),
-                    format!("attachment:{}:exit", attachment.token)
-                ],
-                |row| row.get::<_, String>(0),
+                "SELECT departure FROM agent_sessions WHERE id=?1 AND departed_attachment=?2",
+                params![canonical.as_str(), attachment.token.to_string()],
+                |row| row.get::<_, Option<String>>(0),
             )
-            .optional()?;
-        let Some(payload) = payload else {
-            return Ok(None);
-        };
-        let mut payload: serde_json::Value = serde_json::from_str(&payload)
-            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
-        match payload.get_mut("departure").map(serde_json::Value::take) {
-            Some(departure) => serde_json::from_value(departure)
-                .map(Some)
-                .map_err(|error| StoreError::InvalidData(error.to_string())),
-            None => Ok(None),
-        }
+            .optional()?
+            .flatten();
+        departure
+            .map(|departure| serde_json::from_str(&departure))
+            .transpose()
+            .map_err(|error| StoreError::InvalidData(error.to_string()))
     }
 
     /// Stale providers retain their historical caller, never the new attachment.

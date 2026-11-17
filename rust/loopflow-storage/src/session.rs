@@ -143,7 +143,6 @@ pub struct LfSession {
     pub title_source: TitleSource,
     /// Retained request context from historical conversations.
     pub request: Option<String>,
-    pub ready_summary: Option<String>,
     pub completed_at: Option<i64>,
     pub created_at: i64,
 }
@@ -402,7 +401,6 @@ pub struct SessionSummary {
     pub has_provider_history: bool,
     pub title: String,
     pub title_source: TitleSource,
-    pub ready_summary: Option<String>,
     pub completed_at: Option<i64>,
     pub interactive: bool,
     pub task_id: Option<TaskId>,

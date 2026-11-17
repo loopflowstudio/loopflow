@@ -89,15 +89,13 @@ fn history_limits_precede_payload_reads_and_keep_unfinished_work_and_exact_calle
                 .unwrap();
         record_captured_start(&store, &session.id, &at.to_string());
         if at != 1 {
-            store
-                .record_turn_completion(
-                    &session.id,
-                    &"thread".into(),
-                    &at.to_string(),
-                    time::OffsetDateTime::now_utc().unix_timestamp(),
-                    &json!({"status":"completed"}),
-                )
-                .unwrap();
+            store.record_turn_completion(
+                &session.id,
+                &"thread".into(),
+                &at.to_string(),
+                time::OffsetDateTime::now_utc().unix_timestamp(),
+                &json!({"status":"completed"}),
+            );
         }
     }
     let (recent, truncated) =
@@ -275,24 +273,20 @@ fn aggregate_history_discovers_unattributed_native_receipts_without_a_capture() 
     let counts = json!({"inputTokens":12,"outputTokens":3,
             "cachedInputTokens":0,"reasoningOutputTokens":0});
     for (turn, at) in [("old", 10), ("recent", 100)] {
-        store
-            .record_turn_usage(
-                "conversation",
-                &"thread".into(),
-                turn,
-                at,
-                &json!({"total":counts,"last":counts}),
-            )
-            .unwrap();
-        store
-            .record_turn_completion(
-                "conversation",
-                &"thread".into(),
-                turn,
-                at,
-                &json!({"status":"completed"}),
-            )
-            .unwrap();
+        store.record_turn_usage(
+            "conversation",
+            &"thread".into(),
+            turn,
+            at,
+            &json!({"total":counts,"last":counts}),
+        );
+        store.record_turn_completion(
+            "conversation",
+            &"thread".into(),
+            turn,
+            at,
+            &json!({"status":"completed"}),
+        );
     }
     let rows =
         crate::store::sessions::conversation_history(&store, None, None, None, None, 50, true)
@@ -457,25 +451,21 @@ fn native_usage_cannot_skip_a_turn_without_a_notification_for_its_baseline() {
     for (turn, total, last) in [("a", Some(20), 20), ("b", None, 30), ("c", Some(60), 10)] {
         record_captured_start(&store, "conversation", turn);
         if let Some(total) = total {
-            store
-                .record_turn_usage(
-                    "conversation",
-                    &"thread".into(),
-                    turn,
-                    2,
-                    &json!({"total":counts(total),"last":counts(last)}),
-                )
-                .unwrap();
-        }
-        store
-            .record_turn_completion(
+            store.record_turn_usage(
                 "conversation",
                 &"thread".into(),
                 turn,
-                3,
-                &json!({"status":"completed"}),
-            )
-            .unwrap();
+                2,
+                &json!({"total":counts(total),"last":counts(last)}),
+            );
+        }
+        store.record_turn_completion(
+            "conversation",
+            &"thread".into(),
+            turn,
+            3,
+            &json!({"status":"completed"}),
+        );
     }
     // B's usage is unknown: 20 for A and C's 10-token suffix.
     let usage = crate::store::sessions::input_history(&store, &input)

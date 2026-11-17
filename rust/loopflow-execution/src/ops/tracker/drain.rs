@@ -453,6 +453,10 @@ impl Drain<'_> {
     }
 
     async fn send(&self, action: &TrackerAction) -> OpsResult<Step> {
+        if let Some(reason) = self.tracker.blocked(self.store, self.repo, action).await {
+            self.error(action, &reason)?;
+            return Ok(Step::Wait);
+        }
         if !self.take() {
             return Ok(Step::Spent);
         }
@@ -482,14 +486,6 @@ impl Drain<'_> {
                 },
             )?,
             Sent::Rejected(error) => {
-                self.store
-                    .sqlite
-                    .reject_tracker_action(&action.id, &error)
-                    .map_err(message)?;
-                return Ok(Step::Wait);
-            }
-            Sent::Refused(error) => {
-                self.used.fetch_sub(1, Ordering::SeqCst);
                 self.store
                     .sqlite
                     .reject_tracker_action(&action.id, &error)
@@ -719,7 +715,20 @@ mod tests {
             .iter()
             .all(|action| action.phase == ActionPhase::Queued
                 && action.error.as_deref()
-                    == Some("Wave has no Linear Initiative; its Projects stay local")));
+                    == Some("Wave has no Linear Initiative; its Projects stay local")
+                && action.sent_at.is_none()));
+        // A later pass decides the same block without writing the rows again.
+        let revision = f.store.sqlite.revisions().unwrap().planning;
+        let pass = f.pass().await;
+        assert_eq!(pass.requests, 0);
+        assert_eq!(f.store.sqlite.revisions().unwrap().planning, revision);
+        assert!(f
+            .store
+            .sqlite
+            .unconfirmed_tracker_actions("/repo")
+            .unwrap()
+            .iter()
+            .all(|action| action.phase == ActionPhase::Queued && action.sent_at.is_none()));
     }
 
     #[tokio::test]

@@ -24,6 +24,25 @@ use loopflow_storage::sqlite::tracker_actions::{
 use loopflow_storage::work::edit::WorkValue;
 
 impl LinearClient {
+    /// A Project created under a Wave with no Initiative stays local until the
+    /// Wave has one. A missing Project or Wave is not a block: the send reports it.
+    pub(crate) async fn blocked_action(
+        &self,
+        store: &Store,
+        repo: &Path,
+        action: &TrackerAction,
+    ) -> Option<String> {
+        let (ActionOwner::Project(project), ActionKind::Create) = (&action.owner, action.kind)
+        else {
+            return None;
+        };
+        let project = store.get_project(project).await.ok()??;
+        let wave = store.get_wave(&project.wave_id).await.ok()??;
+        crate::ops::linear::read_initiative(repo, wave.slug())
+            .is_none()
+            .then(|| NO_INITIATIVE.to_string())
+    }
+
     pub(crate) async fn send_action(
         &self,
         store: &Store,
@@ -135,10 +154,7 @@ impl LinearClient {
         project: &ProjectId,
         action: &TrackerAction,
     ) -> OpsResult<Sent> {
-        let (wave, initiative) = match project_scope(store, repo, project).await {
-            Ok(scope) => scope,
-            Err(error) => return Ok(Sent::Refused(error.to_string())),
-        };
+        let (wave, initiative) = project_scope(store, repo, project).await?;
         let team = repository_scope(repo)?;
         let id = creation_id(project.as_str())?;
         let mut input = json!({"id": id, "teamIds": [team], "useDefaultTemplate": false});
@@ -682,6 +698,8 @@ async fn project_id(store: &Store, project: Option<&str>) -> OpsResult<Option<St
     Ok(Some(remote_project(store, &project).await?))
 }
 
+const NO_INITIATIVE: &str = "Wave has no Linear Initiative; its Projects stay local";
+
 /// The Wave a Project belongs to and that Wave's Initiative.
 async fn project_scope(
     store: &Store,
@@ -699,7 +717,7 @@ async fn project_scope(
         .map_err(message)?
         .ok_or_else(|| message("Project Wave is missing"))?;
     let initiative = crate::ops::linear::read_initiative(repo, wave.slug())
-        .ok_or_else(|| message("Wave has no Linear Initiative; its Projects stay local"))?;
+        .ok_or_else(|| message(NO_INITIATIVE))?;
     Ok((project.wave_id, initiative))
 }
 

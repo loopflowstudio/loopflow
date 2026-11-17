@@ -117,9 +117,9 @@ Built (glossary in `docs/dev/planning.md` "Words"; renames in
   no Linear Initiative) still takes one of the pass's 20 requests, every pass.
   One such Project on this Machine (manabot `infrastructure`). Concept
   review 2026-11-17, headless: charge only requests that leave, since the
-  bound is the provider's allowance. Built as `Sent::Refused` (37f38c3537);
-  the next concept review moves the check before the attempt
-  (`Tracker::blocked`, see `tracker-mirror.md` "Next implement").
+  bound is the provider's allowance. Built as `Tracker::blocked`, decided
+  before the drain takes a request or marks the action sent; a missing
+  Project or Wave is an error from the send, not a block.
 
 ## Concept review round (2026-11-17)
 

@@ -1,7 +1,8 @@
 # LOO-925: the tracker mirrors the store
 
-Status: built except "Next implement" below (replace `Sent::Refused` with
-`Tracker::blocked`). Open choices in `scratch/questions.md` keep today's
+Status: built. A tracker block (Linear Project with no Initiative) is decided
+by `Tracker::blocked` before the drain takes a request or marks the action
+sent. Open choices in `scratch/questions.md` keep today's
 behavior and do not block publishing.
 The design as built is `docs/dev/planning.md` ("Words", "One outbound queue").
 
@@ -75,37 +76,6 @@ QA run: `scratch/qa.html`.
   coworker's value over an edit that exists only in `tracker_actions`; the
   new drain then sees the base moved and conflicts, keeping the losing value.
 
-## Next implement: a refusal is decided before the attempt
-
-Concept review of 37f38c3537. `Sent::Refused` comes back from `send`, after
-`Drain::send` has taken a budget slot and `attempt_tracker_action` has set
-`phase='sent'`, `sent_at`, `error=NULL`. `reject_tracker_action` then puts it
-back. On every pass, each refused Project (manabot `infrastructure` today)
-costs two store writes and two `store_revisions` bumps, its row flips
-`queued → sent → queued` with its error cleared in between (`lf repo plan`
-and Desktop can read `sent` with no error), and a process that exits between
-the two writes leaves a creation the tracker never saw in `sent`, which the
-lost-reply rule then looks for with a real request. The refund
-(`used.fetch_sub`) is there only because the slot was taken too early.
-`project_scope` also maps "Project is missing" and store read errors to
-`Refused`, so they stay queued for free forever. Before this commit they
-were `Err`.
-
-Direction:
-- `Tracker::blocked(store, repo, action) -> Option<String>`: why this action
-  cannot be sent yet, with no request. Linear answers it for a Project
-  `create` with no Initiative; Asana and Fake return `None` (Fake keeps its
-  `refuse` hook here). `Drain::send` checks it before `take()` and
-  `attempt_tracker_action`. When it is `Some`, call `tracker_action_error`
-  (which writes only when the error changes) and return `Step::Wait`.
-- Delete `Sent::Refused`, its drain arm and the `fetch_sub` refund. `Rejected`
-  no longer needs a near-synonym beside it.
-- `create_project` keeps `project_scope`'s `?`. Only the Initiative check
-  moves into `blocked`. A missing Project or Wave is an error again.
-- Test: keep `a_creation_refused_before_any_request_costs_the_pass_nothing`.
-  Add an assertion that a second pass makes no store write for the refused
-  rows: `sent_at` stays NULL and the `tracker_actions` revision does not move.
-
 ## Remaining work, filed
 
 - LOO-941: contract migration ≥ 30 days after merge — drop `task_changes`,
@@ -142,3 +112,4 @@ Direction:
 - Concept-review round (one tracker-action view, Git conflicts, `lf task sync` on Git, no `--retry-updates`): execution `store::planning_sync_tests:: | ops::tracker:: | task_sync | tracker_actions` → 16 pass; `-p loopflow` local_planning, status, planning_setup, dto_fixtures, subscribe, `lf::tests::`, documented_commands, schema → pass, except two `subscribe::` watches that timed out in the 120-test run and pass alone (`a_store_created_after_the_watch_started_is_shown`, `a_paused_watch_and_a_truncated_log_both_catch_up`; load-timed, gate watches them); storage `query_plans | tracker_actions | migration` → 157 pass; `scripts/test_desktop.sh --filter "DTOFixtureTests|DesktopHeadlessTests|WorkModelTests|RegistryQueryTests|WaveLensTests|TaskRowMetadataTests|WaveStandupTests"` → 170 pass; clippy clean. `lf::tests::native_login_controls…` listed `notion` after Notion's delete; fixed.
 - Concept review follow-up (2026-11-17, 37f38c3537; its refusal mechanism is replaced by "Next implement"): a tracker refusal before any request (`Sent::Refused`, Linear Project with no Initiative) is free and stays queued (`a_creation_refused_before_any_request_costs_the_pass_nothing`: 21 refused Projects + one edit → 1 request; fails with the request charged); `owner_kind`/`tracker` are `ActionOwnerKind`/`TrackerKind` enums in Rust, schema and Swift; `TrackerReceipts` → `TrackerActions` (`task_tracker_actions`, `project_tracker_actions`). Storage+execution `tracker_actions | planning::rules | ops::tracker:: | store::planning_sync_tests:: | task_sync | query_plans` → 45 pass; server schema regenerated; `-p loopflow` `dto_fixtures:: | server::schema::tests:: | local_planning | planning_status | repo_plan | task_sync` → 93 pass; `scripts/test_desktop.sh --filter 'DTOFixtureTests|DesktopHeadlessTests'` → 73 pass; clippy storage+execution+loopflow `--all-targets -D warnings` clean.
 - Not run: `binary(two_people)`, `test(transport::)`, `binary(golden_prompt)`. Gate: `scripts/check_migrations.py`; CI runs the suites.
+- Tracker::blocked: `cargo nextest run -p loopflow-storage -p loopflow-execution --lib -E 'test(ops::tracker::) | test(tracker_actions) | test(linear::actions::)'` → 20 pass; clippy storage+execution clean. `documented_commands::` (planning.md prose) left to gate.

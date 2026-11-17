@@ -31,9 +31,6 @@ pub enum Sent {
     /// The provider refused before acting (validation, rate limit): safe to
     /// send again.
     Rejected(String),
-    /// The tracker refused before any request left, so the pass spent nothing
-    /// (a Linear Project whose Wave has no Initiative). The action stays queued.
-    Refused(String),
     /// No reply: the provider may or may not have acted.
     Unknown(String),
     /// The tracker has no form for this action; it retires with the reason.
@@ -165,6 +162,22 @@ impl Tracker {
             Self::Asana(_) => kind == ActionKind::Link,
             #[cfg(test)]
             Self::Fake(fake) => fake.idempotent.contains(&kind),
+        }
+    }
+
+    /// Why `action` cannot be sent yet, decided with no request: a Linear
+    /// Project whose Wave has no Initiative. The action stays queued.
+    pub async fn blocked(
+        &self,
+        store: &Store,
+        repo: &Path,
+        action: &TrackerAction,
+    ) -> Option<String> {
+        match self {
+            Self::Linear(client) => client.blocked_action(store, repo, action).await,
+            Self::Asana(_) => None,
+            #[cfg(test)]
+            Self::Fake(fake) => (fake.refuse)(action),
         }
     }
 
@@ -505,7 +518,7 @@ pub(crate) mod fake {
         pub idempotent: Vec<ActionKind>,
         pub held: Mutex<Option<Observed>>,
         pub requests: AtomicUsize,
-        /// Refuses these actions before any request, with the reason.
+        /// Blocks these actions before any request, with the reason.
         pub refuse: fn(&TrackerAction) -> Option<String>,
     }
 
@@ -524,9 +537,6 @@ pub(crate) mod fake {
         }
 
         pub(super) fn send(&self, action: &TrackerAction) -> Sent {
-            if let Some(reason) = (self.refuse)(action) {
-                return Sent::Refused(reason);
-            }
             self.requests.fetch_add(1, Ordering::SeqCst);
             Sent::Acknowledged {
                 revision: Some("2026-11-16T00:00:00Z".into()),

@@ -358,15 +358,6 @@ impl LfProcessRuntime {
         self.record_best_effort(|execution| execution.observe_provider(session_id, account_id));
     }
 
-    /// The final answer of this Process's input, from its provider's transcript.
-    pub fn final_answer(&self) -> anyhow::Result<Option<String>> {
-        let runtime = self.0.lock().expect("Process runtime mutex poisoned");
-        crate::transcript::answer::input_final_answer(
-            &row_store(&runtime.recorder.dir)?,
-            &runtime.recorder.manifest.artifact_key,
-        )
-    }
-
     pub fn finish(&self, outcome: &str) -> StoreResult<()> {
         self.0
             .lock()

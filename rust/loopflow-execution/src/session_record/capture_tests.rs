@@ -867,7 +867,10 @@ fn history_keeps_only_how_a_turn_ended() {
     capture.finish("completed").unwrap();
 
     // Capture prose remains readable, but cannot substitute for native turn output.
-    assert_eq!(capture.final_answer().unwrap(), None);
+    assert_eq!(
+        crate::session_record::final_answer(&capture.artifact_dir()).unwrap(),
+        None
+    );
     assert!(!capture.artifact_dir().join("events.jsonl").exists());
 
     let history = crate::session_record::row_store(&capture.artifact_dir())

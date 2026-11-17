@@ -220,13 +220,17 @@ pub fn run_bound(
     run_bound_prompt(skill, message, cli, binding).map(|_| ())
 }
 
-/// Run a channel request through the ordinary attributed launch and settlement path.
+/// Run a channel request through the ordinary attributed launch and settlement
+/// path, and read its answer from the provider's transcript.
 pub(crate) fn answer_bound(
     message: &str,
     cli: &Cli,
     binding: &loopflow_execution::ops::WorkBinding,
 ) -> Result<Option<String>> {
-    run_bound_prompt(None, Some(message), cli, binding)
+    match run_bound_prompt(None, Some(message), cli, binding)? {
+        Some(dir) => loopflow_execution::session_record::final_answer(&dir),
+        None => Ok(None),
+    }
 }
 
 fn run_bound_prompt(
@@ -234,7 +238,7 @@ fn run_bound_prompt(
     message: Option<&str>,
     cli: &Cli,
     binding: &loopflow_execution::ops::WorkBinding,
-) -> Result<Option<String>> {
+) -> Result<Option<std::path::PathBuf>> {
     let mut scoped;
     let binding = if let Some(scope) = operator_scope(skill, cli, &binding.cwd, Some(binding))? {
         scoped = binding.clone();
@@ -731,7 +735,8 @@ fn print_context_header(built: &PromptBuild, cli: &Cli) {
     );
 }
 
-fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<String>> {
+/// Run the prompt; a headless run returns where its input was recorded.
+fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<std::path::PathBuf>> {
     if !built.process.auto {
         info!("launching interactive vendor session");
         let runtime = begin_process_runtime(built, "tui", &built.agent_config, None)?;
@@ -833,7 +838,7 @@ fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<String>> {
         ))),
         (Err(error), Ok(())) => Err(error),
         (Ok(()), Err(error)) => Err(anyhow!("Session completed but did not settle: {error}")),
-        (Ok(()), Ok(())) => Ok(runtime.final_answer()?),
+        (Ok(()), Ok(())) => Ok(Some(runtime.artifact_dir())),
     }
 }
 

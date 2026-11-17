@@ -2,8 +2,8 @@
 //!
 //! This prune closes Processes whose OS process is gone without recording its exit,
 //! then forgets finished Processes nothing needs, as exit does. It moves the
-//! history an earlier lf kept in `loopflow.db` into `history.db` and its turns
-//! into `usage.db`, and forgets history older than [`HISTORY_DAYS`]. Each step
+//! history an earlier lf kept in `loopflow.db` into `history.db`, its turns
+//! into `history.turns`, and forgets history older than [`HISTORY_DAYS`]. Each step
 //! is one short transaction on its own connection, so live writers wait well
 //! under their busy timeout. The Machine server runs it every hour.
 
@@ -23,8 +23,8 @@ const ROW_BATCH: i64 = 10_000;
 const VACUUM_PAGES: i64 = 10_000;
 /// Every live writer waits this long; each prune transaction stays well under.
 const BUSY_TIMEOUT: Duration = Duration::from_secs(15);
-/// Session history is kept this long after it was observed. Turns in
-/// `usage.db` and the inputs in `loopflow.db` are kept.
+/// Session history is kept this long after it was observed. Turns and the
+/// inputs in `loopflow.db` are kept.
 pub const HISTORY_DAYS: i64 = 90;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -33,7 +33,7 @@ pub struct RetentionReport {
     pub forgotten_processes: u64,
     /// Observations an earlier lf kept in `loopflow.db`, now in `history.db`.
     pub moved_observations: u64,
-    /// Turns an earlier lf kept as three rows, now one row in `usage.turns`.
+    /// Turns an earlier lf kept as three rows, now one row in `history.turns`.
     pub converted_turns: u64,
     /// Rows past [`HISTORY_DAYS`], and rows nothing reads, deleted.
     pub forgotten_history: u64,
@@ -54,8 +54,8 @@ pub fn prune(
     // Nothing references the rows deleted here (see each predicate), and
     // per-row foreign-key probes would scan session_events for each delete.
     conn.execute_batch("PRAGMA foreign_keys = OFF;")?;
-    crate::journals::attach(&conn, database);
-    let history = crate::journals::JournalFile::beside(&crate::journals::HISTORY, Some(database));
+    crate::history::attach(&conn, database);
+    let history = crate::history::HistoryFile::beside(Some(database));
     let closed_processes = close_dead_processes(&conn, dead)?;
     let cutoff = now - HISTORY_DAYS * 86_400;
     let mut forgotten_history = forget_unread_rows(&conn, cutoff)?;
@@ -76,8 +76,10 @@ pub fn prune(
 // History an earlier lf kept in loopflow.db
 
 /// Observations in `loopflow.db` nothing reads: kinds no lf writes or reads
-/// any more, departure-less attachment exits, and the facts that became
-/// columns, once carried there. Over alias `e`.
+/// any more, departure-less attachment exits, the facts that became columns,
+/// once carried there, and what an ordinary turn's row already says (its
+/// first attempt starting and completing, and its completed turn). Over
+/// alias `e`.
 const UNREAD_OBSERVATION: &str = "e.kind='observed' AND (
     json_extract(e.payload,'$.source') IN ('task_update','codex_relay','codex_submission')
     OR json_extract(e.payload,'$.type') IN ('provider_launch','driver_exit','legacy_flow',
@@ -87,7 +89,14 @@ const UNREAD_OBSERVATION: &str = "e.kind='observed' AND (
         'provider_session_observed')
     OR (json_extract(e.payload,'$.type')='attachment_exit'
         AND json_type(e.payload,'$.departure') IS NULL)
-    OR instr(e.receipt_key,':provider-session:')>0)";
+    OR instr(e.receipt_key,':provider-session:')>0
+    OR (json_extract(e.payload,'$.evidence.attempt_key')='attempt-1'
+        AND (json_extract(e.payload,'$.evidence.type')='provider_attempt_started'
+            OR (json_extract(e.payload,'$.evidence.type')='provider_attempt_finished'
+                AND json_extract(e.payload,'$.evidence.outcome')='completed')))
+    OR (json_extract(e.payload,'$.evidence.type')='conversation'
+        AND json_extract(e.payload,'$.evidence.event.type')='turn_completed'
+        AND json_extract(e.payload,'$.evidence.event.status')='completed'))";
 
 /// Carry the state facts an earlier lf wrote as observations onto their
 /// owners, then delete what nothing reads in `loopflow.db`: unread
@@ -145,10 +154,7 @@ fn forget_unread_rows(conn: &Connection, cutoff: i64) -> StoreResult<u64> {
 /// Move the observations left in `loopflow.db` into `history.db`, oldest
 /// first: each batch is written there, then deleted here, so a pass cut short
 /// moves the rest next time and a row already moved is not written twice.
-fn move_observations(
-    conn: &Connection,
-    history: &crate::journals::JournalFile,
-) -> StoreResult<u64> {
+fn move_observations(conn: &Connection, history: &crate::history::HistoryFile) -> StoreResult<u64> {
     let mut moved = 0;
     loop {
         let last: Option<i64> = conn.query_row(
@@ -163,11 +169,10 @@ fn move_observations(
         history
             .write("history move", |tx| {
                 Ok(tx.execute(
-                    "INSERT OR IGNORE INTO session_history(session_id,provider_thread,provider_turn,
-                         kind,receipt_key,lf_process_id,agent_process_id,task_id,wave_id,
-                         captured_event,observed_at,payload)
-                     SELECT session_id,provider_thread,provider_turn,kind,receipt_key,lf_process_id,
-                         agent_process_id,task_id,wave_id,captured_event,observed_at,payload
+                    "INSERT OR IGNORE INTO session_history(session_id,receipt_key,lf_process_id,
+                         task_id,wave_id,captured_event,observed_at,payload)
+                     SELECT session_id,receipt_key,lf_process_id,task_id,wave_id,captured_event,
+                         observed_at,payload
                      FROM store.session_events WHERE kind='observed' AND seq<=?1 ORDER BY seq",
                     [last],
                 )?)
@@ -182,7 +187,7 @@ fn move_observations(
 
 /// Forget Session history observed before `cutoff`, then return its pages.
 fn forget_old_history(
-    history: &crate::journals::JournalFile,
+    history: &crate::history::HistoryFile,
     database: &Path,
     cutoff: i64,
 ) -> StoreResult<u64> {
@@ -202,7 +207,7 @@ fn forget_old_history(
             break;
         }
     }
-    let conn = Connection::open(crate::journals::history_path(database))?;
+    let conn = Connection::open(crate::history::history_path(database))?;
     conn.busy_timeout(BUSY_TIMEOUT)?;
     reclaim(&conn)?;
     Ok(forgotten)
@@ -509,6 +514,20 @@ mod history_tests {
             recent,
             serde_json::json!({"evidence":{"type":"provider_account_selected"}}),
         );
+        // What an ordinary turn's row already says.
+        observe(
+            "observed",
+            format!("{input}:events.jsonl:2"),
+            recent,
+            serde_json::json!({"evidence":{"type":"provider_attempt_started","attempt_key":"attempt-1"}}),
+        );
+        observe(
+            "observed",
+            format!("{input}:events.jsonl:3"),
+            recent,
+            serde_json::json!({"evidence":{"type":"conversation",
+                "event":{"type":"turn_completed","status":"completed"}}}),
+        );
         // State facts that became columns.
         observe(
             "observed",
@@ -541,9 +560,9 @@ mod history_tests {
         observe("output", "answer:new".into(), recent, serde_json::json!({}));
         store
             .execute_history(
-                "INSERT INTO session_history(session_id,kind,receipt_key,observed_at,payload)
-                 VALUES('conversation','observed','history:old',?1,'{}'),
-                       ('conversation','observed','history:new',?2,'{}')",
+                "INSERT INTO session_history(session_id,receipt_key,observed_at,payload)
+                 VALUES('conversation','history:old',?1,'{}'),
+                       ('conversation','history:new',?2,'{}')",
                 params![aged, recent],
             )
             .unwrap();
@@ -579,7 +598,7 @@ mod history_tests {
             (Some("thread-1".into()), Some("work".into()), Some(1_234))
         );
         let history = || -> Vec<String> {
-            let mut kept: Vec<String> = Connection::open(crate::journals::history_path(&path))
+            let mut kept: Vec<String> = Connection::open(crate::history::history_path(&path))
                 .unwrap()
                 .prepare("SELECT receipt_key FROM session_history")
                 .unwrap()

@@ -101,9 +101,28 @@ WHERE t.session_id=s.id AND t.newest=1;
 CREATE INDEX session_capture_provider_thread ON session_events(provider_thread)
     WHERE kind='captured' AND provider_thread IS NOT NULL;
 
--- Usage rows live in history.db, whose own revision row counts them.
+-- Turns live in history.db, whose own revision row counts them.
 DROP TRIGGER store_revision_usage_insert;
 
--- A Task's work is its turns in usage.db now; `started` rows in
+-- A Task's work is its turns in history.db now; `started` rows in
 -- session_events convert there and go, including a Task's last one.
 DROP TRIGGER retain_task_agent_turn;
+
+-- How an input's newest ended turn went is state: Graph routing reads the turn
+-- that answered it, the Session list whether it ended, and a failed step
+-- whether it was interrupted or errored. It lives on the input's captured row,
+-- written in this file when the turn ends; history.db keeps the turn's numbers.
+ALTER TABLE session_events ADD COLUMN turn_thread TEXT;
+ALTER TABLE session_events ADD COLUMN turn_id TEXT;
+ALTER TABLE session_events ADD COLUMN turn_ended_at INTEGER;
+ALTER TABLE session_events ADD COLUMN turn_status TEXT;
+ALTER TABLE session_events ADD COLUMN turn_error TEXT;
+UPDATE session_events AS c SET turn_thread=e.provider_thread,turn_id=e.provider_turn,
+    turn_ended_at=e.observed_at,turn_status=json_extract(e.payload,'$.status')
+FROM (SELECT captured_event,provider_thread,provider_turn,observed_at,payload,
+        ROW_NUMBER() OVER (PARTITION BY captured_event ORDER BY observed_at DESC,seq DESC) AS newest
+    FROM session_events WHERE kind='completed' AND captured_event IS NOT NULL
+      AND provider_thread IS NOT NULL AND provider_turn IS NOT NULL AND json_valid(payload)) AS e
+WHERE c.kind='captured' AND c.seq=e.captured_event AND e.newest=1;
+CREATE INDEX session_capture_turn ON session_events(session_id,turn_thread,turn_id)
+    WHERE kind='captured' AND turn_id IS NOT NULL;

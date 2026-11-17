@@ -327,8 +327,8 @@ shrink it. Persistent docs belong in `docs:` in `.lf/config.yaml`.
 ```bash
 scripts/disk-cleanup.sh            # reclaim now; each removal is logged to ~/.lf/logs/disk.log
 scripts/disk-cleanup.sh install    # run the disk-cleanup skill hourly from crontab
-lf process prune                   # only lf's records: dead Process rows and receipts, expired history, then vacuum
-ls -la ~/.lf/loopflow.db ~/.lf/history.db ~/.lf/usage.db   # state stays small
+lf machine prune                   # only lf's records: dead Process rows, expired history, then vacuum
+ls -la ~/.lf/loopflow.db ~/.lf/history.db   # state stays small
 ```
 
 The script prunes every repository under `~/src`: finished worktrees, completed
@@ -346,12 +346,11 @@ nothing itself. Edit `scripts/disk-cleanup.sh` or
 `.lf/skills/disk-cleanup.md` to change the policy. Provider transcripts follow
 each provider's own retention; raise Claude's `cleanupPeriodDays` to keep more.
 
-`history.db` and `usage.db` grow with use. The Machine
-server keeps 90 days of Session history, pruning every hour; turns in
-`usage.db` are kept. `lf doctor` reports both files' size and oldest row, and
-warns when history is past retention. Deleting either while nothing runs loses
-only past history or usage: Tasks, conversations and `lf resume` read
-`loopflow.db`.
+`history.db` grows with use. The Machine server keeps 90 days of Session
+history, pruning every hour; turns are kept. `lf doctor` reports the file's
+size and oldest rows, and warns when history is past retention. Deleting it
+while nothing runs loses only past history and usage: Tasks, conversations,
+Graph routing and `lf resume` read `loopflow.db`.
 
 ## Stale worktrees and branches
 
@@ -389,9 +388,10 @@ lf process prune --dry-run --json  # each candidate and why
 lf process prune --json            # recheck, then reap
 ```
 
-Pruning reports each agent process it settles or keeps, with the reason, then
-closes Process rows whose exit is proven, forgets finished ones nothing current
-references, and compacts the files; a dry run changes none of it. A
+Pruning reports each agent process it settles or keeps, with the reason; a
+dry run changes none of it. `lf machine prune` then closes Process rows whose
+exit is proven, forgets finished ones nothing current references, and
+compacts the files. A
 missing PID, a completed Task or an old Session does not prove the agent
 exited: unresolved records keep protecting their checkouts.
 

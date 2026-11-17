@@ -836,9 +836,14 @@ fn history_keeps_only_how_a_turn_ended() {
         },
         final_receipt: true,
     });
+    // A completed turn's row says it all; one that did not complete is kept.
     capture.record_conversation(ConversationEvent::TurnCompleted {
         turn_id: turn(),
         status: loopflow_model::chat::types::Lifecycle::Completed,
+    });
+    capture.record_conversation(ConversationEvent::TurnCompleted {
+        turn_id: turn(),
+        status: loopflow_model::chat::types::Lifecycle::Interrupted,
     });
     capture.finish("completed").unwrap();
 
@@ -1307,7 +1312,7 @@ fn recording_failure_cannot_forget_the_thread_used_by_retry() {
             )?;
             // A resume reference is state on the input's captured row; every
             // other provider fact is history in the history file.
-            let history = rusqlite::Connection::open(loopflow_storage::journals::history_path(
+            let history = rusqlite::Connection::open(loopflow_storage::history::history_path(
                 &crate::session_record::row_database(&capture.artifact_dir())?,
             ))?;
             let (target, trigger) = if source.starts_with("provider-session") {
@@ -1322,7 +1327,7 @@ fn recording_failure_cannot_forget_the_thread_used_by_retry() {
                     &history,
                     format!(
                         "CREATE TRIGGER reject_observation BEFORE INSERT ON session_history
-                         WHEN NEW.kind='observed' AND json_extract(NEW.payload,'$.source') LIKE '{source}'
+                         WHEN json_extract(NEW.payload,'$.source') LIKE '{source}'
                          BEGIN SELECT RAISE(FAIL, 'observation unavailable'); END;"
                     ),
                 )

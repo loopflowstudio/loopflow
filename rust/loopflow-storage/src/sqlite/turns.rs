@@ -1,4 +1,4 @@
-//! Provider turns in `usage.turns`: one row from dispatch to end. A turn's
+//! Provider turns in `history.turns`: one row from dispatch to end. A turn's
 //! start, origin, usage and completion each fill their own columns of that
 //! row; the first reading of each is kept, and a different second one is a
 //! recording gap.
@@ -271,7 +271,7 @@ pub(crate) fn write_completion_in(
 impl SqliteStore {
     /// Record that `turn` of `thread` started at `at`.
     pub fn record_turn_start(&self, session: &str, thread: &AgentSessionId, turn: &str, at: i64) {
-        self.write_usage("turn start", |tx| {
+        self.write_history("turn start", |tx| {
             tx.execute(
                 "INSERT INTO turns(session_id,provider_thread,provider_turn,started_at)
                  VALUES(?1,?2,?3,?4)
@@ -293,7 +293,7 @@ impl SqliteStore {
         origin: &SessionTurnOrigin,
     ) -> StoreResult<()> {
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
-        self.write_usage("turn origin", |tx| {
+        self.write_history("turn origin", |tx| {
             let id = ensure_turn(tx, &origin.session_id, thread, turn)?;
             tx.execute(
                 "UPDATE turns SET started_at=?2 WHERE id=?1 AND started_at IS NULL",
@@ -361,7 +361,7 @@ impl SqliteStore {
     ) -> StoreResult<bool> {
         let usage = crate::session_record::resolve_usage(reading, None, at);
         Ok(self
-            .write_usage("turn usage", |tx| {
+            .write_history("turn usage", |tx| {
                 let usage = usage.as_ref().ok_or_else(|| {
                     StoreError::InvalidData(format!("unreadable usage reading for turn {turn}"))
                 })?;
@@ -381,18 +381,80 @@ impl SqliteStore {
         at: i64,
         detail: &Value,
     ) -> StoreResult<()> {
-        self.write_usage("turn completion", |tx| {
+        self.write_history("turn completion", |tx| {
             let id = ensure_turn(tx, session, thread, turn)?;
             write_completion_in(tx, id, at, detail)
         });
         Ok(())
     }
 
+    /// Record that `turn`, answering input `captured`, ended at `at` with the
+    /// provider's `detail`: state on the input's captured row.
+    pub fn record_answered_turn_end(
+        &self,
+        captured: i64,
+        thread: &AgentSessionId,
+        turn: &str,
+        at: i64,
+        detail: &Value,
+    ) -> StoreResult<()> {
+        let error = [&detail["errors"], &detail["error"]]
+            .into_iter()
+            .find(|error| !error.is_null())
+            .map(|error| match error.as_str() {
+                Some(text) => text.to_owned(),
+                None => error.to_string(),
+            });
+        self.record_input_turn_end(
+            captured,
+            thread,
+            turn,
+            at,
+            detail["status"].as_str(),
+            error.as_deref(),
+        )
+    }
+
+    /// Keep what the agent said last in `turn`, for people reading it after
+    /// the provider's transcript is gone. A turn keeps the first it is given.
+    pub fn record_turn_final_message(
+        &self,
+        session: &str,
+        thread: &AgentSessionId,
+        turn: &str,
+        message: &str,
+    ) {
+        self.write_history("turn final message", |tx| {
+            let id = ensure_turn(tx, session, thread, turn)?;
+            tx.execute(
+                "UPDATE turns SET final_message=?2 WHERE id=?1 AND final_message IS NULL",
+                params![id, message],
+            )?;
+            Ok(())
+        });
+    }
+
+    /// The final message history kept for the turn that answered `input`.
+    pub fn input_recorded_answer(&self, input: &str) -> StoreResult<Option<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                "SELECT t.final_message FROM session_events c
+                 JOIN history.turns t ON t.session_id=c.session_id
+                   AND t.provider_thread=c.turn_thread AND t.provider_turn=c.turn_id
+                 WHERE c.kind='captured' AND c.receipt_key=?1 AND c.turn_status='completed'",
+                [input],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten())
+    }
+
     /// Every turn of `session`, in the order they were first recorded.
     pub fn session_turns(&self, session: &str) -> StoreResult<Vec<Turn>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(&format!(
-            "SELECT {} FROM usage.turns t WHERE t.session_id=?1 ORDER BY t.id",
+            "SELECT {} FROM history.turns t WHERE t.session_id=?1 ORDER BY t.id",
             turn_columns("t")
         ))?;
         let rows = query.query_map([session], read_turn)?;
@@ -419,17 +481,17 @@ struct LegacyRow {
 }
 
 /// Turn every `started`, `usage` and `completed` row an earlier lf kept in
-/// `loopflow.db` into one `usage.turns` row per turn, then delete the rows it
+/// `loopflow.db` into one `history.turns` row per turn, then delete the rows it
 /// converted; returns how many turns it wrote. A turn that already has a row
 /// keeps what it has. Safe to run again: a pass cut short converts the rest
 /// next time.
 ///
 /// # Errors
-/// When the store or `usage.db` cannot be opened, read or written.
+/// When the store or `history.db` cannot be opened, read or written.
 pub fn convert_turn_rows(database: &std::path::Path) -> StoreResult<u64> {
     let conn = rusqlite::Connection::open(database)?;
     conn.busy_timeout(std::time::Duration::from_secs(15))?;
-    let usage = crate::journals::JournalFile::beside(&crate::journals::USAGE, Some(database));
+    let usage = crate::history::HistoryFile::beside(Some(database));
     let mut converted = 0;
     loop {
         let threads: Vec<(String, String)> = conn
@@ -462,7 +524,7 @@ pub fn convert_turn_rows(database: &std::path::Path) -> StoreResult<u64> {
 /// Write the turns of one Session thread from its legacy rows.
 fn convert_thread(
     conn: &rusqlite::Connection,
-    usage: &crate::journals::JournalFile,
+    usage: &crate::history::HistoryFile,
     session: &str,
     thread: &str,
 ) -> StoreResult<u64> {
@@ -562,7 +624,23 @@ fn convert_thread(
             Ok(())
         });
         if wrote.is_none() {
-            return Err(StoreError::InvalidData("usage.db is unavailable".into()));
+            return Err(StoreError::InvalidData("history.db is unavailable".into()));
+        }
+        // The input it answered keeps its newest ended turn, as live turns do.
+        let input = started.or(completed).and_then(|row| row.captured_event);
+        if let (Some(input), Some(row)) = (input, completed) {
+            conn.execute(
+                "UPDATE session_events SET turn_thread=?2,turn_id=?3,turn_ended_at=?4,
+                    turn_status=?5
+                 WHERE seq=?1 AND kind='captured' AND (turn_ended_at IS NULL OR turn_ended_at<=?4)",
+                params![
+                    input,
+                    thread,
+                    turn,
+                    row.observed_at,
+                    row.payload["status"].as_str()
+                ],
+            )?;
         }
         written += 1;
     }
@@ -786,9 +864,9 @@ mod tests {
         };
         assert!(write(5));
         assert!(!write(5));
-        assert!(!store.usage.gap_open());
+        assert!(!store.history.gap_open());
         assert!(!write(9));
-        assert!(store.usage.gap_open());
+        assert!(store.history.gap_open());
         let kept = store.session_turns("conversation").unwrap()[0]
             .usage
             .clone()
@@ -797,11 +875,11 @@ mod tests {
     }
 
     #[test]
-    fn a_locked_usage_file_is_a_gap_not_a_failed_turn() {
+    fn a_locked_history_file_is_a_gap_and_the_turn_end_stays_exact() {
         let (home, store) = store();
         let thread = "thread".into();
         store.record_turn_start("conversation", &thread, "first", 1);
-        let mut other = rusqlite::Connection::open(crate::journals::usage_path(
+        let mut other = rusqlite::Connection::open(crate::history::history_path(
             &home.path().join("loopflow.db"),
         ))
         .unwrap();
@@ -818,8 +896,30 @@ mod tests {
                 &json!({"status":"completed"})
             )
             .is_ok());
-        assert!(store.usage.gap_open());
-        // The store itself keeps answering writes while usage is gapped.
+        assert!(store.history.gap_open());
+        // The input's row keeps the turn's end while history is locked.
+        let captured = store
+            .session("conversation")
+            .unwrap()
+            .unwrap()
+            .captured
+            .unwrap();
+        store
+            .record_answered_turn_end(
+                captured,
+                &thread,
+                "first",
+                3,
+                &json!({"status":"completed"}),
+            )
+            .unwrap();
+        assert_eq!(
+            store
+                .recorded_turn_end("conversation", &thread, "first")
+                .unwrap(),
+            Some((3, Some("completed".into())))
+        );
+        // The store itself keeps answering writes while history is gapped.
         store
             .conn
             .lock()
@@ -829,7 +929,7 @@ mod tests {
         held.rollback().unwrap();
 
         store.record_turn_start("conversation", &thread, "after", 4);
-        assert!(!store.usage.gap_open());
+        assert!(!store.history.gap_open());
         let turns: Vec<String> = store
             .session_turns("conversation")
             .unwrap()

@@ -360,7 +360,7 @@ fn task_work_includes_checkout_binding_and_mechanical_history_without_granting_o
         // Binding includes earlier Processes in the inventory without assigning
         // their earlier performed work or usage to this Task.
         store.execute_history(
-"INSERT INTO session_history(session_id,kind,receipt_key,lf_process_id,observed_at,payload) VALUES('history','started','before-bind',?1,1,'{}')", [&bound_process]).unwrap();
+"INSERT INTO session_history(session_id,receipt_key,lf_process_id,observed_at,payload) VALUES('history','before-bind',?1,1,'{}')", [&bound_process]).unwrap();
         conn.execute(
             "UPDATE processes SET parent_lf_process_id=?1 WHERE id=?2",
             params![mechanical, sibling],
@@ -410,7 +410,7 @@ fn task_work_includes_checkout_binding_and_mechanical_history_without_granting_o
         )
         .unwrap();
         store.execute_history(
-"INSERT INTO session_history(session_id,kind,receipt_key,lf_process_id,observed_at,payload) VALUES('history','started','open',?1,1,'{}')", [&unfinished]).unwrap();
+"INSERT INTO session_history(session_id,receipt_key,lf_process_id,observed_at,payload) VALUES('history','open',?1,1,'{}')", [&unfinished]).unwrap();
     }
     let open = store.task_open_processes(&task).unwrap();
     assert_eq!(open.len(), 3);
@@ -578,7 +578,7 @@ fn task_work_includes_checkout_binding_and_mechanical_history_without_granting_o
     // Task's: the Graph's Task is what its launch recorded.
     let taskless = store.test_graph("taskless", "/elsewhere", &[], None);
     store.execute_history(
-        "INSERT INTO session_history(session_id,kind,receipt_key,lf_process_id,observed_at,payload) VALUES('history','started','taskless-graph',?1,3,'{}')", [&taskless]).unwrap();
+        "INSERT INTO session_history(session_id,receipt_key,lf_process_id,observed_at,payload) VALUES('history','taskless-graph',?1,3,'{}')", [&taskless]).unwrap();
     assert_eq!(graph_ids(&task), enclosing);
     let (_, entry) = store.graph_process(taskless.as_str()).unwrap().unwrap();
     assert_eq!(entry.summary.task_id, None);

@@ -205,14 +205,14 @@ impl Fixture {
         let db = rusqlite::Connection::open(&store).unwrap();
         db.execute(
             "ATTACH ?1 AS history",
-            [loopflow_storage::journals::history_path(&store)
+            [loopflow_storage::history::history_path(&store)
                 .to_string_lossy()
                 .as_ref()],
         )
         .unwrap();
         db.execute(
             "ATTACH ?1 AS usage",
-            [loopflow_storage::journals::usage_path(&store)
+            [loopflow_storage::history::history_path(&store)
                 .to_string_lossy()
                 .as_ref()],
         )
@@ -274,7 +274,7 @@ Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
                             CASE WHEN m.task_id IS s.task_id AND m.wave_id IS s.wave_id THEN s.work_source END)
                     END
                  FROM agent_sessions s JOIN session_events i ON i.session_id=s.id AND i.kind='captured'
-                 LEFT JOIN history.session_history m ON m.session_id=s.id AND m.kind='observed'
+                 LEFT JOIN history.session_history m ON m.session_id=s.id
                     AND m.receipt_key=i.receipt_key||':manifest.json'
                  WHERE i.receipt_key=?1",
                 [run_id],
@@ -1104,17 +1104,16 @@ fn public_history_discovers_unlinked_native_receipts_without_borrowing_a_later_b
         &task.task.id,
     )
     .unwrap();
-    let count = serde_json::json!({"inputTokens":12,"outputTokens":3,
-        "cachedInputTokens":0,"reasoningOutputTokens":0});
-    for (kind, payload) in [
-        ("usage", serde_json::json!({"total":count,"last":count})),
-        ("completed", serde_json::json!({"status":"completed"})),
-    ] {
-        store.execute_history(
-            "INSERT INTO session_history(session_id,provider_thread,provider_turn,kind,receipt_key,observed_at,payload)
-             VALUES(?1,'retained-thread','retained-turn',?2,'',strftime('%s','now'),?3)",
-            rusqlite::params![session,kind,payload.to_string()]).unwrap();
-    }
+    store
+        .execute_history(
+            "INSERT INTO turns(session_id,provider_thread,provider_turn,ended_at,status,
+                 usage_at,usage_final,usage_partial,input_tokens,cached_input_tokens,output_tokens,
+                 reasoning_tokens)
+             VALUES(?1,'retained-thread','retained-turn',strftime('%s','now'),
+                 'completed',strftime('%s','now'),0,0,12,0,3,0)",
+            [&session],
+        )
+        .unwrap();
     let captures = fixture.count("agent_sessions");
     {
         let command = vec!["history", "usage", "--days", "0", "--json"];
@@ -2066,7 +2065,7 @@ fn taskless_structured_output_correction_is_bounded_and_preserves_the_conversati
         let starts: i64 = fixture
             .db()
             .query_row(
-                "SELECT count(*) FROM usage.turns WHERE started_at IS NOT NULL",
+                "SELECT count(*) FROM history.turns WHERE started_at IS NOT NULL",
                 [],
                 |row| row.get(0),
             )
@@ -2389,7 +2388,7 @@ fn opencode_disconnect_after_tool_preserves_unknown_native_completion() {
     let starts: i64 = fixture
         .db()
         .query_row(
-            "SELECT count(*) FROM usage.turns WHERE started_at IS NOT NULL",
+            "SELECT count(*) FROM history.turns WHERE started_at IS NOT NULL",
             [],
             |row| row.get(0),
         )
@@ -2399,7 +2398,7 @@ fn opencode_disconnect_after_tool_preserves_unknown_native_completion() {
     // reads as a turn that finished.
     let endings: Vec<String> = fixture
         .db()
-        .prepare("SELECT status FROM usage.turns WHERE ended_at IS NOT NULL")
+        .prepare("SELECT status FROM history.turns WHERE ended_at IS NOT NULL")
         .unwrap()
         .query_map([], |row| row.get(0))
         .unwrap()

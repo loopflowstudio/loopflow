@@ -22,9 +22,9 @@ pub enum ProcessCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Reap orphan providers, remove dead receipts, forget finished Process rows and release unrecorded AgentProcess ancestry
+    /// Reap orphan providers, remove dead receipts and release unrecorded AgentProcess ancestry
     Prune {
-        /// Show exact targets without changing processes, receipts or the store
+        /// Show exact targets without changing processes or receipts
         #[arg(long)]
         dry_run: bool,
         /// Emit the versioned prune report as JSON

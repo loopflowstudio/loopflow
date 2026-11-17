@@ -979,7 +979,7 @@ where
 {
     let repo = repo.to_owned();
     loopflow_execution::read_stream::start(
-        loopflow_execution::read_stream::Watch::Journals,
+        loopflow_execution::read_stream::Watch::History,
         TaskStatusArgs { issue },
         move |store, args| {
             let repo = repo.to_owned();

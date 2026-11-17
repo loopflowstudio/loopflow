@@ -148,14 +148,9 @@ pub struct SqliteStore {
     pub(crate) token_key: token_crypto::TokenKeySource,
     /// This connection's writer of `history.db`, opened at its first write.
     #[cfg(feature = "test-support")]
-    pub history: Arc<crate::journals::JournalFile>,
+    pub history: Arc<crate::history::HistoryFile>,
     #[cfg(not(feature = "test-support"))]
-    pub(crate) history: Arc<crate::journals::JournalFile>,
-    /// This connection's writer of `usage.db`, opened at its first write.
-    #[cfg(feature = "test-support")]
-    pub usage: Arc<crate::journals::JournalFile>,
-    #[cfg(not(feature = "test-support"))]
-    pub(crate) usage: Arc<crate::journals::JournalFile>,
+    pub(crate) history: Arc<crate::history::HistoryFile>,
 }
 
 fn waves_in(conn: &Connection, repo: Option<&str>) -> StoreResult<Vec<Wave>> {
@@ -185,19 +180,18 @@ impl SqliteStore {
     }
 
     /// Refresh `sqlite_stat1` for tables whose size changed enough to move a
-    /// plan, in the store and in `history.db` and `usage.db`. Bounded by
-    /// `analysis_limit`, it holds the write lock under a second on a store of
-    /// 770 MB. The Machine server runs it at start and about once a day;
-    /// nothing else does. A journal that cannot be measured is a gap.
+    /// plan, in the store and in `history.db`. Bounded by `analysis_limit`,
+    /// it holds the write lock under a second on a store of 770 MB. The
+    /// Machine server runs it at start and about once a day; nothing else
+    /// does. A history that cannot be measured is a gap.
     pub fn refresh_statistics(&self) -> StoreResult<()> {
         const OPTIMIZE: &str = "PRAGMA analysis_limit=400; PRAGMA main.optimize=0x10002;";
         self.conn
             .lock()
             .expect("store mutex poisoned")
             .execute_batch(OPTIMIZE)?;
-        for journal in [&self.history, &self.usage] {
-            journal.write("statistics", |tx| Ok(tx.execute_batch(OPTIMIZE)?));
-        }
+        self.history
+            .write("statistics", |tx| Ok(tx.execute_batch(OPTIMIZE)?));
         Ok(())
     }
 
@@ -218,15 +212,15 @@ impl SqliteStore {
             .filter(|path| !path.is_empty())
             .map(PathBuf::from);
         match &path {
-            Some(path) => crate::journals::attach(&conn, path),
-            None => crate::journals::attach_empty(&conn),
+            Some(path) => crate::history::attach(&conn, path),
+            None => crate::history::attach_empty(&conn),
         }
-        Self::with_journals(conn, token_key, path.as_deref())
+        Self::with_history(conn, token_key, path.as_deref())
     }
 
-    /// A store over `conn`, whose journals live beside `path` and are already
+    /// A store over `conn`, whose history lives beside `path` and is already
     /// attached.
-    fn with_journals(
+    fn with_history(
         conn: Connection,
         token_key: token_crypto::TokenKeySource,
         path: Option<&Path>,
@@ -234,8 +228,7 @@ impl SqliteStore {
         Self {
             conn: Arc::new(Mutex::new(conn)),
             token_key,
-            history: crate::journals::JournalFile::beside(&crate::journals::HISTORY, path),
-            usage: crate::journals::JournalFile::beside(&crate::journals::USAGE, path),
+            history: crate::history::HistoryFile::beside(path),
         }
     }
 
@@ -249,41 +242,23 @@ impl SqliteStore {
         self.history.write(what, write)
     }
 
-    /// Run `write` on this store's `usage.db`, never under the store's write
-    /// lock. A failure is a recording gap for `what`, and `None`.
-    pub(crate) fn write_usage<T>(
-        &self,
-        what: &str,
-        write: impl FnOnce(&rusqlite::Transaction<'_>) -> StoreResult<T>,
-    ) -> Option<T> {
-        self.usage.write(what, write)
-    }
-
     /// Run `sql` on this store's history file, with the store attached as
-    /// `store`, for fixtures that seed history rows directly.
+    /// `store`, for fixtures that seed history and turn rows directly.
     #[cfg(any(test, feature = "test-support"))]
     pub fn execute_history(&self, sql: &str, params: impl rusqlite::Params) -> StoreResult<usize> {
         self.write_history("fixture", |tx| Ok(tx.execute(sql, params)?))
             .ok_or_else(|| StoreError::InvalidData("fixture history write failed".into()))
     }
 
-    /// Run `sql` on this store's usage file, with the store attached as
-    /// `store`, for fixtures that seed turn rows directly.
-    #[cfg(any(test, feature = "test-support"))]
-    pub fn execute_usage(&self, sql: &str, params: impl rusqlite::Params) -> StoreResult<usize> {
-        self.write_usage("fixture", |tx| Ok(tx.execute(sql, params)?))
-            .ok_or_else(|| StoreError::InvalidData("fixture usage write failed".into()))
-    }
-
     /// Append `rows` to Session history in one transaction, after the state
     /// they describe has committed; a failure is a recording gap.
-    pub(crate) fn append_history(&self, what: &str, rows: &[crate::journals::Row]) {
+    pub(crate) fn append_history(&self, what: &str, rows: &[crate::history::Row]) {
         if rows.is_empty() {
             return;
         }
         self.write_history(what, |tx| {
             for row in rows {
-                crate::journals::append_in(tx, row)?;
+                crate::history::append_in(tx, row)?;
             }
             Ok(())
         });
@@ -677,8 +652,8 @@ impl SqliteStore {
         crate::instrumentation::observe_sqlite(&conn);
         configure_write_connection(&mut conn, path, SQLITE_WRITE_BUSY_TIMEOUT)?;
         super::migration_runner::apply_sqlite(build, &conn, observers)?;
-        crate::journals::attach(&conn, path);
-        Ok(Self::with_journals(conn, token_key, Some(path)))
+        crate::history::attach(&conn, path);
+        Ok(Self::with_history(conn, token_key, Some(path)))
     }
 
     /// Open with the application's selected frontier authority and upgrade observations.
@@ -746,8 +721,8 @@ impl SqliteStore {
         if may_apply_migrations {
             migrate_plaintext_provider_tokens(&mut conn, token_key)?;
         }
-        crate::journals::attach(&conn, path);
-        Ok(Self::with_journals(conn, token_key, Some(path)))
+        crate::history::attach(&conn, path);
+        Ok(Self::with_history(conn, token_key, Some(path)))
     }
 
     /// Open only the Process rows without schema or token writes.
@@ -785,8 +760,8 @@ impl SqliteStore {
         conn.prepare(
             "SELECT id, trace_id, parent_lf_process_id, started_at, completed_at, outcome, exit_code, pid FROM processes LIMIT 0",
         )?;
-        crate::journals::attach(&conn, path);
-        Ok(Self::with_journals(conn, token_key, Some(path)))
+        crate::history::attach(&conn, path);
+        Ok(Self::with_history(conn, token_key, Some(path)))
     }
 
     pub fn open_read_only(
@@ -801,8 +776,8 @@ impl SqliteStore {
         )?;
         crate::instrumentation::observe_sqlite(&conn);
         conn.execute_batch("PRAGMA query_only = ON; PRAGMA busy_timeout = 5000;")?;
-        crate::journals::attach(&conn, path);
-        Ok(Self::with_journals(conn, token_key, Some(path)))
+        crate::history::attach(&conn, path);
+        Ok(Self::with_history(conn, token_key, Some(path)))
     }
 
     pub fn work_identities(&self) -> StoreResult<Vec<WorkIdentity>> {
@@ -1762,7 +1737,7 @@ mod fixture_tests {
             .unwrap();
         conn.execute_batch(&view).unwrap();
         conn.execute_batch("PRAGMA query_only = ON").unwrap();
-        let store = SqliteStore::with_journals(conn, crate::test_fixture::key, None);
+        let store = SqliteStore::with_history(conn, crate::test_fixture::key, None);
         let identities = store.work_identities().unwrap();
         assert_eq!(identities.len(), 4);
         assert_eq!(identities[3].subject, "abcdef");

@@ -45,7 +45,9 @@ const GROWING: [&str; 16] = [
 /// stopped Tasks backfill to, 216 of them naming a Process.
 /// `task_ownership` counts November 13's 895 entries over 880 Tasks.
 /// `session_capture_provider_thread` counts the 21,078 inputs with a resume
-/// reference on November 16's store.
+/// reference on November 16's store. `session_capture_turn` is estimated from
+/// that store's 28,791 `completed` rows over 21,601 inputs: about 19,000
+/// inputs with an ended turn, rarely two per Session thread.
 const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          'agent_sessions','processes','session_events','tasks','steer_delivered',
          'steer_adapters','projects','waves',
@@ -94,6 +96,7 @@ const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          ('session_events','session_capture_caller','17360 15'),
          ('session_events','session_capture_key','17360 1'),
          ('session_events','session_capture_provider_thread','21078 1'),
+         ('session_events','session_capture_turn','19000 2 1 1'),
          ('session_events','session_capture_window','17723 1'),
          ('session_events','session_event_input','20942 15 14'),
          ('session_events','session_event_receipt','278035 51 37 20 7 1'),

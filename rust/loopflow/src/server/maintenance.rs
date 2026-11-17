@@ -2,7 +2,7 @@
 //! guesses every table holds a million rows and can pick a scan over an index;
 //! a bounded `PRAGMA optimize` measures the tables that changed, once when the
 //! server starts and then about once a day. Retention: the store prune that
-//! `lf process prune` runs, at start and then every hour, so `history.db`
+//! `lf machine prune` runs, at start and then every hour, so `history.db`
 //! keeps 90 days and history an earlier lf wrote into `loopflow.db` moves out.
 //! Neither runs per connection or per command. Failures are logged and retried
 //! at the next tick.

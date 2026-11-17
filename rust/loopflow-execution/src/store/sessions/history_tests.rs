@@ -138,10 +138,14 @@ fn history_limits_precede_payload_reads_and_keep_unfinished_work_and_exact_calle
     );
     // Corrupt body evidence outside the selected budget cannot break a list;
     // exact detail still reports that real error instead of hiding it.
-    store.execute_history(
-            "INSERT INTO session_history(session_id,kind,receipt_key,observed_at,payload,captured_event)
-             SELECT session_id,'observed',receipt_key||':events.jsonl:1',10,'{',seq FROM session_events
-             WHERE kind='captured' AND session_id='conversation-10'", []).unwrap();
+    store
+        .execute_history(
+            "INSERT INTO session_history(session_id,receipt_key,observed_at,payload,captured_event)
+             SELECT session_id,receipt_key||':events.jsonl:1',10,'{',seq FROM session_events
+             WHERE kind='captured' AND session_id='conversation-10'",
+            [],
+        )
+        .unwrap();
     assert_eq!(
         crate::store::sessions::recent_conversation_history(&store, None, None, None, 0, 5)
             .unwrap()
@@ -159,7 +163,7 @@ fn history_limits_precede_payload_reads_and_keep_unfinished_work_and_exact_calle
             .lock()
             .unwrap()
             .execute(
-                "UPDATE processes SET completed_at=100 WHERE id IN (SELECT lf_process_id FROM usage.turns WHERE session_id='conversation-1')",
+                "UPDATE processes SET completed_at=100 WHERE id IN (SELECT lf_process_id FROM history.turns WHERE session_id='conversation-1')",
                 [],
             )
             .unwrap();
@@ -211,7 +215,7 @@ fn process_completion_ends_inputs_without_exit_events() {
             let conn = store.conn.lock().unwrap();
             conn.execute("UPDATE agent_sessions SET input_published=?1", [captured])
                 .unwrap();
-            store.execute_usage(
+            store.execute_history(
 "INSERT INTO turns(session_id,provider_thread,provider_turn,started_at,captured_event,lf_process_id)
                      SELECT id,'thread','turn',10,CASE WHEN ?1 THEN current_capture END,?2 FROM agent_sessions WHERE id='conversation'",
                     rusqlite::params![captured,process],
@@ -224,14 +228,14 @@ fn process_completion_ends_inputs_without_exit_events() {
         assert!(completed_since().is_empty());
         // A turn with unknown ownership must not fall back to its ended creator.
         store
-            .execute_usage(
+            .execute_history(
                 "UPDATE turns SET lf_process_id=NULL WHERE session_id='conversation'",
                 [],
             )
             .unwrap();
         assert!(completed_since().is_empty());
         store
-            .execute_usage(
+            .execute_history(
                 "UPDATE turns SET lf_process_id=?1 WHERE session_id='conversation'",
                 [&process],
             )
@@ -239,8 +243,8 @@ fn process_completion_ends_inputs_without_exit_events() {
         // An unrelated attachment's exit cannot finish this input.
         store
             .execute_history(
-                "INSERT INTO session_history(session_id,kind,receipt_key,observed_at,payload)
-                 VALUES('conversation','observed','attachment:other:exit',30,'{}')",
+                "INSERT INTO session_history(session_id,receipt_key,observed_at,payload)
+                 VALUES('conversation','attachment:other:exit',30,'{}')",
                 [],
             )
             .unwrap();
@@ -353,7 +357,7 @@ fn aggregate_history_discovers_unattributed_native_receipts_without_a_capture() 
     // Imported native history can establish Work without a capture. That
     // turn cannot lend its attribution to another unlinked receipt.
     store
-        .execute_usage(
+        .execute_history(
             "INSERT INTO turns(session_id,provider_thread,provider_turn,wave_id,started_at)
              VALUES('conversation','thread','owned',?1,110)",
             [wave.as_str()],
@@ -521,8 +525,8 @@ fn history_windows_find_inputs_by_each_start_and_end() {
             ] {
                 let Some(observed) = observed else { continue };
                 store.execute_history(
-"INSERT INTO session_history(session_id,kind,receipt_key,observed_at,payload,captured_event)
-                         VALUES(?1,'observed',?2,?3,?4,?5)",
+"INSERT INTO session_history(session_id,receipt_key,observed_at,payload,captured_event)
+                         VALUES(?1,?2,?3,?4,?5)",
                         params![id, format!("{input}:{file}"), observed, payload.to_string(), captured_event],
                     )
                     .unwrap();
@@ -612,15 +616,15 @@ fn task_history_reads_every_row_naming_the_task() {
                 let payload = json!({"input_id":input,"source":"manifest.json",
                         "evidence":{"artifact_key":input,"schema_version":1}});
                 store.execute_history(
-"INSERT INTO session_history(session_id,kind,receipt_key,task_id,observed_at,payload,captured_event)
-                         VALUES(?1,'observed',?2,?3,10,?4,?5)",
+"INSERT INTO session_history(session_id,receipt_key,task_id,observed_at,payload,captured_event)
+                         VALUES(?1,?2,?3,10,?4,?5)",
                         params![id, format!("{input}:manifest.json"), task.as_str(), payload.to_string(), captured],
                     )
                     .unwrap();
             }
             if let Some(task) = origin {
                 store
-                    .execute_usage(
+                    .execute_history(
                         "INSERT INTO turns(session_id,provider_thread,provider_turn,
                          task_id,started_at,captured_event) VALUES(?1,'thread','turn',?2,10,?3)",
                         params![id, task.as_str(), captured],
@@ -635,7 +639,7 @@ fn task_history_reads_every_row_naming_the_task() {
             )
             .unwrap();
         store
-            .execute_usage(
+            .execute_history(
                 "INSERT INTO turns(session_id,provider_thread,provider_turn,
                  task_id,started_at) VALUES('native','thread','turn',?1,10)",
                 [task.as_str()],

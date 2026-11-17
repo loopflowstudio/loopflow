@@ -255,6 +255,9 @@ pub fn read_manifest(dir: &Path) -> std::io::Result<SessionCaptureManifest> {
     Ok(manifest)
 }
 
+/// An attempt that ended so says nothing its turn rows do not.
+const COMPLETED: &str = "completed";
+
 /// Append-only capture data. This value has no attachment or process authority.
 #[derive(Debug)]
 pub struct SessionRecorder {
@@ -264,6 +267,10 @@ pub struct SessionRecorder {
     provider_observation_pending: bool,
     attempt: u32,
     attempt_started: bool,
+    /// The current attempt's start, at its stream position: kept only when
+    /// the attempt is retried or does not complete, since an ordinary turn's
+    /// row in history already says when it ran.
+    attempt_start: Option<(u64, OffsetDateTime, CaptureFact)>,
     event_seq: u64,
     /// Where facts are kept; none for a mechanical command's capture.
     history: Option<(
@@ -318,6 +325,7 @@ impl SessionRecorder {
             provider_observation_pending: false,
             attempt: 1,
             attempt_started: false,
+            attempt_start: None,
             event_seq: 0,
             history,
             previous_event: None,
@@ -355,17 +363,32 @@ impl SessionRecorder {
             return Ok(());
         }
         self.attempt_started = true;
-        self.record_fact(CaptureFact::ProviderAttemptStarted {
-            provider: provider.to_owned(),
-            model: model.map(str::to_owned),
-            account_id: None,
-            attempt_key: self.attempt_key(),
-        })
+        let (seq, at) = self.next_position()?;
+        self.attempt_start = Some((
+            seq,
+            at,
+            CaptureFact::ProviderAttemptStarted {
+                provider: provider.to_owned(),
+                model: model.map(str::to_owned),
+                account_id: None,
+                attempt_key: self.attempt_key(),
+            },
+        ));
+        Ok(())
     }
 
+    /// Keep how the current attempt ended, with its start, unless it
+    /// completed: then history holds nothing the turn's row does not.
     fn finish_attempt(&mut self, outcome: &str) -> std::io::Result<()> {
         if !self.attempt_started {
             return Ok(());
+        }
+        let start = self.attempt_start.take();
+        if outcome == COMPLETED {
+            return Ok(());
+        }
+        if let Some((seq, at, fact)) = start {
+            self.keep_fact(seq, at, &fact)?;
         }
         self.record_fact(CaptureFact::ProviderAttemptFinished {
             attempt_key: self.attempt_key(),
@@ -396,21 +419,35 @@ impl SessionRecorder {
         format!("attempt-{}", self.attempt)
     }
 
-    /// Keep how a turn ended; any other event only ticks the silence clock.
+    /// Keep a turn that did not complete and any error, the error also on
+    /// the input's row for the Graph; any other event only ticks the silence
+    /// clock.
     pub(crate) fn record_conversation(&mut self, event: ConversationEvent) -> std::io::Result<()> {
         let end = match event {
-            ConversationEvent::TurnCompleted { turn_id, status } => {
+            ConversationEvent::TurnCompleted { turn_id, status }
+                if status != loopflow_model::chat::types::Lifecycle::Completed =>
+            {
                 TurnEnd::TurnCompleted { turn_id, status }
             }
             ConversationEvent::Error {
                 code,
                 message,
                 evidence,
-            } => TurnEnd::Error {
-                code,
-                message,
-                evidence: evidence.map(Box::new),
-            },
+            } => {
+                if let Some((store, _)) = &self.history {
+                    store
+                        .record_input_error(
+                            &self.manifest.artifact_key,
+                            &format!("{code}: {message}"),
+                        )
+                        .map_err(std::io::Error::other)?;
+                }
+                TurnEnd::Error {
+                    code,
+                    message,
+                    evidence: evidence.map(Box::new),
+                }
+            }
             _ => return self.next_position().map(drop),
         };
         self.record_fact(CaptureFact::Conversation { event: end })
@@ -475,8 +512,9 @@ impl SessionRecorder {
         };
         let terminal = write_terminal(&self.dir, terminal)?;
         self.terminal_recorded = true;
-        // The receipt file records settlement. A missed store observation
-        // must not fail the exit.
+        // The receipt file records settlement, which no turn row says: a
+        // completed turn is not the command's outcome. A missed store
+        // observation must not fail the exit.
         if self.manifest.harness != "loopflow" {
             let input = &self.manifest.artifact_key;
             let observed = row_store(&self.dir).and_then(|store| {

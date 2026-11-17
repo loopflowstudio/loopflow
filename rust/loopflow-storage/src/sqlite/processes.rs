@@ -187,7 +187,7 @@ impl SessionTransfer<'_> {
         // Only a departure has a reader: the next attachment asks where the
         // conversation went. An exit without one leaves no history.
         let exit = departure
-            .map(|departure| -> StoreResult<crate::journals::Row> {
+            .map(|departure| -> StoreResult<crate::history::Row> {
                 let payload = serde_json::json!({
                     "type": "attachment_exit", "outcome": outcome, "attachment_token": expected.token,
                     "departure": serde_json::to_value(departure)
@@ -198,7 +198,7 @@ impl SessionTransfer<'_> {
                     [session],
                     |row| row.get(0),
                 )?;
-                let mut row = crate::journals::Row::observed(
+                let mut row = crate::history::Row::observed(
                     session,
                     format!("attachment:{}:exit", expected.token),
                     captured,
@@ -329,7 +329,7 @@ pub(super) const FORGETTABLE: &str = "p.kind='lf' AND p.completed_at IS NOT NULL
     AND NOT EXISTS(SELECT 1 FROM session_events WHERE lf_process_id=p.id)
     AND (p.completed_at < CAST(strftime('%s','now') AS INTEGER) - 30*86400 OR (
         NOT EXISTS(SELECT 1 FROM history.session_history WHERE lf_process_id=p.id)
-        AND NOT EXISTS(SELECT 1 FROM usage.turns WHERE lf_process_id=p.id)))
+        AND NOT EXISTS(SELECT 1 FROM history.turns WHERE lf_process_id=p.id)))
     AND NOT EXISTS(SELECT 1 FROM graph_processes WHERE lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM graph_process_steps WHERE lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM graph_process_steps WHERE graph_lf_process_id=p.id)
@@ -497,7 +497,7 @@ fn process_query(
         // another Process's command context establishes performed work.
         sql.push_str(&format!(
             " AND e.id IN (
-            SELECT lf_process_id FROM usage.turns
+            SELECT lf_process_id FROM history.turns
             WHERE {column}={value} AND lf_process_id IS NOT NULL
             UNION
             SELECT op.id FROM graph_process_steps gs JOIN processes op ON op.id=gs.lf_process_id
@@ -1647,7 +1647,7 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let payload = conn
             .query_row(
-                "SELECT payload FROM history.session_history WHERE session_id=?1 AND kind='observed'
+                "SELECT payload FROM history.session_history WHERE session_id=?1
                  AND receipt_key=?2",
                 params![
                     canonical.as_str(),
@@ -2048,18 +2048,18 @@ mod discovery_tests {
                     &format!("session-{index}"),
                     &format!("run_{index:032x}"),
                 );
-                store.execute_usage("INSERT INTO turns(session_id,provider_thread,provider_turn,lf_process_id,task_id,wave_id,started_at)
+                store.execute_history("INSERT INTO turns(session_id,provider_thread,provider_turn,lf_process_id,task_id,wave_id,started_at)
                     VALUES(?1,'thread','work',?2,?3,?4,1)",
                     params![format!("session-{index}"),shared,task.as_str(),wave]).unwrap();
             }
             // Same Process drove both Tasks, two turns and a mechanical boundary.
-            store.execute_usage("INSERT INTO turns(session_id,provider_thread,provider_turn,lf_process_id,task_id,wave_id,started_at)
+            store.execute_history("INSERT INTO turns(session_id,provider_thread,provider_turn,lf_process_id,task_id,wave_id,started_at)
                 VALUES('session-0','thread','retry',?1,?2,?3,2)",params![shared,first.as_str(),wave]).unwrap();
             // Session is bound now; the earlier turn remains unassigned.
-            store.execute_usage("INSERT INTO turns(session_id,provider_thread,provider_turn,lf_process_id,started_at)
+            store.execute_history("INSERT INTO turns(session_id,provider_thread,provider_turn,lf_process_id,started_at)
                 VALUES('session-0','thread','before-bind',?1,1)",[&unbound]).unwrap();
             // Known Task, unknown original process: neither current attachment nor observer is its owner.
-            store.execute_usage("INSERT INTO turns(session_id,provider_thread,provider_turn,task_id,wave_id,started_at)
+            store.execute_history("INSERT INTO turns(session_id,provider_thread,provider_turn,task_id,wave_id,started_at)
                 VALUES('session-0','thread','unmapped',?1,?2,1)",params![first.as_str(),wave]).unwrap();
 
             conn.execute(

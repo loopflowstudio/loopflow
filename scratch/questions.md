@@ -144,3 +144,27 @@ Page: `scratch/concept-review.html` (five numbered questions). Jack Heart: "1b 2
 - 3b: write attempt and terminal history rows only on a retry or failure, in this PR.
 - 4b: also keep the agent's final message on the turn row.
 - 5b: give store retention its own command name.
+
+## Choices building the concept-review answers (2026-11-17, headless, reversible)
+
+- One file keeps the name `history.db`, one word in code and docs
+  (`HistoryFile`, `Watch::History`); "journal" already names the command
+  journal in `loopflow-execution`.
+- The message row holds the input's newest *ended* turn and its status, not
+  the newest completed one; routing answers only when that status is
+  `completed`. One column set answers routing, the Session list and the
+  failed-step read.
+- `session_turn_completed` and `session_completions` stay on
+  `history.turns`: they guard history's own numbers (a replayed snapshot must
+  not take the live tally; the transcript pass finds turns history lacks). A
+  turn with no known input never reaches an input row, so main cannot answer
+  them (`a_codex_snapshot_replays_a_completed_turn_without_taking_the_live_tally`).
+- `terminal.json` stays in history for every capture: it is the command's
+  settlement, which no turn row says
+  (`native_usage_survives_attachment_and_input_replacement_without_double_counting`:
+  "native completion cannot invent the command outcome"). Change 3 drops only
+  attempt rows of an ordinary attempt and completed turn rows.
+- "Ordinary" = capture outcome or turn status `completed`. For old stores the
+  retention pass drops attempt rows keyed `attempt-1` (start, and a finish
+  that completed), completed terminal receipts and completed turn rows.
+- Store retention is `lf machine prune`, beside `lf machine doctor`.

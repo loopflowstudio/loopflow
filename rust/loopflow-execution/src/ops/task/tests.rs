@@ -688,7 +688,7 @@ fn a_dead_graph_is_history_while_a_live_graph_process_retains_the_checkout() {
     fixture
         .store
         .sqlite
-        .execute_usage(
+        .execute_history(
             "INSERT INTO turns(session_id,provider_thread,provider_turn,started_at)
              VALUES(?1,'thread','turn',?2)",
             rusqlite::params![session.id, now - 100],

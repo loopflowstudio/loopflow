@@ -1,4 +1,4 @@
-//! A conversation's per-turn usage and completion, written to `usage.turns`
+//! A conversation's per-turn usage and completion, written to `history.turns`
 //! from its transcript. The transcript is the only writer of a turn's usage:
 //! its tokens and model, written when the turn ends and again when the
 //! provider exits. A turn that has a reading keeps it.
@@ -121,10 +121,14 @@ fn usage(
     turn: &Turn,
     ended: i64,
 ) -> StoreResult<bool> {
-    match (&turn.id, &turn.receipt.usage) {
-        (Some(id), usage @ Value::Object(_)) => {
-            store.record_turn_usage(session, thread, id, ended, usage)
-        }
+    let Some(id) = &turn.id else {
+        return Ok(false);
+    };
+    if let Some(message) = super::answer::final_message(turn) {
+        store.record_turn_final_message(session, thread, id, &message);
+    }
+    match &turn.receipt.usage {
+        usage @ Value::Object(_) => store.record_turn_usage(session, thread, id, ended, usage),
         _ => Ok(false),
     }
 }

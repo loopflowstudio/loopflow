@@ -22,7 +22,7 @@ pub struct SessionTurnOrigin {
     pub step: Option<String>,
 }
 
-/// One provider turn as `usage.turns` keeps it: inserted when it starts,
+/// One provider turn as `history.turns` keeps it: inserted when it starts,
 /// completed in place when it ends. Its grouping is what it was dispatched
 /// for; a bind made while it ran does not move it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -89,7 +89,7 @@ pub struct SessionEvent {
 pub enum SessionEventKind {
     /// An input, kept in the store as Session state.
     Captured,
-    /// Session history; provider turns are in `usage.turns`.
+    /// Session history; provider turns are in `history.turns`.
     Observed,
 }
 

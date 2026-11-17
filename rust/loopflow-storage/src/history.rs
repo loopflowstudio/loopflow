@@ -1,8 +1,10 @@
-//! History a person reads later lives in `history.db` beside `loopflow.db`,
-//! and one row per provider turn in `usage.db`: each its own SQLite file with
-//! its own write lock, WAL and revision row. A write to either never takes the
-//! store's write lock, and one that fails is a [`RecordingGap`] in
-//! `logs/lf.log`, never a failed turn.
+//! What happened in a Session lives in `history.db` beside `loopflow.db`:
+//! observations a person reads later (`session_history`, 90 days) and one
+//! row per provider turn (`turns`, kept). It has its own write lock, WAL and
+//! revision row. A write never takes the store's write lock, and one that
+//! fails is a [`RecordingGap`] in `logs/lf.log`, never a failed turn. Nothing
+//! the product acts on lives here: deleting the file loses history and usage,
+//! not state.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -13,78 +15,41 @@ use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior};
 
 use crate::{RecordingGap, StoreResult};
 
-/// One journal file beside the store: its name, the schema readers attach it
-/// as, and its schema, applied once per `user_version`. A journal only adds:
-/// a new version creates what it lacks and nothing migrates old rows. `{p}`
-/// names the schema the objects go in: empty for the file itself, `{alias}.`
-/// for the empty stand-in a store attaches when it cannot reach the file.
-#[derive(Debug)]
-pub struct Journal {
-    file: &'static str,
-    alias: &'static str,
-    version: i64,
-    schema: &'static str,
-}
+const FILE: &str = "history.db";
+/// The schema store connections attach the file as.
+const ALIAS: &str = "history";
+const VERSION: i64 = 1;
 
-/// Session history: observations, appended by `seq`.
-pub static HISTORY: Journal = Journal {
-    file: "history.db",
-    alias: "history",
-    // Version 2 keeps only observations; turns moved to `usage.turns`.
-    version: 2,
-    schema: "
+/// The file's schema. It only adds: a new version creates what it lacks and
+/// nothing migrates old rows. `{p}` names the schema the objects go in: empty
+/// for the file itself, `history.` for the empty stand-in a store attaches
+/// when it cannot reach the file.
+const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS {p}session_history (
     seq INTEGER PRIMARY KEY,
     session_id TEXT NOT NULL,
-    provider_thread TEXT,
-    provider_turn TEXT,
-    kind TEXT NOT NULL CHECK(kind='observed'),
     receipt_key TEXT NOT NULL,
     lf_process_id TEXT,
-    agent_process_id TEXT,
     task_id TEXT,
     wave_id TEXT,
     captured_event INTEGER,
     observed_at INTEGER NOT NULL,
-    payload TEXT NOT NULL
+    payload TEXT NOT NULL,
+    UNIQUE(session_id, receipt_key)
 );
-CREATE UNIQUE INDEX IF NOT EXISTS {p}session_history_receipt ON session_history(
-    session_id, COALESCE(provider_thread,''), COALESCE(provider_turn,''), kind, receipt_key);
 CREATE INDEX IF NOT EXISTS {p}session_history_order ON session_history(session_id, seq);
-CREATE INDEX IF NOT EXISTS {p}session_history_observation ON session_history(session_id, receipt_key)
-    WHERE kind='observed';
 CREATE INDEX IF NOT EXISTS {p}session_history_input ON session_history(captured_event)
     WHERE captured_event IS NOT NULL;
 CREATE INDEX IF NOT EXISTS {p}session_history_outcome_window ON session_history(observed_at)
-    WHERE kind='observed' AND substr(receipt_key,-14) IN (':manifest.json',':terminal.json');
+    WHERE substr(receipt_key,-14) IN (':manifest.json',':terminal.json');
 CREATE INDEX IF NOT EXISTS {p}session_history_window ON session_history(observed_at);
 CREATE INDEX IF NOT EXISTS {p}session_history_process ON session_history(lf_process_id, session_id)
     WHERE lf_process_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS {p}session_history_task ON session_history(task_id)
     WHERE task_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS {p}session_history_transitions ON session_history(session_id, seq)
-    WHERE kind='observed' AND receipt_key GLOB 'provider-transition:*';
+    WHERE receipt_key GLOB 'provider-transition:*';
 
-CREATE TABLE IF NOT EXISTS {p}history_revision (
-    id INTEGER PRIMARY KEY CHECK(id = 1),
-    revision INTEGER NOT NULL
-);
-INSERT OR IGNORE INTO {p}history_revision(id, revision) VALUES(1, 0);
-CREATE TRIGGER IF NOT EXISTS {p}history_revision_session_insert AFTER INSERT ON session_history
-BEGIN UPDATE history_revision SET revision = revision + 1; END;
-CREATE TRIGGER IF NOT EXISTS {p}history_revision_session_delete AFTER DELETE ON session_history
-BEGIN UPDATE history_revision SET revision = revision + 1; END;
-",
-};
-
-/// Per-turn accounting: one row per provider turn, inserted when it starts
-/// and completed in place when it ends, grouped by what it was dispatched for.
-/// Self-contained, so a report by skill or model needs no other file.
-pub static USAGE: Journal = Journal {
-    file: "usage.db",
-    alias: "usage",
-    version: 1,
-    schema: "
 CREATE TABLE IF NOT EXISTS {p}turns (
     id INTEGER PRIMARY KEY,
     session_id TEXT NOT NULL,
@@ -125,6 +90,7 @@ CREATE TABLE IF NOT EXISTS {p}turns (
     tool_output_tokens INTEGER,
     compactions INTEGER,
     compaction_tokens INTEGER,
+    final_message TEXT,
     UNIQUE(session_id, provider_thread, provider_turn)
 );
 CREATE INDEX IF NOT EXISTS {p}turns_input ON turns(captured_event)
@@ -135,32 +101,30 @@ CREATE INDEX IF NOT EXISTS {p}turns_process ON turns(lf_process_id, session_id)
     WHERE lf_process_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS {p}turns_task ON turns(task_id) WHERE task_id IS NOT NULL;
 
-CREATE TABLE IF NOT EXISTS {p}turns_revision (
+CREATE TABLE IF NOT EXISTS {p}history_revision (
     id INTEGER PRIMARY KEY CHECK(id = 1),
     revision INTEGER NOT NULL
 );
-INSERT OR IGNORE INTO {p}turns_revision(id, revision) VALUES(1, 0);
-CREATE TRIGGER IF NOT EXISTS {p}turns_revision_insert AFTER INSERT ON turns
-BEGIN UPDATE turns_revision SET revision = revision + 1; END;
-CREATE TRIGGER IF NOT EXISTS {p}turns_revision_update AFTER UPDATE ON turns
-BEGIN UPDATE turns_revision SET revision = revision + 1; END;
-CREATE TRIGGER IF NOT EXISTS {p}turns_revision_delete AFTER DELETE ON turns
-BEGIN UPDATE turns_revision SET revision = revision + 1; END;
-",
-};
+INSERT OR IGNORE INTO {p}history_revision(id, revision) VALUES(1, 0);
+CREATE TRIGGER IF NOT EXISTS {p}history_revision_session_insert AFTER INSERT ON session_history
+BEGIN UPDATE history_revision SET revision = revision + 1; END;
+CREATE TRIGGER IF NOT EXISTS {p}history_revision_session_delete AFTER DELETE ON session_history
+BEGIN UPDATE history_revision SET revision = revision + 1; END;
+CREATE TRIGGER IF NOT EXISTS {p}history_revision_turn_insert AFTER INSERT ON turns
+BEGIN UPDATE history_revision SET revision = revision + 1; END;
+CREATE TRIGGER IF NOT EXISTS {p}history_revision_turn_update AFTER UPDATE ON turns
+BEGIN UPDATE history_revision SET revision = revision + 1; END;
+CREATE TRIGGER IF NOT EXISTS {p}history_revision_turn_delete AFTER DELETE ON turns
+BEGIN UPDATE history_revision SET revision = revision + 1; END;
+";
 
-/// Every journal a store connection attaches.
-const JOURNALS: [&Journal; 2] = [&HISTORY, &USAGE];
+fn schema(prefix: &str) -> String {
+    SCHEMA.replace("{p}", prefix)
+}
 
-impl Journal {
-    fn schema(&self, prefix: &str) -> String {
-        self.schema.replace("{p}", prefix)
-    }
-
-    /// This journal's file beside the store at `store`.
-    pub fn path(&self, store: &Path) -> PathBuf {
-        store.with_file_name(self.file)
-    }
+/// `history.db` in the directory of the store at `store`.
+pub fn history_path(store: &Path) -> PathBuf {
+    store.with_file_name(FILE)
 }
 
 /// One observation appended to `history.session_history`.
@@ -204,9 +168,7 @@ impl Row {
 pub(crate) fn append_in(tx: &Connection, row: &Row) -> StoreResult<i64> {
     let kept: Option<(i64, String)> = tx
         .query_row(
-            "SELECT seq,payload FROM session_history WHERE session_id=?1
-             AND COALESCE(provider_thread,'')='' AND COALESCE(provider_turn,'')=''
-             AND kind='observed' AND receipt_key=?2",
+            "SELECT seq,payload FROM session_history WHERE session_id=?1 AND receipt_key=?2",
             rusqlite::params![row.session_id, row.receipt_key],
             |found| Ok((found.get(0)?, found.get(1)?)),
         )
@@ -221,9 +183,9 @@ pub(crate) fn append_in(tx: &Connection, row: &Row) -> StoreResult<i64> {
         )));
     }
     tx.execute(
-        "INSERT INTO session_history(session_id,kind,receipt_key,lf_process_id,task_id,wave_id,
+        "INSERT INTO session_history(session_id,receipt_key,lf_process_id,task_id,wave_id,
             captured_event,observed_at,payload)
-         VALUES(?1,'observed',?2,?3,?4,?5,?6,?7,?8)",
+         VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
         rusqlite::params![
             row.session_id,
             row.receipt_key,
@@ -238,34 +200,23 @@ pub(crate) fn append_in(tx: &Connection, row: &Row) -> StoreResult<i64> {
     Ok(tx.last_insert_rowid())
 }
 
-/// A journal write waits this long for another writer of the same file, then
-/// becomes a gap: a turn boundary does not queue behind history or usage.
+/// A history write waits this long for another writer of the file, then
+/// becomes a gap: a turn boundary does not queue behind history.
 /// While a gap is open the next write does not wait at all, so a held lock
-/// costs a process one wait per file, not one per write. Against a lock that
+/// costs a process one wait, not one per write. Against a lock that
 /// is never released, SQLite's WAL retries make that wait about 5 s.
 #[cfg(not(test))]
 const BUSY: Duration = Duration::from_secs(2);
 #[cfg(test)]
 const BUSY: Duration = Duration::from_millis(50);
 
-/// `history.db` in the directory of the store at `store`.
-pub fn history_path(store: &Path) -> PathBuf {
-    HISTORY.path(store)
-}
-
-/// `usage.db` in the directory of the store at `store`.
-pub fn usage_path(store: &Path) -> PathBuf {
-    USAGE.path(store)
-}
-
-/// The writer of one journal file, shared by every store this process opens
+/// The writer of `history.db`, shared by every store this process opens
 /// beside it: opened at its first write, and reopened after a failure. `store`
-/// is the store beside which the journal lives; a store without a file keeps
+/// is the store beside which the file lives; a store without a file keeps
 /// none. Sharing it means a held lock costs the process one wait, however many
 /// times it opens the store.
 #[derive(Debug)]
-pub struct JournalFile {
-    journal: &'static Journal,
+pub struct HistoryFile {
     store: Option<PathBuf>,
     state: Mutex<WriterState>,
 }
@@ -276,14 +227,13 @@ struct WriterState {
     gap: RecordingGap,
 }
 
-impl JournalFile {
-    /// This process's writer of `journal` beside the store at `store`, or a
+impl HistoryFile {
+    /// This process's writer of the history beside the store at `store`, or a
     /// writer of none for a store without a file.
-    pub(crate) fn beside(journal: &'static Journal, store: Option<&Path>) -> Arc<Self> {
-        static WRITERS: OnceLock<Mutex<HashMap<PathBuf, Arc<JournalFile>>>> = OnceLock::new();
+    pub(crate) fn beside(store: Option<&Path>) -> Arc<Self> {
+        static WRITERS: OnceLock<Mutex<HashMap<PathBuf, Arc<HistoryFile>>>> = OnceLock::new();
         let writer = |store: Option<&Path>| {
             Arc::new(Self {
-                journal,
                 store: store.map(Path::to_path_buf),
                 state: Mutex::default(),
             })
@@ -294,21 +244,21 @@ impl JournalFile {
         let mut writers = WRITERS
             .get_or_init(Mutex::default)
             .lock()
-            .expect("journal writers mutex poisoned");
+            .expect("history writers mutex poisoned");
         // One file reached through two spellings (`/tmp` and `/private/tmp`)
         // still has one writer.
-        let path = journal.path(store);
+        let path = history_path(store);
         let key = path
             .parent()
             .and_then(|dir| dir.canonicalize().ok())
-            .map_or_else(|| path.clone(), |dir| dir.join(journal.file));
+            .map_or_else(|| path.clone(), |dir| dir.join(FILE));
         writers
             .entry(key)
             .or_insert_with(|| writer(Some(store)))
             .clone()
     }
 
-    /// Run `write` in one transaction on the journal's file, with the store
+    /// Run `write` in one transaction on `history.db`, with the store
     /// attached read-only as `store`. Returns what it committed; a failure is
     /// noted as a recording gap for `what`.
     pub(crate) fn write<T>(
@@ -316,14 +266,11 @@ impl JournalFile {
         what: &str,
         write: impl FnOnce(&Transaction<'_>) -> StoreResult<T>,
     ) -> Option<T> {
-        let mut state = self.state.lock().expect("journal mutex poisoned");
+        let mut state = self.state.lock().expect("history mutex poisoned");
         let Some(store) = &self.store else {
             state.gap.note(
                 what,
-                &format!(
-                    "the store has no file beside which to keep {}",
-                    self.journal.file
-                ),
+                &"the store has no file beside which to keep history.db",
             );
             return None;
         };
@@ -332,7 +279,7 @@ impl JournalFile {
         } else {
             BUSY
         };
-        let result = commit(&mut state.conn, self.journal, store, busy, write);
+        let result = commit(&mut state.conn, store, busy, write);
         match result {
             Ok(value) => {
                 state.gap.recovered();
@@ -355,15 +302,14 @@ impl JournalFile {
 
 fn commit<T>(
     conn: &mut Option<Connection>,
-    journal: &Journal,
     store: &Path,
     busy: Duration,
     write: impl FnOnce(&Transaction<'_>) -> StoreResult<T>,
 ) -> StoreResult<T> {
     if conn.is_none() {
-        *conn = Some(open_writer(journal, store)?);
+        *conn = Some(open_writer(store)?);
     }
-    let conn = conn.as_mut().expect("journal connection was just opened");
+    let conn = conn.as_mut().expect("history connection was just opened");
     conn.busy_timeout(busy)?;
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let value = write(&tx)?;
@@ -371,79 +317,64 @@ fn commit<T>(
     Ok(value)
 }
 
-/// Attach each journal of the store at `store` to `conn` read-only under its
-/// alias, so readers name `history.session_history` and `usage.turns`, making
-/// a missing file and its schema first. A journal a store cannot reach is a
-/// recording gap, never a failed open: readers then see it empty.
+/// Attach the history of the store at `store` to `conn` read-only as
+/// `history`, so readers name `history.session_history` and `history.turns`,
+/// making a missing file and its schema first. A file a store cannot reach is
+/// a recording gap, never a failed open: readers then see it empty.
 pub(crate) fn attach(conn: &Connection, store: &Path) {
-    for journal in JOURNALS {
-        let path = journal.path(store);
-        let attached = (|| -> StoreResult<()> {
-            if !path.exists() {
-                open_writer(journal, store)?;
-            }
-            conn.execute(
-                &format!("ATTACH ?1 AS {}", journal.alias),
-                [read_only_uri(&path)],
-            )?;
-            Ok(())
-        })();
-        if let Err(error) = attached {
-            RecordingGap::default().note(journal.file, &error);
-            attach_empty_journal(conn, journal);
+    let path = history_path(store);
+    let attached = (|| -> StoreResult<()> {
+        if !path.exists() {
+            open_writer(store)?;
         }
+        conn.execute(&format!("ATTACH ?1 AS {ALIAS}"), [read_only_uri(&path)])?;
+        Ok(())
+    })();
+    if let Err(error) = attached {
+        RecordingGap::default().note(FILE, &error);
+        attach_empty(conn);
     }
 }
 
-/// Empty in-memory journals, for a store without a file beside which to keep
-/// them.
-#[cfg(any(test, feature = "test-support"))]
+/// An empty in-memory history, for a store without a file beside which to
+/// keep it.
 pub(crate) fn attach_empty(conn: &Connection) {
-    for journal in JOURNALS {
-        attach_empty_journal(conn, journal);
-    }
-}
-
-fn attach_empty_journal(conn: &Connection, journal: &Journal) {
-    // A read-only store connection is `query_only`; its empty journal is not
+    // A read-only store connection is `query_only`; its empty history is not
     // a write to anything the person keeps.
     let attached = (|| -> StoreResult<()> {
         let query_only: bool = conn.pragma_query_value(None, "query_only", |row| row.get(0))?;
         conn.execute_batch(&format!(
-            "PRAGMA query_only=OFF; ATTACH ':memory:' AS {alias}; {} PRAGMA query_only={};",
-            journal.schema(&format!("{}.", journal.alias)),
+            "PRAGMA query_only=OFF; ATTACH ':memory:' AS {ALIAS}; {} PRAGMA query_only={};",
+            schema(&format!("{ALIAS}.")),
             if query_only { "ON" } else { "OFF" },
-            alias = journal.alias,
         ))?;
         Ok(())
     })();
     if let Err(error) = attached {
-        RecordingGap::default().note(&format!("empty {}", journal.file), &error);
+        RecordingGap::default().note(&format!("empty {FILE}"), &error);
     }
 }
 
-/// A connection whose main database is the journal's file, so `BEGIN
-/// IMMEDIATE` locks only it. The store is attached read-only for the
-/// attachment fences rows check; a read-only attachment never takes its lock.
-pub(crate) fn open_writer(journal: &Journal, store: &Path) -> StoreResult<Connection> {
-    let conn = Connection::open(journal.path(store))?;
+/// A connection whose main database is `history.db`, so `BEGIN IMMEDIATE`
+/// locks only it. The store is attached read-only for the attachment fences
+/// rows check; a read-only attachment never takes its lock.
+pub(crate) fn open_writer(store: &Path) -> StoreResult<Connection> {
+    let conn = Connection::open(history_path(store))?;
     crate::instrumentation::observe_sqlite(&conn);
     conn.busy_timeout(BUSY)?;
     let mode: String =
         conn.pragma_update_and_check(None, "journal_mode", "WAL", |row| row.get(0))?;
     if mode != "wal" {
         return Err(crate::StoreError::InvalidData(format!(
-            "{} stayed in {mode} journal mode",
-            journal.file
+            "{FILE} stayed in {mode} journal mode"
         )));
     }
     conn.pragma_update(None, "synchronous", "NORMAL")?;
     let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
-    if version < journal.version {
+    if version < VERSION {
         conn.execute_batch(&format!(
-            "BEGIN IMMEDIATE; {} PRAGMA user_version = {}; COMMIT;",
-            journal.schema(""),
-            journal.version
+            "BEGIN IMMEDIATE; {} PRAGMA user_version = {VERSION}; COMMIT;",
+            schema("")
         ))?;
     }
     conn.execute("ATTACH ?1 AS store", [read_only_uri(store)])?;
@@ -474,8 +405,8 @@ mod tests {
             let session: String =
                 tx.query_row("SELECT id FROM store.agent_sessions", [], |row| row.get(0))?;
             tx.execute(
-                "INSERT INTO session_history(session_id,kind,receipt_key,observed_at,payload)
-                 VALUES(?1,'observed',?2,0,'{}')",
+                "INSERT INTO session_history(session_id,receipt_key,observed_at,payload)
+                 VALUES(?1,?2,0,'{}')",
                 rusqlite::params![session, receipt],
             )?;
             Ok(tx.last_insert_rowid())

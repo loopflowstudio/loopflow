@@ -279,8 +279,8 @@ fn session_metadata_reads_its_graph_from_the_process_that_captured_its_input() {
         )
         .unwrap();
         store.execute_history(
-"INSERT INTO session_history(session_id,kind,receipt_key,observed_at,payload,captured_event)
-            VALUES('session','observed',?1,1,'not JSON',(SELECT current_capture FROM agent_sessions WHERE id='session'))",
+"INSERT INTO session_history(session_id,receipt_key,observed_at,payload,captured_event)
+            VALUES('session',?1,1,'not JSON',(SELECT current_capture FROM agent_sessions WHERE id='session'))",
             [format!("{input}:events.jsonl:0")],
         )
         .unwrap();

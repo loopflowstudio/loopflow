@@ -2400,19 +2400,19 @@ for line in sys.stdin:
             "{:?}",
             graphs
         );
-        let history = rusqlite::Connection::open(loopflow_storage::journals::history_path(
+        let history = rusqlite::Connection::open(loopflow_storage::history::history_path(
             &home.path().join("loopflow.db"),
         ))
         .unwrap();
-        for kind in ["started", "completed"] {
+        for column in ["started_at", "ended_at"] {
             let count: i64 = history
                 .query_row(
-                    "SELECT count(*) FROM session_history WHERE kind=?1",
-                    [kind],
+                    &format!("SELECT count(*) FROM turns WHERE {column} IS NOT NULL"),
+                    [],
                     |row| row.get(0),
                 )
                 .unwrap();
-            assert_eq!(count, if correct_first { 3 } else { 4 }, "{kind}");
+            assert_eq!(count, if correct_first { 3 } else { 4 }, "{column}");
         }
         // The decision is the structured answer Claude kept for its last turn.
         let decision: String = rusqlite::Connection::open(home.path().join("loopflow.db"))

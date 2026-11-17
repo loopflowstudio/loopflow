@@ -1,12 +1,12 @@
-//! A turn's final answer, read from the transcript its provider keeps.
-//! Loopflow keeps no copy. A transcript that is gone, unreadable or without
-//! the turn is an error naming the file, never an empty answer.
+//! A turn's final answer, read from the transcript its provider keeps. A
+//! transcript that is gone, unreadable or without the turn is an error naming
+//! the file, never an empty answer. The turn's row in history keeps a copy
+//! for people, read only when the transcript is gone; routing never reads it.
 
 use anyhow::{anyhow, Context, Result};
 use loopflow_model::chat::types::ConversationItem;
 use loopflow_storage::sqlite::SqliteStore;
 
-use super::live::TurnState;
 use super::{json_lines, locate, read, Gap, Located, Source, Turn};
 use crate::harness::HarnessKind;
 
@@ -40,11 +40,7 @@ pub fn input_final_answer(store: &SqliteStore, input: &str) -> Result<Option<Str
             return Err(error);
         }
     };
-    let answer = match &answered.turn {
-        Some(turn) => last_assistant_message(harness, &source, turn),
-        None => unrecorded_answer(harness, &source, answered.captured_at),
-    };
-    answer
+    last_assistant_message(harness, &source, &answered.turn)
         .with_context(|| {
             format!(
                 "read the final answer of {input} from {}",
@@ -54,6 +50,22 @@ pub fn input_final_answer(store: &SqliteStore, input: &str) -> Result<Option<Str
         .inspect_err(|error| {
             tracing::warn!(error = format!("{error:#}"), "final answer unavailable")
         })
+}
+
+/// The final answer of `input` for a person reading it later: the
+/// transcript's, or when the transcript cannot answer, the copy its turn's
+/// row in history kept.
+///
+/// # Errors
+/// When the transcript cannot answer and history kept no copy.
+pub fn input_final_answer_for_people(store: &SqliteStore, input: &str) -> Result<Option<String>> {
+    match input_final_answer(store, input) {
+        Ok(answer) => Ok(answer),
+        Err(error) => match store.input_recorded_answer(input)? {
+            Some(answer) => Ok(Some(answer)),
+            None => Err(error),
+        },
+    }
 }
 
 /// What the agent said last in turn `turn` of a transcript, one reader per
@@ -90,26 +102,10 @@ pub fn last_assistant_message(
     Ok(final_message(found))
 }
 
-/// The answer of a turn lf failed to record: the transcript's last turn, when
-/// it began after the input was captured and has ended. `None` while it runs
-/// or before it begins.
-fn unrecorded_answer(
-    harness: HarnessKind,
-    source: &Source,
-    captured_at: i64,
-) -> Result<Option<String>> {
-    let turns = read(harness, source)?;
-    Ok(turns
-        .last()
-        .filter(|turn| turn.state == TurnState::Ended)
-        .filter(|turn| turn.at().is_some_and(|at| at >= captured_at))
-        .and_then(final_message))
-}
-
 /// The agent's last message in `turn`, or the object a structured answer
 /// returned, as JSON: Claude keeps a structured answer as its
 /// `StructuredOutput` tool call.
-fn final_message(turn: &Turn) -> Option<String> {
+pub(crate) fn final_message(turn: &Turn) -> Option<String> {
     let items: Vec<&ConversationItem> = turn.agent().collect();
     items.into_iter().rev().find_map(|item| match item {
         ConversationItem::Tool {
@@ -131,7 +127,7 @@ fn final_message(turn: &Turn) -> Option<String> {
 mod tests {
     use std::path::{Path, PathBuf};
 
-    use super::{input_final_answer, last_assistant_message};
+    use super::{input_final_answer, input_final_answer_for_people, last_assistant_message};
     use crate::harness::HarnessKind;
     use crate::transcript::Source;
 
@@ -213,24 +209,32 @@ mod tests {
             )
             .unwrap();
         loopflow_storage::test_fixture::record_captured_start(&store, &session.id, "turn");
+        let captured = store
+            .session(&session.id)
+            .unwrap()
+            .unwrap()
+            .captured
+            .unwrap();
+        let completed = serde_json::json!({"status":"completed"});
         store
-            .record_turn_completion(
-                &session.id,
-                &"thread".into(),
-                "turn",
-                1,
-                &serde_json::json!({"status":"completed"}),
-            )
+            .record_answered_turn_end(captured, &"thread".into(), "turn", 1, &completed)
             .unwrap();
         let gone = format!("{:#}", input_final_answer(&store, &input).unwrap_err());
         assert!(
             gone.contains("thread") && gone.contains("is gone"),
             "{gone}"
         );
+        // A person still reads the copy the turn's row kept; routing never does.
+        store.record_turn_final_message(&session.id, &"thread".into(), "turn", "Kept answer.");
+        assert!(input_final_answer(&store, &input).is_err());
+        assert_eq!(
+            input_final_answer_for_people(&store, &input).unwrap(),
+            Some("Kept answer.".into())
+        );
     }
 
     #[test]
-    fn a_turn_lf_failed_to_record_answers_from_its_transcript() {
+    fn an_answer_needs_only_the_input_row_and_the_transcript() {
         let home = tempfile::tempdir().unwrap();
         let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let input = crate::session_record::new_artifact_key();
@@ -262,10 +266,6 @@ mod tests {
             thread,
             "fixture",
         );
-        // No transcript and no turn row: the gap is named, never an answer.
-        let gone = format!("{:#}", input_final_answer(&store, &input).unwrap_err());
-        assert!(gone.contains(thread) && gone.contains("is gone"), "{gone}");
-
         let captured_at: i64 = store
             .conn
             .lock()
@@ -292,24 +292,30 @@ mod tests {
             std::fs::write(project.join(format!("{thread}.jsonl")), lines.join("\n")).unwrap();
         };
         let text = |text: &str| serde_json::json!([{"type":"text","text":text}]);
-        // An earlier input's turn in the same thread is not this input's answer.
-        let earlier = [
-            row("user", &at(-60), serde_json::json!("before")),
-            row("assistant", &at(-59), text("Earlier answer.")),
-        ];
-        write(&earlier);
-        assert_eq!(input_final_answer(&store, &input).unwrap(), None);
-
-        let [before, earlier_answer] = earlier;
+        // History kept no row for the turn: the input's row names it.
         write(&[
-            before,
-            earlier_answer,
             row("user", &at(1), serde_json::json!("go")),
-            row("assistant", &at(5), text("Unrecorded answer.")),
+            row("assistant", &at(5), text("Answer.")),
         ]);
+        assert_eq!(input_final_answer(&store, &input).unwrap(), None);
+        let captured = store
+            .session(&session.id)
+            .unwrap()
+            .unwrap()
+            .captured
+            .unwrap();
+        store
+            .record_answered_turn_end(
+                captured,
+                &thread.into(),
+                &format!("user-{}", at(1)),
+                captured_at + 5,
+                &serde_json::json!({"status":"completed"}),
+            )
+            .unwrap();
         assert_eq!(
             input_final_answer(&store, &input).unwrap(),
-            Some("Unrecorded answer.".into())
+            Some("Answer.".into())
         );
     }
 }

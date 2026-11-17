@@ -34,6 +34,9 @@ pub(super) struct FactWriter {
     /// they retain receipts but say nothing about current availability.
     attachment: Option<SessionAttachment>,
     requests: RequestOrigins,
+    /// The input each turn this writer saw answered, so its end lands on
+    /// that input's row. A replayed turn it never saw writes no state.
+    answering: HashMap<(AgentSessionId, String), i64>,
     activity: SessionActivityTracker,
     context: TurnContext,
 }
@@ -58,6 +61,7 @@ impl FactWriter {
             session,
             attachment,
             requests,
+            answering: HashMap::new(),
             activity: SessionActivityTracker::default(),
             context: TurnContext::default(),
         }
@@ -141,6 +145,10 @@ impl FactWriter {
                     (None, None) => None,
                 };
                 if let Some(origin) = origin {
+                    if let Some(captured) = origin.captured_event {
+                        self.answering
+                            .insert((turn.thread.clone(), turn.turn.clone()), captured);
+                    }
                     self.store
                         .record_session_turn_origin(&turn.thread, &turn.turn, &origin)?;
                 }
@@ -158,13 +166,26 @@ impl FactWriter {
                 }
                 let context = std::mem::take(&mut self.context);
                 if let Some(turn) = turn {
+                    let at = now();
+                    if let Some(captured) = self
+                        .answering
+                        .remove(&(turn.thread.clone(), turn.turn.clone()))
+                    {
+                        self.store.record_answered_turn_end(
+                            captured,
+                            &turn.thread,
+                            &turn.turn,
+                            at,
+                            detail,
+                        )?;
+                    }
                     let mut detail = detail.clone();
                     detail["context"] = json!(context);
                     self.store.record_turn_completion(
                         &self.session,
                         &turn.thread,
                         &turn.turn,
-                        now(),
+                        at,
                         &detail,
                     )?;
                 }
@@ -1110,7 +1131,7 @@ mod tests {
                         .lock()
                         .unwrap()
                         .query_row(
-                            "SELECT count(*) FROM usage.turns WHERE captured_event=?1",
+                            "SELECT count(*) FROM history.turns WHERE captured_event=?1",
                             [next.captured],
                             |row| row.get::<_, i64>(0)
                         )
@@ -1291,7 +1312,7 @@ mod tests {
             .lock()
             .unwrap()
             .query_row(
-                "SELECT status,error FROM usage.turns WHERE ended_at IS NOT NULL AND provider_turn=?1",
+                "SELECT status,error FROM history.turns WHERE ended_at IS NOT NULL AND provider_turn=?1",
                 [&request],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )

@@ -14,13 +14,16 @@ pub struct AnsweredTurn {
     pub session_id: String,
     pub provider: Option<String>,
     pub thread: AgentSessionId,
-    /// `None` when `usage.db` kept no completed turn for the input (a
-    /// recording gap): its answer is then the thread's last turn begun since
-    /// `captured_at`.
-    pub turn: Option<String>,
-    /// Unix seconds when the input was captured.
-    pub captured_at: i64,
+    pub turn: String,
     pub cwd: std::path::PathBuf,
+}
+
+/// How an input's newest ended turn went, as its captured row keeps it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InputTurnEnd {
+    pub status: Option<String>,
+    /// What failed the turn, from the provider or from lf.
+    pub error: Option<String>,
 }
 
 /// A Session's current provider conversation.
@@ -68,7 +71,7 @@ impl SqliteStore {
             let mut query = conn.prepare(
                 "SELECT t.provider_thread,t.provider_turn,t.started_at,t.ended_at,t.status,
                         json_extract(c.payload,'$.provider')
-                 FROM usage.turns t
+                 FROM history.turns t
                  LEFT JOIN session_events c ON c.seq=t.captured_event AND c.kind='captured'
                  WHERE t.session_id=?1 ORDER BY t.id",
             )?;
@@ -154,7 +157,8 @@ impl SqliteStore {
             .optional()?)
     }
 
-    /// When turn `turn` of `thread` was recorded complete, and its status.
+    /// When turn `turn` of `thread` ended, and its status, while it is the
+    /// newest ended turn of the input it answered.
     pub fn recorded_turn_end(
         &self,
         session: &str,
@@ -164,11 +168,65 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
             .query_row(
-                "SELECT ended_at,status FROM usage.turns
-                 WHERE session_id=?1 AND provider_thread=?2 AND provider_turn=?3
-                   AND ended_at IS NOT NULL",
+                "SELECT turn_ended_at,turn_status FROM session_events
+                 WHERE session_id=?1 AND turn_thread=?2 AND turn_id=?3
+                   AND kind='captured' AND turn_id IS NOT NULL
+                 ORDER BY turn_ended_at DESC LIMIT 1",
                 params![session, thread, turn],
                 |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?)
+    }
+
+    /// Record that `turn` of `thread` ended at `at` with `status` as the
+    /// newest ended turn of input `captured`. A turn that ended earlier than
+    /// the one kept leaves it.
+    pub fn record_input_turn_end(
+        &self,
+        captured: i64,
+        thread: &AgentSessionId,
+        turn: &str,
+        at: i64,
+        status: Option<&str>,
+        error: Option<&str>,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "UPDATE session_events SET turn_thread=?2,turn_id=?3,turn_ended_at=?4,turn_status=?5,
+                turn_error=?6
+             WHERE seq=?1 AND kind='captured' AND (turn_ended_at IS NULL OR turn_ended_at<=?4)",
+            params![captured, thread, turn, at, status, error],
+        )?;
+        Ok(())
+    }
+
+    /// Record what failed `input`'s turn, as lf saw it on the provider's
+    /// stream.
+    pub fn record_input_error(&self, input: &str, error: &str) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "UPDATE session_events SET turn_error=?2 WHERE kind='captured' AND receipt_key=?1",
+            params![input, error],
+        )?;
+        Ok(())
+    }
+
+    /// How `input`'s newest ended turn went; `None` before one ended or
+    /// failed.
+    pub fn input_turn_end(&self, input: &str) -> StoreResult<Option<InputTurnEnd>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                "SELECT turn_status,turn_error FROM session_events
+                 WHERE kind='captured' AND receipt_key=?1
+                   AND (turn_status IS NOT NULL OR turn_error IS NOT NULL)",
+                [input],
+                |row| {
+                    Ok(InputTurnEnd {
+                        status: row.get(0)?,
+                        error: row.get(1)?,
+                    })
+                },
             )
             .optional()?)
     }
@@ -228,7 +286,7 @@ impl SqliteStore {
         let mut query = conn.prepare(
             "SELECT e.payload FROM session_events c
              JOIN history.session_history e ON c.seq=e.captured_event AND c.kind='captured' AND c.receipt_key=?1
-             WHERE e.kind='observed' AND substr(e.receipt_key,1,length(?1)+14)=?1||':events.jsonl:'
+             WHERE substr(e.receipt_key,1,length(?1)+14)=?1||':events.jsonl:'
              ORDER BY CAST(substr(e.receipt_key,length(?1)+15) AS INTEGER),e.seq",
         )?;
         let rows = query.query_map([input], |row| row.get::<_, String>(0))?;
@@ -243,7 +301,7 @@ impl SqliteStore {
             "SELECT json_extract(e.payload,'$.evidence.since'),json_extract(e.payload,'$.evidence.observed_at')
              FROM session_events c
              JOIN history.session_history e ON c.seq=e.captured_event AND c.kind='captured' AND c.receipt_key=?1
-             WHERE e.kind='observed' AND substr(e.receipt_key,1,length(?1)+9)=?1||':silence:'
+             WHERE substr(e.receipt_key,1,length(?1)+9)=?1||':silence:'
              ORDER BY CAST(substr(e.receipt_key,length(?1)+10) AS INTEGER),e.seq",
         )?;
         let rows = query.query_map([input], |row| Ok((row.get(0)?, row.get(1)?)))?;
@@ -258,7 +316,7 @@ impl SqliteStore {
     ) -> StoreResult<Vec<Option<crate::session::TurnContext>>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(&format!(
-            "SELECT {} FROM usage.turns t
+            "SELECT {} FROM history.turns t
              WHERE t.captured_event=(SELECT seq FROM session_events WHERE kind='captured' AND receipt_key=?1)
                AND t.ended_at IS NOT NULL
              ORDER BY t.ended_at,t.id",
@@ -268,24 +326,17 @@ impl SqliteStore {
         rows.map(|row| Ok(row??.context)).collect()
     }
 
-    /// The provider turn that last answered `input`: the newest turn it
-    /// started that completed. Its text is in the provider's transcript.
-    /// Without a turn row, the input's own thread, unless a later input
-    /// continued it: that thread's last turn may answer someone else.
+    /// The provider turn that answered `input`: its newest ended turn, when
+    /// that turn completed. Its text is in the provider's transcript.
     pub fn input_answered_turn(&self, input: &str) -> StoreResult<Option<AnsweredTurn>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
             .query_row(
                 "SELECT c.session_id,COALESCE(json_extract(c.payload,'$.provider'),s.provider),
-                        COALESCE(t.provider_thread,c.provider_thread),t.provider_turn,
-                        c.observed_at,COALESCE(json_extract(c.payload,'$.cwd'),s.cwd)
+                        c.turn_thread,c.turn_id,COALESCE(json_extract(c.payload,'$.cwd'),s.cwd)
                  FROM session_events c JOIN agent_sessions s ON s.id=c.session_id
-                 LEFT JOIN usage.turns t ON t.captured_event=c.seq AND t.status='completed'
-                 WHERE c.kind='captured' AND c.receipt_key=?1
-                   AND (t.id IS NOT NULL OR (c.provider_thread IS NOT NULL AND NOT EXISTS(
-                     SELECT 1 FROM session_events later WHERE later.kind='captured'
-                       AND later.provider_thread=c.provider_thread AND later.seq>c.seq)))
-                 ORDER BY t.ended_at DESC,t.id DESC LIMIT 1",
+                 WHERE c.kind='captured' AND c.receipt_key=?1 AND c.turn_status='completed'
+                   AND c.turn_thread IS NOT NULL AND c.turn_id IS NOT NULL",
                 [input],
                 |row| {
                     Ok(AnsweredTurn {
@@ -293,8 +344,7 @@ impl SqliteStore {
                         provider: row.get(1)?,
                         thread: row.get(2)?,
                         turn: row.get(3)?,
-                        captured_at: row.get(4)?,
-                        cwd: row.get::<_, String>(5)?.into(),
+                        cwd: row.get::<_, String>(4)?.into(),
                     })
                 },
             )
@@ -437,8 +487,11 @@ impl SqliteStore {
             .optional()?)
     }
 
-    /// Whether the turn's completion is already kept; a provider snapshot
-    /// replays completions of turns it has finished before.
+    /// Whether history already keeps the turn's completion; a provider
+    /// snapshot replays completions of turns it has finished before, and the
+    /// replay must not take the live turn's tally. It guards history's
+    /// numbers, so it reads history: a turn with no known input never
+    /// reaches an input's row.
     pub fn session_turn_completed(
         &self,
         session: &str,
@@ -448,7 +501,7 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
             .query_row(
-                "SELECT 1 FROM usage.turns WHERE session_id=?1 AND provider_thread=?2
+                "SELECT 1 FROM history.turns WHERE session_id=?1 AND provider_thread=?2
                  AND provider_turn=?3 AND ended_at IS NOT NULL",
                 params![session, thread, turn],
                 |_| Ok(()),
@@ -457,7 +510,9 @@ impl SqliteStore {
             .is_some())
     }
 
-    /// Each completion recorded in `thread`: its turn and when it was observed.
+    /// Each completion `history.turns` keeps in `thread`: its turn and when it
+    /// was observed. The transcript pass reads it to fill the turns history
+    /// missed.
     pub fn session_completions(
         &self,
         session: &str,
@@ -465,7 +520,7 @@ impl SqliteStore {
     ) -> StoreResult<Vec<(String, i64)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare_cached(
-            "SELECT provider_turn,ended_at FROM usage.turns
+            "SELECT provider_turn,ended_at FROM history.turns
              WHERE session_id=?1 AND provider_thread=?2 AND ended_at IS NOT NULL",
         )?;
         let rows = query.query_map(params![session, thread], |row| {
@@ -555,7 +610,7 @@ impl SqliteStore {
         let task = scope.2.map(loopflow_model::id::TaskSelector::parse);
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(&format!(
-            "SELECT {} FROM usage.turns t
+            "SELECT {} FROM history.turns t
              WHERE t.session_id=?1
              AND CASE WHEN ?2 IS NULL THEN t.captured_event IS NULL
                      AND t.provider_thread IS ?3 AND t.provider_turn IS ?4
@@ -601,12 +656,12 @@ impl SqliteStore {
         let task = scope.2.map(loopflow_model::id::TaskSelector::parse);
         let conn = self.conn.lock().expect("store mutex poisoned");
         // Observations answer to their own scope. Inputs are Session state in
-        // the store and turns are in `usage.turns`, not history.
+        // the store and turns are in `history.turns`, not history.
         let mut query = conn.prepare(
-            "SELECT e.seq,e.session_id,e.provider_thread,e.provider_turn,
-                    e.agent_process_id,e.lf_process_id,e.task_id,e.wave_id,e.observed_at,e.payload
+            "SELECT e.seq,e.session_id,NULL,NULL,
+                    NULL,e.lf_process_id,e.task_id,e.wave_id,e.observed_at,e.payload
              FROM history.session_history e
-             WHERE e.session_id=?8 AND e.seq>?2 AND e.kind='observed'
+             WHERE e.session_id=?8 AND e.seq>?2
              AND (?4 IS NULL OR substr(e.receipt_key,1,length(?4)+1)=?4||':')
              AND (CASE WHEN json_valid(e.payload) THEN json_extract(e.payload,'$.source') END IN ('manifest.json','runs','terminal.json') OR (
                  (?5 IS NULL OR e.wave_id IN (SELECT id FROM wave_addresses WHERE id=?9 OR slug=?5))
@@ -846,16 +901,6 @@ mod tests {
         assert_eq!(turns[0].turn, "new");
         assert_eq!(store.input_events(&input).unwrap().len(), 1);
         assert_eq!(store.input_silences(&input).unwrap(), [(1, 5)]);
-        assert!(store
-            .session_turn_completed("conversation", &old, "new")
-            .unwrap());
-        assert_eq!(
-            store
-                .input_answered_turn(&input)
-                .unwrap()
-                .and_then(|turn| turn.turn),
-            Some("new".to_owned())
-        );
     }
 
     /// What a hook and the server do together: the hook sends its span, the
@@ -885,7 +930,7 @@ mod tests {
                 .unwrap()
                 .query_row(
                     "SELECT COUNT(*) FROM history.session_history WHERE session_id='session'
-                     AND kind='observed' AND json_extract(payload,'$.source')='store-gap'",
+                     AND json_extract(payload,'$.source')='store-gap'",
                     [],
                     |row| row.get(0),
                 )
@@ -908,8 +953,8 @@ mod tests {
             .lock()
             .unwrap()
             .query_row(
-                "SELECT payload FROM history.session_history WHERE kind='observed'
-                 AND json_extract(payload,'$.source')='store-gap'",
+                "SELECT payload FROM history.session_history
+                 WHERE json_extract(payload,'$.source')='store-gap'",
                 [],
                 |row| row.get(0),
             )

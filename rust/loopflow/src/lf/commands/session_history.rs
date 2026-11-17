@@ -96,8 +96,9 @@ pub(crate) fn render(selector: &str, view: SessionView, json: bool) -> Result<St
     let dir = loopflow_execution::session_record::record_dir(&home, &input)
         .ok_or_else(|| anyhow!("Input {} has no artifact path", snapshot.selector()))?;
     if view == SessionView::Final {
-        let answer = loopflow_execution::transcript::answer::input_final_answer(&store, &input)
-            .map_err(|error| anyhow!("Capture final answer unavailable: {error:#}"))?;
+        let answer =
+            loopflow_execution::transcript::answer::input_final_answer_for_people(&store, &input)
+                .map_err(|error| anyhow!("Capture final answer unavailable: {error:#}"))?;
         return match answer {
             Some(answer) => {
                 writeln!(&mut output, "{answer}")?;

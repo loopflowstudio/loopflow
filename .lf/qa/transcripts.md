@@ -29,7 +29,7 @@ directory to check pairing. Codex's first-run trust prompt writes into the real
 Plain `pi` and `opencode` need no trust answer and list the same way. A
 headless `lf -b -a pi : '<prompt>'` (or `opencode`) in the raw process's
 directory checks pairing against an lf-written conversation and writes
-one `usage.db` `turns` row per turn with `cost_usd`. OpenCode's default headless model may fail
+one `history.db` `turns` row per turn with `cost_usd`. OpenCode's default headless model may fail
 upstream; name one that answered interactively, `-a opencode:opencode/<model>`.
 `pi --session <file>` resumes a recorded Pi conversation raw. To learn
 which filesystem events a provider home really sends, a throwaway ignored

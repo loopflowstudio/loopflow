@@ -88,7 +88,7 @@ pub fn report() -> Result<DoctorReport> {
     let rows = events.as_ref().map_or(0, |(events, _)| events.len());
     // Binary freshness remains useful when the store cannot open.
     checks.extend(check_installation(&database_path));
-    checks.push(check_journals(
+    checks.push(check_history(
         &database_path,
         time::OffsetDateTime::now_utc().unix_timestamp(),
     ));
@@ -142,52 +142,41 @@ fn check_running_binaries() -> Check {
 
 const CONTENTION_WINDOW_SECONDS: i64 = 86_400;
 
-/// `history.db` and `usage.db` grow with use: their sizes and oldest rows. A
-/// history row past retention means no prune has run on this Machine.
-fn check_journals(database: &Path, now: i64) -> Check {
-    const NAME: &str = "journals";
+/// `history.db` grows with use: its size and oldest rows. A history row past
+/// retention means no prune has run on this Machine.
+fn check_history(database: &Path, now: i64) -> Check {
+    const NAME: &str = "history";
+    let path = loopflow_storage::history::history_path(database);
+    let Ok(metadata) = std::fs::metadata(&path) else {
+        return Check::ok(NAME, "history.db absent");
+    };
     let retained = now - (loopflow_storage::sqlite::retention::HISTORY_DAYS + 2) * 86_400;
-    // Each journal, its oldest row and the oldest a pruned Machine keeps.
-    let journals = [
-        (
-            loopflow_storage::journals::history_path(database),
-            "SELECT MIN(observed_at) FROM session_history",
-            Some(retained),
-        ),
-        (
-            loopflow_storage::journals::usage_path(database),
-            "SELECT MIN(COALESCE(started_at,ended_at)) FROM turns",
-            None,
-        ),
-    ];
-    let mut parts = Vec::new();
-    let mut stale = false;
-    for (path, oldest, floor) in journals {
-        let name = path.file_name().unwrap_or_default().to_string_lossy();
-        let Ok(metadata) = std::fs::metadata(&path) else {
-            parts.push(format!("{name} absent"));
-            continue;
-        };
-        let oldest: Option<i64> = rusqlite::Connection::open_with_flags(
-            &path,
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-        )
-        .and_then(|conn| conn.query_row(oldest, [], |row| row.get(0)))
-        .unwrap_or(None);
-        stale |= oldest.zip(floor).is_some_and(|(at, floor)| at < floor);
-        let since = oldest
+    let conn =
+        rusqlite::Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY);
+    let oldest = |query: &str| -> Option<i64> {
+        conn.as_ref()
+            .ok()
+            .and_then(|conn| conn.query_row(query, [], |row| row.get(0)).ok())
+            .flatten()
+    };
+    let since = |oldest: Option<i64>| {
+        oldest
             .and_then(|at| time::OffsetDateTime::from_unix_timestamp(at).ok())
-            .map_or("empty".into(), |at| format!("oldest {}", at.date()));
-        parts.push(format!(
-            "{name} {:.1} MB, {since}",
-            metadata.len() as f64 / 1_000_000.0
-        ));
-    }
-    let detail = parts.join("; ");
+            .map_or("empty".into(), |at| format!("oldest {}", at.date()))
+    };
+    let history = oldest("SELECT MIN(observed_at) FROM session_history");
+    let turns = oldest("SELECT MIN(COALESCE(started_at,ended_at)) FROM turns");
+    let stale = history.is_some_and(|at| at < retained);
+    let detail = format!(
+        "history.db {:.1} MB; Session history {}; turns {}",
+        metadata.len() as f64 / 1_000_000.0,
+        since(history),
+        since(turns)
+    );
     if stale {
         Check::warn(
             NAME,
-            format!("{detail}; history is past retention: is the Machine server running? `lf process prune` applies it now"),
+            format!("{detail}; history is past retention: is the Machine server running? `lf machine prune` applies it now"),
         )
     } else {
         Check::ok(NAME, detail)

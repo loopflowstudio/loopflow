@@ -139,25 +139,17 @@ fn step_log(reading: &Value, index: usize) -> Result<String> {
     );
     if let Some((session, input, _)) = store.sqlite.process_input(&id)? {
         text.push_str(&format!("\nSession {session}\nCaptured input {input}\n\n"));
-        for envelope in store.sqlite.input_events(&input)? {
-            let event = &envelope["event"];
-            match event["type"].as_str() {
-                Some("text_delta") => text.push_str(event["content"].as_str().unwrap_or_default()),
-                Some("item_completed") if event["item"]["type"] != "message" => {
-                    text.push_str(&format!(
-                        "\n{}\n",
-                        serde_json::to_string_pretty(&event["item"])?
-                    ));
-                }
-                Some("error") => text.push_str(&format!(
-                    "\n{}: {}\n",
-                    word(event, "code"),
-                    word(event, "message")
-                )),
-                _ => {}
-            }
+        if let Some(error) = store
+            .sqlite
+            .input_turn_end(&input)?
+            .and_then(|end| end.error)
+        {
+            text.push_str(&format!("\n{error}\n"));
         }
-        match loopflow_execution::transcript::answer::input_final_answer(&store.sqlite, &input) {
+        match loopflow_execution::transcript::answer::input_final_answer_for_people(
+            &store.sqlite,
+            &input,
+        ) {
             Ok(Some(answer)) => text.push_str(&format!("\nConclusion\n{answer}\n")),
             Ok(None) => {}
             Err(error) => text.push_str(&format!("\nConclusion unavailable: {error:#}\n")),

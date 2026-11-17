@@ -287,14 +287,14 @@ fn machine_db(home: &Path) -> rusqlite::Connection {
     let db = rusqlite::Connection::open(&store).unwrap();
     db.execute(
         "ATTACH ?1 AS history",
-        [loopflow_storage::journals::history_path(&store)
+        [loopflow_storage::history::history_path(&store)
             .to_string_lossy()
             .as_ref()],
     )
     .unwrap();
     db.execute(
         "ATTACH ?1 AS usage",
-        [loopflow_storage::journals::usage_path(&store)
+        [loopflow_storage::history::history_path(&store)
             .to_string_lossy()
             .as_ref()],
     )
@@ -1866,11 +1866,11 @@ fn pi_native_callbacks_retain_identity_final_output_and_usage() {
             .to_string()
     );
     assert_eq!(pi_final_answer(&fixture, &session), "native answer");
-    let tokens: i64 = db.query_row("SELECT total_input_tokens FROM usage.turns WHERE session_id=?1 AND usage_at IS NOT NULL ORDER BY id DESC LIMIT 1", [&session], |row| row.get(0)).unwrap();
+    let tokens: i64 = db.query_row("SELECT total_input_tokens FROM history.turns WHERE session_id=?1 AND usage_at IS NOT NULL ORDER BY id DESC LIMIT 1", [&session], |row| row.get(0)).unwrap();
     assert_eq!(tokens, 26);
     let receipts: i64 = db
         .query_row(
-            "SELECT count(*) FROM usage.turns WHERE session_id=?1 AND usage_at IS NOT NULL",
+            "SELECT count(*) FROM history.turns WHERE session_id=?1 AND usage_at IS NOT NULL",
             [&session],
             |row| row.get(0),
         )
@@ -1905,12 +1905,12 @@ fn pi_native_crash_keeps_the_paid_step_and_interrupts_the_turn() {
     let session = fixture.session();
     let db = machine_db(fixture.home.path());
     let (count, tokens): (i64, i64) = db.query_row(
-        "SELECT count(*), total_input_tokens FROM usage.turns WHERE session_id=?1 AND usage_at IS NOT NULL",
+        "SELECT count(*), total_input_tokens FROM history.turns WHERE session_id=?1 AND usage_at IS NOT NULL",
         [&session], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
     assert_eq!((count, tokens), (1, 13));
     // The exit read closes the turn the transcript left open.
     let statuses: Vec<String> = db
-        .prepare("SELECT status FROM usage.turns WHERE session_id=?1 AND ended_at IS NOT NULL")
+        .prepare("SELECT status FROM history.turns WHERE session_id=?1 AND ended_at IS NOT NULL")
         .unwrap()
         .query_map([&session], |row| row.get(0))
         .unwrap()

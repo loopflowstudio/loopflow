@@ -35,12 +35,9 @@ pub struct StoreRevisions {
     pub sessions: i64,
     pub graphs: i64,
     pub processes: i64,
-    /// Session history in `history.db`; only a read that names `history.*`
-    /// waits on it.
+    /// Session history and turns in `history.db`. Moves at every turn's
+    /// start and end; only a read that names `history.*` waits on it.
     pub history: i64,
-    /// Provider turns in `usage.db`. Moves at every turn's start and end;
-    /// only a read that names `usage.*` waits on it.
-    pub turns: i64,
 }
 
 impl SqliteStore {
@@ -78,7 +75,6 @@ impl SqliteStore {
             graphs: 0,
             processes: 0,
             history: 0,
-            turns: 0,
         };
         let mut query = conn.prepare("SELECT domain,revision FROM store_revisions")?;
         let mut rows = query.query([])?;
@@ -94,10 +90,6 @@ impl SqliteStore {
         }
         revisions.history =
             conn.query_row("SELECT revision FROM history.history_revision", [], |row| {
-                row.get(0)
-            })?;
-        revisions.turns =
-            conn.query_row("SELECT revision FROM usage.turns_revision", [], |row| {
                 row.get(0)
             })?;
         Ok(revisions)
@@ -490,7 +482,7 @@ mod tests {
     }
 
     #[test]
-    fn history_and_turns_move_only_their_own_revisions() {
+    fn history_and_turns_move_only_the_history_revision() {
         let (_dir, store) = store();
         session(&store, "conversation");
         let before = store.revisions().unwrap();
@@ -506,7 +498,7 @@ mod tests {
             .unwrap();
         store.append_history(
             "observation",
-            &[crate::journals::Row::observed(
+            &[crate::history::Row::observed(
                 "conversation",
                 "store-gap:1:2".into(),
                 None,
@@ -518,8 +510,7 @@ mod tests {
         assert_eq!(
             after,
             StoreRevisions {
-                history: before.history + 1,
-                turns: before.turns + 2,
+                history: before.history + 3,
                 ..before
             }
         );

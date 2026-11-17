@@ -104,32 +104,24 @@ pub fn require_store(store: Option<SharedStore>) -> Result<SharedStore> {
     store.ok_or_else(|| anyhow::anyhow!("no Loopflow store exists on this Machine"))
 }
 
-/// What a read names beside the store's state. History and turns move with
-/// every turn, so a commit to `history.db` or `usage.db` reads again only the
-/// subscriptions that name `history.*` or `usage.*`.
+/// What a read names beside the store's state. History moves with every
+/// turn, so a commit to `history.db` reads again only the subscriptions that
+/// name `history.*`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Watch {
     /// State in `loopflow.db` only.
     State,
     /// State, Session history and turns.
-    Journals,
+    History,
 }
 
 /// Whether a commit that moved revisions from `old` to `new` can change a
 /// result of a read that watches `watch`.
 fn changed(watch: Watch, old: StoreRevisions, new: StoreRevisions) -> bool {
     match watch {
-        Watch::Journals => old != new,
+        Watch::History => old != new,
         Watch::State => {
-            StoreRevisions {
-                history: 0,
-                turns: 0,
-                ..old
-            } != StoreRevisions {
-                history: 0,
-                turns: 0,
-                ..new
-            }
+            StoreRevisions { history: 0, ..old } != StoreRevisions { history: 0, ..new }
         }
     }
 }
@@ -1091,7 +1083,7 @@ mod tests {
         );
         let (sender, wakes) = mpsc::channel();
         let subscription = start_pull(
-            Watch::Journals,
+            Watch::History,
             (),
             |store, ()| async move {
                 let store = super::require_store(store)?;
@@ -1117,15 +1109,10 @@ mod tests {
             graphs: 1,
             processes: 1,
             history: 1,
-            turns: 1,
         };
-        let turn = StoreRevisions {
-            history: 9,
-            turns: 9,
-            ..old
-        };
+        let turn = StoreRevisions { history: 9, ..old };
         assert!(!changed(Watch::State, old, turn));
-        assert!(changed(Watch::Journals, old, turn));
+        assert!(changed(Watch::History, old, turn));
         assert!(changed(
             Watch::State,
             old,

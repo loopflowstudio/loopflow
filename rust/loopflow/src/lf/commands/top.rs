@@ -83,8 +83,6 @@ pub struct ProcessPruneReport {
     pub orphaned_agent_process_groups: Vec<u32>,
     pub reaped_agent_process_groups: u32,
     pub agent_process_records: Vec<loopflow_execution::harness::agent_process::AgentProcessCleanup>,
-    /// Store retention; absent on a dry run or before the store exists.
-    pub store: Option<loopflow_storage::sqlite::retention::RetentionReport>,
     pub errors: u32,
 }
 
@@ -178,22 +176,9 @@ pub fn run_prune(json: bool, dry_run: bool) -> Result<()> {
         orphaned_agent_process_groups: agents.orphaned,
         reaped_agent_process_groups: agents.reaped,
         agent_process_records: agents.records,
-        store: None,
         errors: u32::try_from(agents.errors.len()).unwrap_or(u32::MAX),
     };
     if !dry_run {
-        // Retention closes rows from receipt evidence, so it runs before
-        // their receipts go.
-        let database = loopflow_execution::store::database_path_from_env()?;
-        if database.exists() {
-            match loopflow_execution::store::retention::prune(&database, now) {
-                Ok(store) => report.store = Some(store),
-                Err(error) => {
-                    tracing::warn!(%error, "failed to apply store retention");
-                    report.errors += 1;
-                }
-            }
-        }
         match prune_process_receipts_at(&lf_home, &report.stale_process_receipt_pids) {
             Ok(removed) => report.removed_process_receipts = removed,
             Err(error) => {
@@ -571,17 +556,6 @@ fn render_prune_report(report: &ProcessPruneReport) -> String {
         output.push_str(&format!(
             "removed {} receipts · reaped {} process groups\n",
             report.removed_process_receipts, report.reaped_agent_process_groups,
-        ));
-    }
-    if let Some(store) = &report.store {
-        output.push_str(&format!(
-            "store: closed {} dead Processes · forgot {} finished · moved {} observations · converted {} turns · forgot {} history rows{}\n",
-            store.closed_processes,
-            store.forgotten_processes,
-            store.moved_observations,
-            store.converted_turns,
-            store.forgotten_history,
-            if store.vacuumed { " · vacuumed" } else { "" },
         ));
     }
     output

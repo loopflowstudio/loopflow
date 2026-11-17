@@ -268,13 +268,32 @@ Start's log is `task.create` alone and the opening names the answer's Session
 (fixture `task_create_receipt.json`). Not covered by a test: the
 `RemoteMobileClient` wire half (no fake Machine in the iOS suite).
 
+Concept review of 4d6ec717da: the phone model holds (`MobileTask` is the one
+value both Start and the Task list open; recovery alone reads `task:<id>`).
+The Desktop rule from the previous review is still unbuilt: `createTask`'s
+generic `catch` (`WorkModel.swift:2583`) still takes a throw from
+`openCreatedTask` and sets `startingTask.error`, so Try again files a second
+Task. It is the next implement pass.
+
 Remaining, in order:
-1. `Perf.retarget(.startTask, from: "new-task", …)`: key by request ID from the
+1. **Desktop: after the answer, no Try again.** Split `createTask`'s `do`:
+   `query.createTask` failures (before filing) keep `startingTask.error` and
+   Try again; once `created` exists, clear `startingTask`, select the Task
+   (`openTaskDestination`) and put the error on its workspace
+   (`conversationError`). Test in `WorkDestinationTests`: answer arrives,
+   `installConversation`'s prepare fails → `startingTask` nil, selection is the
+   Task, workspace `conversationError` set, one `task.create` in the log.
+   Phone, same pass: the first send's spinner reads "Checking your Task…"
+   (`MobileNewTaskView.swift:140`); it is starting one. Show "Starting…" while
+   `submit` is on its first send (a lost answer's recheck can also have no
+   outcome, so key it on the send, not on `draft.outcome`), "Checking your
+   Task…" for recovery.
+2. `Perf.retarget(.startTask, from: "new-task", …)`: key by request ID from the
    click (slice 5).
-2. Checkout without network for a new branch: `fetch_task_refs`, the base
+3. Checkout without network for a new branch: `fetch_task_refs`, the base
    fetch and `assert_assignee` still run inside setup (off the answer path,
    on the typing path); with slice 3.
-3. Slices 3–5.
+4. Slices 3–5.
 
 ## Slices
 

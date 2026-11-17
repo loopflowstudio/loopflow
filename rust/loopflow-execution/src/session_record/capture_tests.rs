@@ -162,7 +162,7 @@ fn spec(cwd: &std::path::Path) -> SessionCaptureSpec {
 }
 
 #[test]
-fn native_capture_replacement_retains_each_spawn_and_rejects_late_exit() {
+fn a_settled_runtime_cannot_launch_another_native_provider() {
     let ledger = crate::journal::TestLedgerGuard::new();
     let _ambient = crate::test_ambient::EnvGuard::new();
     let home = ledger.home();
@@ -170,62 +170,23 @@ fn native_capture_replacement_retains_each_spawn_and_rejects_late_exit() {
         let capture = crate::session_record::SessionRecorder::begin_at(home, spec(home))
             .map(crate::process::LfProcessRuntime::new)?;
         capture.claim_session_attachment()?;
-        let (session, first) = capture.session_attachment().unwrap();
-        let invocation = crate::journal::current_lf_process_id().unwrap();
-        assert_eq!(first.lf_process_id.as_ref(), Some(&invocation));
-        assert_eq!(first.provider_lf_process_id, invocation);
+        let (session, attachment) = capture.session_attachment().unwrap();
         let store = crate::session_record::row_store(&capture.artifact_dir())?;
-        let command = || {
-            let mut command = std::process::Command::new("/bin/sh");
-            command.env_clear().args(["-c", "exit 42"]);
-            command
-        };
-        let (mut child, snapshot) =
-            capture.spawn_native_agent(command(), crate::session::Holder::Caller)?;
-        assert_eq!(snapshot, first);
-        assert_eq!(child.wait()?.code(), Some(42));
-        // Observed wait, not successful spawn or a finished capture, ends it.
-        capture.record_native_agent_exit(&first)?;
-        let ended = store.agent_process(&first.agent_process_id)?.unwrap();
-        assert_eq!(ended.pid, Some(child.id()));
-        assert!(ended.completed_at.is_some());
-
-        let (mut child, snapshot) =
-            capture.spawn_native_agent(command(), crate::session::Holder::Caller)?;
-        let second = snapshot;
-        assert_ne!(first.agent_process_id, second.agent_process_id);
-        assert_eq!(second.lf_process_id.as_ref(), Some(&invocation));
-        assert_eq!(second.provider_lf_process_id, invocation);
-        for attachment in [&first, &second] {
-            let process = store.agent_process(&attachment.agent_process_id)?.unwrap();
-            assert_eq!(process.parent_lf_process_id.as_ref(), Some(&invocation));
-        }
-        assert_eq!(
-            capture.session_attachment(),
-            Some((session.clone(), second.clone()))
-        );
-        assert_eq!(child.wait()?.code(), Some(42));
-        assert!(capture.record_native_agent_exit(&first).is_err());
-        assert!(store
-            .agent_process(&second.agent_process_id)?
-            .unwrap()
-            .completed_at
-            .is_none());
-        // The child exited but without its wait receipt another launch is refused.
-        assert!(capture
-            .spawn_native_agent(command(), crate::session::Holder::Caller)
-            .is_err());
-        capture.record_native_agent_exit(&second)?;
-        assert_eq!(store.agent_process(&first.agent_process_id)?, Some(ended));
         capture.finish("completed")?;
-        assert!(capture
-            .spawn_native_agent(command(), crate::session::Holder::Caller)
-            .is_err());
-        assert!(store
-            .session_attachment(&session)?
-            .unwrap()
-            .lf_process_id
-            .is_none());
+
+        let marker = home.join("unexpected-provider");
+        let mut command = std::process::Command::new("/bin/sh");
+        command
+            .env_clear()
+            .args(["-c", "touch \"$1\"", "fixture"])
+            .arg(&marker);
+        let result = crate::harness::agent_process::spawn_native(
+            command,
+            &(store, session, attachment),
+            crate::session::Holder::Caller,
+        );
+        assert!(result.is_err());
+        assert!(!marker.exists());
         Ok(())
     })
     .unwrap();
@@ -287,12 +248,12 @@ fn a_failed_terminal_receipt_still_closes_only_the_owned_provider() {
                 assert!(current.lf_process_id.is_none());
             }
             assert!(capture.finish("failed").is_err());
-            assert!(capture
-                .spawn_native_agent(
-                    std::process::Command::new("/bin/true"),
-                    crate::session::Holder::Caller
-                )
-                .is_err());
+            assert!(crate::harness::agent_process::spawn_native(
+                std::process::Command::new("/bin/true"),
+                &(store.clone(), session.clone(), attachment.clone()),
+                crate::session::Holder::Caller,
+            )
+            .is_err());
             fs::remove_dir(&receipt)?;
             capture.finish("interrupted")?;
             let recorded: TerminalReceipt = serde_json::from_slice(&fs::read(&receipt)?)?;

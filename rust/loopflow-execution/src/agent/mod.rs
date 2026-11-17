@@ -16,46 +16,14 @@ use std::fs;
 use std::io::{Seek, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::thread;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, SystemTime};
 
 use crate::config::parse_agent;
 use crate::error::CoreError;
-use crate::os_process::wait_for_exit;
-use crate::platform::kill_process;
 use crate::process::LfProcessRuntime;
 use crate::prompt::structured_reply::{render_structured_reply_guidance, StructuredReply};
-use crate::provider_auth::Provider;
-
-/// PID of the current child agent process. The Ctrl+C handler sends SIGTERM
-/// to this process before exiting so the agent doesn't survive as an orphan.
-static CHILD_PID: AtomicU32 = AtomicU32::new(0);
-
-/// Tracks the active agent PID and clears it even on early returns.
-struct ChildPidGuard;
-
-impl ChildPidGuard {
-    fn new(pid: u32) -> Self {
-        CHILD_PID.store(pid, Ordering::Release);
-        Self
-    }
-}
-
-impl Drop for ChildPidGuard {
-    fn drop(&mut self) {
-        CHILD_PID.store(0, Ordering::Release);
-    }
-}
-
-/// Kill the child agent process if one is running.
-pub fn kill_child_if_running() {
-    let pid = CHILD_PID.load(Ordering::Acquire);
-    if pid != 0 {
-        kill_process(pid);
-    }
-}
 
 /// Cleanups to run when the process is interrupted before it exits. The
 /// handler covers SIGINT (Ctrl+C), SIGTERM, and SIGHUP (`tmux kill-session`
@@ -92,7 +60,6 @@ pub fn exit_on_interrupt() -> ! {
             hook();
         }
     }
-    kill_child_if_running();
     // Keep the hook lock until process exit: a child failure must not replace
     // the interrupted exit while cleanup is still running on this thread.
     std::process::exit(130);
@@ -939,7 +906,7 @@ pub(crate) fn validate_terminal_turn(prompt: &str) -> Result<(), CoreError> {
     Ok(())
 }
 
-/// Launch an agent subprocess and wait for it to exit.
+/// Drive one headless provider turn, retrying according to process policy.
 pub fn run_agent(
     launch: &AgentConfig,
     process: &ProcessConfig,
@@ -1017,7 +984,7 @@ fn run_admitted_agent(
         &launch,
         &process,
         &TRANSIENT_RETRY_DELAYS,
-        |attempt, retry| _run_agent_once(attempt, &process, retry),
+        |attempt, retry| _run_harness_once(attempt, &process, retry),
         _sleep_wall_clock,
     );
     if let Err(error) = crate::ops::planning_sync::check_directory(&directory) {
@@ -1405,7 +1372,6 @@ fn _begin_process_runtime(
 fn _run_harness_once(
     launch: &AgentConfig,
     process: &ProcessConfig,
-    model: Option<String>,
     retry: bool,
 ) -> Result<AgentProcessResult, CoreError> {
     if tokio::runtime::Handle::try_current().is_ok() {
@@ -1413,7 +1379,7 @@ fn _run_harness_once(
         let process = process.clone();
         return std::thread::Builder::new()
             .name("lf-native-harness".to_string())
-            .spawn(move || _run_harness_once(&launch, &process, model, retry))
+            .spawn(move || _run_harness_once(&launch, &process, retry))
             .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?
             .join()
             .map_err(|_| {
@@ -1425,7 +1391,7 @@ fn _run_harness_once(
     use loopflow_model::chat::types::{ConversationEvent, Lifecycle};
 
     let runtime = process.runtime.as_ref();
-    let (provider, _) = parse_agent(launch.agent()?);
+    let (provider, model) = parse_agent(&launch.resolved_agent()?);
     _note_limit_recovery(|store, process| store.end_agent_limit_wait(process));
     if retry {
         if let Some(runtime) = runtime {
@@ -1569,182 +1535,6 @@ fn _run_harness_once(
     });
 
     result
-}
-
-fn _run_agent_once(
-    launch: &AgentConfig,
-    process: &ProcessConfig,
-    retry: bool,
-) -> Result<AgentProcessResult, CoreError> {
-    let start = Instant::now();
-    let (harness, model) = parse_agent(&launch.resolved_agent()?);
-    if process.auto {
-        return _run_harness_once(launch, process, model, retry);
-    }
-    if matches!(harness.as_str(), "codex" | "opencode") {
-        let result = crate::harness::native_session::run_native_agent(launch)
-            .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
-        return Ok(result);
-    }
-    let mut progress = crate::startup::Startup::new(format!("Preparing {harness}"));
-    let invocation = match launch.resume_token.as_ref() {
-        Some(session_id) => ProviderInvocation::Resume { session_id },
-        None => ProviderInvocation::Terminal { session_id: None },
-    };
-    let command = build_session_command(launch, invocation, process.context_file.as_deref())
-        .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
-    let hooks = crate::harness::context::native_args(
-        &harness,
-        launch.conversation_context.as_ref(),
-        launch.holder,
-    )
-    .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
-    let program = &command.program;
-    tracing::debug!(
-        elapsed_ms = start.elapsed().as_millis(),
-        "run_agent prepared command"
-    );
-    tracing::debug!(program, "spawning agent command");
-
-    let mut cmd = Command::new(program);
-    for name in EXECUTION_IDENTITY_ENV {
-        cmd.env_remove(name);
-    }
-    cmd.envs(
-        session_environment(launch, process.context_file.as_deref())
-            .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?,
-    );
-    if let Some(context) = launch
-        .conversation_context
-        .as_ref()
-        .filter(|_| matches!(harness.as_str(), "claude" | "codex" | "pi"))
-    {
-        context
-            .configure_hooks(&mut cmd)
-            .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
-    }
-    progress.finish();
-    let title = crate::terminal_title::TerminalTitle::prepare(&launch.env, &harness, &mut cmd);
-    if let Some(input) = &command.input {
-        configure_native_input(&mut cmd, input)
-            .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
-    }
-
-    cmd.current_dir(&command.cwd);
-    crate::ops::git_operation::prepare_agent_process(&command.cwd)
-        .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
-    cmd.env_remove(crate::os_process::DISCORD_TOKEN_ENV);
-
-    // Shell integration sets LOOPFLOW_DIRECTIVE_FILE so top-level `lf` commands
-    // can request parent-shell actions (for example auto-cd after `lf wt switch`).
-    // Agent sessions run arbitrary nested commands; those must not mutate the
-    // invoking shell state via the top-level directive file.
-    cmd.env_remove("LOOPFLOW_DIRECTIVE_FILE");
-
-    // If the caller set up a directive relay, give the agent a scoped directive
-    // file. The caller will filter and forward safe directives after the agent exits.
-    if let Some(ref relay_path) = launch.directive_relay {
-        cmd.env("LOOPFLOW_DIRECTIVE_FILE", relay_path);
-    }
-
-    // Ambient API keys are filtered by executable. Explicitly stored provider
-    // credentials are then restored only for the executable that owns them.
-    crate::provider_auth::apply_provider_env_to_command(program, &mut cmd);
-    crate::harness::configure_vendor_std_env(&mut cmd)
-        .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
-
-    if harness == "claude" {
-        if let Some(thread) = &launch.resume_token {
-            crate::transcript::adopt_native(Provider::Claude, thread)
-                .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
-        }
-    }
-    if harness == "claude" {
-        crate::harness::claude_trust::accept_created_worktree(&cmd);
-    }
-    cmd.args(hooks).args(&command.args);
-    let runtime = process.runtime.as_ref();
-    if retry {
-        if let Some(runtime) = runtime {
-            runtime
-                .retry_agent_process(harness.clone(), model.clone(), launch.resume_token.as_ref())
-                .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
-        }
-    }
-
-    if let Some(runtime) = runtime {
-        runtime.observe_provider(None);
-    }
-
-    let admitted_runtime = runtime.ok_or_else(|| {
-        CoreError::ExecutionFailed("AgentProcess launch has no admitted runtime".into())
-    })?;
-    run_interactive(cmd, process.timeout, admitted_runtime, title, launch.holder)
-}
-
-fn run_interactive(
-    mut cmd: Command,
-    timeout: Option<Duration>,
-    runtime: &LfProcessRuntime,
-    mut title: Option<crate::terminal_title::TerminalTitle>,
-    holder: crate::session::Holder,
-) -> Result<AgentProcessResult, CoreError> {
-    let start = Instant::now();
-    let program = cmd.get_program().to_string_lossy().into_owned();
-    let foreground = crate::os_process::foreground::hand_to(&mut cmd);
-    let (mut child, attachment) = runtime
-        .spawn_native_agent(cmd, holder)
-        .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
-    let pid = child.id();
-    let _pid_guard = ChildPidGuard::new(pid);
-    if let Some(foreground) = &foreground {
-        foreground.lead(pid);
-    }
-    tracing::debug!(
-        elapsed_ms = start.elapsed().as_millis(),
-        "agent spawned (interactive)"
-    );
-    let (status, timed_out) = wait_for_exit(&mut child, timeout, || {
-        if let Some(foreground) = &foreground {
-            foreground.follow_stop(pid);
-        }
-        if let Some(title) = title.as_mut() {
-            title.refresh();
-        }
-    })?;
-    runtime
-        .record_native_agent_exit(&attachment)
-        .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
-    tracing::debug!(
-        elapsed_ms = start.elapsed().as_millis(),
-        "agent interactive completed"
-    );
-    if timed_out {
-        return Err(CoreError::ExecutionFailed(format!(
-            "agent timed out after {}",
-            format_timeout(timeout)
-        )));
-    }
-    let exit_code = if holder == crate::session::Holder::Caller {
-        crate::harness::native_session::SessionCommandOutcome {
-            status,
-            interrupted: foreground
-                .as_ref()
-                .is_some_and(|foreground| foreground.interrupted(&status)),
-            moved: None,
-        }
-        .bare_exit_code(&program)
-        .into()
-    } else {
-        status.code().unwrap_or(1)
-    };
-    Ok(AgentProcessResult {
-        exit_code,
-        stdout: String::new(),
-        stderr: String::new(),
-        agent_session: None,
-        failure: None,
-    })
 }
 
 fn format_timeout(timeout: Option<Duration>) -> String {
@@ -2135,21 +1925,8 @@ trust_level = "trusted"
     }
 
     #[test]
-    fn unknown_provider_is_rejected_in_both_launch_modes() {
-        let cwd = tempfile::tempdir().unwrap();
-        let launch = AgentConfig {
-            agent: Some("not-a-provider:model".to_string()),
-            cwd: Some(cwd.path().to_path_buf()),
-            ..default_launch()
-        };
-        for auto in [false, true] {
-            let process = ProcessConfig {
-                auto,
-                ..Default::default()
-            };
-            let error = _run_agent_once(&launch, &process, false).unwrap_err();
-            assert!(error.to_string().contains("not-a-provider"), "{error}");
-        }
+    fn unknown_provider_is_rejected() {
+        assert!(crate::harness::HarnessKind::parse("not-a-provider").is_none());
     }
 
     #[test]

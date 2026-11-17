@@ -204,50 +204,6 @@ impl LfProcessRuntime {
         store.session_thread(&session.id)
     }
 
-    pub(crate) fn spawn_native_agent(
-        &self,
-        mut command: std::process::Command,
-        holder: crate::session::Holder,
-    ) -> anyhow::Result<(std::process::Child, crate::process::SessionAttachment)> {
-        let mut runtime = self.0.lock().expect("Process runtime mutex poisoned");
-        if runtime.settled_outcome.is_some() {
-            return Err(
-                StoreError::InvalidAuthority("Process runtime already settled".into()).into(),
-            );
-        }
-        let owner = runtime.owner.as_mut().ok_or_else(|| {
-            StoreError::InvalidAuthority("AgentProcess launch has no attachment".into())
-        })?;
-        let (store, session, attachment) = owner;
-        *attachment = attachment::prepare_session_agent_process(store, session, attachment)?;
-        command.env(
-            crate::process::AGENT_CALLER_ENV,
-            serde_json::to_string(&attachment.caller(session.clone().into()))?,
-        );
-        let snapshot = attachment.clone();
-        // Keep the invocation's settlement snapshot fixed through admission.
-        let child = crate::harness::agent_process::spawn_native(command, owner, holder)?;
-        Ok((child, snapshot))
-    }
-
-    pub(crate) fn record_native_agent_exit(
-        &self,
-        expected: &crate::process::SessionAttachment,
-    ) -> StoreResult<()> {
-        let runtime = self.0.lock().expect("Process runtime mutex poisoned");
-        let Some((store, session, attachment)) = &runtime.owner else {
-            return Err(StoreError::InvalidAuthority(
-                "Process has no attachment".into(),
-            ));
-        };
-        if attachment != expected {
-            return Err(StoreError::InvalidAuthority(
-                "Process attachment changed".into(),
-            ));
-        }
-        store.record_agent_process_exit(session, expected, true)
-    }
-
     pub fn session_attachment(&self) -> Option<(String, crate::process::SessionAttachment)> {
         self.0
             .lock()

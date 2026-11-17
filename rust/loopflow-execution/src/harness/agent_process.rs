@@ -1420,6 +1420,14 @@ mod tests {
             .agent_process(&next.agent_process_id)
             .unwrap()
             .unwrap();
+        // A late wait receipt from the previous provider cannot settle this one.
+        assert!(store
+            .record_agent_process_exit(&session.id, &first, true)
+            .is_err());
+        assert_eq!(
+            store.agent_process(&next.agent_process_id).unwrap(),
+            Some(recorded.clone())
+        );
         // Reusing the current attachment is not permission for a second spawn.
         // Reject before fork, without recording failure on the running process.
         let duplicate = super::spawn_native(command(), &next_owner, Holder::Caller);

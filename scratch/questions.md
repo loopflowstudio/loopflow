@@ -1,8 +1,8 @@
-# Open choices (LOO-924 kickoff, headless)
+# Open choices (LOO-924, headless)
 
-- Name of the renamed stream trait: chose `Driver` (`claude::Driver`, …), because `Conversation` already names `transcript::session::Conversation`. Reversible rename.
-- "A fifth harness is one file": with an enum it is one file plus one `HarnessKind` variant and one registry line. The plan says so instead of adding link-time registration.
-- Sequencing: implement waits for #1953 (LOO-913). On 2026-11-16 it was CONFLICTING with main, because it predates the #1951 crate split.
-- Implement pass 2026-11-16: not started. #1953 is still OPEN/CONFLICTING; `jack-heart/cli-prox` head 412da944f0 is a checkpoint mid-sync onto 606c13c2d7 (still has `rust/loopflow/src/agent/`, `rust/loopflow/src/harness/` paths) and is not on origin/main 470da475a1. It changes `agent/mod.rs` by ~1.6k lines, the file slice 1 deletes from. Resume implement once #1953 merges, or once cli-prox is synced onto main and this branch is stacked on it.
-- Realign 2026-11-16: unchanged. origin/main still 470da475a1; #1953 OPEN/CONFLICTING at 412da944f0, which contains 606c13c2d7 but not 470da475a1.
-- Stacked 2026-11-16 on `jack-heart/cli-prox` at ca4145fd03 (#1953, MERGEABLE, contains main 470da475a1). Jack: "yeah thats fine". The PR base is `jack-heart/cli-prox` until #1953 merges; then retarget main.
+- Renamed stream trait: `Driver` (`claude::Driver`, …); `Conversation` already names `transcript::session::Conversation`.
+- A fifth harness needs one file, one `HarnessKind` variant and one registry line; no link-time registration.
+- Stacked 2026-11-16 on `jack-heart/cli-prox` at ca4145fd03 (#1953, contains main 470da475a1). Jack: "yeah thats fine". The PR base stays `jack-heart/cli-prox` until #1953 merges, then main. Earlier dependency investigations are in 3b735e67d6:scratch/questions.md.
+- The deletion check for provider `SessionCommand` must be scoped to execution code: `loopflow::lf::SessionCommand` is the unrelated Clap command enum and remains.
+- No `Placement` wrapper: `Launch` and `Delegation::Here` carry `mode` and `holder` as fields. `Placement` already names the `machine:` setting and a pane container.
+- Unverified: whether a binding found by `implicit_binding` can be `WorkSource::Bound` while `delegate` saw `named_work = false`. Slice 3 checks each entry; a differing holder is recorded, not silently changed.

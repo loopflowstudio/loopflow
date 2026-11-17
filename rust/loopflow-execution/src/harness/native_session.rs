@@ -718,51 +718,6 @@ fn record_reported_thread(path: &Path, capture_dir: &Path) -> Result<()> {
 /// How often a native client checks that its Session is still attached here.
 const CLIENT_ATTACHMENT_CHECK: std::time::Duration = std::time::Duration::from_secs(2);
 
-pub(crate) fn run_native_agent(
-    launch: &crate::agent::AgentConfig,
-) -> Result<crate::agent::AgentProcessResult> {
-    let command = build_session_command(
-        launch,
-        match launch.resume_token.as_ref() {
-            Some(session_id) => ProviderInvocation::Resume { session_id },
-            None => ProviderInvocation::Terminal { session_id: None },
-        },
-        None,
-    )?;
-    let outcome = session_command_status_with_env(
-        &command,
-        &launch.env,
-        launch.resume_token.as_ref(),
-        None,
-        None,
-    )?;
-    let agent_session =
-        launch
-            .env
-            .get(crate::session_record::CAPTURE_KEY_ENV)
-            .map(|input| -> Result<_> {
-                Ok(crate::session_record::read_provider_session(
-                    &crate::session_record::capture_dir(input)?,
-                )?
-                .map(|provider| provider.agent_session))
-            })
-            .transpose()?
-            .flatten();
-    Ok(crate::agent::AgentProcessResult {
-        exit_code: if launch.holder == crate::session::Holder::Caller {
-            outcome.bare_exit_code(&command.program).into()
-        } else if outcome.interrupted {
-            0
-        } else {
-            outcome.status.code().unwrap_or(1)
-        },
-        stdout: String::new(),
-        stderr: String::new(),
-        agent_session,
-        failure: None,
-    })
-}
-
 fn run_opencode_native(
     command: &SessionCommand,
     environment: &BTreeMap<String, String>,
